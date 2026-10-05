@@ -1,0 +1,14 @@
+## Interface: 120100
+## Title: Asgard's Guild Fellowship (Dev)
+## Notes: Development build of Asgard's Guild Fellowship.
+## Author: FinalAsgard
+## Version: dev
+## SavedVariables: AsgardsGuildFellowshipDevDB
+## X-Client: Retail
+
+Core/Identity.lua
+Adapters/ClientProfile.lua
+Adapters/WoW.lua
+Core/CommandRouter.lua
+Core/Lifecycle.lua
+AsgardsGuildFellowship.lua
