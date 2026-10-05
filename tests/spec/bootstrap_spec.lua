@@ -5,6 +5,7 @@ local MANIFEST_FILES = {
     "Core/Identity.lua",
     "Adapters/ClientProfile.lua",
     "Adapters/WoW.lua",
+    "Core/Persistence.lua",
     "Core/CommandRouter.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
@@ -91,8 +92,13 @@ local function registerBootstrapTest(variant)
         test.assertTrue(world.frames[1].registeredEvents.PLAYER_LOGIN)
 
         fixtures.fire(world, "ADDON_LOADED", variant.addonName)
+        -- Saved data waits for login.
+        test.assertEqual(nil, world.database)
         world.loggedIn = true
         fixtures.fire(world, "PLAYER_LOGIN")
+
+        test.assertEqual(1, world.database.schemaVersion)
+        test.assertEqual("table", type(world.database.guilds))
 
         test.assertEqual(variant.slashCommand, environment["SLASH_" .. variant.slashKey .. "1"])
         test.assertEqual(variant.slashAlias, environment["SLASH_" .. variant.slashKey .. "2"])

@@ -205,6 +205,8 @@ local function registerProfileTests(profile, addonName)
         test.assertEqual(identity.slashCommand, world.environment["SLASH_" .. identity.slashKey .. "1"])
         test.assertEqual(identity.slashAlias, world.environment["SLASH_" .. identity.slashKey .. "2"])
         test.assertEqual(0, #world.messages)
+        test.assertEqual(1, world.database.schemaVersion)
+        test.assertEqual("table", type(world.database.guilds))
 
         fixtures.slash(world, "help")
         test.assertEqual(
@@ -235,11 +237,15 @@ local function registerProfileTests(profile, addonName)
         test.assertEqual(1, #world.messages)
         test.assertContains(world.messages[1], "This game client is not supported")
         test.assertContains(world.messages[1], "WoW Forever and WoW Retail")
-        test.assertEqual(existing, world.environment[addonName .. "DB"])
+        test.assertEqual(0, world.savedVariableReads)
+        test.assertEqual(0, world.savedVariableWrites)
+        test.assertEqual(existing, world.database)
         fixtures.assertSameData(before, existing)
 
         fixtures.slash(world, "help")
         test.assertContains(world.messages[#world.messages], "on Unsupported client.")
+        test.assertEqual(0, world.savedVariableReads)
+        test.assertEqual(0, world.savedVariableWrites)
     end)
 end
 

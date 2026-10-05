@@ -15,18 +15,22 @@ router:Register("help", "show available commands", function()
         " on " .. clientProfile.label .. ".")
 end)
 
-if not clientProfile.supported then
+local persistence
+if clientProfile.supported then
+    persistence = addon.Persistence.Create(client)
+else
     -- Never touch saved data on a client we cannot identify.
     client:Print(addon.Identity.chatPrefix .. " This game client is not supported (" ..
         clientProfile.reason .. "). Supported clients are WoW Forever and WoW Retail. " ..
         "Saved data was left unchanged.")
 end
 
-local lifecycle = addon.Lifecycle.Create(client, router)
+local lifecycle = addon.Lifecycle.Create(client, router, persistence)
 
 addon.client = client
 addon.clientProfile = clientProfile
 addon.lifecycle = lifecycle
+addon.persistence = persistence
 addon.router = router
 addon.version = version
 

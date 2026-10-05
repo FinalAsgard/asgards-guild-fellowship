@@ -93,16 +93,22 @@ local PROFILE_APIS = {
 -- Returns a WoW-like global environment for `profile`. `options.addonName`
 -- picks the build (production by default), `options.declaredClient` overrides
 -- the manifest's X-Client value (false removes it), and `options.database`
--- seeds that build's SavedVariables.
+-- seeds that build's SavedVariables. The SavedVariables global lives in
+-- `world.database`, and every read or write of it through the environment is
+-- counted in `world.savedVariableReads` and `world.savedVariableWrites`.
 function Fixtures.newEnvironment(profile, options)
     options = options or {}
     local addonName = options.addonName or test.DEFAULT_ADDON_NAME
+    local databaseName = addonName .. "DB"
     local world = {
         addonName = addonName,
+        database = options.database,
         frames = {},
         loggedIn = false,
         manifestPath = Fixtures.manifestPath(profile, addonName),
         messages = {},
+        savedVariableReads = 0,
+        savedVariableWrites = 0,
     }
     world.manifest = Fixtures.manifestMetadata(world.manifestPath)
 
@@ -120,9 +126,24 @@ function Fixtures.newEnvironment(profile, options)
         end,
         SlashCmdList = {},
     }
-    setmetatable(environment, { __index = _G })
+    setmetatable(environment, {
+        __index = function(_, key)
+            if key == databaseName then
+                world.savedVariableReads = world.savedVariableReads + 1
+                return world.database
+            end
+            return _G[key]
+        end,
+        __newindex = function(target, key, value)
+            if key == databaseName then
+                world.savedVariableWrites = world.savedVariableWrites + 1
+                world.database = value
+                return
+            end
+            rawset(target, key, value)
+        end,
+    })
     environment._G = environment
-    environment[addonName .. "DB"] = options.database
 
     local declaredClient = options.declaredClient
     if declaredClient == nil then
