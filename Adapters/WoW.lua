@@ -125,6 +125,35 @@ function Client:Print(message)
     return ok
 end
 
+function Client:HasLibStub()
+    local libStub = self.environment.LibStub
+    return type(libStub) == "table" and type(libStub.GetLibrary) == "function"
+end
+
+-- The library LibStub has registered under `major`, or nil when LibStub or
+-- the library is missing.
+function Client:GetLibrary(major)
+    if not self:HasLibStub() then
+        return nil
+    end
+
+    local libStub = self.environment.LibStub
+    local ok, library = pcall(libStub.GetLibrary, libStub, major, true)
+    if not ok then
+        return nil
+    end
+
+    return library
+end
+
+function Client:GetGlobal(name)
+    if type(name) ~= "string" then
+        return nil
+    end
+
+    return self.environment[name]
+end
+
 function Client:GetAccountDatabase()
     return self.environment[self.databaseName]
 end

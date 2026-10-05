@@ -110,7 +110,13 @@ for caseIndex = 1, #DETECTION_CASES do
 end
 
 test.test("core modules never inspect the client", function()
-    local files = { "Core/Identity.lua", "Core/CommandRouter.lua", "Core/Lifecycle.lua" }
+    local files = {
+        "Core/Identity.lua",
+        "Core/Persistence.lua",
+        "Core/LibraryCheck.lua",
+        "Core/CommandRouter.lua",
+        "Core/Lifecycle.lua",
+    }
     local forbidden = { "ClientProfile", "X-Client", "WOW_PROJECT", "clientProfile" }
     local index, termIndex
     for index = 1, #files do

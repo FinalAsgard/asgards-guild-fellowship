@@ -6,10 +6,18 @@
 ## SavedVariables: AsgardsGuildFellowshipDB
 ## X-Client: Retail
 
+Libs/LibStub/LibStub.lua
+Libs/CallbackHandler-1.0/CallbackHandler-1.0.xml
+Libs/LibDataBroker-1.1/LibDataBroker-1.1.lua
+Libs/LibDBIcon-1.0/lib.xml
+Libs/LibSharedMedia-3.0/lib.xml
+Libs/DetailsFramework/load.xml
+
 Core/Identity.lua
 Adapters/ClientProfile.lua
 Adapters/WoW.lua
 Core/Persistence.lua
+Core/LibraryCheck.lua
 Core/CommandRouter.lua
 Core/Lifecycle.lua
 AsgardsGuildFellowship.lua

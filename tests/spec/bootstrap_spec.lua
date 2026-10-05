@@ -6,6 +6,7 @@ local MANIFEST_FILES = {
     "Adapters/ClientProfile.lua",
     "Adapters/WoW.lua",
     "Core/Persistence.lua",
+    "Core/LibraryCheck.lua",
     "Core/CommandRouter.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
@@ -113,6 +114,7 @@ local function registerBootstrapTest(variant)
             world.messages[2],
             "Version " .. variant.version .. " on " .. variant.clientLabel .. "."
         )
+        test.assertContains(world.messages[3], "Libraries: all 6 present.")
     end)
 end
 

@@ -28,3 +28,27 @@ jobs:
 
       - name: Run automated tests
         run: lua5.1 tests/run.lua
+
+      - name: Check library pins match .pkgmeta
+        run: lua5.1 tools/check-libraries.lua
+
+  fetch:
+    name: Library fetch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Fetch pinned libraries
+        shell: pwsh
+        run: ./tools/Fetch-Libraries.ps1
+
+      # A second run must change nothing, and fetched files stay git-ignored.
+      - name: Fetch again and confirm nothing changed
+        shell: pwsh
+        run: |
+          $output = ./tools/Fetch-Libraries.ps1 6>&1 | Out-String
+          Write-Host $output
+          if ($output -match 'Fetching ') { throw 'Second fetch downloaded again.' }
+          $status = git status --porcelain
+          if ($status) { throw "Fetching left the working tree dirty:`n$status" }

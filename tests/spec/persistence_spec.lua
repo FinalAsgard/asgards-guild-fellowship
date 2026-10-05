@@ -64,7 +64,7 @@ local function registerProfileTests(profile)
         test.assertEqual(nil, world.addon.persistence:GetDatabase())
 
         fixtures.slash(world, "help")
-        test.assertContains(world.messages[#world.messages], "Version ")
+        test.assertContains(world.messages[#world.messages - 1], "Version ")
         test.assertEqual(0, world.savedVariableWrites)
     end)
 end

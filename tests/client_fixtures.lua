@@ -29,16 +29,80 @@ function Fixtures.manifestMetadata(path)
     return metadata
 end
 
-function Fixtures.manifestFiles(path)
+-- Every file line in the manifest, libraries included, in order.
+function Fixtures.manifestLines(path)
     local files = {}
     local line
     for line in io.lines(path) do
         line = line:gsub("%s+$", "")
-        if string.sub(line, 1, 2) ~= "##" and string.match(line, "%.lua$") then
+        if line ~= "" and string.sub(line, 1, 2) ~= "##" then
             table.insert(files, line)
         end
     end
     return files
+end
+
+-- The add-on's own files in manifest order. Library files are skipped: the
+-- fixtures stand in for them, so CI never needs the fetched libraries.
+function Fixtures.manifestFiles(path)
+    local files = {}
+    local lines = Fixtures.manifestLines(path)
+    local index
+    for index = 1, #lines do
+        if string.sub(lines[index], 1, 5) ~= "Libs/" then
+            table.insert(files, lines[index])
+        end
+    end
+    return files
+end
+
+-- The majors the fake LibStub registers unless a test removes them.
+Fixtures.LIBRARY_MAJORS = {
+    "CallbackHandler-1.0",
+    "LibDataBroker-1.1",
+    "LibDBIcon-1.0",
+    "LibSharedMedia-3.0",
+    "DetailsFramework-1.0",
+}
+
+-- A fake LibStub registry and Details! Framework global. `options.libStub =
+-- false` omits LibStub, `options.missingLibraries` lists majors left
+-- unregistered, and `options.frameworkFailed` leaves the framework half
+-- loaded (registered, but its core file stopped before finishing).
+local function installLibraries(environment, options)
+    if options.libStub == false then
+        return
+    end
+
+    local missing = {}
+    local index
+    for index = 1, #(options.missingLibraries or {}) do
+        missing[options.missingLibraries[index]] = true
+    end
+
+    local libStub = { libs = {}, minors = {} }
+    function libStub:GetLibrary(major, silent)
+        if self.libs[major] == nil and not silent then
+            error("Cannot find a library instance of \"" .. tostring(major) .. "\".", 2)
+        end
+        return self.libs[major], self.minors[major]
+    end
+    for index = 1, #Fixtures.LIBRARY_MAJORS do
+        local major = Fixtures.LIBRARY_MAJORS[index]
+        if not missing[major] then
+            libStub.libs[major] = {}
+            libStub.minors[major] = 1
+        end
+    end
+    environment.LibStub = libStub
+
+    local framework = libStub.libs["DetailsFramework-1.0"]
+    if framework ~= nil then
+        if not options.frameworkFailed then
+            framework.FrameWorkVersion = "746"
+        end
+        environment.DetailsFramework = framework
+    end
 end
 
 local function newFrame(world)
@@ -93,7 +157,8 @@ local PROFILE_APIS = {
 -- Returns a WoW-like global environment for `profile`. `options.addonName`
 -- picks the build (production by default), `options.declaredClient` overrides
 -- the manifest's X-Client value (false removes it), and `options.database`
--- seeds that build's SavedVariables. The SavedVariables global lives in
+-- seeds that build's SavedVariables; see installLibraries for the library
+-- options. The SavedVariables global lives in
 -- `world.database`, and every read or write of it through the environment is
 -- counted in `world.savedVariableReads` and `world.savedVariableWrites`.
 function Fixtures.newEnvironment(profile, options)
@@ -150,6 +215,7 @@ function Fixtures.newEnvironment(profile, options)
         declaredClient = profile
     end
     PROFILE_APIS[profile](world, environment, declaredClient)
+    installLibraries(environment, options)
 
     world.environment = environment
     world.profile = profile

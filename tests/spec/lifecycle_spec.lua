@@ -211,6 +211,10 @@ local function registerProfileTests(profile, addonName)
         fixtures.slash(world, "help")
         test.assertEqual(
             identity.chatPrefix .. " Version " .. version .. " on " .. label .. ".",
+            world.messages[#world.messages - 1]
+        )
+        test.assertEqual(
+            identity.chatPrefix .. " Libraries: all 6 present.",
             world.messages[#world.messages]
         )
 
@@ -243,7 +247,7 @@ local function registerProfileTests(profile, addonName)
         fixtures.assertSameData(before, existing)
 
         fixtures.slash(world, "help")
-        test.assertContains(world.messages[#world.messages], "on Unsupported client.")
+        test.assertContains(world.messages[#world.messages - 1], "on Unsupported client.")
         test.assertEqual(0, world.savedVariableReads)
         test.assertEqual(0, world.savedVariableWrites)
     end)
