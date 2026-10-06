@@ -10,11 +10,13 @@ local _, addon = ...
 -- print a message instead of raising Lua errors. The window is created once,
 -- then hidden and shown; it is never destroyed.
 local RosterWindow = {
-    DEFAULT_WIDTH = 560,
-    DEFAULT_HEIGHT = 420,
-    MIN_WIDTH = 420,
-    MIN_HEIGHT = 220,
-    LINE_HEIGHT = 18,
+    DEFAULT_WIDTH = 640,
+    DEFAULT_HEIGHT = 440,
+    MIN_WIDTH = 480,
+    MIN_HEIGHT = 240,
+    LINE_HEIGHT = 22,
+    -- How far an alt's name sits in from its player's header.
+    INDENT = 18,
 }
 addon.RosterWindow = RosterWindow
 
@@ -23,11 +25,17 @@ Window.__index = Window
 
 -- Column layout: x offset and width of each text column in a line.
 local COLUMNS = {
-    { field = "coloredName", header = "Name", x = 6, width = 170 },
-    { field = "level", header = "Level", x = 180, width = 40 },
-    { field = "rank", header = "Rank", x = 226, width = 110 },
-    { field = "location", header = "Zone / Last online", x = 342, width = 190 },
+    { field = "name", header = "Name", x = 8, width = 240 },
+    { field = "level", header = "Level", x = 254, width = 44 },
+    { field = "rank", header = "Rank", x = 302, width = 120 },
+    { field = "location", header = "Zone / Last online", x = 428, width = 180 },
 }
+
+-- Row backgrounds: a tint for player headers, and a faint stripe on every
+-- other row so long lists stay easy to follow.
+local HEADER_BACKGROUND = { 0.35, 0.27, 0.05, 0.35 }
+local STRIPE_BACKGROUND = { 1, 1, 1, 0.04 }
+local NO_BACKGROUND = { 0, 0, 0, 0 }
 
 local function frameworkFrom(client)
     local framework = client:GetGlobal("DetailsFramework")
@@ -51,11 +59,13 @@ local function createLine(scroll, index, onToggleGroup)
     line:SetHeight(RosterWindow.LINE_HEIGHT)
     line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
     line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
+    line.background = line:CreateTexture(nil, "BACKGROUND")
+    line.background:SetAllPoints(line)
     line.cells = {}
     local columnIndex
     for columnIndex = 1, #COLUMNS do
         local column = COLUMNS[columnIndex]
-        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
         cell:SetWidth(column.width)
         cell:SetJustifyH("LEFT")
@@ -65,40 +75,64 @@ local function createLine(scroll, index, onToggleGroup)
     return line
 end
 
--- The text each column shows for a row. Player headers show the group label
--- with an expand/collapse marker; character rows are indented under it, and
--- the main is marked.
+-- The text each column shows for a row. Headers show the player's label
+-- with an expand/collapse marker and character count; a single-character
+-- player's row shows its label; an alt's row shows its own name, and the
+-- main is marked.
 local function cellText(row, field)
     if row.kind == "player" then
-        if field == "coloredName" then
-            local marker = row.collapsed and "[+] " or "[-] "
-            local count = row.count > 1 and ("  |cff888888" .. row.count .. " characters|r") or ""
-            return "|cffffd100" .. marker .. row.label .. "|r" .. count
+        if field == "name" then
+            local marker = row.collapsed and "+ " or "- "
+            return "|cffffd100" .. marker .. row.label .. "|r  |cff9d9d9d" .. row.count .. " characters|r"
         end
         if field == "location" and row.online then
             return "|cff20ff20Online|r"
         end
         return ""
     end
-    if field == "coloredName" then
-        return "    " .. row.coloredName .. (row.isMain and " |cff888888(main)|r" or "")
+    if field == "name" then
+        if row.standalone then
+            return row.coloredLabel
+        end
+        return row.coloredName .. (row.isMain and "  |cff9d9d9d(main)|r" or "")
     end
     local value = row[field]
     return value ~= nil and tostring(value) or ""
+end
+
+local function setBackground(line, color)
+    line.background:SetColorTexture(color[1], color[2], color[3], color[4])
 end
 
 -- Draws only the visible slice of rows; the framework recycles line frames.
 local function refreshLines(scroll, rows, offset, totalLines)
     local lineIndex
     for lineIndex = 1, totalLines do
-        local row = rows[lineIndex + offset]
+        local dataIndex = lineIndex + offset
+        local row = rows[dataIndex]
         if row ~= nil then
             local line = scroll:GetLine(lineIndex)
             line.row = row
             local columnIndex
             for columnIndex = 1, #COLUMNS do
-                local field = COLUMNS[columnIndex].field
-                line.cells[field]:SetText(cellText(row, field))
+                local column = COLUMNS[columnIndex]
+                line.cells[column.field]:SetText(cellText(row, column.field))
+            end
+
+            -- Alts sit under their player's header.
+            local nameCell = line.cells.name
+            local indent = (row.kind == "character" and not row.standalone) and RosterWindow.INDENT or 0
+            nameCell:ClearAllPoints()
+            nameCell:SetPoint("LEFT", line, "LEFT", COLUMNS[1].x + indent, 0)
+            nameCell:SetWidth(COLUMNS[1].width - indent)
+            nameCell:SetFontObject(row.kind == "player" and "GameFontNormal" or "GameFontHighlight")
+
+            if row.kind == "player" then
+                setBackground(line, HEADER_BACKGROUND)
+            elseif dataIndex % 2 == 0 then
+                setBackground(line, STRIPE_BACKGROUND)
+            else
+                setBackground(line, NO_BACKGROUND)
             end
         end
     end

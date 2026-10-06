@@ -5,8 +5,9 @@ local _, addon = ...
 -- it needs.
 --
 -- The result is a flat list ready for a virtualized scroll list: a header
--- row per player, followed (unless the group is collapsed) by its character
--- rows with the main first. Filters and search come in later slices.
+-- row per player with alts, followed (unless the group is collapsed) by its
+-- character rows with the main first; a player with one character is a
+-- single row. Filters and search come in later slices.
 local RosterViewModel = {}
 addon.RosterViewModel = RosterViewModel
 
@@ -77,13 +78,15 @@ end
 --   normalizer   a NameNormalizer, for display names
 --   classColor   function(classToken) -> "ffrrggbb" or nil
 --   collapsed    set of player ids whose groups are collapsed
--- Returns rows. Header rows:
+-- Returns rows. A player with several characters gets a header row:
 --   { kind = "player", id, label, alias, mainName, online, collapsed, count }
--- where `label` is "Alias (Main)", or the main's name without an alias.
--- Character rows:
+-- where `label` is "Alias (Main)", or the main's name without an alias,
+-- followed (unless collapsed) by its character rows:
 --   { kind = "character", key, player, isMain, name, coloredName,
 --     classToken, level, rank, online, location }
 -- where `location` is the zone when online, or the last-online text.
+-- A single-character player is just its character row, marked
+-- `standalone = true` and carrying the player's `label` and `coloredLabel`.
 -- Players sort online first, then by label.
 function RosterViewModel.Build(inputs)
     inputs.members = inputs.members or {}
@@ -128,20 +131,31 @@ function RosterViewModel.Build(inputs)
     local groupIndex
     for groupIndex = 1, #groups do
         local group = groups[groupIndex]
-        table.insert(rows, {
-            kind = "player",
-            id = group.id,
-            label = group.label,
-            alias = group.alias,
-            mainName = group.mainName,
-            online = group.online,
-            collapsed = collapsed[group.id] == true,
-            count = #group.rows,
-        })
-        if not collapsed[group.id] then
-            local rowIndex
-            for rowIndex = 1, #group.rows do
-                table.insert(rows, group.rows[rowIndex])
+        if #group.rows == 1 then
+            -- A single-character player is one plain row, labeled like a
+            -- header would be, so the list isn't doubled up.
+            local row = group.rows[1]
+            row.standalone = true
+            row.label = group.label
+            row.coloredLabel = group.alias and (group.alias .. " (" .. row.coloredName .. ")")
+                or row.coloredName
+            table.insert(rows, row)
+        else
+            table.insert(rows, {
+                kind = "player",
+                id = group.id,
+                label = group.label,
+                alias = group.alias,
+                mainName = group.mainName,
+                online = group.online,
+                collapsed = collapsed[group.id] == true,
+                count = #group.rows,
+            })
+            if not collapsed[group.id] then
+                local rowIndex
+                for rowIndex = 1, #group.rows do
+                    table.insert(rows, group.rows[rowIndex])
+                end
             end
         end
     end

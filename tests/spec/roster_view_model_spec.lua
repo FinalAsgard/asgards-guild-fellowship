@@ -46,14 +46,14 @@ local function build(addon, partition, normalizer, collapsed)
     })
 end
 
-test.test("view model groups characters under a header per player, main first and marked", function()
+test.test("view model groups alts under a header for their player, main first and marked", function()
     local addon = load()
     local partition, normalizer = setup(addon)
     seedGuild(partition)
 
     local rows = build(addon, partition, normalizer)
 
-    test.assertEqual(5, #rows)
+    test.assertEqual(4, #rows)
     test.assertEqual("player", rows[1].kind)
     test.assertEqual("TheTool (Tool Box)", rows[1].label)
     test.assertEqual(2, rows[1].count)
@@ -62,10 +62,26 @@ test.test("view model groups characters under a header per player, main first an
     test.assertEqual("Hammer Smith", rows[3].name)
     test.assertFalse(rows[3].isMain)
     test.assertEqual(rows[1].id, rows[3].player)
-    test.assertEqual("player", rows[4].kind)
+    test.assertFalse(rows[2].standalone == true)
+    -- A single-character player is one plain row, without a header.
+    test.assertEqual("character", rows[4].kind)
+    test.assertTrue(rows[4].standalone)
     test.assertEqual("Zélie Rune", rows[4].label)
-    test.assertEqual("Zélie Rune", rows[5].name)
-    test.assertTrue(rows[5].isMain)
+    test.assertEqual("Zélie Rune", rows[4].coloredLabel)
+    test.assertTrue(rows[4].isMain)
+end)
+
+test.test("a single-character player with an alias is labeled Alias (Name)", function()
+    local addon = load()
+    local partition, normalizer = setup(addon)
+    partition:RecordCharacter("tool box-camelot", { name = "Tool Box", classToken = "WARRIOR" })
+    partition:SetAlias(partition:GetCharacter("tool box-camelot").player, "TheTool", "note")
+
+    local rows = build(addon, partition, normalizer)
+
+    test.assertEqual(1, #rows)
+    test.assertEqual("TheTool (Tool Box)", rows[1].label)
+    test.assertEqual("TheTool (|cffc69b6dTool Box|r)", rows[1].coloredLabel)
 end)
 
 test.test("a player is online when any of its characters is", function()
@@ -78,6 +94,7 @@ test.test("a player is online when any of its characters is", function()
     -- Only the alt Hammer Smith is online, which puts the player first.
     test.assertTrue(rows[1].online)
     test.assertFalse(rows[4].online)
+    test.assertEqual("Zélie Rune", rows[4].label)
 end)
 
 test.test("character rows show class-colored name, level, rank, and zone or last online", function()
@@ -103,9 +120,9 @@ test.test("collapsed groups keep their header and hide their characters", functi
 
     local rows = build(addon, partition, normalizer, { [toolPlayer] = true })
 
-    test.assertEqual(3, #rows)
+    test.assertEqual(2, #rows)
     test.assertTrue(rows[1].collapsed)
-    test.assertEqual("player", rows[2].kind)
+    test.assertTrue(rows[2].standalone)
 end)
 
 test.test("players without an alias are labeled by the main's name and sorted by label", function()
@@ -117,7 +134,7 @@ test.test("players without an alias are labeled by the main's name and sorted by
     local rows = addon.RosterViewModel.Build({ partition = partition, normalizer = normalizer })
 
     test.assertEqual("Anna Two", rows[1].label)
-    test.assertEqual("Zed One", rows[3].label)
+    test.assertEqual("Zed One", rows[2].label)
 end)
 
 test.test("view model falls back to stored facts when live facts are missing", function()
@@ -128,11 +145,11 @@ test.test("view model falls back to stored facts when live facts are missing", f
 
     local rows = addon.RosterViewModel.Build({ partition = partition, normalizer = normalizer })
 
-    test.assertEqual("Tool Box", rows[2].name)
-    test.assertEqual(60, rows[2].level)
-    test.assertEqual("Rank 2", rows[2].rank)
-    test.assertFalse(rows[2].online)
-    test.assertEqual(nil, rows[2].location)
+    test.assertEqual("Tool Box", rows[1].name)
+    test.assertEqual(60, rows[1].level)
+    test.assertEqual("Rank 2", rows[1].rank)
+    test.assertFalse(rows[1].online)
+    test.assertEqual(nil, rows[1].location)
 end)
 
 test.test("last online text uses the largest unit", function()

@@ -83,8 +83,9 @@ local function registerProfileTests(profile)
 
         local partitionKey = profile == "Forever" and "Knights of Camelot-Camelot" or "Knights of Camelot-Area52"
         local partition = setup.database.guilds[partitionKey]
-        -- Two player headers: TheTool with main and alt, and a single.
-        test.assertEqual(5, #setup.window.rows)
+        -- TheTool's header with main and alt, then a single-character row.
+        test.assertEqual(4, #setup.window.rows)
+        test.assertTrue(setup.window.rows[4].standalone)
         test.assertTrue(setup.window.shown)
         test.assertEqual(1790000000, partition.lastFullScan)
         test.assertTrue(partition.characters[first.key] ~= nil)
@@ -111,7 +112,7 @@ local function registerProfileTests(profile)
         setup.controller:Toggle()
 
         test.assertEqual(requests, setup.world.rosterRequests)
-        test.assertEqual(5, #setup.window.rows)
+        test.assertEqual(4, #setup.window.rows)
         test.assertEqual(1, setup.windowsCreated())
     end)
 
@@ -135,7 +136,7 @@ local function registerProfileTests(profile)
 
         test.assertTrue(setup.controller:Rescan())
 
-        test.assertEqual(7, #setup.window.rows)
+        test.assertEqual(5, #setup.window.rows)
         test.assertContains(setup.world.messages[#setup.world.messages], "Roster scanned: 4 characters")
     end)
 
@@ -149,7 +150,7 @@ local function registerProfileTests(profile)
         setup.world.rosterReady = true
         setup.controller:OnRosterUpdate()
 
-        test.assertEqual(5, #setup.window.rows)
+        test.assertEqual(4, #setup.window.rows)
         test.assertContains(setup.world.messages[1], "Roster scanned: 3 characters")
     end)
 
@@ -196,11 +197,11 @@ test.test("clicking a player header collapses and expands its group", function()
     local header = setup.window.rows[1]
 
     setup.controller:ToggleGroup(header.id)
-    test.assertEqual(3, #setup.window.rows)
+    test.assertEqual(2, #setup.window.rows)
     test.assertTrue(setup.window.rows[1].collapsed)
 
     setup.controller:ToggleGroup(header.id)
-    test.assertEqual(5, #setup.window.rows)
+    test.assertEqual(4, #setup.window.rows)
 end)
 
 test.test("roster updates refresh an open window with live facts", function()
