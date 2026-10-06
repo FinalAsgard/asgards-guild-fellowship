@@ -23,6 +23,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+# Windows PowerShell 5.1 runs on .NET Framework, which may not offer TLS 1.2
+# by default; CurseForge and GitHub require it. pwsh already does.
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+}
+
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $listPath = Join-Path $PSScriptRoot 'libraries.txt'
 $librariesRoot = Join-Path $repositoryRoot 'Libs'
@@ -79,7 +85,13 @@ function Save-SvnFolder([string] $Url, [string] $Destination) {
             continue
         }
 
+        # Check the decoded name too: an encoded "..%2F" would otherwise slip
+        # past the checks above and escape the staging folder.
         $name = [uri]::UnescapeDataString($href.TrimEnd('/'))
+        if ($name -eq '' -or $name -eq '.' -or $name -eq '..' -or
+            $name.IndexOfAny([char[]]'/\:') -ge 0 -or [IO.Path]::IsPathRooted($name)) {
+            throw "the listing at $folderUrl contains an unsafe entry name '$href'."
+        }
         $childPath = Join-Path $Destination $name
         if ($href.EndsWith('/')) {
             Save-SvnFolder -Url ($folderUrl + $href) -Destination $childPath
@@ -103,7 +115,12 @@ function Sync-Library([pscustomobject] $Library) {
     $pinPath = Join-Path $target $pinFileName
     $pin = Get-PinText $Library
 
-    if ((Test-Path -LiteralPath $pinPath) -and ((Get-Content -LiteralPath $pinPath -Raw).Trim() -eq $pin)) {
+    $recordedPin = $null
+    if (Test-Path -LiteralPath $pinPath) {
+        $recordedPin = Get-Content -LiteralPath $pinPath -Raw
+    }
+    # An empty or missing pin file means "fetch again", never an error.
+    if ($null -ne $recordedPin -and $recordedPin.Trim() -eq $pin) {
         Write-Host "$($Library.name) $($Library.tag) is up to date."
         return
     }

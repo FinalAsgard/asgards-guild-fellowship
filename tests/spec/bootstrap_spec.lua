@@ -176,10 +176,11 @@ test.test("the dev installer links the dev folder for the dev manifests", functi
     test.assertContains(source, '[string]$Client = "Forever"')
     test.assertContains(source, '"Fetch-Libraries.ps1"')
     -- The libraries are fetched before the junction is created.
-    test.assertTrue(
-        string.find(source, "& $fetchScript", 1, true) < string.find(source, "New-Item -ItemType Junction", 1, true),
-        "fetch runs before linking"
-    )
+    local fetchAt = string.find(source, "& $fetchScript", 1, true)
+    local linkAt = string.find(source, "New-Item -ItemType Junction", 1, true)
+    test.assertTrue(fetchAt ~= nil, "installer runs the fetch script")
+    test.assertTrue(linkAt ~= nil, "installer creates a junction")
+    test.assertTrue(fetchAt < linkAt, "fetch runs before linking")
 end)
 
 test.test("an unknown add-on folder name is refused", function()
