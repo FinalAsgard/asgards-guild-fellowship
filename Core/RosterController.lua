@@ -107,9 +107,7 @@ end
 
 function Controller:OnRosterUpdate()
     self.scheduler:OnRosterUpdate()
-    if self.window ~= nil and self.window:IsShown() then
-        self:Refresh()
-    end
+    self:Invalidate()
 end
 
 -- `/agf rescan` and the Rescan button.
@@ -161,9 +159,7 @@ function Controller:OnScanFinished(result, summary)
     if summary.mode ~= "incremental" or summary.newCharacters > 0 then
         self:Print("Roster scanned: " .. RosterController.DescribeScan(summary) .. ".")
     end
-    if self.window ~= nil and self.window:IsShown() then
-        self:Refresh()
-    end
+    self:Invalidate()
 end
 
 -- "Last scan 5 minutes ago: 3 new characters, 1 alt linked".
@@ -484,6 +480,15 @@ end
 function Controller:Refresh()
     self.revision = (self.revision or 0) + 1
     self:Redraw()
+end
+
+-- Data changed: the rows are stale even while the window is hidden, so the
+-- next open rebuilds them. Only a shown window redraws now.
+function Controller:Invalidate()
+    self.revision = (self.revision or 0) + 1
+    if self.window ~= nil and self.window:IsShown() then
+        self:Redraw()
+    end
 end
 
 -- Draws the window from the store plus live roster facts. The rows are

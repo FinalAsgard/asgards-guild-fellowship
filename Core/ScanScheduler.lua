@@ -154,13 +154,14 @@ function Scheduler:Checkpoint()
 end
 
 -- Reads the whole roster, keyed by character key. Returns nil when the
--- roster is empty, partial, or changed size while it was read.
+-- roster is empty, partial, changed size, or re-sorted while it was read.
 function Scheduler:ReadRoster(normalizer)
     local count = self.client:GetGuildRosterCount()
     if count == nil or count <= 0 then
         return nil
     end
     local members = {}
+    local distinct = 0
     local index
     for index = 1, count do
         local member = self.client:GetGuildMember(index)
@@ -168,10 +169,15 @@ function Scheduler:ReadRoster(normalizer)
         if key == nil then
             return nil
         end
+        if members[key] == nil then
+            distinct = distinct + 1
+        end
         members[key] = member
         self:Checkpoint()
     end
-    if self.client:GetGuildRosterCount() ~= count then
+    -- The read spans frames, so a roster re-sorted mid-read repeats some
+    -- members and skips others; that read isn't complete.
+    if distinct ~= count or self.client:GetGuildRosterCount() ~= count then
         return nil
     end
     return members

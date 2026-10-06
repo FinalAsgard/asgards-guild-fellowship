@@ -184,6 +184,30 @@ test.test("an empty or partial roster is never treated as complete", function()
     test.assertEqual(1, #setup.finished)
 end)
 
+test.test("a roster re-sorted while it was read is never treated as complete", function()
+    local setup = build()
+    setup.login()
+    test.assertEqual(1, #setup.finished)
+    -- The roster re-sorts mid-read: index 2 repeats the member at index 1,
+    -- so the member really at index 2 is never read.
+    local environment = setup.world.environment
+    local getInfo = environment.GetGuildRosterInfo
+    environment.GetGuildRosterInfo = function(index)
+        if index == 2 then
+            return getInfo(1)
+        end
+        return getInfo(index)
+    end
+
+    setup.scheduler:RequestFull(true)
+    fixtures.runTimers(setup.world, 5)
+
+    local partition = setup.partition()
+    for _, key in ipairs({ "toolbox-area52", "hammer-area52", "visitor-stormrage" }) do
+        test.assertTrue(partition:IsInGuild(key), key .. " stays in the guild")
+    end
+end)
+
 test.test("nothing scans before saved data is ready", function()
     local setup = build()
 

@@ -85,6 +85,7 @@ function Service:AcceptConflict(character, kind)
         if not self.partition:JoinPlayerOf(character, conflict.suggestion.main, source) then
             return false, "the character could not be moved"
         end
+        self:KeepActingMains()
     elseif kind == "alias" then
         local record = self.partition:GetCharacter(character)
         if record == nil or not self.partition:SetAlias(record.player, conflict.suggestion.alias, source) then

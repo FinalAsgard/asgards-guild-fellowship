@@ -203,6 +203,30 @@ test.test("a player with any in-guild character always has an in-guild acting ma
     test.assertEqual("solo-area52", state.playerOf("solo-area52").main)
 end)
 
+test.test("accepting a main conflict leaves the old player with an in-guild acting main", function()
+    local state = setup()
+    state.scan({
+        { "Toolbox-Area52", "", 80 },
+        { "Hammer-Area52", ">Toolbox", 70 },
+        { "Lowbie-Area52", ">Toolbox", 20 },
+        { "Other-Area52", "", 60 },
+    }, "initial")
+    local player = state.partition:GetCharacter("toolbox-area52").player
+    -- Hammer leaves, and Toolbox's note now names another main.
+    state.scan({
+        { "Toolbox-Area52", ">Other", 80 },
+        { "Lowbie-Area52", ">Toolbox", 20 },
+        { "Other-Area52", "", 60 },
+    })
+    test.assertEqual(1, #state.conflictsOf("main"))
+
+    test.assertTrue(state.service():AcceptConflict("toolbox-area52", "main"))
+
+    test.assertEqual(state.playerOf("other-area52"), state.playerOf("toolbox-area52"))
+    -- The departed Hammer outranks Lowbie by level, but can't lead the player.
+    test.assertEqual("lowbie-area52", state.partition:GetPlayer(player).main)
+end)
+
 test.test("an alt pointing at a main who left links to that main's player and gets promoted", function()
     local state = setup()
     state.scan({ { "Toolbox-Area52", "@TheTool", 80 }, { "Visitor-Area52", "", 30 } }, "initial")

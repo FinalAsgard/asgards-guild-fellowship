@@ -165,7 +165,7 @@ local function controllerSetup()
     controller:OnRosterUpdate()
     fixtures.runTimers(world)
     controller:Toggle()
-    return controller, window
+    return controller, window, world
 end
 
 test.test("expand all and collapse all change every group and survive reopening", function()
@@ -193,6 +193,25 @@ test.test("the controls filter the roster", function()
     test.assertTrue(controller:ToggleOnlineOnly())
     test.assertEqual(3, #window.rows)
     test.assertEqual("Toolbox", window.rows[1].onlineAs)
+end)
+
+test.test("a scan that finishes while the window is hidden shows on the next open", function()
+    local controller, window, world = controllerSetup()
+    controller:Toggle()
+    test.assertFalse(window:IsShown())
+    world.guild.members[4] = { name = "Newcomer", class = "ROGUE", level = 1, rank = 4,
+        rankName = "Initiate", online = true }
+
+    controller:OnRosterUpdate()
+    fixtures.runTimers(world, 2)
+    controller:Toggle()
+
+    local names = {}
+    local index
+    for index = 1, #window.rows do
+        names[window.rows[index].name or window.rows[index].label or ""] = true
+    end
+    test.assertTrue(names["Newcomer"], "the newcomer is listed after reopening")
 end)
 
 test.test("reopening the window without changes doesn't rebuild the rows", function()
