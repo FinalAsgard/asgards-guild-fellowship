@@ -208,6 +208,26 @@ test.test("a roster re-sorted while it was read is never treated as complete", f
     end
 end)
 
+test.test("a roster read while the guild changes is never saved to the old guild", function()
+    local setup = build()
+    setup.login()
+    local partition = setup.partition()
+    -- The roster now belongs to another guild with the same member count.
+    local environment = setup.world.environment
+    local getInfo = environment.GetGuildRosterInfo
+    environment.GetGuildRosterInfo = function(index)
+        GUILD.name = "Other Guild"
+        return getInfo(index)
+    end
+
+    setup.scheduler:RequestFull(true)
+    fixtures.runTimers(setup.world, 5)
+    GUILD.name = "Knights of Camelot"
+
+    test.assertEqual(1, #setup.finished)
+    test.assertTrue(partition:IsInGuild("toolbox-area52"))
+end)
+
 test.test("nothing scans before saved data is ready", function()
     local setup = build()
 

@@ -192,6 +192,12 @@ function Scheduler:Run(mode, force)
     if members == nil then
         return { incomplete = true }
     end
+    -- The read spans frames: a roster that now belongs to another guild
+    -- must never be saved into this guild's records.
+    local _, current = self.context()
+    if current == nil or current.key ~= partition.key then
+        return { incomplete = true }
+    end
 
     local engine = addon.ReconcileEngine
     local planMode = mode

@@ -169,6 +169,7 @@ end
 --   newKeys      keys the store hadn't seen
 --   links        alt key -> the main key whose player it joins
 --   aliases      main key -> alias for that main's player
+--   aliasNotes   main key -> keys of the characters whose notes set that alias
 --   conflicts    { character, kind, fingerprint, suggestion? } to queue
 --   departures   stored keys missing from the roster (full scans only)
 --   rejoins      departed keys back in the roster
@@ -184,6 +185,7 @@ function ReconcileEngine.Plan(inputs)
     local plan = {
         aliases = {},
         fingerprints = {},
+        aliasNotes = {},
         links = {},
         members = members,
         mode = mode,
@@ -311,6 +313,10 @@ function ReconcileEngine.Plan(inputs)
             end
         elseif rootCharacter == nil or not hasRelationship(partition, sizes, root) then
             plan.aliases[root] = agreed
+            plan.aliasNotes[root] = {}
+            for index = 1, #entries do
+                table.insert(plan.aliasNotes[root], entries[index].character)
+            end
         elseif player.alias == nil or string.lower(player.alias) ~= folded then
             for index = 1, #entries do
                 addConflict(plan, partition, entries[index].character, "alias", { alias = agreed })
@@ -350,13 +356,18 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
     -- Nothing below yields, so no manual change can land between these
     -- checks and the writes. Planning yielded, though, so each seed is
     -- checked again: a character organized since then is left alone.
+    --
+    -- A note whose seed is skipped that way is left unprocessed: the next
+    -- scan reads it again and, the character now being organized, queues
+    -- any disagreement as a conflict.
+    local unprocessed = {}
     local sizes = playerSizes(partition)
     local linked = 0
     local alt, main
     for alt, main in pairs(plan.links) do
-        if not hasRelationship(partition, sizes, alt)
-            and partition:JoinPlayerOf(alt, main, addon.FellowshipStore.SOURCE_NOTE)
-        then
+        if hasRelationship(partition, sizes, alt) then
+            unprocessed[alt] = true
+        elseif partition:JoinPlayerOf(alt, main, addon.FellowshipStore.SOURCE_NOTE) then
             linked = linked + 1
         end
     end
@@ -371,9 +382,16 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         if player ~= nil and player.main == main and player.alias == nil
             and player.aliasSource ~= addon.FellowshipStore.SOURCE_MANUAL
             and character.source ~= addon.FellowshipStore.SOURCE_MANUAL
-            and partition:SetAlias(character.player, alias, addon.FellowshipStore.SOURCE_NOTE)
         then
-            aliased = aliased + 1
+            if partition:SetAlias(character.player, alias, addon.FellowshipStore.SOURCE_NOTE) then
+                aliased = aliased + 1
+            end
+        else
+            local notes = plan.aliasNotes[main] or {}
+            local index
+            for index = 1, #notes do
+                unprocessed[notes[index]] = true
+            end
         end
     end
 
@@ -419,9 +437,10 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
 
     -- Notes count as processed only now, once their links, aliases, and
     -- conflicts are saved, so a scan cut short (a reload or logout) is
-    -- redone by the next scan instead of skipped as unchanged.
+    -- redone by the next scan instead of skipped as unchanged. Notes whose
+    -- seed was skipped above stay unprocessed too.
     for key in pairs(plan.processed) do
-        if partition:GetCharacter(key) ~= nil then
+        if not unprocessed[key] and partition:GetCharacter(key) ~= nil then
             partition:SetNoteFingerprint(key, plan.fingerprints[key])
         end
     end

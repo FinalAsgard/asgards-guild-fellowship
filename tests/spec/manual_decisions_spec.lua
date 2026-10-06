@@ -118,6 +118,10 @@ test.test("a link planned before a manual change is not applied over it", functi
     state.addon.ReconcileEngine.Apply(state.partition, plan)
 
     test.assertEqual("anvil-area52", state.playerOf("hammer-area52").main)
+    -- The note still disagrees, so the next ordinary scan queues it.
+    state.scan({ { "Toolbox-Area52", "" }, { "Hammer-Area52", ">Toolbox" }, { "Anvil-Area52", "" } })
+    test.assertEqual("anvil-area52", state.playerOf("hammer-area52").main)
+    test.assertTrue(state.hasConflict("hammer-area52", "main"), "the skipped note becomes a conflict")
 end)
 
 test.test("an alias planned before a manual alias is not applied over it", function()
@@ -130,6 +134,9 @@ test.test("an alias planned before a manual alias is not applied over it", funct
     state.addon.ReconcileEngine.Apply(state.partition, plan)
 
     test.assertEqual("Tooly", state.playerOf("toolbox-area52").alias)
+    state.scan({ { "Toolbox-Area52", "@TheTool" } })
+    test.assertEqual("Tooly", state.playerOf("toolbox-area52").alias)
+    test.assertTrue(state.hasConflict("toolbox-area52", "alias"), "the skipped note becomes a conflict")
 end)
 
 test.test("a scan cut short leaves its notes to be processed by the next scan", function()
