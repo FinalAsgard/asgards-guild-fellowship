@@ -13,15 +13,26 @@ local _, addon = ...
 -- that are too long, and competing aliases). A suggestion the player
 -- rejected is not queued again until the note changes.
 --
--- Departures and out-of-guild mains come in a later slice.
+-- Departures: a full scan of a complete roster marks stored characters that
+-- are missing as departed, and clears the flag on any that are back (they
+-- keep their stored player). Afterwards every player that still has an
+-- in-guild character gets an in-guild acting main: the highest level, then
+-- the most recently online. The former main goes into the player's history,
+-- and a confirmation conflict is queued.
+--
+-- Out-of-guild mains: a marker naming a stored character who isn't in the
+-- guild links to that character's player. A marker naming nobody known is an
+-- "unresolved" conflict whose suggestion, if accepted, records the name as
+-- the player's out-of-guild main.
 local ReconcileEngine = {
     MAX_CHAIN_DEPTH = 10,
 }
 addon.ReconcileEngine = ReconcileEngine
 
--- Matches marker text against roster characters: a full name (with or
--- without realm), or on Forever a single word as a unique first name.
-local function newResolver(members, normalizer, twoPartNames)
+-- Matches marker text against characters: a full name (with or without
+-- realm) of a roster member or a stored character no longer in the guild,
+-- or on Forever a single word as a unique first name of a roster member.
+local function newResolver(members, normalizer, twoPartNames, partition)
     local byFirstName = {}
     if twoPartNames then
         local key, member
@@ -40,7 +51,7 @@ local function newResolver(members, normalizer, twoPartNames)
 
     return function(text)
         local key = normalizer:Key(text)
-        if key ~= nil and members[key] ~= nil then
+        if key ~= nil and (members[key] ~= nil or partition:GetCharacter(key) ~= nil) then
             return { key }
         end
         if twoPartNames and string.find(text, "[%s%-]") == nil then
@@ -154,13 +165,16 @@ end
 --   links        alt key -> the main key whose player it joins
 --   aliases      main key -> alias for that main's player
 --   conflicts    { character, kind, fingerprint, suggestion? } to queue
+--   departures   stored keys missing from the roster (full scans only)
+--   rejoins      departed keys back in the roster
+--   now          the scan's timestamp (inputs.now)
 function ReconcileEngine.Plan(inputs)
     local partition = inputs.partition
     local members = inputs.members or {}
     local rules = inputs.rules or {}
     local checkpoint = inputs.checkpoint or function() end
     local mode = inputs.mode or "initial"
-    local resolver = newResolver(members, inputs.normalizer, rules.twoPartNames == true)
+    local resolver = newResolver(members, inputs.normalizer, rules.twoPartNames == true, partition)
     local sizes = playerSizes(partition)
     local plan = {
         aliases = {},
@@ -171,6 +185,9 @@ function ReconcileEngine.Plan(inputs)
         newKeys = {},
         processed = {},
         conflicts = {},
+        departures = {},
+        rejoins = {},
+        now = inputs.now or 0,
     }
 
     -- Notes are parsed only when needed: for processed characters, and for
@@ -200,6 +217,24 @@ function ReconcileEngine.Plan(inputs)
     table.sort(keys)
     table.sort(plan.newKeys)
 
+    -- Departures need the whole roster, so incremental checks never declare
+    -- them. Callers only pass complete roster reads.
+    if mode ~= "incremental" and next(members) ~= nil then
+        partition:EachCharacter(function(storedKey, character)
+            if members[storedKey] == nil and character.departed == nil then
+                table.insert(plan.departures, storedKey)
+            end
+        end)
+        table.sort(plan.departures)
+    end
+    for key in pairs(members) do
+        local character = partition:GetCharacter(key)
+        if character ~= nil and character.departed ~= nil then
+            table.insert(plan.rejoins, key)
+        end
+    end
+    table.sort(plan.rejoins)
+
     local seedable = {}
     local index
     for index = 1, #keys do
@@ -211,7 +246,10 @@ function ReconcileEngine.Plan(inputs)
         key = keys[index]
         local ref = parseOf(key).mainRef
         if ref ~= nil then
-            if ref.status ~= "resolved" then
+            if ref.status == "unresolved" then
+                -- Accepting records the name as an out-of-guild main.
+                addConflict(plan, partition, key, ref.status, { outOfGuild = ref.text })
+            elseif ref.status ~= "resolved" then
                 addConflict(plan, partition, key, ref.status)
             elseif ref.key == key then
                 addConflict(plan, partition, key, "self reference")
@@ -286,7 +324,8 @@ end
 
 -- Commits a plan to the partition. `checkpoint` is called between
 -- characters, as in Plan. Returns counts for reporting:
---   recorded, newCharacters, linked, aliased, conflicts
+--   recorded, newCharacters, linked, aliased, conflicts, departed,
+--   rejoined, promoted
 function ReconcileEngine.Apply(partition, plan, checkpoint)
     checkpoint = checkpoint or function() end
 
@@ -325,19 +364,37 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         end
     end
 
+    local departed, rejoined = 0, 0
+    local index
+    for index = 1, #plan.departures do
+        if partition:MarkDeparted(plan.departures[index], plan.now) then
+            departed = departed + 1
+        end
+    end
+    for index = 1, #plan.rejoins do
+        if partition:MarkRejoined(plan.rejoins[index]) then
+            rejoined = rejoined + 1
+        end
+    end
+    local promotions = ReconcileEngine.EnsureActingMains(partition, plan.members, plan.now)
+
     -- Characters this plan skipped keep their pending conflicts; processed
     -- characters get exactly the conflicts this plan found.
     local conflicts = {}
     local previous = partition:GetConflicts() or {}
-    local index
     for index = 1, #previous do
         local entry = previous[index]
-        if type(entry) == "table" and not plan.processed[entry.character] then
+        -- Promotions wait for the player to confirm them, whatever is
+        -- rescanned.
+        if type(entry) == "table" and (not plan.processed[entry.character] or entry.kind == "promotion") then
             table.insert(conflicts, entry)
         end
     end
     for index = 1, #plan.conflicts do
         table.insert(conflicts, plan.conflicts[index])
+    end
+    for index = 1, #promotions do
+        table.insert(conflicts, promotions[index])
     end
     table.sort(conflicts, function(first, second)
         if first.character ~= second.character then
@@ -352,6 +409,87 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         linked = linked,
         newCharacters = #plan.newKeys,
         recorded = recorded,
-        conflicts = #plan.conflicts,
+        conflicts = #plan.conflicts + #promotions,
+        departed = departed,
+        rejoined = rejoined,
+        promoted = #promotions,
     }
+end
+
+-- The in-guild character that should act as main: highest level, then
+-- online now, then most recently online, then by key.
+local function lastOnlineHours(live)
+    local last = live and live.lastOnline
+    if live and live.online then
+        return -1
+    end
+    if type(last) ~= "table" then
+        return math.huge
+    end
+    return (last.years or 0) * 8760 + (last.months or 0) * 730 + (last.days or 0) * 24 + (last.hours or 0)
+end
+
+local function bestActingMain(partition, keys, members)
+    local best
+    local index
+    for index = 1, #keys do
+        local key = keys[index]
+        if partition:IsInGuild(key) then
+            if best == nil then
+                best = key
+            else
+                local candidate, current = partition:GetCharacter(key), partition:GetCharacter(best)
+                local candidateLevel, currentLevel = candidate.level or 0, current.level or 0
+                local candidateSeen, currentSeen = lastOnlineHours(members[key]), lastOnlineHours(members[best])
+                if candidateLevel > currentLevel
+                    or (candidateLevel == currentLevel and candidateSeen < currentSeen)
+                    or (candidateLevel == currentLevel and candidateSeen == currentSeen and key < best)
+                then
+                    best = key
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- Keeps the invariant: a player with any in-guild character has an
+-- in-guild acting main. Each promotion records the former main in the
+-- player's history and returns a "promotion" conflict for confirmation.
+function ReconcileEngine.EnsureActingMains(partition, members, now)
+    members = members or {}
+    local promotions = {}
+    local players = {}
+    partition:EachPlayer(function(id, player)
+        table.insert(players, { id = id, player = player })
+    end)
+    table.sort(players, function(first, second)
+        return first.id < second.id
+    end)
+    local index
+    for index = 1, #players do
+        local id, player = players[index].id, players[index].player
+        if not partition:IsInGuild(player.main) then
+            local keys = partition:CharactersOf(id)
+            local best = bestActingMain(partition, keys, members)
+            if best ~= nil then
+                local formerKey = player.main
+                local former = partition:GetCharacter(formerKey)
+                partition:AddHistory(id, {
+                    character = formerKey,
+                    name = (former and former.name) or formerKey,
+                    role = "main",
+                    ["until"] = (former and former.departed) or now,
+                    reason = former and "departed" or "out of guild",
+                })
+                partition:SetMain(id, best)
+                table.insert(promotions, {
+                    character = best,
+                    kind = "promotion",
+                    suggestion = { main = best, former = formerKey },
+                })
+            end
+        end
+    end
+    return promotions
 end

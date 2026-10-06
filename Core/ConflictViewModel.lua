@@ -38,6 +38,9 @@ local function currentText(inputs, key, kind)
     if kind == "alias" or kind == "competing aliases" then
         return player.alias and ("Alias \"" .. player.alias .. "\"") or "No alias"
     end
+    if kind == "promotion" then
+        return "Main of its player"
+    end
     if player.main == key then
         local count = #inputs.partition:CharactersOf(character.player)
         if count > 1 then
@@ -79,6 +82,11 @@ function ConflictViewModel.Build(inputs)
             suggests = "Alt of " .. displayName(inputs, conflict.suggestion.main)
         elseif conflict.kind == "alias" and conflict.suggestion then
             suggests = "Alias \"" .. conflict.suggestion.alias .. "\""
+        elseif conflict.kind == "unresolved" and conflict.suggestion and conflict.suggestion.outOfGuild then
+            suggests = "Main \"" .. conflict.suggestion.outOfGuild .. "\", not in the guild"
+        elseif conflict.kind == "promotion" and conflict.suggestion then
+            suggests = "Acting main now, since " ..
+                displayName(inputs, conflict.suggestion.former) .. " left"
         else
             suggests = PROBLEMS[conflict.kind] or conflict.kind
         end

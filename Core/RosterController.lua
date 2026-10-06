@@ -21,6 +21,7 @@ function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
         collapsed = {},
+        showDeparted = false,
         createWindow = options.createWindow,
         getDatabase = options.getDatabase,
         nameRules = options.nameRules or {},
@@ -130,6 +131,15 @@ function RosterController.DescribeScan(summary)
     if (summary.aliased or 0) > 0 then
         table.insert(parts, plural(summary.aliased, "alias", "aliases") .. " set")
     end
+    if (summary.departed or 0) > 0 then
+        table.insert(parts, plural(summary.departed, "character") .. " left")
+    end
+    if (summary.rejoined or 0) > 0 then
+        table.insert(parts, plural(summary.rejoined, "character") .. " rejoined")
+    end
+    if (summary.promoted or 0) > 0 then
+        table.insert(parts, plural(summary.promoted, "new acting main"))
+    end
     if (summary.conflicts or 0) > 0 then
         table.insert(parts, plural(summary.conflicts, "new conflict") .. " to review")
     end
@@ -183,7 +193,7 @@ function Controller:ResolveConflicts(action, character, kind)
     if self.current == nil then
         return false
     end
-    local service = addon.PlayerService.Create(self.current.partition)
+    local service = self:Service()
     local ok, reason
     if action == "accept" then
         ok, reason = service:AcceptConflict(character, kind)
@@ -219,6 +229,44 @@ end
 
 function Controller:RejectAllConflicts()
     return self:ResolveConflicts("rejectAll")
+end
+
+function Controller:Service()
+    return addon.PlayerService.Create(self.current.partition, {
+        now = function()
+            return self.client:Timestamp() or 0
+        end,
+    })
+end
+
+-- Shows or hides characters who left the guild. Lasts for the session.
+function Controller:ToggleDeparted()
+    self.showDeparted = not self.showDeparted
+    self:Refresh()
+    return self.showDeparted
+end
+
+-- Purges one departed character, keeping its player's history entry.
+function Controller:Purge(key)
+    if self.current == nil then
+        return false
+    end
+    local ok, reason = self:Service():Purge(key)
+    if not ok then
+        self:Print("That character can't be purged: " .. reason .. ".")
+    end
+    self:Refresh()
+    return ok
+end
+
+function Controller:PurgeAllDeparted()
+    if self.current == nil then
+        return 0
+    end
+    local purged = self:Service():PurgeAllDeparted()
+    self:Print("Purged " .. plural(purged, "departed character") .. ".")
+    self:Refresh()
+    return purged
 end
 
 -- Collapses or expands a player's group. The state lasts for the session.
@@ -261,6 +309,8 @@ function Controller:Refresh()
             return self.client:GetClassColor(classToken)
         end,
         collapsed = self.collapsed,
+        showDeparted = self.showDeparted == true,
+        now = self.client:Timestamp(),
     })
     self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
     self.window:SetRows(rows)

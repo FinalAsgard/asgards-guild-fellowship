@@ -44,11 +44,26 @@ local function coloredName(name, color)
     return "|c" .. color .. name .. "|r"
 end
 
+-- "Left 3 days ago" for a departed character, from its departure date.
+local function leftText(departed, now)
+    local elapsed = math.max(0, (now or departed) - departed)
+    local days = math.floor(elapsed / 86400)
+    if days < 1 then
+        return "Left today"
+    end
+    return "Left " .. plural(days, "day") .. " ago"
+end
+
 local function characterRow(inputs, key, character, playerId, isMain)
     local live = inputs.members[key] or {}
     local name = inputs.normalizer:Display(live.name or character.name) or key
     local classToken = live.classToken or character.class
     local online = live.online == true
+    local departed = character.departed ~= nil
+    local location = online and live.zone or RosterViewModel.FormatLastOnline(live.lastOnline)
+    if departed then
+        location = leftText(character.departed, inputs.now)
+    end
     return {
         kind = "character",
         key = key,
@@ -60,7 +75,8 @@ local function characterRow(inputs, key, character, playerId, isMain)
         level = live.level or character.level,
         rank = live.rankName or (character.rank and ("Rank " .. character.rank)) or nil,
         online = online,
-        location = online and live.zone or RosterViewModel.FormatLastOnline(live.lastOnline),
+        departed = departed,
+        location = location,
     }
 end
 
@@ -78,13 +94,17 @@ end
 --   normalizer   a NameNormalizer, for display names
 --   classColor   function(classToken) -> "ffrrggbb" or nil
 --   collapsed    set of player ids whose groups are collapsed
+--   showDeparted true to include characters who left the guild
+--   now          the current timestamp, for "Left N days ago"
 -- Returns rows. A player with several characters gets a header row:
 --   { kind = "player", id, label, alias, mainName, online, collapsed, count }
 -- where `label` is "Alias (Main)", or the main's name without an alias,
 -- followed (unless collapsed) by its character rows:
 --   { kind = "character", key, player, isMain, name, coloredName,
---     classToken, level, rank, online, location }
--- where `location` is the zone when online, or the last-online text.
+--     classToken, level, rank, online, departed, location }
+-- where `location` is the zone when online, the last-online text, or when
+-- the character left. Departed characters are hidden unless showDeparted;
+-- a player with no visible characters is left out.
 -- A single-character player is just its character row, marked
 -- `standalone = true` and carrying the player's `label` and `coloredLabel`.
 -- Players sort online first, then by label.
@@ -100,23 +120,28 @@ function RosterViewModel.Build(inputs)
         if keys[1] ~= nil then
             local rows = {}
             local online = false
+            -- CharactersOf puts the main first, so the label uses the
+            -- main's name even when it is hidden.
+            local mainName = characterRow(inputs, keys[1], partition:GetCharacter(keys[1]), id, true).name
             local index
             for index = 1, #keys do
                 local row = characterRow(inputs, keys[index], partition:GetCharacter(keys[index]), id,
                     keys[index] == player.main)
-                online = online or row.online
-                table.insert(rows, row)
+                if not row.departed or inputs.showDeparted then
+                    online = online or row.online
+                    table.insert(rows, row)
+                end
             end
-            -- CharactersOf puts the main first.
-            local mainName = rows[1].name
-            table.insert(groups, {
-                id = id,
-                label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
-                alias = player.alias,
-                mainName = mainName,
-                online = online,
-                rows = rows,
-            })
+            if rows[1] ~= nil then
+                table.insert(groups, {
+                    id = id,
+                    label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
+                    alias = player.alias,
+                    mainName = mainName,
+                    online = online,
+                    rows = rows,
+                })
+            end
         end
     end)
 

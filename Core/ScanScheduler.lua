@@ -195,6 +195,7 @@ function Scheduler:Run(mode, force)
     local checkpoint = function()
         self:Checkpoint()
     end
+    local now = self.client:Timestamp() or 0
     local plan = engine.Plan({
         partition = partition,
         members = members,
@@ -203,13 +204,14 @@ function Scheduler:Run(mode, force)
         mode = planMode,
         force = force,
         checkpoint = checkpoint,
+        now = now,
     })
-    -- An incremental check that finds nobody new changes nothing.
-    if planMode == "incremental" and next(plan.processed) == nil then
+    -- An incremental check that finds nobody new or returning changes
+    -- nothing.
+    if planMode == "incremental" and next(plan.processed) == nil and plan.rejoins[1] == nil then
         return { idle = true }
     end
     local result = engine.Apply(partition, plan, checkpoint)
-    local now = self.client:Timestamp() or 0
     if planMode ~= "incremental" then
         partition:MarkScanned(now)
     end
@@ -220,6 +222,9 @@ function Scheduler:Run(mode, force)
         linked = result.linked,
         aliased = result.aliased,
         conflicts = result.conflicts,
+        departed = result.departed,
+        rejoined = result.rejoined,
+        promoted = result.promoted,
     }
     partition:SetLastScanSummary(summary)
     return { result = result, summary = summary }

@@ -64,6 +64,15 @@ if clientProfile.supported then
                 onRejectAll = function()
                     rosterController:RejectAllConflicts()
                 end,
+                onToggleDeparted = function()
+                    return rosterController:ToggleDeparted()
+                end,
+                onPurge = function(key)
+                    rosterController:Purge(key)
+                end,
+                onPurgeAll = function()
+                    rosterController:PurgeAllDeparted()
+                end,
             })
         end,
     })

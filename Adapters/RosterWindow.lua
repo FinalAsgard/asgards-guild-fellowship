@@ -48,7 +48,7 @@ local function frameworkFrom(client)
     return framework
 end
 
-local function createLine(scroll, index, onToggleGroup)
+local function createLine(scroll, index, onToggleGroup, onPurge)
     local line = CreateFrame("Button", nil, scroll)
     -- Clicking a player header collapses or expands its group.
     line:SetScript("OnClick", function(self)
@@ -72,6 +72,17 @@ local function createLine(scroll, index, onToggleGroup)
         cell:SetWordWrap(false)
         line.cells[column.field] = cell
     end
+    -- Departed characters can be purged one at a time.
+    line.purge = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+    line.purge:SetSize(52, 18)
+    line.purge:SetPoint("RIGHT", line, "RIGHT", -4, 0)
+    line.purge:SetText("Purge")
+    line.purge:SetScript("OnClick", function()
+        if line.row ~= nil and line.row.departed then
+            onPurge(line.row.key)
+        end
+    end)
+    line.purge:Hide()
     return line
 end
 
@@ -91,10 +102,20 @@ local function cellText(row, field)
         return ""
     end
     if field == "name" then
+        local text
         if row.standalone then
-            return row.coloredLabel
+            text = row.coloredLabel
+        else
+            text = row.coloredName .. (row.isMain and "  |cff9d9d9d(main)|r" or "")
         end
-        return row.coloredName .. (row.isMain and "  |cff9d9d9d(main)|r" or "")
+        if row.departed then
+            -- Grey and plain, so departed characters read as history.
+            text = "|cff7f7f7f" .. (row.standalone and row.label or row.name) .. " (left)|r"
+        end
+        return text
+    end
+    if row.departed and field == "location" then
+        return "|cff7f7f7f" .. tostring(row.location) .. "|r"
     end
     local value = row[field]
     return value ~= nil and tostring(value) or ""
@@ -126,6 +147,12 @@ local function refreshLines(scroll, rows, offset, totalLines)
             nameCell:SetPoint("LEFT", line, "LEFT", COLUMNS[1].x + indent, 0)
             nameCell:SetWidth(COLUMNS[1].width - indent)
             nameCell:SetFontObject(row.kind == "player" and "GameFontNormal" or "GameFontHighlight")
+
+            if row.departed then
+                line.purge:Show()
+            else
+                line.purge:Hide()
+            end
 
             if row.kind == "player" then
                 setBackground(line, HEADER_BACKGROUND)
@@ -356,7 +383,7 @@ local function build(framework, options)
 
     local lineAmount = math.floor((RosterWindow.DEFAULT_HEIGHT - 70) / RosterWindow.LINE_HEIGHT)
     local function newLine(scrollBox, index)
-        return createLine(scrollBox, index, options.onToggleGroup)
+        return createLine(scrollBox, index, options.onToggleGroup, options.onPurge)
     end
     local scroll = framework:CreateScrollBox(
         panel,
@@ -387,8 +414,32 @@ local function build(framework, options)
     conflictsButton:SetSize(110, 22)
     conflictsButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -36, 10)
     conflictsButton:SetText("Conflicts (0)")
+
+    -- Departed characters are hidden unless this is checked.
+    local departed = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    departed:SetSize(22, 22)
+    departed:SetPoint("LEFT", rescan, "RIGHT", 8, 0)
+    local departedLabel = departed:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    departedLabel:SetPoint("LEFT", departed, "RIGHT", 2, 0)
+    departedLabel:SetText("Show departed")
+    local purgeAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    purgeAll:SetSize(130, 22)
+    purgeAll:SetPoint("LEFT", departedLabel, "RIGHT", 8, 0)
+    purgeAll:SetText("Purge all departed")
+    purgeAll:SetScript("OnClick", function()
+        options.onPurgeAll()
+    end)
+    purgeAll:Hide()
+    departed:SetScript("OnClick", function()
+        if options.onToggleDeparted() then
+            purgeAll:Show()
+        else
+            purgeAll:Hide()
+        end
+    end)
+
     local status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    status:SetPoint("LEFT", rescan, "RIGHT", 10, 0)
+    status:SetPoint("LEFT", purgeAll, "RIGHT", 10, 0)
     status:SetPoint("RIGHT", conflictsButton, "LEFT", -10, 0)
     status:SetJustifyH("LEFT")
     status:SetWordWrap(false)
@@ -426,7 +477,9 @@ end
 -- options.onToggleGroup(playerId) runs when a player header is clicked;
 -- options.onRescan() runs when the Rescan button is clicked;
 -- options.onAcceptConflict(character, kind), onRejectConflict(character,
--- kind), onAcceptAll(), and onRejectAll() resolve conflicts.
+-- kind), onAcceptAll(), and onRejectAll() resolve conflicts;
+-- options.onToggleDeparted() returns whether departed characters are now
+-- shown, and options.onPurge(key) / onPurgeAll() purge them.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then

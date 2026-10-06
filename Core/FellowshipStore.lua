@@ -56,6 +56,9 @@ local function characterProblem(character)
     if character.note ~= nil and not isText(character.note) then
         return "character note fingerprint is invalid"
     end
+    if character.departed ~= nil and type(character.departed) ~= "number" then
+        return "character departure date is invalid"
+    end
     if character.rejected ~= nil then
         if type(character.rejected) ~= "table" then
             return "character rejected fingerprints are invalid"
@@ -82,6 +85,18 @@ local function playerProblem(player)
     end
     if player.aliasSource ~= nil and not isText(player.aliasSource) then
         return "player alias source is invalid"
+    end
+    if player.history ~= nil then
+        if type(player.history) ~= "table" then
+            return "player history is invalid"
+        end
+        local index
+        for index = 1, #player.history do
+            local entry = player.history[index]
+            if type(entry) ~= "table" or not isText(entry.name) or not isText(entry.role) then
+                return "player history is invalid"
+            end
+        end
     end
     return nil
 end
@@ -436,6 +451,116 @@ function Partition:ClearRejected(key, kind)
         if next(character.rejected) == nil then
             character.rejected = nil
         end
+    end
+end
+
+-- Departure and history -------------------------------------------------
+
+-- Marks a character as having left the guild at `timestamp`.
+function Partition:MarkDeparted(key, timestamp)
+    local character = self.data.characters[key]
+    if character == nil or type(timestamp) ~= "number" then
+        return false
+    end
+    character.departed = timestamp
+    return true
+end
+
+-- Clears a character's departed flag when it is seen in the roster again.
+-- It keeps its stored player, so it rejoins that player automatically.
+function Partition:MarkRejoined(key)
+    local character = self.data.characters[key]
+    if character == nil or character.departed == nil then
+        return false
+    end
+    character.departed = nil
+    return true
+end
+
+function Partition:IsInGuild(key)
+    local character = self.data.characters[key]
+    return character ~= nil and character.departed == nil
+end
+
+-- Adds an entry to a player's history of former and out-of-guild
+-- characters: { name, role ("main" or "alt"), character?, since?, until?,
+-- reason }. History is kept when characters are purged.
+function Partition:AddHistory(playerId, entry)
+    local player = self.data.players[playerId]
+    if player == nil or type(entry) ~= "table" or not isText(entry.name) or not isText(entry.role) then
+        return false
+    end
+    player.history = player.history or {}
+    table.insert(player.history, entry)
+    return true
+end
+
+function Partition:GetHistory(playerId)
+    local player = self.data.players[playerId]
+    return player and player.history or {}
+end
+
+-- Makes `key` its player's main. Returns false when it isn't a member.
+function Partition:SetMain(playerId, key)
+    local player = self.data.players[playerId]
+    local character = self.data.characters[key]
+    if player == nil or character == nil or character.player ~= playerId then
+        return false
+    end
+    player.main = key
+    return true
+end
+
+-- Removes a departed character for good. Its player keeps a history entry
+-- for it; a player left with no characters is removed.
+function Partition:Purge(key, timestamp)
+    local character = self.data.characters[key]
+    if character == nil or character.departed == nil then
+        return false
+    end
+    local playerId = character.player
+    local player = self.data.players[playerId]
+    if player ~= nil then
+        local recorded = false
+        local index
+        for index = 1, #(player.history or {}) do
+            if player.history[index].character == key then
+                recorded = true
+            end
+        end
+        if not recorded then
+            self:AddHistory(playerId, {
+                character = key,
+                name = character.name or key,
+                role = player.main == key and "main" or "alt",
+                ["until"] = character.departed,
+                reason = "purged",
+            })
+        end
+    end
+
+    self.data.characters[key] = nil
+    self.members = nil
+    if player ~= nil then
+        local remaining = self:CharactersOf(playerId)
+        if remaining[1] == nil then
+            self.data.players[playerId] = nil
+        elseif player.main == key then
+            player.main = remaining[1]
+        end
+    end
+    self:RemoveConflictsFor(key)
+    return true
+end
+
+function Partition:RemoveConflictsFor(key)
+    local conflicts = self.data.conflicts
+    local index = #conflicts
+    while index >= 1 do
+        if conflicts[index].character == key then
+            table.remove(conflicts, index)
+        end
+        index = index - 1
     end
 end
 

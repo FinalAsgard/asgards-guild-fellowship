@@ -211,11 +211,11 @@ test.test("unusable markers can't be accepted, only dismissed", function()
     local state = seeded()
     state.scan({
         { "Toolbox-Area52", "@TheTool" },
-        { "Hammer-Area52", ">Nobody" },
-        { "Visitor-Area52", "" },
+        { "Hammer-Area52", ">Toolbox" },
+        { "Visitor-Area52", ">Visitor" },
     })
 
-    local accepted, reason = state.service():AcceptConflict("hammer-area52", "unresolved")
+    local accepted, reason = state.service():AcceptConflict("visitor-area52", "self reference")
 
     test.assertFalse(accepted)
     test.assertContains(reason, "dismiss")
@@ -356,9 +356,9 @@ test.test("review rows show the character, live note, suggestion, current state,
     test.assertTrue(byKind.main.canAccept)
     test.assertEqual("Alias \"Toolman\"", byKind.alias.suggests)
     test.assertEqual("Alias \"TheTool\"", byKind.alias.current)
-    test.assertEqual("Main not found in the guild", byKind.unresolved.suggests)
+    test.assertEqual("Main \"Nobody\", not in the guild", byKind.unresolved.suggests)
     test.assertEqual("Own player", byKind.unresolved.current)
-    test.assertFalse(byKind.unresolved.canAccept)
+    test.assertTrue(byKind.unresolved.canAccept)
 
     -- A character missing from the live roster has no note to show.
     rows = state.addon.ConflictViewModel.Build({ partition = state.partition, normalizer = state.normalizer })
