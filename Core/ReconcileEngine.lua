@@ -71,17 +71,22 @@ local function playerSizes(partition)
 end
 
 -- A character with no relationship is unknown, or the only character, main,
--- and unnamed member of its own player. Only those are seeded from notes.
+-- and unnamed member of its own player that nobody organized by hand. Only
+-- those are seeded from notes; a manual detach or alias change is a choice
+-- that only the conflict queue may change.
 local function hasRelationship(partition, sizes, key)
     local character = partition:GetCharacter(key)
     if character == nil then
         return false
     end
     local player = partition:GetPlayer(character.player)
+    local manual = addon.FellowshipStore.SOURCE_MANUAL
     return player == nil
         or player.main ~= key
         or player.alias ~= nil
         or (sizes[character.player] or 0) > 1
+        or character.source == manual
+        or player.aliasSource == manual
 end
 
 -- The main a resolved marker ultimately leads to, following other notes
@@ -337,18 +342,21 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         if plan.mode ~= "incremental" or plan.processed[key] then
             if partition:RecordCharacter(key, member) ~= nil then
                 recorded = recorded + 1
-                if plan.processed[key] then
-                    partition:SetNoteFingerprint(key, plan.fingerprints[key])
-                end
             end
             checkpoint()
         end
     end
 
+    -- Nothing below yields, so no manual change can land between these
+    -- checks and the writes. Planning yielded, though, so each seed is
+    -- checked again: a character organized since then is left alone.
+    local sizes = playerSizes(partition)
     local linked = 0
     local alt, main
     for alt, main in pairs(plan.links) do
-        if partition:JoinPlayerOf(alt, main, addon.FellowshipStore.SOURCE_NOTE) then
+        if not hasRelationship(partition, sizes, alt)
+            and partition:JoinPlayerOf(alt, main, addon.FellowshipStore.SOURCE_NOTE)
+        then
             linked = linked + 1
         end
     end
@@ -357,7 +365,12 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
     local alias
     for main, alias in pairs(plan.aliases) do
         local character = partition:GetCharacter(main)
-        if character ~= nil
+        local player = character and partition:GetPlayer(character.player)
+        -- The plan's own links may have given this player alts; what must
+        -- still hold is that nobody named it or organized it by hand.
+        if player ~= nil and player.main == main and player.alias == nil
+            and player.aliasSource ~= addon.FellowshipStore.SOURCE_MANUAL
+            and character.source ~= addon.FellowshipStore.SOURCE_MANUAL
             and partition:SetAlias(character.player, alias, addon.FellowshipStore.SOURCE_NOTE)
         then
             aliased = aliased + 1
@@ -403,6 +416,15 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         return tostring(first.kind) < tostring(second.kind)
     end)
     partition:SetConflicts(conflicts)
+
+    -- Notes count as processed only now, once their links, aliases, and
+    -- conflicts are saved, so a scan cut short (a reload or logout) is
+    -- redone by the next scan instead of skipped as unchanged.
+    for key in pairs(plan.processed) do
+        if partition:GetCharacter(key) ~= nil then
+            partition:SetNoteFingerprint(key, plan.fingerprints[key])
+        end
+    end
 
     return {
         aliased = aliased,
