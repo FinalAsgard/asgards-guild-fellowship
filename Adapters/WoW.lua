@@ -300,6 +300,19 @@ function Client:PreciseMilliseconds()
     return nil
 end
 
+-- A timestamp as "2026-10-05", or the raw number when the client has no
+-- date function.
+function Client:FormatDate(timestamp)
+    if type(timestamp) ~= "number" then
+        return ""
+    end
+    local ok, text = callFunction(self.environment.date, "%Y-%m-%d", timestamp)
+    if ok and type(text) == "string" then
+        return text
+    end
+    return tostring(timestamp)
+end
+
 -- The class color as an "ffrrggbb" hex string, or nil.
 function Client:GetClassColor(classToken)
     local colors = self.environment.RAID_CLASS_COLORS

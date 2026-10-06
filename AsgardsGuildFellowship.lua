@@ -106,6 +106,12 @@ if clientProfile.supported then
                 onCollapseAll = function()
                     rosterController:CollapseAll()
                 end,
+                onSelectCharacter = function(key)
+                    rosterController:SelectPlayerOf(key)
+                end,
+                onClosePanel = function()
+                    rosterController:ClosePanel()
+                end,
                 onMenuUnavailable = function()
                     rosterController:Print("The organize menu isn't available on this client.")
                 end,

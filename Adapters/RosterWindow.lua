@@ -48,7 +48,7 @@ local function frameworkFrom(client)
     return framework
 end
 
-local function createLine(scroll, index, onToggleGroup, onPurge, onRowMenu)
+local function createLine(scroll, index, onToggleGroup, onPurge, onRowMenu, onSelectRow)
     local line = CreateFrame("Button", nil, scroll)
     line:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     -- Left-clicking a player header collapses or expands its group;
@@ -61,6 +61,9 @@ local function createLine(scroll, index, onToggleGroup, onPurge, onRowMenu)
             onRowMenu(self.row, self)
         elseif self.row.kind == "player" then
             onToggleGroup(self.row.id)
+        else
+            -- Left-clicking a character opens its player's edit panel.
+            onSelectRow(self.row)
         end
     end)
     line:SetHeight(RosterWindow.LINE_HEIGHT)
@@ -391,6 +394,144 @@ local function buildPicker(framework, frameName)
     return picker
 end
 
+-- The player edit panel -------------------------------------------------------
+
+local PANEL_WIDTH = 380
+local PANEL_HEIGHT = 440
+
+local function buildPlayerPanel(framework, options, frameName, anchor)
+    local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
+    panel:SetFrameStrata("HIGH")
+    panel:ClearAllPoints()
+    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
+    local edit = { panel = panel }
+
+    local aliasLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    aliasLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -32)
+    aliasLabel:SetText("Alias")
+    local alias = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    alias:SetSize(170, 20)
+    alias:SetPoint("LEFT", aliasLabel, "RIGHT", 12, 0)
+    alias:SetAutoFocus(false)
+    alias:SetMaxLetters(48)
+    local saveAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    saveAlias:SetSize(60, 20)
+    saveAlias:SetPoint("LEFT", alias, "RIGHT", 6, 0)
+    saveAlias:SetText("Save")
+    local clearAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    clearAlias:SetSize(60, 20)
+    clearAlias:SetPoint("LEFT", saveAlias, "RIGHT", 4, 0)
+    clearAlias:SetText("Clear")
+    local aliasSource = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    aliasSource:SetPoint("TOPLEFT", aliasLabel, "BOTTOMLEFT", 0, -10)
+    saveAlias:SetScript("OnClick", function()
+        if edit.model ~= nil then
+            options.onSetAlias(edit.model.main, alias:GetText())
+            alias:ClearFocus()
+        end
+    end)
+    alias:SetScript("OnEnterPressed", function(box)
+        if edit.model ~= nil then
+            options.onSetAlias(edit.model.main, box:GetText())
+        end
+        box:ClearFocus()
+    end)
+    alias:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    clearAlias:SetScript("OnClick", function()
+        if edit.model ~= nil then
+            options.onSetAlias(edit.model.main, "")
+        end
+    end)
+    edit.alias = alias
+    edit.aliasSource = aliasSource
+
+    local lineAmount = math.floor((PANEL_HEIGHT - 90) / RosterWindow.LINE_HEIGHT)
+    local function newLine(scroll, index)
+        local line = CreateFrame("Frame", nil, scroll)
+        line:SetHeight(RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
+        line.text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
+        line.text:SetPoint("RIGHT", line, "RIGHT", -128, 0)
+        line.text:SetJustifyH("LEFT")
+        line.text:SetWordWrap(false)
+        line.makeMain = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+        line.makeMain:SetSize(62, 18)
+        line.makeMain:SetPoint("RIGHT", line, "RIGHT", -62, 0)
+        line.makeMain:SetText("Make main")
+        line.makeMain:SetScript("OnClick", function()
+            if line.row ~= nil then
+                options.onMakeMain(line.row.key)
+            end
+        end)
+        line.detach = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+        line.detach:SetSize(56, 18)
+        line.detach:SetPoint("RIGHT", line, "RIGHT", -2, 0)
+        line.detach:SetText("Detach")
+        line.detach:SetScript("OnClick", function()
+            if line.row ~= nil then
+                options.onDetach(line.row.key)
+            end
+        end)
+        return line
+    end
+    local function refreshLines(scroll, rows, offset, totalLines)
+        local lineIndex
+        for lineIndex = 1, totalLines do
+            local row = rows[lineIndex + offset]
+            if row ~= nil then
+                local line = scroll:GetLine(lineIndex)
+                line.row = row
+                local text = ""
+                if row.kind == "section" then
+                    text = "|cffffd100" .. row.text .. "|r"
+                elseif row.kind == "empty" then
+                    text = "|cff9d9d9d" .. row.text .. "|r"
+                elseif row.kind == "character" then
+                    text = "  " .. row.name .. (row.level and ("  |cff9d9d9d" .. row.level .. "|r") or "") ..
+                        "  |cff9d9d9d" .. tostring(row.status) .. "|r"
+                    if not row.inGuild then
+                        text = "  |cff7f7f7f" .. row.name .. " (left)|r"
+                    end
+                elseif row.kind == "history" then
+                    text = "  " .. row.name .. "  |cff9d9d9d" .. row.role .. ", " .. row.reason ..
+                        (row.dates ~= "" and (", " .. row.dates) or "") .. "|r"
+                end
+                line.text:SetText(text)
+                if row.kind == "character" and row.canMakeMain then
+                    line.makeMain:Show()
+                else
+                    line.makeMain:Hide()
+                end
+                if row.kind == "character" and row.canDetach then
+                    line.detach:Show()
+                else
+                    line.detach:Hide()
+                end
+            end
+        end
+    end
+    local scroll = framework:CreateScrollBox(panel, frameName .. "PlayerScroll", refreshLines, {},
+        PANEL_WIDTH - 20, PANEL_HEIGHT - 90, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -72)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 12)
+    scroll:CreateLines(newLine, lineAmount)
+    edit.scroll = scroll
+
+    panel:HookScript("OnHide", function()
+        if edit.model ~= nil then
+            edit.model = nil
+            options.onClosePanel()
+        end
+    end)
+    panel:Hide()
+    return edit
+end
+
 -- The conflict review panel: one line per pending conflict, with Accept and
 -- Reject (or Dismiss, when there's nothing to apply), plus Accept all and
 -- Reject all.
@@ -646,6 +787,8 @@ local function build(framework, options)
                 end
             elseif entry.action == "detach" then
                 options.onDetach(entry.key)
+            elseif entry.action == "edit" then
+                options.onSelectCharacter(entry.key)
             end
         end)
         if not shown then
@@ -658,8 +801,13 @@ local function build(framework, options)
             options.onMenuUnavailable()
         end
     end
+    local function onSelectRow(row)
+        if row.key ~= nil then
+            options.onSelectCharacter(row.key)
+        end
+    end
     local function newLine(scrollBox, index)
-        return createLine(scrollBox, index, options.onToggleGroup, options.onPurge, onRowMenu)
+        return createLine(scrollBox, index, options.onToggleGroup, options.onPurge, onRowMenu, onSelectRow)
     end
     local scroll = framework:CreateScrollBox(
         panel,
@@ -733,6 +881,7 @@ local function build(framework, options)
     panel:Hide()
 
     local conflicts = buildConflictPanel(framework, options, frameName)
+    local playerPanel = buildPlayerPanel(framework, options, frameName, panel)
     conflictsButton:SetScript("OnClick", function()
         if conflicts.panel:IsShown() then
             conflicts.panel:Hide()
@@ -743,9 +892,10 @@ local function build(framework, options)
     conflicts.button = conflictsButton
     panel:HookScript("OnHide", function()
         conflicts.panel:Hide()
+        playerPanel.panel:Hide()
     end)
 
-    return panel, scroll, status, conflicts
+    return panel, scroll, status, conflicts, playerPanel
 end
 
 -- options.loadGeometry() returns saved geometry or nil;
@@ -760,18 +910,25 @@ end
 -- playerId), onMakeMain(key), onSetAlias(key, text), onDetach(key),
 -- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them;
 -- options.onSearch(text), onToggleOnlineOnly(), onExpandAll(), and
--- onCollapseAll() drive the controls row.
+-- onCollapseAll() drive the controls row; options.onSelectCharacter(key)
+-- opens a player's edit panel and onClosePanel() runs when it closes.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, panel, scroll, status, conflicts = pcall(build, framework, options)
+    local ok, panel, scroll, status, conflicts, playerPanel = pcall(build, framework, options)
     if not ok or panel == nil then
         return nil, "the Details! Framework could not build the window"
     end
-    return setmetatable({ panel = panel, scroll = scroll, status = status, conflicts = conflicts }, Window)
+    return setmetatable({
+        panel = panel,
+        scroll = scroll,
+        status = status,
+        conflicts = conflicts,
+        playerPanel = playerPanel,
+    }, Window)
 end
 
 function Window:IsShown()
@@ -810,6 +967,31 @@ function Window:SetConflicts(rows)
             conflicts.acceptAll:Enable()
             conflicts.rejectAll:Enable()
         end
+    end))
+end
+
+-- Shows the edit panel for a player (see PlayerPanelViewModel).
+function Window:ShowPlayer(model)
+    return (pcall(function()
+        local edit = self.playerPanel
+        edit.model = model
+        if type(edit.panel.SetTitle) == "function" then
+            edit.panel:SetTitle(model.label)
+        end
+        if not edit.alias:HasFocus() then
+            edit.alias:SetText(model.alias or "")
+        end
+        edit.aliasSource:SetText(model.aliasSource and ("Alias " .. model.aliasSource) or "")
+        edit.scroll:SetData(model.rows)
+        edit.scroll:Refresh()
+        edit.panel:Show()
+    end))
+end
+
+function Window:HidePlayer()
+    return (pcall(function()
+        self.playerPanel.model = nil
+        self.playerPanel.panel:Hide()
     end))
 end
 

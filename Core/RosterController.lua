@@ -249,7 +249,10 @@ function Controller:MenuFor(row)
     end
     if row.kind == "player" then
         local player = self.current.partition:GetPlayer(row.id)
-        return player and { { text = "Set alias...", action = "alias", key = player.main } } or {}
+        return player and {
+            { text = "Set alias...", action = "alias", key = player.main },
+            { text = "Edit player...", action = "edit", key = player.main },
+        } or {}
     end
     local partition = self.current.partition
     local character = partition:GetCharacter(row.key)
@@ -265,6 +268,7 @@ function Controller:MenuFor(row)
         end
     end
     table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
+    table.insert(entries, { text = "Edit player...", action = "edit", key = row.key })
     if partition:CharactersOf(character.player)[2] ~= nil then
         table.insert(entries, { text = "Detach as own player", action = "detach", key = row.key })
     end
@@ -358,6 +362,54 @@ function Controller:PurgeAllDeparted()
     return purged
 end
 
+-- The player edit panel ------------------------------------------------------
+
+-- Selects a player (by id, or by one of its characters' keys) and opens the
+-- edit panel for it.
+function Controller:SelectPlayer(playerId)
+    if self.current == nil or self.current.partition:GetPlayer(playerId) == nil then
+        return false
+    end
+    self.selected = playerId
+    self:RedrawPanel()
+    return true
+end
+
+function Controller:SelectPlayerOf(key)
+    local character = self.current and self.current.partition:GetCharacter(key)
+    return character ~= nil and self:SelectPlayer(character.player)
+end
+
+function Controller:ClosePanel()
+    self.selected = nil
+    if self.window ~= nil then
+        self.window:HidePlayer()
+    end
+end
+
+-- Rebuilds the panel for the selected player, or closes it when that player
+-- no longer exists (merged away, or purged).
+function Controller:RedrawPanel()
+    if self.window == nil or self.current == nil or self.selected == nil then
+        return
+    end
+    local normalizer = self:Normalizer(self.current.guild)
+    local model = addon.PlayerPanelViewModel.Build({
+        partition = self.current.partition,
+        playerId = self.selected,
+        members = self.liveMembers or self:LiveMembers(normalizer),
+        normalizer = normalizer,
+        formatDate = function(timestamp)
+            return self.client:FormatDate(timestamp)
+        end,
+    })
+    if model == nil then
+        self:ClosePanel()
+        return
+    end
+    self.window:ShowPlayer(model)
+end
+
 -- Collapses or expands a player's group. The state lasts for the session,
 -- so groups stay as they were when the window is reopened.
 function Controller:ToggleGroup(playerId)
@@ -438,6 +490,7 @@ function Controller:Redraw()
     if self.cache.stamp ~= stamp then
         local normalizer = self:Normalizer(self.current.guild)
         local members = self:LiveMembers(normalizer)
+        self.liveMembers = members
         local rows = self.cache:Build({
             partition = self.current.partition,
             members = members,
@@ -458,6 +511,7 @@ function Controller:Redraw()
             members = members,
             normalizer = normalizer,
         }))
+        self:RedrawPanel()
     end
     self:UpdateStatus()
 end
