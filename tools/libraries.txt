@@ -1,0 +1,25 @@
+# Pinned third-party libraries: the single source of truth for names,
+# sources, pins, and target paths. .pkgmeta externals, the manifests' library
+# lines, and the add-on's load-time check are all verified against this list
+# (tools/check-libraries.lua and tests/spec/libraries_spec.lua).
+#
+# Rows are in load (dependency) order. Columns, separated by "|":
+#   name    display name used in chat messages
+#   major   LibStub major version name
+#   target  folder the library is fetched into (always under Libs/)
+#   load    file inside target that the manifests load
+#   type    git: url is a repository and tag is the pinned tag
+#           svn: url is the pinned tag's folder, which must end in /tags/<tag>
+#                or contain /tags/<tag>/
+#   url     source
+#   tag     pinned tag
+#
+# The Details! Framework requires LibSharedMedia-3.0 at load, so it is pinned
+# here too.
+
+LibStub | LibStub | Libs/LibStub | LibStub.lua | svn | https://repos.curseforge.com/wow/libstub/tags/1.0.3 | 1.0.3
+CallbackHandler-1.0 | CallbackHandler-1.0 | Libs/CallbackHandler-1.0 | CallbackHandler-1.0.xml | svn | https://repos.curseforge.com/wow/callbackhandler/tags/1.0.9/CallbackHandler-1.0 | 1.0.9
+LibDataBroker-1.1 | LibDataBroker-1.1 | Libs/LibDataBroker-1.1 | LibDataBroker-1.1.lua | git | https://github.com/tekkub/libdatabroker-1-1 | v1.1.4
+LibDBIcon-1.0 | LibDBIcon-1.0 | Libs/LibDBIcon-1.0 | lib.xml | svn | https://repos.curseforge.com/wow/libdbicon-1-0/tags/v12.0.3/LibDBIcon-1.0 | v12.0.3
+LibSharedMedia-3.0 | LibSharedMedia-3.0 | Libs/LibSharedMedia-3.0 | lib.xml | svn | https://repos.curseforge.com/wow/libsharedmedia-3-0/tags/v12.1.0/LibSharedMedia-3.0 | v12.1.0
+Details! Framework | DetailsFramework-1.0 | Libs/DetailsFramework | load.xml | git | https://github.com/Tercioo/Details-Framework | v12.0.7.746

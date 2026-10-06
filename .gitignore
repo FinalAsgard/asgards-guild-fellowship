@@ -1,0 +1,4 @@
+# Third-party libraries fetched from the pinned list; never committed.
+Libs/
+# Build output.
+.release/

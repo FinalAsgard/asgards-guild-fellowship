@@ -1,0 +1,33 @@
+package-as: AsgardsGuildFellowship
+
+# Must match tools/libraries.txt; the Lua 5.1 CI job runs
+# tools/check-libraries.lua to catch drift. svn externals are pinned by their
+# tag folder url, git externals by tag.
+externals:
+  Libs/LibStub:
+    url: https://repos.curseforge.com/wow/libstub/tags/1.0.3
+    type: svn
+  Libs/CallbackHandler-1.0:
+    url: https://repos.curseforge.com/wow/callbackhandler/tags/1.0.9/CallbackHandler-1.0
+    type: svn
+  Libs/LibDataBroker-1.1:
+    url: https://github.com/tekkub/libdatabroker-1-1
+    tag: v1.1.4
+  Libs/LibDBIcon-1.0:
+    url: https://repos.curseforge.com/wow/libdbicon-1-0/tags/v12.0.3/LibDBIcon-1.0
+    type: svn
+  Libs/LibSharedMedia-3.0:
+    url: https://repos.curseforge.com/wow/libsharedmedia-3-0/tags/v12.1.0/LibSharedMedia-3.0
+    type: svn
+  Libs/DetailsFramework:
+    url: https://github.com/Tercioo/Details-Framework
+    tag: v12.0.7.746
+
+ignore:
+  - .github
+  - ai
+  - AsgardsGuildFellowshipDev_Camelot.toc
+  - AsgardsGuildFellowshipDev_Mainline.toc
+  - docs
+  - tests
+  - tools
