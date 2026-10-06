@@ -216,9 +216,23 @@ local function installGuild(world, environment, profile)
     else
         environment.GuildRoster = request
     end
+    -- A fake clock: `world.time` is wall-clock seconds, `world.precise` the
+    -- millisecond profiler clock, and C_Timer callbacks wait in
+    -- `world.timers` until Fixtures.runTimers delivers them.
+    world.time = 1790000000
+    world.precise = 0
+    world.timers = {}
     environment.GetServerTime = function()
-        return 1790000000
+        return world.time
     end
+    environment.debugprofilestop = function()
+        return world.precise
+    end
+    environment.C_Timer = {
+        After = function(seconds, callback)
+            table.insert(world.timers, { at = world.time + seconds, callback = callback })
+        end,
+    }
     environment.RAID_CLASS_COLORS = {
         WARRIOR = { colorStr = "ffc69b6d" },
         PALADIN = { r = 0.96, g = 0.55, b = 0.73 },
@@ -340,6 +354,33 @@ function Fixtures.fire(world, eventName, ...)
         local frame = world.frames[index]
         if frame.registeredEvents[eventName] and frame.handler ~= nil then
             frame.handler(frame, eventName, ...)
+        end
+    end
+end
+
+-- Moves the fake wall clock forward by `seconds` and delivers every timer
+-- that comes due, including timers those callbacks schedule (as a frame
+-- loop would). Returns how many callbacks ran.
+function Fixtures.runTimers(world, seconds)
+    world.time = world.time + (seconds or 0)
+    local ran = 0
+    while true do
+        local dueIndex
+        local index
+        for index = 1, #world.timers do
+            if world.timers[index].at <= world.time then
+                dueIndex = index
+                break
+            end
+        end
+        if dueIndex == nil then
+            return ran
+        end
+        local timer = table.remove(world.timers, dueIndex)
+        timer.callback()
+        ran = ran + 1
+        if ran > 100000 then
+            error("timers never settle")
         end
     end
 end

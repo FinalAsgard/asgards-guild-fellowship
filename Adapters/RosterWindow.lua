@@ -220,8 +220,22 @@ local function build(framework, options)
     )
     scroll:ClearAllPoints()
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -46)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 24)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 40)
     scroll:CreateLines(newLine, lineAmount)
+
+    -- Footer: a Rescan button and what the last scan found.
+    local rescan = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    rescan:SetSize(90, 22)
+    rescan:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 10)
+    rescan:SetText("Rescan")
+    rescan:SetScript("OnClick", function()
+        options.onRescan()
+    end)
+    local status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    status:SetPoint("LEFT", rescan, "RIGHT", 10, 0)
+    status:SetPoint("RIGHT", panel, "RIGHT", -40, 0)
+    status:SetJustifyH("LEFT")
+    status:SetWordWrap(false)
 
     local function save()
         options.saveGeometry(readGeometry(panel))
@@ -235,23 +249,24 @@ local function build(framework, options)
     panel:HookScript("OnHide", save)
     panel:Hide()
 
-    return panel, scroll
+    return panel, scroll, status
 end
 
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
--- options.onToggleGroup(playerId) runs when a player header is clicked.
+-- options.onToggleGroup(playerId) runs when a player header is clicked;
+-- options.onRescan() runs when the Rescan button is clicked.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, panel, scroll = pcall(build, framework, options)
+    local ok, panel, scroll, status = pcall(build, framework, options)
     if not ok or panel == nil then
         return nil, "the Details! Framework could not build the window"
     end
-    return setmetatable({ panel = panel, scroll = scroll }, Window)
+    return setmetatable({ panel = panel, scroll = scroll, status = status }, Window)
 end
 
 function Window:IsShown()
@@ -272,6 +287,10 @@ function Window:SetTitle(title)
     elseif self.panel.Title ~= nil then
         self.panel.Title:SetText(title)
     end
+end
+
+function Window:SetStatus(text)
+    self.status:SetText(text or "")
 end
 
 -- Returns false instead of raising when the framework misbehaves.

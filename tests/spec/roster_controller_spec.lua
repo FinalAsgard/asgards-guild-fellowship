@@ -3,7 +3,7 @@ local fixtures = require("tests.client_fixtures")
 
 -- A window that records what the controller asks of it.
 local function newWindow()
-    local window = { shown = false, rows = nil, title = nil }
+    local window = { shown = false, rows = nil, title = nil, status = nil }
     function window:IsShown()
         return self.shown
     end
@@ -16,6 +16,9 @@ local function newWindow()
     function window:SetTitle(title)
         self.title = title
     end
+    function window:SetStatus(text)
+        self.status = text
+    end
     function window:SetRows(rows)
         self.rows = rows
         return true
@@ -23,19 +26,22 @@ local function newWindow()
     return window
 end
 
+local MODULES = {
+    "Adapters/ClientProfile.lua",
+    "Adapters/WoW.lua",
+    "Core/NameNormalizer.lua",
+    "Core/NoteParser.lua",
+    "Core/FellowshipStore.lua",
+    "Core/ReconcileEngine.lua",
+    "Core/RosterViewModel.lua",
+    "Core/ScanScheduler.lua",
+    "Core/RosterController.lua",
+}
+
 local function build(profile, options)
     options = options or {}
     local world = fixtures.newEnvironment(profile, options.world)
-    local addon = test.newAddon(
-        "Adapters/ClientProfile.lua",
-        "Adapters/WoW.lua",
-        "Core/NameNormalizer.lua",
-        "Core/NoteParser.lua",
-        "Core/FellowshipStore.lua",
-        "Core/ReconcileEngine.lua",
-        "Core/RosterViewModel.lua",
-        "Core/RosterController.lua"
-    )
+    local addon = test.newAddon(unpack(MODULES))
     local client = addon.Compatibility.Create(world.environment)
     local database = options.database
     if database == nil then
@@ -57,15 +63,35 @@ local function build(profile, options)
             return window
         end,
     })
-    return {
+    local setup = {
         controller = controller,
         database = database,
         window = window,
-        windowsCreated = function()
-            return windowsCreated
-        end,
         world = world,
     }
+    function setup.windowsCreated()
+        return windowsCreated
+    end
+    -- Logs in: saved data becomes ready and the roster reports in.
+    function setup.login()
+        controller:OnSavedDataReady()
+        controller:OnRosterUpdate()
+        fixtures.runTimers(world)
+    end
+    function setup.partition()
+        local key = profile == "Forever" and "Knights of Camelot-Camelot" or "Knights of Camelot-Area52"
+        return database.guilds[key]
+    end
+    return setup
+end
+
+local function countKeys(map)
+    local count = 0
+    local _
+    for _ in pairs(map) do
+        count = count + 1
+    end
+    return count
 end
 
 local EXPECTED_FIRST = {
@@ -73,47 +99,44 @@ local EXPECTED_FIRST = {
     Retail = { key = "toolbox-area52", name = "Toolbox", alt = "hammer-area52" },
 }
 
+local function newcomer()
+    return { name = "Newcomer", class = "ROGUE", level = 1, rank = 4, rankName = "Initiate",
+        online = true, zone = "Elwynn" }
+end
+
 local function registerProfileTests(profile)
     local first = EXPECTED_FIRST[profile]
+    local newcomerKey = profile == "Forever" and "newcomer-camelot" or "newcomer-area52"
 
-    test.test(profile .. " first open scans an unscanned guild and seeds players from notes", function()
+    test.test(profile .. " login runs the first full scan and seeds players from notes", function()
+        local setup = build(profile)
+
+        setup.login()
+
+        local partition = setup.partition()
+        local main = partition.characters[first.key]
+        test.assertEqual(main.player, partition.characters[first.alt].player)
+        test.assertEqual("TheTool", partition.players[main.player].alias)
+        test.assertEqual(setup.world.time, partition.lastFullScan)
+        test.assertContains(setup.world.messages[1],
+            "Roster scanned: 3 new characters, 1 alt linked, 1 alias set.")
+
+        test.assertTrue(setup.controller:Toggle())
+        test.assertEqual(4, #setup.window.rows)
+        test.assertEqual("TheTool (" .. first.name .. ")", setup.window.rows[1].label)
+        test.assertContains(setup.window.status, "Last scan just now: 3 new characters")
+    end)
+
+    test.test(profile .. " opening the window never scans", function()
         local setup = build(profile)
 
         test.assertTrue(setup.controller:Toggle())
 
-        local partitionKey = profile == "Forever" and "Knights of Camelot-Camelot" or "Knights of Camelot-Area52"
-        local partition = setup.database.guilds[partitionKey]
-        -- TheTool's header with main and alt, then a single-character row.
-        test.assertEqual(4, #setup.window.rows)
-        test.assertTrue(setup.window.rows[4].standalone)
-        test.assertTrue(setup.window.shown)
-        test.assertEqual(1790000000, partition.lastFullScan)
-        test.assertTrue(partition.characters[first.key] ~= nil)
-        test.assertEqual(setup.world.guild.members[1].name, partition.characters[first.key].name)
-        test.assertEqual("TheTool (" .. first.name .. ")", setup.window.rows[1].label)
-        test.assertEqual(first.name, setup.window.rows[2].name)
-        test.assertTrue(setup.window.rows[2].isMain)
-        test.assertContains(setup.window.title, "Knights of Camelot")
-        test.assertContains(setup.world.messages[1],
-            "Roster scanned: 3 characters, 1 linked and 1 aliases set from notes.")
-        local main = partition.characters[first.key]
-        test.assertEqual(main.player, partition.characters[first.alt].player)
-        test.assertEqual("TheTool", partition.players[main.player].alias)
-    end)
-
-    test.test(profile .. " later opens never scan", function()
-        local setup = build(profile)
-        setup.controller:Toggle()
-        setup.controller:Toggle()
-        local requests = setup.world.rosterRequests
-        setup.world.guild.members[4] = { name = "Newcomer-Camelot", class = "ROGUE", level = 1, rank = 4,
-            rankName = "Initiate", online = true, zone = "Elwynn" }
-
-        setup.controller:Toggle()
-
-        test.assertEqual(requests, setup.world.rosterRequests)
-        test.assertEqual(4, #setup.window.rows)
-        test.assertEqual(1, setup.windowsCreated())
+        test.assertEqual(0, setup.world.rosterRequests)
+        test.assertEqual(0, #setup.window.rows)
+        test.assertEqual(nil, setup.partition().lastFullScan)
+        test.assertContains(setup.window.status, "Not scanned yet")
+        test.assertEqual(0, #setup.world.messages)
     end)
 
     test.test(profile .. " /agf toggles the window, hiding rather than destroying it", function()
@@ -128,30 +151,53 @@ local function registerProfileTests(profile)
         test.assertEqual(1, setup.windowsCreated())
     end)
 
-    test.test(profile .. " rescan reads the roster again on request", function()
+    test.test(profile .. " rescan waits for the refreshed roster, then scans", function()
         local setup = build(profile)
-        setup.controller:Toggle()
-        setup.world.guild.members[4] = { name = "Newcomer-Camelot", class = "ROGUE", level = 1, rank = 4,
-            rankName = "Initiate", online = true, zone = "Elwynn" }
+        setup.login()
+        setup.world.guild.members[4] = newcomer()
+        local requests = setup.world.rosterRequests
 
         test.assertTrue(setup.controller:Rescan())
+        test.assertEqual(requests + 1, setup.world.rosterRequests)
+        test.assertContains(setup.world.messages[#setup.world.messages], "Scanning the guild roster")
+        setup.controller:OnRosterUpdate()
 
-        test.assertEqual(5, #setup.window.rows)
-        test.assertContains(setup.world.messages[#setup.world.messages], "Roster scanned: 4 characters")
+        test.assertContains(setup.world.messages[#setup.world.messages], "Roster scanned: 1 new character")
+        test.assertTrue(setup.partition().characters[newcomerKey] ~= nil)
     end)
 
-    test.test(profile .. " a loading roster finishes the scan on the next roster update", function()
+    test.test(profile .. " rescan reads the roster anyway when no update arrives", function()
+        local setup = build(profile)
+        setup.login()
+
+        setup.controller:Rescan()
+        fixtures.runTimers(setup.world, 3)
+
+        test.assertContains(setup.world.messages[#setup.world.messages], "Roster scanned: 0 new characters")
+    end)
+
+    test.test(profile .. " a second rescan while one is running is refused", function()
+        local setup = build(profile)
+        setup.login()
+
+        test.assertTrue(setup.controller:Rescan())
+        test.assertFalse(setup.controller:Rescan())
+
+        test.assertContains(setup.world.messages[#setup.world.messages], "already running")
+    end)
+
+    test.test(profile .. " a roster still loading at login is never treated as complete", function()
         local setup = build(profile, { world = { rosterReady = false } })
 
-        setup.controller:Toggle()
-        test.assertEqual(0, #setup.window.rows)
-        test.assertEqual(1, setup.world.rosterRequests)
+        setup.login()
+        test.assertEqual(nil, setup.partition().lastFullScan)
+        test.assertEqual(0, countKeys(setup.partition().characters))
 
         setup.world.rosterReady = true
         setup.controller:OnRosterUpdate()
 
-        test.assertEqual(4, #setup.window.rows)
-        test.assertContains(setup.world.messages[1], "Roster scanned: 3 characters")
+        test.assertEqual(3, countKeys(setup.partition().characters))
+        test.assertTrue(setup.partition().lastFullScan ~= nil)
     end)
 
     test.test(profile .. " a character not in a guild gets a clear message", function()
@@ -174,8 +220,6 @@ local function registerProfileTests(profile)
         test.assertFalse(opened)
         test.assertContains(setup.world.messages[1], "The roster window can't open")
         test.assertContains(setup.world.messages[1], "Details! Framework is not available")
-        test.assertFalse(setup.database.guilds["Knights of Camelot-" ..
-            (profile == "Forever" and "Camelot" or "Area52")].lastFullScan ~= nil)
     end)
 end
 
@@ -193,6 +237,7 @@ end)
 
 test.test("clicking a player header collapses and expands its group", function()
     local setup = build("Retail")
+    setup.login()
     setup.controller:Toggle()
     local header = setup.window.rows[1]
 
@@ -206,6 +251,7 @@ end)
 
 test.test("roster updates refresh an open window with live facts", function()
     local setup = build("Retail")
+    setup.login()
     setup.controller:Toggle()
     setup.world.guild.members[2].online = true
     setup.world.guild.members[2].zone = "Valdrakken"
@@ -221,4 +267,13 @@ test.test("roster updates refresh an open window with live facts", function()
     end
     test.assertTrue(hammer.online)
     test.assertEqual("Valdrakken", hammer.location)
+end)
+
+test.test("scan descriptions name what was found", function()
+    local addon = test.newAddon(unpack(MODULES))
+    local describe = addon.RosterController.DescribeScan
+
+    test.assertEqual("0 new characters", describe({ newCharacters = 0 }))
+    test.assertEqual("1 new character, 2 alts linked, 1 alias set, 3 note markers to review",
+        describe({ newCharacters = 1, linked = 2, aliased = 1, unapplied = 3 }))
 end)

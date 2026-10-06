@@ -49,6 +49,9 @@ if clientProfile.supported then
                 onToggleGroup = function(playerId)
                     rosterController:ToggleGroup(playerId)
                 end,
+                onRescan = function()
+                    rosterController:Rescan()
+                end,
             })
         end,
     })
@@ -69,7 +72,9 @@ else
         "Saved data was left unchanged.")
 end
 
-local lifecycle = addon.Lifecycle.Create(client, router, persistence)
+local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
+    rosterController:OnSavedDataReady()
+end)
 
 addon.client = client
 addon.clientProfile = clientProfile

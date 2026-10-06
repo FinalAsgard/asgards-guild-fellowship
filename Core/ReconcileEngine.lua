@@ -72,7 +72,7 @@ end
 -- (A>B, B>C gives C). A character that is already organized stops the
 -- chain at its player's main. Returns nil and a reason when it can't be
 -- followed.
-local function followChain(start, target, parses, partition, sizes)
+local function followChain(start, target, parseOf, partition, sizes)
     local visited = { [start] = true }
     local current = target
     local depth = 0
@@ -87,7 +87,7 @@ local function followChain(start, target, parses, partition, sizes)
             return player and player.main or current
         end
 
-        local parse = parses[current]
+        local parse = parseOf(current)
         local nextRef = parse and parse.mainRef
         if nextRef == nil or nextRef.status ~= "resolved" or nextRef.key == current then
             return current
@@ -108,11 +108,36 @@ local function addUnapplied(plan, key, reason)
     })
 end
 
+-- Which roster characters a plan processes:
+--   "initial"      every character (the first scan of a guild)
+--   "full"         characters whose note fingerprint changed, plus new ones;
+--                  with `force`, every character (a manual rescan)
+--   "incremental"  only characters the store has never seen
+-- Characters whose note is unchanged are skipped entirely, so repeat scans
+-- do no per-character reconciliation work.
+local function selects(mode, force, partition, key, fingerprint)
+    local character = partition:GetCharacter(key)
+    if character == nil then
+        return true
+    end
+    if mode == "incremental" then
+        return false
+    end
+    if mode == "initial" or force then
+        return true
+    end
+    return character.note ~= fingerprint
+end
+
 -- inputs: partition, members (key -> roster facts with `note`), normalizer,
--- rules (client name rules), mode ("initial", "full", or "incremental").
+-- rules (client name rules), mode ("initial", "full", or "incremental"),
+-- force (reprocess every character), and checkpoint (called between
+-- characters so a scheduler can spread the work across frames).
 -- Returns a plan:
 --   members      key -> roster facts to record
 --   fingerprints key -> note fingerprint (never the note text)
+--   processed    set of keys this plan reconciled
+--   newKeys      keys the store hadn't seen
 --   links        alt key -> the main key whose player it joins
 --   aliases      main key -> alias for that main's player
 --   unapplied    { character, fingerprint, reason } for the conflict queue
@@ -120,6 +145,8 @@ function ReconcileEngine.Plan(inputs)
     local partition = inputs.partition
     local members = inputs.members or {}
     local rules = inputs.rules or {}
+    local checkpoint = inputs.checkpoint or function() end
+    local mode = inputs.mode or "initial"
     local resolver = newResolver(members, inputs.normalizer, rules.twoPartNames == true)
     local sizes = playerSizes(partition)
     local plan = {
@@ -127,20 +154,38 @@ function ReconcileEngine.Plan(inputs)
         fingerprints = {},
         links = {},
         members = members,
-        mode = inputs.mode or "initial",
+        mode = mode,
+        newKeys = {},
+        processed = {},
         unapplied = {},
     }
 
+    -- Notes are parsed only when needed: for processed characters, and for
+    -- the targets of a chain being followed.
     local parses = {}
+    local function parseOf(key)
+        if parses[key] == nil and members[key] ~= nil then
+            parses[key] = addon.NoteParser.Parse(members[key].note, resolver, rules)
+        end
+        return parses[key]
+    end
+
     local keys = {}
     local key, member
     for key, member in pairs(members) do
-        table.insert(keys, key)
         plan.fingerprints[key] = addon.NoteParser.Fingerprint(member.note or "")
-        parses[key] = addon.NoteParser.Parse(member.note, resolver, rules)
+        if partition:GetCharacter(key) == nil then
+            table.insert(plan.newKeys, key)
+        end
+        if selects(mode, inputs.force, partition, key, plan.fingerprints[key]) then
+            table.insert(keys, key)
+            plan.processed[key] = true
+        end
+        checkpoint()
     end
     -- Plans are deterministic whatever order the roster comes in.
     table.sort(keys)
+    table.sort(plan.newKeys)
 
     local seedable = {}
     local index
@@ -151,14 +196,14 @@ function ReconcileEngine.Plan(inputs)
 
     for index = 1, #keys do
         key = keys[index]
-        local ref = parses[key].mainRef
+        local ref = parseOf(key).mainRef
         if seedable[key] and ref ~= nil then
             if ref.status ~= "resolved" then
                 addUnapplied(plan, key, ref.status)
             elseif ref.key == key then
                 addUnapplied(plan, key, "self reference")
             else
-                local root, reason = followChain(key, ref.key, parses, partition, sizes)
+                local root, reason = followChain(key, ref.key, parseOf, partition, sizes)
                 if root == nil then
                     addUnapplied(plan, key, reason)
                 elseif root ~= key then
@@ -166,13 +211,14 @@ function ReconcileEngine.Plan(inputs)
                 end
             end
         end
+        checkpoint()
     end
 
     -- An alias on any character's note names that character's player.
     local proposals = {}
     for index = 1, #keys do
         key = keys[index]
-        local alias = parses[key].alias
+        local alias = parseOf(key).alias
         if seedable[key] and alias ~= nil then
             local root = plan.links[key] or key
             proposals[root] = proposals[root] or {}
@@ -210,14 +256,25 @@ function ReconcileEngine.Plan(inputs)
     return plan
 end
 
--- Commits a plan to the partition. Returns counts for reporting.
-function ReconcileEngine.Apply(partition, plan)
+-- Commits a plan to the partition. `checkpoint` is called between
+-- characters, as in Plan. Returns counts for reporting:
+--   recorded, newCharacters, linked, aliased, unapplied
+function ReconcileEngine.Apply(partition, plan, checkpoint)
+    checkpoint = checkpoint or function() end
+
+    -- Full scans refresh every character's lasting facts; incremental scans
+    -- only add the characters they found.
     local recorded = 0
     local key, member
     for key, member in pairs(plan.members) do
-        if partition:RecordCharacter(key, member) ~= nil then
-            partition:SetNoteFingerprint(key, plan.fingerprints[key])
-            recorded = recorded + 1
+        if plan.mode ~= "incremental" or plan.processed[key] then
+            if partition:RecordCharacter(key, member) ~= nil then
+                recorded = recorded + 1
+                if plan.processed[key] then
+                    partition:SetNoteFingerprint(key, plan.fingerprints[key])
+                end
+            end
+            checkpoint()
         end
     end
 
@@ -240,10 +297,28 @@ function ReconcileEngine.Apply(partition, plan)
         end
     end
 
-    partition:SetUnapplied(plan.unapplied)
+    -- Characters this plan skipped keep their earlier unapplied markers.
+    local unapplied = {}
+    local previous = partition:GetUnapplied() or {}
+    local index
+    for index = 1, #previous do
+        local entry = previous[index]
+        if type(entry) == "table" and not plan.processed[entry.character] then
+            table.insert(unapplied, entry)
+        end
+    end
+    for index = 1, #plan.unapplied do
+        table.insert(unapplied, plan.unapplied[index])
+    end
+    table.sort(unapplied, function(first, second)
+        return tostring(first.character) < tostring(second.character)
+    end)
+    partition:SetUnapplied(unapplied)
+
     return {
         aliased = aliased,
         linked = linked,
+        newCharacters = #plan.newKeys,
         recorded = recorded,
         unapplied = #plan.unapplied,
     }

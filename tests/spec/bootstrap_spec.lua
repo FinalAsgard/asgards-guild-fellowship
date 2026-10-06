@@ -12,6 +12,7 @@ local MANIFEST_FILES = {
     "Core/FellowshipStore.lua",
     "Core/ReconcileEngine.lua",
     "Core/RosterViewModel.lua",
+    "Core/ScanScheduler.lua",
     "Core/RosterController.lua",
     "Core/LibraryCheck.lua",
     "Core/CommandRouter.lua",

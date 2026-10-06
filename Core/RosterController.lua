@@ -1,13 +1,11 @@
 local _, addon = ...
 
--- Connects the guild roster, the store, and the roster window for `/agf`
--- and `/agf rescan`.
+-- Connects the guild roster, the store, the scan scheduler, and the roster
+-- window for `/agf`, `/agf rescan`, and the window's Rescan button.
 --
--- A scan reads the whole roster into the guild's partition. It only runs on
--- the first open of a guild that has never been scanned, or on request.
--- Opening the window otherwise only reads live roster facts for display.
--- Each scan seeds players from `>Main` and `@Alias` notes through the
--- ReconcileEngine. Scheduling and chunked scanning come in later slices.
+-- Opening the window never scans: it only reads live roster facts for
+-- display. Scans are the ScanScheduler's job (daily at login, new members
+-- as they appear, and on request).
 local RosterController = {}
 addon.RosterController = RosterController
 
@@ -20,22 +18,24 @@ Controller.__index = Controller
 --   getDatabase   function() -> the SavedVariables root, or nil
 --   createWindow  function() -> window or nil, reason
 function RosterController.Create(options)
-    return setmetatable({
+    local controller = setmetatable({
         client = options.client,
+        collapsed = {},
         createWindow = options.createWindow,
         getDatabase = options.getDatabase,
-        collapsed = {},
         nameRules = options.nameRules or {},
     }, Controller)
-end
-
--- Collapses or expands a player's group. The state lasts for the session.
-function Controller:ToggleGroup(playerId)
-    if playerId == nil then
-        return
-    end
-    self.collapsed[playerId] = not self.collapsed[playerId] or nil
-    self:Refresh()
+    controller.scheduler = addon.ScanScheduler.Create({
+        client = controller.client,
+        rules = controller.nameRules,
+        context = function()
+            return controller:QuietContext()
+        end,
+        onFinished = function(result, summary)
+            controller:OnScanFinished(result, summary)
+        end,
+    })
+    return controller
 end
 
 function Controller:Print(message)
@@ -60,110 +60,146 @@ function Controller:Store()
     return self.store
 end
 
--- The current guild and its partition, or nil after telling the player why.
-function Controller:Context()
+-- The current guild, its partition, and a normalizer, or nil and the
+-- message explaining why not.
+function Controller:QuietContext()
     local guild = self.client:GetGuildIdentity()
     if guild == nil then
         if self.client:IsInGuild() then
-            self:Print("Guild information isn't available yet. Try again in a moment.")
-        else
-            self:Print("You're not in a guild, so there is no roster to show.")
+            return nil, "Guild information isn't available yet. Try again in a moment."
         end
-        return nil
+        return nil, "You're not in a guild, so there is no roster to show."
     end
-
     local store = self:Store()
     if store == nil then
-        self:Print("Saved data is unavailable, so the roster can't be shown.")
-        return nil
+        return nil, "Saved data is unavailable, so the roster can't be shown."
     end
     local partition, reason = store:Partition(guild)
     if partition == nil then
-        self:Print("The roster can't be shown: " .. tostring(reason) .. ".")
+        return nil, "The roster can't be shown: " .. tostring(reason) .. "."
+    end
+    return guild, partition, self:Normalizer(guild)
+end
+
+function Controller:Context()
+    local guild, partition, normalizer = self:QuietContext()
+    if guild == nil then
+        self:Print(partition)
         return nil
     end
-    return guild, partition
+    return guild, partition, normalizer
 end
 
--- Reads every roster member keyed by character key. `complete` is false
--- when the roster isn't fully loaded yet (it loads asynchronously).
-function Controller:ReadRoster(guild)
-    local normalizer = self:Normalizer(guild)
-    local members = {}
-    local count = self.client:GetGuildRosterCount()
-    local complete = count ~= nil and count > 0
-    local index
-    for index = 1, count or 0 do
-        local member = self.client:GetGuildMember(index)
-        local key = member and normalizer:Key(member.name)
-        if key == nil then
-            complete = false
-        else
-            members[key] = member
-        end
-    end
-    return members, complete, normalizer
-end
-
--- Applies a complete roster to the partition. Returns false when the
--- roster isn't ready, leaving the scan pending.
-function Controller:CompleteScan()
-    local pending = self.pendingScan
-    if pending == nil then
-        return false
-    end
-    local members, complete = self:ReadRoster(pending.guild)
-    if not complete then
-        return false
-    end
-
-    local plan = addon.ReconcileEngine.Plan({
-        partition = pending.partition,
-        members = members,
-        normalizer = self:Normalizer(pending.guild),
-        rules = self.nameRules,
-        mode = pending.partition:HasBeenScanned() and "full" or "initial",
-    })
-    local result = addon.ReconcileEngine.Apply(pending.partition, plan)
-    pending.partition:MarkScanned(self.client:Timestamp() or 0)
-    self.pendingScan = nil
-
-    local summary = "Roster scanned: " .. result.recorded .. " characters"
-    if result.linked > 0 or result.aliased > 0 then
-        summary = summary .. ", " .. result.linked .. " linked and " .. result.aliased ..
-            " aliases set from notes"
-    end
-    if result.unapplied > 0 then
-        summary = summary .. ", " .. result.unapplied .. " note markers left for review"
-    end
-    self:Print(summary .. ".")
-    self:Refresh()
-    return true
-end
-
--- Starts a full roster scan for the current guild.
-function Controller:Scan(guild, partition)
-    self.pendingScan = { guild = guild, partition = partition }
-    self.client:RequestGuildRoster()
-    -- The roster is often already loaded; otherwise GUILD_ROSTER_UPDATE
-    -- finishes the scan.
-    return self:CompleteScan()
-end
-
-function Controller:Rescan()
-    local guild, partition = self:Context()
-    if guild == nil then
-        return false
-    end
-    return self:Scan(guild, partition)
+-- Saved data is ready (after login): let the scheduler run its daily check.
+function Controller:OnSavedDataReady()
+    self.scheduler:OnSavedDataReady()
 end
 
 function Controller:OnRosterUpdate()
-    if self.pendingScan ~= nil then
-        self:CompleteScan()
-    elseif self.window ~= nil and self.window:IsShown() then
+    self.scheduler:OnRosterUpdate()
+    if self.window ~= nil and self.window:IsShown() then
         self:Refresh()
     end
+end
+
+-- `/agf rescan` and the Rescan button.
+function Controller:Rescan()
+    if self.scheduler:IsRunning() then
+        self:Print("A roster scan is already running.")
+        return false
+    end
+    local guild = self:Context()
+    if guild == nil then
+        return false
+    end
+    self:Print("Scanning the guild roster...")
+    self:UpdateStatus()
+    return self.scheduler:RequestFull(true)
+end
+
+local function plural(count, word, many)
+    return count .. " " .. (count == 1 and word or (many or (word .. "s")))
+end
+
+-- What a scan found, in words.
+function RosterController.DescribeScan(summary)
+    local parts = { plural(summary.newCharacters or 0, "new character") }
+    if (summary.linked or 0) > 0 then
+        table.insert(parts, plural(summary.linked, "alt") .. " linked")
+    end
+    if (summary.aliased or 0) > 0 then
+        table.insert(parts, plural(summary.aliased, "alias", "aliases") .. " set")
+    end
+    if (summary.unapplied or 0) > 0 then
+        table.insert(parts, plural(summary.unapplied, "note marker") .. " to review")
+    end
+    return table.concat(parts, ", ")
+end
+
+function Controller:OnScanFinished(result, summary)
+    -- Incremental pickups that found new characters, and every full scan,
+    -- are reported; quiet checks are not.
+    if summary.mode ~= "incremental" or summary.newCharacters > 0 then
+        self:Print("Roster scanned: " .. RosterController.DescribeScan(summary) .. ".")
+    end
+    if self.window ~= nil and self.window:IsShown() then
+        self:Refresh()
+    end
+end
+
+-- "Last scan 5 minutes ago: 3 new characters, 1 alt linked".
+function Controller:StatusText(partition)
+    if self.scheduler:IsRunning() then
+        return "Scanning the guild roster..."
+    end
+    local summary = partition:GetLastScanSummary()
+    if summary == nil then
+        return "Not scanned yet. The roster is scanned once it loads, or use Rescan."
+    end
+    local now = self.client:Timestamp() or summary.at
+    local elapsed = math.max(0, now - summary.at)
+    local when
+    if elapsed < 60 then
+        when = "just now"
+    elseif elapsed < 3600 then
+        when = plural(math.floor(elapsed / 60), "minute") .. " ago"
+    elseif elapsed < 86400 then
+        when = plural(math.floor(elapsed / 3600), "hour") .. " ago"
+    else
+        when = plural(math.floor(elapsed / 86400), "day") .. " ago"
+    end
+    return "Last scan " .. when .. ": " .. RosterController.DescribeScan(summary)
+end
+
+function Controller:UpdateStatus()
+    if self.window ~= nil and self.current ~= nil then
+        self.window:SetStatus(self:StatusText(self.current.partition))
+    end
+end
+
+-- Collapses or expands a player's group. The state lasts for the session.
+function Controller:ToggleGroup(playerId)
+    if playerId == nil then
+        return
+    end
+    self.collapsed[playerId] = not self.collapsed[playerId] or nil
+    self:Refresh()
+end
+
+-- Live roster facts for display, keyed by character key. Unlike a scan,
+-- this tolerates a partial roster.
+function Controller:LiveMembers(normalizer)
+    local members = {}
+    local count = self.client:GetGuildRosterCount() or 0
+    local index
+    for index = 1, count do
+        local member = self.client:GetGuildMember(index)
+        local key = member and normalizer:Key(member.name)
+        if key ~= nil then
+            members[key] = member
+        end
+    end
+    return members
 end
 
 -- Redraws the window from the store plus live roster facts.
@@ -171,10 +207,10 @@ function Controller:Refresh()
     if self.window == nil or self.current == nil then
         return
     end
-    local members, _, normalizer = self:ReadRoster(self.current.guild)
+    local normalizer = self:Normalizer(self.current.guild)
     local rows = addon.RosterViewModel.Build({
         partition = self.current.partition,
-        members = members,
+        members = self:LiveMembers(normalizer),
         normalizer = normalizer,
         classColor = function(classToken)
             return self.client:GetClassColor(classToken)
@@ -183,9 +219,10 @@ function Controller:Refresh()
     })
     self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
     self.window:SetRows(rows)
+    self:UpdateStatus()
 end
 
--- `/agf`: shows or hides the roster window.
+-- `/agf`: shows or hides the roster window. Never scans.
 function Controller:Toggle()
     if self.window ~= nil and self.window:IsShown() then
         self.window:Hide()
@@ -207,9 +244,6 @@ function Controller:Toggle()
     end
 
     self.current = { guild = guild, partition = partition }
-    if not partition:HasBeenScanned() and self.pendingScan == nil then
-        self:Scan(guild, partition)
-    end
     self:Refresh()
     self.window:Show()
     return true

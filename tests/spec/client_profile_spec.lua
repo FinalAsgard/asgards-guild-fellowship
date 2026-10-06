@@ -118,6 +118,7 @@ test.test("core modules never inspect the client", function()
         "Core/FellowshipStore.lua",
         "Core/ReconcileEngine.lua",
         "Core/RosterViewModel.lua",
+        "Core/ScanScheduler.lua",
         "Core/RosterController.lua",
         "Core/LibraryCheck.lua",
         "Core/CommandRouter.lua",

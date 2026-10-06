@@ -356,6 +356,24 @@ function Partition:GetUnapplied()
     return self.data.unapplied
 end
 
+-- What the latest scan found, for the window's status line:
+-- { at, mode, newCharacters, linked, aliased, unapplied }.
+function Partition:SetLastScanSummary(summary)
+    if type(summary) ~= "table" then
+        return false
+    end
+    self.data.lastScanSummary = summary
+    return true
+end
+
+function Partition:GetLastScanSummary()
+    local summary = self.data.lastScanSummary
+    if type(summary) ~= "table" then
+        return nil
+    end
+    return summary
+end
+
 function Partition:HasBeenScanned()
     return self.data.lastFullScan ~= nil
 end

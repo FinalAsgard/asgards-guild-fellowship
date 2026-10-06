@@ -275,6 +275,31 @@ function Client:Timestamp()
     return now
 end
 
+-- Runs callback once after `seconds` (0 means the next frame). Returns false
+-- when the client has no timer, so callers can act immediately instead.
+function Client:After(seconds, callback)
+    local timers = self.environment.C_Timer
+    if type(timers) ~= "table" or type(timers.After) ~= "function" or type(callback) ~= "function" then
+        return false
+    end
+
+    local ok = pcall(timers.After, seconds, callback)
+    return ok
+end
+
+-- A high-resolution clock in milliseconds for time budgets, or nil.
+function Client:PreciseMilliseconds()
+    local ok, now = callFunction(self.environment.debugprofilestop)
+    if ok and type(now) == "number" then
+        return now
+    end
+    ok, now = callFunction(self.environment.GetTimePreciseSec)
+    if ok and type(now) == "number" then
+        return now * 1000
+    end
+    return nil
+end
+
 -- The class color as an "ffrrggbb" hex string, or nil.
 function Client:GetClassColor(classToken)
     local colors = self.environment.RAID_CLASS_COLORS
