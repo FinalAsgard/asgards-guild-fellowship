@@ -46,6 +46,9 @@ if clientProfile.supported then
                         store:SetWindowState(state)
                     end
                 end,
+                onToggleGroup = function(playerId)
+                    rosterController:ToggleGroup(playerId)
+                end,
             })
         end,
     })

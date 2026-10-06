@@ -190,7 +190,7 @@ end
 -- Facts about the roster member at `index`, or nil when the client can't
 -- say (the roster loads asynchronously, so early reads may be empty).
 function Client:GetGuildMember(index)
-    local ok, name, rankName, rankIndex, level, _, zone, _, _, online, _, classToken =
+    local ok, name, rankName, rankIndex, level, _, zone, note, _, online, _, classToken =
         callFunction(self.environment.GetGuildRosterInfo, index)
     if not ok or type(name) ~= "string" or name == "" then
         return nil
@@ -204,6 +204,8 @@ function Client:GetGuildMember(index)
         rankName = type(rankName) == "string" and rankName or nil,
         online = online == true or online == 1,
         zone = type(zone) == "string" and zone ~= "" and zone or nil,
+        -- The public note, read live. It is only parsed, never stored.
+        note = type(note) == "string" and note or "",
     }
 
     local lastOk, years, months, days, hours =

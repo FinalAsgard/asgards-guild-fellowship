@@ -40,8 +40,14 @@ local function frameworkFrom(client)
     return framework
 end
 
-local function createLine(scroll, index)
+local function createLine(scroll, index, onToggleGroup)
     local line = CreateFrame("Button", nil, scroll)
+    -- Clicking a player header collapses or expands its group.
+    line:SetScript("OnClick", function(self)
+        if self.row ~= nil and self.row.kind == "player" then
+            onToggleGroup(self.row.id)
+        end
+    end)
     line:SetHeight(RosterWindow.LINE_HEIGHT)
     line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
     line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
@@ -59,6 +65,28 @@ local function createLine(scroll, index)
     return line
 end
 
+-- The text each column shows for a row. Player headers show the group label
+-- with an expand/collapse marker; character rows are indented under it, and
+-- the main is marked.
+local function cellText(row, field)
+    if row.kind == "player" then
+        if field == "coloredName" then
+            local marker = row.collapsed and "[+] " or "[-] "
+            local count = row.count > 1 and ("  |cff888888" .. row.count .. " characters|r") or ""
+            return "|cffffd100" .. marker .. row.label .. "|r" .. count
+        end
+        if field == "location" and row.online then
+            return "|cff20ff20Online|r"
+        end
+        return ""
+    end
+    if field == "coloredName" then
+        return "    " .. row.coloredName .. (row.isMain and " |cff888888(main)|r" or "")
+    end
+    local value = row[field]
+    return value ~= nil and tostring(value) or ""
+end
+
 -- Draws only the visible slice of rows; the framework recycles line frames.
 local function refreshLines(scroll, rows, offset, totalLines)
     local lineIndex
@@ -66,11 +94,11 @@ local function refreshLines(scroll, rows, offset, totalLines)
         local row = rows[lineIndex + offset]
         if row ~= nil then
             local line = scroll:GetLine(lineIndex)
+            line.row = row
             local columnIndex
             for columnIndex = 1, #COLUMNS do
                 local field = COLUMNS[columnIndex].field
-                local value = row[field]
-                line.cells[field]:SetText(value ~= nil and tostring(value) or "")
+                line.cells[field]:SetText(cellText(row, field))
             end
         end
     end
@@ -141,6 +169,9 @@ local function build(framework, options)
     end
 
     local lineAmount = math.floor((RosterWindow.DEFAULT_HEIGHT - 70) / RosterWindow.LINE_HEIGHT)
+    local function newLine(scrollBox, index)
+        return createLine(scrollBox, index, options.onToggleGroup)
+    end
     local scroll = framework:CreateScrollBox(
         panel,
         frameName .. "Scroll",
@@ -150,13 +181,13 @@ local function build(framework, options)
         RosterWindow.DEFAULT_HEIGHT - 70,
         lineAmount,
         RosterWindow.LINE_HEIGHT,
-        createLine,
+        newLine,
         true
     )
     scroll:ClearAllPoints()
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -46)
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 24)
-    scroll:CreateLines(createLine, lineAmount)
+    scroll:CreateLines(newLine, lineAmount)
 
     local function save()
         options.saveGeometry(readGeometry(panel))
@@ -174,7 +205,8 @@ local function build(framework, options)
 end
 
 -- options.loadGeometry() returns saved geometry or nil;
--- options.saveGeometry(state) stores it.
+-- options.saveGeometry(state) stores it;
+-- options.onToggleGroup(playerId) runs when a player header is clicked.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then

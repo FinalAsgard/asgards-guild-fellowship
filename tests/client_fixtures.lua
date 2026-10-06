@@ -135,15 +135,17 @@ end
 
 -- Sample guilds per client: Forever names are "First Last", Retail names are
 -- one word, and both carry a realm suffix as the roster API reports them.
+-- In each, Hammer's note marks it as an alt of the officer, whose note sets
+-- the alias "TheTool".
 Fixtures.GUILDS = {
     Forever = {
         name = "Knights of Camelot",
         realm = "Camelot",
         members = {
             { name = "Tool Box-Camelot", class = "WARRIOR", level = 60, rank = 1, rankName = "Officer",
-                online = true, zone = "Ironforge" },
+                online = true, zone = "Ironforge", note = "@TheTool raid lead" },
             { name = "Hammer Smith-Camelot", class = "PALADIN", level = 42, rank = 3, rankName = "Member",
-                online = false, lastOnline = { 0, 0, 3, 2 } },
+                online = false, lastOnline = { 0, 0, 3, 2 }, note = "Healer >Tool Box" },
             { name = "Zélie Rune-Camelot", class = "MAGE", level = 12, rank = 4, rankName = "Initiate",
                 online = false, lastOnline = { 0, 0, 0, 0 } },
         },
@@ -153,9 +155,9 @@ Fixtures.GUILDS = {
         realm = "Area 52",
         members = {
             { name = "Toolbox-Area52", class = "WARRIOR", level = 80, rank = 1, rankName = "Officer",
-                online = true, zone = "Dornogal" },
+                online = true, zone = "Dornogal", note = "@TheTool raid lead" },
             { name = "Hammer-Area52", class = "PALADIN", level = 70, rank = 3, rankName = "Member",
-                online = false, lastOnline = { 0, 2, 0, 0 } },
+                online = false, lastOnline = { 0, 2, 0, 0 }, note = "Healer >Toolbox" },
             { name = "Visitor-Stormrage", class = "MAGE", level = 80, rank = 4, rankName = "Initiate",
                 online = false, lastOnline = { 1, 0, 0, 0 } },
         },
@@ -193,7 +195,7 @@ local function installGuild(world, environment, profile)
             return nil
         end
         return member.name, member.rankName, member.rank, member.level, "Class", member.zone,
-            "", "", member.online, 0, member.class
+            member.note or "", "", member.online, 0, member.class
     end
     environment.GetGuildRosterLastOnline = function(index)
         local member = world.rosterReady and world.guild and world.guild.members[index]

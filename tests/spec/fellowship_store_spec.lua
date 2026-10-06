@@ -59,7 +59,8 @@ test.test("only lasting facts are persisted for a character", function()
     local store = newStore(foundationRoot())
     local character = store:Partition(GUILD):RecordCharacter("toolbox-area52", MEMBER)
 
-    local allowed = { class = true, level = true, name = true, player = true, rank = true, source = true }
+    local allowed = { class = true, level = true, name = true, note = true, player = true, rank = true,
+        source = true }
     local field
     for field in pairs(character) do
         test.assertTrue(allowed[field], "unexpected persisted field " .. tostring(field))

@@ -6,7 +6,8 @@ local _, addon = ...
 -- A scan reads the whole roster into the guild's partition. It only runs on
 -- the first open of a guild that has never been scanned, or on request.
 -- Opening the window otherwise only reads live roster facts for display.
--- Note parsing, scheduling, and chunked scanning come in later slices.
+-- Each scan seeds players from `>Main` and `@Alias` notes through the
+-- ReconcileEngine. Scheduling and chunked scanning come in later slices.
 local RosterController = {}
 addon.RosterController = RosterController
 
@@ -23,8 +24,18 @@ function RosterController.Create(options)
         client = options.client,
         createWindow = options.createWindow,
         getDatabase = options.getDatabase,
+        collapsed = {},
         nameRules = options.nameRules or {},
     }, Controller)
+end
+
+-- Collapses or expands a player's group. The state lasts for the session.
+function Controller:ToggleGroup(playerId)
+    if playerId == nil then
+        return
+    end
+    self.collapsed[playerId] = not self.collapsed[playerId] or nil
+    self:Refresh()
 end
 
 function Controller:Print(message)
@@ -106,16 +117,26 @@ function Controller:CompleteScan()
         return false
     end
 
-    local recorded = 0
-    local key, member
-    for key, member in pairs(members) do
-        if pending.partition:RecordCharacter(key, member) ~= nil then
-            recorded = recorded + 1
-        end
-    end
+    local plan = addon.ReconcileEngine.Plan({
+        partition = pending.partition,
+        members = members,
+        normalizer = self:Normalizer(pending.guild),
+        rules = self.nameRules,
+        mode = pending.partition:HasBeenScanned() and "full" or "initial",
+    })
+    local result = addon.ReconcileEngine.Apply(pending.partition, plan)
     pending.partition:MarkScanned(self.client:Timestamp() or 0)
     self.pendingScan = nil
-    self:Print("Roster scanned: " .. recorded .. " characters.")
+
+    local summary = "Roster scanned: " .. result.recorded .. " characters"
+    if result.linked > 0 or result.aliased > 0 then
+        summary = summary .. ", " .. result.linked .. " linked and " .. result.aliased ..
+            " aliases set from notes"
+    end
+    if result.unapplied > 0 then
+        summary = summary .. ", " .. result.unapplied .. " note markers left for review"
+    end
+    self:Print(summary .. ".")
     self:Refresh()
     return true
 end
@@ -158,6 +179,7 @@ function Controller:Refresh()
         classColor = function(classToken)
             return self.client:GetClassColor(classToken)
         end,
+        collapsed = self.collapsed,
     })
     self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
     self.window:SetRows(rows)

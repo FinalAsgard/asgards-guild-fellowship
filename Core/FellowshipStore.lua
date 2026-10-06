@@ -11,6 +11,7 @@ local _, addon = ...
 -- last-online, note text) is read from the game when it's needed and never
 -- written here.
 local FellowshipStore = {
+    SOURCE_NOTE = "note",
     SOURCE_ROSTER = "roster",
 }
 addon.FellowshipStore = FellowshipStore
@@ -52,6 +53,9 @@ local function characterProblem(character)
     if character.source ~= nil and not isText(character.source) then
         return "character source is invalid"
     end
+    if character.note ~= nil and not isText(character.note) then
+        return "character note fingerprint is invalid"
+    end
     return nil
 end
 
@@ -61,6 +65,12 @@ local function playerProblem(player)
     end
     if not isText(player.main) then
         return "player has no main character"
+    end
+    if player.alias ~= nil and not isText(player.alias) then
+        return "player alias is invalid"
+    end
+    if player.aliasSource ~= nil and not isText(player.aliasSource) then
+        return "player alias source is invalid"
     end
     return nil
 end
@@ -84,7 +94,7 @@ local function validatePartition(data)
     if type(data) ~= "table" then
         return false
     end
-    local containers = { "characters", "players", "quarantine" }
+    local containers = { "characters", "players", "quarantine", "unapplied" }
     local index
     for index = 1, #containers do
         local value = data[containers[index]]
@@ -233,6 +243,7 @@ function Partition:RecordCharacter(key, facts)
         self.data.players[id] = { main = key }
         character = { player = id, source = FellowshipStore.SOURCE_ROSTER }
         self.data.characters[key] = character
+        self.members = nil
     end
 
     -- The name exactly as the roster spells it (capitalization, realm
@@ -251,6 +262,98 @@ function Partition:RecordCharacter(key, facts)
         character.rank = facts.rankIndex
     end
     return character
+end
+
+-- Stores the fingerprint of a character's current public note (never the
+-- note text itself).
+function Partition:SetNoteFingerprint(key, fingerprint)
+    local character = self.data.characters[key]
+    if character == nil or not isText(fingerprint) then
+        return false
+    end
+    character.note = fingerprint
+    return true
+end
+
+-- Moves `altKey` into the player of `mainKey`. The alt's old player is
+-- removed when the alt was its only character.
+function Partition:JoinPlayerOf(altKey, mainKey, source)
+    local alt = self.data.characters[altKey]
+    local main = self.data.characters[mainKey]
+    if alt == nil or main == nil or altKey == mainKey then
+        return false
+    end
+    local oldPlayer = alt.player
+    if oldPlayer == main.player then
+        return true
+    end
+
+    alt.player = main.player
+    alt.source = source
+    self.members = nil
+    if self:CharactersOf(oldPlayer)[1] == nil then
+        self.data.players[oldPlayer] = nil
+    end
+    return true
+end
+
+function Partition:SetAlias(playerId, alias, source)
+    local player = self.data.players[playerId]
+    if player == nil or not isText(alias) then
+        return false
+    end
+    player.alias = alias
+    player.aliasSource = source
+    return true
+end
+
+-- Keys of every character of a player, main first, then alphabetical. The
+-- reverse index is rebuilt in memory when needed and never persisted.
+function Partition:CharactersOf(playerId)
+    if self.members == nil then
+        self.members = {}
+        local key, character
+        for key, character in pairs(self.data.characters) do
+            self.members[character.player] = self.members[character.player] or {}
+            table.insert(self.members[character.player], key)
+        end
+    end
+    local keys = {}
+    local main = self.data.players[playerId] and self.data.players[playerId].main
+    local index
+    local list = self.members[playerId] or {}
+    for index = 1, #list do
+        table.insert(keys, list[index])
+    end
+    table.sort(keys, function(first, second)
+        if (first == main) ~= (second == main) then
+            return first == main
+        end
+        return first < second
+    end)
+    return keys
+end
+
+-- Calls `callback(id, player)` for every stored player.
+function Partition:EachPlayer(callback)
+    local id, player
+    for id, player in pairs(self.data.players) do
+        callback(id, player)
+    end
+end
+
+-- Replaces the markers left unapplied by the latest scan. Each entry is
+-- { character, fingerprint, reason }: never the note text.
+function Partition:SetUnapplied(entries)
+    if type(entries) ~= "table" then
+        return false
+    end
+    self.data.unapplied = entries
+    return true
+end
+
+function Partition:GetUnapplied()
+    return self.data.unapplied
 end
 
 function Partition:HasBeenScanned()

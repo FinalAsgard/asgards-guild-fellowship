@@ -30,7 +30,9 @@ local function build(profile, options)
         "Adapters/ClientProfile.lua",
         "Adapters/WoW.lua",
         "Core/NameNormalizer.lua",
+        "Core/NoteParser.lua",
         "Core/FellowshipStore.lua",
+        "Core/ReconcileEngine.lua",
         "Core/RosterViewModel.lua",
         "Core/RosterController.lua"
     )
@@ -67,36 +69,35 @@ local function build(profile, options)
 end
 
 local EXPECTED_FIRST = {
-    Forever = { key = "tool box-camelot", name = "Tool Box" },
-    Retail = { key = "toolbox-area52", name = "Toolbox" },
+    Forever = { key = "tool box-camelot", name = "Tool Box", alt = "hammer smith-camelot" },
+    Retail = { key = "toolbox-area52", name = "Toolbox", alt = "hammer-area52" },
 }
 
 local function registerProfileTests(profile)
     local first = EXPECTED_FIRST[profile]
 
-    test.test(profile .. " first open scans an unscanned guild and lists every character", function()
+    test.test(profile .. " first open scans an unscanned guild and seeds players from notes", function()
         local setup = build(profile)
 
         test.assertTrue(setup.controller:Toggle())
 
         local partitionKey = profile == "Forever" and "Knights of Camelot-Camelot" or "Knights of Camelot-Area52"
         local partition = setup.database.guilds[partitionKey]
-        test.assertEqual(3, #setup.window.rows)
+        -- Two player headers: TheTool with main and alt, and a single.
+        test.assertEqual(5, #setup.window.rows)
         test.assertTrue(setup.window.shown)
         test.assertEqual(1790000000, partition.lastFullScan)
         test.assertTrue(partition.characters[first.key] ~= nil)
         test.assertEqual(setup.world.guild.members[1].name, partition.characters[first.key].name)
-        test.assertEqual(first.name, setup.window.rows[1].name)
+        test.assertEqual("TheTool (" .. first.name .. ")", setup.window.rows[1].label)
+        test.assertEqual(first.name, setup.window.rows[2].name)
+        test.assertTrue(setup.window.rows[2].isMain)
         test.assertContains(setup.window.title, "Knights of Camelot")
-        test.assertContains(setup.world.messages[1], "Roster scanned: 3 characters.")
-        -- Each character is its own single-character player.
-        local players = {}
-        local key, character
-        for key, character in pairs(partition.characters) do
-            test.assertEqual(key, partition.players[character.player].main)
-            test.assertEqual(nil, players[character.player])
-            players[character.player] = true
-        end
+        test.assertContains(setup.world.messages[1],
+            "Roster scanned: 3 characters, 1 linked and 1 aliases set from notes.")
+        local main = partition.characters[first.key]
+        test.assertEqual(main.player, partition.characters[first.alt].player)
+        test.assertEqual("TheTool", partition.players[main.player].alias)
     end)
 
     test.test(profile .. " later opens never scan", function()
@@ -110,7 +111,7 @@ local function registerProfileTests(profile)
         setup.controller:Toggle()
 
         test.assertEqual(requests, setup.world.rosterRequests)
-        test.assertEqual(3, #setup.window.rows)
+        test.assertEqual(5, #setup.window.rows)
         test.assertEqual(1, setup.windowsCreated())
     end)
 
@@ -134,8 +135,8 @@ local function registerProfileTests(profile)
 
         test.assertTrue(setup.controller:Rescan())
 
-        test.assertEqual(4, #setup.window.rows)
-        test.assertContains(setup.world.messages[#setup.world.messages], "Roster scanned: 4 characters.")
+        test.assertEqual(7, #setup.window.rows)
+        test.assertContains(setup.world.messages[#setup.world.messages], "Roster scanned: 4 characters")
     end)
 
     test.test(profile .. " a loading roster finishes the scan on the next roster update", function()
@@ -148,8 +149,8 @@ local function registerProfileTests(profile)
         setup.world.rosterReady = true
         setup.controller:OnRosterUpdate()
 
-        test.assertEqual(3, #setup.window.rows)
-        test.assertContains(setup.world.messages[1], "Roster scanned: 3 characters.")
+        test.assertEqual(5, #setup.window.rows)
+        test.assertContains(setup.world.messages[1], "Roster scanned: 3 characters")
     end)
 
     test.test(profile .. " a character not in a guild gets a clear message", function()
@@ -187,6 +188,19 @@ test.test("unusable saved data stops the roster with a message", function()
 
     test.assertFalse(setup.controller:Toggle())
     test.assertContains(setup.world.messages[1], "Saved data is unavailable")
+end)
+
+test.test("clicking a player header collapses and expands its group", function()
+    local setup = build("Retail")
+    setup.controller:Toggle()
+    local header = setup.window.rows[1]
+
+    setup.controller:ToggleGroup(header.id)
+    test.assertEqual(3, #setup.window.rows)
+    test.assertTrue(setup.window.rows[1].collapsed)
+
+    setup.controller:ToggleGroup(header.id)
+    test.assertEqual(5, #setup.window.rows)
 end)
 
 test.test("roster updates refresh an open window with live facts", function()
