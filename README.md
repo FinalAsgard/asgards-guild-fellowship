@@ -2,7 +2,70 @@
 
 A World of Warcraft add-on for the guild's member database and Fellowship roster: who each player is, which characters are their mains and alts, and the alias they choose to be called. It supports WoW Forever and WoW Retail from one source tree.
 
-This is an early foundation. The add-on loads, detects the running client, and answers `/agf help` (`/agfdev help` in the development build) with its version, client, and library status. Roster features come in later releases.
+The add-on groups the guild's characters into **players**. Each player has one main, any number of alts, and an optional alias. The grouping is seeded from public guild notes, and from then on it's kept in a local database that only you change.
+
+## Using the roster
+
+### Opening it
+
+- `/agf` (or `/agf roster`) shows or hides the roster window. The development build uses `/agfdev`.
+- The minimap button toggles it too. Its tooltip shows how many conflicts are waiting. Drag it to move it; its position is saved.
+- On Retail, the add-on compartment has an entry for it as well.
+- The guild window gets a **Guild Fellowship** button left of **Invite Member**. If the add-on can't find that button, it skips this one quietly.
+- `/agf help` lists the commands with the version, client, and library status.
+
+Opening the window never scans the guild, so it's always quick. The window remembers its position and size, and Escape closes it.
+
+### The guild note convention
+
+Two markers in a character's **public** note seed the database:
+
+- `>Toolbox` means "this character is an alt of Toolbox".
+- `@TheTool` means "this player goes by TheTool".
+
+A marker can sit anywhere in the note (for example `Tank >Toolbox` or `@TheTool raid lead`), and both can appear in one note. Only the first `>` and the first `@` count. Matching ignores case.
+
+- On **WoW Forever**, names have a first and last name: `>Tool Box` works. So does `>Tool`, as long as only one guild character has the first name Tool.
+- On **Retail**, `>Toolbox` uses the single character name. A realm suffix is optional.
+
+An alias from a note is one word: letters (accented ones too), digits, `_`, `'`, and `-`. Longer aliases can be set in the window, up to 48 characters.
+
+The add-on never writes to guild notes.
+
+### Scanning
+
+- On login, the add-on scans every note if the last full scan is more than a day old.
+- New members are picked up automatically when the guild roster updates.
+- **Rescan** in the window, or `/agf rescan`, scans right away.
+
+Scans run a little at a time, so even a large guild doesn't cause a hitch. The window's footer shows when the last scan ran and what it found.
+
+### The database is the source of truth
+
+- On the first scan, note markers are applied directly to any character the database doesn't know about.
+- After that, a note that disagrees with the database never overwrites it. The difference goes to the **conflict queue** instead. You'll also find there any note naming a character that doesn't exist or matches more than one, and any note that loops back on itself.
+- **Conflicts (N)** at the bottom of the window opens the queue. Each entry shows the note and what it suggests next to what the database says. Accept or reject each one, or all at once.
+- A rejected suggestion stays away until that note changes again.
+
+### Mains, alts, and departures
+
+- A player always leads with a character who is in the guild. If their main leaves, or a note names a main outside the guild, an in-guild alt becomes the acting main: the highest level, then the most recently online. You confirm that change in the conflict queue.
+- Characters who leave are kept and marked departed. They're hidden until you choose **Show departed**. A returning character goes back to their old player automatically.
+- **Purge** removes one departed character. **Purge all departed** removes them all.
+
+### Organizing by hand
+
+Right-click a character for **Set main…**, **Make this the main**, **Set alias…**, **Detach as own player**, and **Edit player…**. Clicking a character opens the player panel, with the alias, main, alts, and character history.
+
+Changes show up right away and are recorded as manual. Data is saved per guild and shared by every character on this game install.
+
+### Finding people
+
+- The search box matches character names and aliases.
+- **Online only** hides players with no character online.
+- **Expand all** and **Collapse all** open and close every group.
+- Online players come first, then everyone else by name. A group shows "online as …" when the player is on an alt.
+- A player with one character is shown as a single row.
 
 ## Supported clients
 
