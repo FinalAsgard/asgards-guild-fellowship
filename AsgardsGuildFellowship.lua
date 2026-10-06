@@ -73,6 +73,30 @@ if clientProfile.supported then
                 onPurgeAll = function()
                     rosterController:PurgeAllDeparted()
                 end,
+                menuFor = function(row)
+                    return rosterController:MenuFor(row)
+                end,
+                onSetMain = function(key, playerId)
+                    rosterController:SetMainPlayer(key, playerId)
+                end,
+                onMakeMain = function(key)
+                    rosterController:MakeMain(key)
+                end,
+                onSetAlias = function(key, text)
+                    rosterController:SetAlias(key, text)
+                end,
+                onDetach = function(key)
+                    rosterController:Detach(key)
+                end,
+                searchPlayers = function(key, query)
+                    return rosterController:SearchPlayers(key, query)
+                end,
+                aliasOf = function(key)
+                    return rosterController:AliasOf(key)
+                end,
+                onMenuUnavailable = function()
+                    rosterController:Print("The organize menu isn't available on this client.")
+                end,
             })
         end,
     })

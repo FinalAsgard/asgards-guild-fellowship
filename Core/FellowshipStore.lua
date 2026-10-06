@@ -11,6 +11,7 @@ local _, addon = ...
 -- last-online, note text) is read from the game when it's needed and never
 -- written here.
 local FellowshipStore = {
+    SOURCE_MANUAL = "manual",
     SOURCE_NOTE = "note",
     SOURCE_ROSTER = "roster",
 }
@@ -319,6 +320,27 @@ function Partition:SetNoteFingerprint(key, fingerprint)
     return true
 end
 
+-- After `key` has moved out of `oldPlayer`: removes the old player if it is
+-- now empty, or hands its main role to the highest-level character left
+-- (ties by name). Acting-main rules (in-guild first) are applied on top by
+-- ReconcileEngine.EnsureActingMains.
+function Partition:LeftPlayer(oldPlayer, key)
+    local remaining = self:CharactersOf(oldPlayer)
+    if remaining[1] == nil then
+        self.data.players[oldPlayer] = nil
+    elseif self.data.players[oldPlayer].main == key then
+        local best = remaining[1]
+        local index
+        for index = 2, #remaining do
+            local candidate = self.data.characters[remaining[index]]
+            if (candidate.level or 0) > (self.data.characters[best].level or 0) then
+                best = remaining[index]
+            end
+        end
+        self.data.players[oldPlayer].main = best
+    end
+end
+
 -- Moves `altKey` into the player of `mainKey`. The alt's old player is
 -- removed when the alt was its only character.
 function Partition:JoinPlayerOf(altKey, mainKey, source)
@@ -335,22 +357,35 @@ function Partition:JoinPlayerOf(altKey, mainKey, source)
     alt.player = main.player
     alt.source = source
     self.members = nil
-    local remaining = self:CharactersOf(oldPlayer)
-    if remaining[1] == nil then
-        self.data.players[oldPlayer] = nil
-    elseif self.data.players[oldPlayer].main == altKey then
-        -- The moved character led its old player; the highest-level
-        -- character left takes over (ties by name).
-        local best = remaining[1]
-        local index
-        for index = 2, #remaining do
-            local candidate = self.data.characters[remaining[index]]
-            if (candidate.level or 0) > (self.data.characters[best].level or 0) then
-                best = remaining[index]
-            end
-        end
-        self.data.players[oldPlayer].main = best
+    self:LeftPlayer(oldPlayer, altKey)
+    return true
+end
+
+-- Moves a character into a new player of its own, as its main. Returns the
+-- new player id.
+function Partition:MoveToNewPlayer(key, source)
+    local character = self.data.characters[key]
+    if character == nil then
+        return nil
     end
+    local oldPlayer = character.player
+    local id = self.data.nextPlayerId
+    self.data.nextPlayerId = id + 1
+    self.data.players[id] = { main = key }
+    character.player = id
+    character.source = source
+    self.members = nil
+    self:LeftPlayer(oldPlayer, key)
+    return id
+end
+
+function Partition:ClearAlias(playerId, source)
+    local player = self.data.players[playerId]
+    if player == nil then
+        return false
+    end
+    player.alias = nil
+    player.aliasSource = source
     return true
 end
 

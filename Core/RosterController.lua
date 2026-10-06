@@ -233,10 +233,99 @@ end
 
 function Controller:Service()
     return addon.PlayerService.Create(self.current.partition, {
+        normalizer = self:Normalizer(self.current.guild),
         now = function()
             return self.client:Timestamp() or 0
         end,
     })
+end
+
+-- The right-click menu for a roster row: a list of { text, action }.
+-- Character rows offer every organizing action that applies; player
+-- headers offer the alias.
+function Controller:MenuFor(row)
+    if self.current == nil or type(row) ~= "table" then
+        return {}
+    end
+    if row.kind == "player" then
+        local player = self.current.partition:GetPlayer(row.id)
+        return player and { { text = "Set alias...", action = "alias", key = player.main } } or {}
+    end
+    local partition = self.current.partition
+    local character = partition:GetCharacter(row.key)
+    if character == nil then
+        return {}
+    end
+    local player = partition:GetPlayer(character.player)
+    local entries = {}
+    if partition:IsInGuild(row.key) then
+        table.insert(entries, { text = "Set main...", action = "setMain", key = row.key })
+        if player ~= nil and player.main ~= row.key then
+            table.insert(entries, { text = "Make this the main", action = "makeMain", key = row.key })
+        end
+    end
+    table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
+    if partition:CharactersOf(character.player)[2] ~= nil then
+        table.insert(entries, { text = "Detach as own player", action = "detach", key = row.key })
+    end
+    return entries
+end
+
+-- Runs a manual change, reports a refusal, and redraws at once (no scan).
+function Controller:Organize(operation, ...)
+    if self.current == nil then
+        return false
+    end
+    local service = self:Service()
+    local ok, reason = service[operation](service, ...)
+    if not ok then
+        self:Print("That change wasn't made: " .. tostring(reason) .. ".")
+    end
+    self:Refresh()
+    return ok == true
+end
+
+function Controller:SetMainPlayer(key, playerId)
+    return self:Organize("SetMainPlayer", key, playerId)
+end
+
+function Controller:MakeMain(key)
+    return self:Organize("MakeMain", key)
+end
+
+function Controller:SetAlias(key, alias)
+    return self:Organize("SetAlias", key, alias)
+end
+
+function Controller:Detach(key)
+    return self:Organize("Detach", key)
+end
+
+-- Results for the "Set main…" picker, without `key`'s own player.
+function Controller:SearchPlayers(key, query)
+    if self.current == nil then
+        return {}
+    end
+    local service = self:Service()
+    local ownPlayer = service:PlayerOf(key)
+    local results = {}
+    local found = service:SearchPlayers(query, 50)
+    local index
+    for index = 1, #found do
+        if found[index].id ~= ownPlayer then
+            table.insert(results, found[index])
+        end
+    end
+    return results
+end
+
+-- The alias to prefill in "Set alias…".
+function Controller:AliasOf(key)
+    if self.current == nil then
+        return ""
+    end
+    local _, player = self:Service():PlayerOf(key)
+    return player and player.alias or ""
 end
 
 -- Shows or hides characters who left the guild. Lasts for the session.

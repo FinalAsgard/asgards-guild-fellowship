@@ -48,11 +48,18 @@ local function frameworkFrom(client)
     return framework
 end
 
-local function createLine(scroll, index, onToggleGroup, onPurge)
+local function createLine(scroll, index, onToggleGroup, onPurge, onRowMenu)
     local line = CreateFrame("Button", nil, scroll)
-    -- Clicking a player header collapses or expands its group.
-    line:SetScript("OnClick", function(self)
-        if self.row ~= nil and self.row.kind == "player" then
+    line:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    -- Left-clicking a player header collapses or expands its group;
+    -- right-clicking any row opens its organize menu.
+    line:SetScript("OnClick", function(self, button)
+        if self.row == nil then
+            return
+        end
+        if button == "RightButton" then
+            onRowMenu(self.row, self)
+        elseif self.row.kind == "player" then
             onToggleGroup(self.row.id)
         end
     end)
@@ -203,6 +210,185 @@ local function readGeometry(frame)
         width = width,
         height = height,
     }
+end
+
+-- Organize menu, alias dialog, and "Set main…" picker ---------------------
+
+-- Shows a context menu with the client's menu system: MenuUtil on newer
+-- clients, UIDropDownMenu otherwise. Returns false when neither exists.
+local menuFrame
+local function showContextMenu(owner, title, entries, onChoose)
+    if type(MenuUtil) == "table" and type(MenuUtil.CreateContextMenu) == "function" then
+        MenuUtil.CreateContextMenu(owner, function(_, root)
+            root:CreateTitle(title)
+            local index
+            for index = 1, #entries do
+                local entry = entries[index]
+                root:CreateButton(entry.text, function()
+                    onChoose(entry)
+                end)
+            end
+        end)
+        return true
+    end
+    if type(UIDropDownMenu_Initialize) == "function" and type(ToggleDropDownMenu) == "function"
+        and type(UIDropDownMenu_AddButton) == "function"
+    then
+        menuFrame = menuFrame or CreateFrame("Frame", addon.Identity.addonName .. "RowMenu", UIParent,
+            "UIDropDownMenuTemplate")
+        UIDropDownMenu_Initialize(menuFrame, function(_, level)
+            local info = { text = title, isTitle = true, notCheckable = true }
+            UIDropDownMenu_AddButton(info, level)
+            local index
+            for index = 1, #entries do
+                local entry = entries[index]
+                UIDropDownMenu_AddButton({
+                    text = entry.text,
+                    notCheckable = true,
+                    func = function()
+                        onChoose(entry)
+                    end,
+                }, level)
+            end
+        end, "MENU")
+        ToggleDropDownMenu(1, nil, menuFrame, "cursor", 0, 0)
+        return true
+    end
+    return false
+end
+
+local function popupEditBox(popup)
+    if popup.editBox ~= nil then
+        return popup.editBox
+    end
+    if popup.EditBox ~= nil then
+        return popup.EditBox
+    end
+    if type(popup.GetEditBox) == "function" then
+        return popup:GetEditBox()
+    end
+    return nil
+end
+
+-- A text dialog for "Set alias…". Saving an empty alias clears it.
+local function showAliasDialog(label, current, onSave)
+    if type(StaticPopupDialogs) ~= "table" or type(StaticPopup_Show) ~= "function" then
+        return false
+    end
+    local name = addon.Identity.addonName .. "_SET_ALIAS"
+    if StaticPopupDialogs[name] == nil then
+        local function save(popup, data)
+            local box = popupEditBox(popup)
+            if box ~= nil and data ~= nil then
+                data.onSave(box:GetText())
+            end
+        end
+        StaticPopupDialogs[name] = {
+            text = "Alias for %s (leave empty to clear):",
+            button1 = ACCEPT or "Accept",
+            button2 = CANCEL or "Cancel",
+            hasEditBox = true,
+            maxLetters = 48,
+            OnShow = function(popup, data)
+                local box = popupEditBox(popup)
+                if box ~= nil and data ~= nil then
+                    box:SetText(data.current or "")
+                    box:HighlightText()
+                end
+            end,
+            OnAccept = save,
+            EditBoxOnEnterPressed = function(box, data)
+                local popup = box:GetParent()
+                save(popup, data)
+                popup:Hide()
+            end,
+            EditBoxOnEscapePressed = function(box)
+                box:GetParent():Hide()
+            end,
+            timeout = 0,
+            whileDead = true,
+            hideOnEscape = true,
+        }
+    end
+    StaticPopup_Show(name, label, nil, { current = current, onSave = onSave })
+    return true
+end
+
+local PICKER_WIDTH = 360
+local PICKER_HEIGHT = 380
+
+-- The "Set main…" picker: a search box and the matching players.
+local function buildPicker(framework, frameName)
+    local panel = framework:CreateSimplePanel(UIParent, PICKER_WIDTH, PICKER_HEIGHT, "Set main", frameName .. "Picker")
+    panel:SetFrameStrata("DIALOG")
+    local prompt = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    prompt:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
+    prompt:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -30)
+    prompt:SetJustifyH("LEFT")
+
+    local search = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    search:SetSize(PICKER_WIDTH - 40, 20)
+    search:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -48)
+    search:SetAutoFocus(true)
+
+    local picker = { panel = panel, prompt = prompt, search = search, results = {} }
+
+    local lineAmount = math.floor((PICKER_HEIGHT - 100) / RosterWindow.LINE_HEIGHT)
+    local function refreshResults(scroll, rows, offset, totalLines)
+        local lineIndex
+        for lineIndex = 1, totalLines do
+            local row = rows[lineIndex + offset]
+            if row ~= nil then
+                local line = scroll:GetLine(lineIndex)
+                line.row = row
+                local text = row.label
+                if row.matched ~= nil then
+                    text = text .. "  |cff9d9d9d(" .. row.matched .. ")|r"
+                end
+                line.text:SetText(text)
+            end
+        end
+    end
+    local function newLine(scroll, index)
+        local line = CreateFrame("Button", nil, scroll)
+        line:SetHeight(RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
+        line:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+        line.text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
+        line.text:SetPoint("RIGHT", line, "RIGHT", -6, 0)
+        line.text:SetJustifyH("LEFT")
+        line.text:SetWordWrap(false)
+        line:SetScript("OnClick", function(self)
+            if self.row ~= nil and picker.onPick ~= nil then
+                picker.onPick(self.row.id)
+                panel:Hide()
+            end
+        end)
+        return line
+    end
+    local scroll = framework:CreateScrollBox(panel, frameName .. "PickerScroll", refreshResults, {},
+        PICKER_WIDTH - 20, PICKER_HEIGHT - 100, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -76)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 12)
+    scroll:CreateLines(newLine, lineAmount)
+    picker.scroll = scroll
+
+    function picker.update()
+        local results = picker.search_fn and picker.search_fn(search:GetText()) or {}
+        scroll:SetData(results)
+        scroll:Refresh()
+    end
+    search:SetScript("OnTextChanged", function()
+        picker.update()
+    end)
+    search:SetScript("OnEscapePressed", function()
+        panel:Hide()
+    end)
+    panel:Hide()
+    return picker
 end
 
 -- The conflict review panel: one line per pending conflict, with Accept and
@@ -382,8 +568,49 @@ local function build(framework, options)
     end
 
     local lineAmount = math.floor((RosterWindow.DEFAULT_HEIGHT - 70) / RosterWindow.LINE_HEIGHT)
+    local picker = buildPicker(framework, frameName)
+    local function openRowMenu(row, line)
+        local entries = options.menuFor(row)
+        if entries[1] == nil then
+            return
+        end
+        local title = row.kind == "player" and row.label or (row.standalone and row.label or row.name)
+        local shown = showContextMenu(line, title, entries, function(entry)
+            if entry.action == "setMain" then
+                picker.prompt:SetText("Make " .. tostring(row.name) .. " an alt of:")
+                picker.search_fn = function(query)
+                    return options.searchPlayers(entry.key, query)
+                end
+                picker.onPick = function(playerId)
+                    options.onSetMain(entry.key, playerId)
+                end
+                picker.search:SetText("")
+                picker.panel:Show()
+                picker.update()
+            elseif entry.action == "makeMain" then
+                options.onMakeMain(entry.key)
+            elseif entry.action == "alias" then
+                if not showAliasDialog(title, options.aliasOf(entry.key), function(text)
+                    options.onSetAlias(entry.key, text)
+                end) then
+                    options.onMenuUnavailable()
+                end
+            elseif entry.action == "detach" then
+                options.onDetach(entry.key)
+            end
+        end)
+        if not shown then
+            options.onMenuUnavailable()
+        end
+    end
+    local function onRowMenu(row, line)
+        local ok = pcall(openRowMenu, row, line)
+        if not ok then
+            options.onMenuUnavailable()
+        end
+    end
     local function newLine(scrollBox, index)
-        return createLine(scrollBox, index, options.onToggleGroup, options.onPurge)
+        return createLine(scrollBox, index, options.onToggleGroup, options.onPurge, onRowMenu)
     end
     local scroll = framework:CreateScrollBox(
         panel,
@@ -479,7 +706,10 @@ end
 -- options.onAcceptConflict(character, kind), onRejectConflict(character,
 -- kind), onAcceptAll(), and onRejectAll() resolve conflicts;
 -- options.onToggleDeparted() returns whether departed characters are now
--- shown, and options.onPurge(key) / onPurgeAll() purge them.
+-- shown, and options.onPurge(key) / onPurgeAll() purge them;
+-- options.menuFor(row) lists a row's organize actions, and onSetMain(key,
+-- playerId), onMakeMain(key), onSetAlias(key, text), onDetach(key),
+-- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then

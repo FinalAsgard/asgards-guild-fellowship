@@ -1,9 +1,13 @@
 local _, addon = ...
 
--- The operations that organize players, used by conflict resolution (and,
--- in later slices, the right-click menu and edit panel). Pure: it works on a
--- FellowshipStore partition and never touches the game, and it never writes
--- guild notes.
+-- The operations that organize players, used by conflict resolution, the
+-- right-click menu, and (later) the edit panel, plus lookups for other
+-- features. Pure: it works on a FellowshipStore partition and never touches
+-- the game, and it never writes guild notes.
+--
+-- Operations the player performs by hand mark what they change as manual,
+-- and every one leaves the acting-main invariant intact: a player with any
+-- in-guild character has an in-guild main.
 local PlayerService = {
     -- Kinds whose suggestion can be applied (an unresolved marker records
     -- its name as an out-of-guild main; a promotion confirms the new acting
@@ -16,15 +20,38 @@ addon.PlayerService = PlayerService
 local Service = {}
 Service.__index = Service
 
+PlayerService.MAX_ALIAS_LENGTH = 48
+
 -- options.now: function() -> timestamp, used for history dates.
+-- options.normalizer: a NameNormalizer, for display names in lookups.
 function PlayerService.Create(partition, options)
     options = options or {}
     return setmetatable({
         partition = partition,
+        normalizer = options.normalizer,
         now = options.now or function()
             return 0
         end,
     }, Service)
+end
+
+-- Restores the acting-main invariant after a manual change. Manual changes
+-- don't queue promotion conflicts: the player made them on purpose.
+function Service:KeepActingMains()
+    addon.ReconcileEngine.EnsureActingMains(self.partition, {}, self.now())
+end
+
+-- Drops pending note conflicts that a manual change has settled.
+function Service:SettleConflicts(keys, kinds)
+    local conflicts = self.partition:GetConflicts() or {}
+    local index = #conflicts
+    while index >= 1 do
+        local entry = conflicts[index]
+        if keys[entry.character] and kinds[entry.kind] then
+            table.remove(conflicts, index)
+        end
+        index = index - 1
+    end
 end
 
 local function findConflict(partition, character, kind)
@@ -114,6 +141,7 @@ function Service:MakeMain(key)
         return true
     end
     self.partition:SetMain(playerId, key)
+    character.source = addon.FellowshipStore.SOURCE_MANUAL
     local conflicts = self.partition:GetConflicts() or {}
     local index = #conflicts
     while index >= 1 do
@@ -189,4 +217,161 @@ function Service:RejectAll()
         end
     end
     return rejected
+end
+
+-- Manual organizing (the right-click menu) ---------------------------------
+
+-- "Set main…": links `key` as an alt of `playerId`.
+function Service:SetMainPlayer(key, playerId)
+    local character = self.partition:GetCharacter(key)
+    local player = self.partition:GetPlayer(playerId)
+    if character == nil then
+        return false, "that character is not known"
+    end
+    if player == nil then
+        return false, "that player is not known"
+    end
+    if character.player == playerId then
+        return true
+    end
+    if not self.partition:JoinPlayerOf(key, player.main, addon.FellowshipStore.SOURCE_MANUAL) then
+        return false, "the character could not be moved"
+    end
+    self:SettleConflicts({ [key] = true }, { main = true })
+    self:KeepActingMains()
+    return true
+end
+
+-- "Set alias…": sets the player's alias, or clears it when `alias` is
+-- empty. Multi-word aliases are allowed here (notes only take one word).
+function Service:SetAlias(key, alias)
+    local character = self.partition:GetCharacter(key)
+    if character == nil then
+        return false, "that character is not known"
+    end
+    local playerId = character.player
+    local trimmed = type(alias) == "string" and string.gsub(alias, "^%s*(.-)%s*$", "%1") or ""
+    trimmed = string.gsub(trimmed, "%s+", " ")
+    if #trimmed > PlayerService.MAX_ALIAS_LENGTH then
+        return false, "aliases can be at most " .. PlayerService.MAX_ALIAS_LENGTH .. " characters"
+    end
+    if trimmed == "" then
+        self.partition:ClearAlias(playerId, addon.FellowshipStore.SOURCE_MANUAL)
+    else
+        self.partition:SetAlias(playerId, trimmed, addon.FellowshipStore.SOURCE_MANUAL)
+    end
+    local keys = {}
+    local members = self.partition:CharactersOf(playerId)
+    local index
+    for index = 1, #members do
+        keys[members[index]] = true
+    end
+    self:SettleConflicts(keys, { alias = true, ["competing aliases"] = true })
+    return true
+end
+
+-- "Detach as own player": moves `key` into a new single-character player.
+function Service:Detach(key)
+    local character = self.partition:GetCharacter(key)
+    if character == nil then
+        return false, "that character is not known"
+    end
+    if self.partition:CharactersOf(character.player)[2] == nil then
+        return false, "it is already its own player"
+    end
+    if self.partition:MoveToNewPlayer(key, addon.FellowshipStore.SOURCE_MANUAL) == nil then
+        return false, "the character could not be moved"
+    end
+    self:SettleConflicts({ [key] = true }, { main = true })
+    self:KeepActingMains()
+    return true
+end
+
+-- Lookups --------------------------------------------------------------------
+
+-- The player id and record of a character's player, or nil.
+function Service:PlayerOf(key)
+    local character = self.partition:GetCharacter(key)
+    if character == nil then
+        return nil
+    end
+    return character.player, self.partition:GetPlayer(character.player)
+end
+
+-- Character keys of a player, main first.
+function Service:CharactersOf(playerId)
+    return self.partition:CharactersOf(playerId)
+end
+
+-- How a character is shown: its name as the roster spells it.
+function Service:CharacterName(key)
+    local character = self.partition:GetCharacter(key)
+    if character == nil then
+        return nil
+    end
+    if self.normalizer ~= nil then
+        return self.normalizer:Display(character.name) or key
+    end
+    return character.name or key
+end
+
+-- How a player is shown: "Alias (Main)", or the main's name.
+function Service:PlayerName(playerId)
+    local player = self.partition:GetPlayer(playerId)
+    if player == nil then
+        return nil
+    end
+    local mainName = self:CharacterName(player.main) or player.main
+    if player.alias ~= nil then
+        return player.alias .. " (" .. mainName .. ")"
+    end
+    return mainName
+end
+
+-- How a character's player is shown, from any of its characters.
+function Service:PlayerNameOf(key)
+    local playerId = self:PlayerOf(key)
+    return playerId and self:PlayerName(playerId) or nil
+end
+
+-- Players matching `query` by alias or any in-guild character's name,
+-- case-insensitively, for the "Set main…" picker. An empty query lists
+-- everyone. Each result: { id, label, matched } where `matched` names the
+-- character that matched, when it wasn't the alias. Sorted by label.
+function Service:SearchPlayers(query, limit)
+    local needle = string.lower(type(query) == "string" and query or "")
+    needle = string.gsub(needle, "^%s*(.-)%s*$", "%1")
+    local results = {}
+    self.partition:EachPlayer(function(id, player)
+        local keys = self.partition:CharactersOf(id)
+        local inGuild, matched = false, nil
+        local aliasMatches = needle == ""
+            or (player.alias ~= nil and string.find(string.lower(player.alias), needle, 1, true) ~= nil)
+        local index
+        for index = 1, #keys do
+            if self.partition:IsInGuild(keys[index]) then
+                inGuild = true
+                local name = self:CharacterName(keys[index]) or keys[index]
+                if not aliasMatches and matched == nil and string.find(string.lower(name), needle, 1, true) then
+                    matched = name
+                end
+            end
+        end
+        if inGuild and (aliasMatches or matched ~= nil) then
+            table.insert(results, { id = id, label = self:PlayerName(id), matched = matched })
+        end
+    end)
+    table.sort(results, function(first, second)
+        local firstLabel, secondLabel = string.lower(first.label), string.lower(second.label)
+        if firstLabel ~= secondLabel then
+            return firstLabel < secondLabel
+        end
+        return first.id < second.id
+    end)
+    if limit ~= nil then
+        while #results > limit do
+            table.remove(results)
+        end
+    end
+    return results
 end
