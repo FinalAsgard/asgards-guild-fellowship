@@ -14,7 +14,8 @@ local function foundationRoot()
     return { schemaVersion = 1, guilds = {} }
 end
 
-local MEMBER = { classToken = "WARRIOR", level = 80, rankIndex = 1, online = true, zone = "Dornogal",
+local MEMBER = { name = "Toolbox-Area52", classToken = "WARRIOR", level = 80, rankIndex = 1,
+    online = true, zone = "Dornogal",
     rankName = "Officer", lastOnline = { 0, 0, 1, 0 } }
 
 test.test("store migrates the foundation's root by creating a partition on first use", function()
@@ -58,11 +59,13 @@ test.test("only lasting facts are persisted for a character", function()
     local store = newStore(foundationRoot())
     local character = store:Partition(GUILD):RecordCharacter("toolbox-area52", MEMBER)
 
-    local allowed = { class = true, level = true, player = true, rank = true, source = true }
+    local allowed = { class = true, level = true, name = true, player = true, rank = true, source = true }
     local field
     for field in pairs(character) do
         test.assertTrue(allowed[field], "unexpected persisted field " .. tostring(field))
     end
+    -- The name is kept exactly as the roster spells it.
+    test.assertEqual("Toolbox-Area52", character.name)
     test.assertEqual("WARRIOR", character.class)
     test.assertEqual(80, character.level)
     test.assertEqual(1, character.rank)
@@ -107,6 +110,7 @@ test.test("unreadable records are quarantined intact and the rest stays usable",
             ["broken-area52"] = "not a record",
             ["orphan-area52"] = { player = 9 },
             ["badlevel-area52"] = { player = 1, level = "eighty" },
+            ["badname-area52"] = { player = 1, name = 42 },
         },
         players = {
             [1] = { main = "toolbox-area52" },
@@ -123,7 +127,7 @@ test.test("unreadable records are quarantined intact and the rest stays usable",
     test.assertTrue(partition:GetCharacter("toolbox-area52") ~= nil)
     test.assertEqual(nil, partition:GetCharacter("broken-area52"))
     test.assertEqual(nil, partition:GetPlayer(2))
-    test.assertEqual(4, #data.quarantine)
+    test.assertEqual(5, #data.quarantine)
     test.assertTrue(data.futureField.kept)
     local quarantined = {}
     local index
@@ -133,6 +137,7 @@ test.test("unreadable records are quarantined intact and the rest stays usable",
     test.assertEqual("not a record", quarantined["broken-area52"].record)
     test.assertEqual("character's player is missing", quarantined["orphan-area52"].reason)
     test.assertEqual("eighty", quarantined["badlevel-area52"].record.level)
+    test.assertEqual("character name is invalid", quarantined["badname-area52"].reason)
     test.assertEqual("no main", quarantined[2].record.alias)
 end)
 

@@ -58,7 +58,7 @@ function RosterViewModel.Build(inputs)
 
     inputs.partition:EachCharacter(function(key, character)
         local live = members[key] or {}
-        local name = live.name and inputs.normalizer:Display(live.name) or key
+        local name = inputs.normalizer:Display(live.name or character.name) or key
         local classToken = live.classToken or character.class
         local online = live.online == true
         table.insert(rows, {

@@ -37,6 +37,9 @@ local function characterProblem(character)
     if not isWholeNumber(character.player) then
         return "character has no valid player id"
     end
+    if character.name ~= nil and not isText(character.name) then
+        return "character name is invalid"
+    end
     if character.class ~= nil and not isText(character.class) then
         return "character class is invalid"
     end
@@ -216,7 +219,8 @@ end
 
 -- Records a character seen in the roster. A character with no known
 -- relationships becomes the main of its own single-character player. Only
--- lasting facts are stored; everything else in `facts` is ignored.
+-- lasting facts (name, class, level, rank) are stored; everything else in
+-- `facts` is ignored.
 function Partition:RecordCharacter(key, facts)
     if not isText(key) or type(facts) ~= "table" then
         return nil
@@ -231,6 +235,12 @@ function Partition:RecordCharacter(key, facts)
         self.data.characters[key] = character
     end
 
+    -- The name exactly as the roster spells it (capitalization, realm
+    -- suffix), so it can still be shown once the character isn't in the
+    -- live roster.
+    if isText(facts.name) then
+        character.name = facts.name
+    end
     if isText(facts.classToken) then
         character.class = facts.classToken
     end

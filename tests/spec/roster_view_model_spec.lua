@@ -86,6 +86,16 @@ test.test("view model falls back to stored facts when live facts are missing", f
     test.assertEqual(nil, rows[1].location)
 end)
 
+test.test("view model shows the stored spelling of a character missing from the live roster", function()
+    local addon = load()
+    local partition, normalizer = setup(addon)
+    partition:RecordCharacter("tool box-camelot", { name = "Tool Box-Camelot", level = 60 })
+
+    local rows = addon.RosterViewModel.Build({ partition = partition, normalizer = normalizer })
+
+    test.assertEqual("Tool Box", rows[1].name)
+end)
+
 test.test("last online text uses the largest unit", function()
     local format = load().RosterViewModel.FormatLastOnline
 
