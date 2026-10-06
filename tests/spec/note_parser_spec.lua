@@ -69,6 +69,8 @@ local MAIN_CASES = {
         why = "a > marker before a Main: label counts first" },
     { rules = RETAIL, note = "Domain: Toolbox, main: Hammer", status = "resolved", key = "hammer-area52",
         why = "main: inside another word is not a label" },
+    { rules = RETAIL, note = "raid2main: Toolbox, alt_main: Toolbox, main: Hammer", status = "resolved",
+        key = "hammer-area52", why = "main: after a digit or underscore is not a label" },
     { rules = RETAIL, note = "Main: Nobody", status = "unresolved", text = "Nobody",
         why = "Main: label with an unknown name is unresolved" },
 }
@@ -129,6 +131,8 @@ local ALIAS_CASES = {
     { note = "Alias: Tool, or @Other", alias = "Tool", why = "an Alias: label before an @ counts first" },
     { note = "@Tool, Alias: Other", alias = "Tool", why = "an @ before an Alias: label counts first" },
     { note = "Healias: Tool", alias = nil, why = "alias: inside another word is not a label" },
+    { note = "raid2alias: Tool, my_alias: Tool", alias = nil,
+        why = "alias: after a digit or underscore is not a label" },
     { note = "Alias:", alias = nil, why = "no alias when nothing follows the label" },
 }
 

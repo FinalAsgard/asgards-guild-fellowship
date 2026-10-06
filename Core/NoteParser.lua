@@ -61,8 +61,9 @@ local function resolve(resolver, text)
 end
 
 -- Where the first `<word>:` label (any case) starts and ends, or nil. The
--- label must start the note or follow a character that isn't a letter, so
--- "Domain:" isn't a `Main:` label.
+-- label must start the note or follow a character that can't be part of a
+-- word (a letter, digit, or underscore), so "Domain:" and "raid2main:" aren't
+-- `Main:` labels.
 local function findLabel(note, word)
     local lower = string.lower(note)
     local init = 1
@@ -72,8 +73,8 @@ local function findLabel(note, word)
             return nil, nil
         end
         local before = first > 1 and string.byte(lower, first - 1) or nil
-        local isLetter = before ~= nil and (before >= 128 or string.match(string.char(before), "%a") ~= nil)
-        if not isLetter then
+        local inWord = before ~= nil and (before >= 128 or string.match(string.char(before), "[%w_]") ~= nil)
+        if not inWord then
             return first, last
         end
         init = first + 1
