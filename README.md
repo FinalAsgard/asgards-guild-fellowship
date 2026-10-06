@@ -33,6 +33,48 @@ Run it again any time; it only downloads a library whose pin changed. To change 
 
 If a library is missing in game, the add-on prints one message naming it, and `help` lists which libraries are present.
 
+## Development install (Windows)
+
+The development add-on is a directory junction, `Interface\AddOns\AsgardsGuildFellowshipDev`, that points straight at your git checkout. From PowerShell in the checkout:
+
+```powershell
+./tools/Install-Dev.ps1                 # WoW Forever (default)
+./tools/Install-Dev.ps1 -Client Retail  # WoW Retail
+```
+
+The installer fetches the libraries first, so you don't need to run `tools/Fetch-Libraries.ps1` yourself. If the fetch fails, nothing is linked. After a new install, restart WoW so it finds **Asgard's Guild Fellowship (Dev)**.
+
+| `-Client` | Default client directory |
+|---|---|
+| `Forever` (default) | `C:\Program Files (x86)\World of Warcraft\_classic_beta_` |
+| `Retail` | `C:\Program Files (x86)\World of Warcraft\_retail_` |
+
+If WoW is installed somewhere else, pass the `World of Warcraft` folder with `-WowInstallRoot`; `-Client` still picks the client directory inside it. For an unusual layout, pass the exact client directory with `-WowRoot`, which overrides the derived one:
+
+```powershell
+./tools/Install-Dev.ps1 -Client Retail -WowInstallRoot "D:\World of Warcraft"
+./tools/Install-Dev.ps1 -Client Forever -WowRoot "D:\Games\WoW Forever"
+```
+
+To develop against both clients, run the installer once per client. Both junctions point at the same checkout.
+
+The installer is safe to run again. If the junction already points at this checkout, it reports "already linked" and changes nothing. It refuses, without changing anything, if `AsgardsGuildFellowshipDev` is a real folder or a junction pointing somewhere else. It never edits repository files or changes permissions.
+
+### Updating
+
+There is no copy step. Pull, then reload:
+
+```powershell
+git pull --ff-only
+./tools/Fetch-Libraries.ps1   # only downloads libraries whose pins changed
+```
+
+Use `/reload` in game for Lua changes, and restart WoW after manifest changes.
+
+### Keeping production and development apart
+
+The production add-on lives in `AsgardsGuildFellowship` (managed by CurseForge) and the development add-on in `AsgardsGuildFellowshipDev`. They never overwrite each other. Each build has its own commands (`/agf` and `/agfdev`) and its own SavedVariables (`AsgardsGuildFellowshipDB` and `AsgardsGuildFellowshipDevDB`), so their data never mixes. Enable only one of them at a time.
+
 ## Running the tests
 
 The tests need only Lua 5.1:

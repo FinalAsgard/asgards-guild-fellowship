@@ -163,6 +163,25 @@ test.test("only the supported client manifests exist", function()
     test.assertEqual(#VARIANTS, found)
 end)
 
+-- The installer is verified by hand on Windows; this only keeps its names in
+-- step with the dev build.
+test.test("the dev installer links the dev folder for the dev manifests", function()
+    local handle = assert(io.open("tools/Install-Dev.ps1", "r"))
+    local source = handle:read("*a")
+    handle:close()
+
+    test.assertContains(source, '$addonFolderName = "AsgardsGuildFellowshipDev"')
+    test.assertContains(source, 'Directory = "_classic_beta_"; Manifest = "AsgardsGuildFellowshipDev_Camelot.toc"')
+    test.assertContains(source, 'Directory = "_retail_"; Manifest = "AsgardsGuildFellowshipDev_Mainline.toc"')
+    test.assertContains(source, '[string]$Client = "Forever"')
+    test.assertContains(source, '"Fetch-Libraries.ps1"')
+    -- The libraries are fetched before the junction is created.
+    test.assertTrue(
+        string.find(source, "& $fetchScript", 1, true) < string.find(source, "New-Item -ItemType Junction", 1, true),
+        "fetch runs before linking"
+    )
+end)
+
 test.test("an unknown add-on folder name is refused", function()
     local ok, failure = pcall(test.newAddonNamed, "AsgardsGuildFellowshipCopy")
 
