@@ -104,7 +104,7 @@ local function cellText(row, field)
             return "|cffffd100" .. marker .. row.label .. "|r  |cff9d9d9d" .. row.count .. " characters|r"
         end
         if field == "location" and row.online then
-            return "|cff20ff20Online|r"
+            return "|cff20ff20Online as " .. tostring(row.onlineAs) .. "|r"
         end
         return ""
     end
@@ -559,15 +559,64 @@ local function build(framework, options)
     setResizeBounds(panel)
     restoreGeometry(panel, options.loadGeometry(), parent)
 
+    -- Controls: search, online only, expand and collapse all.
+    local search = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    search:SetSize(180, 20)
+    search:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -30)
+    search:SetAutoFocus(false)
+    local placeholder = search:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    placeholder:SetPoint("LEFT", search, "LEFT", 2, 0)
+    placeholder:SetText("Search names and aliases")
+    search:SetScript("OnTextChanged", function(box)
+        local text = box:GetText()
+        if text == "" then
+            placeholder:Show()
+        else
+            placeholder:Hide()
+        end
+        options.onSearch(text)
+    end)
+    search:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    search:SetScript("OnEnterPressed", function(box)
+        box:ClearFocus()
+    end)
+
+    local onlineOnly = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    onlineOnly:SetSize(22, 22)
+    onlineOnly:SetPoint("LEFT", search, "RIGHT", 10, 0)
+    local onlineLabel = onlineOnly:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    onlineLabel:SetPoint("LEFT", onlineOnly, "RIGHT", 2, 0)
+    onlineLabel:SetText("Online only")
+    onlineOnly:SetScript("OnClick", function()
+        options.onToggleOnlineOnly()
+    end)
+
+    local collapseAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    collapseAll:SetSize(90, 20)
+    collapseAll:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -30)
+    collapseAll:SetText("Collapse all")
+    collapseAll:SetScript("OnClick", function()
+        options.onCollapseAll()
+    end)
+    local expandAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    expandAll:SetSize(90, 20)
+    expandAll:SetPoint("RIGHT", collapseAll, "LEFT", -4, 0)
+    expandAll:SetText("Expand all")
+    expandAll:SetScript("OnClick", function()
+        options.onExpandAll()
+    end)
+
     local headerIndex
     for headerIndex = 1, #COLUMNS do
         local column = COLUMNS[headerIndex]
         local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -30)
+        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -58)
         header:SetText(column.header)
     end
 
-    local lineAmount = math.floor((RosterWindow.DEFAULT_HEIGHT - 70) / RosterWindow.LINE_HEIGHT)
+    local lineAmount = math.floor((RosterWindow.DEFAULT_HEIGHT - 120) / RosterWindow.LINE_HEIGHT)
     local picker = buildPicker(framework, frameName)
     local function openRowMenu(row, line)
         local entries = options.menuFor(row)
@@ -618,14 +667,14 @@ local function build(framework, options)
         refreshLines,
         {},
         RosterWindow.DEFAULT_WIDTH - 20,
-        RosterWindow.DEFAULT_HEIGHT - 70,
+        RosterWindow.DEFAULT_HEIGHT - 120,
         lineAmount,
         RosterWindow.LINE_HEIGHT,
         newLine,
         true
     )
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -46)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -74)
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 40)
     scroll:CreateLines(newLine, lineAmount)
 
@@ -709,7 +758,9 @@ end
 -- shown, and options.onPurge(key) / onPurgeAll() purge them;
 -- options.menuFor(row) lists a row's organize actions, and onSetMain(key,
 -- playerId), onMakeMain(key), onSetAlias(key, text), onDetach(key),
--- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them.
+-- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them;
+-- options.onSearch(text), onToggleOnlineOnly(), onExpandAll(), and
+-- onCollapseAll() drive the controls row.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then

@@ -94,6 +94,18 @@ if clientProfile.supported then
                 aliasOf = function(key)
                     return rosterController:AliasOf(key)
                 end,
+                onSearch = function(text)
+                    rosterController:SetSearch(text)
+                end,
+                onToggleOnlineOnly = function()
+                    return rosterController:ToggleOnlineOnly()
+                end,
+                onExpandAll = function()
+                    rosterController:ExpandAll()
+                end,
+                onCollapseAll = function()
+                    rosterController:CollapseAll()
+                end,
                 onMenuUnavailable = function()
                     rosterController:Print("The organize menu isn't available on this client.")
                 end,

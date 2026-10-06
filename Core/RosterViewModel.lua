@@ -96,9 +96,14 @@ end
 --   collapsed    set of player ids whose groups are collapsed
 --   showDeparted true to include characters who left the guild
 --   now          the current timestamp, for "Left N days ago"
+--   search       text to match against character names and aliases,
+--                ignoring case; a matching player shows its whole group
+--   onlineOnly   true to show only players with a character online
 -- Returns rows. A player with several characters gets a header row:
---   { kind = "player", id, label, alias, mainName, online, collapsed, count }
--- where `label` is "Alias (Main)", or the main's name without an alias,
+--   { kind = "player", id, label, alias, mainName, online, onlineAs,
+--     collapsed, count }
+-- where `label` is "Alias (Main)", or the main's name without an alias, and
+-- `onlineAs` names the online character (the main if it is online),
 -- followed (unless collapsed) by its character rows:
 --   { kind = "character", key, player, isMain, name, coloredName,
 --     classToken, level, rank, online, departed, location }
@@ -108,11 +113,40 @@ end
 -- A single-character player is just its character row, marked
 -- `standalone = true` and carrying the player's `label` and `coloredLabel`.
 -- Players sort online first, then by label.
+local function trimmedLower(text)
+    if type(text) ~= "string" then
+        return ""
+    end
+    return string.lower((string.gsub(text, "^%s*(.-)%s*$", "%1")))
+end
+
+local function contains(text, needle)
+    return text ~= nil and string.find(string.lower(text), needle, 1, true) ~= nil
+end
+
+-- Whether a group passes the search and online filters.
+local function shown(group, needle, onlineOnly)
+    if onlineOnly and not group.online then
+        return false
+    end
+    if needle == "" or contains(group.alias, needle) then
+        return true
+    end
+    local index
+    for index = 1, #group.rows do
+        if contains(group.rows[index].name, needle) then
+            return true
+        end
+    end
+    return false
+end
+
 function RosterViewModel.Build(inputs)
     inputs.members = inputs.members or {}
     inputs.classColor = inputs.classColor or function() return nil end
     local collapsed = inputs.collapsed or {}
     local partition = inputs.partition
+    local needle = trimmedLower(inputs.search)
 
     local groups = {}
     partition:EachPlayer(function(id, player)
@@ -120,6 +154,7 @@ function RosterViewModel.Build(inputs)
         if keys[1] ~= nil then
             local rows = {}
             local online = false
+            local onlineAs
             -- CharactersOf puts the main first, so the label uses the
             -- main's name even when it is hidden.
             local mainName = characterRow(inputs, keys[1], partition:GetCharacter(keys[1]), id, true).name
@@ -128,19 +163,24 @@ function RosterViewModel.Build(inputs)
                 local row = characterRow(inputs, keys[index], partition:GetCharacter(keys[index]), id,
                     keys[index] == player.main)
                 if not row.departed or inputs.showDeparted then
+                    if row.online and onlineAs == nil then
+                        onlineAs = row.name
+                    end
                     online = online or row.online
                     table.insert(rows, row)
                 end
             end
-            if rows[1] ~= nil then
-                table.insert(groups, {
-                    id = id,
-                    label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
-                    alias = player.alias,
-                    mainName = mainName,
-                    online = online,
-                    rows = rows,
-                })
+            local group = {
+                id = id,
+                label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
+                alias = player.alias,
+                mainName = mainName,
+                online = online,
+                onlineAs = onlineAs,
+                rows = rows,
+            }
+            if rows[1] ~= nil and shown(group, needle, inputs.onlineOnly) then
+                table.insert(groups, group)
             end
         end
     end)
@@ -173,6 +213,7 @@ function RosterViewModel.Build(inputs)
                 alias = group.alias,
                 mainName = group.mainName,
                 online = group.online,
+                onlineAs = group.onlineAs,
                 collapsed = collapsed[group.id] == true,
                 count = #group.rows,
             })
@@ -185,4 +226,36 @@ function RosterViewModel.Build(inputs)
         end
     end
     return rows
+end
+
+-- The ids of every player with more than one character, for Collapse all.
+function RosterViewModel.GroupIds(partition)
+    local ids = {}
+    partition:EachPlayer(function(id)
+        if partition:CharactersOf(id)[2] ~= nil then
+            table.insert(ids, id)
+        end
+    end)
+    table.sort(ids)
+    return ids
+end
+
+-- Remembers the last build and returns it again while `stamp` (a value the
+-- caller changes whenever any input changes) is the same, so reopening the
+-- window or redrawing without changes doesn't rebuild.
+local Cache = {}
+Cache.__index = Cache
+
+function RosterViewModel.CreateCache()
+    return setmetatable({ builds = 0 }, Cache)
+end
+
+function Cache:Build(inputs, stamp)
+    if self.rows ~= nil and stamp ~= nil and stamp == self.stamp then
+        return self.rows
+    end
+    self.rows = RosterViewModel.Build(inputs)
+    self.stamp = stamp
+    self.builds = self.builds + 1
+    return self.rows
 end

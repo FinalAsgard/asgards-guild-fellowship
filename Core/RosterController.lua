@@ -358,13 +358,48 @@ function Controller:PurgeAllDeparted()
     return purged
 end
 
--- Collapses or expands a player's group. The state lasts for the session.
+-- Collapses or expands a player's group. The state lasts for the session,
+-- so groups stay as they were when the window is reopened.
 function Controller:ToggleGroup(playerId)
     if playerId == nil then
         return
     end
     self.collapsed[playerId] = not self.collapsed[playerId] or nil
     self:Refresh()
+end
+
+function Controller:ExpandAll()
+    self.collapsed = {}
+    self:Refresh()
+end
+
+function Controller:CollapseAll()
+    if self.current == nil then
+        return
+    end
+    self.collapsed = {}
+    local ids = addon.RosterViewModel.GroupIds(self.current.partition)
+    local index
+    for index = 1, #ids do
+        self.collapsed[ids[index]] = true
+    end
+    self:Refresh()
+end
+
+-- The search box: matches character names and aliases.
+function Controller:SetSearch(text)
+    local search = type(text) == "string" and text or ""
+    if search == self.search then
+        return
+    end
+    self.search = search
+    self:Refresh()
+end
+
+function Controller:ToggleOnlineOnly()
+    self.onlineOnly = not self.onlineOnly
+    self:Refresh()
+    return self.onlineOnly
 end
 
 -- Live roster facts for display, keyed by character key. Unlike a scan,
@@ -383,31 +418,47 @@ function Controller:LiveMembers(normalizer)
     return members
 end
 
--- Redraws the window from the store plus live roster facts.
+-- Something the roster shows changed (saved data, live facts, or a view
+-- setting): bump the revision and redraw.
 function Controller:Refresh()
+    self.revision = (self.revision or 0) + 1
+    self:Redraw()
+end
+
+-- Draws the window from the store plus live roster facts. The rows are
+-- only rebuilt when the revision or guild changed since the last build.
+function Controller:Redraw()
     if self.window == nil or self.current == nil then
         return
     end
-    local normalizer = self:Normalizer(self.current.guild)
-    local members = self:LiveMembers(normalizer)
-    local rows = addon.RosterViewModel.Build({
-        partition = self.current.partition,
-        members = members,
-        normalizer = normalizer,
-        classColor = function(classToken)
-            return self.client:GetClassColor(classToken)
-        end,
-        collapsed = self.collapsed,
-        showDeparted = self.showDeparted == true,
-        now = self.client:Timestamp(),
-    })
-    self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
-    self.window:SetRows(rows)
-    self.window:SetConflicts(addon.ConflictViewModel.Build({
-        partition = self.current.partition,
-        members = members,
-        normalizer = normalizer,
-    }))
+    local stamp = self.current.partition.key .. "#" .. tostring(self.revision or 0)
+    if self.cache == nil then
+        self.cache = addon.RosterViewModel.CreateCache()
+    end
+    if self.cache.stamp ~= stamp then
+        local normalizer = self:Normalizer(self.current.guild)
+        local members = self:LiveMembers(normalizer)
+        local rows = self.cache:Build({
+            partition = self.current.partition,
+            members = members,
+            normalizer = normalizer,
+            classColor = function(classToken)
+                return self.client:GetClassColor(classToken)
+            end,
+            collapsed = self.collapsed,
+            showDeparted = self.showDeparted == true,
+            onlineOnly = self.onlineOnly == true,
+            search = self.search,
+            now = self.client:Timestamp(),
+        }, stamp)
+        self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
+        self.window:SetRows(rows)
+        self.window:SetConflicts(addon.ConflictViewModel.Build({
+            partition = self.current.partition,
+            members = members,
+            normalizer = normalizer,
+        }))
+    end
     self:UpdateStatus()
 end
 
@@ -432,8 +483,9 @@ function Controller:Toggle()
         self.window = window
     end
 
+    -- Reopening with nothing changed reuses the last build.
     self.current = { guild = guild, partition = partition }
-    self:Refresh()
+    self:Redraw()
     self.window:Show()
     return true
 end
