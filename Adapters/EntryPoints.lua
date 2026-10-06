@@ -97,9 +97,32 @@ function Points:StartMinimap()
         local state = self.minimapState() or {}
         icon:Register(name, launcher, state)
         self.launcher = launcher
+        self.icon, self.iconState = icon, state
     end)
     self.minimapRegistered = ok and self.launcher ~= nil
     return self.minimapRegistered
+end
+
+-- `/agf minimap`: shows or hides the minimap button and saves the choice.
+-- Returns true when the button is now shown, false when hidden, or nil
+-- and a reason when there is no minimap button.
+function Points:ToggleMinimap()
+    if not self.minimapRegistered then
+        return nil, "the minimap button isn't available (LibDBIcon is missing)"
+    end
+    local hide = not self.iconState.hide
+    local ok = pcall(function()
+        if hide then
+            self.icon:Hide(addon.Identity.addonName)
+        else
+            self.icon:Show(addon.Identity.addonName)
+        end
+    end)
+    if not ok then
+        return nil, "the minimap button couldn't be changed"
+    end
+    self.iconState.hide = hide
+    return not hide
 end
 
 -- The add-on compartment entry, where the client has the compartment.

@@ -30,6 +30,8 @@ local function installMinimapLibraries(environment)
     function icon:Register(name, object, state)
         self.registered[name] = { object = object, state = state }
     end
+    function icon:Hide(name) self.registered[name].shown = false end
+    function icon:Show(name) self.registered[name].shown = true end
     environment.LibStub.libs["LibDataBroker-1.1"] = broker
     environment.LibStub.libs["LibDBIcon-1.0"] = icon
     return broker, icon
@@ -150,6 +152,33 @@ local index
 for index = 1, #fixtures.PROFILES do
     registerProfileTests(fixtures.PROFILES[index])
 end
+
+test.test("the minimap button can be hidden and shown again, and the choice is saved", function()
+    local world = fixtures.newEnvironment("Retail")
+    local _, icon = installMinimapLibraries(world.environment)
+    local saved = { minimapPos = 200 }
+    local points = build(world, { minimapState = saved })
+    points:StartMinimap()
+    local name = "AsgardsGuildFellowship"
+
+    test.assertEqual(false, points:ToggleMinimap())
+    test.assertTrue(saved.hide)
+    test.assertEqual(false, icon.registered[name].shown)
+
+    test.assertEqual(true, points:ToggleMinimap())
+    test.assertFalse(saved.hide)
+    test.assertEqual(true, icon.registered[name].shown)
+end)
+
+test.test("without a minimap button, toggling it explains why", function()
+    local points = build(fixtures.newEnvironment("Retail"))
+    points:StartMinimap()
+
+    local shown, reason = points:ToggleMinimap()
+
+    test.assertEqual(nil, shown)
+    test.assertTrue(reason ~= nil)
+end)
 
 test.test("missing LibDataBroker or LibDBIcon disables the minimap button without errors", function()
     local world = fixtures.newEnvironment("Retail")

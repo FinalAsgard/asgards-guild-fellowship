@@ -7,8 +7,8 @@ local function newClient(world)
 end
 
 local EXPECTED = {
-    Forever = { realm = "Camelot", homeRealm = "Camelot", first = "Tool Box-Camelot", twoPartNames = true },
-    Retail = { realm = "Area 52", homeRealm = "Area52", first = "Toolbox-Area52", twoPartNames = false },
+    Forever = { realm = "Camelot", first = "Tool Box-Camelot", twoPartNames = true },
+    Retail = { realm = "Area 52", first = "Toolbox-Area52", twoPartNames = false },
 }
 
 local function registerProfileTests(profile)
@@ -21,7 +21,6 @@ local function registerProfileTests(profile)
         local guild = client:GetGuildIdentity()
         test.assertEqual("Knights of Camelot", guild.name)
         test.assertEqual(expected.realm, guild.realm)
-        test.assertEqual(expected.homeRealm, client:GetHomeRealm())
         test.assertTrue(client:IsInGuild())
         test.assertEqual(3, client:GetGuildRosterCount())
 
@@ -97,7 +96,6 @@ test.test("guild roster adapter returns nil or false when the APIs are missing o
         test.assertEqual(nil, client:GetGuildRosterCount())
         test.assertEqual(nil, client:GetGuildMember(1))
         test.assertFalse(client:RequestGuildRoster())
-        test.assertEqual(nil, client:GetHomeRealm())
         test.assertEqual(nil, client:Timestamp())
         test.assertEqual(nil, client:GetClassColor("WARRIOR"))
         test.assertFalse(client:ObserveGuildRoster(function() end))

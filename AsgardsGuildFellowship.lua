@@ -124,6 +124,16 @@ if clientProfile.supported then
     router:Register("rescan", "rescan the guild roster now", function()
         rosterController:Rescan()
     end)
+    router:Register("minimap", "show or hide the minimap button", function()
+        local shown, reason = entryPoints:ToggleMinimap()
+        if shown == nil then
+            rosterController:Print("Can't change the minimap button: " .. reason .. ".")
+        elseif shown then
+            rosterController:Print("Minimap button shown.")
+        else
+            rosterController:Print("Minimap button hidden. Type the command again to bring it back.")
+        end
+    end)
     router:SetDefault("roster")
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()

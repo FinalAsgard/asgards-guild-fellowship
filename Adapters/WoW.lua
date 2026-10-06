@@ -251,18 +251,6 @@ function Client:ObserveGuildRoster(onUpdate)
     return true
 end
 
--- The realm name as roster names spell it (no spaces), or nil.
-function Client:GetHomeRealm()
-    local ok, realm = callFunction(self.environment.GetNormalizedRealmName)
-    if not ok or type(realm) ~= "string" or realm == "" then
-        ok, realm = callFunction(self.environment.GetRealmName)
-    end
-    if not ok or type(realm) ~= "string" or realm == "" then
-        return nil
-    end
-    return (string.gsub(realm, "%s+", ""))
-end
-
 -- Wall-clock seconds for saved records, or nil.
 function Client:Timestamp()
     local ok, now = callFunction(self.environment.GetServerTime)

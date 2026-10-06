@@ -9,7 +9,7 @@ The add-on groups the guild's characters into **players**. Each player has one m
 ### Opening it
 
 - `/agf` (or `/agf roster`) shows or hides the roster window. The development build uses `/agfdev`.
-- The minimap button toggles it too. Its tooltip shows how many conflicts are waiting. Drag it to move it; its position is saved.
+- The minimap button toggles it too. Its tooltip shows how many conflicts are waiting. Drag it to move it; its position is saved. `/agf minimap` hides it, and running it again brings it back.
 - On Retail, the add-on compartment has an entry for it as well.
 - The guild window gets a **Guild Fellowship** button left of **Invite Member**. If the add-on can't find that button, it skips this one quietly.
 - `/agf help` lists the commands with the version, client, and library status.
