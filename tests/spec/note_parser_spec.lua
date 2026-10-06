@@ -96,6 +96,13 @@ test.test("note parser reports both candidates for an ambiguous first name", fun
     test.assertEqual(2, #result.mainRef.candidates)
 end)
 
+test.test("note parser reads Main: and Alias: labels in one note", function()
+    local result = NoteParser.Parse("Main: Tool Box, Alias: TheTool", foreverResolver, FOREVER)
+
+    test.assertEqual("tool box-camelot", result.mainRef.key)
+    test.assertEqual("TheTool", result.alias)
+end)
+
 test.test("note parser finds both markers in one note, in either order", function()
     local first = NoteParser.Parse("@TheTool >Toolbox", retailResolver, RETAIL)
     local second = NoteParser.Parse("Officer >Toolbox, goes by @TheTool", retailResolver, RETAIL)
@@ -114,6 +121,15 @@ local ALIAS_CASES = {
     { note = "@Tool!", alias = "Tool", why = "stops at disallowed punctuation" },
     { note = "@ TheTool", alias = nil, why = "no alias when nothing follows the @" },
     { note = "@Tool @Other", alias = "Tool", why = "only the first @ counts" },
+    { note = "Alias: TheTool", alias = "TheTool", why = "an Alias: label" },
+    { note = "Raid lead, alias:TheTool", alias = "TheTool", why = "a lowercase alias: label anywhere, without a space" },
+    { note = "ALIAS : TheTool", alias = "TheTool", why = "Alias: label ignores case and a space before the colon" },
+    { note = "Alias: TheTool raid lead", alias = "TheTool", why = "Alias: label takes only one word" },
+    { note = "Alias: @TheTool", alias = "TheTool", why = "Alias: label followed by @ is one marker" },
+    { note = "Alias: Tool, or @Other", alias = "Tool", why = "an Alias: label before an @ counts first" },
+    { note = "@Tool, Alias: Other", alias = "Tool", why = "an @ before an Alias: label counts first" },
+    { note = "Healias: Tool", alias = nil, why = "alias: inside another word is not a label" },
+    { note = "Alias:", alias = nil, why = "no alias when nothing follows the label" },
 }
 
 for index = 1, #ALIAS_CASES do

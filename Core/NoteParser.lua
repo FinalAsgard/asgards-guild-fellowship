@@ -1,16 +1,16 @@
 local _, addon = ...
 
--- Reads the `>Main` (or `Main: Name`) and `@Alias` markers from a public
--- guild note. Pure: the caller passes a resolver that knows which
--- characters exist.
+-- Reads the main (`>Name` or `Main: Name`) and alias (`@Alias` or
+-- `Alias: Name`) markers from a public guild note. Pure: the caller passes a
+-- resolver that knows which characters exist.
 --
 --   resolver(text) -> array of character keys matching `text`, matched by
 --                     full name or, for a single word on Forever, by unique
 --                     first name
 --
--- Only the first main marker and the first `@` count, anywhere in the note;
--- all other text is ignored. Nothing is ever guessed: a main that doesn't match
--- exactly one character is reported as unresolved or ambiguous.
+-- Only the first main marker and the first alias marker count, anywhere in
+-- the note; all other text is ignored. Nothing is ever guessed: a main that
+-- doesn't match exactly one character is reported as unresolved or ambiguous.
 local NoteParser = {}
 addon.NoteParser = NoteParser
 
@@ -60,14 +60,14 @@ local function resolve(resolver, text)
     return nil
 end
 
--- Where the first `Main:` label (any case) ends, or nil. The label must
--- start the note or follow a character that isn't a letter, so "Domain:"
--- doesn't count.
-local function mainLabelEnd(note)
+-- Where the first `<word>:` label (any case) starts and ends, or nil. The
+-- label must start the note or follow a character that isn't a letter, so
+-- "Domain:" isn't a `Main:` label.
+local function findLabel(note, word)
     local lower = string.lower(note)
     local init = 1
     while true do
-        local first, last = string.find(lower, "main%s*:", init)
+        local first, last = string.find(lower, word .. "%s*:", init)
         if first == nil then
             return nil, nil
         end
@@ -80,21 +80,21 @@ local function mainLabelEnd(note)
     end
 end
 
--- Where the name after the first main marker starts, or nil. A main is
--- marked with `>Name` or `Main: Name`; whichever comes first counts.
-local function mainTextStart(note)
-    local arrow = string.find(note, ">", 1, true)
-    local labelStart, labelEnd = mainLabelEnd(note)
-    if labelStart ~= nil and (arrow == nil or labelStart < arrow) then
-        -- "Main: >Name" is the same marker written twice.
-        local rest = string.match(string.sub(note, labelEnd + 1), "^%s*>")
-        return labelEnd + 1 + (rest and #rest or 0)
+-- Where the text after the first marker starts, or nil. A marker is either
+-- the `symbol` or the `<word>:` label; whichever comes first counts. A label
+-- followed by the symbol ("Main: >Name") is one marker.
+local function markerTextStart(note, symbol, word)
+    local symbolAt = string.find(note, symbol, 1, true)
+    local labelStart, labelEnd = findLabel(note, word)
+    if labelStart ~= nil and (symbolAt == nil or labelStart < symbolAt) then
+        local skip = string.match(string.sub(note, labelEnd + 1), "^%s*" .. symbol .. "?")
+        return labelEnd + 1 + #skip
     end
-    return arrow and arrow + 1 or nil
+    return symbolAt and symbolAt + 1 or nil
 end
 
 local function parseMain(note, resolver, twoPartNames)
-    local start = mainTextStart(note)
+    local start = markerTextStart(note, ">", "main")
     if start == nil then
         return nil
     end
@@ -115,11 +115,11 @@ local function parseMain(note, resolver, twoPartNames)
 end
 
 local function parseAlias(note)
-    local start = string.find(note, "@", 1, true)
+    local start = markerTextStart(note, "@", "alias")
     if start == nil then
         return nil
     end
-    local alias = string.match(string.sub(note, start + 1), ALIAS_WORD)
+    local alias = string.match(string.sub(note, start), ALIAS_WORD)
     if alias == nil or alias == "" then
         return nil
     end

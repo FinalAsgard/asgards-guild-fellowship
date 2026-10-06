@@ -21,9 +21,9 @@ Opening the window never scans the guild, so it's always quick. The window remem
 Two markers in a character's **public** note seed the database:
 
 - `Main: Toolbox` or the shorter `>Toolbox` means "this character is an alt of Toolbox".
-- `@TheTool` means "this player goes by TheTool".
+- `Alias: TheTool` or the shorter `@TheTool` means "this player goes by TheTool".
 
-A marker can sit anywhere in the note (for example `Tank, Main: Toolbox`, `Tank >Toolbox` or `@TheTool raid lead`), and both kinds can appear in one note. Only the first main marker and the first `@` count. The `Main:` label can be any case (`main:` works too), and the space after the colon is optional. Matching ignores case.
+A marker can sit anywhere in the note (for example `Tank, Main: Toolbox, Alias: TheTool`, `Tank >Toolbox` or `@TheTool raid lead`), and both kinds can appear in one note. Only the first main marker and the first alias marker count. The `Main:` and `Alias:` labels can be any case (`main:` works too), the space after the colon is optional, and a label only counts as a word of its own (`Domain:` isn't a main marker). Matching ignores case.
 
 - On **WoW Forever**, names have a first and last name: `Main: Tool Box` and `>Tool Box` work. So do `Main: Tool` and `>Tool`, as long as only one guild character has the first name Tool.
 - On **Retail**, `Main: Toolbox` and `>Toolbox` use the single character name. A realm suffix is optional.
