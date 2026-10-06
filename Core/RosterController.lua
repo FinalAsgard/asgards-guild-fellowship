@@ -91,6 +91,15 @@ function Controller:Context()
     return guild, partition, normalizer
 end
 
+-- Pending conflicts for the current guild, for the minimap tooltip.
+function Controller:PendingConflictCount()
+    local guild, partition = self:QuietContext()
+    if guild == nil then
+        return 0
+    end
+    return #(partition:GetConflicts() or {})
+end
+
 -- Saved data is ready (after login): let the scheduler run its daily check.
 function Controller:OnSavedDataReady()
     self.scheduler:OnSavedDataReady()

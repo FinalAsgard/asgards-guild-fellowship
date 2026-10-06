@@ -25,7 +25,7 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence, rosterController
+local persistence, rosterController, entryPoints
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     rosterController = addon.RosterController.Create({
@@ -128,6 +128,19 @@ if clientProfile.supported then
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
     end)
+    entryPoints = addon.EntryPoints.Create({
+        client = client,
+        toggle = function()
+            rosterController:Toggle()
+        end,
+        conflictCount = function()
+            return rosterController:PendingConflictCount()
+        end,
+        minimapState = function()
+            local store = rosterController:Store()
+            return store and store:GetMinimapState()
+        end,
+    })
 else
     -- Never touch saved data on a client we cannot identify.
     client:Print(addon.Identity.chatPrefix .. " This game client is not supported (" ..
@@ -137,6 +150,8 @@ end
 
 local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
     rosterController:OnSavedDataReady()
+    -- The minimap button needs saved data for its position.
+    entryPoints:Start()
 end)
 
 addon.client = client
@@ -145,6 +160,7 @@ addon.libraryCheck = libraryCheck
 addon.lifecycle = lifecycle
 addon.persistence = persistence
 addon.rosterController = rosterController
+addon.entryPoints = entryPoints
 addon.router = router
 addon.version = version
 

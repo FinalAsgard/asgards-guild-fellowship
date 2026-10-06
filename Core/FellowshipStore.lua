@@ -256,6 +256,22 @@ function Store:SetWindowState(state)
     return true
 end
 
+-- The minimap button's saved state (LibDBIcon's angle and hidden flag),
+-- created on first use. Nil when an unusable value is stored there; it is
+-- then left alone.
+function Store:GetMinimapState()
+    if type(self.database) ~= "table" then
+        return nil
+    end
+    if self.database.minimap == nil then
+        self.database.minimap = {}
+    end
+    if type(self.database.minimap) ~= "table" then
+        return nil
+    end
+    return self.database.minimap
+end
+
 function Partition:GetCharacter(key)
     return self.data.characters[key]
 end

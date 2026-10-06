@@ -6,6 +6,7 @@ local MANIFEST_FILES = {
     "Adapters/ClientProfile.lua",
     "Adapters/WoW.lua",
     "Adapters/RosterWindow.lua",
+    "Adapters/EntryPoints.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",
