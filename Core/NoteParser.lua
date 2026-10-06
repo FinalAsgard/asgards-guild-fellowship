@@ -1,14 +1,15 @@
 local _, addon = ...
 
--- Reads the `>Main` and `@Alias` markers from a public guild note. Pure: the
--- caller passes a resolver that knows which characters exist.
+-- Reads the `>Main` (or `Main: Name`) and `@Alias` markers from a public
+-- guild note. Pure: the caller passes a resolver that knows which
+-- characters exist.
 --
 --   resolver(text) -> array of character keys matching `text`, matched by
 --                     full name or, for a single word on Forever, by unique
 --                     first name
 --
--- Only the first `>` and the first `@` count, anywhere in the note; all
--- other text is ignored. Nothing is ever guessed: a main that doesn't match
+-- Only the first main marker and the first `@` count, anywhere in the note;
+-- all other text is ignored. Nothing is ever guessed: a main that doesn't match
 -- exactly one character is reported as unresolved or ambiguous.
 local NoteParser = {}
 addon.NoteParser = NoteParser
@@ -59,12 +60,45 @@ local function resolve(resolver, text)
     return nil
 end
 
+-- Where the first `Main:` label (any case) ends, or nil. The label must
+-- start the note or follow a character that isn't a letter, so "Domain:"
+-- doesn't count.
+local function mainLabelEnd(note)
+    local lower = string.lower(note)
+    local init = 1
+    while true do
+        local first, last = string.find(lower, "main%s*:", init)
+        if first == nil then
+            return nil, nil
+        end
+        local before = first > 1 and string.byte(lower, first - 1) or nil
+        local isLetter = before ~= nil and (before >= 128 or string.match(string.char(before), "%a") ~= nil)
+        if not isLetter then
+            return first, last
+        end
+        init = first + 1
+    end
+end
+
+-- Where the name after the first main marker starts, or nil. A main is
+-- marked with `>Name` or `Main: Name`; whichever comes first counts.
+local function mainTextStart(note)
+    local arrow = string.find(note, ">", 1, true)
+    local labelStart, labelEnd = mainLabelEnd(note)
+    if labelStart ~= nil and (arrow == nil or labelStart < arrow) then
+        -- "Main: >Name" is the same marker written twice.
+        local rest = string.match(string.sub(note, labelEnd + 1), "^%s*>")
+        return labelEnd + 1 + (rest and #rest or 0)
+    end
+    return arrow and arrow + 1 or nil
+end
+
 local function parseMain(note, resolver, twoPartNames)
-    local start = string.find(note, ">", 1, true)
+    local start = mainTextStart(note)
     if start == nil then
         return nil
     end
-    local words = nameWords(string.sub(note, start + 1), twoPartNames and 2 or 1)
+    local words = nameWords(string.sub(note, start), twoPartNames and 2 or 1)
     if #words == 0 then
         return nil
     end

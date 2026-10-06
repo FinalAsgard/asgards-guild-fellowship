@@ -53,6 +53,24 @@ local MAIN_CASES = {
         why = "Retail never matches partial names" },
     { rules = RETAIL, note = "first >Hammer then >Toolbox", status = "resolved", key = "hammer-area52",
         why = "only the first > marker counts" },
+    { rules = FOREVER, note = "Main: Tool Box", status = "resolved", key = "tool box-camelot",
+        why = "Forever Main: label with a two-word name" },
+    { rules = FOREVER, note = "Healer, main:tool", status = "resolved", key = "tool box-camelot",
+        why = "Forever lowercase main: label anywhere, without a space" },
+    { rules = RETAIL, note = "Main: Toolbox", status = "resolved", key = "toolbox-area52",
+        why = "Retail Main: label" },
+    { rules = RETAIL, note = "MAIN : toolbox", status = "resolved", key = "toolbox-area52",
+        why = "Main: label ignores case and a space before the colon" },
+    { rules = RETAIL, note = "Main: >Toolbox", status = "resolved", key = "toolbox-area52",
+        why = "Main: label followed by > is one marker" },
+    { rules = RETAIL, note = "Main: Hammer, ex >Toolbox", status = "resolved", key = "hammer-area52",
+        why = "a Main: label before a > marker counts first" },
+    { rules = RETAIL, note = ">Hammer, Main: Toolbox", status = "resolved", key = "hammer-area52",
+        why = "a > marker before a Main: label counts first" },
+    { rules = RETAIL, note = "Domain: Toolbox, main: Hammer", status = "resolved", key = "hammer-area52",
+        why = "main: inside another word is not a label" },
+    { rules = RETAIL, note = "Main: Nobody", status = "unresolved", text = "Nobody",
+        why = "Main: label with an unknown name is unresolved" },
 }
 
 local index
@@ -104,6 +122,12 @@ for index = 1, #ALIAS_CASES do
         test.assertEqual(case.alias, NoteParser.Parse(case.note, retailResolver, RETAIL).alias)
     end)
 end
+
+test.test("note parser ignores a Main label with no name after it", function()
+    test.assertEqual(nil, NoteParser.Parse("Main:", retailResolver, RETAIL).mainRef)
+    test.assertEqual(nil, NoteParser.Parse("Domain: Toolbox", retailResolver, RETAIL).mainRef)
+    test.assertEqual(nil, NoteParser.Parse("Main alt of the raid", retailResolver, RETAIL).mainRef)
+end)
 
 test.test("note parser ignores notes without markers", function()
     local empty = NoteParser.Parse("", retailResolver, RETAIL)
