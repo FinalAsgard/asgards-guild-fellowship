@@ -16,7 +16,12 @@ Libs/DetailsFramework/load.xml
 Core/Identity.lua
 Adapters/ClientProfile.lua
 Adapters/WoW.lua
+Adapters/RosterWindow.lua
 Core/Persistence.lua
+Core/NameNormalizer.lua
+Core/FellowshipStore.lua
+Core/RosterViewModel.lua
+Core/RosterController.lua
 Core/LibraryCheck.lua
 Core/CommandRouter.lua
 Core/Lifecycle.lua

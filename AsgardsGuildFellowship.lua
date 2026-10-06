@@ -25,9 +25,40 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence
+local persistence, rosterController
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
+    rosterController = addon.RosterController.Create({
+        client = client,
+        nameRules = clientProfile.nameRules,
+        getDatabase = function()
+            return persistence:GetDatabase()
+        end,
+        createWindow = function()
+            return addon.RosterWindow.Create(client, {
+                loadGeometry = function()
+                    local store = rosterController:Store()
+                    return store and store:GetWindowState()
+                end,
+                saveGeometry = function(state)
+                    local store = rosterController:Store()
+                    if store ~= nil then
+                        store:SetWindowState(state)
+                    end
+                end,
+            })
+        end,
+    })
+    router:Register("roster", "show or hide the roster window", function()
+        rosterController:Toggle()
+    end)
+    router:Register("rescan", "rescan the guild roster now", function()
+        rosterController:Rescan()
+    end)
+    router:SetDefault("roster")
+    client:ObserveGuildRoster(function()
+        rosterController:OnRosterUpdate()
+    end)
 else
     -- Never touch saved data on a client we cannot identify.
     client:Print(addon.Identity.chatPrefix .. " This game client is not supported (" ..
@@ -42,6 +73,7 @@ addon.clientProfile = clientProfile
 addon.libraryCheck = libraryCheck
 addon.lifecycle = lifecycle
 addon.persistence = persistence
+addon.rosterController = rosterController
 addon.router = router
 addon.version = version
 

@@ -113,6 +113,10 @@ test.test("core modules never inspect the client", function()
     local files = {
         "Core/Identity.lua",
         "Core/Persistence.lua",
+        "Core/NameNormalizer.lua",
+        "Core/FellowshipStore.lua",
+        "Core/RosterViewModel.lua",
+        "Core/RosterController.lua",
         "Core/LibraryCheck.lua",
         "Core/CommandRouter.lua",
         "Core/Lifecycle.lua",

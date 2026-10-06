@@ -5,7 +5,12 @@ local MANIFEST_FILES = {
     "Core/Identity.lua",
     "Adapters/ClientProfile.lua",
     "Adapters/WoW.lua",
+    "Adapters/RosterWindow.lua",
     "Core/Persistence.lua",
+    "Core/NameNormalizer.lua",
+    "Core/FellowshipStore.lua",
+    "Core/RosterViewModel.lua",
+    "Core/RosterController.lua",
     "Core/LibraryCheck.lua",
     "Core/CommandRouter.lua",
     "Core/Lifecycle.lua",
@@ -88,9 +93,11 @@ local function registerBootstrapTest(variant)
         test.assertEqual(variant.slashAlias, addon.Identity.slashAlias)
         test.assertEqual(variant.savedVariables, addon.Identity.databaseName)
         test.assertContains(addon.Identity.chatPrefix, variant.chatTag)
-        test.assertEqual(1, #world.frames)
-        test.assertTrue(world.frames[1].registeredEvents.ADDON_LOADED)
-        test.assertTrue(world.frames[1].registeredEvents.PLAYER_LOGIN)
+        -- The lifecycle frame, plus the roster frame for GUILD_ROSTER_UPDATE.
+        test.assertEqual(2, #world.frames)
+        test.assertTrue(world.frames[2].registeredEvents.ADDON_LOADED)
+        test.assertTrue(world.frames[2].registeredEvents.PLAYER_LOGIN)
+        test.assertTrue(world.frames[1].registeredEvents.GUILD_ROSTER_UPDATE)
 
         fixtures.fire(world, "ADDON_LOADED", variant.addonName)
         -- Saved data waits for login.
@@ -107,14 +114,22 @@ local function registerBootstrapTest(variant)
         test.assertEqual(otherDatabase, environment[variant.otherDatabaseName])
         test.assertEqual("other build", otherDatabase.sentinel)
 
-        environment.SlashCmdList[variant.slashKey]("")
+        environment.SlashCmdList[variant.slashKey]("help")
         test.assertContains(world.messages[1], variant.chatTag .. "|r Commands: " ..
             variant.slashCommand .. " help")
+        test.assertContains(world.messages[1], variant.slashCommand .. " roster - show or hide the roster window")
+        test.assertContains(world.messages[1], variant.slashCommand .. " rescan - rescan the guild roster now")
         test.assertContains(
             world.messages[2],
             "Version " .. variant.version .. " on " .. variant.clientLabel .. "."
         )
         test.assertContains(world.messages[3], "Libraries: all 6 present.")
+
+        -- A bare slash command opens the roster. The fixtures' stand-in
+        -- framework can't build windows, so it reports that instead of
+        -- raising errors.
+        environment.SlashCmdList[variant.slashKey]("")
+        test.assertContains(world.messages[4], "The roster window can't open")
     end)
 end
 

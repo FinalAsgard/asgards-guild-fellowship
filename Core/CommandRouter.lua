@@ -43,6 +43,16 @@ function Router:Register(command, description, handler)
     return true
 end
 
+-- Makes a registered command run when the slash command has no arguments.
+function Router:SetDefault(command)
+    if type(command) ~= "string" or self.commands[string.lower(command)] == nil then
+        return false
+    end
+
+    self.defaultCommand = string.lower(command)
+    return true
+end
+
 function Router:PrintHelp()
     local entries = {}
     local index
