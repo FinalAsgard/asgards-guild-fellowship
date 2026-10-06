@@ -56,6 +56,17 @@ local function characterProblem(character)
     if character.note ~= nil and not isText(character.note) then
         return "character note fingerprint is invalid"
     end
+    if character.rejected ~= nil then
+        if type(character.rejected) ~= "table" then
+            return "character rejected fingerprints are invalid"
+        end
+        local kind, fingerprint
+        for kind, fingerprint in pairs(character.rejected) do
+            if not isText(kind) or not isText(fingerprint) then
+                return "character rejected fingerprints are invalid"
+            end
+        end
+    end
     return nil
 end
 
@@ -94,7 +105,7 @@ local function validatePartition(data)
     if type(data) ~= "table" then
         return false
     end
-    local containers = { "characters", "players", "quarantine", "unapplied" }
+    local containers = { "characters", "players", "quarantine", "conflicts", "unapplied" }
     local index
     for index = 1, #containers do
         local value = data[containers[index]]
@@ -107,8 +118,26 @@ local function validatePartition(data)
     then
         return false
     end
+    -- Markers an earlier build recorded as `unapplied` become conflicts.
+    if data.unapplied ~= nil and data.conflicts == nil then
+        data.conflicts = {}
+        local entryIndex
+        for entryIndex = 1, #data.unapplied do
+            local entry = data.unapplied[entryIndex]
+            if type(entry) == "table" and isText(entry.character) and isText(entry.reason)
+                and entry.reason ~= "player already organized"
+            then
+                table.insert(data.conflicts, {
+                    character = entry.character,
+                    fingerprint = entry.fingerprint,
+                    kind = entry.reason,
+                })
+            end
+        end
+    end
+    data.unapplied = nil
     for index = 1, #containers do
-        if data[containers[index]] == nil then
+        if containers[index] ~= "unapplied" and data[containers[index]] == nil then
             data[containers[index]] = {}
         end
     end
@@ -291,8 +320,21 @@ function Partition:JoinPlayerOf(altKey, mainKey, source)
     alt.player = main.player
     alt.source = source
     self.members = nil
-    if self:CharactersOf(oldPlayer)[1] == nil then
+    local remaining = self:CharactersOf(oldPlayer)
+    if remaining[1] == nil then
         self.data.players[oldPlayer] = nil
+    elseif self.data.players[oldPlayer].main == altKey then
+        -- The moved character led its old player; the highest-level
+        -- character left takes over (ties by name).
+        local best = remaining[1]
+        local index
+        for index = 2, #remaining do
+            local candidate = self.data.characters[remaining[index]]
+            if (candidate.level or 0) > (self.data.characters[best].level or 0) then
+                best = remaining[index]
+            end
+        end
+        self.data.players[oldPlayer].main = best
     end
     return true
 end
@@ -342,22 +384,63 @@ function Partition:EachPlayer(callback)
     end
 end
 
--- Replaces the markers left unapplied by the latest scan. Each entry is
--- { character, fingerprint, reason }: never the note text.
-function Partition:SetUnapplied(entries)
+-- The pending conflict queue: a list of
+--   { character, kind, fingerprint, suggestion? }
+-- where kind is "main", "alias", "unresolved", "ambiguous", "cycle",
+-- "self reference", "chain too long", or "competing aliases", and
+-- suggestion is { main = key } or { alias = text } for the kinds that can be
+-- accepted. Never the note text.
+function Partition:SetConflicts(entries)
     if type(entries) ~= "table" then
         return false
     end
-    self.data.unapplied = entries
+    self.data.conflicts = entries
     return true
 end
 
-function Partition:GetUnapplied()
-    return self.data.unapplied
+function Partition:GetConflicts()
+    return self.data.conflicts
+end
+
+-- Removes one conflict, found by character and kind. Returns it, or nil.
+function Partition:RemoveConflict(character, kind)
+    local conflicts = self.data.conflicts
+    local index
+    for index = 1, #conflicts do
+        local entry = conflicts[index]
+        if entry.character == character and entry.kind == kind then
+            table.remove(conflicts, index)
+            return entry
+        end
+    end
+    return nil
+end
+
+-- Remembers that a conflict of this kind from this note fingerprint was
+-- rejected, so it isn't queued again until the note changes.
+function Partition:SetRejected(key, kind, fingerprint)
+    local character = self.data.characters[key]
+    if character == nil or not isText(kind) or not isText(fingerprint) then
+        return false
+    end
+    character.rejected = character.rejected or {}
+    character.rejected[kind] = fingerprint
+    return true
+end
+
+-- Forgets a rejection, once the player accepts that kind of suggestion.
+function Partition:ClearRejected(key, kind)
+    local character = self.data.characters[key]
+    if character ~= nil and character.rejected ~= nil then
+        character.rejected[kind] = nil
+        if next(character.rejected) == nil then
+            character.rejected = nil
+        end
+    end
 end
 
 -- What the latest scan found, for the window's status line:
--- { at, mode, newCharacters, linked, aliased, unapplied }.
+-- { at, mode, newCharacters, linked, aliased, conflicts }.
 function Partition:SetLastScanSummary(summary)
     if type(summary) ~= "table" then
         return false

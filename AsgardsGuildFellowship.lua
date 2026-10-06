@@ -52,6 +52,18 @@ if clientProfile.supported then
                 onRescan = function()
                     rosterController:Rescan()
                 end,
+                onAcceptConflict = function(character, kind)
+                    rosterController:AcceptConflict(character, kind)
+                end,
+                onRejectConflict = function(character, kind)
+                    rosterController:RejectConflict(character, kind)
+                end,
+                onAcceptAll = function()
+                    rosterController:AcceptAllConflicts()
+                end,
+                onRejectAll = function()
+                    rosterController:RejectAllConflicts()
+                end,
             })
         end,
     })

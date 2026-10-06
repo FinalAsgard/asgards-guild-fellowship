@@ -130,8 +130,8 @@ function RosterController.DescribeScan(summary)
     if (summary.aliased or 0) > 0 then
         table.insert(parts, plural(summary.aliased, "alias", "aliases") .. " set")
     end
-    if (summary.unapplied or 0) > 0 then
-        table.insert(parts, plural(summary.unapplied, "note marker") .. " to review")
+    if (summary.conflicts or 0) > 0 then
+        table.insert(parts, plural(summary.conflicts, "new conflict") .. " to review")
     end
     return table.concat(parts, ", ")
 end
@@ -177,6 +177,50 @@ function Controller:UpdateStatus()
     end
 end
 
+-- Conflict review. Each action resolves through PlayerService, then
+-- redraws the roster and the conflict list.
+function Controller:ResolveConflicts(action, character, kind)
+    if self.current == nil then
+        return false
+    end
+    local service = addon.PlayerService.Create(self.current.partition)
+    local ok, reason
+    if action == "accept" then
+        ok, reason = service:AcceptConflict(character, kind)
+    elseif action == "reject" then
+        ok, reason = service:RejectConflict(character, kind)
+    elseif action == "acceptAll" then
+        local accepted, dismissed = service:AcceptAll()
+        self:Print("Accepted " .. plural(accepted, "conflict") .. " and dismissed " .. dismissed .. ".")
+        ok = true
+    elseif action == "rejectAll" then
+        local rejected = service:RejectAll()
+        self:Print("Rejected " .. plural(rejected, "conflict") .. ".")
+        ok = true
+    end
+    if not ok and reason ~= nil then
+        self:Print("That conflict can't be accepted: " .. reason .. ".")
+    end
+    self:Refresh()
+    return ok == true
+end
+
+function Controller:AcceptConflict(character, kind)
+    return self:ResolveConflicts("accept", character, kind)
+end
+
+function Controller:RejectConflict(character, kind)
+    return self:ResolveConflicts("reject", character, kind)
+end
+
+function Controller:AcceptAllConflicts()
+    return self:ResolveConflicts("acceptAll")
+end
+
+function Controller:RejectAllConflicts()
+    return self:ResolveConflicts("rejectAll")
+end
+
 -- Collapses or expands a player's group. The state lasts for the session.
 function Controller:ToggleGroup(playerId)
     if playerId == nil then
@@ -208,9 +252,10 @@ function Controller:Refresh()
         return
     end
     local normalizer = self:Normalizer(self.current.guild)
+    local members = self:LiveMembers(normalizer)
     local rows = addon.RosterViewModel.Build({
         partition = self.current.partition,
-        members = self:LiveMembers(normalizer),
+        members = members,
         normalizer = normalizer,
         classColor = function(classToken)
             return self.client:GetClassColor(classToken)
@@ -219,6 +264,11 @@ function Controller:Refresh()
     })
     self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
     self.window:SetRows(rows)
+    self.window:SetConflicts(addon.ConflictViewModel.Build({
+        partition = self.current.partition,
+        members = members,
+        normalizer = normalizer,
+    }))
     self:UpdateStatus()
 end
 

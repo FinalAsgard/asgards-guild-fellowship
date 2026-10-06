@@ -3,12 +3,17 @@ local _, addon = ...
 -- Compares a roster snapshot (with note text) against a guild partition and
 -- plans the changes. Plan() never mutates anything; Apply() commits a plan.
 --
--- This slice implements seeding: a note marker on a character with no
--- relationship in the database is applied directly, which covers the whole
--- first scan. Markers that can't be applied (unresolved, ambiguous, cyclic,
--- self-referencing, or competing aliases) are left unapplied and recorded
--- for the conflict queue. Drift conflicts, departures, and out-of-guild
--- mains come in later slices.
+-- Seeding: a note marker on a character with no relationship in the
+-- database is applied directly, which covers the whole first scan.
+--
+-- Conflicts: the database is the source of truth, so a note that disagrees
+-- with an existing relationship or alias never changes anything. It becomes
+-- a conflict for the player to accept or reject, as do markers that can't be
+-- applied at all (unresolved, ambiguous, cyclic, self-referencing, chains
+-- that are too long, and competing aliases). A suggestion the player
+-- rejected is not queued again until the note changes.
+--
+-- Departures and out-of-guild mains come in a later slice.
 local ReconcileEngine = {
     MAX_CHAIN_DEPTH = 10,
 }
@@ -100,11 +105,19 @@ local function followChain(start, target, parseOf, partition, sizes)
     end
 end
 
-local function addUnapplied(plan, key, reason)
-    table.insert(plan.unapplied, {
+-- Queues a conflict, unless the player already rejected this note.
+local function addConflict(plan, partition, key, kind, suggestion)
+    local character = partition:GetCharacter(key)
+    if character ~= nil and character.rejected ~= nil
+        and character.rejected[kind] == plan.fingerprints[key]
+    then
+        return
+    end
+    table.insert(plan.conflicts, {
         character = key,
         fingerprint = plan.fingerprints[key],
-        reason = reason,
+        kind = kind,
+        suggestion = suggestion,
     })
 end
 
@@ -140,7 +153,7 @@ end
 --   newKeys      keys the store hadn't seen
 --   links        alt key -> the main key whose player it joins
 --   aliases      main key -> alias for that main's player
---   unapplied    { character, fingerprint, reason } for the conflict queue
+--   conflicts    { character, kind, fingerprint, suggestion? } to queue
 function ReconcileEngine.Plan(inputs)
     local partition = inputs.partition
     local members = inputs.members or {}
@@ -157,7 +170,7 @@ function ReconcileEngine.Plan(inputs)
         mode = mode,
         newKeys = {},
         processed = {},
-        unapplied = {},
+        conflicts = {},
     }
 
     -- Notes are parsed only when needed: for processed characters, and for
@@ -197,29 +210,41 @@ function ReconcileEngine.Plan(inputs)
     for index = 1, #keys do
         key = keys[index]
         local ref = parseOf(key).mainRef
-        if seedable[key] and ref ~= nil then
+        if ref ~= nil then
             if ref.status ~= "resolved" then
-                addUnapplied(plan, key, ref.status)
+                addConflict(plan, partition, key, ref.status)
             elseif ref.key == key then
-                addUnapplied(plan, key, "self reference")
+                addConflict(plan, partition, key, "self reference")
             else
                 local root, reason = followChain(key, ref.key, parseOf, partition, sizes)
                 if root == nil then
-                    addUnapplied(plan, key, reason)
-                elseif root ~= key then
-                    plan.links[key] = root
+                    addConflict(plan, partition, key, reason)
+                elseif seedable[key] then
+                    if root ~= key then
+                        plan.links[key] = root
+                    end
+                else
+                    -- Already organized: a note naming a different player
+                    -- is drift, for the player to decide.
+                    local rootCharacter = partition:GetCharacter(root)
+                    local character = partition:GetCharacter(key)
+                    if rootCharacter == nil or rootCharacter.player ~= character.player then
+                        addConflict(plan, partition, key, "main", { main = root })
+                    end
                 end
             end
         end
         checkpoint()
     end
 
-    -- An alias on any character's note names that character's player.
+    -- An alias on any character's note names that character's player. On
+    -- unorganized players it is applied; on organized ones a different
+    -- alias is drift.
     local proposals = {}
     for index = 1, #keys do
         key = keys[index]
         local alias = parseOf(key).alias
-        if seedable[key] and alias ~= nil then
+        if alias ~= nil then
             local root = plan.links[key] or key
             proposals[root] = proposals[root] or {}
             table.insert(proposals[root], { alias = alias, character = key })
@@ -235,30 +260,33 @@ function ReconcileEngine.Plan(inputs)
                 break
             end
         end
+        local rootCharacter = partition:GetCharacter(root)
+        local player = rootCharacter and partition:GetPlayer(rootCharacter.player)
         if agreed == nil then
             for index = 1, #entries do
-                addUnapplied(plan, entries[index].character, "competing aliases")
+                addConflict(plan, partition, entries[index].character, "competing aliases")
             end
-        elseif not seedable[root] and partition:GetCharacter(root) ~= nil then
-            -- The main's player is already organized; the conflict queue
-            -- decides whether a note may rename it.
-            for index = 1, #entries do
-                addUnapplied(plan, entries[index].character, "player already organized")
-            end
-        else
+        elseif rootCharacter == nil or not hasRelationship(partition, sizes, root) then
             plan.aliases[root] = agreed
+        elseif player.alias == nil or string.lower(player.alias) ~= folded then
+            for index = 1, #entries do
+                addConflict(plan, partition, entries[index].character, "alias", { alias = agreed })
+            end
         end
     end
 
-    table.sort(plan.unapplied, function(first, second)
-        return first.character < second.character
+    table.sort(plan.conflicts, function(first, second)
+        if first.character ~= second.character then
+            return first.character < second.character
+        end
+        return first.kind < second.kind
     end)
     return plan
 end
 
 -- Commits a plan to the partition. `checkpoint` is called between
 -- characters, as in Plan. Returns counts for reporting:
---   recorded, newCharacters, linked, aliased, unapplied
+--   recorded, newCharacters, linked, aliased, conflicts
 function ReconcileEngine.Apply(partition, plan, checkpoint)
     checkpoint = checkpoint or function() end
 
@@ -297,29 +325,33 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         end
     end
 
-    -- Characters this plan skipped keep their earlier unapplied markers.
-    local unapplied = {}
-    local previous = partition:GetUnapplied() or {}
+    -- Characters this plan skipped keep their pending conflicts; processed
+    -- characters get exactly the conflicts this plan found.
+    local conflicts = {}
+    local previous = partition:GetConflicts() or {}
     local index
     for index = 1, #previous do
         local entry = previous[index]
         if type(entry) == "table" and not plan.processed[entry.character] then
-            table.insert(unapplied, entry)
+            table.insert(conflicts, entry)
         end
     end
-    for index = 1, #plan.unapplied do
-        table.insert(unapplied, plan.unapplied[index])
+    for index = 1, #plan.conflicts do
+        table.insert(conflicts, plan.conflicts[index])
     end
-    table.sort(unapplied, function(first, second)
-        return tostring(first.character) < tostring(second.character)
+    table.sort(conflicts, function(first, second)
+        if first.character ~= second.character then
+            return tostring(first.character) < tostring(second.character)
+        end
+        return tostring(first.kind) < tostring(second.kind)
     end)
-    partition:SetUnapplied(unapplied)
+    partition:SetConflicts(conflicts)
 
     return {
         aliased = aliased,
         linked = linked,
         newCharacters = #plan.newKeys,
         recorded = recorded,
-        unapplied = #plan.unapplied,
+        conflicts = #plan.conflicts,
     }
 end

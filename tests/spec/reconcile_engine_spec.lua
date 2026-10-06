@@ -73,7 +73,7 @@ test.test("initial seeding links alts to their main and applies the alias", func
     test.assertEqual(3, result.recorded)
     test.assertEqual(1, result.linked)
     test.assertEqual(1, result.aliased)
-    test.assertEqual(0, result.unapplied)
+    test.assertEqual(0, result.conflicts)
     local main = playerOf(partition, "toolbox-area52")
     test.assertEqual(main, playerOf(partition, "hammer-area52"))
     test.assertEqual("toolbox-area52", main.main)
@@ -117,8 +117,8 @@ test.test("Forever seeding resolves two-word names and unique first names", func
     test.assertEqual(main, playerOf(partition, "hammer smith-camelot"))
     test.assertEqual(main, playerOf(partition, "zélie rune-camelot"))
     test.assertTrue(playerOf(partition, "bob cat-camelot") ~= playerOf(partition, "ann lee-camelot"))
-    test.assertEqual(1, result.unapplied)
-    test.assertEqual("ambiguous", partition:GetUnapplied()[1].reason)
+    test.assertEqual(1, result.conflicts)
+    test.assertEqual("ambiguous", partition:GetConflicts()[1].kind)
 end)
 
 test.test("chains collapse to the root main", function()
@@ -139,7 +139,7 @@ test.test("chains collapse to the root main", function()
     test.assertEqual("charlie-area52", main.main)
 end)
 
-test.test("unresolved, ambiguous, cyclic, and self markers stay unapplied and recorded", function()
+test.test("unresolved, ambiguous, cyclic, and self markers become conflicts", function()
     local addon, partition, plan = setup(RETAIL, {
         { "Alpha-Area52", ">Bravo" },
         { "Bravo-Area52", ">Alpha" },
@@ -151,10 +151,10 @@ test.test("unresolved, ambiguous, cyclic, and self markers stay unapplied and re
 
     test.assertEqual(0, result.linked)
     local reasons = {}
-    local entries = partition:GetUnapplied()
+    local entries = partition:GetConflicts()
     local index
     for index = 1, #entries do
-        reasons[entries[index].character] = entries[index].reason
+        reasons[entries[index].character] = entries[index].kind
         test.assertEqual(8, #entries[index].fingerprint)
         test.assertEqual(nil, entries[index].text)
     end
@@ -165,7 +165,7 @@ test.test("unresolved, ambiguous, cyclic, and self markers stay unapplied and re
     test.assertTrue(playerOf(partition, "alpha-area52") ~= playerOf(partition, "bravo-area52"))
 end)
 
-test.test("competing aliases on one player are left unapplied", function()
+test.test("competing aliases on one player become conflicts", function()
     local addon, partition, plan = setup(RETAIL, {
         { "Toolbox-Area52", "@TheTool" },
         { "Hammer-Area52", ">Toolbox @Hammertime" },
@@ -174,8 +174,8 @@ test.test("competing aliases on one player are left unapplied", function()
     local result = addon.ReconcileEngine.Apply(partition, plan())
 
     test.assertEqual(nil, playerOf(partition, "toolbox-area52").alias)
-    test.assertEqual(2, result.unapplied)
-    test.assertEqual("competing aliases", partition:GetUnapplied()[1].reason)
+    test.assertEqual(2, result.conflicts)
+    test.assertEqual("competing aliases", partition:GetConflicts()[1].kind)
 end)
 
 test.test("characters that already have relationships are not reseeded", function()

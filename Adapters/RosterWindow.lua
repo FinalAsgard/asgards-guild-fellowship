@@ -178,6 +178,158 @@ local function readGeometry(frame)
     }
 end
 
+-- The conflict review panel: one line per pending conflict, with Accept and
+-- Reject (or Dismiss, when there's nothing to apply), plus Accept all and
+-- Reject all.
+local CONFLICT_COLUMNS = {
+    { field = "name", header = "Character", x = 8, width = 140 },
+    { field = "note", header = "Note (live)", x = 152, width = 170 },
+    { field = "suggests", header = "Note suggests", x = 326, width = 170 },
+    { field = "current", header = "Currently", x = 500, width = 150 },
+    { field = "source", header = "Source", x = 654, width = 90 },
+}
+local CONFLICT_WIDTH = 900
+local CONFLICT_HEIGHT = 360
+
+local function createConflictLine(scroll, index, options)
+    local line = CreateFrame("Frame", nil, scroll)
+    line:SetHeight(RosterWindow.LINE_HEIGHT)
+    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
+    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
+    line.background = line:CreateTexture(nil, "BACKGROUND")
+    line.background:SetAllPoints(line)
+    line.cells = {}
+    local columnIndex
+    for columnIndex = 1, #CONFLICT_COLUMNS do
+        local column = CONFLICT_COLUMNS[columnIndex]
+        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
+        cell:SetWidth(column.width)
+        cell:SetJustifyH("LEFT")
+        cell:SetWordWrap(false)
+        line.cells[column.field] = cell
+    end
+    line.accept = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+    line.accept:SetSize(56, 18)
+    line.accept:SetPoint("LEFT", line, "LEFT", 748, 0)
+    line.accept:SetText("Accept")
+    line.accept:SetScript("OnClick", function()
+        if line.row ~= nil then
+            options.onAcceptConflict(line.row.character, line.row.kind)
+        end
+    end)
+    line.reject = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+    line.reject:SetSize(56, 18)
+    line.reject:SetPoint("LEFT", line.accept, "RIGHT", 4, 0)
+    line.reject:SetScript("OnClick", function()
+        if line.row ~= nil then
+            options.onRejectConflict(line.row.character, line.row.kind)
+        end
+    end)
+    return line
+end
+
+local function refreshConflictLines(scroll, rows, offset, totalLines)
+    local lineIndex
+    for lineIndex = 1, totalLines do
+        local dataIndex = lineIndex + offset
+        local row = rows[dataIndex]
+        if row ~= nil then
+            local line = scroll:GetLine(lineIndex)
+            line.row = row
+            local columnIndex
+            for columnIndex = 1, #CONFLICT_COLUMNS do
+                local field = CONFLICT_COLUMNS[columnIndex].field
+                local value = row[field]
+                if field == "note" and value == nil then
+                    value = "|cff9d9d9d(not in the roster)|r"
+                end
+                line.cells[field]:SetText(value ~= nil and tostring(value) or "")
+            end
+            if row.canAccept then
+                line.accept:Show()
+                line.reject:SetText("Reject")
+            else
+                line.accept:Hide()
+                line.reject:SetText("Dismiss")
+            end
+            if dataIndex % 2 == 0 then
+                setBackground(line, STRIPE_BACKGROUND)
+            else
+                setBackground(line, NO_BACKGROUND)
+            end
+        end
+    end
+end
+
+local function buildConflictPanel(framework, options, frameName)
+    local panel = framework:CreateSimplePanel(
+        UIParent,
+        CONFLICT_WIDTH,
+        CONFLICT_HEIGHT,
+        addon.Identity.displayName .. " - Conflicts",
+        frameName .. "Conflicts"
+    )
+    panel:SetFrameStrata("DIALOG")
+
+    local explain = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    explain:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
+    explain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -30)
+    explain:SetJustifyH("LEFT")
+    explain:SetText("Guild notes that disagree with the roster. Accepting applies the note's suggestion; " ..
+        "rejecting keeps the roster and hides that suggestion until the note changes. Guild notes are never edited.")
+
+    local headerIndex
+    for headerIndex = 1, #CONFLICT_COLUMNS do
+        local column = CONFLICT_COLUMNS[headerIndex]
+        local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -50)
+        header:SetText(column.header)
+    end
+
+    local lineAmount = math.floor((CONFLICT_HEIGHT - 110) / RosterWindow.LINE_HEIGHT)
+    local function newLine(scrollBox, index)
+        return createConflictLine(scrollBox, index, options)
+    end
+    local scroll = framework:CreateScrollBox(
+        panel,
+        frameName .. "ConflictScroll",
+        refreshConflictLines,
+        {},
+        CONFLICT_WIDTH - 20,
+        CONFLICT_HEIGHT - 110,
+        lineAmount,
+        RosterWindow.LINE_HEIGHT,
+        newLine,
+        true
+    )
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -66)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 40)
+    scroll:CreateLines(newLine, lineAmount)
+
+    local acceptAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    acceptAll:SetSize(100, 22)
+    acceptAll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 10)
+    acceptAll:SetText("Accept all")
+    acceptAll:SetScript("OnClick", function()
+        options.onAcceptAll()
+    end)
+    local rejectAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    rejectAll:SetSize(100, 22)
+    rejectAll:SetPoint("LEFT", acceptAll, "RIGHT", 6, 0)
+    rejectAll:SetText("Reject all")
+    rejectAll:SetScript("OnClick", function()
+        options.onRejectAll()
+    end)
+    local empty = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    empty:SetPoint("CENTER", panel, "CENTER", 0, 0)
+    empty:SetText("No conflicts. The roster and the guild notes agree.")
+
+    panel:Hide()
+    return { panel = panel, scroll = scroll, empty = empty, acceptAll = acceptAll, rejectAll = rejectAll }
+end
+
 local function build(framework, options)
     local parent = UIParent
     local frameName = addon.Identity.addonName .. "RosterWindow"
@@ -231,9 +383,13 @@ local function build(framework, options)
     rescan:SetScript("OnClick", function()
         options.onRescan()
     end)
+    local conflictsButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    conflictsButton:SetSize(110, 22)
+    conflictsButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -36, 10)
+    conflictsButton:SetText("Conflicts (0)")
     local status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     status:SetPoint("LEFT", rescan, "RIGHT", 10, 0)
-    status:SetPoint("RIGHT", panel, "RIGHT", -40, 0)
+    status:SetPoint("RIGHT", conflictsButton, "LEFT", -10, 0)
     status:SetJustifyH("LEFT")
     status:SetWordWrap(false)
 
@@ -249,24 +405,39 @@ local function build(framework, options)
     panel:HookScript("OnHide", save)
     panel:Hide()
 
-    return panel, scroll, status
+    local conflicts = buildConflictPanel(framework, options, frameName)
+    conflictsButton:SetScript("OnClick", function()
+        if conflicts.panel:IsShown() then
+            conflicts.panel:Hide()
+        else
+            conflicts.panel:Show()
+        end
+    end)
+    conflicts.button = conflictsButton
+    panel:HookScript("OnHide", function()
+        conflicts.panel:Hide()
+    end)
+
+    return panel, scroll, status, conflicts
 end
 
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
 -- options.onToggleGroup(playerId) runs when a player header is clicked;
--- options.onRescan() runs when the Rescan button is clicked.
+-- options.onRescan() runs when the Rescan button is clicked;
+-- options.onAcceptConflict(character, kind), onRejectConflict(character,
+-- kind), onAcceptAll(), and onRejectAll() resolve conflicts.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, panel, scroll, status = pcall(build, framework, options)
+    local ok, panel, scroll, status, conflicts = pcall(build, framework, options)
     if not ok or panel == nil then
         return nil, "the Details! Framework could not build the window"
     end
-    return setmetatable({ panel = panel, scroll = scroll, status = status }, Window)
+    return setmetatable({ panel = panel, scroll = scroll, status = status, conflicts = conflicts }, Window)
 end
 
 function Window:IsShown()
@@ -287,6 +458,25 @@ function Window:SetTitle(title)
     elseif self.panel.Title ~= nil then
         self.panel.Title:SetText(title)
     end
+end
+
+-- Shows the pending conflicts and their count on the footer button.
+function Window:SetConflicts(rows)
+    return (pcall(function()
+        local conflicts = self.conflicts
+        conflicts.button:SetText("Conflicts (" .. #rows .. ")")
+        conflicts.scroll:SetData(rows)
+        conflicts.scroll:Refresh()
+        if #rows == 0 then
+            conflicts.empty:Show()
+            conflicts.acceptAll:Disable()
+            conflicts.rejectAll:Disable()
+        else
+            conflicts.empty:Hide()
+            conflicts.acceptAll:Enable()
+            conflicts.rejectAll:Enable()
+        end
+    end))
 end
 
 function Window:SetStatus(text)

@@ -219,7 +219,7 @@ function Scheduler:Run(mode, force)
         newCharacters = result.newCharacters,
         linked = result.linked,
         aliased = result.aliased,
-        unapplied = result.unapplied,
+        conflicts = result.conflicts,
     }
     partition:SetLastScanSummary(summary)
     return { result = result, summary = summary }

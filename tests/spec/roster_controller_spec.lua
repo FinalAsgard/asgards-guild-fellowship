@@ -19,6 +19,10 @@ local function newWindow()
     function window:SetStatus(text)
         self.status = text
     end
+    function window:SetConflicts(rows)
+        self.conflicts = rows
+        return true
+    end
     function window:SetRows(rows)
         self.rows = rows
         return true
@@ -33,7 +37,9 @@ local MODULES = {
     "Core/NoteParser.lua",
     "Core/FellowshipStore.lua",
     "Core/ReconcileEngine.lua",
+    "Core/PlayerService.lua",
     "Core/RosterViewModel.lua",
+    "Core/ConflictViewModel.lua",
     "Core/ScanScheduler.lua",
     "Core/RosterController.lua",
 }
@@ -274,6 +280,6 @@ test.test("scan descriptions name what was found", function()
     local describe = addon.RosterController.DescribeScan
 
     test.assertEqual("0 new characters", describe({ newCharacters = 0 }))
-    test.assertEqual("1 new character, 2 alts linked, 1 alias set, 3 note markers to review",
-        describe({ newCharacters = 1, linked = 2, aliased = 1, unapplied = 3 }))
+    test.assertEqual("1 new character, 2 alts linked, 2 aliases set, 3 new conflicts to review",
+        describe({ newCharacters = 1, linked = 2, aliased = 2, conflicts = 3 }))
 end)
