@@ -41,7 +41,7 @@ fail() {
 }
 
 has_entry() {
-    printf '%s\n' "$entries" | grep -Fxq -- "$1"
+    grep -Fxq -- "$1" <<< "$entries"
 }
 
 manifest_versions=()
@@ -100,12 +100,12 @@ while IFS='|' read -r name _major target load _type url tag; do
     tag="$(printf '%s' "$tag" | tr -d '[:space:]')"
     libraries=$((libraries + 1))
 
-    if ! printf '%s\n' "$entries" | grep -Fq -- "${addon}/${target}/"; then
+    if ! grep -Fq -- "${addon}/${target}/" <<< "$entries"; then
         fail "library $name is missing: no ${target}/ folder in the package"
         continue
     fi
     has_entry "${addon}/${target}/${load}" || fail "library $name is missing its load file ${target}/${load}"
-    printf '%s\n' "$fetched" | grep -Fxq -- "Fetching tag \"${tag}\" from external ${url}" ||
+    grep -Fxq -- "Fetching tag \"${tag}\" from external ${url}" <<< "$fetched" ||
         fail "library $name was not fetched at its pin ${tag} from ${url}"
 done < "$library_list"
 [ "$libraries" -gt 0 ] || fail "no libraries read from $library_list"

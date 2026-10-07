@@ -136,6 +136,9 @@ expect fail "git library fetched from another source" "perl -pi -e 's{Tercioo/De
 expect fail "svn library fetched at another tag" "perl -pi -e 's{\"1\\.0\\.3\" from external (.*)/1\\.0\\.3}{\"1.0.2\" from external \$1/1.0.2}' \"\$log\"" "library LibStub was not fetched at its pin 1.0.3"
 expect fail "library never fetched" "perl -ni -e 'print unless /callbackhandler/' \"\$log\"" "library CallbackHandler-1.0 was not fetched at its pin"
 expect pass "packager log without CI group markers" "perl -pi -e 's/^##\\[(end)?group\\]//' \"\$log\"" ""
+# A real CI log and library tree are large. Searching them must not fail when
+# the search stops at the first match (a broken pipe under pipefail).
+expect pass "large packager log and many packaged files" "perl -e 'print \"changelog line \$_\\n\" for 1..50000' >> \"\$log\" && for i in \$(seq 1 3000); do : > $addon/Libs/DetailsFramework/f\$i.lua; done" ""
 
 echo "$passed passed, $failed failed"
 [ "$failed" -eq 0 ]
