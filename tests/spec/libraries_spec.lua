@@ -91,6 +91,31 @@ test.test(".pkgmeta names the package and ignores development-only files", funct
     end
 end)
 
+local function readFile(path)
+    local file = assert(io.open(path, "r"))
+    local text = file:read("*a")
+    file:close()
+    return text
+end
+
+test.test("the release changelog is declared to the packager and never committed", function()
+    local pkgmeta = readFile(".pkgmeta")
+    test.assertTrue(string.find(pkgmeta, "\nmanual%-changelog:\n  filename: CHANGELOG%.md\n") ~= nil,
+        ".pkgmeta declares CHANGELOG.md as the manual changelog")
+    local ignored = false
+    local line
+    for line in string.gmatch(readFile(".gitignore"), "[^\n]+") do
+        ignored = ignored or line == "CHANGELOG.md"
+    end
+    test.assertTrue(ignored, "CHANGELOG.md is git-ignored")
+end)
+
+test.test("the package ships an MIT license for FinalAsgard", function()
+    local license = readFile("LICENSE")
+    test.assertTrue(string.find(license, "^MIT License") ~= nil, "LICENSE is the MIT license")
+    test.assertTrue(string.find(license, "Copyright %(c%) %d+ FinalAsgard") ~= nil, "LICENSE names FinalAsgard")
+end)
+
 test.test("every manifest loads the libraries first, in list order", function()
     local libraryLines = LibraryList.ManifestLines(listEntries())
     local manifestIndex, lineIndex

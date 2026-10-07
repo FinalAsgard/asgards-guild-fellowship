@@ -56,3 +56,38 @@ jobs:
           if ($output -match 'Fetching ') { throw 'Second fetch downloaded again.' }
           $status = git status --porcelain
           if ($status) { throw "Fetching left the working tree dirty:`n$status" }
+
+  package:
+    name: Release package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # The packager reads the version and changelog from git history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The packager fetches the CurseForge library externals with svn.
+      - name: Install svn
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes subversion
+
+      - name: Test the package check
+        run: tests/tools/check-package.test.sh
+
+      - name: Build and validate the multi-client package without uploading
+        run: tools/build-package.sh
+
+      # Keep the validated zip so a build can be downloaded, for example for a
+      # manual CurseForge upload.
+      - name: Keep the package as a download
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsgardsGuildFellowship-package
+          path: .release/AsgardsGuildFellowship-*.zip
+          if-no-files-found: error
+          # The package is written to .release/, a hidden directory.
+          include-hidden-files: true
+          retention-days: 30
