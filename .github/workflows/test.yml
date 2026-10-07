@@ -34,18 +34,6 @@ jobs:
       - name: Check library pins match .pkgmeta
         run: lua5.1 tools/check-libraries.lua
 
-      - name: Test the interface setter
-        run: tests/tools/set-interface.test.sh
-
-      - name: Test the release tag check and interface application
-        run: tests/tools/release-tools.test.sh
-
-      - name: Test the publish script's setup checks
-        run: tests/tools/publish-release.test.sh
-
-      - name: Test the packager download check
-        run: tests/tools/fetch-packager.test.sh
-
   fetch:
     name: Library fetch
     runs-on: ubuntu-latest
@@ -86,8 +74,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes subversion
 
+      # The release tools' own tests run here, so the Lua 5.1 job stays the
+      # add-on's test gate.
       - name: Test the package check
         run: tests/tools/check-package.test.sh
+
+      - name: Test the interface setter
+        run: tests/tools/set-interface.test.sh
+
+      - name: Test the release tag check and interface application
+        run: tests/tools/release-tools.test.sh
+
+      - name: Test the publish script's setup checks
+        run: tests/tools/publish-release.test.sh
+
+      - name: Test the packager download check
+        run: tests/tools/fetch-packager.test.sh
 
       - name: Build and validate the multi-client package without uploading
         run: tools/build-package.sh

@@ -101,7 +101,7 @@ builds on Linux, where it does not appear.
 
 CI runs the same script on every pull request and every push to `main`, in the
 **Release package** job of `.github/workflows/test.yml`. It installs svn, runs
-the package check's own tests (`tests/tools/check-package.test.sh`), builds and
+the release tools' own tests (every `tests/tools/*.test.sh`), builds and
 validates the package without uploading, and keeps the zip as a downloadable
 workflow artifact (**AsgardsGuildFellowship-package**) for 30 days.
 

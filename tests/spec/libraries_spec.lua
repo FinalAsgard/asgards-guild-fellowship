@@ -103,7 +103,6 @@ test.test("the release changelog is declared to the packager and never committed
     test.assertTrue(string.find(pkgmeta, "\nmanual%-changelog:\n  filename: CHANGELOG%.md\n") ~= nil,
         ".pkgmeta declares CHANGELOG.md as the manual changelog")
     local ignored = false
-    local line
     for line in string.gmatch(readFile(".gitignore"), "[^\n]+") do
         ignored = ignored or line == "CHANGELOG.md"
     end
