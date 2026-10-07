@@ -62,7 +62,8 @@ if [ "${#staged_zips[@]}" -ne 1 ]; then
     echo "Expected exactly one AsgardsGuildFellowship-*.zip in $staging_dir, found ${#staged_zips[@]}." >&2
     exit 1
 fi
-"$repo_root/tools/check-package.sh" "${staged_zips[0]}"
+# The log records the tag and source the packager fetched each library from.
+"$repo_root/tools/check-package.sh" "${staged_zips[0]}" "$work_dir/packager.log"
 
 mkdir -p "$release_dir"
 zip_path="$release_dir/$(basename "${staged_zips[0]}")"

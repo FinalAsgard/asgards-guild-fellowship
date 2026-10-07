@@ -37,6 +37,9 @@ jobs:
       - name: Test the interface setter
         run: tests/tools/set-interface.test.sh
 
+      - name: Test the release tag check and interface application
+        run: tests/tools/release-tools.test.sh
+
   fetch:
     name: Library fetch
     runs-on: ubuntu-latest
