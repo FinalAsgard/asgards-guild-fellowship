@@ -1,0 +1,98 @@
+name: Release
+
+# Publishing a GitHub release (with a new version tag such as v0.1.0, or
+# v0.1.0-beta1 for a beta) tests, packages, and uploads the add-on to
+# CurseForge for both clients, then attaches the zip to that release.
+# Pushing a tag or saving a draft release does nothing.
+# The release's notes become the changelog on CurseForge and in the package.
+on:
+  release:
+    types:
+      - published
+
+# Only attaching the zip to the release needs write access.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish to CurseForge
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      # The packaged manifests must carry exactly this version.
+      EXPECTED_VERSION: ${{ github.event.release.tag_name }}
+      # The game versions this release supports, from the repository variables.
+      FOREVER_INTERFACE: ${{ vars.FOREVER_INTERFACE }}
+      RETAIL_INTERFACE: ${{ vars.RETAIL_INTERFACE }}
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          # The packager reads the version and changelog from git history.
+          fetch-depth: 0
+          # The attach step uses its own token; nothing else pushes.
+          persist-credentials: false
+
+      - name: Check the tag is a valid version
+        run: tools/check-release-tag.sh "$TAG"
+
+      - name: Check the pre-release setting matches the tag
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          expected=false
+          case "$TAG" in *alpha*|*beta*) expected=true ;; esac
+          if [ "$PRERELEASE" != "$expected" ]; then
+            if [ "$expected" = true ]; then setting=checked; else setting=unchecked; fi
+            echo "::error::Tag $TAG should have 'Set as a pre-release' $setting. Tags with alpha or beta are pre-releases; others are full releases."
+            exit 1
+          fi
+
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes lua5.1
+
+      - name: Check Lua syntax
+        run: find . -type f -name '*.lua' -not -path './Libs/*' -print0 | xargs -0 -n1 luac5.1 -p
+
+      - name: Run automated tests
+        run: lua5.1 tests/run.lua
+
+      - name: Apply the supported game versions
+        run: tools/apply-interfaces.sh
+
+      - name: Use the release notes as the changelog
+        env:
+          NOTES: ${{ github.event.release.body }}
+        run: |
+          if [ -n "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            printf '%s\n' "$NOTES" > CHANGELOG.md
+          else
+            echo "The release has no notes; the changelog is generated from git history."
+          fi
+
+      # The packager fetches the CurseForge library externals with svn.
+      - name: Install svn
+        run: sudo apt-get install --yes subversion
+
+      # Packages this checkout in place, so the game versions and changelog
+      # written above are what gets validated.
+      - name: Build and validate the package without uploading
+        env:
+          PACKAGE_WORKING_TREE: "1"
+        run: tools/build-package.sh
+
+      - name: Upload to CurseForge
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          CURSEFORGE_PROJECT_ID: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          PUBLISH_DIR: .release/published
+        run: tools/publish-release.sh
+
+      - name: Attach the package to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" .release/published/AsgardsGuildFellowship-*.zip --clobber

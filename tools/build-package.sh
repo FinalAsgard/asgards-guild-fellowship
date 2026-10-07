@@ -11,6 +11,12 @@
 # The package is built from a fresh clone of the committed history, so a
 # fetched, git-ignored Libs/ folder (or any uncommitted file) can never be
 # packaged in place of the pinned externals the packager fetches itself.
+#
+# PACKAGE_WORKING_TREE=1 packages the checkout in place instead. The Release
+# workflow uses it, because it writes the release's game versions into the
+# manifests and its notes into CHANGELOG.md just before building, on a fresh
+# tag checkout with no Libs/ folder. The packager still leaves out every
+# untracked file there, so only CHANGELOG.md is read from outside git.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,18 +38,21 @@ if ! command -v svn >/dev/null 2>&1; then
     exit 1
 fi
 
-if [ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no)" ]; then
-    echo "Note: uncommitted changes are not packaged; the build uses the committed history only." >&2
-fi
-
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
-checkout_dir="$work_dir/checkout"
 # Build into an empty staging directory so an older zip can never be the one
 # that gets validated.
 staging_dir="$work_dir/release"
 
-git clone --quiet "$repo_root" "$checkout_dir"
+if [ "${PACKAGE_WORKING_TREE:-}" = 1 ]; then
+    checkout_dir="$repo_root"
+else
+    if [ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no)" ]; then
+        echo "Note: uncommitted changes are not packaged; the build uses the committed history only." >&2
+    fi
+    checkout_dir="$work_dir/checkout"
+    git clone --quiet "$repo_root" "$checkout_dir"
+fi
 curl -fsSL "$packager_url" -o "$work_dir/release.sh"
 # -d: never upload anywhere. The result is only a local zip.
 "$packager_bash" "$work_dir/release.sh" -d -t "$checkout_dir" -r "$staging_dir" | tee "$work_dir/packager.log"

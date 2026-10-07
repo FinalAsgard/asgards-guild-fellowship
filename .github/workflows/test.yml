@@ -40,6 +40,9 @@ jobs:
       - name: Test the release tag check and interface application
         run: tests/tools/release-tools.test.sh
 
+      - name: Test the publish script's setup checks
+        run: tests/tools/publish-release.test.sh
+
   fetch:
     name: Library fetch
     runs-on: ubuntu-latest
