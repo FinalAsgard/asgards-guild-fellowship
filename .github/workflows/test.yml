@@ -34,6 +34,9 @@ jobs:
       - name: Check library pins match .pkgmeta
         run: lua5.1 tools/check-libraries.lua
 
+      - name: Test the interface setter
+        run: tests/tools/set-interface.test.sh
+
   fetch:
     name: Library fetch
     runs-on: ubuntu-latest
