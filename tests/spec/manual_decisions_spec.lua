@@ -9,7 +9,9 @@ local function load()
         "Core/NoteParser.lua",
         "Core/FellowshipStore.lua",
         "Core/ReconcileEngine.lua",
-        "Core/PlayerService.lua"
+        "Core/PlayerService.lua",
+        "Core/RosterViewModel.lua",
+        "Core/PlayerPanelViewModel.lua"
     )
 end
 
@@ -201,4 +203,36 @@ test.test("a single-character player that is moved leaves no history behind", fu
     test.assertTrue(state.service():SetMainPlayer("anvil-area52", toolbox))
 
     test.assertEqual(0, #historyOf(state, "toolbox-area52"))
+end)
+
+test.test("a character moved back is no longer listed as a former character", function()
+    local state = setup()
+    state.scan(LINKED, "initial")
+    local toolbox = state.partition:GetCharacter("toolbox-area52").player
+    test.assertTrue(state.service():Detach("hammer-area52"))
+
+    test.assertTrue(state.service():SetMainPlayer("hammer-area52", toolbox))
+
+    local normalizer = state.addon.NameNormalizer.Create(RULES)
+    local model = state.addon.PlayerPanelViewModel.Build({
+        partition = state.partition, playerId = toolbox, members = {}, normalizer = normalizer,
+    })
+    local index
+    for index = 1, #model.rows do
+        test.assertTrue(model.rows[index].kind ~= "history", "no history row for a current member")
+    end
+end)
+
+test.test("purging a character that was moved back still records it as purged", function()
+    local state = setup()
+    state.scan(LINKED, "initial")
+    local toolbox = state.partition:GetCharacter("toolbox-area52").player
+    test.assertTrue(state.service():Detach("hammer-area52"))
+    test.assertTrue(state.service():SetMainPlayer("hammer-area52", toolbox))
+    state.scan({ { "Toolbox-Area52", "" } })
+
+    test.assertTrue(state.service():Purge("hammer-area52"))
+
+    local history = state.partition:GetHistory(toolbox)
+    test.assertEqual("purged", history[#history].reason)
 end)

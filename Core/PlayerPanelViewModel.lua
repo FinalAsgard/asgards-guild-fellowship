@@ -97,7 +97,16 @@ function PlayerPanelViewModel.Build(inputs)
     end
 
     table.insert(rows, { kind = "section", text = "History" })
-    local history = partition:GetHistory(inputs.playerId)
+    -- Former characters only: an entry for a character that is back in this
+    -- player and in the guild (moved back, or rejoined) is left out.
+    local history = {}
+    local all = partition:GetHistory(inputs.playerId)
+    for index = 1, #all do
+        local current = all[index].character and partition:GetCharacter(all[index].character)
+        if not (current ~= nil and current.player == inputs.playerId and partition:IsInGuild(all[index].character)) then
+            table.insert(history, all[index])
+        end
+    end
     for index = #history, 1, -1 do
         local entry = history[index]
         table.insert(rows, {

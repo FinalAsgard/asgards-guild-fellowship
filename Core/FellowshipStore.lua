@@ -574,8 +574,11 @@ function Partition:Purge(key, timestamp)
     if player ~= nil then
         local recorded = false
         local index
+        -- A departed main is already recorded; earlier moves ("detached",
+        -- "moved to …") don't count, since the character came back.
         for index = 1, #(player.history or {}) do
-            if player.history[index].character == key then
+            local entry = player.history[index]
+            if entry.character == key and (entry.reason == "departed" or entry.reason == "purged") then
                 recorded = true
             end
         end
