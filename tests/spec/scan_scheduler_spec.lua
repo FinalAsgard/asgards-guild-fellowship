@@ -23,7 +23,7 @@ local function build(options)
     local database = options.database or { schemaVersion = 1, guilds = {} }
     local store = addon.FellowshipStore.Create(database)
     local normalizer = addon.NameNormalizer.Create({ twoPartNames = false, homeRealm = GUILD.realm })
-    local setup = { addon = addon, database = database, finished = {}, world = world }
+    local setup = { addon = addon, database = database, finished = {}, world = world, normalizer = normalizer }
     setup.scheduler = addon.ScanScheduler.Create({
         client = client,
         rules = { twoPartNames = false },
@@ -226,6 +226,29 @@ test.test("a roster read while the guild changes is never saved to the old guild
 
     test.assertEqual(1, #setup.finished)
     test.assertTrue(partition:IsInGuild("toolbox-area52"))
+end)
+
+test.test("roster updates before guild information is available wait without errors", function()
+    local setup = build()
+    local partition = setup.partition
+    -- The real context returns nil and a message while the guild is unknown.
+    setup.scheduler.context = function()
+        return nil, "Guild information isn't available yet. Try again in a moment."
+    end
+    setup.scheduler:OnSavedDataReady()
+
+    local ok, problem = pcall(setup.scheduler.OnRosterUpdate, setup.scheduler)
+    fixtures.runTimers(setup.world)
+
+    test.assertTrue(ok, tostring(problem))
+    test.assertEqual(0, #setup.finished)
+    -- Once the guild is known, the daily check still runs.
+    setup.scheduler.context = function()
+        return GUILD, partition(), setup.normalizer
+    end
+    setup.scheduler:OnRosterUpdate()
+    fixtures.runTimers(setup.world)
+    test.assertEqual(1, #setup.finished)
 end)
 
 test.test("nothing scans before saved data is ready", function()

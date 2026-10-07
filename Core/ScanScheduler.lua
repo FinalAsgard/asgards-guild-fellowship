@@ -109,8 +109,9 @@ end
 -- Only marked done once a scan can actually start, so a roster that isn't
 -- available yet is checked again on the next update.
 function Scheduler:CheckDaily()
-    local _, partition = self.context()
-    if partition == nil then
+    -- Without a guild, context() returns nil and a message, not a partition.
+    local guild, partition = self.context()
+    if guild == nil then
         return
     end
     self.dailyChecked = true
@@ -194,8 +195,8 @@ function Scheduler:Run(mode, force)
     end
     -- The read spans frames: a roster that now belongs to another guild
     -- must never be saved into this guild's records.
-    local _, current = self.context()
-    if current == nil or current.key ~= partition.key then
+    local currentGuild, current = self.context()
+    if currentGuild == nil or current.key ~= partition.key then
         return { incomplete = true }
     end
 
