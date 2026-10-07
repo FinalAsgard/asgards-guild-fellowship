@@ -22,10 +22,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 release_dir="${1:-$repo_root/.release}"
 packager_bash="${PACKAGER_BASH:-bash}"
-# The pinned packager revision every build and release shares.
-# shellcheck source=tools/packager.env
-source "$repo_root/tools/packager.env"
-packager_url="https://raw.githubusercontent.com/BigWigsMods/packager/${PACKAGER_COMMIT}/release.sh"
 
 if ! "$packager_bash" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))'; then
     echo "The packager needs bash 4.3 or newer; '$packager_bash' is older. Set PACKAGER_BASH to a newer bash." >&2
@@ -53,7 +49,7 @@ else
     checkout_dir="$work_dir/checkout"
     git clone --quiet "$repo_root" "$checkout_dir"
 fi
-curl -fsSL "$packager_url" -o "$work_dir/release.sh"
+"$repo_root/tools/fetch-packager.sh" "$work_dir/release.sh"
 # -d: never upload anywhere. The result is only a local zip.
 "$packager_bash" "$work_dir/release.sh" -d -t "$checkout_dir" -r "$staging_dir" | tee "$work_dir/packager.log"
 

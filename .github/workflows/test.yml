@@ -43,6 +43,9 @@ jobs:
       - name: Test the publish script's setup checks
         run: tests/tools/publish-release.test.sh
 
+      - name: Test the packager download check
+        run: tests/tools/fetch-packager.test.sh
+
   fetch:
     name: Library fetch
     runs-on: ubuntu-latest

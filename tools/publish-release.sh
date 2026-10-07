@@ -9,8 +9,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=tools/packager.env
-source "$repo_root/tools/packager.env"
 
 # Every setup problem is reported before anything is downloaded or uploaded.
 missing=()
@@ -40,8 +38,7 @@ unset GITHUB_OAUTH GITHUB_API_TOKEN WOWI_API_TOKEN WAGO_API_TOKEN
 
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
-curl -fsSL "https://raw.githubusercontent.com/BigWigsMods/packager/${PACKAGER_COMMIT}/release.sh" \
-    -o "$work_dir/release.sh"
+"$repo_root/tools/fetch-packager.sh" "$work_dir/release.sh"
 bash "$work_dir/release.sh" -t "$repo_root" -r "$work_dir/release" -p "$CURSEFORGE_PROJECT_ID" \
     | tee "$work_dir/packager.log"
 

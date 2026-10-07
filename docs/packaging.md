@@ -68,8 +68,11 @@ The script needs:
   building and says so.
 
 It downloads the packager at a pinned commit (`PACKAGER_COMMIT` in
-`tools/packager.env`; update it deliberately, since builds and releases share
-it) and runs it with `-d`, so nothing is ever uploaded. It builds from a fresh
+`tools/packager.env`) through `tools/fetch-packager.sh`, which refuses to run
+a download whose SHA-256 isn't `PACKAGER_SHA256` from the same file. Builds
+and releases share both pins; to update the packager, change them together
+(`shasum -a 256 release.sh` gives the new digest). It runs the packager with
+`-d`, so nothing is ever uploaded. It builds from a fresh
 clone of the committed history, so uncommitted changes are not packaged; it
 prints a note when you have some.
 
