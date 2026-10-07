@@ -10,10 +10,13 @@ local ClientProfile = {
 }
 addon.ClientProfile = ClientProfile
 
-local function supported(id, label)
+-- `twoPartNames`: Forever character names are "First Last"; Retail names are
+-- a single word. NameNormalizer receives this instead of detecting it.
+local function supported(id, label, twoPartNames)
     return {
         id = id,
         label = label,
+        nameRules = { twoPartNames = twoPartNames },
         supported = true,
     }
 end
@@ -59,12 +62,12 @@ function ClientProfile.Detect(environment, addonName)
     end
 
     if declared == "Forever" then
-        return supported("forever", "WoW Forever")
+        return supported("forever", "WoW Forever", true)
     end
 
     if declared == "Retail" then
         if isMainlineProject(environment) then
-            return supported("retail", "WoW Retail")
+            return supported("retail", "WoW Retail", false)
         end
         return unsupported("the Retail manifest loaded on a non-Retail client")
     end

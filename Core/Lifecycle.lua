@@ -7,12 +7,14 @@ local Controller = {}
 Controller.__index = Controller
 
 -- `state` is optional: the composition root passes none on an unsupported
--- client, so saved data is never read or written there.
-function Lifecycle.Create(client, router, state)
+-- client, so saved data is never read or written there. `onReady` (also
+-- optional) runs once, after saved data first initializes.
+function Lifecycle.Create(client, router, state, onReady)
     return setmetatable({
         addonName = addon.Identity.addonName,
         client = client,
         initialized = false,
+        onReady = onReady,
         router = router,
         slashRegistrationAttempted = false,
         slashRegistered = false,
@@ -65,6 +67,11 @@ function Controller:InitializeState()
 
     -- A failed attempt stays retryable on the next login event.
     self.initialized = self.state == nil or self.stateReady
+    if self.stateReady and self.onReady ~= nil then
+        local onReady = self.onReady
+        self.onReady = nil
+        pcall(onReady)
+    end
     return self.stateReady
 end
 

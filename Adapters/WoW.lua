@@ -154,6 +154,169 @@ function Client:GetGlobal(name)
     return self.environment[name]
 end
 
+-- The player's current guild as { name, realm }, or nil when guildless or
+-- unknown. GetGuildInfo reports no realm for a guild on the player's realm.
+function Client:GetGuildIdentity()
+    local ok, name, _, _, realm = callFunction(self.environment.GetGuildInfo, "player")
+    if not ok or type(name) ~= "string" or name == "" then
+        return nil
+    end
+
+    if type(realm) ~= "string" or realm == "" then
+        local realmOk, currentRealm = callFunction(self.environment.GetRealmName)
+        realm = realmOk and currentRealm or nil
+    end
+    if type(realm) ~= "string" or realm == "" then
+        return nil
+    end
+
+    return { name = name, realm = realm }
+end
+
+function Client:IsInGuild()
+    local ok, inGuild = callFunction(self.environment.IsInGuild)
+    return ok and inGuild ~= nil and inGuild ~= false
+end
+
+-- How many members the guild roster currently holds, or nil.
+function Client:GetGuildRosterCount()
+    local ok, total = callFunction(self.environment.GetNumGuildMembers)
+    if not ok or type(total) ~= "number" or total < 0 then
+        return nil
+    end
+    return total
+end
+
+-- Facts about the roster member at `index`, or nil when the client can't
+-- say (the roster loads asynchronously, so early reads may be empty).
+function Client:GetGuildMember(index)
+    local ok, name, rankName, rankIndex, level, _, zone, note, _, online, _, classToken =
+        callFunction(self.environment.GetGuildRosterInfo, index)
+    if not ok or type(name) ~= "string" or name == "" then
+        return nil
+    end
+
+    local member = {
+        name = name,
+        classToken = type(classToken) == "string" and classToken or nil,
+        level = type(level) == "number" and level or nil,
+        rankIndex = type(rankIndex) == "number" and rankIndex or nil,
+        rankName = type(rankName) == "string" and rankName or nil,
+        online = online == true or online == 1,
+        zone = type(zone) == "string" and zone ~= "" and zone or nil,
+        -- The public note, read live. It is only parsed, never stored.
+        note = type(note) == "string" and note or "",
+    }
+
+    local lastOk, years, months, days, hours =
+        callFunction(self.environment.GetGuildRosterLastOnline, index)
+    if lastOk and (type(years) == "number" or type(months) == "number"
+        or type(days) == "number" or type(hours) == "number")
+    then
+        member.lastOnline = {
+            years = years or 0,
+            months = months or 0,
+            days = days or 0,
+            hours = hours or 0,
+        }
+    end
+    return member
+end
+
+-- Asks the client to refresh the guild roster. GUILD_ROSTER_UPDATE follows.
+function Client:RequestGuildRoster()
+    local guildInfo = self.environment.C_GuildInfo
+    if type(guildInfo) == "table" and callFunction(guildInfo.GuildRoster) then
+        return true
+    end
+    return (callFunction(self.environment.GuildRoster))
+end
+
+-- Calls onUpdate() on every GUILD_ROSTER_UPDATE. Returns false when the
+-- client can't deliver the event.
+function Client:ObserveGuildRoster(onUpdate)
+    if type(onUpdate) ~= "function" then
+        return false
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil
+        or not self:SetEventHandler(frame, function()
+            onUpdate()
+        end)
+        or not self:RegisterEvent(frame, "GUILD_ROSTER_UPDATE")
+    then
+        return false
+    end
+    self.rosterFrame = frame
+    return true
+end
+
+-- Wall-clock seconds for saved records, or nil.
+function Client:Timestamp()
+    local ok, now = callFunction(self.environment.GetServerTime)
+    if not ok or type(now) ~= "number" then
+        ok, now = callFunction(self.environment.time)
+    end
+    if not ok or type(now) ~= "number" then
+        return nil
+    end
+    return now
+end
+
+-- Runs callback once after `seconds` (0 means the next frame). Returns false
+-- when the client has no timer, so callers can act immediately instead.
+function Client:After(seconds, callback)
+    local timers = self.environment.C_Timer
+    if type(timers) ~= "table" or type(timers.After) ~= "function" or type(callback) ~= "function" then
+        return false
+    end
+
+    local ok = pcall(timers.After, seconds, callback)
+    return ok
+end
+
+-- A high-resolution clock in milliseconds for time budgets, or nil.
+function Client:PreciseMilliseconds()
+    local ok, now = callFunction(self.environment.debugprofilestop)
+    if ok and type(now) == "number" then
+        return now
+    end
+    ok, now = callFunction(self.environment.GetTimePreciseSec)
+    if ok and type(now) == "number" then
+        return now * 1000
+    end
+    return nil
+end
+
+-- A timestamp as "2026-10-05", or the raw number when the client has no
+-- date function.
+function Client:FormatDate(timestamp)
+    if type(timestamp) ~= "number" then
+        return ""
+    end
+    local ok, text = callFunction(self.environment.date, "%Y-%m-%d", timestamp)
+    if ok and type(text) == "string" then
+        return text
+    end
+    return tostring(timestamp)
+end
+
+-- The class color as an "ffrrggbb" hex string, or nil.
+function Client:GetClassColor(classToken)
+    local colors = self.environment.RAID_CLASS_COLORS
+    local color = type(colors) == "table" and type(classToken) == "string" and colors[classToken] or nil
+    if type(color) ~= "table" then
+        return nil
+    end
+    if type(color.colorStr) == "string" then
+        return color.colorStr
+    end
+    if type(color.r) == "number" and type(color.g) == "number" and type(color.b) == "number" then
+        return string.format("ff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
+    end
+    return nil
+end
+
 function Client:GetAccountDatabase()
     return self.environment[self.databaseName]
 end

@@ -142,6 +142,32 @@ test.test("lifecycle initializes state at add-on load when the player is already
     test.assertTrue(lifecycle.stateReady)
 end)
 
+test.test("lifecycle runs onReady once, after saved data first initializes", function()
+    local addon = loadRuntimeModules()
+    local attempts, readyCalls = 0, 0
+    local state = {
+        Initialize = function()
+            attempts = attempts + 1
+            return attempts >= 2
+        end,
+    }
+    local client = {
+        Print = function()
+            return true
+        end,
+    }
+    local lifecycle = addon.Lifecycle.Create(client, {}, state, function()
+        readyCalls = readyCalls + 1
+    end)
+
+    lifecycle:OnEvent("PLAYER_LOGIN")
+    test.assertEqual(0, readyCalls)
+    lifecycle:OnEvent("PLAYER_ENTERING_WORLD")
+    lifecycle:OnEvent("PLAYER_ENTERING_WORLD")
+
+    test.assertEqual(1, readyCalls)
+end)
+
 test.test("state initialization exceptions are reported, not raised", function()
     local addon = loadRuntimeModules()
     local messages = {}

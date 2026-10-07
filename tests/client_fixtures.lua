@@ -133,6 +133,112 @@ local function metadataReader(world, declaredClient)
     end
 end
 
+-- Sample guilds per client: Forever names are "First Last", Retail names are
+-- one word, and both carry a realm suffix as the roster API reports them.
+-- In each, Hammer's note marks it as an alt of the officer, whose note sets
+-- the alias "TheTool".
+Fixtures.GUILDS = {
+    Forever = {
+        name = "Knights of Camelot",
+        realm = "Camelot",
+        members = {
+            { name = "Tool Box-Camelot", class = "WARRIOR", level = 60, rank = 1, rankName = "Officer",
+                online = true, zone = "Ironforge", note = "@TheTool raid lead" },
+            { name = "Hammer Smith-Camelot", class = "PALADIN", level = 42, rank = 3, rankName = "Member",
+                online = false, lastOnline = { 0, 0, 3, 2 }, note = "Healer >Tool Box" },
+            { name = "Zélie Rune-Camelot", class = "MAGE", level = 12, rank = 4, rankName = "Initiate",
+                online = false, lastOnline = { 0, 0, 0, 0 } },
+        },
+    },
+    Retail = {
+        name = "Knights of Camelot",
+        realm = "Area 52",
+        members = {
+            { name = "Toolbox-Area52", class = "WARRIOR", level = 80, rank = 1, rankName = "Officer",
+                online = true, zone = "Dornogal", note = "@TheTool raid lead" },
+            { name = "Hammer-Area52", class = "PALADIN", level = 70, rank = 3, rankName = "Member",
+                online = false, lastOnline = { 0, 2, 0, 0 }, note = "Healer >Toolbox" },
+            { name = "Visitor-Stormrage", class = "MAGE", level = 80, rank = 4, rankName = "Initiate",
+                online = false, lastOnline = { 1, 0, 0, 0 } },
+        },
+    },
+}
+
+-- Installs the guild APIs. `world.guild` (nil = not in a guild) holds name,
+-- realm, and members; `world.rosterReady = false` makes the roster report
+-- nothing, as it does while it loads; `world.rosterRequests` counts refresh
+-- requests.
+local function installGuild(world, environment, profile)
+    environment.IsInGuild = function()
+        return world.guild ~= nil
+    end
+    environment.GetGuildInfo = function(unit)
+        test.assertEqual("player", unit)
+        if world.guild == nil then
+            return nil
+        end
+        -- The realm is reported only for a guild on another realm.
+        return world.guild.name, "Member", 3, nil
+    end
+    environment.GetRealmName = function()
+        return world.guild and world.guild.realm or "Camelot"
+    end
+    environment.GetNumGuildMembers = function()
+        if world.guild == nil or not world.rosterReady then
+            return 0, 0, 0
+        end
+        return #world.guild.members, 1, 1
+    end
+    environment.GetGuildRosterInfo = function(index)
+        local member = world.rosterReady and world.guild and world.guild.members[index]
+        if not member then
+            return nil
+        end
+        return member.name, member.rankName, member.rank, member.level, "Class", member.zone,
+            member.note or "", "", member.online, 0, member.class
+    end
+    environment.GetGuildRosterLastOnline = function(index)
+        local member = world.rosterReady and world.guild and world.guild.members[index]
+        if not member or not member.lastOnline then
+            return nil
+        end
+        return member.lastOnline[1], member.lastOnline[2], member.lastOnline[3], member.lastOnline[4]
+    end
+    world.rosterRequests = 0
+    local function request()
+        world.rosterRequests = world.rosterRequests + 1
+    end
+    if profile == "Retail" then
+        environment.C_GuildInfo = { GuildRoster = request }
+        environment.GetNormalizedRealmName = function()
+            return world.guild and string.gsub(world.guild.realm, "%s+", "") or "Camelot"
+        end
+    else
+        environment.GuildRoster = request
+    end
+    -- A fake clock: `world.time` is wall-clock seconds, `world.precise` the
+    -- millisecond profiler clock, and C_Timer callbacks wait in
+    -- `world.timers` until Fixtures.runTimers delivers them.
+    world.time = 1790000000
+    world.precise = 0
+    world.timers = {}
+    environment.GetServerTime = function()
+        return world.time
+    end
+    environment.debugprofilestop = function()
+        return world.precise
+    end
+    environment.C_Timer = {
+        After = function(seconds, callback)
+            table.insert(world.timers, { at = world.time + seconds, callback = callback })
+        end,
+    }
+    environment.RAID_CLASS_COLORS = {
+        WARRIOR = { colorStr = "ffc69b6d" },
+        PALADIN = { r = 0.96, g = 0.55, b = 0.73 },
+    }
+end
+
 local PROFILE_APIS = {
     -- Forever exposes the legacy metadata global and the newer slash API, and
     -- shares Retail's project constants, which must not make it Retail.
@@ -158,7 +264,9 @@ local PROFILE_APIS = {
 -- picks the build (production by default), `options.declaredClient` overrides
 -- the manifest's X-Client value (false removes it), and `options.database`
 -- seeds that build's SavedVariables; see installLibraries for the library
--- options. The SavedVariables global lives in
+-- options. `options.guild = false` puts the character outside any guild,
+-- `options.guild = {...}` replaces the profile's sample guild, and
+-- `options.rosterReady = false` starts with the roster still loading. The SavedVariables global lives in
 -- `world.database`, and every read or write of it through the environment is
 -- counted in `world.savedVariableReads` and `world.savedVariableWrites`.
 function Fixtures.newEnvironment(profile, options)
@@ -216,6 +324,11 @@ function Fixtures.newEnvironment(profile, options)
     end
     PROFILE_APIS[profile](world, environment, declaredClient)
     installLibraries(environment, options)
+    if options.guild ~= false then
+        world.guild = options.guild or Fixtures.snapshot(Fixtures.GUILDS[profile])
+    end
+    world.rosterReady = options.rosterReady ~= false
+    installGuild(world, environment, profile)
 
     world.environment = environment
     world.profile = profile
@@ -241,6 +354,33 @@ function Fixtures.fire(world, eventName, ...)
         local frame = world.frames[index]
         if frame.registeredEvents[eventName] and frame.handler ~= nil then
             frame.handler(frame, eventName, ...)
+        end
+    end
+end
+
+-- Moves the fake wall clock forward by `seconds` and delivers every timer
+-- that comes due, including timers those callbacks schedule (as a frame
+-- loop would). Returns how many callbacks ran.
+function Fixtures.runTimers(world, seconds)
+    world.time = world.time + (seconds or 0)
+    local ran = 0
+    while true do
+        local dueIndex
+        local index
+        for index = 1, #world.timers do
+            if world.timers[index].at <= world.time then
+                dueIndex = index
+                break
+            end
+        end
+        if dueIndex == nil then
+            return ran
+        end
+        local timer = table.remove(world.timers, dueIndex)
+        timer.callback()
+        ran = ran + 1
+        if ran > 100000 then
+            error("timers never settle")
         end
     end
 end

@@ -25,9 +25,132 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence
+local persistence, rosterController, entryPoints
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
+    rosterController = addon.RosterController.Create({
+        client = client,
+        nameRules = clientProfile.nameRules,
+        getDatabase = function()
+            return persistence:GetDatabase()
+        end,
+        createWindow = function()
+            return addon.RosterWindow.Create(client, {
+                loadGeometry = function()
+                    local store = rosterController:Store()
+                    return store and store:GetWindowState()
+                end,
+                saveGeometry = function(state)
+                    local store = rosterController:Store()
+                    if store ~= nil then
+                        store:SetWindowState(state)
+                    end
+                end,
+                onToggleGroup = function(playerId)
+                    rosterController:ToggleGroup(playerId)
+                end,
+                onRescan = function()
+                    rosterController:Rescan()
+                end,
+                onAcceptConflict = function(character, kind)
+                    rosterController:AcceptConflict(character, kind)
+                end,
+                onRejectConflict = function(character, kind)
+                    rosterController:RejectConflict(character, kind)
+                end,
+                onAcceptAll = function()
+                    rosterController:AcceptAllConflicts()
+                end,
+                onRejectAll = function()
+                    rosterController:RejectAllConflicts()
+                end,
+                onToggleDeparted = function()
+                    return rosterController:ToggleDeparted()
+                end,
+                onPurge = function(key)
+                    rosterController:Purge(key)
+                end,
+                onPurgeAll = function()
+                    rosterController:PurgeAllDeparted()
+                end,
+                menuFor = function(row)
+                    return rosterController:MenuFor(row)
+                end,
+                onSetMain = function(key, playerId)
+                    rosterController:SetMainPlayer(key, playerId)
+                end,
+                onMakeMain = function(key)
+                    rosterController:MakeMain(key)
+                end,
+                onSetAlias = function(key, text)
+                    rosterController:SetAlias(key, text)
+                end,
+                onDetach = function(key)
+                    rosterController:Detach(key)
+                end,
+                searchPlayers = function(key, query)
+                    return rosterController:SearchPlayers(key, query)
+                end,
+                aliasOf = function(key)
+                    return rosterController:AliasOf(key)
+                end,
+                onSearch = function(text)
+                    rosterController:SetSearch(text)
+                end,
+                onToggleOnlineOnly = function()
+                    return rosterController:ToggleOnlineOnly()
+                end,
+                onExpandAll = function()
+                    rosterController:ExpandAll()
+                end,
+                onCollapseAll = function()
+                    rosterController:CollapseAll()
+                end,
+                onSelectCharacter = function(key)
+                    rosterController:SelectPlayerOf(key)
+                end,
+                onClosePanel = function()
+                    rosterController:ClosePanel()
+                end,
+                onMenuUnavailable = function()
+                    rosterController:Print("The organize menu isn't available on this client.")
+                end,
+            })
+        end,
+    })
+    router:Register("roster", "show or hide the roster window", function()
+        rosterController:Toggle()
+    end)
+    router:Register("rescan", "rescan the guild roster now", function()
+        rosterController:Rescan()
+    end)
+    router:Register("minimap", "show or hide the minimap button", function()
+        local shown, reason = entryPoints:ToggleMinimap()
+        if shown == nil then
+            rosterController:Print("Can't change the minimap button: " .. reason .. ".")
+        elseif shown then
+            rosterController:Print("Minimap button shown.")
+        else
+            rosterController:Print("Minimap button hidden. Type the command again to bring it back.")
+        end
+    end)
+    router:SetDefault("roster")
+    client:ObserveGuildRoster(function()
+        rosterController:OnRosterUpdate()
+    end)
+    entryPoints = addon.EntryPoints.Create({
+        client = client,
+        toggle = function()
+            rosterController:Toggle()
+        end,
+        conflictCount = function()
+            return rosterController:PendingConflictCount()
+        end,
+        minimapState = function()
+            local store = rosterController:Store()
+            return store and store:GetMinimapState()
+        end,
+    })
 else
     -- Never touch saved data on a client we cannot identify.
     client:Print(addon.Identity.chatPrefix .. " This game client is not supported (" ..
@@ -35,13 +158,19 @@ else
         "Saved data was left unchanged.")
 end
 
-local lifecycle = addon.Lifecycle.Create(client, router, persistence)
+local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
+    rosterController:OnSavedDataReady()
+    -- The minimap button needs saved data for its position.
+    entryPoints:Start()
+end)
 
 addon.client = client
 addon.clientProfile = clientProfile
 addon.libraryCheck = libraryCheck
 addon.lifecycle = lifecycle
 addon.persistence = persistence
+addon.rosterController = rosterController
+addon.entryPoints = entryPoints
 addon.router = router
 addon.version = version
 
