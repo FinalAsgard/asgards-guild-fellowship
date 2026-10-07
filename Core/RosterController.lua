@@ -256,7 +256,7 @@ function Controller:MenuFor(row)
         local player = self.current.partition:GetPlayer(row.id)
         return player and {
             { text = "Set alias...", action = "alias", key = player.main },
-            { text = "Edit player...", action = "edit", key = player.main },
+            { text = "View player...", action = "view", key = player.main },
         } or {}
     end
     local partition = self.current.partition
@@ -273,7 +273,7 @@ function Controller:MenuFor(row)
         end
     end
     table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
-    table.insert(entries, { text = "Edit player...", action = "edit", key = row.key })
+    table.insert(entries, { text = "View player...", action = "view", key = row.key })
     if partition:CharactersOf(character.player)[2] ~= nil then
         table.insert(entries, { text = "Detach as own player", action = "detach", key = row.key })
     end

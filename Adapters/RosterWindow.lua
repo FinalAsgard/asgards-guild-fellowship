@@ -343,6 +343,11 @@ local function buildPicker(framework, frameName)
             local row = rows[lineIndex + offset]
             if row ~= nil then
                 local line = scroll:GetLine(lineIndex)
+                -- Each line is placed by its slot on every refresh, so rows
+                -- never stack on one another whatever order lines were made.
+                line:ClearAllPoints()
+                line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(lineIndex - 1) * RosterWindow.LINE_HEIGHT)
+                line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(lineIndex - 1) * RosterWindow.LINE_HEIGHT)
                 line.row = row
                 local text = row.label
                 if row.matched ~= nil then
@@ -399,52 +404,43 @@ end
 local PANEL_WIDTH = 380
 local PANEL_HEIGHT = 440
 
-local function buildPlayerPanel(framework, options, frameName, anchor)
+-- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name)`
+-- open the dialogs the right-click menu uses.
+local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
     panel:SetFrameStrata("HIGH")
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
     local edit = { panel = panel }
 
-    local aliasLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    aliasLabel:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -32)
-    aliasLabel:SetText("Alias")
-    local alias = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    alias:SetSize(170, 20)
-    alias:SetPoint("LEFT", aliasLabel, "RIGHT", 12, 0)
-    alias:SetAutoFocus(false)
-    alias:SetMaxLetters(48)
-    local saveAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    saveAlias:SetSize(60, 20)
-    saveAlias:SetPoint("LEFT", alias, "RIGHT", 6, 0)
-    saveAlias:SetText("Save")
-    local clearAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    clearAlias:SetSize(60, 20)
-    clearAlias:SetPoint("LEFT", saveAlias, "RIGHT", 4, 0)
-    clearAlias:SetText("Clear")
+    -- The alias, and the same Set alias… and Set main… dialogs as the
+    -- right-click menu.
+    local aliasText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    aliasText:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -32)
+    aliasText:SetPoint("RIGHT", panel, "RIGHT", -190, 0)
+    aliasText:SetJustifyH("LEFT")
+    aliasText:SetWordWrap(false)
+    local setMain = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    setMain:SetSize(84, 20)
+    setMain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -28)
+    setMain:SetText("Set main...")
+    local setAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    setAlias:SetSize(84, 20)
+    setAlias:SetPoint("RIGHT", setMain, "LEFT", -4, 0)
+    setAlias:SetText("Set alias...")
     local aliasSource = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    aliasSource:SetPoint("TOPLEFT", aliasLabel, "BOTTOMLEFT", 0, -10)
-    saveAlias:SetScript("OnClick", function()
+    aliasSource:SetPoint("TOPLEFT", aliasText, "BOTTOMLEFT", 0, -6)
+    setAlias:SetScript("OnClick", function()
         if edit.model ~= nil then
-            options.onSetAlias(edit.model.main, alias:GetText())
-            alias:ClearFocus()
+            actions.openSetAlias(edit.model.main, edit.model.label)
         end
     end)
-    alias:SetScript("OnEnterPressed", function(box)
+    setMain:SetScript("OnClick", function()
         if edit.model ~= nil then
-            options.onSetAlias(edit.model.main, box:GetText())
-        end
-        box:ClearFocus()
-    end)
-    alias:SetScript("OnEscapePressed", function(box)
-        box:ClearFocus()
-    end)
-    clearAlias:SetScript("OnClick", function()
-        if edit.model ~= nil then
-            options.onSetAlias(edit.model.main, "")
+            actions.openSetMain(edit.model.main, edit.model.mainName)
         end
     end)
-    edit.alias = alias
+    edit.aliasText = aliasText
     edit.aliasSource = aliasSource
 
     local lineAmount = math.floor((PANEL_HEIGHT - 90) / RosterWindow.LINE_HEIGHT)
@@ -759,6 +755,26 @@ local function build(framework, options)
 
     local lineAmount = math.floor((RosterWindow.DEFAULT_HEIGHT - 120) / RosterWindow.LINE_HEIGHT)
     local picker = buildPicker(framework, frameName)
+    -- "Set main…": links `key` (named `name`) as an alt of the picked player.
+    local function openSetMain(key, name)
+        picker.prompt:SetText("Make " .. tostring(name) .. " an alt of:")
+        picker.search_fn = function(query)
+            return options.searchPlayers(key, query)
+        end
+        picker.onPick = function(playerId)
+            options.onSetMain(key, playerId)
+        end
+        picker.search:SetText("")
+        picker.panel:Show()
+        picker.update()
+    end
+    local function openSetAlias(key, title)
+        if not showAliasDialog(title, options.aliasOf(key), function(text)
+            options.onSetAlias(key, text)
+        end) then
+            options.onMenuUnavailable()
+        end
+    end
     local function openRowMenu(row, line)
         local entries = options.menuFor(row)
         if entries[1] == nil then
@@ -767,27 +783,14 @@ local function build(framework, options)
         local title = row.kind == "player" and row.label or (row.standalone and row.label or row.name)
         local shown = showContextMenu(line, title, entries, function(entry)
             if entry.action == "setMain" then
-                picker.prompt:SetText("Make " .. tostring(row.name) .. " an alt of:")
-                picker.search_fn = function(query)
-                    return options.searchPlayers(entry.key, query)
-                end
-                picker.onPick = function(playerId)
-                    options.onSetMain(entry.key, playerId)
-                end
-                picker.search:SetText("")
-                picker.panel:Show()
-                picker.update()
+                openSetMain(entry.key, row.name)
             elseif entry.action == "makeMain" then
                 options.onMakeMain(entry.key)
             elseif entry.action == "alias" then
-                if not showAliasDialog(title, options.aliasOf(entry.key), function(text)
-                    options.onSetAlias(entry.key, text)
-                end) then
-                    options.onMenuUnavailable()
-                end
+                openSetAlias(entry.key, title)
             elseif entry.action == "detach" then
                 options.onDetach(entry.key)
-            elseif entry.action == "edit" then
+            elseif entry.action == "view" then
                 options.onSelectCharacter(entry.key)
             end
         end)
@@ -881,7 +884,10 @@ local function build(framework, options)
     panel:Hide()
 
     local conflicts = buildConflictPanel(framework, options, frameName)
-    local playerPanel = buildPlayerPanel(framework, options, frameName, panel)
+    local playerPanel = buildPlayerPanel(framework, options, frameName, panel, {
+        openSetAlias = openSetAlias,
+        openSetMain = openSetMain,
+    })
     conflictsButton:SetScript("OnClick", function()
         if conflicts.panel:IsShown() then
             conflicts.panel:Hide()
@@ -978,10 +984,8 @@ function Window:ShowPlayer(model)
         if type(edit.panel.SetTitle) == "function" then
             edit.panel:SetTitle(model.label)
         end
-        if not edit.alias:HasFocus() then
-            edit.alias:SetText(model.alias or "")
-        end
-        edit.aliasSource:SetText(model.aliasSource and ("Alias " .. model.aliasSource) or "")
+        edit.aliasText:SetText(model.alias and ("Alias: " .. model.alias) or "|cff9d9d9dNo alias|r")
+        edit.aliasSource:SetText(model.alias and model.aliasSource and ("Alias " .. model.aliasSource) or "")
         edit.scroll:SetData(model.rows)
         edit.scroll:Refresh()
         edit.panel:Show()

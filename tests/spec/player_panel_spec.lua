@@ -95,7 +95,8 @@ test.test("the panel shows the alias, acting main, alts, and history", function(
     test.assertEqual("Online, Dornogal", characters[2].status)
     local history = rowsOf(model, "history")
     test.assertEqual(1, #history)
-    test.assertEqual("Wrench-Area52", history[1].name)
+    -- Shown as the roster spells it, without the home realm.
+    test.assertEqual("Wrench", history[1].name)
     test.assertEqual("Alt", history[1].role)
     test.assertEqual("left the guild, purged", history[1].reason)
     test.assertEqual("until day 1", history[1].dates)

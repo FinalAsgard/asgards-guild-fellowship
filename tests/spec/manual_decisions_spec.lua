@@ -160,3 +160,45 @@ test.test("a scan cut short leaves its notes to be processed by the next scan", 
 
     test.assertEqual("toolbox-area52", state.playerOf("hammer-area52").main)
 end)
+
+-- History of characters that left a player -----------------------------------
+
+local function historyOf(state, key)
+    return state.partition:GetHistory(state.partition:GetCharacter(key).player)
+end
+
+test.test("detaching an alt keeps it in its former player's history", function()
+    local state = setup()
+    state.scan(LINKED, "initial")
+
+    test.assertTrue(state.service():Detach("hammer-area52"))
+
+    local history = historyOf(state, "toolbox-area52")
+    test.assertEqual(1, #history)
+    test.assertEqual("Hammer-Area52", history[1].name)
+    test.assertEqual("alt", history[1].role)
+    test.assertEqual("detached", history[1].reason)
+    test.assertEqual(1790000000, history[1]["until"])
+end)
+
+test.test("moving a character to another player names where it went", function()
+    local state = setup()
+    state.scan({ { "Toolbox-Area52", "" }, { "Hammer-Area52", ">Toolbox" }, { "Anvil-Area52", "" } }, "initial")
+    local anvil = state.partition:GetCharacter("anvil-area52").player
+
+    test.assertTrue(state.service():SetMainPlayer("hammer-area52", anvil))
+
+    local history = historyOf(state, "toolbox-area52")
+    test.assertEqual(1, #history)
+    test.assertEqual("moved to Anvil-Area52", history[1].reason)
+end)
+
+test.test("a single-character player that is moved leaves no history behind", function()
+    local state = setup()
+    state.scan({ { "Toolbox-Area52", "" }, { "Anvil-Area52", "" } }, "initial")
+    local toolbox = state.partition:GetCharacter("toolbox-area52").player
+
+    test.assertTrue(state.service():SetMainPlayer("anvil-area52", toolbox))
+
+    test.assertEqual(0, #historyOf(state, "toolbox-area52"))
+end)

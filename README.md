@@ -55,7 +55,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 
 ### Organizing by hand
 
-Right-click a character for **Set main…**, **Make this the main**, **Set alias…**, **Detach as own player**, and **Edit player…**. Clicking a character opens the player panel, with the alias, main, alts, and character history.
+Right-click a character for **Set main…**, **Make this the main**, **Set alias…**, **Detach as own player**, and **View player…**. Clicking a character also opens the player panel. It shows the alias, main, alts, and history, and has **Set alias…** and **Set main…** buttons that open the same dialogs as the menu. History lists characters that left the player: ones that left the guild, were detached, or were moved to another player.
 
 Changes show up right away and are recorded as manual. Data is saved per guild and shared by every character on this game install.
 

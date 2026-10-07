@@ -41,6 +41,30 @@ function Service:KeepActingMains()
     addon.ReconcileEngine.EnsureActingMains(self.partition, {}, self.now())
 end
 
+-- Records in `playerId`'s history that `key` left it ("detached", "moved
+-- to …"), so the player panel shows former characters. Nothing is recorded
+-- when the old player is gone (it had no other characters).
+function Service:RecordLeaving(playerId, key, wasMain, reason)
+    local character = self.partition:GetCharacter(key)
+    if character == nil or self.partition:GetPlayer(playerId) == nil then
+        return
+    end
+    self.partition:AddHistory(playerId, {
+        name = character.name or key,
+        character = key,
+        role = wasMain and "main" or "alt",
+        ["until"] = self.now(),
+        reason = reason,
+    })
+end
+
+-- The player `key` belongs to, and whether it is that player's main.
+function Service:Membership(key)
+    local character = self.partition:GetCharacter(key)
+    local player = character and self.partition:GetPlayer(character.player)
+    return character and character.player, player ~= nil and player.main == key
+end
+
 -- Drops pending note conflicts that a manual change has settled.
 function Service:SettleConflicts(keys, kinds)
     local conflicts = self.partition:GetConflicts() or {}
@@ -82,10 +106,13 @@ function Service:AcceptConflict(character, kind)
         if self.partition:GetCharacter(conflict.suggestion.main) == nil then
             return false, "the suggested main is no longer known"
         end
+        local formerPlayer, wasMain = self:Membership(character)
         if not self.partition:JoinPlayerOf(character, conflict.suggestion.main, source) then
             return false, "the character could not be moved"
         end
         self:KeepActingMains()
+        self:RecordLeaving(formerPlayer, character, wasMain, "moved to " ..
+            tostring(self:PlayerNameOf(character)) .. " by a guild note")
     elseif kind == "alias" then
         local record = self.partition:GetCharacter(character)
         if record == nil or not self.partition:SetAlias(record.player, conflict.suggestion.alias, source) then
@@ -235,11 +262,13 @@ function Service:SetMainPlayer(key, playerId)
     if character.player == playerId then
         return true
     end
+    local formerPlayer, wasMain = self:Membership(key)
     if not self.partition:JoinPlayerOf(key, player.main, addon.FellowshipStore.SOURCE_MANUAL) then
         return false, "the character could not be moved"
     end
     self:SettleConflicts({ [key] = true }, { main = true })
     self:KeepActingMains()
+    self:RecordLeaving(formerPlayer, key, wasMain, "moved to " .. tostring(self:PlayerName(playerId)))
     return true
 end
 
@@ -280,11 +309,13 @@ function Service:Detach(key)
     if self.partition:CharactersOf(character.player)[2] == nil then
         return false, "it is already its own player"
     end
+    local formerPlayer, wasMain = self:Membership(key)
     if self.partition:MoveToNewPlayer(key, addon.FellowshipStore.SOURCE_MANUAL) == nil then
         return false, "the character could not be moved"
     end
     self:SettleConflicts({ [key] = true }, { main = true })
     self:KeepActingMains()
+    self:RecordLeaving(formerPlayer, key, wasMain, "detached")
     return true
 end
 

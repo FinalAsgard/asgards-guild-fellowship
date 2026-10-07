@@ -297,9 +297,9 @@ test.test("the right-click menu offers the actions that apply to the row", funct
     test.assertEqual(nil, single.detach)
 
     local header = actions(controller:MenuFor(rowFor(window, "TheTool (Toolbox)")))
-    test.assertTrue(header.alias and header.edit)
+    test.assertTrue(header.alias and header.view)
     test.assertEqual(nil, header.detach)
-    test.assertTrue(alt.edit and main.edit and single.edit)
+    test.assertTrue(alt.view and main.view and single.view)
 end)
 
 test.test("organizing from the menu refreshes the roster at once without a scan", function()

@@ -60,7 +60,7 @@ end
 -- inputs: partition, playerId, members (live facts by key), normalizer,
 -- formatDate (function(timestamp) -> text).
 -- Returns nil when the player no longer exists, or:
---   { id, label, alias, aliasSource, main, rows }
+--   { id, label, alias, aliasSource, main, mainName, rows }
 -- where `main` is the main's character key and `rows` is a flat list for the
 -- panel's scroll list:
 --   { kind = "section", text }
@@ -102,7 +102,9 @@ function PlayerPanelViewModel.Build(inputs)
         local entry = history[index]
         table.insert(rows, {
             kind = "history",
-            name = entry.name,
+            -- Shown as the roster spells names (no home realm); an
+            -- out-of-guild name from a note is shown as written.
+            name = (inputs.normalizer and inputs.normalizer:Display(entry.name)) or entry.name,
             role = entry.role == "main" and "Main" or "Alt",
             dates = datesText(entry, formatDate),
             reason = REASONS[entry.reason] or entry.reason or "",
@@ -119,6 +121,7 @@ function PlayerPanelViewModel.Build(inputs)
         alias = player.alias,
         aliasSource = SOURCES[player.aliasSource],
         main = player.main,
+        mainName = mainName,
         rows = rows,
     }
 end
