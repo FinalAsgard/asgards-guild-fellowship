@@ -141,7 +141,8 @@ end
 --   "initial"      every character (the first scan of a guild)
 --   "full"         characters whose note fingerprint changed, plus new ones;
 --                  with `force`, every character (a manual rescan)
---   "incremental"  only characters the store has never seen
+--   "incremental"  only characters the store has never seen, or whose note
+--                  was never processed (a scan was cut short)
 -- Characters whose note is unchanged are skipped entirely, so repeat scans
 -- do no per-character reconciliation work.
 local function selects(mode, force, partition, key, fingerprint)
@@ -150,7 +151,9 @@ local function selects(mode, force, partition, key, fingerprint)
         return true
     end
     if mode == "incremental" then
-        return false
+        -- A character recorded by a scan that was cut short has no note
+        -- fingerprint yet; picking it up again finishes its reconciliation.
+        return character.note == nil
     end
     if mode == "initial" or force then
         return true

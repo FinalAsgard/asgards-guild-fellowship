@@ -208,6 +208,31 @@ test.test("a roster re-sorted while it was read is never treated as complete", f
     end
 end)
 
+test.test("a roster read that a roster update interrupts is never treated as complete", function()
+    local setup = build()
+    setup.login()
+    local partition = setup.partition()
+    -- Mid-read, Visitor leaves and Newbie joins: same count, no repeats.
+    -- The client fires a roster update for the change.
+    local environment = setup.world.environment
+    local getInfo = environment.GetGuildRosterInfo
+    environment.GetGuildRosterInfo = function(index)
+        if index == 2 then
+            setup.scheduler:OnRosterUpdate()
+        end
+        if index == 3 then
+            return "Newbie-Area52", "Initiate", 4, 1, "Rogue", "", "", "", true, 0, "ROGUE"
+        end
+        return getInfo(index)
+    end
+
+    setup.scheduler:RequestFull(true)
+    fixtures.runTimers(setup.world, 5)
+
+    test.assertEqual(1, #setup.finished)
+    test.assertTrue(partition:IsInGuild("visitor-stormrage"), "nobody is marked departed from a mixed read")
+end)
+
 test.test("a roster read while the guild changes is never saved to the old guild", function()
     local setup = build()
     setup.login()

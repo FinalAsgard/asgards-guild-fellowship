@@ -96,6 +96,8 @@ function Scheduler:OnRosterUpdate()
         return
     end
     if self.job ~= nil then
+        -- The roster changed under a running read; that read can't be trusted.
+        self.rosterChanged = true
         return
     end
     if not self.dailyChecked then
@@ -155,12 +157,17 @@ function Scheduler:Checkpoint()
 end
 
 -- Reads the whole roster, keyed by character key. Returns nil when the
--- roster is empty, partial, changed size, or re-sorted while it was read.
+-- roster is empty, partial, or changed (size, order, or members) while it
+-- was read.
 function Scheduler:ReadRoster(normalizer)
     local count = self.client:GetGuildRosterCount()
     if count == nil or count <= 0 then
         return nil
     end
+    -- The read spans frames. The client fires a roster update whenever its
+    -- roster changes, so a read with an update in the middle may mix two
+    -- rosters (one member left, another joined, same count) and isn't used.
+    self.rosterChanged = false
     local members = {}
     local distinct = 0
     local index
@@ -178,7 +185,7 @@ function Scheduler:ReadRoster(normalizer)
     end
     -- The read spans frames, so a roster re-sorted mid-read repeats some
     -- members and skips others; that read isn't complete.
-    if distinct ~= count or self.client:GetGuildRosterCount() ~= count then
+    if self.rosterChanged or distinct ~= count or self.client:GetGuildRosterCount() ~= count then
         return nil
     end
     return members

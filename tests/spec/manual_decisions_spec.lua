@@ -236,3 +236,20 @@ test.test("purging a character that was moved back still records it as purged", 
     local history = state.partition:GetHistory(toolbox)
     test.assertEqual("purged", history[#history].reason)
 end)
+
+test.test("a new member whose pickup was cut short is finished by the next pickup", function()
+    local state = setup()
+    state.scan({ { "Toolbox-Area52", "" } }, "initial")
+    local entries = { { "Toolbox-Area52", "" }, { "Hammer-Area52", ">Toolbox" } }
+
+    -- A reload stops the incremental pickup after Hammer is recorded.
+    local ok = pcall(state.addon.ReconcileEngine.Apply, state.partition, state.plan(entries, "incremental"), function()
+        error("interrupted")
+    end)
+    test.assertFalse(ok)
+    test.assertTrue(state.partition:GetCharacter("hammer-area52") ~= nil)
+
+    state.scan(entries, "incremental")
+
+    test.assertEqual("toolbox-area52", state.playerOf("hammer-area52").main)
+end)
