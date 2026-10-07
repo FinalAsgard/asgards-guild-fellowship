@@ -216,21 +216,34 @@ test.test("a roster read that a roster update interrupts is never treated as com
     -- The client fires a roster update for the change.
     local environment = setup.world.environment
     local getInfo = environment.GetGuildRosterInfo
+    -- Only the first read after this point is mixed; later reads are stable.
+    local reads = 0
     environment.GetGuildRosterInfo = function(index)
-        if index == 2 then
+        if index == 1 then
+            reads = reads + 1
+        end
+        if reads == 1 and index == 2 then
             setup.scheduler:OnRosterUpdate()
         end
-        if index == 3 then
+        if reads == 1 and index == 3 then
             return "Newbie-Area52", "Initiate", 4, 1, "Rogue", "", "", "", true, 0, "ROGUE"
         end
         return getInfo(index)
     end
 
     setup.scheduler:RequestFull(true)
-    fixtures.runTimers(setup.world, 5)
+    -- The requested refresh never arrives, so the read starts after its
+    -- 3-second wait; the retry is due 2 seconds after that.
+    fixtures.runTimers(setup.world, 3)
 
+    -- The mixed read was thrown away: nobody is marked departed.
     test.assertEqual(1, #setup.finished)
     test.assertTrue(partition:IsInGuild("visitor-stormrage"), "nobody is marked departed from a mixed read")
+
+    -- With no further roster update, the scan still reads again and finishes.
+    fixtures.runTimers(setup.world, 5)
+    test.assertEqual(2, #setup.finished)
+    test.assertFalse(setup.scheduler:IsRunning())
 end)
 
 test.test("a roster read while the guild changes is never saved to the old guild", function()

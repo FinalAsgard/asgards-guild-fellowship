@@ -185,7 +185,10 @@ function Scheduler:ReadRoster(normalizer)
     end
     -- The read spans frames, so a roster re-sorted mid-read repeats some
     -- members and skips others; that read isn't complete.
-    if self.rosterChanged or distinct ~= count or self.client:GetGuildRosterCount() ~= count then
+    if self.rosterChanged then
+        return nil, "changed"
+    end
+    if distinct ~= count or self.client:GetGuildRosterCount() ~= count then
         return nil
     end
     return members
@@ -196,9 +199,9 @@ function Scheduler:Run(mode, force)
     if guild == nil then
         return nil
     end
-    local members = self:ReadRoster(normalizer)
+    local members, why = self:ReadRoster(normalizer)
     if members == nil then
-        return { incomplete = true }
+        return { incomplete = true, changed = why == "changed" }
     end
     -- The read spans frames: a roster that now belongs to another guild
     -- must never be saved into this guild's records.
@@ -293,7 +296,18 @@ function Scheduler:Step()
         -- A full scan tries again when the roster finishes loading; an
         -- incremental check simply runs on the next update.
         if self.jobMode ~= "incremental" then
-            self.waiting = { mode = self.jobMode, force = self.jobForce }
+            local waiting = { mode = self.jobMode, force = self.jobForce }
+            self.waiting = waiting
+            -- A read cut short by a roster update has already used that
+            -- update, so the retry can't wait for the next one: it reads
+            -- again once the burst settles.
+            if outcome.changed then
+                self.client:After(ScanScheduler.COALESCE_SECONDS, function()
+                    if self.waiting == waiting then
+                        self:StartWaiting()
+                    end
+                end)
+            end
         end
         return
     end
