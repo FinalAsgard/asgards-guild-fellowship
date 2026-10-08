@@ -20,6 +20,8 @@ local LibraryCheck = {
             global = "DetailsFramework",
             loadedField = "FrameWorkVersion",
         },
+        { name = "AceSerializer-3.0", major = "AceSerializer-3.0" },
+        { name = "AceComm-3.0", major = "AceComm-3.0" },
     },
 }
 addon.LibraryCheck = LibraryCheck

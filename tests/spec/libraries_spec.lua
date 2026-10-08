@@ -30,6 +30,8 @@ test.test("library list pins the required libraries in load order", function()
         "LibDBIcon-1.0",
         "LibSharedMedia-3.0",
         "DetailsFramework-1.0",
+        "AceSerializer-3.0",
+        "AceComm-3.0",
     }
 
     test.assertEqual(#expected, #entries, "library count")
@@ -171,7 +173,7 @@ local function registerProfileTests(profile)
 
         test.assertEqual(0, #world.messages)
         fixtures.slash(world, "help")
-        test.assertContains(world.messages[#world.messages], "Libraries: all 6 present.")
+        test.assertContains(world.messages[#world.messages], "Libraries: all 8 present.")
     end)
 
     test.test(profile .. " names missing libraries once and keeps help working", function()
@@ -184,10 +186,11 @@ local function registerProfileTests(profile)
 
         fixtures.slash(world, "help")
         local summary = world.messages[#world.messages]
-        test.assertContains(summary, "Libraries present: LibStub, CallbackHandler-1.0, LibSharedMedia-3.0, Details! Framework.")
+        test.assertContains(summary, "Libraries present: LibStub, CallbackHandler-1.0, LibSharedMedia-3.0, Details! Framework, " ..
+            "AceSerializer-3.0, AceComm-3.0.")
         test.assertContains(summary, "Missing: LibDataBroker-1.1, LibDBIcon-1.0.")
         -- Saved data is unaffected by missing libraries.
-        test.assertEqual(1, world.database.schemaVersion)
+        test.assertEqual(2, world.database.schemaVersion)
     end)
 
     test.test(profile .. " reports a half-loaded Details! Framework as missing", function()
@@ -204,7 +207,7 @@ local function registerProfileTests(profile)
         test.assertContains(
             world.messages[1],
             "Missing libraries: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, " ..
-                "LibSharedMedia-3.0, Details! Framework."
+                "LibSharedMedia-3.0, Details! Framework, AceSerializer-3.0, AceComm-3.0."
         )
         fixtures.slash(world, "help")
         test.assertContains(world.messages[#world.messages], "Libraries present: none.")
@@ -231,5 +234,5 @@ test.test("a LibStub that raises is treated as missing libraries", function()
 
     test.assertEqual(1, #present)
     test.assertEqual("LibStub", present[1])
-    test.assertEqual(5, #missing)
+    test.assertEqual(7, #missing)
 end)

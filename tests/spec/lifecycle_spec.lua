@@ -231,7 +231,7 @@ local function registerProfileTests(profile, addonName)
         test.assertEqual(identity.slashCommand, world.environment["SLASH_" .. identity.slashKey .. "1"])
         test.assertEqual(identity.slashAlias, world.environment["SLASH_" .. identity.slashKey .. "2"])
         test.assertEqual(0, #world.messages)
-        test.assertEqual(1, world.database.schemaVersion)
+        test.assertEqual(2, world.database.schemaVersion)
         test.assertEqual("table", type(world.database.guilds))
 
         fixtures.slash(world, "help")
@@ -240,7 +240,7 @@ local function registerProfileTests(profile, addonName)
             world.messages[#world.messages - 1]
         )
         test.assertEqual(
-            identity.chatPrefix .. " Libraries: all 6 present.",
+            identity.chatPrefix .. " Libraries: all 8 present.",
             world.messages[#world.messages]
         )
 

@@ -7,6 +7,7 @@ local MANIFEST_FILES = {
     "Adapters/WoW.lua",
     "Adapters/RosterWindow.lua",
     "Adapters/EntryPoints.lua",
+    "Adapters/Comm.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",
@@ -17,6 +18,9 @@ local MANIFEST_FILES = {
     "Core/ConflictViewModel.lua",
     "Core/PlayerPanelViewModel.lua",
     "Core/ChatAnnotator.lua",
+    "Core/OfficerAuthority.lua",
+    "Core/SyncFacts.lua",
+    "Core/SyncSession.lua",
     "Core/ScanScheduler.lua",
     "Core/RosterController.lua",
     "Core/LibraryCheck.lua",
@@ -113,7 +117,7 @@ local function registerBootstrapTest(variant)
         world.loggedIn = true
         fixtures.fire(world, "PLAYER_LOGIN")
 
-        test.assertEqual(1, world.database.schemaVersion)
+        test.assertEqual(2, world.database.schemaVersion)
         test.assertEqual("table", type(world.database.guilds))
 
         test.assertEqual(variant.slashCommand, environment["SLASH_" .. variant.slashKey .. "1"])
@@ -131,7 +135,7 @@ local function registerBootstrapTest(variant)
             world.messages[2],
             "Version " .. variant.version .. " on " .. variant.clientLabel .. "."
         )
-        test.assertContains(world.messages[3], "Libraries: all 6 present.")
+        test.assertContains(world.messages[3], "Libraries: all 8 present.")
 
         -- A bare slash command opens the roster. The fixtures' stand-in
         -- framework can't build windows, so it reports that instead of
