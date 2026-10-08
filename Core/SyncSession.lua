@@ -61,6 +61,20 @@ function Session:LocalAliasEdit(key)
     end)
 end
 
+-- Once the roster is known (after a scan): when this user is an officer,
+-- their manual edits from before guild sync become official, stamped now,
+-- and are broadcast. A member's older edits stay local and unstamped, so
+-- they never become official or suggestions. Safe to call after every scan.
+function Session:UpgradeLegacy()
+    local author = self.selfKey()
+    if author == nil or not self.isOfficer(author) then
+        return nil
+    end
+    return self:StampAndSend(function(facts, officer, now)
+        return facts:StampLegacy(officer, now)
+    end)
+end
+
 -- Stamps with `stamp(facts, author, now)` -> list of facts, and broadcasts
 -- them when this user is an officer.
 function Session:StampAndSend(stamp)

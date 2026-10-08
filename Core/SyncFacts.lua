@@ -116,6 +116,41 @@ function Facts:StampAlias(key, author, at)
     return self:AliasFactOf(key)
 end
 
+-- Upgrading from before guild sync: every manual main link and alias that
+-- was never stamped is stamped as `author`'s, at `at`, and returned as facts
+-- (main links sorted by character, then aliases sorted by main). Edits made
+-- since sync shipped are always stamped, so only older ones are found, and
+-- running this again finds nothing. Note- and roster-seeded facts stay
+-- unstamped: the oldest possible.
+function Facts:StampLegacy(author, at)
+    local partition = self.partition
+    local manual = addon.FellowshipStore.SOURCE_MANUAL
+    local links, aliases = {}, {}
+    partition:EachCharacter(function(key, character)
+        if character.source == manual and character.mainAt == nil then
+            table.insert(links, key)
+        end
+    end)
+    partition:EachPlayer(function(_, player)
+        if player.aliasSource == manual and player.aliasAt == nil then
+            table.insert(aliases, player.main)
+        end
+    end)
+    table.sort(links)
+    table.sort(aliases)
+    local facts = {}
+    local index
+    for index = 1, #links do
+        partition:SetMainStamp(links[index], at, author)
+        table.insert(facts, self:FactOf(links[index]))
+    end
+    for index = 1, #aliases do
+        partition:SetAliasStamp(aliases[index], at, author)
+        table.insert(facts, self:AliasFactOf(aliases[index]))
+    end
+    return facts
+end
+
 -- When the thing `fact` is about was last set, and by whom, or nil when the
 -- character is unknown.
 function Facts:HeldStamp(fact)

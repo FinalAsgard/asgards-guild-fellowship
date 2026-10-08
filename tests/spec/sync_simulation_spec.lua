@@ -47,15 +47,19 @@ local function newWindow()
     return window
 end
 
--- Logs `playerName` in on a fresh install, lets the first scan finish, and
+-- Logs `playerName` in on a fresh install (or `options.database`), lets the
+-- first scan finish, and
 -- opens the roster window so organizing works.
 local function login(channel, playerName, options)
     options = options or {}
     local world = fixtures.newEnvironment(options.profile or "Retail", {
         addonName = options.addonName,
+        database = options.database,
         guild = guild(),
         playerName = playerName,
     })
+    -- Joined first, so anything sent while logging in is heard.
+    fixtures.joinChannel(channel, world)
     fixtures.loadAddon(world)
     fixtures.fire(world, "ADDON_LOADED", world.addonName)
     world.loggedIn = true
@@ -67,8 +71,9 @@ local function login(channel, playerName, options)
     controller.createWindow = function()
         return newWindow()
     end
-    test.assertTrue(controller:Toggle(), playerName .. " opens the roster")
-    fixtures.joinChannel(channel, world)
+    if options.openRoster ~= false then
+        test.assertTrue(controller:Toggle(), playerName .. " opens the roster")
+    end
     return world
 end
 
@@ -353,4 +358,73 @@ test.test("an alias set after a main change lands on the right player", function
     test.assertEqual("Smith", aliasOf(member, "toolbox-area52"))
     test.assertEqual("Smith", aliasOf(member, "hammer-area52"))
     test.assertEqual(nil, aliasOf(member, "wrench-area52"))
+end)
+
+-- Upgrading from before sync --------------------------------------------------
+
+-- Saved data from before guild sync (schema 1): Hammer linked to Toolbox
+-- and the player named "Tools" by hand, Wrench seeded from the roster.
+local function legacyDatabase()
+    return {
+        schemaVersion = 1,
+        guilds = {
+            ["Knights of Camelot-Area52"] = {
+                characters = {
+                    ["toolbox-area52"] = { player = 1, source = "roster" },
+                    ["hammer-area52"] = { player = 1, source = "manual" },
+                    ["wrench-area52"] = { player = 2, source = "roster" },
+                },
+                players = {
+                    [1] = { main = "toolbox-area52", alias = "Tools", aliasSource = "manual" },
+                    [2] = { main = "wrench-area52" },
+                },
+                nextPlayerId = 3,
+            },
+        },
+    }
+end
+
+test.test("an upgraded officer's edits from before sync reach members", function()
+    local channel = fixtures.newChannel()
+    local member = login(channel, "Wrench-Area52")
+    local officer = login(channel, "Toolbox-Area52", { database = legacyDatabase() })
+    fixtures.deliver(channel)
+
+    test.assertEqual(2, officer.database.schemaVersion)
+    test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
+    test.assertEqual("Tools", aliasOf(member, "hammer-area52"))
+    local at, by = partitionOf(officer):GetMainStamp("hammer-area52")
+    test.assertEqual(officer.time, at)
+    test.assertEqual("toolbox-area52", by)
+    test.assertEqual(0, (partitionOf(officer):GetMainStamp("wrench-area52")))
+
+    -- Only once: the next scan finds nothing left to upgrade.
+    local sent = #officer.sentMessages
+    officer.addon.rosterController:OnScanFinished({}, { mode = "incremental", newCharacters = 0 })
+    test.assertEqual(sent, #officer.sentMessages)
+end)
+
+test.test("an upgraded member's edits from before sync stay local and unofficial", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local member = login(channel, "Wrench-Area52", { database = legacyDatabase() })
+    fixtures.deliver(channel)
+
+    test.assertEqual(0, #member.sentMessages)
+    test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
+    test.assertEqual("Tools", aliasOf(member, "hammer-area52"))
+    test.assertEqual(0, (partitionOf(member):GetMainStamp("hammer-area52")))
+    test.assertEqual(0, (partitionOf(member):GetAliasStamp("hammer-area52")))
+    test.assertEqual("hammer-area52", mainOf(officer, "hammer-area52"))
+end)
+
+test.test("saved data from a newer add-on is never upgraded or sent", function()
+    local channel = fixtures.newChannel()
+    local database = legacyDatabase()
+    database.schemaVersion = 3
+    local officer = login(channel, "Toolbox-Area52", { database = database, openRoster = false })
+
+    test.assertEqual(0, #officer.sentMessages)
+    test.assertEqual(3, officer.database.schemaVersion)
+    test.assertEqual(nil, officer.database.guilds["Knights of Camelot-Area52"].characters["hammer-area52"].mainAt)
 end)

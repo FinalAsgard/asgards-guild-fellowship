@@ -22,11 +22,13 @@ Controller.__index = Controller
 --                 player was involved (for guild sync)
 --   onAliasChanged  optional function(key): after a manual alias change to
 --                 the player of `key` (for guild sync)
+--   onScanFinished  optional function(): after every completed scan
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
+        onScanFinished = options.onScanFinished,
         collapsed = {},
         showDeparted = false,
         createWindow = options.createWindow,
@@ -167,6 +169,9 @@ function Controller:OnScanFinished(result, summary)
         self:Print("Roster scanned: " .. RosterController.DescribeScan(summary) .. ".")
     end
     self:Invalidate()
+    if self.onScanFinished ~= nil then
+        self.onScanFinished()
+    end
 end
 
 -- "Last scan 5 minutes ago: 3 new characters, 1 alt linked".

@@ -269,3 +269,42 @@ test.test("stamping an alias reports it by the player's main, empty when there i
     test.assertEqual(NOW + 1, set.at)
     test.assertEqual(nil, setup.facts:StampAlias("nobody-area52", OFFICER, NOW))
 end)
+
+-- Upgrading from before sync --------------------------------------------------
+
+test.test("upgrading stamps only unstamped manual links and aliases as the officer's", function()
+    local setup = newSetup({ OFFICER, MEMBER, "wrench-area52", "anvil-area52" })
+    -- Before sync: Hammer linked by hand, Anvil detached by hand, an alias
+    -- cleared by hand, and Wrench seeded from its note.
+    setup.partition:JoinPlayerOf(MEMBER, OFFICER, "manual")
+    setup.partition:MoveToNewPlayer("anvil-area52", "manual")
+    setup.partition:ClearAlias(setup.partition:GetCharacter("anvil-area52").player, "manual")
+    setup.partition:SetAlias(setup.partition:GetCharacter("wrench-area52").player, "Sparky", "note")
+    setup.partition:GetCharacter("wrench-area52").source = "note"
+    -- Already stamped since sync shipped: left alone.
+    setup.partition:SetAlias(setup.partition:GetCharacter(OFFICER).player, "Tools", "manual")
+    setup.partition:SetAliasStamp(OFFICER, NOW - 50, OTHER_OFFICER)
+
+    local facts = setup.facts:StampLegacy(OFFICER, NOW)
+
+    test.assertEqual(3, #facts)
+    test.assertEqual("anvil-area52", facts[1].character)
+    test.assertEqual("anvil-area52", facts[1].main)
+    test.assertEqual(MEMBER, facts[2].character)
+    test.assertEqual(OFFICER, facts[2].main)
+    test.assertEqual("alias", facts[3].kind)
+    test.assertEqual("anvil-area52", facts[3].character)
+    test.assertEqual("", facts[3].alias)
+    local index
+    for index = 1, #facts do
+        test.assertEqual(NOW, facts[index].at)
+        test.assertEqual(OFFICER, facts[index].by)
+    end
+    test.assertEqual(0, (setup.partition:GetMainStamp("wrench-area52")))
+    test.assertEqual(0, (setup.partition:GetAliasStamp("wrench-area52")))
+    local at, by = setup.partition:GetAliasStamp(OFFICER)
+    test.assertEqual(NOW - 50, at)
+    test.assertEqual(OTHER_OFFICER, by)
+
+    test.assertEqual(0, #setup.facts:StampLegacy(OFFICER, NOW + 60))
+end)

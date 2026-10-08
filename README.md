@@ -88,6 +88,7 @@ When an officer changes which characters belong together, or what a player goes 
 - An officer is anyone whose guild rank can view officer notes. The guild master always counts. Nothing needs to be set up: promoting or demoting someone changes what their edits do.
 - When two officers change the same character or the same alias, the most recent edit wins everywhere.
 - Your own edits stay in your roster. They're only sent to the guild when you're an officer.
+- Edits made before sync existed: they become official and are sent to the guild once you log in on an officer character with this version. Until then, and for members, they stay in your own roster only.
 - Only main and alt links and aliases are shared. Departures, purges, history, conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
 

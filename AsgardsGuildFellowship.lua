@@ -38,6 +38,9 @@ if clientProfile.supported then
         onAliasChanged = function(key)
             syncSession:LocalAliasEdit(key)
         end,
+        onScanFinished = function()
+            syncSession:UpgradeLegacy()
+        end,
         getDatabase = function()
             return persistence:GetDatabase()
         end,

@@ -9,7 +9,9 @@ local _, addon = ...
 -- Schema 2 adds guild sync's per-fact timestamps and authors. Its fields are
 -- all optional, so v1 data is already valid v2 data and upgrading only
 -- raises the version. An older add-on then refuses the data instead of
--- dropping fields it doesn't know.
+-- dropping fields it doesn't know. Unstamped facts count as the oldest
+-- possible; an officer's unstamped manual edits are stamped later, once
+-- the roster shows they are an officer (SyncSession:UpgradeLegacy).
 local Persistence = {
     SCHEMA_VERSION = 2,
 }
