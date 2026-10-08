@@ -88,7 +88,7 @@ In guild chat, a tag after the speaker's name shows who the player is:
 - If they have no alias and are on an alt, the tag shows their main's name: `[Wrench] [Toolbox]: hi`. If the main has left the guild, it's the acting main.
 - There's no tag when they're on their main with no alias, or when the tag would just repeat their own name.
 
-Your own messages are tagged the same way. Characters the database doesn't know yet get no tag. The name stays clickable as usual. Tags come from your own database, so changes you make in the roster show up on the next line.
+An alias tag is green and a main's-name tag is light blue, so you can tell a nickname from a character name at a glance. Your own messages are tagged the same way. Characters the database doesn't know yet get no tag. The name stays clickable as usual. Tags come from your own database, so changes you make in the roster show up on the next line.
 
 ## Supported clients
 

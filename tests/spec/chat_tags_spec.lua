@@ -79,6 +79,15 @@ local function assertTag(expectedText, expectedKind, tag, message)
     test.assertEqual(expectedKind, tag.kind, message)
 end
 
+-- How chat shows a tag: green for an alias, light blue for a main's name.
+local function alias(text)
+    return "|cff7fff7f[" .. text .. "]|r "
+end
+
+local function main(text)
+    return "|cff7fd4ff[" .. text .. "]|r "
+end
+
 -- The tag rule -----------------------------------------------------------------
 
 test.test("an alt of a player with an alias is tagged with the alias", function()
@@ -152,15 +161,15 @@ end)
 
 test.test("guild chat from an alt gets the tag in front of the message", function()
     local world = retail()
-    test.assertEqual("[TheTool] hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
-    test.assertEqual("[Anvil] hello", world.annotator:Annotate("CHAT_MSG_GUILD", "hello", "Tongs-Area52"))
+    test.assertEqual(alias("TheTool") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+    test.assertEqual(main("Anvil") .. "hello", world.annotator:Annotate("CHAT_MSG_GUILD", "hello", "Tongs-Area52"))
 end)
 
 test.test("a Retail sender matches with or without a realm suffix", function()
     local world = retail()
-    test.assertEqual("[TheTool] hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer"))
-    test.assertEqual("[TheTool] hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "hammer-Area52"))
-    test.assertEqual("[TheTool] hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Saw-Stormrage"))
+    test.assertEqual(alias("TheTool") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer"))
+    test.assertEqual(alias("TheTool") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "hammer-Area52"))
+    test.assertEqual(alias("TheTool") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Saw-Stormrage"))
     test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Saw"),
         "Saw without its realm is a different character")
 end)
@@ -168,7 +177,7 @@ end)
 test.test("an accented sender is matched", function()
     local world = retail()
     test.assertTrue(world.service:SetAlias("élise-area52", "Lissy"))
-    test.assertEqual("[Lissy] hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "ÉLISE-Area52"))
+    test.assertEqual(alias("Lissy") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "ÉLISE-Area52"))
 end)
 
 test.test("Forever two-part sender names are matched", function()
@@ -178,9 +187,9 @@ test.test("Forever two-part sender names are matched", function()
         { "Wren Ch-Camelot", "", 60 },
         { "Pli Ers-Camelot", ">Wren Ch", 50 },
     })
-    test.assertEqual("[TheTool] hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Ham Mer"))
-    test.assertEqual("[TheTool] hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Ham Mer-Camelot"))
-    test.assertEqual("[Wren Ch] hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Pli  Ers"))
+    test.assertEqual(alias("TheTool") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Ham Mer"))
+    test.assertEqual(alias("TheTool") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Ham Mer-Camelot"))
+    test.assertEqual(main("Wren Ch") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Pli  Ers"))
     test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Wren Ch"))
 end)
 
@@ -220,4 +229,27 @@ test.test("a failing context or bad arguments never raise", function()
     test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_GUILD", "hi", nil))
     test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_GUILD", "hi", ""))
     test.assertEqual(nil, world.annotator:Annotate(nil, "hi", "Hammer-Area52"))
+end)
+
+-- How tags look --------------------------------------------------------------
+
+test.test("alias tags are green and main-name tags light blue, each closed", function()
+    local world = retail()
+    test.assertEqual("|cff7fff7f[TheTool]|r hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+    test.assertEqual("|cff7fd4ff[Anvil]|r hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Tongs-Area52"))
+end)
+
+test.test("a | in an alias is shown literally, not read as an escape code", function()
+    local world = retail()
+    test.assertTrue(world.service:SetAlias("tongs-area52", "Smith|cffff0000Evil|r"))
+    test.assertEqual("|cff7fff7f[Smith||cffff0000Evil||r]|r hi",
+        world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Tongs-Area52"))
+end)
+
+test.test("a long multi-word alias is shown in full", function()
+    local world = retail()
+    local long = "The Most Reliable Tool In The Whole Box Of Tools"
+    test.assertEqual(48, #long)
+    test.assertTrue(world.service:SetAlias("tongs-area52", long))
+    test.assertEqual(alias(long) .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Pliers-Area52"))
 end)

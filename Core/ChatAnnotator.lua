@@ -8,6 +8,12 @@ local _, addon = ...
 local ChatAnnotator = {
     -- The chat events that get tags.
     EVENTS = { "CHAT_MSG_GUILD" },
+    -- Tag colors by kind: an alias is green, a main's name light blue, so a
+    -- nickname and a character name are told apart at a glance.
+    COLORS = {
+        alias = "ff7fff7f",
+        main = "ff7fd4ff",
+    },
 }
 addon.ChatAnnotator = ChatAnnotator
 
@@ -50,5 +56,13 @@ function Annotator:Annotate(event, message, sender)
     if not ok or tag == nil then
         return nil
     end
-    return "[" .. tag.text .. "] " .. message
+    return ChatAnnotator.Format(tag) .. " " .. message
+end
+
+-- A tag as chat shows it: "[TheTool]" in its kind's color. A "|" in the text
+-- is doubled so the chat frame shows it literally instead of reading it as
+-- an escape code.
+function ChatAnnotator.Format(tag)
+    local text = string.gsub(tag.text, "|", "||")
+    return "|c" .. ChatAnnotator.COLORS[tag.kind] .. "[" .. text .. "]|r"
 end
