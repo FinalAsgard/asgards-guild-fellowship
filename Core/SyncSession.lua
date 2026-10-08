@@ -1,23 +1,53 @@
 local _, addon = ...
 
--- Guild sync's conversation between add-on users. For now it has one
--- message: an officer's edit, broadcast to the guild as it happens and
+-- Guild sync's conversation between add-on users.
+--
+-- Live edits: an officer's edit is broadcast to the guild as it happens and
 -- applied by everyone who receives it.
+--
+-- Catching up: a while after login, a client announces the digest
+-- (SyncDigest) of the officer facts it holds. Nobody needs to be an
+-- officer for this, so members who never play at the same time as an
+-- officer still get officers' edits through anyone who has them.
+--   1. "digest": the announcement. A client whose digest matches says
+--      nothing, so two clients that agree exchange one short message.
+--   2. "facts" with `re` (the announcer) and `buckets`: a reply with every
+--      fact the replier holds in the buckets that differ. Every client that
+--      could reply waits a random short delay first, and stays silent once
+--      it hears someone else's reply to the same announcement, so each
+--      announcement gets one reply.
+--   3. "facts": the announcer's own facts from those buckets that the reply
+--      lacked or held older, so the data settles both ways.
+-- Everyone applies every facts message they hear, so bystanders catch up too.
 --
 -- Every message is a table { v = PROTOCOL, t = type, ... }. A message with
 -- another protocol version, or a type this version doesn't know, is ignored,
 -- so mixed add-on versions in one guild never break each other.
 --
--- Pure: the transport and the game's facts are passed in.
+-- Pure: the transport, clock and timers, and the game's facts are passed in.
 --   comm         { Broadcast(message) } sending to the guild
 --   context()    -> partition, normalizer for the current guild, or nil
 --   selfKey()    -> the logged-in character's key, or nil
 --   isOfficer(key) -> boolean
 --   now()        -> server time in seconds, or nil
+--   after(seconds, callback) -> false when there are no timers
+--   random(low, high) -> a whole number from low to high
 --   onApplied(count) called after received facts changed the roster
 local SyncSession = {
     PROTOCOL = 1,
     TYPE_FACTS = "facts",
+    TYPE_DIGEST = "digest",
+    -- The announcement goes out START_DELAY to START_DELAY + START_SPREAD
+    -- seconds after login, so logging in is never slowed down and a guild
+    -- logging in together doesn't announce all at once.
+    START_DELAY = 30,
+    START_SPREAD = 30,
+    -- Before the roster has been scanned, nobody's rank is known, so the
+    -- announcement waits this long and tries again.
+    RETRY_SECONDS = 30,
+    -- A reply waits a random REPLY_MIN to REPLY_MAX seconds.
+    REPLY_MIN = 1,
+    REPLY_MAX = 5,
 }
 addon.SyncSession = SyncSession
 
@@ -31,7 +61,15 @@ function SyncSession.Create(options)
         selfKey = options.selfKey,
         isOfficer = options.isOfficer,
         now = options.now,
+        after = options.after or function()
+            return false
+        end,
+        random = options.random or function(low)
+            return low
+        end,
         onApplied = options.onApplied or function() end,
+        -- Announcer key -> a reply this client is waiting to send.
+        replies = {},
     }, Session)
 end
 
@@ -42,6 +80,18 @@ function Session:Facts(partition)
             return self.now() or 0
         end,
     })
+end
+
+function Session:Send(message)
+    message.v = SyncSession.PROTOCOL
+    self.comm:Broadcast(message)
+end
+
+-- Runs `callback` after `seconds`, or now when there are no timers.
+function Session:Later(seconds, callback)
+    if not self.after(seconds, callback) then
+        callback()
+    end
 end
 
 -- After this user changed main links by hand: stamps the main link of every
@@ -88,16 +138,104 @@ function Session:StampAndSend(stamp)
     if facts[1] == nil or not self.isOfficer(author) then
         return nil
     end
-    self.comm:Broadcast({ v = SyncSession.PROTOCOL, t = SyncSession.TYPE_FACTS, facts = facts })
+    self:Send({ t = SyncSession.TYPE_FACTS, facts = facts })
     return facts
+end
+
+-- Catching up -----------------------------------------------------------------
+
+-- Called once saved data is ready (at login): schedules the announcement.
+function Session:Start()
+    if self.started then
+        return
+    end
+    self.started = true
+    local delay = SyncSession.START_DELAY + self.random(0, SyncSession.START_SPREAD)
+    self:Later(delay, function()
+        self:Announce()
+    end)
+end
+
+-- Announces this client's digest, once the roster has been scanned. Returns
+-- true when it was sent.
+function Session:Announce()
+    local partition = self.context()
+    if partition == nil or not partition:HasBeenScanned() or self.selfKey() == nil then
+        -- With no timers there's no waiting for the scan; the next login
+        -- tries again.
+        self.after(SyncSession.RETRY_SECONDS, function()
+            self:Announce()
+        end)
+        return false
+    end
+    local facts = self:Facts(partition):OfficerFacts()
+    self:Send({ t = SyncSession.TYPE_DIGEST, digest = addon.SyncDigest.Of(facts) })
+    return true
+end
+
+-- Someone announced `digest`: unless it matches, schedules a reply with this
+-- client's facts in the buckets that differ.
+function Session:OnDigest(digest, announcer, partition)
+    local digests = addon.SyncDigest
+    if not digests.IsValid(digest) or self.replies[announcer] ~= nil then
+        return
+    end
+    local mine = digests.Of(self:Facts(partition):OfficerFacts())
+    local buckets = digests.Differing(mine, digest)
+    if buckets[1] == nil then
+        return
+    end
+    local reply = { buckets = buckets }
+    self.replies[announcer] = reply
+    self:Later(self.random(SyncSession.REPLY_MIN, SyncSession.REPLY_MAX), function()
+        if self.replies[announcer] ~= reply then
+            return
+        end
+        self.replies[announcer] = nil
+        -- The guild may have changed while the reply waited.
+        local current = self.context()
+        if current == nil or current.key ~= partition.key then
+            return
+        end
+        partition = current
+        local facts = digests.FactsIn(self:Facts(partition):OfficerFacts(), buckets)
+        self:Send({ t = SyncSession.TYPE_FACTS, re = announcer, buckets = buckets, facts = facts })
+    end)
+end
+
+-- A reply to this client's announcement: sends back this client's facts in
+-- those buckets that the reply lacked or held older.
+function Session:FollowUp(reply, partition)
+    local digests = addon.SyncDigest
+    if not digests.IsBucketList(reply.buckets) or type(reply.facts) ~= "table" then
+        return
+    end
+    local theirs = {}
+    local index
+    for index = 1, #reply.facts do
+        local fact = reply.facts[index]
+        if addon.SyncFacts.IsValid(fact) then
+            theirs[fact.kind .. "\31" .. fact.character] = fact
+        end
+    end
+    local missing = {}
+    local mine = digests.FactsIn(self:Facts(partition):OfficerFacts(), reply.buckets)
+    for index = 1, #mine do
+        local fact = mine[index]
+        local held = theirs[fact.kind .. "\31" .. fact.character]
+        if held == nil or addon.SyncFacts.IsNewer(fact.at, fact.by, held.at, held.by) then
+            table.insert(missing, fact)
+        end
+    end
+    if missing[1] ~= nil then
+        self:Send({ t = SyncSession.TYPE_FACTS, facts = missing })
+    end
 end
 
 -- A message from `sender` (a name as the game reports it). Returns how many
 -- facts it applied.
 function Session:Receive(message, sender)
-    if type(message) ~= "table" or message.v ~= SyncSession.PROTOCOL
-        or message.t ~= SyncSession.TYPE_FACTS
-    then
+    if type(message) ~= "table" or message.v ~= SyncSession.PROTOCOL then
         return 0
     end
     local partition, normalizer = self.context()
@@ -106,12 +244,27 @@ function Session:Receive(message, sender)
     end
     local senderKey = normalizer:Key(sender)
     -- The game echoes guild messages back to their sender.
-    if senderKey == nil or senderKey == self.selfKey() then
+    local selfKey = self.selfKey()
+    if senderKey == nil or senderKey == selfKey then
         return 0
     end
-    local applied = self:Facts(partition):ApplyAll(message.facts, senderKey)
+    if message.t == SyncSession.TYPE_DIGEST then
+        self:OnDigest(message.digest, senderKey, partition)
+        return 0
+    end
+    if message.t ~= SyncSession.TYPE_FACTS then
+        return 0
+    end
+    local applied = self:Facts(partition):ApplyAll(message.facts)
     if applied > 0 then
         self.onApplied(applied)
+    end
+    if type(message.re) == "string" then
+        -- Someone answered that announcement, so this client doesn't.
+        self.replies[message.re] = nil
+        if message.re == selfKey then
+            self:FollowUp(message, partition)
+        end
     end
     return applied
 end

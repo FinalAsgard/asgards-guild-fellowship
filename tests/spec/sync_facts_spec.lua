@@ -60,10 +60,53 @@ test.test("a fact from someone who isn't an officer is ignored", function()
     test.assertEqual("not an officer", setup.facts:Refusal(fact("wrench-area52", MEMBER, NOW, MEMBER), MEMBER))
 end)
 
-test.test("a fact relayed by someone other than its author is not accepted yet", function()
+test.test("an officer's fact is accepted whoever passes it on", function()
     local setup = newSetup({ OFFICER, MEMBER, "wrench-area52" })
 
-    test.assertEqual("relayed", setup.facts:Refusal(fact("wrench-area52", MEMBER), OTHER_OFFICER))
+    test.assertEqual(nil, setup.facts:Refusal(fact("wrench-area52", MEMBER)))
+    test.assertEqual(1, setup.facts:ApplyAll({ fact("wrench-area52", MEMBER) }, "wrench-area52"))
+    test.assertEqual(MEMBER, mainOf(setup.partition, "wrench-area52"))
+end)
+
+test.test("a fact dated more than a few minutes ahead of server time is refused", function()
+    local setup = newSetup({ OFFICER, MEMBER, "wrench-area52" })
+    local facts = setup.addon.SyncFacts.Create(setup.partition, {
+        isOfficer = function(key)
+            return setup.officers[key] == true
+        end,
+        now = function()
+            return NOW
+        end,
+    })
+    local limit = setup.addon.SyncFacts.MAX_FUTURE_SECONDS
+
+    test.assertEqual(nil, facts:Refusal(fact("wrench-area52", MEMBER, NOW + limit)))
+    test.assertEqual("from the future", facts:Refusal(fact("wrench-area52", MEMBER, NOW + limit + 1)))
+    test.assertEqual(0, facts:ApplyAll({ fact("wrench-area52", MEMBER, NOW + 86400) }))
+    test.assertEqual("wrench-area52", mainOf(setup.partition, "wrench-area52"))
+end)
+
+test.test("held officer facts list stamped links and aliases by authors who are officers now", function()
+    local setup = newSetup({ OFFICER, OTHER_OFFICER, MEMBER, "wrench-area52" })
+    setup.facts:ApplyAll({
+        fact("wrench-area52", MEMBER, NOW, OTHER_OFFICER),
+        { kind = "alias", character = MEMBER, alias = "Hammy", at = NOW, by = OFFICER },
+    })
+    -- A member's own edit is stamped, but isn't officer data.
+    setup.partition:SetMainStamp(OFFICER, NOW, MEMBER)
+
+    local held = setup.facts:OfficerFacts()
+    test.assertEqual(2, #held)
+    test.assertEqual("main", held[1].kind)
+    test.assertEqual("wrench-area52", held[1].character)
+    test.assertEqual(MEMBER, held[1].main)
+    test.assertEqual("alias", held[2].kind)
+    test.assertEqual(MEMBER, held[2].character)
+    test.assertEqual("Hammy", held[2].alias)
+
+    -- Demoting the author takes their facts out of officer data.
+    setup.officers[OTHER_OFFICER] = nil
+    test.assertEqual(1, #setup.facts:OfficerFacts())
 end)
 
 test.test("the newest edit wins, and an equal time is settled the same way everywhere", function()

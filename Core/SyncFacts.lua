@@ -18,6 +18,9 @@ local SyncFacts = {
     KIND_ALIAS = "alias",
     -- The same limit "Set alias…" enforces.
     MAX_ALIAS_LENGTH = 48,
+    -- How far ahead of server time a fact may be dated: enough for clocks
+    -- that disagree a little.
+    MAX_FUTURE_SECONDS = 300,
 }
 addon.SyncFacts = SyncFacts
 
@@ -183,18 +186,22 @@ function Facts:Stamp(keys, author, at)
     return facts
 end
 
--- Whether a fact received from `sender` should be applied: nil when it
--- should, or why not. Only officers' own edits are accepted for now; facts
--- relayed by someone other than their author are not.
-function Facts:Refusal(fact, sender)
+-- Whether a received fact should be applied: nil when it should, or why
+-- not. Any add-on user may pass officer facts on, so who sent it doesn't
+-- matter: its named author must hold an officer rank on the current roster,
+-- and it can't be dated more than MAX_FUTURE_SECONDS ahead of server time
+-- (a fact dated far ahead would beat every real edit until then). Without a
+-- known clock, the date can't be judged and isn't checked.
+function Facts:Refusal(fact)
     if not SyncFacts.IsValid(fact) then
         return "malformed"
     end
-    if fact.by ~= sender then
-        return "relayed"
-    end
     if not self.isOfficer(fact.by) then
         return "not an officer"
+    end
+    local now = self.now()
+    if now > 0 and fact.at > now + SyncFacts.MAX_FUTURE_SECONDS then
+        return "from the future"
     end
     if self.partition:GetCharacter(fact.character) == nil
         or (fact.kind == SyncFacts.KIND_MAIN and self.partition:GetCharacter(fact.main) == nil)
@@ -249,16 +256,46 @@ function Facts:Change(fact)
     partition:SetMainStamp(fact.character, fact.at, fact.by)
 end
 
--- Applies every acceptable fact in `facts` from `sender`, then restores the
--- acting-main invariant once. Returns how many were applied.
-function Facts:ApplyAll(facts, sender)
+-- Every officer fact this client holds, which it can pass on to others:
+-- main links, sorted by character, then aliases, sorted by main. Facts
+-- nobody stamped, and edits by authors who aren't officers now, aren't
+-- officer data.
+function Facts:OfficerFacts()
+    local partition = self.partition
+    local links, aliases = {}, {}
+    partition:EachCharacter(function(key, character)
+        if character.mainAt ~= nil and self.isOfficer(character.mainBy) then
+            table.insert(links, key)
+        end
+    end)
+    partition:EachPlayer(function(_, player)
+        if player.aliasAt ~= nil and self.isOfficer(player.aliasBy) then
+            table.insert(aliases, player.main)
+        end
+    end)
+    table.sort(links)
+    table.sort(aliases)
+    local facts = {}
+    local index
+    for index = 1, #links do
+        table.insert(facts, self:FactOf(links[index]))
+    end
+    for index = 1, #aliases do
+        table.insert(facts, self:AliasFactOf(aliases[index]))
+    end
+    return facts
+end
+
+-- Applies every acceptable fact in `facts`, then restores the acting-main
+-- invariant once. Returns how many were applied.
+function Facts:ApplyAll(facts)
     if type(facts) ~= "table" then
         return 0
     end
     local applied = 0
     local index
     for index = 1, #facts do
-        if self:Refusal(facts[index], sender) == nil then
+        if self:Refusal(facts[index]) == nil then
             self:Change(facts[index])
             applied = applied + 1
         end

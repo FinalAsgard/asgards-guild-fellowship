@@ -97,6 +97,23 @@ local function linkAlt(world, alt, main)
     test.assertTrue(world.addon.rosterController:SetMainPlayer(alt, playerIdOf(world, main)))
 end
 
+local function aliasOf(world, key)
+    local partition = partitionOf(world)
+    return partition:GetPlayer(partition:GetCharacter(key).player).alias
+end
+
+-- The roster row labeled `label` in `world`'s open window, or nil.
+local function rosterRow(world, label)
+    local rows = world.addon.rosterController.window.rows or {}
+    local index
+    for index = 1, #rows do
+        if rows[index].label == label then
+            return rows[index]
+        end
+    end
+    return nil
+end
+
 local function decode(world, sent)
     local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
     local ok, message = serializer:Deserialize(sent.text)
@@ -161,7 +178,7 @@ test.test("make this the main and detach reach members too", function()
     test.assertEqual("hammer-area52", mainOf(member, "toolbox-area52"))
 end)
 
-test.test("a member's own edit isn't broadcast, and a forged member broadcast is ignored", function()
+test.test("a member's own edit isn't broadcast, and facts by a non-officer or from the future are ignored", function()
     local channel = fixtures.newChannel()
     local officer = login(channel, "Toolbox-Area52")
     local hammer = login(channel, "Hammer-Area52")
@@ -175,9 +192,12 @@ test.test("a member's own edit isn't broadcast, and a forged member broadcast is
         v = 1,
         t = "facts",
         facts = {
+            -- A member naming themselves as author has no authority.
             { kind = "main", character = "wrench-area52", main = "hammer-area52", at = hammer.time, by = "hammer-area52" },
-            -- Claiming to be the officer doesn't help: it isn't their message.
-            { kind = "main", character = "wrench-area52", main = "hammer-area52", at = hammer.time, by = "toolbox-area52" },
+            -- An officer's name on a fact dated a day ahead would beat
+            -- every real edit until then.
+            { kind = "main", character = "wrench-area52", main = "hammer-area52", at = hammer.time + 86400,
+                by = "toolbox-area52" },
         },
     })
     fixtures.deliver(channel)
@@ -258,24 +278,139 @@ test.test("sync works the same on WoW Forever", function()
     test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
 end)
 
--- Aliases ---------------------------------------------------------------------
+-- Catching up at login -------------------------------------------------------
 
-local function aliasOf(world, key)
-    local partition = partitionOf(world)
-    return partition:GetPlayer(partition:GetCharacter(key).player).alias
-end
-
--- The roster row labeled `label` in `world`'s open window, or nil.
-local function rosterRow(world, label)
-    local rows = world.addon.rosterController.window.rows or {}
+local function logOff(channel, world)
     local index
-    for index = 1, #rows do
-        if rows[index].label == label then
-            return rows[index]
+    for index = #channel.worlds, 1, -1 do
+        if channel.worlds[index] == world then
+            table.remove(channel.worlds, index)
         end
     end
-    return nil
+    world.channel = nil
 end
+
+-- Lets a minute pass for `world`, so its announcement goes out.
+local function announce(world)
+    local sent = #world.sentMessages
+    fixtures.runTimers(world, 60)
+    test.assertEqual(sent + 1, #world.sentMessages, "one announcement")
+    test.assertEqual("digest", decode(world, world.sentMessages[#world.sentMessages]).t)
+end
+
+-- The messages `world` sent from the `from`-th on, decoded.
+local function sentSince(world, from)
+    local messages = {}
+    local index
+    for index = from + 1, #world.sentMessages do
+        table.insert(messages, decode(world, world.sentMessages[index]))
+    end
+    return messages
+end
+
+test.test("an officer's edit reaches a member who logs in after the officer logged off", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(officer, "hammer-area52", "toolbox-area52")
+    officer.addon.rosterController:SetAlias("hammer-area52", "The Tool")
+    fixtures.deliver(channel)
+    logOff(channel, officer)
+
+    local wrench = login(channel, "Wrench-Area52")
+    test.assertEqual(0, #wrench.sentMessages, "nothing is sent at login")
+    test.assertEqual("hammer-area52", mainOf(wrench, "hammer-area52"))
+    announce(wrench)
+    fixtures.deliver(channel)
+    -- Hammer, a member, answers after a short random wait.
+    fixtures.runTimers(hammer, 5)
+    fixtures.deliver(channel)
+
+    test.assertEqual("toolbox-area52", mainOf(wrench, "hammer-area52"))
+    test.assertEqual("The Tool", aliasOf(wrench, "hammer-area52"))
+    test.assertTrue(rosterRow(wrench, "The Tool (Toolbox)") ~= nil, "the roster shows the relayed data")
+    local reply = decode(hammer, hammer.sentMessages[#hammer.sentMessages])
+    test.assertEqual("facts", reply.t)
+    test.assertEqual("wrench-area52", reply.re)
+end)
+
+test.test("members who already agree exchange only the announcement", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+    linkAlt(officer, "hammer-area52", "toolbox-area52")
+    fixtures.deliver(channel)
+    local before = { #officer.sentMessages, #hammer.sentMessages, #wrench.sentMessages }
+
+    announce(hammer)
+    fixtures.deliver(channel)
+    fixtures.runTimers(officer, 5)
+    fixtures.runTimers(wrench, 5)
+    fixtures.deliver(channel)
+
+    test.assertEqual(before[1], #officer.sentMessages)
+    test.assertEqual(before[2] + 1, #hammer.sentMessages)
+    test.assertEqual(before[3], #wrench.sentMessages)
+end)
+
+test.test("one answer is sent per announcement, whoever sends it", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+    linkAlt(officer, "wrench-area52", "toolbox-area52")
+    fixtures.deliver(channel)
+    logOff(channel, officer)
+    local before = { #hammer.sentMessages, #wrench.sentMessages }
+
+    local leader = login(channel, "Grandmaster-Area52")
+    announce(leader)
+    fixtures.deliver(channel)
+    -- Whoever's wait ends first answers; the other hears it and stays quiet.
+    fixtures.runTimers(hammer, 5)
+    fixtures.deliver(channel)
+    fixtures.runTimers(wrench, 5)
+    fixtures.deliver(channel)
+
+    local replies = 0
+    local index
+    local messages = sentSince(hammer, before[1])
+    for index = 1, #messages do
+        replies = replies + (messages[index].re == "grandmaster-area52" and 1 or 0)
+    end
+    messages = sentSince(wrench, before[2])
+    for index = 1, #messages do
+        replies = replies + (messages[index].re == "grandmaster-area52" and 1 or 0)
+    end
+    test.assertEqual(1, replies)
+    test.assertEqual("toolbox-area52", mainOf(leader, "wrench-area52"))
+end)
+
+test.test("a relayed answer naming a non-officer author or dated in the future is refused", function()
+    local channel = fixtures.newChannel()
+    local hammer = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+
+    announce(wrench)
+    hammer.addon.comm:Broadcast({
+        v = 1,
+        t = "facts",
+        re = "wrench-area52",
+        buckets = { 1 },
+        facts = {
+            { kind = "main", character = "wrench-area52", main = "hammer-area52", at = hammer.time, by = "hammer-area52" },
+            { kind = "alias", character = "wrench-area52", alias = "Forged", at = hammer.time + 86400,
+                by = "toolbox-area52" },
+        },
+    })
+    fixtures.deliver(channel)
+
+    test.assertEqual("wrench-area52", mainOf(wrench, "wrench-area52"))
+    test.assertEqual(nil, aliasOf(wrench, "wrench-area52"))
+end)
+
+-- Aliases ---------------------------------------------------------------------
 
 test.test("an officer's alias shows in members' roster and chat tags", function()
     local channel = fixtures.newChannel()

@@ -93,7 +93,14 @@ When an officer changes which characters belong together, or what a player goes 
 - Only main and alt links and aliases are shared. Departures, purges, history, conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
 
-For now, edits reach only members who are online when they're made.
+### Catching up when you log in
+
+You don't need to be online at the same time as an officer. Officers' edits also reach you through other add-on users:
+
+- About 30 to 60 seconds after you log in, your add-on asks the guild whether your copy of officers' data matches theirs. It sends a short summary, never the data itself.
+- If someone's copy is the same, nothing else is sent. If it differs, one add-on user who has the officers' edits sends back only the part that differs. That can be any member, not just an officer. If you hold officer edits they're missing, yours go back the other way.
+- An edit is only accepted when the officer it names holds an officer rank on the current roster. A member can't make their own edits official by passing them on.
+- An edit dated more than a few minutes in the future is refused, so a faked date can't make an edit win over every real one.
 
 ## Chat tags
 

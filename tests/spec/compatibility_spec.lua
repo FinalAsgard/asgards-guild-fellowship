@@ -43,6 +43,16 @@ test.test("adapter contains errors raised by client APIs", function()
     test.assertEqual(nil, client:GetAddOnMetadata("Version"))
 end)
 
+test.test("random numbers come from the client, or the low end without one", function()
+    test.assertEqual(7, newClient({ math = { random = function(low, high)
+        test.assertEqual(0, low)
+        test.assertEqual(30, high)
+        return 7
+    end } }):Random(0, 30))
+    test.assertEqual(0, newClient({}):Random(0, 30))
+    test.assertEqual(1, newClient({ math = { random = raises } }):Random(1, 5))
+end)
+
 test.test("adapter falls back to print and to SlashCmdList", function()
     local printed
     local handler = function() end

@@ -197,6 +197,12 @@ if clientProfile.supported then
         now = function()
             return client:Timestamp()
         end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
         onApplied = function()
             rosterController:Invalidate()
         end,
@@ -244,9 +250,11 @@ end
 local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
     rosterController:OnSavedDataReady()
     -- Without the comm libraries, sync simply stays off.
-    comm:Start(function(message, sender)
+    if comm:Start(function(message, sender)
         syncSession:Receive(message, sender)
-    end)
+    end) then
+        syncSession:Start()
+    end
     -- The minimap button needs saved data for its position.
     entryPoints:Start()
     -- Without a chat filter API, chat is simply left untagged.

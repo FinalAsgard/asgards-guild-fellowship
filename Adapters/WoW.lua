@@ -345,6 +345,17 @@ function Client:After(seconds, callback)
     return ok
 end
 
+-- A random whole number from `low` to `high`, or `low` when the client has
+-- no random numbers.
+function Client:Random(low, high)
+    local math = self.environment.math
+    local ok, value = callFunction(type(math) == "table" and math.random or nil, low, high)
+    if not ok or type(value) ~= "number" then
+        return low
+    end
+    return value
+end
+
 -- A high-resolution clock in milliseconds for time budgets, or nil.
 function Client:PreciseMilliseconds()
     local ok, now = callFunction(self.environment.debugprofilestop)

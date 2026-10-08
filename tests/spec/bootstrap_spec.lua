@@ -20,6 +20,7 @@ local MANIFEST_FILES = {
     "Core/ChatAnnotator.lua",
     "Core/OfficerAuthority.lua",
     "Core/SyncFacts.lua",
+    "Core/SyncDigest.lua",
     "Core/SyncSession.lua",
     "Core/ScanScheduler.lua",
     "Core/RosterController.lua",
