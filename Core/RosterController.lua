@@ -23,12 +23,15 @@ Controller.__index = Controller
 --   onAliasChanged  optional function(key): after a manual alias change to
 --                 the player of `key` (for guild sync)
 --   onScanFinished  optional function(): after every completed scan
+--   onSyncResumed  optional function(key): after "Don't sync" was turned
+--                 off for the player of `key`
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
         onScanFinished = options.onScanFinished,
+        onSyncResumed = options.onSyncResumed,
         collapsed = {},
         showDeparted = false,
         createWindow = options.createWindow,
@@ -345,6 +348,22 @@ end
 
 function Controller:Detach(key)
     return self:Organize("Detach", key)
+end
+
+-- Turns "Don't sync" on or off for `key`'s player. Turning it off reports
+-- the player to onSyncResumed, so guild sync can bring it back in line.
+function Controller:SetDontSync(key, enabled)
+    if self.current == nil then
+        return false
+    end
+    local ok, reason = self:Service():SetDontSync(key, enabled)
+    if not ok then
+        self:Print("That change wasn't made: " .. tostring(reason) .. ".")
+    elseif not enabled and self.onSyncResumed ~= nil then
+        self.onSyncResumed(key)
+    end
+    self:Refresh()
+    return ok == true
 end
 
 -- Results for the "Set main…" picker, without `key`'s own player.

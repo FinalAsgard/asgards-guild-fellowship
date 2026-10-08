@@ -105,6 +105,10 @@ local function playerProblem(player)
     if player.aliasBy ~= nil and not isText(player.aliasBy) then
         return "player alias author is invalid"
     end
+    -- "Don't sync": this client keeps its own version of the player.
+    if player.noSync ~= nil and player.noSync ~= true then
+        return "player don't sync flag is invalid"
+    end
     if player.history ~= nil then
         if type(player.history) ~= "table" then
             return "player history is invalid"
@@ -591,6 +595,42 @@ function Partition:SetAliasStamp(key, at, by)
     end
     player.aliasAt = at
     player.aliasBy = by
+    return true
+end
+
+-- Forgets when and by whom `key`'s main link was set, making it the oldest
+-- possible again.
+function Partition:ClearMainStamp(key)
+    local character = self.data.characters[key]
+    if character ~= nil then
+        character.mainAt = nil
+        character.mainBy = nil
+    end
+end
+
+-- The same for the alias of `key`'s player.
+function Partition:ClearAliasStamp(key)
+    local character = self.data.characters[key]
+    local player = character and self.data.players[character.player]
+    if player ~= nil then
+        player.aliasAt = nil
+        player.aliasBy = nil
+    end
+end
+
+-- "Don't sync": whether this client keeps its own version of a player,
+-- ignoring guild sync for it.
+function Partition:IsNoSync(playerId)
+    local player = self.data.players[playerId]
+    return player ~= nil and player.noSync == true
+end
+
+function Partition:SetNoSync(playerId, enabled)
+    local player = self.data.players[playerId]
+    if player == nil then
+        return false
+    end
+    player.noSync = enabled and true or nil
     return true
 end
 

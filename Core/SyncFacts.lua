@@ -208,6 +208,11 @@ function Facts:Refusal(fact)
     then
         return "unknown character"
     end
+    -- A fact that would change a "Don't sync" player, by moving one of its
+    -- characters out, another in, or renaming it.
+    if self:IsPinned(fact.character) or (fact.kind == SyncFacts.KIND_MAIN and self:IsPinned(fact.main)) then
+        return "don't sync"
+    end
     local heldAt, heldBy = self:HeldStamp(fact)
     if not SyncFacts.IsNewer(fact.at, fact.by, heldAt, heldBy) then
         return "not newer"
@@ -256,20 +261,28 @@ function Facts:Change(fact)
     partition:SetMainStamp(fact.character, fact.at, fact.by)
 end
 
+-- True when `key`'s player is marked "Don't sync" on this client.
+function Facts:IsPinned(key)
+    local character = self.partition:GetCharacter(key)
+    return character ~= nil and self.partition:IsNoSync(character.player)
+end
+
 -- Every officer fact this client holds, which it can pass on to others:
 -- main links, sorted by character, then aliases, sorted by main. Facts
 -- nobody stamped, and edits by authors who aren't officers now, aren't
--- officer data.
+-- officer data, and "Don't sync" players are this client's own business.
 function Facts:OfficerFacts()
     local partition = self.partition
     local links, aliases = {}, {}
     partition:EachCharacter(function(key, character)
-        if character.mainAt ~= nil and self.isOfficer(character.mainBy) then
+        if character.mainAt ~= nil and self.isOfficer(character.mainBy)
+            and not partition:IsNoSync(character.player)
+        then
             table.insert(links, key)
         end
     end)
-    partition:EachPlayer(function(_, player)
-        if player.aliasAt ~= nil and self.isOfficer(player.aliasBy) then
+    partition:EachPlayer(function(id, player)
+        if player.aliasAt ~= nil and self.isOfficer(player.aliasBy) and not partition:IsNoSync(id) then
             table.insert(aliases, player.main)
         end
     end)
@@ -284,6 +297,29 @@ function Facts:OfficerFacts()
         table.insert(facts, self:AliasFactOf(aliases[index]))
     end
     return facts
+end
+
+-- After "Don't sync" is turned off for `key`'s player: this user's own
+-- stamped edits to it (not an officer's) become the oldest possible, so the
+-- officers' data for it wins again when it next arrives.
+function Facts:Rejoin(key)
+    local partition = self.partition
+    local character = partition:GetCharacter(key)
+    if character == nil then
+        return
+    end
+    local keys = partition:CharactersOf(character.player)
+    local index
+    for index = 1, #keys do
+        local _, by = partition:GetMainStamp(keys[index])
+        if by ~= nil and not self.isOfficer(by) then
+            partition:ClearMainStamp(keys[index])
+        end
+    end
+    local _, aliasBy = partition:GetAliasStamp(key)
+    if aliasBy ~= nil and not self.isOfficer(aliasBy) then
+        partition:ClearAliasStamp(key)
+    end
 end
 
 -- Applies every acceptable fact in `facts`, then restores the acting-main

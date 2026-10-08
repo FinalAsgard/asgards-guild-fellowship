@@ -102,6 +102,15 @@ test.test("the panel shows the alias, acting main, alts, and history", function(
     test.assertEqual("until day 1", history[1].dates)
 end)
 
+test.test("the panel says whether the player is marked don't sync", function()
+    local state = setup()
+    test.assertFalse(state.build().dontSync)
+
+    state.partition:SetNoSync(state.playerId, true)
+
+    test.assertTrue(state.build().dontSync)
+end)
+
 test.test("panel rows offer the same actions as the right-click menu", function()
     local state = setup()
 
@@ -158,7 +167,7 @@ end)
 
 -- Controller: selecting and editing ------------------------------------------
 
-local function controllerSetup()
+local function controllerSetup(onSyncResumed)
     local world = fixtures.newEnvironment("Retail")
     world.environment.date = function(format, timestamp)
         return os.date("!" .. format, timestamp)
@@ -194,6 +203,7 @@ local function controllerSetup()
         nameRules = client:GetClientProfile().nameRules,
         getDatabase = function() return database end,
         createWindow = function() return window end,
+        onSyncResumed = onSyncResumed,
     })
     controller:OnSavedDataReady()
     controller:OnRosterUpdate()
@@ -236,6 +246,26 @@ test.test("the panel closes when its player is merged away", function()
     controller:SetMainPlayer("visitor-stormrage", toolPlayer)
 
     test.assertEqual(nil, window.player)
+end)
+
+test.test("don't sync is toggled from the panel, marked there, and turning it off resumes sync", function()
+    local resumed = {}
+    local controller, window = controllerSetup(function(key)
+        table.insert(resumed, key)
+    end)
+    controller:SelectPlayerOf("hammer-area52")
+    test.assertFalse(window.player.dontSync)
+
+    test.assertTrue(controller:SetDontSync(window.player.main, true))
+    test.assertTrue(window.player.dontSync, "the panel shows the player is pinned")
+    test.assertTrue(controller.current.partition:IsNoSync(window.player.id))
+    test.assertEqual(0, #resumed)
+
+    test.assertTrue(controller:SetDontSync(window.player.main, false))
+    test.assertFalse(window.player.dontSync)
+    test.assertFalse(controller.current.partition:IsNoSync(window.player.id))
+    test.assertEqual(1, #resumed)
+    test.assertEqual("toolbox-area52", resumed[1])
 end)
 
 test.test("dates are formatted by the client", function()

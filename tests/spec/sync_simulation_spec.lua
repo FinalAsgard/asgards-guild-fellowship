@@ -563,3 +563,36 @@ test.test("saved data from a newer add-on is never upgraded or sent", function()
     test.assertEqual(3, officer.database.schemaVersion)
     test.assertEqual(nil, officer.database.guilds["Knights of Camelot-Area52"].characters["hammer-area52"].mainAt)
 end)
+
+-- Don't sync -------------------------------------------------------------------
+
+test.test("a member's don't-sync player keeps their version, and rejoins officer data when turned off", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local member = login(channel, "Wrench-Area52")
+    local controller = member.addon.rosterController
+    test.assertTrue(controller:SetDontSync("hammer-area52", true))
+
+    linkAlt(officer, "hammer-area52", "toolbox-area52")
+    officer.addon.rosterController:SetAlias("hammer-area52", "The Tool")
+    fixtures.deliver(channel)
+
+    test.assertEqual("hammer-area52", mainOf(member, "hammer-area52"))
+    test.assertEqual(nil, aliasOf(member, "hammer-area52"))
+    -- Other players still sync while one is pinned.
+    linkAlt(officer, "grandmaster-area52", "toolbox-area52")
+    fixtures.deliver(channel)
+    test.assertEqual("toolbox-area52", mainOf(member, "grandmaster-area52"))
+
+    -- Turning it off asks the guild right away; the officer answers.
+    local sent = #member.sentMessages
+    test.assertTrue(controller:SetDontSync("hammer-area52", false))
+    test.assertEqual(sent + 1, #member.sentMessages)
+    test.assertEqual("digest", decode(member, member.sentMessages[#member.sentMessages]).t)
+    fixtures.deliver(channel)
+    fixtures.runTimers(officer, 5)
+    fixtures.deliver(channel)
+
+    test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
+    test.assertEqual("The Tool", aliasOf(member, "hammer-area52"))
+end)

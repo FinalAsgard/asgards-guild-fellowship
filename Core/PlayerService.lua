@@ -319,6 +319,17 @@ function Service:Detach(key)
     return true
 end
 
+-- "Don't sync": keeps this client's own version of `key`'s player, or (with
+-- `enabled` false) lets guild sync update it again.
+function Service:SetDontSync(key, enabled)
+    local character = self.partition:GetCharacter(key)
+    if character == nil then
+        return false, "that character is not known"
+    end
+    self.partition:SetNoSync(character.player, enabled)
+    return true
+end
+
 -- Lookups --------------------------------------------------------------------
 
 -- The player id and record of a character's player, or nil.

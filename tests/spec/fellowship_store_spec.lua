@@ -311,3 +311,29 @@ test.test("a stored alias stamp of the wrong type quarantines its player intact"
     end
     test.assertEqual(2, players)
 end)
+
+test.test("don't sync is kept on the player record, and an unusable flag quarantines the player", function()
+    local database = foundationRoot()
+    database.guilds["Knights of Camelot-Area52"] = {
+        characters = {
+            ["hammer-area52"] = { player = 1 },
+            ["toolbox-area52"] = { player = 2 },
+        },
+        players = {
+            [1] = { main = "hammer-area52", noSync = "yes" },
+            [2] = { main = "toolbox-area52" },
+        },
+    }
+
+    local partition = newStore(database):Partition(GUILD)
+
+    test.assertEqual(nil, partition:GetPlayer(1))
+    test.assertFalse(partition:IsNoSync(2))
+    test.assertTrue(partition:SetNoSync(2, true))
+    test.assertTrue(partition:IsNoSync(2))
+    test.assertEqual(true, database.guilds["Knights of Camelot-Area52"].players[2].noSync)
+    test.assertTrue(partition:SetNoSync(2, false))
+    test.assertFalse(partition:IsNoSync(2))
+    test.assertEqual(nil, database.guilds["Knights of Camelot-Area52"].players[2].noSync)
+    test.assertFalse(partition:SetNoSync(99, true))
+end)

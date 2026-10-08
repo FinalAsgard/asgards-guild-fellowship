@@ -93,6 +93,14 @@ When an officer changes which characters belong together, or what a player goes 
 - Only main and alt links and aliases are shared. Departures, purges, history, conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
 
+### Don't sync
+
+To keep your own version of a player, open the player panel and check **Don't sync**. The panel's title and the checkbox show the player in orange while it's on.
+
+- Officers' edits for that player are ignored on your computer: moving its characters in or out, changing its main, and setting or clearing its alias.
+- Every other player keeps syncing as usual.
+- Uncheck it to rejoin. Your own edits to that player stop counting as newer than the officers', and your add-on asks the guild for their data right away, so the player matches what the officers have within a few seconds if anyone online has it, or at your next login otherwise.
+
 ### Catching up when you log in
 
 You don't need to be online at the same time as an officer. Officers' edits also reach you through other add-on users:

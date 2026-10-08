@@ -173,6 +173,18 @@ function Session:Announce()
     return true
 end
 
+-- After "Don't sync" was turned off for `key`'s player: lets officer data
+-- win for it again, and asks the guild for it right away rather than at the
+-- next login.
+function Session:Rejoin(key)
+    local partition = self.context()
+    if partition == nil then
+        return false
+    end
+    self:Facts(partition):Rejoin(key)
+    return self:Announce()
+end
+
 -- Someone announced `digest`: unless it matches, schedules a reply with this
 -- client's facts in the buckets that differ.
 function Session:OnDigest(digest, announcer, partition)

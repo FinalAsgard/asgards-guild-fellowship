@@ -41,6 +41,9 @@ if clientProfile.supported then
         onScanFinished = function()
             syncSession:UpgradeLegacy()
         end,
+        onSyncResumed = function(key)
+            syncSession:Rejoin(key)
+        end,
         getDatabase = function()
             return persistence:GetDatabase()
         end,
@@ -121,6 +124,9 @@ if clientProfile.supported then
                 end,
                 onClosePanel = function()
                     rosterController:ClosePanel()
+                end,
+                onSetDontSync = function(key, enabled)
+                    rosterController:SetDontSync(key, enabled)
                 end,
                 onMenuUnavailable = function()
                     rosterController:Print("The organize menu isn't available on this client.")

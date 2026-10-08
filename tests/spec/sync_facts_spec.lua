@@ -351,3 +351,66 @@ test.test("upgrading stamps only unstamped manual links and aliases as the offic
 
     test.assertEqual(0, #setup.facts:StampLegacy(OFFICER, NOW + 60))
 end)
+
+-- Don't sync -----------------------------------------------------------------
+
+local function pin(setup, key, enabled)
+    setup.partition:SetNoSync(setup.partition:GetCharacter(key).player, enabled ~= false)
+end
+
+test.test("facts that would change a don't-sync player are ignored", function()
+    local setup = newSetup({ OFFICER, MEMBER, "wrench-area52", "anvil-area52" })
+    pin(setup, MEMBER)
+
+    -- Moving its character out, renaming it, or moving another character in.
+    test.assertEqual("don't sync", setup.facts:Refusal(fact(MEMBER, OFFICER)))
+    local alias = { kind = "alias", character = MEMBER, alias = "Hammy", at = NOW, by = OFFICER }
+    test.assertEqual("don't sync", setup.facts:Refusal(alias))
+    test.assertEqual("don't sync", setup.facts:Refusal(fact("wrench-area52", MEMBER)))
+    test.assertEqual(0, setup.facts:ApplyAll({ fact(MEMBER, OFFICER), alias, fact("wrench-area52", MEMBER) }))
+
+    test.assertEqual(MEMBER, mainOf(setup.partition, MEMBER))
+    test.assertEqual(nil, setup.partition:GetPlayer(setup.partition:GetCharacter(MEMBER).player).alias)
+    test.assertEqual("wrench-area52", mainOf(setup.partition, "wrench-area52"))
+    -- Other players still sync.
+    test.assertEqual(1, setup.facts:ApplyAll({ fact("anvil-area52", OFFICER) }))
+end)
+
+test.test("a don't-sync player's facts aren't passed on", function()
+    local setup = newSetup({ OFFICER, MEMBER, "wrench-area52" })
+    setup.facts:ApplyAll({ fact(MEMBER, OFFICER), fact("wrench-area52", OFFICER) })
+    test.assertEqual(2, #setup.facts:OfficerFacts())
+
+    pin(setup, OFFICER)
+
+    test.assertEqual(0, #setup.facts:OfficerFacts())
+end)
+
+test.test("after don't sync is turned off, officer data wins over the member's own edits again", function()
+    local setup = newSetup({ OFFICER, MEMBER, "wrench-area52" })
+    setup.facts:ApplyAll({ fact(MEMBER, OFFICER, NOW) })
+    pin(setup, OFFICER)
+    -- The member's own edits while pinned: Wrench linked in, and an alias.
+    setup.partition:JoinPlayerOf("wrench-area52", OFFICER, "manual")
+    setup.facts:Stamp({ ["wrench-area52"] = true }, "wrench-area52", NOW + 100)
+    setup.partition:SetAlias(setup.partition:GetCharacter(OFFICER).player, "Mine", "manual")
+    setup.facts:StampAlias(OFFICER, "wrench-area52", NOW + 100)
+
+    pin(setup, OFFICER, false)
+    setup.facts:Rejoin(OFFICER)
+
+    -- The member's stamps are gone; the officer's is kept.
+    test.assertEqual(0, (setup.partition:GetMainStamp("wrench-area52")))
+    test.assertEqual(0, (setup.partition:GetAliasStamp(OFFICER)))
+    local at, by = setup.partition:GetMainStamp(MEMBER)
+    test.assertEqual(NOW, at)
+    test.assertEqual(OFFICER, by)
+    -- The officer's data, older than the member's edits, now applies.
+    test.assertEqual(2, setup.facts:ApplyAll({
+        fact("wrench-area52", "wrench-area52", NOW),
+        { kind = "alias", character = OFFICER, alias = "", at = NOW, by = OFFICER },
+    }))
+    test.assertEqual("wrench-area52", mainOf(setup.partition, "wrench-area52"))
+    test.assertEqual(OFFICER, mainOf(setup.partition, MEMBER))
+    test.assertEqual(nil, setup.partition:GetPlayer(setup.partition:GetCharacter(OFFICER).player).alias)
+end)

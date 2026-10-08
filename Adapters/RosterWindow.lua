@@ -443,6 +443,20 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.aliasText = aliasText
     edit.aliasSource = aliasSource
 
+    -- "Don't sync": keep this client's own version of the player.
+    local dontSync = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    dontSync:SetSize(20, 20)
+    dontSync:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -160, -50)
+    local dontSyncLabel = dontSync:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dontSyncLabel:SetPoint("LEFT", dontSync, "RIGHT", 2, 0)
+    dontSync:SetScript("OnClick", function(button)
+        if edit.model ~= nil then
+            options.onSetDontSync(edit.model.main, button:GetChecked() == true)
+        end
+    end)
+    edit.dontSync = dontSync
+    edit.dontSyncLabel = dontSyncLabel
+
     local lineAmount = math.floor((PANEL_HEIGHT - 90) / RosterWindow.LINE_HEIGHT)
     local function newLine(scroll, index)
         local line = CreateFrame("Frame", nil, scroll)
@@ -917,7 +931,8 @@ end
 -- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them;
 -- options.onSearch(text), onToggleOnlineOnly(), onExpandAll(), and
 -- onCollapseAll() drive the controls row; options.onSelectCharacter(key)
--- opens a player's edit panel and onClosePanel() runs when it closes.
+-- opens a player's edit panel and onClosePanel() runs when it closes;
+-- options.onSetDontSync(key, enabled) runs the panel's "Don't sync" toggle.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then
@@ -982,10 +997,12 @@ function Window:ShowPlayer(model)
         local edit = self.playerPanel
         edit.model = model
         if type(edit.panel.SetTitle) == "function" then
-            edit.panel:SetTitle(model.label)
+            edit.panel:SetTitle(model.dontSync and (model.label .. " |cffff8000(Don't sync)|r") or model.label)
         end
         edit.aliasText:SetText(model.alias and ("Alias: " .. model.alias) or "|cff9d9d9dNo alias|r")
         edit.aliasSource:SetText(model.alias and model.aliasSource and ("Alias " .. model.aliasSource) or "")
+        edit.dontSync:SetChecked(model.dontSync == true)
+        edit.dontSyncLabel:SetText(model.dontSync and "|cffff8000Don't sync: kept as yours|r" or "Don't sync")
         edit.scroll:SetData(model.rows)
         edit.scroll:Refresh()
         edit.panel:Show()
