@@ -16,6 +16,7 @@ local MANIFEST_FILES = {
     "Core/RosterViewModel.lua",
     "Core/ConflictViewModel.lua",
     "Core/PlayerPanelViewModel.lua",
+    "Core/ChatAnnotator.lua",
     "Core/ScanScheduler.lua",
     "Core/RosterController.lua",
     "Core/LibraryCheck.lua",

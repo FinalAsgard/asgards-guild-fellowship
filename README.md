@@ -15,6 +15,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf` or `/agf roster` | Shows or hides the roster window. |
 | `/agf rescan` | Scans the guild's notes right away. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
+| `/agf tags` | Turns chat tags off, or back on. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## Using the roster
@@ -79,6 +80,21 @@ Changes show up right away and are recorded as manual. Data is saved per guild a
 - **Expand all** and **Collapse all** open and close every group.
 - Online players come first, then everyone else by name. A group shows "online as …" when the player is on an alt.
 - A player with one character is shown as a single row.
+
+## Chat tags
+
+In guild chat, officer chat, and guild achievement announcements, a tag after the speaker's name shows who the player is:
+
+- If the player has an alias, the tag shows it: Hammer (an alt of Toolbox, alias TheTool) saying hi reads `[Hammer] [TheTool]: hi`.
+- If they have no alias and are on an alt, the tag shows their main's name: `[Wrench] [Toolbox]: hi`. If the main has left the guild, it's the acting main.
+- Achievements read the same way: `[Hammer] [TheTool] has earned the achievement …`.
+- There's no tag when they're on their main with no alias, or when the tag would just repeat their own name.
+
+An alias tag is medium blue and a main's-name tag is light blue, so you can tell a nickname from a character name at a glance. Your own messages are tagged the same way. Characters the database doesn't know yet get no tag. The name stays clickable as usual. Tags come from your own database, so changes you make in the roster show up on the next line.
+
+Tags are on by default. `/agf tags` turns them off, and running it again turns them back on. The choice is saved for every character on this game install and applies from the next chat line.
+
+On Retail, the game hides chat from add-ons during encounters and keystone runs. Those lines appear without tags, and tags return once the restriction lifts.
 
 ## Supported clients
 

@@ -366,6 +366,32 @@ function Service:PlayerNameOf(key)
     return playerId and self:PlayerName(playerId) or nil
 end
 
+-- The tag chat shows next to a character's name: { text, kind }, where kind
+-- is "alias" (the player's alias) or "main" (the main's name, when speaking
+-- from an alt). Nil when there's nothing new to show: the character is
+-- unknown, is the main and has no alias, or the tag would repeat its own
+-- name. Costs two record lookups, so it's cheap enough for every chat line.
+function Service:ChatTag(key)
+    local character = self.partition:GetCharacter(key)
+    local player = character and self.partition:GetPlayer(character.player)
+    if player == nil then
+        return nil
+    end
+    local tag
+    if player.alias ~= nil then
+        tag = { text = player.alias, kind = "alias" }
+    elseif player.main ~= key then
+        tag = { text = self:CharacterName(player.main) or player.main, kind = "main" }
+    else
+        return nil
+    end
+    local fold = addon.NameNormalizer.Fold
+    if fold(tag.text) == fold(self:CharacterName(key) or key) then
+        return nil
+    end
+    return tag
+end
+
 -- Players matching `query` by alias or any in-guild character's name,
 -- case-insensitively, for the "Set main…" picker. An empty query lists
 -- everyone. Each result: { id, label, matched } where `matched` names the

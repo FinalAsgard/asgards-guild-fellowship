@@ -25,7 +25,7 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence, rosterController, entryPoints
+local persistence, rosterController, entryPoints, chatAnnotator
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     rosterController = addon.RosterController.Create({
@@ -134,10 +134,42 @@ if clientProfile.supported then
             rosterController:Print("Minimap button hidden. Type the command again to bring it back.")
         end
     end)
+    router:Register("tags", "turn chat tags on or off", function()
+        local store = rosterController:Store()
+        if store == nil then
+            rosterController:Print("Saved data is unavailable, so chat tags can't be changed.")
+            return
+        end
+        local enabled = not store:ChatTagsEnabled()
+        if not store:SetChatTagsEnabled(enabled) then
+            rosterController:Print("Chat tags can't be changed: the saved setting is unreadable. They stay on.")
+        elseif enabled then
+            rosterController:Print("Chat tags on.")
+        else
+            rosterController:Print("Chat tags off.")
+        end
+    end)
     router:SetDefault("roster")
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
     end)
+    -- Chat tags read the same guild context as the roster.
+    chatAnnotator = addon.ChatAnnotator.Create({
+        context = function()
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return partition, normalizer
+        end,
+        isSecret = function(value)
+            return client:IsSecretValue(value)
+        end,
+        enabled = function()
+            local store = rosterController:Store()
+            return store == nil or store:ChatTagsEnabled()
+        end,
+    })
     entryPoints = addon.EntryPoints.Create({
         client = client,
         toggle = function()
@@ -162,6 +194,10 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     rosterController:OnSavedDataReady()
     -- The minimap button needs saved data for its position.
     entryPoints:Start()
+    -- Without a chat filter API, chat is simply left untagged.
+    client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
+        return chatAnnotator:Annotate(event, message, sender)
+    end)
 end)
 
 addon.client = client
@@ -171,6 +207,7 @@ addon.lifecycle = lifecycle
 addon.persistence = persistence
 addon.rosterController = rosterController
 addon.entryPoints = entryPoints
+addon.chatAnnotator = chatAnnotator
 addon.router = router
 addon.version = version
 

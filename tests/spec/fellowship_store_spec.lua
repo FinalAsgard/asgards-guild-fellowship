@@ -185,3 +185,29 @@ test.test("window geometry is saved account-wide and an unusable value is kept",
     test.assertFalse(store:SetWindowState({ width = 1 }))
     test.assertEqual("corrupt", database.window)
 end)
+
+test.test("chat tags are on by default and the choice is saved account-wide", function()
+    local database = foundationRoot()
+    local store = newStore(database)
+
+    test.assertTrue(store:ChatTagsEnabled())
+    test.assertTrue(store:SetChatTagsEnabled(false))
+    test.assertFalse(store:ChatTagsEnabled())
+    test.assertEqual(false, database.chatTags)
+
+    -- Another session (or character) reading the same saved data.
+    test.assertFalse(newStore(database):ChatTagsEnabled())
+    test.assertTrue(store:SetChatTagsEnabled(true))
+    test.assertTrue(newStore(database):ChatTagsEnabled())
+end)
+
+test.test("an unusable chat tags value is left alone and counts as on", function()
+    local database = foundationRoot()
+    database.chatTags = "corrupt"
+    local store = newStore(database)
+
+    test.assertTrue(store:ChatTagsEnabled())
+    test.assertFalse(store:SetChatTagsEnabled(false))
+    test.assertEqual("corrupt", database.chatTags)
+    test.assertFalse(store:SetChatTagsEnabled("off"))
+end)

@@ -30,6 +30,10 @@ local function fold(value)
     end))
 end
 
+-- Case-folds text the way keys are folded, so names and aliases compare
+-- without regard to case (accented letters included).
+NameNormalizer.Fold = fold
+
 local function compactRealm(realm)
     return (string.gsub(realm, "%s+", ""))
 end
