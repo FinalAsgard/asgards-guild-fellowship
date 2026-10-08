@@ -31,3 +31,9 @@ ignore:
   - docs
   - tests
   - tools
+
+# A release's notes become the changelog. The Release workflow writes them to
+# CHANGELOG.md; without that file the packager generates one from git history.
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown

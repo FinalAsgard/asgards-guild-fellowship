@@ -2,3 +2,5 @@
 Libs/
 # Build output.
 .release/
+# Written from the GitHub release notes during a release; never committed.
+CHANGELOG.md

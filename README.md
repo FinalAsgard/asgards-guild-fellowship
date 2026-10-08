@@ -4,6 +4,19 @@ A World of Warcraft add-on for the guild's member database and Fellowship roster
 
 The add-on groups the guild's characters into **players**. Each player has one main, any number of alts, and an optional alias. The grouping is seeded from public guild notes, and from then on it's kept in a local database that only you change.
 
+## Installing
+
+Install **Asgard's Guild Fellowship** from CurseForge, for example with the CurseForge app. One download works on both supported clients, WoW Forever and WoW Retail (see [Supported clients](#supported-clients)). To install by hand, unzip the release into your client's `Interface\AddOns` folder so that you have `Interface\AddOns\AsgardsGuildFellowship`.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/agf` or `/agf roster` | Shows or hides the roster window. |
+| `/agf rescan` | Scans the guild's notes right away. |
+| `/agf minimap` | Hides the minimap button, or brings it back. |
+| `/agf help` | Lists the commands, with the version, client, and library status. |
+
 ## Using the roster
 
 ### Opening it
@@ -78,6 +91,10 @@ On any other client the add-on prints one message, keeps `help` working, and lea
 
 The development build uses its own folder (`AsgardsGuildFellowshipDev`), commands, chat tag, and SavedVariables, so it never mixes with a production install.
 
+## For maintainers
+
+The rest of this page is for people working on the add-on. To work on it in game, see [Development install (Windows)](#development-install-windows). To build a package or publish a release to CurseForge, see [docs/packaging.md](https://github.com/FinalAsgard/asgards-guild-fellowship/blob/main/docs/packaging.md).
+
 ## Project layout
 
 - `Core/` is game-independent Lua.
@@ -147,3 +164,5 @@ lua5.1 tests/run.lua
 ```
 
 CI runs the same suite, a syntax check of every add-on Lua file, and the library pin check in the `Lua 5.1` job. The tests stand in for the libraries, so they don't need `Libs/`.
+
+The release tools have their own shell tests in `tests/tools/` (run any of them directly, for example `tests/tools/set-interface.test.sh`). CI runs them in the **Release package** job; see [docs/packaging.md](https://github.com/FinalAsgard/asgards-guild-fellowship/blob/main/docs/packaging.md).
