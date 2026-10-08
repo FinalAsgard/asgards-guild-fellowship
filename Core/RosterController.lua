@@ -17,9 +17,13 @@ Controller.__index = Controller
 --   nameRules     the client profile's name rules
 --   getDatabase   function() -> the SavedVariables root, or nil
 --   createWindow  function() -> window or nil, reason
+--   onMainLinksChanged  optional function(keys): after a manual change to
+--                 main links, with the set of every character key whose
+--                 player was involved (for guild sync)
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
+        onMainLinksChanged = options.onMainLinksChanged,
         collapsed = {},
         showDeparted = false,
         createWindow = options.createWindow,
@@ -280,15 +284,37 @@ function Controller:MenuFor(row)
     return entries
 end
 
+-- Manual changes that move characters between players or change a main.
+local MAIN_LINK_OPERATIONS = { SetMainPlayer = true, MakeMain = true, Detach = true }
+
+-- Adds every character of `key`'s player to the set `keys`.
+function Controller:AddPlayerKeys(keys, key)
+    local character = self.current.partition:GetCharacter(key)
+    if character == nil then
+        return keys
+    end
+    local members = self.current.partition:CharactersOf(character.player)
+    local index
+    for index = 1, #members do
+        keys[members[index]] = true
+    end
+    return keys
+end
+
 -- Runs a manual change, reports a refusal, and redraws at once (no scan).
-function Controller:Organize(operation, ...)
+-- A change to main links reports every character of the players involved,
+-- before and after, to onMainLinksChanged.
+function Controller:Organize(operation, key, ...)
     if self.current == nil then
         return false
     end
     local service = self:Service()
-    local ok, reason = service[operation](service, ...)
+    local involved = MAIN_LINK_OPERATIONS[operation] and self:AddPlayerKeys({}, key) or nil
+    local ok, reason = service[operation](service, key, ...)
     if not ok then
         self:Print("That change wasn't made: " .. tostring(reason) .. ".")
+    elseif involved ~= nil and self.onMainLinksChanged ~= nil then
+        self.onMainLinksChanged(self:AddPlayerKeys(involved, key))
     end
     self:Refresh()
     return ok == true

@@ -25,12 +25,16 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence, rosterController, entryPoints, chatAnnotator
+local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
+    comm = addon.Comm.Create(client, addon.Identity.commPrefix)
     rosterController = addon.RosterController.Create({
         client = client,
         nameRules = clientProfile.nameRules,
+        onMainLinksChanged = function(keys)
+            syncSession:LocalEdit(keys)
+        end,
         getDatabase = function()
             return persistence:GetDatabase()
         end,
@@ -150,6 +154,47 @@ if clientProfile.supported then
         end
     end)
     router:SetDefault("roster")
+    -- Guild sync: officers are ranks that can view officer notes, judged
+    -- from the stored roster (current members only).
+    local officerAuthority = addon.OfficerAuthority.Create({
+        rankOf = function(key)
+            local guild, partition = rosterController:QuietContext()
+            if guild == nil or not partition:IsInGuild(key) then
+                return nil
+            end
+            return partition:GetCharacter(key).rank
+        end,
+        rankCanViewOfficerNotes = function(rank)
+            return comm:RankCanViewOfficerNotes(rank)
+        end,
+    })
+    syncSession = addon.SyncSession.Create({
+        comm = comm,
+        context = function()
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return partition, normalizer
+        end,
+        selfKey = function()
+            local guild, _, normalizer = rosterController:QuietContext()
+            local fullName = client:GetPlayerFullName()
+            if guild == nil or fullName == nil then
+                return nil
+            end
+            return normalizer:Key(fullName)
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        onApplied = function()
+            rosterController:Invalidate()
+        end,
+    })
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
     end)
@@ -192,6 +237,10 @@ end
 
 local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
     rosterController:OnSavedDataReady()
+    -- Without the comm libraries, sync simply stays off.
+    comm:Start(function(message, sender)
+        syncSession:Receive(message, sender)
+    end)
     -- The minimap button needs saved data for its position.
     entryPoints:Start()
     -- Without a chat filter API, chat is simply left untagged.
@@ -208,6 +257,8 @@ addon.persistence = persistence
 addon.rosterController = rosterController
 addon.entryPoints = entryPoints
 addon.chatAnnotator = chatAnnotator
+addon.comm = comm
+addon.syncSession = syncSession
 addon.router = router
 addon.version = version
 

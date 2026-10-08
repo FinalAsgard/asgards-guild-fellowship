@@ -2,7 +2,7 @@
 
 A World of Warcraft add-on for the guild's member database and Fellowship roster: who each player is, which characters are their mains and alts, and the alias they choose to be called. It supports WoW Forever and WoW Retail from one source tree.
 
-The add-on groups the guild's characters into **players**. Each player has one main, any number of alts, and an optional alias. The grouping is seeded from public guild notes, and from then on it's kept in a local database that only you change.
+The add-on groups the guild's characters into **players**. Each player has one main, any number of alts, and an optional alias. The grouping is seeded from public guild notes, and from then on it's kept in a local database. You change it by hand, and officers' edits reach it through [guild sync](#guild-sync).
 
 ## Installing
 
@@ -81,6 +81,18 @@ Changes show up right away and are recorded as manual. Data is saved per guild a
 - Online players come first, then everyone else by name. A group shows "online as …" when the player is on an alt.
 - A player with one character is shown as a single row.
 
+## Guild sync
+
+When an officer changes which characters belong together, the change reaches everyone in the guild who runs the add-on and is online. This covers **Set main…**, **Make this the main**, and **Detach as own player**. Officers' edits update your roster without a rescan.
+
+- An officer is anyone whose guild rank can view officer notes. The guild master always counts. Nothing needs to be set up: promoting or demoting someone changes what their edits do.
+- When two officers change the same character, the most recent edit wins everywhere.
+- Your own edits stay in your roster. They're only sent to the guild when you're an officer.
+- Only main and alt links are shared. Departures, purges, history, conflicts, and settings stay on your computer.
+- Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
+
+For now, edits reach only members who are online when they're made.
+
 ## Chat tags
 
 In guild chat, officer chat, and guild achievement announcements, a tag after the speaker's name shows who the player is:
@@ -119,7 +131,7 @@ The rest of this page is for people working on the add-on. To work on it in game
 
 ## Libraries
 
-The add-on uses LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, LibSharedMedia-3.0, and the Details! Framework. They are not committed. [`tools/libraries.txt`](tools/libraries.txt) pins each one to a tag, and both release packages (`.pkgmeta` externals) and development checkouts use those pins. To fetch them into the git-ignored `Libs/` folder, run this in PowerShell (Windows PowerShell or `pwsh`):
+The add-on uses LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, LibSharedMedia-3.0, the Details! Framework, AceSerializer-3.0, and AceComm-3.0 (which brings ChatThrottleLib). They are not committed. [`tools/libraries.txt`](tools/libraries.txt) pins each one to a tag, and both release packages (`.pkgmeta` externals) and development checkouts use those pins. To fetch them into the git-ignored `Libs/` folder, run this in PowerShell (Windows PowerShell or `pwsh`):
 
 ```powershell
 ./tools/Fetch-Libraries.ps1

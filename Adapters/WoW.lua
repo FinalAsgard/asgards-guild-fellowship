@@ -173,6 +173,27 @@ function Client:GetGuildIdentity()
     return { name = name, realm = realm }
 end
 
+-- The logged-in character as "Name-Realm", or nil while the client can't
+-- say. UnitFullName may leave out the realm (early at login, or on older
+-- clients), so the player's own realm fills it in.
+function Client:GetPlayerFullName()
+    local ok, name, realm = callFunction(self.environment.UnitFullName, "player")
+    if not ok or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    if type(realm) ~= "string" or realm == "" then
+        local realmOk, ownRealm = callFunction(self.environment.GetNormalizedRealmName)
+        if not realmOk or type(ownRealm) ~= "string" or ownRealm == "" then
+            realmOk, ownRealm = callFunction(self.environment.GetRealmName)
+        end
+        realm = realmOk and ownRealm or nil
+    end
+    if type(realm) ~= "string" or realm == "" then
+        return nil
+    end
+    return name .. "-" .. realm
+end
+
 function Client:IsInGuild()
     local ok, inGuild = callFunction(self.environment.IsInGuild)
     return ok and inGuild ~= nil and inGuild ~= false
