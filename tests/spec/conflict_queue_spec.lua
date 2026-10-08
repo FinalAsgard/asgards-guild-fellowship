@@ -8,7 +8,8 @@ local function load()
         "Core/FellowshipStore.lua",
         "Core/ReconcileEngine.lua",
         "Core/PlayerService.lua",
-        "Core/ConflictViewModel.lua"
+        "Core/ConflictViewModel.lua",
+        "Core/SyncFacts.lua"
     )
 end
 
@@ -363,6 +364,117 @@ test.test("review rows show the character, live note, suggestion, current state,
     -- A character missing from the live roster has no note to show.
     rows = state.addon.ConflictViewModel.Build({ partition = state.partition, normalizer = state.normalizer })
     test.assertEqual(nil, rows[1].note)
+end)
+
+-- Officer data beats guild notes ---------------------------------------------
+
+local OFFICER = "boss-area52"
+
+-- Applies facts received from an officer, as guild sync does.
+local function officerSays(state, facts)
+    local index
+    for index = 1, #facts do
+        facts[index].at = facts[index].at or 1790000000
+        facts[index].by = OFFICER
+    end
+    return state.addon.SyncFacts.Create(state.partition, {
+        isOfficer = function(key)
+            return key == OFFICER
+        end,
+    }):ApplyAll(facts, OFFICER)
+end
+
+local function conflictOf(state, key, kind)
+    local conflicts = state.conflicts()
+    local index
+    for index = 1, #conflicts do
+        if conflicts[index].character == key and conflicts[index].kind == kind then
+            return conflicts[index]
+        end
+    end
+    return nil
+end
+
+test.test("a note that disagrees with an officer's main link is queued by the next scan, keeping the link", function()
+    local state = seeded()
+    test.assertEqual(1, officerSays(state, {
+        { kind = "main", character = "hammer-area52", main = "visitor-area52" },
+    }))
+
+    -- Hammer's note still says Toolbox; even a quick check reads it again.
+    state.scan(SEEDED, "incremental")
+
+    test.assertEqual("visitor-area52", state.playerOf("hammer-area52").main)
+    local conflict = conflictOf(state, "hammer-area52", "main")
+    test.assertTrue(conflict ~= nil, "the disagreeing note is queued")
+    test.assertEqual("toolbox-area52", conflict.suggestion.main)
+
+    -- Routine and forced rescans never overwrite the officer's link either.
+    state.scan(SEEDED)
+    state.scan(SEEDED, "full", true)
+    test.assertEqual("visitor-area52", state.playerOf("hammer-area52").main)
+    test.assertEqual(1, #state.conflicts())
+end)
+
+test.test("a note that disagrees with an officer's alias is queued by the next scan, keeping the alias", function()
+    local state = seeded()
+    test.assertEqual(1, officerSays(state, {
+        { kind = "alias", character = "toolbox-area52", alias = "Tools" },
+    }))
+
+    state.scan(SEEDED, "incremental")
+
+    test.assertEqual("Tools", state.playerOf("toolbox-area52").alias)
+    local conflict = conflictOf(state, "toolbox-area52", "alias")
+    test.assertTrue(conflict ~= nil, "the disagreeing note is queued")
+    test.assertEqual("TheTool", conflict.suggestion.alias)
+end)
+
+test.test("a note that disagrees with an officer clearing an alias is queued, keeping it cleared", function()
+    local state = seeded()
+    officerSays(state, { { kind = "alias", character = "toolbox-area52", alias = "" } })
+
+    state.scan(SEEDED, "full", true)
+
+    test.assertEqual(nil, state.playerOf("toolbox-area52").alias)
+    test.assertTrue(conflictOf(state, "toolbox-area52", "alias") ~= nil)
+end)
+
+test.test("a note that agrees with officer data raises no conflict, and the conflict it settled is dropped", function()
+    local state = seeded()
+    local moved = {
+        { "Toolbox-Area52", "@TheTool" },
+        { "Hammer-Area52", ">Visitor" },
+        { "Visitor-Area52", "" },
+    }
+    state.scan(moved)
+    test.assertTrue(conflictOf(state, "hammer-area52", "main") ~= nil, "the note's move is pending")
+
+    -- An officer makes the same move the note suggests.
+    officerSays(state, { { kind = "main", character = "hammer-area52", main = "visitor-area52" } })
+    state.scan(moved, "incremental")
+
+    test.assertEqual("visitor-area52", state.playerOf("hammer-area52").main)
+    test.assertEqual(0, #state.conflicts())
+    state.scan(moved, "full", true)
+    test.assertEqual(0, #state.conflicts())
+end)
+
+test.test("a note rejected before officer data arrived stays rejected", function()
+    local state = seeded()
+    local changed = {
+        { "Toolbox-Area52", "@TheTool" },
+        { "Hammer-Area52", ">Visitor" },
+        { "Visitor-Area52", "" },
+    }
+    state.scan(changed)
+    state.service():RejectConflict("hammer-area52", "main")
+
+    officerSays(state, { { kind = "main", character = "hammer-area52", main = "hammer-area52" } })
+    state.scan(changed, "incremental")
+
+    test.assertEqual("hammer-area52", state.playerOf("hammer-area52").main)
+    test.assertEqual(0, #state.conflicts())
 end)
 
 test.test("markers saved as unapplied by an earlier build load as conflicts", function()

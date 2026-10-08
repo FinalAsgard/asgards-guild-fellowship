@@ -208,7 +208,10 @@ function Facts:Refusal(fact, sender)
     return nil
 end
 
--- Makes the roster agree with one accepted fact.
+-- Makes the roster agree with one accepted fact. Officer data beats guild
+-- notes, so the notes it concerns are read again by the next scan: one that
+-- now disagrees goes to the conflict queue, and a pending conflict the fact
+-- settled is dropped.
 function Facts:Change(fact)
     local partition = self.partition
     local source = addon.FellowshipStore.SOURCE_SYNC
@@ -220,8 +223,15 @@ function Facts:Change(fact)
             partition:SetAlias(character.player, fact.alias, source)
         end
         partition:SetAliasStamp(fact.character, fact.at, fact.by)
+        -- Any of the player's characters can name its alias in a note.
+        local keys = partition:CharactersOf(character.player)
+        local index
+        for index = 1, #keys do
+            partition:ForgetNoteFingerprint(keys[index])
+        end
         return
     end
+    partition:ForgetNoteFingerprint(fact.character)
     if fact.main == fact.character then
         -- It's a main. As an alt it leaves for a player of its own; its
         -- former player's characters follow with their own facts.

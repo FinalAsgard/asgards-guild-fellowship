@@ -372,6 +372,15 @@ function Partition:SetNoteFingerprint(key, fingerprint)
     return true
 end
 
+-- Marks a character's note as unread, so the next scan, even a quick one,
+-- reads it again against the current data.
+function Partition:ForgetNoteFingerprint(key)
+    local character = self.data.characters[key]
+    if character ~= nil then
+        character.note = nil
+    end
+end
+
 -- After `key` has moved out of `oldPlayer`: removes the old player if it is
 -- now empty, or hands its main role to the highest-level character left
 -- (ties by name). Acting-main rules (in-guild first) are applied on top by

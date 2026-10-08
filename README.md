@@ -60,6 +60,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 - After that, a note that disagrees with the database never overwrites it. The difference goes to the **conflict queue** instead. You'll also find there any note naming a character that doesn't exist or matches more than one, and any note that loops back on itself.
 - **Conflicts (N)** at the bottom of the window opens the queue. Each entry shows the note and what it suggests next to what the database says. Accept or reject each one, or all at once.
 - A rejected suggestion stays away until that note changes again.
+- Officer data from [guild sync](#guild-sync) beats guild notes. On a new install, notes fill in the roster first, and officer edits replace them where the two disagree. After an officer edit arrives, the next scan checks the notes it affects again. A note that disagrees goes to the conflict queue, and a pending conflict the edit already settled disappears.
 
 ### Mains, alts, and departures
 

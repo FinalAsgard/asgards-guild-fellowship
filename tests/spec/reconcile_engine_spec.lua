@@ -6,7 +6,8 @@ local function load()
         "Core/NameNormalizer.lua",
         "Core/NoteParser.lua",
         "Core/FellowshipStore.lua",
-        "Core/ReconcileEngine.lua"
+        "Core/ReconcileEngine.lua",
+        "Core/SyncFacts.lua"
     )
 end
 
@@ -202,6 +203,46 @@ test.test("characters that already have relationships are not reseeded", functio
 
     test.assertEqual(playerOf(partition, "toolbox-area52"), playerOf(partition, "hammer-area52"))
     test.assertEqual("TheTool", playerOf(partition, "toolbox-area52").alias)
+end)
+
+test.test("on a new install notes seed first, and officer data arriving later replaces them", function()
+    local entries = {
+        { "Toolbox-Area52", "@TheTool" },
+        { "Hammer-Area52", ">Toolbox" },
+        { "Visitor-Area52", "" },
+        { "Wrench-Area52", "" },
+    }
+    local addon, partition, plan = setup(RETAIL, entries)
+    addon.ReconcileEngine.Apply(partition, plan())
+    test.assertEqual("toolbox-area52", playerOf(partition, "hammer-area52").main)
+
+    local officer = "boss-area52"
+    local applied = addon.SyncFacts.Create(partition, {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    }):ApplyAll({
+        { kind = "main", character = "hammer-area52", main = "visitor-area52", at = 1790000000, by = officer },
+        { kind = "alias", character = "toolbox-area52", alias = "Tools", at = 1790000000, by = officer },
+    }, officer)
+
+    test.assertEqual(2, applied)
+    test.assertEqual("visitor-area52", playerOf(partition, "hammer-area52").main)
+    test.assertEqual("Tools", playerOf(partition, "toolbox-area52").alias)
+
+    -- The notes still disagree; a later scan queues them and changes nothing.
+    local result = addon.ReconcileEngine.Apply(partition, addon.ReconcileEngine.Plan({
+        partition = partition,
+        members = roster(addon, RETAIL, entries),
+        normalizer = addon.NameNormalizer.Create(RETAIL),
+        rules = RETAIL,
+        mode = "incremental",
+    }))
+    test.assertEqual(0, result.linked)
+    test.assertEqual(0, result.aliased)
+    test.assertEqual(2, result.conflicts)
+    test.assertEqual("visitor-area52", playerOf(partition, "hammer-area52").main)
+    test.assertEqual("Tools", playerOf(partition, "toolbox-area52").alias)
 end)
 
 test.test("the store keeps a note fingerprint, never the note text", function()
