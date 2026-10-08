@@ -34,13 +34,25 @@ Annotator.__index = Annotator
 -- options.isSecret: function(value) -> true when the client hides `value`
 -- from add-ons (Retail does during encounters and keystone runs). Optional;
 -- without it nothing is secret.
+-- options.enabled: function() -> false when the player turned tags off.
+-- Optional; without it tags are on.
 function ChatAnnotator.Create(options)
     return setmetatable({
         context = options.context,
+        enabled = options.enabled or function()
+            return true
+        end,
         isSecret = options.isSecret or function()
             return false
         end,
     }, Annotator)
+end
+
+-- Whether the player has tags on. A setting that can't be read leaves the
+-- line alone.
+function Annotator:IsEnabled()
+    local ok, enabled = pcall(self.enabled)
+    return ok and enabled ~= false
 end
 
 -- True when either value is hidden from add-ons, or the check itself fails:
@@ -72,7 +84,7 @@ end
 -- after it; a template without one is left alone. A message or sender the
 -- client hides from add-ons is checked first and never touched.
 function Annotator:Annotate(event, message, sender)
-    if not TAGGED_EVENTS[event] or self:IsHidden(message, sender) then
+    if not TAGGED_EVENTS[event] or not self:IsEnabled() or self:IsHidden(message, sender) then
         return nil
     end
     if type(message) ~= "string" or type(sender) ~= "string" then

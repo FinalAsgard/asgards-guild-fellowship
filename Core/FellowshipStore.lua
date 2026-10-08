@@ -272,6 +272,24 @@ function Store:GetMinimapState()
     return self.database.minimap
 end
 
+-- Whether chat tags are on, shared by every guild. On unless turned off;
+-- an unusable stored value counts as on.
+function Store:ChatTagsEnabled()
+    return type(self.database) ~= "table" or self.database.chatTags ~= false
+end
+
+-- Turns chat tags on or off. An unusable existing value is left alone.
+function Store:SetChatTagsEnabled(enabled)
+    if type(self.database) ~= "table" or type(enabled) ~= "boolean" then
+        return false
+    end
+    if self.database.chatTags ~= nil and type(self.database.chatTags) ~= "boolean" then
+        return false
+    end
+    self.database.chatTags = enabled
+    return true
+end
+
 function Partition:GetCharacter(key)
     return self.data.characters[key]
 end

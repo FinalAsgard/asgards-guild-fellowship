@@ -134,6 +134,21 @@ if clientProfile.supported then
             rosterController:Print("Minimap button hidden. Type the command again to bring it back.")
         end
     end)
+    router:Register("tags", "turn chat tags on or off", function()
+        local store = rosterController:Store()
+        if store == nil then
+            rosterController:Print("Saved data is unavailable, so chat tags can't be changed.")
+            return
+        end
+        local enabled = not store:ChatTagsEnabled()
+        if not store:SetChatTagsEnabled(enabled) then
+            rosterController:Print("Chat tags can't be changed: the saved setting is unreadable. They stay on.")
+        elseif enabled then
+            rosterController:Print("Chat tags on.")
+        else
+            rosterController:Print("Chat tags off.")
+        end
+    end)
     router:SetDefault("roster")
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
@@ -149,6 +164,10 @@ if clientProfile.supported then
         end,
         isSecret = function(value)
             return client:IsSecretValue(value)
+        end,
+        enabled = function()
+            local store = rosterController:Store()
+            return store == nil or store:ChatTagsEnabled()
         end,
     })
     entryPoints = addon.EntryPoints.Create({

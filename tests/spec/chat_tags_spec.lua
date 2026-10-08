@@ -372,3 +372,36 @@ test.test("a secret check that errors leaves the line unchanged and never raises
     })
     test.assertEqual(nil, annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
 end)
+
+-- Turning tags off ----------------------------------------------------------------
+
+test.test("with tags off, every tagged channel is left unchanged", function()
+    local world = retail()
+    local on = false
+    local annotator = world.addon.ChatAnnotator.Create({
+        context = function()
+            return world.partition, world.normalizer
+        end,
+        enabled = function()
+            return on
+        end,
+    })
+    test.assertEqual(nil, annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+    test.assertEqual(nil, annotator:Annotate("CHAT_MSG_OFFICER", "hi", "Hammer-Area52"))
+    test.assertEqual(nil, annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", ACHIEVEMENT, "Hammer-Area52"))
+    on = true
+    test.assertEqual(alias("TheTool") .. "hi", annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+end)
+
+test.test("a setting that can't be read leaves the line unchanged", function()
+    local world = retail()
+    local annotator = world.addon.ChatAnnotator.Create({
+        context = function()
+            return world.partition, world.normalizer
+        end,
+        enabled = function()
+            error("setting exploded")
+        end,
+    })
+    test.assertEqual(nil, annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+end)
