@@ -281,6 +281,16 @@ test.test("only the first placeholder of an achievement gets the tag", function(
         world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", "%s and %s", "Hammer-Area52"))
 end)
 
+test.test("a % in an achievement tag stays literal when the chat frame formats it", function()
+    local world = retail()
+    test.assertTrue(world.service:SetAlias("tongs-area52", "100%Tank 50%s"))
+    local annotated = world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", ACHIEVEMENT, "Tongs-Area52")
+    test.assertEqual(
+        "[Tongs] |cff7fff7f[100%Tank 50%s]|r has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!",
+        string.format(annotated, "[Tongs]"))
+    test.assertEqual(alias("100%Tank 50%s") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Tongs-Area52"))
+end)
+
 test.test("an achievement without a name placeholder is left unchanged", function()
     local world = retail()
     test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT",

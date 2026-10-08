@@ -102,7 +102,10 @@ function Annotator:Annotate(event, message, sender)
         return nil
     end
     if nameEnd ~= nil then
-        return string.sub(message, 1, nameEnd) .. " " .. ChatAnnotator.Format(tag) .. string.sub(message, nameEnd + 1)
+        -- The chat frame formats the template, so a "%" in the tag is
+        -- doubled to stay literal.
+        local formatted = string.gsub(ChatAnnotator.Format(tag), "%%", "%%%%")
+        return string.sub(message, 1, nameEnd) .. " " .. formatted .. string.sub(message, nameEnd + 1)
     end
     return ChatAnnotator.Format(tag) .. " " .. message
 end
