@@ -10,10 +10,10 @@ local _, addon = ...
 local ChatAnnotator = {
     -- The chat events that get tags.
     EVENTS = { "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER", "CHAT_MSG_GUILD_ACHIEVEMENT" },
-    -- Tag colors by kind: an alias is dark blue, a main's name light blue, so a
+    -- Tag colors by kind: an alias is medium blue, a main's name light blue, so a
     -- nickname and a character name are told apart at a glance.
     COLORS = {
-        alias = "ff0070dd",
+        alias = "ff4a90ff",
         main = "ff7fd4ff",
     },
 }

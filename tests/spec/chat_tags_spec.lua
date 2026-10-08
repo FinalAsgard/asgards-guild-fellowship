@@ -79,9 +79,9 @@ local function assertTag(expectedText, expectedKind, tag, message)
     test.assertEqual(expectedKind, tag.kind, message)
 end
 
--- How chat shows a tag: dark blue for an alias, light blue for a main's name.
+-- How chat shows a tag: medium blue for an alias, light blue for a main's name.
 local function alias(text)
-    return "|cff0070dd[" .. text .. "]|r "
+    return "|cff4a90ff[" .. text .. "]|r "
 end
 
 local function main(text)
@@ -233,16 +233,16 @@ end)
 
 -- How tags look --------------------------------------------------------------
 
-test.test("alias tags are dark blue and main-name tags light blue, each closed", function()
+test.test("alias tags are medium blue and main-name tags light blue, each closed", function()
     local world = retail()
-    test.assertEqual("|cff0070dd[TheTool]|r hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+    test.assertEqual("|cff4a90ff[TheTool]|r hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
     test.assertEqual("|cff7fd4ff[Anvil]|r hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Tongs-Area52"))
 end)
 
 test.test("a | in an alias is shown literally, not read as an escape code", function()
     local world = retail()
     test.assertTrue(world.service:SetAlias("tongs-area52", "Smith|cffff0000Evil|r"))
-    test.assertEqual("|cff0070dd[Smith||cffff0000Evil||r]|r hi",
+    test.assertEqual("|cff4a90ff[Smith||cffff0000Evil||r]|r hi",
         world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Tongs-Area52"))
 end)
 
@@ -268,7 +268,7 @@ end)
 test.test("an achievement gets the tag right after the name placeholder", function()
     local world = retail()
     test.assertEqual(
-        "%s |cff0070dd[TheTool]|r has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!",
+        "%s |cff4a90ff[TheTool]|r has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!",
         world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", ACHIEVEMENT, "Hammer-Area52"))
     test.assertEqual(
         "%s |cff7fd4ff[Anvil]|r has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!",
@@ -277,7 +277,7 @@ end)
 
 test.test("only the first placeholder of an achievement gets the tag", function()
     local world = retail()
-    test.assertEqual("%s |cff0070dd[TheTool]|r and %s",
+    test.assertEqual("%s |cff4a90ff[TheTool]|r and %s",
         world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", "%s and %s", "Hammer-Area52"))
 end)
 
@@ -286,7 +286,7 @@ test.test("a % in an achievement tag stays literal when the chat frame formats i
     test.assertTrue(world.service:SetAlias("tongs-area52", "100%Tank 50%s"))
     local annotated = world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", ACHIEVEMENT, "Tongs-Area52")
     test.assertEqual(
-        "[Tongs] |cff0070dd[100%Tank 50%s]|r has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!",
+        "[Tongs] |cff4a90ff[100%Tank 50%s]|r has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!",
         string.format(annotated, "[Tongs]"))
     test.assertEqual(alias("100%Tank 50%s") .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Tongs-Area52"))
 end)

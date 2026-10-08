@@ -90,7 +90,7 @@ In guild chat, officer chat, and guild achievement announcements, a tag after th
 - Achievements read the same way: `[Hammer] [TheTool] has earned the achievement …`.
 - There's no tag when they're on their main with no alias, or when the tag would just repeat their own name.
 
-An alias tag is dark blue and a main's-name tag is light blue, so you can tell a nickname from a character name at a glance. Your own messages are tagged the same way. Characters the database doesn't know yet get no tag. The name stays clickable as usual. Tags come from your own database, so changes you make in the roster show up on the next line.
+An alias tag is medium blue and a main's-name tag is light blue, so you can tell a nickname from a character name at a glance. Your own messages are tagged the same way. Characters the database doesn't know yet get no tag. The name stays clickable as usual. Tags come from your own database, so changes you make in the roster show up on the next line.
 
 Tags are on by default. `/agf tags` turns them off, and running it again turns them back on. The choice is saved for every character on this game install and applies from the next chat line.
 
