@@ -14,6 +14,8 @@ local FellowshipStore = {
     SOURCE_MANUAL = "manual",
     SOURCE_NOTE = "note",
     SOURCE_ROSTER = "roster",
+    -- Applied from an officer's edit received over guild sync.
+    SOURCE_SYNC = "sync",
 }
 addon.FellowshipStore = FellowshipStore
 
@@ -59,6 +61,14 @@ local function characterProblem(character)
     end
     if character.departed ~= nil and type(character.departed) ~= "number" then
         return "character departure date is invalid"
+    end
+    -- Guild sync (schema 2): when this character's main link was last set,
+    -- and by whom (a character key).
+    if character.mainAt ~= nil and not isWholeNumber(character.mainAt) then
+        return "character main link time is invalid"
+    end
+    if character.mainBy ~= nil and not isText(character.mainBy) then
+        return "character main link author is invalid"
     end
     if character.rejected ~= nil then
         if type(character.rejected) ~= "table" then
@@ -521,6 +531,28 @@ function Partition:ClearRejected(key, kind)
             character.rejected = nil
         end
     end
+end
+
+-- Guild sync ---------------------------------------------------------------
+
+-- When `key`'s main link was last set, and by whom. A link nobody stamped
+-- (seeded from notes or the roster) is the oldest possible: at 0, no author.
+function Partition:GetMainStamp(key)
+    local character = self.data.characters[key]
+    if character == nil then
+        return nil
+    end
+    return character.mainAt or 0, character.mainBy
+end
+
+function Partition:SetMainStamp(key, at, by)
+    local character = self.data.characters[key]
+    if character == nil or not isWholeNumber(at) or not isText(by) then
+        return false
+    end
+    character.mainAt = at
+    character.mainBy = by
+    return true
 end
 
 -- Departure and history -------------------------------------------------

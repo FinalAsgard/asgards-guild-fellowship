@@ -1,12 +1,17 @@
 local _, addon = ...
 
--- Account-wide SavedVariables. This slice only creates the root table with a
--- schema version and a per-guild partition container; the real schema and its
--- migrations come later. Existing data is never wiped: unknown fields stay as
--- they are, and a root or field of the wrong type leaves the whole store
--- read-only for the session instead of being overwritten.
+-- Account-wide SavedVariables: the root table with a schema version and a
+-- per-guild partition container (FellowshipStore owns what lives in each
+-- partition). Existing data is never wiped: unknown fields stay as they are,
+-- and a root or field of the wrong type leaves the whole store read-only for
+-- the session instead of being overwritten.
+--
+-- Schema 2 adds guild sync's per-fact timestamps and authors. Its fields are
+-- all optional, so v1 data is already valid v2 data and upgrading only
+-- raises the version. An older add-on then refuses the data instead of
+-- dropping fields it doesn't know.
 local Persistence = {
-    SCHEMA_VERSION = 1,
+    SCHEMA_VERSION = 2,
 }
 addon.Persistence = Persistence
 
@@ -64,8 +69,9 @@ function Store:Initialize()
         return false, problem
     end
 
-    -- Only missing fields are filled in; present values are never replaced.
-    if database.schemaVersion == nil then
+    -- Only missing fields are filled in and an older version is raised;
+    -- present values are never replaced.
+    if database.schemaVersion == nil or database.schemaVersion < Persistence.SCHEMA_VERSION then
         database.schemaVersion = Persistence.SCHEMA_VERSION
     end
     if database.guilds == nil then

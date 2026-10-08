@@ -86,6 +86,7 @@ local function hasRelationship(partition, sizes, key)
         or player.alias ~= nil
         or (sizes[character.player] or 0) > 1
         or character.source == manual
+        or character.source == addon.FellowshipStore.SOURCE_SYNC
         or player.aliasSource == manual
 end
 

@@ -211,3 +211,50 @@ test.test("an unusable chat tags value is left alone and counts as on", function
     test.assertEqual("corrupt", database.chatTags)
     test.assertFalse(store:SetChatTagsEnabled("off"))
 end)
+
+-- Guild sync stamps (schema 2) ------------------------------------------------
+
+test.test("an unstamped main link is the oldest possible and stamps are kept", function()
+    local database = foundationRoot()
+    local partition = newStore(database):Partition(GUILD)
+    partition:RecordCharacter("hammer-area52", MEMBER)
+
+    local at, by = partition:GetMainStamp("hammer-area52")
+    test.assertEqual(0, at)
+    test.assertEqual(nil, by)
+
+    test.assertTrue(partition:SetMainStamp("hammer-area52", 1790000000, "toolbox-area52"))
+    at, by = partition:GetMainStamp("hammer-area52")
+    test.assertEqual(1790000000, at)
+    test.assertEqual("toolbox-area52", by)
+    test.assertEqual(1790000000, database.guilds["Knights of Camelot-Area52"].characters["hammer-area52"].mainAt)
+
+    test.assertFalse(partition:SetMainStamp("hammer-area52", 1.5, "toolbox-area52"))
+    test.assertFalse(partition:SetMainStamp("hammer-area52", 1790000001, ""))
+    test.assertFalse(partition:SetMainStamp("nobody-area52", 1790000001, "toolbox-area52"))
+    test.assertEqual(nil, partition:GetMainStamp("nobody-area52"))
+end)
+
+test.test("a stored stamp of the wrong type quarantines its character intact", function()
+    local database = foundationRoot()
+    database.guilds["Knights of Camelot-Area52"] = {
+        characters = {
+            ["hammer-area52"] = { player = 1, mainAt = "yesterday" },
+            ["wrench-area52"] = { player = 2, mainAt = 1790000000, mainBy = 7 },
+            ["toolbox-area52"] = { player = 3, mainAt = 1790000000, mainBy = "toolbox-area52", source = "sync" },
+        },
+        players = {
+            [1] = { main = "hammer-area52" },
+            [2] = { main = "wrench-area52" },
+            [3] = { main = "toolbox-area52" },
+        },
+    }
+
+    local partition = newStore(database):Partition(GUILD)
+
+    test.assertEqual(nil, partition:GetCharacter("hammer-area52"))
+    test.assertEqual(nil, partition:GetCharacter("wrench-area52"))
+    test.assertEqual("sync", partition:GetCharacter("toolbox-area52").source)
+    local quarantined = database.guilds["Knights of Camelot-Area52"].quarantine
+    test.assertEqual(2, #quarantined)
+end)
