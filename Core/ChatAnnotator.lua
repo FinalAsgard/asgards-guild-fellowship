@@ -1,13 +1,15 @@
 local _, addon = ...
 
--- Adds the speaker's player tag to guild chat lines, so "[Hammer]: hi"
--- reads "[Hammer] [TheTool]: hi". Pure: it reads the Fellowship database
+-- Adds the speaker's player tag to guild and officer chat lines, so
+-- "[Hammer]: hi" reads "[Hammer] [TheTool]: hi", and to guild achievement
+-- announcements: "[Hammer] [TheTool] has earned the achievement …".
+-- Pure: it reads the Fellowship database
 -- through `context` and never touches the game. Only the message text
 -- changes; the sender and its name link are left alone. Any failure leaves
 -- the message as it was.
 local ChatAnnotator = {
     -- The chat events that get tags.
-    EVENTS = { "CHAT_MSG_GUILD" },
+    EVENTS = { "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER", "CHAT_MSG_GUILD_ACHIEVEMENT" },
     -- Tag colors by kind: an alias is green, a main's name light blue, so a
     -- nickname and a character name are told apart at a glance.
     COLORS = {
@@ -46,15 +48,28 @@ function Annotator:TagFor(sender)
     return addon.PlayerService.Create(partition, { normalizer = normalizer }):ChatTag(key)
 end
 
--- The message with the speaker's tag in front, or nil to leave it unchanged.
--- `sender` is the raw name the chat event reports.
+-- The message with the speaker's tag added, or nil to leave it unchanged.
+-- `sender` is the raw name the chat event reports. A chat line gets the tag
+-- in front of its text. An achievement message is a template whose "%s" the
+-- chat frame replaces with the speaker's name link, so the tag goes right
+-- after it; a template without one is left alone.
 function Annotator:Annotate(event, message, sender)
     if not TAGGED_EVENTS[event] or type(message) ~= "string" or type(sender) ~= "string" then
         return nil
     end
+    local nameEnd
+    if event == "CHAT_MSG_GUILD_ACHIEVEMENT" then
+        nameEnd = select(2, string.find(message, "%s", 1, true))
+        if nameEnd == nil then
+            return nil
+        end
+    end
     local ok, tag = pcall(self.TagFor, self, sender)
     if not ok or tag == nil then
         return nil
+    end
+    if nameEnd ~= nil then
+        return string.sub(message, 1, nameEnd) .. " " .. ChatAnnotator.Format(tag) .. string.sub(message, nameEnd + 1)
     end
     return ChatAnnotator.Format(tag) .. " " .. message
 end

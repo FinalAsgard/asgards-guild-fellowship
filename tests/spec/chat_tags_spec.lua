@@ -253,3 +253,56 @@ test.test("a long multi-word alias is shown in full", function()
     test.assertTrue(world.service:SetAlias("tongs-area52", long))
     test.assertEqual(alias(long) .. "hi", world.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Pliers-Area52"))
 end)
+
+-- Officer chat and achievements ------------------------------------------------
+
+local ACHIEVEMENT = "%s has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!"
+
+test.test("officer chat is tagged like guild chat", function()
+    local world = retail()
+    test.assertEqual(alias("TheTool") .. "hi", world.annotator:Annotate("CHAT_MSG_OFFICER", "hi", "Hammer-Area52"))
+    test.assertEqual(main("Anvil") .. "hi", world.annotator:Annotate("CHAT_MSG_OFFICER", "hi", "Tongs-Area52"))
+    test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_OFFICER", "hi", "Anvil-Area52"))
+end)
+
+test.test("an achievement gets the tag right after the name placeholder", function()
+    local world = retail()
+    test.assertEqual(
+        "%s |cff7fff7f[TheTool]|r has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!",
+        world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", ACHIEVEMENT, "Hammer-Area52"))
+    test.assertEqual(
+        "%s |cff7fd4ff[Anvil]|r has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!",
+        world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", ACHIEVEMENT, "Tongs-Area52"))
+end)
+
+test.test("only the first placeholder of an achievement gets the tag", function()
+    local world = retail()
+    test.assertEqual("%s |cff7fff7f[TheTool]|r and %s",
+        world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", "%s and %s", "Hammer-Area52"))
+end)
+
+test.test("an achievement without a name placeholder is left unchanged", function()
+    local world = retail()
+    test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT",
+        "Hammer has earned the achievement [Level 10]!", "Hammer-Area52"))
+end)
+
+test.test("an achievement by a speaker with nothing new to show is left unchanged", function()
+    local world = retail()
+    test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", ACHIEVEMENT, "Anvil-Area52"))
+end)
+
+test.test("tags are added to guild, officer, and achievement events only", function()
+    local world = retail()
+    local expected = { CHAT_MSG_GUILD = true, CHAT_MSG_OFFICER = true, CHAT_MSG_GUILD_ACHIEVEMENT = true }
+    local events = world.addon.ChatAnnotator.EVENTS
+    test.assertEqual(3, #events)
+    local index
+    for index = 1, #events do
+        test.assertTrue(expected[events[index]], events[index] .. " is expected")
+    end
+    local other = { "CHAT_MSG_SAY", "CHAT_MSG_PARTY", "CHAT_MSG_RAID", "CHAT_MSG_ACHIEVEMENT", "CHAT_MSG_CHANNEL" }
+    for index = 1, #other do
+        test.assertEqual(nil, world.annotator:Annotate(other[index], "%s hi", "Hammer-Area52"), other[index])
+    end
+end)
