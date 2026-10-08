@@ -25,7 +25,7 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence, rosterController, entryPoints
+local persistence, rosterController, entryPoints, chatAnnotator
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     rosterController = addon.RosterController.Create({
@@ -138,6 +138,16 @@ if clientProfile.supported then
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
     end)
+    -- Chat tags read the same guild context as the roster.
+    chatAnnotator = addon.ChatAnnotator.Create({
+        context = function()
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return partition, normalizer
+        end,
+    })
     entryPoints = addon.EntryPoints.Create({
         client = client,
         toggle = function()
@@ -162,6 +172,10 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     rosterController:OnSavedDataReady()
     -- The minimap button needs saved data for its position.
     entryPoints:Start()
+    -- Without a chat filter API, chat is simply left untagged.
+    client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
+        return chatAnnotator:Annotate(event, message, sender)
+    end)
 end)
 
 addon.client = client
@@ -171,6 +185,7 @@ addon.lifecycle = lifecycle
 addon.persistence = persistence
 addon.rosterController = rosterController
 addon.entryPoints = entryPoints
+addon.chatAnnotator = chatAnnotator
 addon.router = router
 addon.version = version
 

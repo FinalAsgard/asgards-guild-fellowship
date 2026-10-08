@@ -80,6 +80,16 @@ Changes show up right away and are recorded as manual. Data is saved per guild a
 - Online players come first, then everyone else by name. A group shows "online as …" when the player is on an alt.
 - A player with one character is shown as a single row.
 
+## Chat tags
+
+In guild chat, a tag after the speaker's name shows who the player is:
+
+- If the player has an alias, the tag shows it: Hammer (an alt of Toolbox, alias TheTool) saying hi reads `[Hammer] [TheTool]: hi`.
+- If they have no alias and are on an alt, the tag shows their main's name: `[Wrench] [Toolbox]: hi`. If the main has left the guild, it's the acting main.
+- There's no tag when they're on their main with no alias, or when the tag would just repeat their own name.
+
+Your own messages are tagged the same way. Characters the database doesn't know yet get no tag. The name stays clickable as usual. Tags come from your own database, so changes you make in the roster show up on the next line.
+
 ## Supported clients
 
 | Client | Production manifest | Development manifest |

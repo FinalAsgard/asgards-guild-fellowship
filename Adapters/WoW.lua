@@ -251,6 +251,43 @@ function Client:ObserveGuildRoster(onUpdate)
     return true
 end
 
+-- Runs filter(event, message, sender) on every chat line of `events`. A
+-- string it returns replaces the message text; anything else, or an error,
+-- leaves the line as it was. The sender and the rest of the line pass
+-- through untouched, so name links keep working. Retail keeps the filter
+-- API in ChatFrameUtil; older clients have it as a global. Returns false
+-- when the client has neither, or no event could be registered.
+function Client:AddChatMessageFilter(events, filter)
+    if type(events) ~= "table" or type(filter) ~= "function" then
+        return false
+    end
+    local chatFrameUtil = self.environment.ChatFrameUtil
+    local addFilter = type(chatFrameUtil) == "table" and chatFrameUtil.AddMessageEventFilter or nil
+    if type(addFilter) ~= "function" then
+        addFilter = self.environment.ChatFrame_AddMessageEventFilter
+    end
+    if type(addFilter) ~= "function" then
+        return false
+    end
+
+    local function handler(_, event, message, sender, ...)
+        local ok, replacement = pcall(filter, event, message, sender)
+        if ok and type(replacement) == "string" then
+            return false, replacement, sender, ...
+        end
+        return false
+    end
+
+    local registered = false
+    local index
+    for index = 1, #events do
+        if pcall(addFilter, events[index], handler) then
+            registered = true
+        end
+    end
+    return registered
+end
+
 -- Wall-clock seconds for saved records, or nil.
 function Client:Timestamp()
     local ok, now = callFunction(self.environment.GetServerTime)
