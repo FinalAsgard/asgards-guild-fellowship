@@ -97,6 +97,9 @@ function Service:AcceptConflict(character, kind)
     if conflict == nil then
         return false, "that conflict is no longer pending"
     end
+    if conflict.from ~= nil then
+        return false, "a member's suggestion is decided through guild sync"
+    end
     if not PlayerService.ACCEPTABLE[kind] or type(conflict.suggestion) ~= "table" then
         return false, "there is nothing to apply; dismiss it instead"
     end
@@ -139,6 +142,10 @@ end
 -- Keeps the database as it is and remembers the note's fingerprint, so the
 -- same suggestion isn't queued again until the note changes.
 function Service:RejectConflict(character, kind)
+    local found = findConflict(self.partition, character, kind)
+    if found ~= nil and found.from ~= nil then
+        return false, "a member's suggestion is decided through guild sync"
+    end
     local conflict = self.partition:RemoveConflict(character, kind)
     if conflict == nil then
         return false, "that conflict is no longer pending"
@@ -210,8 +217,9 @@ function Service:PurgeAllDeparted()
     return purged
 end
 
--- Resolves every pending conflict. Accept all applies every suggestion it
--- can and dismisses the rest, so the queue always ends up empty.
+-- Resolves every pending note conflict. Accept all applies every suggestion
+-- it can and dismisses the rest. Members' suggestions are left alone: guild
+-- sync decides those (see RosterController).
 function Service:AcceptAll()
     local pending = {}
     local conflicts = self.partition:GetConflicts() or {}

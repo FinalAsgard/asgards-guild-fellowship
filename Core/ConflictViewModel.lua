@@ -35,7 +35,7 @@ local function currentText(inputs, key, kind)
     if player == nil then
         return "Not organized yet"
     end
-    if kind == "alias" or kind == "competing aliases" then
+    if kind == "alias" or kind == "competing aliases" or kind == "suggested alias" then
         return player.alias and ("Alias \"" .. player.alias .. "\"") or "No alias"
     end
     if kind == "promotion" then
@@ -66,9 +66,11 @@ end
 
 -- inputs: partition, members (live roster facts by key), normalizer.
 -- Returns rows:
---   { character, kind, name, note, suggests, current, source, canAccept }
+--   { character, kind, name, note, suggests, current, source, canAccept,
+--     from? }
 -- `note` is the live public note, or nil when the character isn't in the
--- current roster.
+-- current roster. A member's suggestion has `from` (the member's key), no
+-- note, and "Suggested by <member>" as its source.
 function ConflictViewModel.Build(inputs)
     inputs.members = inputs.members or {}
     local rows = {}
@@ -78,7 +80,17 @@ function ConflictViewModel.Build(inputs)
         local conflict = conflicts[index]
         local key = conflict.character
         local suggests
-        if conflict.kind == "main" and conflict.suggestion then
+        local fromMember = conflict.from ~= nil and type(conflict.suggestion) == "table"
+        if fromMember and conflict.kind == "suggested main" then
+            if conflict.suggestion.main == key then
+                suggests = "Main of its own player"
+            else
+                suggests = "Alt of " .. displayName(inputs, conflict.suggestion.main)
+            end
+        elseif fromMember and conflict.kind == "suggested alias" then
+            local alias = conflict.suggestion.alias
+            suggests = (alias ~= nil and alias ~= "") and ("Alias \"" .. alias .. "\"") or "No alias"
+        elseif conflict.kind == "main" and conflict.suggestion then
             suggests = "Alt of " .. displayName(inputs, conflict.suggestion.main)
         elseif conflict.kind == "alias" and conflict.suggestion then
             suggests = "Alias \"" .. conflict.suggestion.alias .. "\""
@@ -91,7 +103,7 @@ function ConflictViewModel.Build(inputs)
             suggests = PROBLEMS[conflict.kind] or conflict.kind
         end
         local live = inputs.members[key]
-        table.insert(rows, {
+        local row = {
             character = key,
             kind = conflict.kind,
             name = displayName(inputs, key),
@@ -101,7 +113,15 @@ function ConflictViewModel.Build(inputs)
             source = sourceText(inputs, key, conflict.kind),
             canAccept = addon.PlayerService.ACCEPTABLE[conflict.kind] == true
                 and type(conflict.suggestion) == "table",
-        })
+        }
+        if fromMember then
+            -- A member's suggestion, not a note: say who sent it.
+            row.note = nil
+            row.source = "Suggested by " .. displayName(inputs, conflict.from)
+            row.from = conflict.from
+            row.canAccept = true
+        end
+        table.insert(rows, row)
     end
     return rows
 end

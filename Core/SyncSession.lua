@@ -20,6 +20,13 @@ local _, addon = ...
 --      lacked or held older, so the data settles both ways.
 -- Everyone applies every facts message they hear, so bystanders catch up too.
 --
+-- Suggestions (SuggestionService): a member's own edit stays on their side
+-- and is kept as a suggestion. It's sent ("suggest") right away when an
+-- officer is online, and otherwise when an officer's announcement shows one
+-- has logged in. Officers queue it; the first to decide sends a "facts"
+-- message with `decided` naming the suggestion (and, when approved, the new
+-- officer fact), which settles it everywhere.
+--
 -- Every message is a table { v = PROTOCOL, t = type, ... }. A message with
 -- another protocol version, or a type this version doesn't know, is ignored,
 -- so mixed add-on versions in one guild never break each other.
@@ -32,11 +39,14 @@ local _, addon = ...
 --   now()        -> server time in seconds, or nil
 --   after(seconds, callback) -> false when there are no timers
 --   random(low, high) -> a whole number from low to high
+--   officerOnline() -> whether another character with an officer rank is
+--                  online now
 --   onApplied(count) called after received facts changed the roster
 local SyncSession = {
     PROTOCOL = 1,
     TYPE_FACTS = "facts",
     TYPE_DIGEST = "digest",
+    TYPE_SUGGEST = "suggest",
     -- The announcement goes out START_DELAY to START_DELAY + START_SPREAD
     -- seconds after login, so logging in is never slowed down and a guild
     -- logging in together doesn't announce all at once.
@@ -67,6 +77,9 @@ function SyncSession.Create(options)
         random = options.random or function(low)
             return low
         end,
+        officerOnline = options.officerOnline or function()
+            return false
+        end,
         onApplied = options.onApplied or function() end,
         -- Announcer key -> a reply this client is waiting to send.
         replies = {},
@@ -96,10 +109,14 @@ end
 
 -- After this user changed main links by hand: stamps the main link of every
 -- character in `keys` (a set) as theirs, now, and broadcasts them when this
--- user is an officer. Returns the facts sent, or nil when nothing was sent.
-function Session:LocalEdit(keys)
+-- user is an officer. A member suggests only the links that changed:
+-- `before` maps each key to its player's main before the edit. Returns the
+-- facts sent, or nil when nothing was sent.
+function Session:LocalEdit(keys, before)
     return self:StampAndSend(function(facts, author, now)
         return facts:Stamp(keys, author, now)
+    end, function(fact)
+        return before == nil or before[fact.character] ~= fact.main
     end)
 end
 
@@ -126,8 +143,9 @@ function Session:UpgradeLegacy()
 end
 
 -- Stamps with `stamp(facts, author, now)` -> list of facts, and broadcasts
--- them when this user is an officer.
-function Session:StampAndSend(stamp)
+-- them when this user is an officer. A member's edit stays on their side and
+-- the facts `changed(fact)` accepts (all, without it) become suggestions.
+function Session:StampAndSend(stamp, changed)
     local partition = self.context()
     local author = self.selfKey()
     local now = self.now()
@@ -135,11 +153,85 @@ function Session:StampAndSend(stamp)
         return nil
     end
     local facts = stamp(self:Facts(partition), author, now)
-    if facts[1] == nil or not self.isOfficer(author) then
+    if facts[1] == nil then
         return nil
     end
+    local suggestions = self:Suggestions(partition)
+    if not self.isOfficer(author) then
+        local suggested = {}
+        local index
+        for index = 1, #facts do
+            if changed == nil or changed(facts[index]) then
+                table.insert(suggested, facts[index])
+            end
+        end
+        if suggested[1] ~= nil then
+            suggestions:Record(suggested)
+            if self.officerOnline() then
+                self:SendSuggestions(partition)
+            end
+        end
+        return nil
+    end
+    -- An officer's edit settles the queued suggestions it overtakes.
+    suggestions:Settle(nil)
     self:Send({ t = SyncSession.TYPE_FACTS, facts = facts })
     return facts
+end
+
+-- Suggestions -----------------------------------------------------------------
+
+function Session:Suggestions(partition)
+    return addon.SuggestionService.Create(partition, {
+        isOfficer = self.isOfficer,
+        now = function()
+            return self.now() or 0
+        end,
+    })
+end
+
+-- Sends this member's pending suggestions, if any, for officers online to
+-- queue. They stay pending until an officer decides them.
+function Session:SendSuggestions(partition)
+    local pending = self:Suggestions(partition):Pending()
+    if pending[1] == nil then
+        return false
+    end
+    self:Send({ t = SyncSession.TYPE_SUGGEST, facts = pending })
+    return true
+end
+
+-- This officer approves or rejects the queued suggestion about `character`
+-- of `kind`. Approving makes it an officer fact under this officer's name;
+-- either way the decision goes to the guild, so other officers' queues and
+-- the member's pending list drop it. Returns true, or false and why not.
+function Session:Decide(character, kind, approved)
+    local partition = self.context()
+    local officer = self.selfKey()
+    local now = self.now()
+    if partition == nil or officer == nil or not self.isOfficer(officer) then
+        return false, "only officers can decide suggestions"
+    end
+    local suggestions = self:Suggestions(partition)
+    local entry = suggestions:Entry(character, kind)
+    if entry == nil then
+        return false, "that suggestion is no longer pending"
+    end
+    local decided = suggestions:Decision(entry, approved)
+    local facts = {}
+    if approved then
+        if now == nil then
+            return false, "the server time isn't known"
+        end
+        local fact = suggestions:FactFor(entry, officer, now)
+        if self:Facts(partition):ApplyAll({ fact }) == 0 then
+            return false, "it can't be applied here (is the player marked Don't sync?)"
+        end
+        facts = { fact }
+    end
+    suggestions:Settle(decided)
+    self:Send({ t = SyncSession.TYPE_FACTS, facts = facts, decided = decided })
+    return true
 end
 
 -- Catching up -----------------------------------------------------------------
@@ -170,6 +262,9 @@ function Session:Announce()
     end
     local facts = self:Facts(partition):OfficerFacts()
     self:Send({ t = SyncSession.TYPE_DIGEST, digest = addon.SyncDigest.Of(facts) })
+    if not self.isOfficer(self.selfKey()) and self.officerOnline() then
+        self:SendSuggestions(partition)
+    end
     return true
 end
 
@@ -260,15 +355,34 @@ function Session:Receive(message, sender)
     if senderKey == nil or senderKey == selfKey then
         return 0
     end
+    local selfIsOfficer = selfKey ~= nil and self.isOfficer(selfKey)
     if message.t == SyncSession.TYPE_DIGEST then
         self:OnDigest(message.digest, senderKey, partition)
+        -- An officer just logged in: time for this member's suggestions.
+        if not selfIsOfficer and self.isOfficer(senderKey) then
+            self:SendSuggestions(partition)
+        end
+        return 0
+    end
+    if message.t == SyncSession.TYPE_SUGGEST then
+        if selfIsOfficer and self:Suggestions(partition):Queue(message.facts, senderKey) > 0 then
+            self.onApplied(0)
+        end
         return 0
     end
     if message.t ~= SyncSession.TYPE_FACTS then
         return 0
     end
     local applied = self:Facts(partition):ApplyAll(message.facts)
-    if applied > 0 then
+    -- Only an officer's decision settles a suggestion; newer officer facts
+    -- settle the ones they overtake.
+    local decided
+    if addon.SuggestionService.IsDecision(message.decided) and self.isOfficer(senderKey) then
+        decided = message.decided
+    end
+    local suggestions = self:Suggestions(partition)
+    local settled = suggestions:Settle(decided) + suggestions:Prune(decided)
+    if applied > 0 or settled > 0 then
         self.onApplied(applied)
     end
     if type(message.re) == "string" then

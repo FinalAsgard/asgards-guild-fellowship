@@ -39,7 +39,8 @@ local function newWindow()
         self.rows = rows
         return true
     end
-    function window:SetConflicts()
+    function window:SetConflicts(rows)
+        self.conflicts = rows
         return true
     end
     function window:ShowPlayer() end
@@ -178,15 +179,18 @@ test.test("make this the main and detach reach members too", function()
     test.assertEqual("hammer-area52", mainOf(member, "toolbox-area52"))
 end)
 
-test.test("a member's own edit isn't broadcast, and facts by a non-officer or from the future are ignored", function()
+test.test("a member's own edit is only a suggestion, and facts by a non-officer or from the future are ignored", function()
     local channel = fixtures.newChannel()
     local officer = login(channel, "Toolbox-Area52")
     local hammer = login(channel, "Hammer-Area52")
     local wrench = login(channel, "Wrench-Area52")
 
     linkAlt(hammer, "wrench-area52", "hammer-area52")
-    test.assertEqual(0, #hammer.sentMessages)
+    test.assertEqual(1, #hammer.sentMessages)
+    test.assertEqual("suggest", decode(hammer, hammer.sentMessages[1]).t)
     test.assertEqual("hammer-area52", mainOf(hammer, "wrench-area52"))
+    fixtures.deliver(channel)
+    test.assertEqual("wrench-area52", mainOf(officer, "wrench-area52"), "a suggestion changes nothing by itself")
 
     hammer.addon.comm:Broadcast({
         v = 1,
@@ -449,7 +453,7 @@ test.test("an officer clearing an alias clears it for members", function()
     test.assertEqual(nil, member.addon.chatAnnotator:TagFor("Hammer-Area52"))
 end)
 
-test.test("a member's own alias isn't broadcast", function()
+test.test("a member's own alias is only a suggestion", function()
     local channel = fixtures.newChannel()
     local officer = login(channel, "Toolbox-Area52")
     local member = login(channel, "Wrench-Area52")
@@ -457,7 +461,8 @@ test.test("a member's own alias isn't broadcast", function()
     test.assertTrue(member.addon.rosterController:SetAlias("wrench-area52", "Sparky"))
     fixtures.deliver(channel)
 
-    test.assertEqual(0, #member.sentMessages)
+    test.assertEqual(1, #member.sentMessages)
+    test.assertEqual("suggest", decode(member, member.sentMessages[1]).t)
     test.assertEqual("Sparky", aliasOf(member, "wrench-area52"))
     test.assertEqual(nil, aliasOf(officer, "wrench-area52"))
 end)
@@ -595,4 +600,132 @@ test.test("a member's don't-sync player keeps their version, and rejoins officer
 
     test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
     test.assertEqual("The Tool", aliasOf(member, "hammer-area52"))
+end)
+
+-- Suggestions -------------------------------------------------------------------
+
+local function queuedSuggestion(world, character, kind)
+    local conflicts = partitionOf(world):GetConflicts() or {}
+    local index
+    for index = 1, #conflicts do
+        if conflicts[index].from ~= nil and conflicts[index].character == character
+            and conflicts[index].kind == kind
+        then
+            return conflicts[index]
+        end
+    end
+    return nil
+end
+
+local function conflictRow(world, character, kind)
+    local rows = world.addon.rosterController.window.conflicts or {}
+    local index
+    for index = 1, #rows do
+        if rows[index].character == character and rows[index].kind == kind then
+            return rows[index]
+        end
+    end
+    return nil
+end
+
+local function pendingOf(world)
+    return partitionOf(world):GetSuggestions()
+end
+
+test.test("a member's edit is suggested to officers, and approving it spreads to everyone", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    fixtures.deliver(channel)
+
+    -- Applied on the member's side at once; only a suggestion elsewhere.
+    test.assertEqual("hammer-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual("wrench-area52", mainOf(wrench, "wrench-area52"))
+    test.assertEqual("wrench-area52", mainOf(officer, "wrench-area52"))
+    test.assertTrue(#pendingOf(hammer) > 0, "the member keeps it pending")
+    test.assertEqual(nil, queuedSuggestion(wrench, "wrench-area52", "suggested main"), "members don't queue it")
+    local row = conflictRow(officer, "wrench-area52", "suggested main")
+    test.assertTrue(row ~= nil, "the officer's queue shows it")
+    test.assertEqual("Suggested by Hammer", row.source)
+    test.assertEqual("Alt of Hammer", row.suggests)
+    test.assertTrue(row.canAccept)
+
+    test.assertTrue(officer.addon.rosterController:AcceptConflict("wrench-area52", "suggested main"))
+    fixtures.deliver(channel)
+
+    test.assertEqual("hammer-area52", mainOf(officer, "wrench-area52"))
+    test.assertEqual("hammer-area52", mainOf(wrench, "wrench-area52"))
+    test.assertEqual("hammer-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual(nil, queuedSuggestion(officer, "wrench-area52", "suggested main"))
+    local at, by = partitionOf(wrench):GetMainStamp("wrench-area52")
+    test.assertEqual("toolbox-area52", by, "official under the approver's name")
+    test.assertTrue(at > 0)
+    test.assertEqual(0, #pendingOf(hammer))
+end)
+
+test.test("the first officer's decision clears the suggestion from the other officers' queues", function()
+    local channel = fixtures.newChannel()
+    local leader = login(channel, "Grandmaster-Area52")
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammy"))
+    fixtures.deliver(channel)
+    test.assertTrue(queuedSuggestion(leader, "hammer-area52", "suggested alias") ~= nil)
+    test.assertTrue(queuedSuggestion(officer, "hammer-area52", "suggested alias") ~= nil)
+
+    test.assertTrue(officer.addon.rosterController:RejectConflict("hammer-area52", "suggested alias"))
+    fixtures.deliver(channel)
+
+    test.assertEqual(nil, queuedSuggestion(officer, "hammer-area52", "suggested alias"))
+    test.assertEqual(nil, queuedSuggestion(leader, "hammer-area52", "suggested alias"))
+    test.assertFalse(leader.addon.rosterController:AcceptConflict("hammer-area52", "suggested alias"))
+    test.assertEqual(nil, aliasOf(leader, "hammer-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+end)
+
+test.test("a member's suggestions wait until an officer is online", function()
+    local channel = fixtures.newChannel()
+    local hammer = login(channel, "Hammer-Area52")
+    hammer.guild.members[1].online = false
+    hammer.guild.members[2].online = false
+
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertEqual(0, #hammer.sentMessages, "no officer online: nothing sent")
+    test.assertTrue(#pendingOf(hammer) > 0)
+
+    -- An officer logs in, and their announcement shows they're online.
+    local officer = login(channel, "Toolbox-Area52")
+    announce(officer)
+    fixtures.deliver(channel)
+
+    test.assertTrue(queuedSuggestion(officer, "wrench-area52", "suggested main") ~= nil)
+end)
+
+test.test("a member's edit stays until a newer officer edit about the same thing arrives", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    fixtures.deliver(channel)
+
+    -- An officer edit from before the member's: the member's edit stays.
+    officer.time = hammer.time - 60
+    linkAlt(officer, "wrench-area52", "toolbox-area52")
+    fixtures.deliver(channel)
+    test.assertEqual("hammer-area52", mainOf(hammer, "wrench-area52"))
+    test.assertTrue(#pendingOf(hammer) > 0)
+
+    -- A newer one wins, and settles the suggestion it overtakes.
+    officer.time = hammer.time + 60
+    test.assertTrue(officer.addon.rosterController:Detach("wrench-area52"))
+    fixtures.deliver(channel)
+    test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
+    local index
+    for index = 1, #pendingOf(hammer) do
+        test.assertTrue(pendingOf(hammer)[index].character ~= "wrench-area52", "the overtaken suggestion is gone")
+    end
+    test.assertEqual(nil, queuedSuggestion(officer, "wrench-area52", "suggested main"))
 end)

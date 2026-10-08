@@ -154,7 +154,7 @@ test.test("persisted records stay within a fixed field budget with no live field
         player = true, rank = true, rejected = true, source = true }
     local playerFields = { alias = true, aliasSource = true, history = true, main = true }
     local partitionFields = { characters = true, lastFullScan = true, lastScanSummary = true,
-        nextPlayerId = true, players = true, quarantine = true, conflicts = true }
+        nextPlayerId = true, players = true, quarantine = true, conflicts = true, suggestions = true }
 
     local key, record, field
     for key in pairs(partition) do

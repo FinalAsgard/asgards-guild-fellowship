@@ -32,8 +32,8 @@ if clientProfile.supported then
     rosterController = addon.RosterController.Create({
         client = client,
         nameRules = clientProfile.nameRules,
-        onMainLinksChanged = function(keys)
-            syncSession:LocalEdit(keys)
+        onMainLinksChanged = function(keys, before)
+            syncSession:LocalEdit(keys, before)
         end,
         onAliasChanged = function(key)
             syncSession:LocalAliasEdit(key)
@@ -43,6 +43,9 @@ if clientProfile.supported then
         end,
         onSyncResumed = function(key)
             syncSession:Rejoin(key)
+        end,
+        onDecideSuggestion = function(character, kind, approved)
+            return syncSession:Decide(character, kind, approved)
         end,
         getDatabase = function()
             return persistence:GetDatabase()
@@ -208,6 +211,25 @@ if clientProfile.supported then
         end,
         random = function(low, high)
             return client:Random(low, high)
+        end,
+        -- Read from the live roster, only when a member has suggestions to
+        -- send.
+        officerOnline = function()
+            local guild, _, normalizer = rosterController:QuietContext()
+            local count = client:GetGuildRosterCount()
+            if guild == nil or count == nil then
+                return false
+            end
+            local selfKey = syncSession.selfKey()
+            local index
+            for index = 1, count do
+                local member = client:GetGuildMember(index)
+                local key = member and member.online and normalizer:Key(member.name)
+                if key and key ~= selfKey and officerAuthority:IsOfficer(key) then
+                    return true
+                end
+            end
+            return false
         end,
         onApplied = function()
             rosterController:Invalidate()

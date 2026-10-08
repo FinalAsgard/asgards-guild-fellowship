@@ -88,10 +88,20 @@ When an officer changes which characters belong together, or what a player goes 
 
 - An officer is anyone whose guild rank can view officer notes. The guild master always counts. Nothing needs to be set up: promoting or demoting someone changes what their edits do.
 - When two officers change the same character or the same alias, the most recent edit wins everywhere.
-- Your own edits stay in your roster. They're only sent to the guild when you're an officer.
+- A member's own edits apply in their roster right away and are sent to officers as suggestions (see [Suggestions](#suggestions)). Only officers' edits change everyone's roster directly.
 - Edits made before sync existed: they become official and are sent to the guild once you log in on an officer character with this version. Until then, and for members, they stay in your own roster only.
 - Only main and alt links and aliases are shared. Departures, purges, history, conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
+
+### Suggestions
+
+Members know their own alts best, so a member's edits become suggestions for the officers:
+
+- When you're not an officer, **Set main…**, **Make this the main**, **Detach as own player**, and **Set alias…** still change your roster at once. Each change is also kept as a suggestion.
+- Suggestions go to the guild as soon as an officer is online. If none is, they wait, and are sent when an officer logs in.
+- Officers find them in their conflict queue, marked "Suggested by" and the member's name. **Accept** and **Reject** work as for any other entry, and so do Accept all and Reject all.
+- The first officer to decide settles the suggestion for every officer, and it disappears from the other officers' queues. Accepting makes it an official edit under that officer's name, which reaches everyone.
+- Your edit stays in your roster until a newer officer edit about the same character or alias arrives.
 
 ### Don't sync
 

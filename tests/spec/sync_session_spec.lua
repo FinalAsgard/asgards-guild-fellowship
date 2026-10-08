@@ -17,6 +17,7 @@ local function load()
         "Core/ReconcileEngine.lua",
         "Core/SyncFacts.lua",
         "Core/SyncDigest.lua",
+        "Core/SuggestionService.lua",
         "Core/SyncSession.lua"
     )
 end

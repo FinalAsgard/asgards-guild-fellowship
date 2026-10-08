@@ -422,9 +422,11 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
     local previous = partition:GetConflicts() or {}
     for index = 1, #previous do
         local entry = previous[index]
-        -- Promotions wait for the player to confirm them, whatever is
-        -- rescanned.
-        if type(entry) == "table" and (not plan.processed[entry.character] or entry.kind == "promotion") then
+        -- Promotions wait for the player to confirm them, and members'
+        -- suggestions for an officer to decide them, whatever is rescanned.
+        if type(entry) == "table"
+            and (not plan.processed[entry.character] or entry.kind == "promotion" or entry.from ~= nil)
+        then
             table.insert(conflicts, entry)
         end
     end

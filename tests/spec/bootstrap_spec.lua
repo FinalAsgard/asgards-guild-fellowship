@@ -21,6 +21,7 @@ local MANIFEST_FILES = {
     "Core/OfficerAuthority.lua",
     "Core/SyncFacts.lua",
     "Core/SyncDigest.lua",
+    "Core/SuggestionService.lua",
     "Core/SyncSession.lua",
     "Core/ScanScheduler.lua",
     "Core/RosterController.lua",

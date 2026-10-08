@@ -143,7 +143,7 @@ local function validatePartition(data)
     if type(data) ~= "table" then
         return false
     end
-    local containers = { "characters", "players", "quarantine", "conflicts", "unapplied" }
+    local containers = { "characters", "players", "quarantine", "conflicts", "suggestions", "unapplied" }
     local index
     for index = 1, #containers do
         local value = data[containers[index]]
@@ -504,7 +504,9 @@ end
 -- where kind is "main", "alias", "unresolved", "ambiguous", "cycle",
 -- "self reference", "chain too long", or "competing aliases", and
 -- suggestion is { main = key } or { alias = text } for the kinds that can be
--- accepted. Never the note text.
+-- accepted. Never the note text. A member's suggestion queued for an
+-- officer has kind "suggested main" or "suggested alias", plus `from` (the
+-- member's key) and `at` (when they made the edit); see SuggestionService.
 function Partition:SetConflicts(entries)
     if type(entries) ~= "table" then
         return false
@@ -515,6 +517,20 @@ end
 
 function Partition:GetConflicts()
     return self.data.conflicts
+end
+
+-- This member's own edits waiting for an officer's decision: a list of the
+-- facts they stamped (see SyncFacts and SuggestionService).
+function Partition:GetSuggestions()
+    return self.data.suggestions
+end
+
+function Partition:SetSuggestions(entries)
+    if type(entries) ~= "table" then
+        return false
+    end
+    self.data.suggestions = entries
+    return true
 end
 
 -- Removes one conflict, found by character and kind. Returns it, or nil.

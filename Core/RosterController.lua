@@ -17,17 +17,21 @@ Controller.__index = Controller
 --   nameRules     the client profile's name rules
 --   getDatabase   function() -> the SavedVariables root, or nil
 --   createWindow  function() -> window or nil, reason
---   onMainLinksChanged  optional function(keys): after a manual change to
---                 main links, with the set of every character key whose
---                 player was involved (for guild sync)
+--   onMainLinksChanged  optional function(keys, before): after a manual
+--                 change to main links, with the set of every character
+--                 key whose player was involved, and each one's main before
+--                 the change (for guild sync)
 --   onAliasChanged  optional function(key): after a manual alias change to
 --                 the player of `key` (for guild sync)
 --   onScanFinished  optional function(): after every completed scan
 --   onSyncResumed  optional function(key): after "Don't sync" was turned
 --                 off for the player of `key`
+--   onDecideSuggestion  optional function(character, kind, approved) ->
+--                 ok, reason: decides a member's suggestion in the queue
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
+        onDecideSuggestion = options.onDecideSuggestion,
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
         onScanFinished = options.onScanFinished,
@@ -207,25 +211,61 @@ function Controller:UpdateStatus()
     end
 end
 
--- Conflict review. Each action resolves through PlayerService, then
--- redraws the roster and the conflict list.
+-- Decides members' suggestions in the queue (all of them, or the one about
+-- `character` of `kind`) through onDecideSuggestion. Returns how many were
+-- decided, and the last refusal.
+function Controller:DecideSuggestions(approved, character, kind)
+    local decided, reason = 0, nil
+    if self.onDecideSuggestion == nil then
+        return 0, "guild sync is not available"
+    end
+    local entries = {}
+    local conflicts = self.current.partition:GetConflicts() or {}
+    local index
+    for index = 1, #conflicts do
+        local entry = conflicts[index]
+        if entry.from ~= nil and (character == nil or (entry.character == character and entry.kind == kind)) then
+            table.insert(entries, { character = entry.character, kind = entry.kind })
+        end
+    end
+    for index = 1, #entries do
+        local ok, why = self.onDecideSuggestion(entries[index].character, entries[index].kind, approved)
+        if ok then
+            decided = decided + 1
+        else
+            reason = why
+        end
+    end
+    return decided, reason
+end
+
+-- Conflict review. Note conflicts resolve through PlayerService, members'
+-- suggestions through guild sync; then the roster and the conflict list are
+-- redrawn.
 function Controller:ResolveConflicts(action, character, kind)
     if self.current == nil then
         return false
     end
     local service = self:Service()
     local ok, reason
-    if action == "accept" then
+    local suggestion = addon.SuggestionService.KINDS[kind] == true
+    if (action == "accept" or action == "reject") and suggestion then
+        local decided
+        decided, reason = self:DecideSuggestions(action == "accept", character, kind)
+        ok = decided > 0
+    elseif action == "accept" then
         ok, reason = service:AcceptConflict(character, kind)
     elseif action == "reject" then
         ok, reason = service:RejectConflict(character, kind)
     elseif action == "acceptAll" then
+        local approved = self:DecideSuggestions(true)
         local accepted, dismissed = service:AcceptAll()
-        self:Print("Accepted " .. plural(accepted, "conflict") .. " and dismissed " .. dismissed .. ".")
+        self:Print("Accepted " .. plural(accepted + approved, "conflict") .. " and dismissed " .. dismissed .. ".")
         ok = true
     elseif action == "rejectAll" then
+        local declined = self:DecideSuggestions(false)
         local rejected = service:RejectAll()
-        self:Print("Rejected " .. plural(rejected, "conflict") .. ".")
+        self:Print("Rejected " .. plural(rejected + declined, "conflict") .. ".")
         ok = true
     end
     if not ok and reason ~= nil then
@@ -312,21 +352,43 @@ function Controller:AddPlayerKeys(keys, key)
     return keys
 end
 
+-- The main of each character's player, for a set of character keys.
+function Controller:MainsOf(keys)
+    local mains = {}
+    local key
+    for key in pairs(keys) do
+        local character = self.current.partition:GetCharacter(key)
+        local player = character and self.current.partition:GetPlayer(character.player)
+        mains[key] = player and player.main
+    end
+    return mains
+end
+
 -- Runs a manual change, reports a refusal, and redraws at once (no scan).
 -- A change to main links reports every character of the players involved,
--- before and after, to onMainLinksChanged; an alias change reports its
--- character to onAliasChanged.
+-- before and after, to onMainLinksChanged, with each one's main before the
+-- change; an alias change reports its character to onAliasChanged.
 function Controller:Organize(operation, key, ...)
     if self.current == nil then
         return false
     end
     local service = self:Service()
-    local involved = MAIN_LINK_OPERATIONS[operation] and self:AddPlayerKeys({}, key) or nil
+    local involved, before
+    if MAIN_LINK_OPERATIONS[operation] then
+        involved = self:AddPlayerKeys({}, key)
+        -- "Set main…" also involves the player the character joins.
+        local target = operation == "SetMainPlayer" and select(1, ...) or nil
+        local joined = target ~= nil and self.current.partition:GetPlayer(target)
+        if joined then
+            self:AddPlayerKeys(involved, joined.main)
+        end
+        before = self:MainsOf(involved)
+    end
     local ok, reason = service[operation](service, key, ...)
     if not ok then
         self:Print("That change wasn't made: " .. tostring(reason) .. ".")
     elseif involved ~= nil and self.onMainLinksChanged ~= nil then
-        self.onMainLinksChanged(self:AddPlayerKeys(involved, key))
+        self.onMainLinksChanged(self:AddPlayerKeys(involved, key), before)
     elseif operation == "SetAlias" and self.onAliasChanged ~= nil then
         self.onAliasChanged(key)
     end
