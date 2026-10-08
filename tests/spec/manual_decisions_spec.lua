@@ -253,3 +253,14 @@ test.test("a new member whose pickup was cut short is finished by the next picku
 
     test.assertEqual("toolbox-area52", state.playerOf("hammer-area52").main)
 end)
+
+test.test("an alias cleared by an officer's sync is not set again by a note", function()
+    local state = setup()
+    state.scan({ { "Toolbox-Area52", "@TheTool" } }, "initial")
+    local player = state.partition:GetCharacter("toolbox-area52").player
+    state.partition:ClearAlias(player, state.addon.FellowshipStore.SOURCE_SYNC)
+
+    state.scan({ { "Toolbox-Area52", "@TheTool" } }, "full", true)
+
+    test.assertEqual(nil, state.playerOf("toolbox-area52").alias)
+end)

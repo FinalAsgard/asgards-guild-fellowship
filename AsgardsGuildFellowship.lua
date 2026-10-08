@@ -35,6 +35,9 @@ if clientProfile.supported then
         onMainLinksChanged = function(keys)
             syncSession:LocalEdit(keys)
         end,
+        onAliasChanged = function(key)
+            syncSession:LocalAliasEdit(key)
+        end,
         getDatabase = function()
             return persistence:GetDatabase()
         end,

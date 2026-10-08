@@ -35,7 +35,8 @@ local function newWindow()
     end
     function window:SetTitle() end
     function window:SetStatus() end
-    function window:SetRows()
+    function window:SetRows(rows)
+        self.rows = rows
         return true
     end
     function window:SetConflicts()
@@ -250,4 +251,106 @@ test.test("sync works the same on WoW Forever", function()
     fixtures.deliver(channel)
 
     test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
+end)
+
+-- Aliases ---------------------------------------------------------------------
+
+local function aliasOf(world, key)
+    local partition = partitionOf(world)
+    return partition:GetPlayer(partition:GetCharacter(key).player).alias
+end
+
+-- The roster row labeled `label` in `world`'s open window, or nil.
+local function rosterRow(world, label)
+    local rows = world.addon.rosterController.window.rows or {}
+    local index
+    for index = 1, #rows do
+        if rows[index].label == label then
+            return rows[index]
+        end
+    end
+    return nil
+end
+
+test.test("an officer's alias shows in members' roster and chat tags", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local member = login(channel, "Wrench-Area52")
+    linkAlt(officer, "hammer-area52", "toolbox-area52")
+
+    test.assertTrue(officer.addon.rosterController:SetAlias("hammer-area52", "The Tool"))
+    fixtures.deliver(channel)
+
+    test.assertEqual("The Tool", aliasOf(member, "hammer-area52"))
+    test.assertTrue(rosterRow(member, "The Tool (Toolbox)") ~= nil, "the roster shows the synced alias")
+    local tag = member.addon.chatAnnotator:TagFor("Hammer-Area52")
+    test.assertEqual("The Tool", tag.text)
+    test.assertEqual("alias", tag.kind)
+
+    local sent = decode(officer, officer.sentMessages[#officer.sentMessages])
+    test.assertEqual(1, #sent.facts)
+    test.assertEqual("alias", sent.facts[1].kind)
+    test.assertEqual("toolbox-area52", sent.facts[1].character)
+    test.assertEqual("The Tool", sent.facts[1].alias)
+end)
+
+test.test("an officer clearing an alias clears it for members", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local member = login(channel, "Wrench-Area52")
+    officer.addon.rosterController:SetAlias("hammer-area52", "Hammy")
+    fixtures.deliver(channel)
+    test.assertEqual("Hammy", aliasOf(member, "hammer-area52"))
+
+    test.assertTrue(officer.addon.rosterController:SetAlias("hammer-area52", ""))
+    fixtures.deliver(channel)
+
+    test.assertEqual(nil, aliasOf(member, "hammer-area52"))
+    test.assertEqual(nil, member.addon.chatAnnotator:TagFor("Hammer-Area52"))
+end)
+
+test.test("a member's own alias isn't broadcast", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local member = login(channel, "Wrench-Area52")
+
+    test.assertTrue(member.addon.rosterController:SetAlias("wrench-area52", "Sparky"))
+    fixtures.deliver(channel)
+
+    test.assertEqual(0, #member.sentMessages)
+    test.assertEqual("Sparky", aliasOf(member, "wrench-area52"))
+    test.assertEqual(nil, aliasOf(officer, "wrench-area52"))
+end)
+
+test.test("when two officers set different aliases, the newest wins everywhere", function()
+    local channel = fixtures.newChannel()
+    local leader = login(channel, "Grandmaster-Area52")
+    local officer = login(channel, "Toolbox-Area52")
+    local member = login(channel, "Wrench-Area52")
+
+    leader.time = leader.time + 60
+    leader.addon.rosterController:SetAlias("hammer-area52", "Newer")
+    officer.addon.rosterController:SetAlias("hammer-area52", "Older")
+    fixtures.deliver(channel)
+
+    test.assertEqual("Newer", aliasOf(leader, "hammer-area52"))
+    test.assertEqual("Newer", aliasOf(officer, "hammer-area52"))
+    test.assertEqual("Newer", aliasOf(member, "hammer-area52"))
+end)
+
+test.test("an alias set after a main change lands on the right player", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local member = login(channel, "Wrench-Area52")
+    linkAlt(officer, "hammer-area52", "toolbox-area52")
+    fixtures.deliver(channel)
+
+    test.assertTrue(officer.addon.rosterController:MakeMain("hammer-area52"))
+    test.assertTrue(officer.addon.rosterController:SetAlias("toolbox-area52", "Smith"))
+    fixtures.deliver(channel)
+
+    test.assertEqual("hammer-area52", mainOf(member, "toolbox-area52"))
+    test.assertEqual("Smith", aliasOf(member, "toolbox-area52"))
+    test.assertEqual("Smith", aliasOf(member, "hammer-area52"))
+    test.assertEqual(nil, aliasOf(member, "wrench-area52"))
 end)

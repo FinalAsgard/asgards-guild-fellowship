@@ -5,14 +5,19 @@ local _, addon = ...
 -- whom (a character key):
 --
 --   { kind = "main", character = key, main = key, at = seconds, by = key }
+--   { kind = "alias", character = key, alias = text, at = seconds, by = key }
 --
 -- "character's main is main"; a character that is its own main says so with
--- main == character. Player ids are local counters, so facts only ever name
+-- main == character. "character's player goes by alias"; an empty alias
+-- clears it. Player ids are local counters, so facts only ever name
 -- characters, and each client rebuilds its own players from them.
 --
 -- Pure: works on a FellowshipStore partition and never touches the game.
 local SyncFacts = {
     KIND_MAIN = "main",
+    KIND_ALIAS = "alias",
+    -- The same limit "Set alias…" enforces.
+    MAX_ALIAS_LENGTH = 48,
 }
 addon.SyncFacts = SyncFacts
 
@@ -27,14 +32,17 @@ local function isTimestamp(value)
     return type(value) == "number" and value > 0 and value == math.floor(value)
 end
 
--- True when `fact` has the shape of a main-link fact.
+-- True when `fact` has the shape of a main-link or alias fact.
 function SyncFacts.IsValid(fact)
-    return type(fact) == "table"
-        and fact.kind == SyncFacts.KIND_MAIN
-        and isText(fact.character)
-        and isText(fact.main)
-        and isTimestamp(fact.at)
-        and isText(fact.by)
+    if type(fact) ~= "table" or not isText(fact.character) or not isTimestamp(fact.at) or not isText(fact.by) then
+        return false
+    end
+    if fact.kind == SyncFacts.KIND_MAIN then
+        return isText(fact.main)
+    end
+    return fact.kind == SyncFacts.KIND_ALIAS
+        and type(fact.alias) == "string"
+        and #fact.alias <= SyncFacts.MAX_ALIAS_LENGTH
 end
 
 -- Newest wins. Two edits in the same second are settled by author, so every
@@ -78,6 +86,45 @@ function Facts:FactOf(key)
     }
 end
 
+-- The alias fact for `key`'s player as this client holds it, or nil. It
+-- names the player by its main.
+function Facts:AliasFactOf(key)
+    local character = self.partition:GetCharacter(key)
+    local player = character and self.partition:GetPlayer(character.player)
+    if player == nil then
+        return nil
+    end
+    local at, by = self.partition:GetAliasStamp(key)
+    return {
+        kind = SyncFacts.KIND_ALIAS,
+        character = player.main,
+        alias = player.alias or "",
+        at = at,
+        by = by,
+    }
+end
+
+-- Stamps the current alias of `key`'s player as set by `author` at `at`
+-- (always newer than the stamp it replaces), and returns its fact, or nil
+-- for an unknown character.
+function Facts:StampAlias(key, author, at)
+    local heldAt = self.partition:GetAliasStamp(key)
+    if heldAt == nil then
+        return nil
+    end
+    self.partition:SetAliasStamp(key, math.max(at, heldAt + 1), author)
+    return self:AliasFactOf(key)
+end
+
+-- When the thing `fact` is about was last set, and by whom, or nil when the
+-- character is unknown.
+function Facts:HeldStamp(fact)
+    if fact.kind == SyncFacts.KIND_ALIAS then
+        return self.partition:GetAliasStamp(fact.character)
+    end
+    return self.partition:GetMainStamp(fact.character)
+end
+
 -- Stamps the current main link of every key in `keys` (a set) as set by
 -- `author` at `at`, and returns those facts sorted by character. A stamp is
 -- always newer than the one it replaces, so a second edit within the same
@@ -114,10 +161,12 @@ function Facts:Refusal(fact, sender)
     if not self.isOfficer(fact.by) then
         return "not an officer"
     end
-    if self.partition:GetCharacter(fact.character) == nil or self.partition:GetCharacter(fact.main) == nil then
+    if self.partition:GetCharacter(fact.character) == nil
+        or (fact.kind == SyncFacts.KIND_MAIN and self.partition:GetCharacter(fact.main) == nil)
+    then
         return "unknown character"
     end
-    local heldAt, heldBy = self.partition:GetMainStamp(fact.character)
+    local heldAt, heldBy = self:HeldStamp(fact)
     if not SyncFacts.IsNewer(fact.at, fact.by, heldAt, heldBy) then
         return "not newer"
     end
@@ -129,6 +178,15 @@ function Facts:Change(fact)
     local partition = self.partition
     local source = addon.FellowshipStore.SOURCE_SYNC
     local character = partition:GetCharacter(fact.character)
+    if fact.kind == SyncFacts.KIND_ALIAS then
+        if fact.alias == "" then
+            partition:ClearAlias(character.player, source)
+        else
+            partition:SetAlias(character.player, fact.alias, source)
+        end
+        partition:SetAliasStamp(fact.character, fact.at, fact.by)
+        return
+    end
     if fact.main == fact.character then
         -- It's a main. As an alt it leaves for a player of its own; its
         -- former player's characters follow with their own facts.

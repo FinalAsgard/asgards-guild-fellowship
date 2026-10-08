@@ -166,3 +166,106 @@ test.test("a second edit within the same second is still newer", function()
     test.assertEqual(NOW, first[1].at)
     test.assertEqual(NOW + 1, second[1].at)
 end)
+
+-- Alias facts -----------------------------------------------------------------
+
+local function aliasFact(character, alias, at, by)
+    return { kind = "alias", character = character, alias = alias, at = at or NOW, by = by or OFFICER }
+end
+
+local function aliasOf(partition, key)
+    return partition:GetPlayer(partition:GetCharacter(key).player).alias
+end
+
+test.test("an officer's alias fact names the player and records who set it and when", function()
+    local setup = newSetup({ OFFICER, MEMBER })
+
+    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "The Hammer") }, OFFICER))
+
+    test.assertEqual("The Hammer", aliasOf(setup.partition, MEMBER))
+    local player = setup.partition:GetPlayer(setup.partition:GetCharacter(MEMBER).player)
+    test.assertEqual("sync", player.aliasSource)
+    local at, by = setup.partition:GetAliasStamp(MEMBER)
+    test.assertEqual(NOW, at)
+    test.assertEqual(OFFICER, by)
+end)
+
+test.test("an empty alias fact clears the alias", function()
+    local setup = newSetup({ OFFICER, MEMBER })
+    setup.facts:ApplyAll({ aliasFact(MEMBER, "The Hammer") }, OFFICER)
+
+    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "", NOW + 5) }, OFFICER))
+
+    test.assertEqual(nil, aliasOf(setup.partition, MEMBER))
+    test.assertEqual(NOW + 5, (setup.partition:GetAliasStamp(MEMBER)))
+end)
+
+test.test("an alias fact from someone who isn't an officer is ignored", function()
+    local setup = newSetup({ OFFICER, MEMBER })
+
+    test.assertEqual(0, setup.facts:ApplyAll({ aliasFact(MEMBER, "Me", NOW, MEMBER) }, MEMBER))
+    test.assertEqual(nil, aliasOf(setup.partition, MEMBER))
+end)
+
+test.test("when two officers set different aliases, the newest wins", function()
+    local setup = newSetup({ OFFICER, OTHER_OFFICER, MEMBER })
+
+    setup.facts:ApplyAll({ aliasFact(MEMBER, "Newer", NOW + 10, OTHER_OFFICER) }, OTHER_OFFICER)
+    test.assertEqual(0, setup.facts:ApplyAll({ aliasFact(MEMBER, "Older", NOW, OFFICER) }, OFFICER))
+    test.assertEqual("Newer", aliasOf(setup.partition, MEMBER))
+    -- Same second: the later author name wins.
+    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "Tied", NOW + 10, OFFICER) }, OFFICER))
+    test.assertEqual("Tied", aliasOf(setup.partition, MEMBER))
+end)
+
+test.test("an alias fact lands on the right player when this client still has an older main", function()
+    local setup = newSetup({ OFFICER, MEMBER, "wrench-area52" })
+    -- Here the officer is still the main; the sender already made Hammer main.
+    setup.partition:JoinPlayerOf(MEMBER, OFFICER, "manual")
+
+    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "Tools") }, OFFICER))
+
+    test.assertEqual("Tools", aliasOf(setup.partition, OFFICER))
+    test.assertEqual(nil, aliasOf(setup.partition, "wrench-area52"))
+end)
+
+test.test("an alias that arrives after a main change stays with the player", function()
+    local setup = newSetup({ OFFICER, MEMBER })
+    setup.partition:JoinPlayerOf(MEMBER, OFFICER, "manual")
+
+    setup.facts:ApplyAll({ fact(OFFICER, MEMBER), fact(MEMBER, MEMBER) }, OFFICER)
+    setup.facts:ApplyAll({ aliasFact(MEMBER, "Tools", NOW + 1) }, OFFICER)
+
+    test.assertEqual(MEMBER, mainOf(setup.partition, OFFICER))
+    test.assertEqual("Tools", aliasOf(setup.partition, OFFICER))
+end)
+
+test.test("malformed alias facts are ignored", function()
+    local setup = newSetup({ OFFICER, MEMBER })
+
+    test.assertEqual(0, setup.facts:ApplyAll({
+        { kind = "alias", character = MEMBER, at = NOW, by = OFFICER },
+        { kind = "alias", character = MEMBER, alias = 7, at = NOW, by = OFFICER },
+        aliasFact(MEMBER, string.rep("x", 49)),
+        aliasFact("stranger-area52", "Nobody"),
+    }, OFFICER))
+    test.assertEqual(nil, aliasOf(setup.partition, MEMBER))
+end)
+
+test.test("stamping an alias reports it by the player's main, empty when there is none", function()
+    local setup = newSetup({ OFFICER, MEMBER })
+    setup.partition:JoinPlayerOf(MEMBER, OFFICER, "manual")
+
+    local cleared = setup.facts:StampAlias(MEMBER, OFFICER, NOW)
+    test.assertEqual("alias", cleared.kind)
+    test.assertEqual(OFFICER, cleared.character)
+    test.assertEqual("", cleared.alias)
+    test.assertEqual(NOW, cleared.at)
+    test.assertEqual(OFFICER, cleared.by)
+
+    setup.partition:SetAlias(setup.partition:GetCharacter(MEMBER).player, "Tools", "manual")
+    local set = setup.facts:StampAlias(MEMBER, OFFICER, NOW)
+    test.assertEqual("Tools", set.alias)
+    test.assertEqual(NOW + 1, set.at)
+    test.assertEqual(nil, setup.facts:StampAlias("nobody-area52", OFFICER, NOW))
+end)

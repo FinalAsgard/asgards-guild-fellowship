@@ -72,7 +72,7 @@ end
 
 -- A character with no relationship is unknown, or the only character, main,
 -- and unnamed member of its own player that nobody organized by hand. Only
--- those are seeded from notes; a manual detach or alias change is a choice
+-- those are seeded from notes; a manual or synced detach or alias change is a choice
 -- that only the conflict queue may change.
 local function hasRelationship(partition, sizes, key)
     local character = partition:GetCharacter(key)
@@ -88,6 +88,7 @@ local function hasRelationship(partition, sizes, key)
         or character.source == manual
         or character.source == addon.FellowshipStore.SOURCE_SYNC
         or player.aliasSource == manual
+        or player.aliasSource == addon.FellowshipStore.SOURCE_SYNC
 end
 
 -- The main a resolved marker ultimately leads to, following other notes
@@ -385,7 +386,9 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         -- still hold is that nobody named it or organized it by hand.
         if player ~= nil and player.main == main and player.alias == nil
             and player.aliasSource ~= addon.FellowshipStore.SOURCE_MANUAL
+            and player.aliasSource ~= addon.FellowshipStore.SOURCE_SYNC
             and character.source ~= addon.FellowshipStore.SOURCE_MANUAL
+            and character.source ~= addon.FellowshipStore.SOURCE_SYNC
         then
             if partition:SetAlias(character.player, alias, addon.FellowshipStore.SOURCE_NOTE) then
                 aliased = aliased + 1

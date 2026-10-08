@@ -48,13 +48,29 @@ end
 -- character in `keys` (a set) as theirs, now, and broadcasts them when this
 -- user is an officer. Returns the facts sent, or nil when nothing was sent.
 function Session:LocalEdit(keys)
+    return self:StampAndSend(function(facts, author, now)
+        return facts:Stamp(keys, author, now)
+    end)
+end
+
+-- After this user set or cleared the alias of `key`'s player by hand: the
+-- same, for that player's alias.
+function Session:LocalAliasEdit(key)
+    return self:StampAndSend(function(facts, author, now)
+        return { facts:StampAlias(key, author, now) }
+    end)
+end
+
+-- Stamps with `stamp(facts, author, now)` -> list of facts, and broadcasts
+-- them when this user is an officer.
+function Session:StampAndSend(stamp)
     local partition = self.context()
     local author = self.selfKey()
     local now = self.now()
     if partition == nil or author == nil or now == nil then
         return nil
     end
-    local facts = self:Facts(partition):Stamp(keys, author, now)
+    local facts = stamp(self:Facts(partition), author, now)
     if facts[1] == nil or not self.isOfficer(author) then
         return nil
     end

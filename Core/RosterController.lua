@@ -20,10 +20,13 @@ Controller.__index = Controller
 --   onMainLinksChanged  optional function(keys): after a manual change to
 --                 main links, with the set of every character key whose
 --                 player was involved (for guild sync)
+--   onAliasChanged  optional function(key): after a manual alias change to
+--                 the player of `key` (for guild sync)
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
         onMainLinksChanged = options.onMainLinksChanged,
+        onAliasChanged = options.onAliasChanged,
         collapsed = {},
         showDeparted = false,
         createWindow = options.createWindow,
@@ -303,7 +306,8 @@ end
 
 -- Runs a manual change, reports a refusal, and redraws at once (no scan).
 -- A change to main links reports every character of the players involved,
--- before and after, to onMainLinksChanged.
+-- before and after, to onMainLinksChanged; an alias change reports its
+-- character to onAliasChanged.
 function Controller:Organize(operation, key, ...)
     if self.current == nil then
         return false
@@ -315,6 +319,8 @@ function Controller:Organize(operation, key, ...)
         self:Print("That change wasn't made: " .. tostring(reason) .. ".")
     elseif involved ~= nil and self.onMainLinksChanged ~= nil then
         self.onMainLinksChanged(self:AddPlayerKeys(involved, key))
+    elseif operation == "SetAlias" and self.onAliasChanged ~= nil then
+        self.onAliasChanged(key)
     end
     self:Refresh()
     return ok == true

@@ -83,12 +83,12 @@ Changes show up right away and are recorded as manual. Data is saved per guild a
 
 ## Guild sync
 
-When an officer changes which characters belong together, the change reaches everyone in the guild who runs the add-on and is online. This covers **Set main…**, **Make this the main**, and **Detach as own player**. Officers' edits update your roster without a rescan.
+When an officer changes which characters belong together, or what a player goes by, the change reaches everyone in the guild who runs the add-on and is online. This covers **Set main…**, **Make this the main**, **Detach as own player**, and **Set alias…**, including clearing an alias. Officers' edits update your roster and chat tags without a rescan.
 
 - An officer is anyone whose guild rank can view officer notes. The guild master always counts. Nothing needs to be set up: promoting or demoting someone changes what their edits do.
-- When two officers change the same character, the most recent edit wins everywhere.
+- When two officers change the same character or the same alias, the most recent edit wins everywhere.
 - Your own edits stay in your roster. They're only sent to the guild when you're an officer.
-- Only main and alt links are shared. Departures, purges, history, conflicts, and settings stay on your computer.
+- Only main and alt links and aliases are shared. Departures, purges, history, conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
 
 For now, edits reach only members who are online when they're made.
