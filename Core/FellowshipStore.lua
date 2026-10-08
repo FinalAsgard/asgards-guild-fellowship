@@ -97,6 +97,14 @@ local function playerProblem(player)
     if player.aliasSource ~= nil and not isText(player.aliasSource) then
         return "player alias source is invalid"
     end
+    -- Guild sync (schema 2): when this player's alias was last set or
+    -- cleared, and by whom (a character key).
+    if player.aliasAt ~= nil and not isWholeNumber(player.aliasAt) then
+        return "player alias time is invalid"
+    end
+    if player.aliasBy ~= nil and not isText(player.aliasBy) then
+        return "player alias author is invalid"
+    end
     if player.history ~= nil then
         if type(player.history) ~= "table" then
             return "player history is invalid"
@@ -552,6 +560,28 @@ function Partition:SetMainStamp(key, at, by)
     end
     character.mainAt = at
     character.mainBy = by
+    return true
+end
+
+-- When the alias of `key`'s player was last set or cleared, and by whom;
+-- like main links, an unstamped alias is at 0 with no author.
+function Partition:GetAliasStamp(key)
+    local character = self.data.characters[key]
+    local player = character and self.data.players[character.player]
+    if player == nil then
+        return nil
+    end
+    return player.aliasAt or 0, player.aliasBy
+end
+
+function Partition:SetAliasStamp(key, at, by)
+    local character = self.data.characters[key]
+    local player = character and self.data.players[character.player]
+    if player == nil or not isWholeNumber(at) or not isText(by) then
+        return false
+    end
+    player.aliasAt = at
+    player.aliasBy = by
     return true
 end
 
