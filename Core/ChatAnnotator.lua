@@ -31,8 +31,25 @@ Annotator.__index = Annotator
 -- options.context: function() -> partition, normalizer for the current
 -- guild, or nil when there's none yet (no guild, guild info not loaded,
 -- saved data unavailable).
+-- options.isSecret: function(value) -> true when the client hides `value`
+-- from add-ons (Retail does during encounters and keystone runs). Optional;
+-- without it nothing is secret.
 function ChatAnnotator.Create(options)
-    return setmetatable({ context = options.context }, Annotator)
+    return setmetatable({
+        context = options.context,
+        isSecret = options.isSecret or function()
+            return false
+        end,
+    }, Annotator)
+end
+
+-- True when either value is hidden from add-ons, or the check itself fails:
+-- then the line is left alone rather than risk touching a hidden value.
+function Annotator:IsHidden(message, sender)
+    local ok, hidden = pcall(function()
+        return self.isSecret(message) or self.isSecret(sender)
+    end)
+    return not ok or hidden == true
 end
 
 -- The speaker's tag ({ text, kind }), or nil.
@@ -52,9 +69,13 @@ end
 -- `sender` is the raw name the chat event reports. A chat line gets the tag
 -- in front of its text. An achievement message is a template whose "%s" the
 -- chat frame replaces with the speaker's name link, so the tag goes right
--- after it; a template without one is left alone.
+-- after it; a template without one is left alone. A message or sender the
+-- client hides from add-ons is checked first and never touched.
 function Annotator:Annotate(event, message, sender)
-    if not TAGGED_EVENTS[event] or type(message) ~= "string" or type(sender) ~= "string" then
+    if not TAGGED_EVENTS[event] or self:IsHidden(message, sender) then
+        return nil
+    end
+    if type(message) ~= "string" or type(sender) ~= "string" then
         return nil
     end
     local nameEnd

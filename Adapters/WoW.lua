@@ -288,6 +288,18 @@ function Client:AddChatMessageFilter(events, filter)
     return registered
 end
 
+-- True when the client hides `value` from add-ons (Retail's secret values,
+-- during encounters and keystone runs). False on a client without the
+-- check. A check that errors answers true, so callers leave the value alone.
+function Client:IsSecretValue(value)
+    local isSecret = self.environment.issecretvalue
+    if type(isSecret) ~= "function" then
+        return false
+    end
+    local ok, secret = pcall(isSecret, value)
+    return not ok or (secret ~= nil and secret ~= false)
+end
+
 -- Wall-clock seconds for saved records, or nil.
 function Client:Timestamp()
     local ok, now = callFunction(self.environment.GetServerTime)

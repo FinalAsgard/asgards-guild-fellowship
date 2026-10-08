@@ -147,6 +147,9 @@ if clientProfile.supported then
             end
             return partition, normalizer
         end,
+        isSecret = function(value)
+            return client:IsSecretValue(value)
+        end,
     })
     entryPoints = addon.EntryPoints.Create({
         client = client,

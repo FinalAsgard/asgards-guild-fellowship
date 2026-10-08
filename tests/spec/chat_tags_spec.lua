@@ -306,3 +306,69 @@ test.test("tags are added to guild, officer, and achievement events only", funct
         test.assertEqual(nil, world.annotator:Annotate(other[index], "%s hi", "Hammer-Area52"), other[index])
     end
 end)
+
+-- Values the client hides from add-ons ---------------------------------------
+
+-- An annotator over `world` whose client hides the values in `secrets`, and
+-- that counts how often it reads the guild context.
+local function hiding(world, secrets)
+    local annotator = { contextReads = 0 }
+    annotator.annotator = world.addon.ChatAnnotator.Create({
+        context = function()
+            annotator.contextReads = annotator.contextReads + 1
+            return world.partition, world.normalizer
+        end,
+        isSecret = function(value)
+            return secrets[value] == true
+        end,
+    })
+    return annotator
+end
+
+test.test("a hidden message is left unchanged without being looked at", function()
+    local world = retail()
+    local probe = hiding(world, { ["hi"] = true, ["%s has earned"] = true })
+    test.assertEqual(nil, probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+    test.assertEqual(nil, probe.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", "%s has earned", "Hammer-Area52"))
+    test.assertEqual(0, probe.contextReads, "no lookup for a hidden message")
+end)
+
+test.test("a hidden sender is left unchanged without being normalized", function()
+    local world = retail()
+    local probe = hiding(world, { ["Hammer-Area52"] = true })
+    test.assertEqual(nil, probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+    test.assertEqual(nil, probe.annotator:Annotate("CHAT_MSG_OFFICER", "hi", "Hammer-Area52"))
+    test.assertEqual(0, probe.contextReads, "no lookup for a hidden sender")
+end)
+
+test.test("once nothing is hidden, tags come back", function()
+    local world = retail()
+    local secrets = { ["Hammer-Area52"] = true }
+    local probe = hiding(world, secrets)
+    test.assertEqual(nil, probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+    secrets["Hammer-Area52"] = nil
+    test.assertEqual(alias("TheTool") .. "hi", probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+end)
+
+test.test("without a secret check, chat is tagged normally", function()
+    local world = retail()
+    local annotator = world.addon.ChatAnnotator.Create({
+        context = function()
+            return world.partition, world.normalizer
+        end,
+    })
+    test.assertEqual(alias("TheTool") .. "hi", annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+end)
+
+test.test("a secret check that errors leaves the line unchanged and never raises", function()
+    local world = retail()
+    local annotator = world.addon.ChatAnnotator.Create({
+        context = function()
+            return world.partition, world.normalizer
+        end,
+        isSecret = function()
+            error("secret check exploded")
+        end,
+    })
+    test.assertEqual(nil, annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+end)
