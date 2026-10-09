@@ -16,6 +16,11 @@ local FellowshipStore = {
     SOURCE_ROSTER = "roster",
     -- Applied from an officer's edit received over guild sync.
     SOURCE_SYNC = "sync",
+    -- How many greetings a player must already have before this user's
+    -- greet prompt for them closes (GreetTally).
+    GREET_CAP_DEFAULT = 2,
+    GREET_CAP_MIN = 1,
+    GREET_CAP_MAX = 10,
 }
 addon.FellowshipStore = FellowshipStore
 
@@ -350,6 +355,36 @@ function Store:SetGreetEnabled(enabled)
         return false
     end
     state.enabled = enabled
+    return true
+end
+
+local function isGreetCap(value)
+    return type(value) == "number" and value == math.floor(value)
+        and value >= FellowshipStore.GREET_CAP_MIN and value <= FellowshipStore.GREET_CAP_MAX
+end
+
+-- The greeting cap, shared by every character. The default when none is
+-- saved or the saved one is unusable.
+function Store:GreetCap()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local cap = type(state) == "table" and state.cap or nil
+    if not isGreetCap(cap) then
+        return FellowshipStore.GREET_CAP_DEFAULT
+    end
+    return cap
+end
+
+-- Sets the greeting cap (a whole number from 1 to 10). An unusable existing
+-- value is left alone.
+function Store:SetGreetCap(cap)
+    if not isGreetCap(cap) then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.cap ~= nil and not isGreetCap(state.cap)) then
+        return false
+    end
+    state.cap = cap
     return true
 end
 

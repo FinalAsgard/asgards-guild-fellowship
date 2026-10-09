@@ -62,7 +62,9 @@ function GreetPolicy.Create(options)
     }, Policy)
 end
 
-function Policy:identity(key)
+-- The player `key` belongs to; a character the database doesn't know is a
+-- player of its own.
+function Policy:PlayerOf(key)
     local ok, player = pcall(self.playerOf, key)
     if ok and player ~= nil then
         return player
@@ -88,7 +90,7 @@ function Policy:Seed(onlineKeys)
     end
     local index
     for index = 1, #(onlineKeys or {}) do
-        self.seen[self:identity(onlineKeys[index])] = true
+        self.seen[self:PlayerOf(onlineKeys[index])] = true
     end
     self.ready = true
 end
@@ -98,7 +100,7 @@ function Policy:WentOffline(key, now)
     if not self.ready or type(key) ~= "string" or type(now) ~= "number" then
         return
     end
-    local player = self:identity(key)
+    local player = self:PlayerOf(key)
     self.seen[player] = true
     self.offlineAt[player] = now
 end
@@ -117,7 +119,7 @@ function Policy:Joined(key, now)
     if not self.ready or type(key) ~= "string" or type(now) ~= "number" or answers(self.isOwn, key) then
         return nil
     end
-    local player = self:identity(key)
+    local player = self:PlayerOf(key)
     self.seen[player] = true
     self.offlineAt[player] = nil
     return self:prompt(GreetPolicy.JOIN, player, key)
@@ -132,7 +134,7 @@ function Policy:CameOnline(key, now)
     if not answers(self.isMember, key) or answers(self.isOwn, key) then
         return nil
     end
-    local player = self:identity(key)
+    local player = self:PlayerOf(key)
     local wasSeen, offlineAt = self.seen[player], self.offlineAt[player]
     self.seen[player] = true
     self.offlineAt[player] = nil

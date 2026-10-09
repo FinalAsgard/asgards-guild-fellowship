@@ -35,12 +35,14 @@ local function load()
         "Core/GreetPolicy.lua",
         "Core/GreetingLibrary.lua",
         "Core/GreetPromptQueue.lua",
+        "Core/GreetTally.lua",
         "Core/GuildGreet.lua"
     )
 end
 
--- A scanned guild with Guild Greet over it. The world records what was sent
--- and what the prompts view was last asked to show; `world.time` is the
+-- A scanned guild with Guild Greet over it. The world records what was sent,
+-- the "greeted" messages announced, and what the prompts view was last asked
+-- to show; `world.time` is the
 -- clock and `world.timers` the pending timers.
 local function setup(profile)
     local addon = load()
@@ -52,7 +54,7 @@ local function setup(profile)
     local normalizer = addon.NameNormalizer.Create(rules)
     local world = {
         addon = addon, names = names, database = database, store = store,
-        sent = {}, timers = {}, time = START, shown = {},
+        sent = {}, announced = {}, timers = {}, time = START, shown = {},
     }
     -- Each entry: name, note, and the roster's last-online time ({ years,
     -- months, days, hours }; nil while online). Tongs has been away 45 days,
@@ -99,6 +101,10 @@ local function setup(profile)
         end,
         send = function(text)
             table.insert(world.sent, text)
+            return true
+        end,
+        announce = function(message)
+            table.insert(world.announced, message)
             return true
         end,
         view = {
@@ -537,4 +543,142 @@ test.test("guild greet: a greeting added or edited in the window is used by the 
     world.handlers.greet(world.shown[1].player)
 
     test.assertEqual("Ahoy Bolt!", world.sent[1])
+end)
+
+-- Greeter coordination -------------------------------------------------------------
+
+-- A "greeted" message from `greeter` about `name`, for an arrival at `at`.
+local function greeted(world, greeter, name, at)
+    local _, normalizer = world.greet.context()
+    return world.greet:OnGreeted({
+        v = world.addon.GuildGreet.PROTOCOL,
+        t = world.addon.GuildGreet.TYPE_GREETED,
+        c = normalizer:Key(name),
+        a = at or world.time,
+    }, world.names[greeter])
+end
+
+local coordinationIndex
+for coordinationIndex = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[coordinationIndex]
+
+    test.test(profile .. ": greeting someone tells other add-on users", function()
+        local world = setup(profile)
+        local _, normalizer = world.greet.context()
+        world.greet:OnPresence("online", world.names.tongs)
+        advance(world, 10)
+
+        world.handlers.greet(world.shown[1].player)
+
+        test.assertEqual(1, #world.announced)
+        local message = world.announced[1]
+        test.assertEqual("greeted", message.t)
+        test.assertEqual(normalizer:Key(world.names.tongs), message.c)
+        test.assertEqual(START, message.a)
+    end)
+
+    test.test(profile .. ": two greetings from others close the prompt, for any of the player's characters", function()
+        local world = setup(profile)
+        world.greet:OnPresence("online", world.names.anvil)
+
+        -- One greeting, about Anvil's alt, leaves the prompt up.
+        test.assertTrue(greeted(world, "bishop", world.names.tongs))
+        test.assertEqual(1, #world.shown)
+
+        test.assertTrue(greeted(world, "bolt", world.names.anvil))
+        test.assertEqual(0, #world.shown)
+    end)
+end
+
+test.test("guild greet: the cap setting decides when the prompt closes", function()
+    local world = setup("Retail")
+    world.store:SetGreetCap(1)
+    world.greet:OnPresence("online", world.names.anvil)
+    greeted(world, "bishop", world.names.anvil)
+    test.assertEqual(0, #world.shown)
+
+    world = setup("Retail")
+    world.store:SetGreetCap(3)
+    world.greet:OnPresence("online", world.names.anvil)
+    greeted(world, "bishop", world.names.anvil)
+    greeted(world, "bolt", world.names.anvil)
+    test.assertEqual(1, #world.shown)
+    greeted(world, "rust", world.names.anvil)
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a player who has had enough greetings isn't prompted until the welcome-back window passes", function()
+    local world = setup("Retail")
+    -- Others greeted Bolt before this user heard Bolt log in.
+    greeted(world, "bishop", world.names.bolt)
+    greeted(world, "anvil", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(0, #world.shown)
+
+    world.greet:OnPresence("offline", world.names.bolt)
+    advance(world, 15 * MINUTE)
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("welcomeBack", world.shown[1].category)
+end)
+
+test.test("guild greet: duplicate, late, own, and unplaceable greetings don't count", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.anvil)
+
+    test.assertTrue(greeted(world, "bishop", world.names.anvil))
+    test.assertFalse(greeted(world, "bishop", world.names.anvil))
+    test.assertFalse(greeted(world, "bolt", world.names.anvil, START - 15 * MINUTE))
+    test.assertFalse(greeted(world, "me", world.names.anvil))
+    test.assertFalse(greeted(world, "myAlt", world.names.anvil))
+    test.assertFalse(greeted(world, "bolt", world.names.friend))
+    test.assertFalse(world.greet:OnGreeted({ v = 1, t = "greeted", c = 42, a = START }, world.names.bolt))
+    test.assertFalse(world.greet:OnGreeted({ v = 99, t = "greeted", c = "anvil", a = START }, world.names.bolt))
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild greet: someone who just joined is placed by the user's prompt for them", function()
+    local world = setup("Retail")
+    world.store:SetGreetCap(1)
+
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual(1, #world.shown)
+    test.assertTrue(greeted(world, "bishop", world.names.newt))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: when two users greet at once, both count once and nothing breaks", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnPresence("online", world.names.bolt)
+
+    -- This user greets Anvil as Bishop's greeting for Anvil arrives.
+    world.handlers.greet(world.shown[1].player)
+    test.assertTrue(greeted(world, "bishop", world.names.anvil))
+    test.assertFalse(greeted(world, "bishop", world.names.anvil))
+    test.assertEqual(1, #world.sent)
+    -- Only Bolt's prompt is left, and Anvil has had two greetings.
+    test.assertEqual(1, #world.shown)
+    local _, normalizer = world.greet.context()
+    local anvil = world.greet.policy:PlayerOf(normalizer:Key(world.names.anvil))
+    test.assertEqual(2, world.greet.tally:Count(anvil, world.time))
+end)
+
+test.test("guild greet: the greeting cap is saved account-wide, from 1 to 10, default 2", function()
+    local addon = test.newAddon("Core/FellowshipStore.lua")
+    local database = { schemaVersion = 1, guilds = {} }
+    local store = addon.FellowshipStore.Create(database)
+
+    test.assertEqual(2, store:GreetCap())
+    test.assertTrue(store:SetGreetCap(10))
+    test.assertEqual(10, addon.FellowshipStore.Create(database):GreetCap())
+    test.assertFalse(store:SetGreetCap(0))
+    test.assertFalse(store:SetGreetCap(11))
+    test.assertFalse(store:SetGreetCap(2.5))
+    test.assertEqual(10, store:GreetCap())
+
+    database.greet.cap = "lots"
+    test.assertEqual(2, store:GreetCap())
+    test.assertFalse(store:SetGreetCap(3))
+    test.assertEqual("lots", database.greet.cap)
 end)

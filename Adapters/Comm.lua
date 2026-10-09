@@ -4,11 +4,13 @@ local _, addon = ...
 -- the guild rank permission API, and combat, encounter and keystone state.
 -- Messages are tables, serialized and sent to the guild at ChatThrottleLib's
 -- lowest ("BULK") priority, so sync traffic always yields to chat and other
--- add-ons. Like the WoW adapter, every method returns nil or false instead
+-- add-ons. Small messages others should hear within seconds (Guild Greet's
+-- "greeted") can ask for "NORMAL" instead. Like the WoW adapter, every method returns nil or false instead
 -- of raising.
 local Comm = {
     DISTRIBUTION = "GUILD",
     PRIORITY = "BULK",
+    PRIORITY_NORMAL = "NORMAL",
     -- Index of "view officer note" in a rank's permission flags.
     VIEW_OFFICER_NOTE_FLAG = 11,
 }
@@ -55,8 +57,9 @@ function Endpoint:Start(onMessage)
     return true
 end
 
--- Sends `message` to the guild. Returns false when it couldn't be sent.
-function Endpoint:Broadcast(message)
+-- Sends `message` to the guild at `priority` (BULK when nil). Returns false
+-- when it couldn't be sent.
+function Endpoint:Broadcast(message, priority)
     if self.endpoint == nil or type(message) ~= "table" then
         return false
     end
@@ -65,7 +68,7 @@ function Endpoint:Broadcast(message)
         return false
     end
     local ok = pcall(self.endpoint.SendCommMessage, self.endpoint, self.prefix, text,
-        Comm.DISTRIBUTION, nil, Comm.PRIORITY)
+        Comm.DISTRIBUTION, nil, priority or Comm.PRIORITY)
     return ok
 end
 

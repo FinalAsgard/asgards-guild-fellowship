@@ -35,6 +35,7 @@ local MANIFEST_FILES = {
     "Core/GreetPolicy.lua",
     "Core/GreetingLibrary.lua",
     "Core/GreetPromptQueue.lua",
+    "Core/GreetTally.lua",
     "Core/GuildGreet.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",

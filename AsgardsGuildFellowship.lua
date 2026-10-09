@@ -214,6 +214,27 @@ if clientProfile.supported then
             return true
         end,
     })
+    settings:Add("guildGreet", {
+        id = "greetCap",
+        kind = "number",
+        label = "Close my prompt once a player has had this many greetings",
+        min = addon.FellowshipStore.GREET_CAP_MIN,
+        max = addon.FellowshipStore.GREET_CAP_MAX,
+        get = function()
+            local store = rosterController:Store()
+            return store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
+        end,
+        set = function(cap)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetCap(cap) then
+                return nil, "the saved setting is unreadable"
+            end
+            return true
+        end,
+    })
     -- Not saved: the prompts lock again after a reload.
     settings:Add("guildGreet", {
         id = "greetUnlock",
@@ -408,6 +429,10 @@ if clientProfile.supported then
         send = function(text)
             return client:SendGuildMessage(text)
         end,
+        -- Heard within seconds, unlike sync's bulk traffic.
+        announce = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
         view = greetPrompts,
     })
     settings:OnChange(function(id, value)
@@ -474,9 +499,14 @@ end
 
 local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
     rosterController:OnSavedDataReady()
-    -- Without the comm libraries, sync simply stays off.
+    -- Without the comm libraries, sync simply stays off and Guild Greet
+    -- works uncoordinated.
     if comm:Start(function(message, sender)
-        syncSession:Receive(message, sender)
+        if message.t == addon.GuildGreet.TYPE_GREETED then
+            guildGreet:OnGreeted(message, sender)
+        else
+            syncSession:Receive(message, sender)
+        end
     end) then
         syncSession:Start()
     end

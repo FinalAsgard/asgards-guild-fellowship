@@ -275,3 +275,40 @@ test.test("the Guild Greet section can unlock the prompts, and refuses when they
     test.assertContains(reason, "can't be drawn")
     test.assertFalse(addon.settings:Get("greetUnlock"))
 end)
+
+test.test("number settings take whole numbers within their range", function()
+    local model = newModel()
+    local saved = { cap = 2 }
+    model:AddSection("greet", "Guild Greet")
+    test.assertFalse(model:Add("greet", { id = "bad", kind = "number", label = "Bad",
+        get = function() return 1 end, set = function() return true end }))
+    test.assertTrue(model:Add("greet", {
+        id = "cap", kind = "number", label = "Cap", min = 1, max = 10,
+        get = function() return saved.cap end,
+        set = function(value)
+            saved.cap = value
+            return true
+        end,
+    }))
+
+    test.assertTrue(model:Set("cap", 10))
+    test.assertEqual(10, model:Get("cap"))
+    local index, value
+    for index, value in ipairs({ 0, 11, 2.5, "3", true }) do
+        local ok, reason = model:Set("cap", value)
+        test.assertEqual(nil, ok, tostring(index))
+        test.assertEqual("it must be a whole number from 1 to 10", reason)
+    end
+    test.assertEqual(10, saved.cap)
+end)
+
+test.test("the Guild Greet section sets the greeting cap through the saved data", function()
+    local world, addon = loggedIn("Retail")
+    local entry = addon.settings:Entry("greetCap")
+
+    test.assertEqual("number", entry.kind)
+    test.assertEqual(2, addon.settings:Get("greetCap"))
+    test.assertTrue(addon.settings:Set("greetCap", 4))
+    test.assertEqual(4, world.database.greet.cap)
+    test.assertEqual(nil, addon.settings:Set("greetCap", 11))
+end)

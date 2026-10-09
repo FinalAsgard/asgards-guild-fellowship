@@ -9,10 +9,12 @@ local _, addon = ...
 --   toggle   get() -> boolean; set(boolean) -> true, or nil and a reason
 --   action   run() performs it (a button, e.g. "Open Roster")
 --   text     get() -> a line of text shown as is (e.g. the version)
+--   number   get() -> a whole number from `min` to `max`; set(number) ->
+--            true, or nil and a reason
 -- `get`, `set` and `run` are called protected, so a failing feature never
 -- breaks the panel or a slash command.
 local SettingsModel = {
-    KINDS = { toggle = true, action = true, text = true },
+    KINDS = { toggle = true, action = true, text = true, number = true },
 }
 addon.SettingsModel = SettingsModel
 
@@ -61,8 +63,13 @@ local function entryProblem(entry)
     if type(entry.get) ~= "function" then
         return "entry has no get function"
     end
-    if entry.kind == "toggle" and type(entry.set) ~= "function" then
+    if (entry.kind == "toggle" or entry.kind == "number") and type(entry.set) ~= "function" then
         return "entry has no set function"
+    end
+    if entry.kind == "number" and (type(entry.min) ~= "number" or type(entry.max) ~= "number"
+        or entry.min > entry.max)
+    then
+        return "number has no range"
     end
     return nil
 end
@@ -122,10 +129,13 @@ function Model:Set(id, value)
     if entry == nil then
         return nil, "there is no such setting"
     end
-    if entry.kind ~= "toggle" then
+    if entry.kind == "number" then
+        if type(value) ~= "number" or value ~= math.floor(value) or value < entry.min or value > entry.max then
+            return nil, "it must be a whole number from " .. entry.min .. " to " .. entry.max
+        end
+    elseif entry.kind ~= "toggle" then
         return nil, "it can't be changed"
-    end
-    if type(value) ~= "boolean" then
+    elseif type(value) ~= "boolean" then
         return nil, "it can only be on or off"
     end
     local ok, changed, reason = pcall(entry.set, value)

@@ -2,7 +2,8 @@ local _, addon = ...
 
 -- The add-on's page in the game's AddOns options (Esc -> Options -> AddOns),
 -- drawn from the SettingsModel: a title, then one header per section with
--- its entries below it. Clients with the newer Settings API get a canvas
+-- its entries below it (a check box, a button, a line of text, or a number
+-- with minus and plus buttons). Clients with the newer Settings API get a canvas
 -- category; older ones get an Interface Options panel. Like the other
 -- adapters, everything is optional and protected: a client with neither API,
 -- or a frame call that fails, just leaves the panel out without an error.
@@ -37,6 +38,19 @@ function Panel:Refresh()
         pcall(function()
             if widget.kind == "toggle" then
                 widget.frame:SetChecked(self.model:Get(widget.id) == true)
+            elseif widget.kind == "number" then
+                local value = self.model:Get(widget.id)
+                widget.frame:SetText(tostring(value or ""))
+                if value ~= nil and value <= widget.entry.min then
+                    widget.down:Disable()
+                else
+                    widget.down:Enable()
+                end
+                if value ~= nil and value >= widget.entry.max then
+                    widget.up:Disable()
+                else
+                    widget.up:Enable()
+                end
             elseif widget.kind == "text" then
                 widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
             end
@@ -57,6 +71,42 @@ function Panel:addToggle(frame, entry, y)
     label:SetPoint("LEFT", check, "RIGHT", 4, 0)
     label:SetText(entry.label)
     table.insert(self.widgets, { kind = "toggle", id = entry.id, frame = check })
+end
+
+-- A whole number: its label, then a minus button, the value and a plus
+-- button, each press stepping it by one within the entry's range.
+function Panel:addNumber(frame, entry, y)
+    local createFrame = self.environment.CreateFrame
+    local down = createFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    down:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 4, y - 2)
+    down:SetWidth(24)
+    down:SetHeight(22)
+    down:SetText("-")
+    local value = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    value:SetPoint("LEFT", down, "RIGHT", 4, 0)
+    value:SetWidth(24)
+    local up = createFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    up:SetPoint("LEFT", value, "RIGHT", 4, 0)
+    up:SetWidth(24)
+    up:SetHeight(22)
+    up:SetText("+")
+    local label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    label:SetPoint("LEFT", up, "RIGHT", 8, 0)
+    label:SetText(entry.label)
+    local function step(by)
+        local current = self.model:Get(entry.id)
+        if type(current) == "number" then
+            self.model:Set(entry.id, current + by)
+        end
+        self:Refresh()
+    end
+    down:SetScript("OnClick", function()
+        step(-1)
+    end)
+    up:SetScript("OnClick", function()
+        step(1)
+    end)
+    table.insert(self.widgets, { kind = "number", id = entry.id, entry = entry, frame = value, down = down, up = up })
 end
 
 function Panel:addAction(frame, entry, y)
@@ -102,6 +152,8 @@ function Panel:Build()
                     self:addToggle(panel, entry, y)
                 elseif entry.kind == "action" then
                     self:addAction(panel, entry, y)
+                elseif entry.kind == "number" then
+                    self:addNumber(panel, entry, y)
                 else
                     self:addText(panel, entry, y)
                 end

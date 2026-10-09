@@ -6,7 +6,20 @@ local _, addon = ...
 -- GreetingLibrary (what to say) to the game through the functions it's
 -- given, so it never touches the game itself. Nothing is ever posted
 -- without the user pressing Greet.
-local GuildGreet = {}
+--
+-- Greeters coordinate: after the user's greeting posts, a "greeted" message
+-- tells other add-on users, and GreetTally counts each player's greetings
+-- from both sides. Once a player has had as many as the user's cap, the
+-- user's prompt for them quietly closes, and they aren't prompted again
+-- until the welcome-back window passes. Without add-on messaging, Greet
+-- simply works uncoordinated.
+local GuildGreet = {
+    -- The "greeted" message: { v = PROTOCOL, t = TYPE_GREETED, c = the
+    -- greeted character's key, a = when they arrived (server time) }. The
+    -- greeter is whoever the game says sent it.
+    PROTOCOL = 1,
+    TYPE_GREETED = "greeted",
+}
 addon.GuildGreet = GuildGreet
 
 local Greet = {}
@@ -20,6 +33,8 @@ Greet.__index = Greet
 --   after         function(seconds, callback) -> false when there's no timer
 --   random        function(low, high) -> a whole number
 --   send          function(text) -> true when posted to guild chat
+--   announce      function(message) -> sends a "greeted" message to the
+--                 guild's add-on users. Optional.
 --   view          { Show = function(view, prompts, handlers) }: draws the
 --                 prompts; handlers.greet(player) and handlers.close(player)
 function GuildGreet.Create(options)
@@ -31,12 +46,18 @@ function GuildGreet.Create(options)
         after = options.after,
         random = options.random,
         send = options.send,
+        announce = options.announce or function()
+            return false
+        end,
         view = options.view,
         queue = addon.GreetPromptQueue.Create(),
         -- Hours since each offline member's last login, as the roster said
         -- when the session's roster first loaded.
         absences = {},
     }, Greet)
+    greet.tally = addon.GreetTally.Create(function()
+        return addon.GreetPolicy.WELCOME_BACK_SECONDS
+    end)
     greet.policy = addon.GreetPolicy.Create({
         playerOf = function(key)
             return (greet:service():PlayerOf(key))
@@ -71,6 +92,13 @@ end
 function Greet:Library()
     local store = self.store()
     return addon.GreetingLibrary.Create(store and store:GetGreetState(), self.random)
+end
+
+-- How many greetings a player must already have before the user's prompt
+-- for them closes.
+function Greet:Cap()
+    local store = self.store()
+    return store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
 end
 
 function Greet:IsEnabled()
@@ -216,8 +244,11 @@ function Greet:OnPresence(kind, rawName)
     elseif kind == "join" then
         prompt = self.policy:Joined(key, now)
     end
-    -- A category with no greetings has nothing to say, so it never prompts.
-    if prompt == nil or #self:Library():Greetings(prompt.category) == 0 then
+    -- A category with no greetings has nothing to say, so it never prompts,
+    -- and a player who has had enough greetings already isn't prompted.
+    if prompt == nil or #self:Library():Greetings(prompt.category) == 0
+        or self.tally:Reached(prompt.player, self:Cap(), now)
+    then
         return
     end
     prompt.rawName = rawName
@@ -262,8 +293,50 @@ function Greet:Greet(player)
             text = nil
         end
     end
+    local now = self.now()
+    if text ~= nil and type(now) == "number" then
+        local selfKey = self.selfKey()
+        local greeter = selfKey and self.policy:PlayerOf(selfKey) or "self"
+        self.tally:Add(player, greeter, prompt.raisedAt, now)
+        pcall(self.announce, {
+            v = GuildGreet.PROTOCOL, t = GuildGreet.TYPE_GREETED, c = prompt.key, a = prompt.raisedAt,
+        })
+    end
     self:Refresh()
     return text
+end
+
+-- Another add-on user's "greeted" message, from `sender` (a name as the game
+-- reports it). Counts their greeting, and closes the user's prompt once the
+-- player has had enough. Messages from the user's own characters, about
+-- players this add-on can't place, or for an arrival that's long past are
+-- ignored. Returns true when it was counted.
+function Greet:OnGreeted(message, sender)
+    if type(message) ~= "table" or message.v ~= GuildGreet.PROTOCOL or message.t ~= GuildGreet.TYPE_GREETED
+        or type(message.c) ~= "string" or type(message.a) ~= "number"
+    then
+        return false
+    end
+    local partition, normalizer = self.context()
+    local now = self.now()
+    local senderKey = normalizer and normalizer:Key(sender)
+    if senderKey == nil or type(now) ~= "number" or self:IsOwn(senderKey) then
+        return false
+    end
+    -- A player is placed by the database, or by a prompt the user has for
+    -- them (someone who just joined isn't in the database yet).
+    local player = self.policy:PlayerOf(message.c)
+    if partition:GetCharacter(message.c) == nil and self.queue:Get(player) == nil then
+        return false
+    end
+    local before = self.tally:Count(player, now)
+    if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
+        return false
+    end
+    if self.tally:Reached(player, self:Cap(), now) and self.queue:Remove(player) then
+        self:Refresh()
+    end
+    return true
 end
 
 -- The user closed a prompt without greeting.
