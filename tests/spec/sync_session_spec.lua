@@ -1,8 +1,11 @@
 local test = require("tests.test_helper")
 
 -- Catching up at login: digests, one reply per announcement, and the
--- announcer's follow-up. Each client has its own fake clock and timers;
--- a fake guild channel copies messages the way serializing them would.
+-- announcer's follow-up. Each client has its own fake clock, profiler clock
+-- and timers, and can be put in combat (`client.busy`); a fake guild
+-- channel copies messages the way serializing them would. Setting
+-- `client.msPerRead` makes every profiler-clock read cost that much, to
+-- stand in for work.
 local GUILD = { name = "Knights of Camelot", realm = "Area 52" }
 local RULES = { twoPartNames = false, homeRealm = "Area52" }
 local NOW = 1790000000
@@ -66,8 +69,11 @@ local function newClient(network, name, options)
         sent = {},
         timers = {},
         time = NOW,
+        precise = 0,
+        busy = false,
         randomCalls = {},
         forgeries = {},
+        applied = {},
     }
     client.session = addon.SyncSession.Create({
         comm = {
@@ -99,6 +105,16 @@ local function newClient(network, name, options)
         end,
         onForgery = function(count, relayedBy)
             table.insert(client.forgeries, { count = count, relayedBy = relayedBy })
+        end,
+        onApplied = function(count)
+            table.insert(client.applied, count)
+        end,
+        busy = function()
+            return client.busy
+        end,
+        preciseMs = function()
+            client.precise = client.precise + (client.msPerRead or 0)
+            return client.precise
         end,
     })
     table.insert(network.clients, client)
@@ -443,19 +459,83 @@ test.test("bystanders apply the facts they overhear", function()
     test.assertEqual(0, #bystander.sent)
 end)
 
+test.test("in combat nothing is worked on or sent, and it all goes on in order afterwards", function()
+    local network = newNetwork()
+    local announcer = newClient(network, "Hammer-Area52")
+    local replier = newClient(network, "Wrench-Area52")
+    give(network, replier, officerData())
+    replier.busy = true
+
+    announcer.session:Announce()
+    deliver(network)
+    advance(replier, 30)
+    test.assertEqual(0, #replier.randomCalls, "the announcement waits")
+    test.assertEqual(0, #replier.sent)
+
+    replier.busy = false
+    advance(replier, network.addon.SyncSession.PAUSE_SECONDS)
+    test.assertEqual(1, #replier.randomCalls)
+    replier.busy = true
+    advance(replier, 5)
+    test.assertEqual(0, #replier.sent, "the reply waits too")
+    replier.busy = false
+    advance(replier, network.addon.SyncSession.PAUSE_SECONDS)
+    deliver(network)
+
+    test.assertEqual(1, #replier.sent)
+    test.assertEqual(OFFICER, mainOf(announcer, "alt" .. ALTS .. "-area52"))
+end)
+
+test.test("an announcement and an officer's edit made in combat go out, in order, once it ends", function()
+    local network = newNetwork()
+    local officer = newOfficer(network)
+    officer.busy = true
+
+    officer.session:Announce()
+    test.assertEqual(1, #officer.session:LocalEdit({ ["alt1-area52"] = true }))
+    advance(officer, 30)
+    test.assertEqual(0, #officer.sent)
+
+    officer.busy = false
+    advance(officer, network.addon.SyncSession.PAUSE_SECONDS)
+    test.assertEqual(2, #officer.sent)
+    test.assertEqual("digest", officer.sent[1].t)
+    test.assertEqual("facts", officer.sent[2].t)
+end)
+
+test.test("a large batch of facts is applied a frame's budget at a time, and the roster is told once", function()
+    local network = newNetwork()
+    local client = newClient(network, "Hammer-Area52")
+    client.msPerRead = 1
+
+    client.session:Receive({ v = 1, t = "facts", facts = officerData() }, "Toolbox-Area52")
+    test.assertEqual(0, #client.applied, "not all at once")
+    local frames = 1
+    while client.timers[1] ~= nil do
+        test.assertEqual(0, client.timers[1].seconds, "the next frame")
+        table.remove(client.timers, 1).callback()
+        frames = frames + 1
+    end
+
+    test.assertTrue(frames > 5, "applied over " .. frames .. " frames")
+    test.assertEqual(1, #client.applied)
+    test.assertEqual(ALTS, client.applied[1])
+    test.assertEqual(OFFICER, mainOf(client, "alt1-area52"))
+    test.assertEqual(OFFICER, mainOf(client, "alt" .. ALTS .. "-area52"))
+end)
+
 test.test("malformed announcements and replies are ignored without errors", function()
     local network = newNetwork()
     local client = newClient(network, "Wrench-Area52")
     give(network, client, officerData())
 
-    test.assertEqual(0, client.session:Receive({ v = 1, t = "digest", digest = "everything" }, "Hammer-Area52"))
-    test.assertEqual(0, client.session:Receive({ v = 1, t = "digest", digest = { 1, 2 } }, "Hammer-Area52"))
-    test.assertEqual(0, client.session:Receive({ v = 1, t = "facts", re = client.key, buckets = "all", facts = {} },
-        "Hammer-Area52"))
-    test.assertEqual(0, client.session:Receive({ v = 1, t = "facts", re = client.key, buckets = { 1 }, facts = "x" },
-        "Hammer-Area52"))
-    test.assertEqual(0, client.session:Receive({ v = 2, t = "digest" }, "Hammer-Area52"))
+    client.session:Receive({ v = 1, t = "digest", digest = "everything" }, "Hammer-Area52")
+    client.session:Receive({ v = 1, t = "digest", digest = { 1, 2 } }, "Hammer-Area52")
+    client.session:Receive({ v = 1, t = "facts", re = client.key, buckets = "all", facts = {} }, "Hammer-Area52")
+    client.session:Receive({ v = 1, t = "facts", re = client.key, buckets = { 1 }, facts = "x" }, "Hammer-Area52")
+    client.session:Receive({ v = 2, t = "digest" }, "Hammer-Area52")
 
     test.assertEqual(0, #client.timers)
     test.assertEqual(0, #client.sent)
+    test.assertEqual(0, #client.applied)
 end)

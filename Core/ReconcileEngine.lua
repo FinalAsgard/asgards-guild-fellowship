@@ -506,8 +506,10 @@ end
 -- Keeps the invariant: a player with any in-guild character has an
 -- in-guild acting main. Each promotion records the former main in the
 -- player's history and returns a "promotion" conflict for confirmation.
-function ReconcileEngine.EnsureActingMains(partition, members, now)
+-- `checkpoint`, when given, is called after each player.
+function ReconcileEngine.EnsureActingMains(partition, members, now, checkpoint)
     members = members or {}
+    checkpoint = checkpoint or function() end
     local promotions = {}
     local players = {}
     partition:EachPlayer(function(id, player)
@@ -540,6 +542,7 @@ function ReconcileEngine.EnsureActingMains(partition, members, now)
                 })
             end
         end
+        checkpoint()
     end
     return promotions
 end

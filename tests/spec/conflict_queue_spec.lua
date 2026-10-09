@@ -416,7 +416,7 @@ local function officerSays(state, facts)
         isOfficer = function(key)
             return key == OFFICER
         end,
-    }):ApplyAll(facts, OFFICER)
+    }):ApplyAll(facts)
 end
 
 local function conflictOf(state, key, kind)

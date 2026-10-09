@@ -310,7 +310,10 @@ end
 -- main links, sorted by character, then aliases, sorted by main. Facts
 -- nobody stamped, and edits by authors who aren't officers now, aren't
 -- officer data, and "Don't sync" players are this client's own business.
-function Facts:OfficerFacts()
+-- `checkpoint`, when given, is called after each character and player so a
+-- scheduler can spread the work across frames.
+function Facts:OfficerFacts(checkpoint)
+    checkpoint = checkpoint or function() end
     local partition = self.partition
     local links, aliases = {}, {}
     partition:EachCharacter(function(key, character)
@@ -331,9 +334,11 @@ function Facts:OfficerFacts()
     local index
     for index = 1, #links do
         table.insert(facts, self:FactOf(links[index]))
+        checkpoint()
     end
     for index = 1, #aliases do
         table.insert(facts, self:AliasFactOf(aliases[index]))
+        checkpoint()
     end
     return facts
 end
@@ -362,11 +367,14 @@ function Facts:Rejoin(key)
 end
 
 -- Applies every acceptable fact in `facts`, then restores the acting-main
--- invariant once. Returns how many were applied.
-function Facts:ApplyAll(facts)
+-- invariant once. Returns how many were applied. `checkpoint`, when given,
+-- is called after each fact so a scheduler can spread the work across
+-- frames; each fact is judged against the roster as it is by then.
+function Facts:ApplyAll(facts, checkpoint)
     if type(facts) ~= "table" then
         return 0
     end
+    checkpoint = checkpoint or function() end
     local applied = 0
     local index
     for index = 1, #facts do
@@ -374,9 +382,10 @@ function Facts:ApplyAll(facts)
             self:Change(facts[index])
             applied = applied + 1
         end
+        checkpoint()
     end
     if applied > 0 then
-        addon.ReconcileEngine.EnsureActingMains(self.partition, {}, self.now())
+        addon.ReconcileEngine.EnsureActingMains(self.partition, {}, self.now(), checkpoint)
     end
     return applied
 end

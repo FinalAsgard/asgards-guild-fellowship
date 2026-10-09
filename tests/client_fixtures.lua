@@ -344,6 +344,11 @@ local function installGuild(world, environment, profile)
             table.insert(world.timers, { at = world.time + seconds, callback = callback })
         end,
     }
+    -- `world.inCombat = true` puts the player in combat.
+    world.inCombat = false
+    environment.InCombatLockdown = function()
+        return world.inCombat
+    end
     environment.RAID_CLASS_COLORS = {
         WARRIOR = { colorStr = "ffc69b6d" },
         PALADIN = { r = 0.96, g = 0.55, b = 0.73 },
@@ -364,10 +369,22 @@ local PROFILE_APIS = {
             environment.SlashCmdList[key] = callback
         end
     end,
+    -- Retail also reports boss encounters (`world.inEncounter`) and keystone
+    -- runs (`world.inKeystone`).
     Retail = function(world, environment, declaredClient)
         environment.C_AddOns = { GetAddOnMetadata = metadataReader(world, declaredClient) }
         environment.WOW_PROJECT_ID = 1
         environment.WOW_PROJECT_MAINLINE = 1
+        world.inEncounter = false
+        world.inKeystone = false
+        environment.IsEncounterInProgress = function()
+            return world.inEncounter
+        end
+        environment.C_ChallengeMode = {
+            IsChallengeModeActive = function()
+                return world.inKeystone
+            end,
+        }
     end,
 }
 

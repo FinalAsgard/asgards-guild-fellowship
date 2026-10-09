@@ -1,10 +1,11 @@
 local _, addon = ...
 
 -- The only code that touches AceComm-3.0, ChatThrottleLib, AceSerializer-3.0,
--- and the guild rank permission API. Messages are tables, serialized and
--- sent to the guild at ChatThrottleLib's lowest ("BULK") priority, so sync
--- traffic always yields to chat and other add-ons. Like the WoW adapter,
--- every method returns nil or false instead of raising.
+-- the guild rank permission API, and combat, encounter and keystone state.
+-- Messages are tables, serialized and sent to the guild at ChatThrottleLib's
+-- lowest ("BULK") priority, so sync traffic always yields to chat and other
+-- add-ons. Like the WoW adapter, every method returns nil or false instead
+-- of raising.
 local Comm = {
     DISTRIBUTION = "GUILD",
     PRIORITY = "BULK",
@@ -84,4 +85,27 @@ function Endpoint:RankCanViewOfficerNotes(rankIndex)
         return nil
     end
     return flags[Comm.VIEW_OFFICER_NOTE_FLAG] == true
+end
+
+-- Calls the global function at `path` (a list of names) with no arguments:
+-- true when it answers true. A missing or failing check answers false.
+local function answersTrue(client, path)
+    local value = client:GetGlobal(path[1])
+    local index
+    for index = 2, #path do
+        value = type(value) == "table" and value[path[index]] or nil
+    end
+    if type(value) ~= "function" then
+        return false
+    end
+    local ok, answer = pcall(value)
+    return ok and answer == true
+end
+
+-- True while the player is in combat, or, on clients that have them, in a
+-- boss encounter or a keystone run. Sync waits until they aren't.
+function Endpoint:IsBusy()
+    return answersTrue(self.client, { "InCombatLockdown" })
+        or answersTrue(self.client, { "IsEncounterInProgress" })
+        or answersTrue(self.client, { "C_ChallengeMode", "IsChallengeModeActive" })
 end

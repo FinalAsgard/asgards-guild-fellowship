@@ -42,6 +42,13 @@ local _, addon = ...
 -- another protocol version, or a type this version doesn't know, is ignored,
 -- so mixed add-on versions in one guild never break each other.
 --
+-- Never in the way of play: received messages, the announcement and replies
+-- are worked through one at a time in the background, a frame's budget
+-- (BUDGET_MS, the same as the note scan's) at a time. While the player is
+-- busy (in combat, a boss encounter or a keystone run), nothing is sent or
+-- worked on; it all waits, in order, until they aren't. The roster is told
+-- once per message, after all of it was applied.
+--
 -- Pure: the transport, clock and timers, and the game's facts are passed in.
 --   comm         { Broadcast(message) } sending to the guild
 --   context()    -> partition, normalizer for the current guild, or nil
@@ -56,6 +63,10 @@ local _, addon = ...
 --   onForgery(count, relayedBy) called after this officer's add-on caught
 --                and corrected `count` forged edits in their name, relayed
 --                by `relayedBy` (a name as the game reports it)
+--   busy()       -> whether the player is in combat, an encounter or a
+--                  keystone run
+--   preciseMs()  -> a high-resolution clock in milliseconds, or nil
+--   onError(problem) called when background work failed (raises by default)
 local SyncSession = {
     PROTOCOL = 1,
     TYPE_FACTS = "facts",
@@ -76,6 +87,12 @@ local SyncSession = {
     OFFICER_REPLY_MAX = 2,
     MEMBER_REPLY_MIN = 3,
     REPLY_MAX = 5,
+    -- Milliseconds of background work per frame, as for the note scan.
+    BUDGET_MS = 4,
+    -- Without a precise clock, yield after this many steps instead.
+    STEPS_WITHOUT_CLOCK = 50,
+    -- While the player is busy, check again this often.
+    PAUSE_SECONDS = 2,
 }
 addon.SyncSession = SyncSession
 
@@ -100,8 +117,19 @@ function SyncSession.Create(options)
         end,
         onApplied = options.onApplied or function() end,
         onForgery = options.onForgery or function() end,
+        busy = options.busy or function()
+            return false
+        end,
+        preciseMs = options.preciseMs or function()
+            return nil
+        end,
+        onError = options.onError or function(problem)
+            error(problem, 0)
+        end,
         -- Announcer key -> a reply this client is waiting to send.
         replies = {},
+        -- Background work waiting its turn, oldest first.
+        queue = {},
     }, Session)
 end
 
@@ -114,9 +142,93 @@ function Session:Facts(partition)
     })
 end
 
+-- Sends `message` now, or once the player is no longer busy.
 function Session:Send(message)
     message.v = SyncSession.PROTOCOL
+    if self.busy() then
+        self:Queue(function()
+            self.comm:Broadcast(message)
+        end)
+        return
+    end
     self.comm:Broadcast(message)
+end
+
+-- Background work ---------------------------------------------------------------
+
+-- Runs `work` in the background, after the work queued before it.
+function Session:Queue(work)
+    table.insert(self.queue, work)
+    if not self.working then
+        self.working = true
+        self:Step()
+    end
+end
+
+-- Inside background work: yields once this frame's budget is spent. Does
+-- nothing outside it, so the same code can run all at once.
+function Session:Checkpoint()
+    if self.job == nil or coroutine.running() ~= self.job then
+        return
+    end
+    local now = self.preciseMs()
+    if now ~= nil then
+        if now - self.stepStarted >= SyncSession.BUDGET_MS then
+            coroutine.yield()
+        end
+        return
+    end
+    self.stepCount = self.stepCount + 1
+    if self.stepCount >= SyncSession.STEPS_WITHOUT_CLOCK then
+        coroutine.yield()
+    end
+end
+
+-- One frame of background work: waits while the player is busy, otherwise
+-- works through the queue until this frame's budget is spent.
+function Session:Step()
+    local function again(seconds)
+        return self.after(seconds, function()
+            self:Step()
+        end)
+    end
+    -- With no timers there's no waiting, so the work runs now.
+    if self.busy() and again(SyncSession.PAUSE_SECONDS) then
+        return
+    end
+    self.stepStarted = self.preciseMs() or 0
+    self.stepCount = 0
+    while true do
+        if self.job == nil then
+            local work = table.remove(self.queue, 1)
+            if work == nil then
+                self.working = false
+                return
+            end
+            self.job = coroutine.create(work)
+        end
+        local job = self.job
+        local ok, problem = coroutine.resume(job)
+        if coroutine.status(job) ~= "dead" then
+            if again(0) then
+                return
+            end
+            -- No timers: finish now rather than never.
+            self.stepStarted = self.preciseMs() or 0
+            self.stepCount = 0
+        else
+            self.job = nil
+            if not ok then
+                -- The rest of the queue still runs, even when onError raises.
+                self.working = false
+                self.onError(problem)
+                if self.working or self.queue[1] == nil then
+                    return
+                end
+                self.working = true
+            end
+        end
+    end
 end
 
 -- Runs `callback` after `seconds`, or now when there are no timers.
@@ -272,9 +384,15 @@ function Session:Start()
     end)
 end
 
--- Announces this client's digest, once the roster has been scanned. Returns
--- true when it was sent.
+-- Announces this client's digest in the background, once the roster has
+-- been scanned.
 function Session:Announce()
+    self:Queue(function()
+        self:SendDigest()
+    end)
+end
+
+function Session:SendDigest()
     local partition = self.context()
     if partition == nil or not partition:HasBeenScanned() or self.selfKey() == nil then
         -- With no timers there's no waiting for the scan; the next login
@@ -282,14 +400,16 @@ function Session:Announce()
         self.after(SyncSession.RETRY_SECONDS, function()
             self:Announce()
         end)
-        return false
+        return
     end
-    local facts = self:Facts(partition):OfficerFacts()
-    self:Send({ t = SyncSession.TYPE_DIGEST, digest = addon.SyncDigest.Of(facts) })
+    local checkpoint = function()
+        self:Checkpoint()
+    end
+    local facts = self:Facts(partition):OfficerFacts(checkpoint)
+    self:Send({ t = SyncSession.TYPE_DIGEST, digest = addon.SyncDigest.Of(facts, checkpoint) })
     if not self.isOfficer(self.selfKey()) and self.officerOnline() then
         self:SendSuggestions(partition)
     end
-    return true
 end
 
 -- After "Don't sync" was turned off for `key`'s player: lets officer data
@@ -298,10 +418,10 @@ end
 function Session:Rejoin(key)
     local partition = self.context()
     if partition == nil then
-        return false
+        return
     end
     self:Facts(partition):Rejoin(key)
-    return self:Announce()
+    self:Announce()
 end
 
 -- Someone announced `digest`: unless it matches, schedules a reply with this
@@ -311,7 +431,10 @@ function Session:OnDigest(digest, announcer, partition)
     if not digests.IsValid(digest) or self.replies[announcer] ~= nil then
         return
     end
-    local mine = digests.Of(self:Facts(partition):OfficerFacts())
+    local checkpoint = function()
+        self:Checkpoint()
+    end
+    local mine = digests.Of(self:Facts(partition):OfficerFacts(checkpoint), checkpoint)
     local buckets = digests.Differing(mine, digest)
     if buckets[1] == nil then
         return
@@ -325,19 +448,23 @@ function Session:OnDigest(digest, announcer, partition)
     else
         delay = self.random(SyncSession.MEMBER_REPLY_MIN, SyncSession.REPLY_MAX)
     end
+    -- Messages heard meanwhile are worked through first, so a reply heard
+    -- before this one's turn still silences it.
     self:Later(delay, function()
-        if self.replies[announcer] ~= reply then
-            return
-        end
-        self.replies[announcer] = nil
-        -- The guild may have changed while the reply waited.
-        local current = self.context()
-        if current == nil or current.key ~= partition.key then
-            return
-        end
-        partition = current
-        local facts = digests.FactsIn(self:Facts(partition):OfficerFacts(), buckets)
-        self:Send({ t = SyncSession.TYPE_FACTS, re = announcer, buckets = buckets, facts = facts })
+        self:Queue(function()
+            if self.replies[announcer] ~= reply then
+                return
+            end
+            self.replies[announcer] = nil
+            -- The guild may have changed while the reply waited.
+            local current = self.context()
+            if current == nil or current.key ~= partition.key then
+                return
+            end
+            partition = current
+            local facts = digests.FactsIn(self:Facts(partition):OfficerFacts(checkpoint), buckets, checkpoint)
+            self:Send({ t = SyncSession.TYPE_FACTS, re = announcer, buckets = buckets, facts = facts })
+        end)
     end)
 end
 
@@ -357,7 +484,10 @@ function Session:FollowUp(reply, partition)
         end
     end
     local missing = {}
-    local mine = digests.FactsIn(self:Facts(partition):OfficerFacts(), reply.buckets)
+    local checkpoint = function()
+        self:Checkpoint()
+    end
+    local mine = digests.FactsIn(self:Facts(partition):OfficerFacts(checkpoint), reply.buckets, checkpoint)
     for index = 1, #mine do
         local fact = mine[index]
         local held = theirs[fact.kind .. "\31" .. fact.character]
@@ -405,6 +535,7 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
         else
             table.insert(kept, fact)
         end
+        self:Checkpoint()
     end
     if forged == 0 then
         return facts
@@ -417,12 +548,19 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
     return kept
 end
 
--- A message from `sender` (a name as the game reports it). Returns how many
--- facts it applied.
+-- A message from `sender` (a name as the game reports it): worked on in the
+-- background, after anything heard before it.
 function Session:Receive(message, sender)
     if type(message) ~= "table" or message.v ~= SyncSession.PROTOCOL then
-        return 0
+        return
     end
+    self:Queue(function()
+        self:Process(message, sender)
+    end)
+end
+
+-- Works on one received message. Returns how many facts it applied.
+function Session:Process(message, sender)
     local partition, normalizer = self.context()
     if partition == nil then
         return 0
@@ -465,7 +603,9 @@ function Session:Receive(message, sender)
     if selfIsOfficer then
         incoming = self:CatchForgeries(incoming, partition, selfKey, senderKey, sender)
     end
-    local applied = self:Facts(partition):ApplyAll(incoming)
+    local applied = self:Facts(partition):ApplyAll(incoming, function()
+        self:Checkpoint()
+    end)
     local settled = suggestions:Settle(decided) + suggestions:Prune(decided)
     if applied > 0 or settled > 0 or reverted > 0 then
         self.onApplied(applied)

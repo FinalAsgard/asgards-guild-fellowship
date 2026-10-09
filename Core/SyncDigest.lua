@@ -106,8 +106,9 @@ function SyncDigest.IsBucketList(buckets)
     return true
 end
 
--- The facts from `facts` that lie in any of `buckets`.
-function SyncDigest.FactsIn(facts, buckets)
+-- The facts from `facts` that lie in any of `buckets`. `checkpoint`, as for
+-- Of.
+function SyncDigest.FactsIn(facts, buckets, checkpoint)
     local wanted = {}
     local index
     for index = 1, #buckets do
@@ -117,6 +118,9 @@ function SyncDigest.FactsIn(facts, buckets)
     for index = 1, #facts do
         if wanted[SyncDigest.BucketOf(facts[index])] then
             table.insert(found, facts[index])
+        end
+        if checkpoint ~= nil then
+            checkpoint()
         end
     end
     return found

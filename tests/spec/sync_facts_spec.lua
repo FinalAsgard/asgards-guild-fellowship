@@ -40,7 +40,7 @@ end
 test.test("an officer's fact links an alt and records who set it and when", function()
     local setup = newSetup({ OFFICER, MEMBER, "toolbox2-area52" })
 
-    local applied = setup.facts:ApplyAll({ fact(MEMBER, "toolbox2-area52") }, OFFICER)
+    local applied = setup.facts:ApplyAll({ fact(MEMBER, "toolbox2-area52") })
 
     test.assertEqual(1, applied)
     test.assertEqual("toolbox2-area52", mainOf(setup.partition, MEMBER))
@@ -53,7 +53,7 @@ end)
 test.test("a fact from someone who isn't an officer is ignored", function()
     local setup = newSetup({ OFFICER, MEMBER, "wrench-area52" })
 
-    local applied = setup.facts:ApplyAll({ fact("wrench-area52", MEMBER, NOW, MEMBER) }, MEMBER)
+    local applied = setup.facts:ApplyAll({ fact("wrench-area52", MEMBER, NOW, MEMBER) })
 
     test.assertEqual(0, applied)
     test.assertEqual("wrench-area52", mainOf(setup.partition, "wrench-area52"))
@@ -64,7 +64,7 @@ test.test("an officer's fact is accepted whoever passes it on", function()
     local setup = newSetup({ OFFICER, MEMBER, "wrench-area52" })
 
     test.assertEqual(nil, setup.facts:Refusal(fact("wrench-area52", MEMBER)))
-    test.assertEqual(1, setup.facts:ApplyAll({ fact("wrench-area52", MEMBER) }, "wrench-area52"))
+    test.assertEqual(1, setup.facts:ApplyAll({ fact("wrench-area52", MEMBER) }))
     test.assertEqual(MEMBER, mainOf(setup.partition, "wrench-area52"))
 end)
 
@@ -112,23 +112,23 @@ end)
 test.test("the newest edit wins, and an equal time is settled the same way everywhere", function()
     local setup = newSetup({ OFFICER, OTHER_OFFICER, MEMBER, "wrench-area52" })
 
-    setup.facts:ApplyAll({ fact(MEMBER, "wrench-area52", NOW + 10, OTHER_OFFICER) }, OTHER_OFFICER)
+    setup.facts:ApplyAll({ fact(MEMBER, "wrench-area52", NOW + 10, OTHER_OFFICER) })
     -- Older: ignored.
-    test.assertEqual(0, setup.facts:ApplyAll({ fact(MEMBER, OFFICER, NOW, OFFICER) }, OFFICER))
+    test.assertEqual(0, setup.facts:ApplyAll({ fact(MEMBER, OFFICER, NOW, OFFICER) }))
     test.assertEqual("wrench-area52", mainOf(setup.partition, MEMBER))
     -- Newer: applied.
-    test.assertEqual(1, setup.facts:ApplyAll({ fact(MEMBER, OFFICER, NOW + 20, OFFICER) }, OFFICER))
+    test.assertEqual(1, setup.facts:ApplyAll({ fact(MEMBER, OFFICER, NOW + 20, OFFICER) }))
     test.assertEqual(OFFICER, mainOf(setup.partition, MEMBER))
     -- Same second: the later author name wins, whichever arrives first.
-    test.assertEqual(0, setup.facts:ApplyAll({ fact(MEMBER, "wrench-area52", NOW + 20, OTHER_OFFICER) }, OTHER_OFFICER))
+    test.assertEqual(0, setup.facts:ApplyAll({ fact(MEMBER, "wrench-area52", NOW + 20, OTHER_OFFICER) }))
     test.assertEqual(OFFICER, mainOf(setup.partition, MEMBER))
 end)
 
 test.test("a fact about a character this client doesn't know is ignored", function()
     local setup = newSetup({ OFFICER, MEMBER })
 
-    test.assertEqual(0, setup.facts:ApplyAll({ fact(MEMBER, "stranger-area52") }, OFFICER))
-    test.assertEqual(0, setup.facts:ApplyAll({ fact("stranger-area52", MEMBER) }, OFFICER))
+    test.assertEqual(0, setup.facts:ApplyAll({ fact(MEMBER, "stranger-area52") }))
+    test.assertEqual(0, setup.facts:ApplyAll({ fact("stranger-area52", MEMBER) }))
     test.assertEqual(MEMBER, mainOf(setup.partition, MEMBER))
 end)
 
@@ -141,10 +141,10 @@ test.test("malformed facts are ignored without errors", function()
         { kind = "main", character = MEMBER, main = OFFICER, at = "now", by = OFFICER },
         { kind = "main", character = MEMBER, main = OFFICER, at = 0, by = OFFICER },
         { kind = "main", character = MEMBER, at = NOW, by = OFFICER },
-    }, OFFICER)
+    })
 
     test.assertEqual(0, applied)
-    test.assertEqual(0, setup.facts:ApplyAll("nothing", OFFICER))
+    test.assertEqual(0, setup.facts:ApplyAll("nothing"))
 end)
 
 test.test("a detach arrives as the character being its own main", function()
@@ -152,7 +152,7 @@ test.test("a detach arrives as the character being its own main", function()
     setup.partition:JoinPlayerOf(MEMBER, OFFICER, "manual")
     setup.partition:JoinPlayerOf("wrench-area52", OFFICER, "manual")
 
-    setup.facts:ApplyAll({ fact(MEMBER, MEMBER) }, OFFICER)
+    setup.facts:ApplyAll({ fact(MEMBER, MEMBER) })
 
     test.assertEqual(MEMBER, mainOf(setup.partition, MEMBER))
     test.assertEqual(1, #setup.partition:CharactersOf(setup.partition:GetCharacter(MEMBER).player))
@@ -176,7 +176,7 @@ test.test("a new main arrives as every character of the player naming it, in any
             table.insert(batch, fact(orders[orderIndex][index], MEMBER))
         end
 
-        test.assertEqual(3, setup.facts:ApplyAll(batch, OFFICER))
+        test.assertEqual(3, setup.facts:ApplyAll(batch))
 
         local player = setup.partition:GetCharacter(MEMBER).player
         test.assertEqual(MEMBER, setup.partition:GetPlayer(player).main, "order " .. orderIndex)
@@ -223,7 +223,7 @@ end
 test.test("an officer's alias fact names the player and records who set it and when", function()
     local setup = newSetup({ OFFICER, MEMBER })
 
-    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "The Hammer") }, OFFICER))
+    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "The Hammer") }))
 
     test.assertEqual("The Hammer", aliasOf(setup.partition, MEMBER))
     local player = setup.partition:GetPlayer(setup.partition:GetCharacter(MEMBER).player)
@@ -235,9 +235,9 @@ end)
 
 test.test("an empty alias fact clears the alias", function()
     local setup = newSetup({ OFFICER, MEMBER })
-    setup.facts:ApplyAll({ aliasFact(MEMBER, "The Hammer") }, OFFICER)
+    setup.facts:ApplyAll({ aliasFact(MEMBER, "The Hammer") })
 
-    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "", NOW + 5) }, OFFICER))
+    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "", NOW + 5) }))
 
     test.assertEqual(nil, aliasOf(setup.partition, MEMBER))
     test.assertEqual(NOW + 5, (setup.partition:GetAliasStamp(MEMBER)))
@@ -246,18 +246,18 @@ end)
 test.test("an alias fact from someone who isn't an officer is ignored", function()
     local setup = newSetup({ OFFICER, MEMBER })
 
-    test.assertEqual(0, setup.facts:ApplyAll({ aliasFact(MEMBER, "Me", NOW, MEMBER) }, MEMBER))
+    test.assertEqual(0, setup.facts:ApplyAll({ aliasFact(MEMBER, "Me", NOW, MEMBER) }))
     test.assertEqual(nil, aliasOf(setup.partition, MEMBER))
 end)
 
 test.test("when two officers set different aliases, the newest wins", function()
     local setup = newSetup({ OFFICER, OTHER_OFFICER, MEMBER })
 
-    setup.facts:ApplyAll({ aliasFact(MEMBER, "Newer", NOW + 10, OTHER_OFFICER) }, OTHER_OFFICER)
-    test.assertEqual(0, setup.facts:ApplyAll({ aliasFact(MEMBER, "Older", NOW, OFFICER) }, OFFICER))
+    setup.facts:ApplyAll({ aliasFact(MEMBER, "Newer", NOW + 10, OTHER_OFFICER) })
+    test.assertEqual(0, setup.facts:ApplyAll({ aliasFact(MEMBER, "Older", NOW, OFFICER) }))
     test.assertEqual("Newer", aliasOf(setup.partition, MEMBER))
     -- Same second: the later author name wins.
-    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "Tied", NOW + 10, OFFICER) }, OFFICER))
+    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "Tied", NOW + 10, OFFICER) }))
     test.assertEqual("Tied", aliasOf(setup.partition, MEMBER))
 end)
 
@@ -266,7 +266,7 @@ test.test("an alias fact lands on the right player when this client still has an
     -- Here the officer is still the main; the sender already made Hammer main.
     setup.partition:JoinPlayerOf(MEMBER, OFFICER, "manual")
 
-    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "Tools") }, OFFICER))
+    test.assertEqual(1, setup.facts:ApplyAll({ aliasFact(MEMBER, "Tools") }))
 
     test.assertEqual("Tools", aliasOf(setup.partition, OFFICER))
     test.assertEqual(nil, aliasOf(setup.partition, "wrench-area52"))
@@ -276,8 +276,8 @@ test.test("an alias that arrives after a main change stays with the player", fun
     local setup = newSetup({ OFFICER, MEMBER })
     setup.partition:JoinPlayerOf(MEMBER, OFFICER, "manual")
 
-    setup.facts:ApplyAll({ fact(OFFICER, MEMBER), fact(MEMBER, MEMBER) }, OFFICER)
-    setup.facts:ApplyAll({ aliasFact(MEMBER, "Tools", NOW + 1) }, OFFICER)
+    setup.facts:ApplyAll({ fact(OFFICER, MEMBER), fact(MEMBER, MEMBER) })
+    setup.facts:ApplyAll({ aliasFact(MEMBER, "Tools", NOW + 1) })
 
     test.assertEqual(MEMBER, mainOf(setup.partition, OFFICER))
     test.assertEqual("Tools", aliasOf(setup.partition, OFFICER))
@@ -291,7 +291,7 @@ test.test("malformed alias facts are ignored", function()
         { kind = "alias", character = MEMBER, alias = 7, at = NOW, by = OFFICER },
         aliasFact(MEMBER, string.rep("x", 49)),
         aliasFact("stranger-area52", "Nobody"),
-    }, OFFICER))
+    }))
     test.assertEqual(nil, aliasOf(setup.partition, MEMBER))
 end)
 

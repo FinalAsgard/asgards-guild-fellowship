@@ -235,6 +235,16 @@ if clientProfile.supported then
                 " in your name that you never made. Your own data was sent to the guild to correct it," ..
                 " and the forgery was logged.")
         end,
+        -- Sync never competes with play.
+        busy = function()
+            return comm:IsBusy()
+        end,
+        preciseMs = function()
+            return client:PreciseMilliseconds()
+        end,
+        onError = function(problem)
+            rosterController:Print("Guild sync failed: " .. tostring(problem))
+        end,
     })
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()

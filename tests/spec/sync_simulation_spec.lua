@@ -430,7 +430,7 @@ test.test("a forged relay is corrected for every member once the officer it name
     fixtures.joinChannel(channel, officer)
     officer.time = wrench.time + 60
     local printed = #officer.messages
-    test.assertTrue(officer.addon.syncSession:Announce())
+    officer.addon.syncSession:Announce()
     fixtures.deliver(channel)
     fixtures.runTimers(hammer, 5)
     fixtures.runTimers(wrench, 5)
@@ -926,4 +926,33 @@ test.test("on WoW Forever, a first name shared by two roster members is matched 
     officer.environment.UnitGUID = nil
     officer.addon.rosterController.selfKeyCache = nil
     test.assertEqual(nil, officer.addon.syncSession.selfKey())
+end)
+
+test.test("sync pauses in combat and boss encounters, and catches up once they end", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local member = login(channel, "Hammer-Area52")
+    local pause = member.addon.SyncSession.PAUSE_SECONDS
+
+    -- The member is fighting when the officer's edit arrives.
+    member.inCombat = true
+    linkAlt(officer, "wrench-area52", "toolbox-area52")
+    fixtures.deliver(channel)
+    fixtures.runTimers(member, 10)
+    test.assertEqual("wrench-area52", mainOf(member, "wrench-area52"), "nothing is worked on in combat")
+    member.inCombat = false
+    fixtures.runTimers(member, pause)
+    test.assertEqual("toolbox-area52", mainOf(member, "wrench-area52"))
+
+    -- The officer edits during a boss encounter.
+    local sent = #officer.sentMessages
+    officer.inEncounter = true
+    test.assertTrue(officer.addon.rosterController:Detach("wrench-area52"))
+    fixtures.runTimers(officer, 10)
+    test.assertEqual(sent, #officer.sentMessages, "nothing is sent during an encounter")
+    officer.inEncounter = false
+    fixtures.runTimers(officer, pause)
+    fixtures.deliver(channel)
+    test.assertEqual(sent + 1, #officer.sentMessages)
+    test.assertEqual("wrench-area52", mainOf(member, "wrench-area52"))
 end)

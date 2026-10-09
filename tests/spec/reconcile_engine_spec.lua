@@ -224,7 +224,7 @@ test.test("on a new install notes seed first, and officer data arriving later re
     }):ApplyAll({
         { kind = "main", character = "hammer-area52", main = "visitor-area52", at = 1790000000, by = officer },
         { kind = "alias", character = "toolbox-area52", alias = "Tools", at = 1790000000, by = officer },
-    }, officer)
+    })
 
     test.assertEqual(2, applied)
     test.assertEqual("visitor-area52", playerOf(partition, "hammer-area52").main)
