@@ -15,6 +15,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf` or `/agf roster` | Shows or hides the roster window. |
 | `/agf rescan` | Scans the guild's notes right away. |
 | `/agf options` | Opens the add-on's settings panel. |
+| `/agf greet` | Opens the Greetings window, where you edit your Guild Greet greetings. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
@@ -26,7 +27,7 @@ The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Gui
 
 - **General**: show or hide the minimap button, an **Open Roster** button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off.
-- **Guild Greet**: turn Guild Greet on or off.
+- **Guild Greet**: turn Guild Greet on or off, and an **Edit Greetings** button that opens the Greetings window.
 
 The panel and the slash commands change the same settings, so a change made either way shows up in both. Settings are saved for every character on this game install. The development build's panel is labeled "(Dev)".
 
@@ -164,8 +165,8 @@ On Retail, the game hides chat from add-ons during encounters and keystone runs.
 
 When a guild member comes online, a small prompt appears at the left side of the screen with just the name they go by and a **Greet** button. Press it to post a random greeting to guild chat. Nothing is ever posted unless you press the button.
 
-- **New member**: someone joins the guild. They get this instead of a login prompt.
-- **Long time no see**: someone's first login this session when none of their characters had logged in for 30 days or more, going by the guild roster's last-online times when you logged in.
+- **Join**: someone joins the guild. They get this instead of a login prompt.
+- **Long absence**: someone's first login this session when none of their characters had logged in for 30 days or more, going by the guild roster's last-online times when you logged in.
 - **Login**: the first time you see someone come online this session.
 - **Welcome back**: someone you saw log off comes back 15 minutes or more later. Coming back sooner (a relog or a disconnect) gets no prompt.
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
@@ -184,6 +185,12 @@ Greetings can use these placeholders, in any capitalization:
 | `{characterFirst}`, `{characterLast}` | The first or last part of that character's name. |
 
 First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** section of the settings panel. Greetings and the setting are shared by every character on this game install.
+
+### Editing greetings
+
+The **Greetings** window (`/agf greet`, or **Edit Greetings** in the settings panel) has a button for each category. Each lists that category's greetings, with **Edit** and **Delete** beside each one. Type in the box at the bottom and press **Add** (or Enter) to add a greeting; after **Edit**, the button reads **Save**. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The window lists every placeholder.
+
+A category with no greetings shows no prompts, so emptying one is a way to turn it off. **Restore starter greetings** puts back the starters in the open category, and **Restore all categories** does it everywhere. Both replace what's there, so each asks for a second click.
 
 ## Supported clients
 

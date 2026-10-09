@@ -67,6 +67,12 @@ function Greet:service()
     return addon.PlayerService.Create(partition, { normalizer = normalizer })
 end
 
+-- The user's greetings (a GreetingLibrary over the saved state).
+function Greet:Library()
+    local store = self.store()
+    return addon.GreetingLibrary.Create(store and store:GetGreetState(), self.random)
+end
+
 function Greet:IsEnabled()
     local store = self.store()
     return store == nil or store:GreetEnabled()
@@ -210,7 +216,8 @@ function Greet:OnPresence(kind, rawName)
     elseif kind == "join" then
         prompt = self.policy:Joined(key, now)
     end
-    if prompt == nil then
+    -- A category with no greetings has nothing to say, so it never prompts.
+    if prompt == nil or #self:Library():Greetings(prompt.category) == 0 then
         return
     end
     prompt.rawName = rawName
@@ -247,9 +254,7 @@ function Greet:Greet(player)
         return nil
     end
     self.queue:Remove(player)
-    local store = self.store()
-    local library = addon.GreetingLibrary.Create(store and store:GetGreetState(), self.random)
-    local greeting = library:Pick(prompt.category)
+    local greeting = self:Library():Pick(prompt.category)
     local text
     if greeting ~= nil then
         text = addon.GreetingLibrary.Render(greeting, self:Names(prompt.key, prompt.rawName))

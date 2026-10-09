@@ -502,3 +502,39 @@ test.test("combat that's already under way when Greet starts is reported", funct
     encounterWorld.inEncounter = true
     test.assertEqual(true, encounter:ObserveCombat(function() end))
 end)
+
+-- Editing greetings -------------------------------------------------------------
+
+test.test("guild greet: a category with no greetings shows no prompts, and restoring brings them back", function()
+    local world = setup("Retail")
+    local library = world.greet:Library()
+    while #library:Greetings("login") > 0 do
+        library:Remove("login", 1)
+    end
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(0, #world.shown)
+    -- Other categories still prompt.
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("join", world.shown[1].category)
+
+    world.greet:Library():Restore("login")
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertEqual(2, #world.shown)
+    test.assertEqual("login", world.shown[2].category)
+end)
+
+test.test("guild greet: a greeting added or edited in the window is used by the next greet", function()
+    local world = setup("Forever")
+    local library = world.greet:Library()
+    library:Restore("login")
+    library:Remove("login", 3)
+    library:Remove("login", 2)
+    library:Edit("login", 1, "Ahoy {characterFirst}!")
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.handlers.greet(world.shown[1].player)
+
+    test.assertEqual("Ahoy Bolt!", world.sent[1])
+end)

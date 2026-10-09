@@ -39,6 +39,23 @@ local GreetingLibrary = {
     RETIRED = {
         ["Evening, {name}!"] = "Hello, {name}!",
     },
+    -- The categories in the order the Greetings window lists them.
+    CATEGORIES = {
+        { id = "join", label = "Join", when = "Someone joins the guild." },
+        { id = "login", label = "Login", when = "Someone's first login you see this session." },
+        { id = "welcomeBack", label = "Welcome back", when = "Someone you saw log off comes back after a break." },
+        { id = "longAbsence", label = "Long absence", when = "Someone logs in after a long time away." },
+    },
+    -- Every placeholder and what it's filled with. Case doesn't matter.
+    PLACEHOLDERS = {
+        { "{name}", "their alias, else their main's name" },
+        { "{main}", "their main's name, even when they have an alias" },
+        { "{mainFirst}", "the first part of their main's name" },
+        { "{mainLast}", "the last part of their main's name" },
+        { "{character}", "the character that logged in" },
+        { "{characterFirst}", "the first part of that character's name" },
+        { "{characterLast}", "the last part of that character's name" },
+    },
 }
 addon.GreetingLibrary = GreetingLibrary
 
@@ -66,9 +83,8 @@ function GreetingLibrary.Create(state, random)
     }, Library)
 end
 
--- A greeting cleaned for chat: trimmed, with line breaks folded to spaces,
--- and cut to one message. Nil when nothing is left.
-function GreetingLibrary.Clean(text)
+-- Trimmed, with line breaks folded to spaces. Nil when nothing is left.
+local function tidy(text)
     if type(text) ~= "string" then
         return nil
     end
@@ -78,7 +94,28 @@ function GreetingLibrary.Clean(text)
     if text == "" then
         return nil
     end
-    return string.sub(text, 1, GreetingLibrary.MAX_LENGTH)
+    return text
+end
+
+-- A greeting cleaned for chat: trimmed, with line breaks folded to spaces,
+-- and cut to one message. Nil when nothing is left.
+function GreetingLibrary.Clean(text)
+    text = tidy(text)
+    return text and string.sub(text, 1, GreetingLibrary.MAX_LENGTH)
+end
+
+-- A greeting the user typed, tidied the same way. Returns nil and the reason
+-- when it's empty or won't fit in one chat message; a long greeting is
+-- refused rather than cut, so nothing is silently lost.
+function GreetingLibrary.Check(text)
+    local tidied = tidy(text)
+    if tidied == nil then
+        return nil, "it's empty"
+    end
+    if #tidied > GreetingLibrary.MAX_LENGTH then
+        return nil, "it's longer than one guild chat message (" .. GreetingLibrary.MAX_LENGTH .. " characters)"
+    end
+    return tidied
 end
 
 -- Fills in a greeting's placeholders from `names`, keyed in lowercase (see
@@ -183,4 +220,91 @@ function Library:Pick(category)
         lastUsed[category] = greeting
     end
     return greeting
+end
+
+-- The category's saved list, rewritten as Greetings(category) shows it so
+-- positions match what the user sees. Nil and the reason when it can't be
+-- edited; an unusable saved list is left alone.
+function Library:editable(category)
+    if GreetingLibrary.STARTERS[category] == nil then
+        return nil, "there is no such category"
+    end
+    local greetings = self:stored()
+    if greetings == nil then
+        return nil, "saved data is unavailable"
+    end
+    local cleaned = self:Greetings(category)
+    if type(greetings[category]) ~= "table" then
+        return nil, "the saved greetings are unreadable"
+    end
+    greetings[category] = cleaned
+    return cleaned
+end
+
+-- Adds a greeting to the end of `category`. Returns its position, or nil and
+-- the reason.
+function Library:Add(category, text)
+    local list, reason = self:editable(category)
+    if list == nil then
+        return nil, reason
+    end
+    local greeting
+    greeting, reason = GreetingLibrary.Check(text)
+    if greeting == nil then
+        return nil, reason
+    end
+    table.insert(list, greeting)
+    return #list
+end
+
+-- Replaces the greeting at `index` in `category`. Returns true, or nil and
+-- the reason.
+function Library:Edit(category, index, text)
+    local list, reason = self:editable(category)
+    if list == nil then
+        return nil, reason
+    end
+    if list[index] == nil then
+        return nil, "that greeting is gone"
+    end
+    local greeting
+    greeting, reason = GreetingLibrary.Check(text)
+    if greeting == nil then
+        return nil, reason
+    end
+    list[index] = greeting
+    return true
+end
+
+-- Deletes the greeting at `index` in `category`. A category may be left
+-- empty: it then shows no prompts. Returns true, or nil and the reason.
+function Library:Remove(category, index)
+    local list, reason = self:editable(category)
+    if list == nil then
+        return nil, reason
+    end
+    if list[index] == nil then
+        return nil, "that greeting is gone"
+    end
+    table.remove(list, index)
+    return true
+end
+
+-- Puts back the starter greetings in `category`, or in every category when
+-- it's nil, replacing what's there. Returns true, or nil and the reason.
+function Library:Restore(category)
+    if category ~= nil and GreetingLibrary.STARTERS[category] == nil then
+        return nil, "there is no such category"
+    end
+    local greetings = self:stored()
+    if greetings == nil then
+        return nil, "saved data is unavailable"
+    end
+    local id, starters
+    for id, starters in pairs(GreetingLibrary.STARTERS) do
+        if category == nil or category == id then
+            greetings[id] = copy(starters)
+        end
+    end
+    return true
 end

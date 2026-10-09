@@ -238,3 +238,27 @@ test.test("/agf options is listed in help and explains when there is no panel", 
     fixtures.slash(world, "options")
     test.assertContains(lastMessage(world), "The settings panel isn't available on this client.")
 end)
+
+test.test("/agf greet and the panel's Edit Greetings button open the Greetings window", function()
+    local world, addon = loggedIn("Retail")
+
+    fixtures.slash(world, "help")
+    test.assertContains(table.concat(world.messages, "\n"), "/agf greet - edit your Guild Greet greetings")
+
+    local entry = addon.settings:Entry("editGreetings")
+    test.assertEqual("action", entry.kind)
+    test.assertEqual("Edit Greetings", entry.label)
+    local sections = addon.settings:Sections()
+    local guildGreet = sections[#sections]
+    test.assertEqual("Guild Greet", guildGreet.label)
+    test.assertEqual("editGreetings", guildGreet.entries[#guildGreet.entries].id)
+
+    -- The fixtures' stand-in framework can't build windows, so both report
+    -- that instead of raising errors.
+    fixtures.slash(world, "greet")
+    test.assertContains(lastMessage(world), "The Greetings window can't open")
+    local before = #world.messages
+    test.assertTrue(addon.settings:Run("editGreetings"))
+    test.assertEqual(before + 1, #world.messages)
+    test.assertContains(lastMessage(world), "The Greetings window can't open")
+end)

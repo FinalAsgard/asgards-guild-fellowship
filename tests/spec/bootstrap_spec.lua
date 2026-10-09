@@ -10,6 +10,7 @@ local MANIFEST_FILES = {
     "Adapters/Comm.lua",
     "Adapters/SettingsPanel.lua",
     "Adapters/GreetPrompts.lua",
+    "Adapters/GreetingsWindow.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",

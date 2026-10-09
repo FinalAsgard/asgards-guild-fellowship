@@ -93,3 +93,97 @@ test.test("greeting library: a retired starter in saved greetings is replaced", 
     test.assertEqual("Hello, {name}!", library:Greetings("login")[2])
     test.assertEqual("Hello, {name}!", state.greetings.login[2])
 end)
+
+test.test("greeting library: greetings can be added, edited and deleted", function()
+    local addon = load()
+    local state = { greetings = { login = { "One", "", "Two" } } }
+    local library = addon.GreetingLibrary.Create(state, lowest)
+
+    -- Positions are the ones Greetings shows, with the blank line gone.
+    test.assertEqual(3, library:Add("login", "  Three\n"))
+    test.assertTrue(library:Edit("login", 2, "Second"))
+    test.assertTrue(library:Remove("login", 1))
+
+    test.assertEqual("Second,Three", table.concat(library:Greetings("login"), ","))
+    -- Saved account-wide, so a new library (the next prompt) sees them.
+    test.assertEqual("Second,Three", table.concat(
+        addon.GreetingLibrary.Create(state, lowest):Greetings("login"), ","))
+end)
+
+test.test("greeting library: empty and over-long greetings are refused, not cut", function()
+    local addon = load()
+    local state = {}
+    local library = addon.GreetingLibrary.Create(state, lowest)
+
+    local ok, reason = library:Add("join", "   ")
+    test.assertEqual(nil, ok)
+    test.assertEqual("it's empty", reason)
+
+    ok, reason = library:Edit("join", 1, string.rep("a", 256))
+    test.assertEqual(nil, ok)
+    test.assertContains(reason, "255 characters")
+    -- Exactly one message's worth fits, after the three starters.
+    test.assertEqual(4, library:Add("join", string.rep("a", 255)))
+    test.assertEqual(255, #state.greetings.join[4])
+
+    test.assertEqual(nil, library:Edit("join", 9, "Hi"))
+    test.assertEqual(nil, library:Remove("join", 9))
+    test.assertEqual(nil, library:Add("party", "Hi"))
+end)
+
+test.test("greeting library: restoring puts back the starters in one category or all", function()
+    local addon = load()
+    local starters = addon.GreetingLibrary.STARTERS
+    local state = { greetings = { login = { "Mine" }, join = {}, welcomeBack = { "Also mine" } } }
+    local library = addon.GreetingLibrary.Create(state, lowest)
+
+    test.assertTrue(library:Restore("login"))
+    test.assertEqual(table.concat(starters.login, ","), table.concat(library:Greetings("login"), ","))
+    test.assertEqual("Also mine", library:Greetings("welcomeBack")[1])
+    test.assertEqual(0, #library:Greetings("join"))
+
+    test.assertTrue(library:Restore())
+    local index
+    for index = 1, #addon.GreetingLibrary.CATEGORIES do
+        local category = addon.GreetingLibrary.CATEGORIES[index].id
+        test.assertEqual(table.concat(starters[category], ","), table.concat(library:Greetings(category), ","))
+    end
+    -- The saved copies are the user's own again, apart from the starters.
+    library:Add("login", "New")
+    test.assertEqual(3, #starters.login)
+end)
+
+test.test("greeting library: without usable saved data nothing is changed", function()
+    local addon = load()
+    local corrupt = { greetings = { login = "x" } }
+
+    local ok, reason = addon.GreetingLibrary.Create(nil, lowest):Add("login", "Hi")
+    test.assertEqual(nil, ok)
+    test.assertEqual("saved data is unavailable", reason)
+    test.assertEqual(nil, addon.GreetingLibrary.Create(nil, lowest):Restore())
+
+    ok, reason = addon.GreetingLibrary.Create(corrupt, lowest):Remove("login", 1)
+    test.assertEqual(nil, ok)
+    test.assertEqual("the saved greetings are unreadable", reason)
+    test.assertEqual("x", corrupt.greetings.login)
+end)
+
+test.test("greeting library: every category and placeholder is described for the window", function()
+    local addon = load()
+    local library = addon.GreetingLibrary
+
+    test.assertEqual(4, #library.CATEGORIES)
+    local index
+    for index = 1, #library.CATEGORIES do
+        test.assertTrue(library.STARTERS[library.CATEGORIES[index].id] ~= nil)
+    end
+    local described = {}
+    for index = 1, #library.PLACEHOLDERS do
+        described[string.lower(library.PLACEHOLDERS[index][1])] = true
+    end
+    local names = { "name", "main", "mainfirst", "mainlast", "character", "characterfirst", "characterlast" }
+    for index = 1, #names do
+        test.assertTrue(described["{" .. names[index] .. "}"], names[index])
+    end
+    test.assertEqual(#names, #library.PLACEHOLDERS)
+end)

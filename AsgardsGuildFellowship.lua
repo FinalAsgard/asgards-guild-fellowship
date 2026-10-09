@@ -26,7 +26,7 @@ if missingLibraries ~= nil then
 end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
-local guildGreet
+local guildGreet, greetingsWindow
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -214,12 +214,40 @@ if clientProfile.supported then
             return true
         end,
     })
+    -- The greetings themselves are edited in their own window, made on
+    -- first use.
+    local function openGreetings()
+        if greetingsWindow == nil then
+            local reason
+            greetingsWindow, reason = addon.GreetingsWindow.Create(client, {
+                library = function()
+                    return guildGreet:Library()
+                end,
+                after = function(seconds, callback)
+                    return client:After(seconds, callback)
+                end,
+            })
+            if greetingsWindow == nil then
+                rosterController:Print("The Greetings window can't open: " .. tostring(reason) ..
+                    ". Reinstall the add-on, or in a development checkout run tools/Fetch-Libraries.ps1.")
+                return
+            end
+        end
+        greetingsWindow:Open()
+    end
+    settings:Add("guildGreet", {
+        id = "editGreetings",
+        kind = "action",
+        label = "Edit Greetings",
+        run = openGreetings,
+    })
     settingsPanel = addon.SettingsPanel.Create(client, settings)
     router:Register("options", "open the settings panel", function()
         if not settingsPanel:Open() then
             rosterController:Print("The settings panel isn't available on this client.")
         end
     end)
+    router:Register("greet", "edit your Guild Greet greetings", openGreetings)
     router:Register("minimap", "show or hide the minimap button", function()
         local shown, reason = settings:Toggle("minimap")
         if shown == nil then
