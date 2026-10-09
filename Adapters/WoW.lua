@@ -383,6 +383,50 @@ function Client:ObservePresence(onPresence)
     return true
 end
 
+-- Calls onChange(busy) when the player enters or leaves combat or, on
+-- clients that report them, a boss encounter: busy is true while either
+-- lasts. Returns the current state (false when the client can't say), or
+-- nil when the client can't deliver the events.
+function Client:ObserveCombat(onChange)
+    if type(onChange) ~= "function" then
+        return nil
+    end
+    local function asks(callback)
+        local ok, answer = callFunction(callback)
+        return ok and answer ~= nil and answer ~= false
+    end
+    local inCombat = asks(self.environment.InCombatLockdown)
+    local inEncounter = asks(self.environment.IsEncounterInProgress)
+    local frame = self:CreateEventFrame()
+    if frame == nil or not self:SetEventHandler(frame, function(_, eventName)
+        if eventName == "PLAYER_REGEN_DISABLED" then
+            inCombat = true
+        elseif eventName == "PLAYER_REGEN_ENABLED" then
+            inCombat = false
+        elseif eventName == "ENCOUNTER_START" then
+            inEncounter = true
+        elseif eventName == "ENCOUNTER_END" then
+            inEncounter = false
+        else
+            return
+        end
+        pcall(onChange, inCombat or inEncounter)
+    end) then
+        return nil
+    end
+    if not self:RegisterEvent(frame, "PLAYER_REGEN_DISABLED")
+        or not self:RegisterEvent(frame, "PLAYER_REGEN_ENABLED")
+    then
+        return nil
+    end
+    -- Encounter events are optional; a client without them only holds for
+    -- combat.
+    self:RegisterEvent(frame, "ENCOUNTER_START")
+    self:RegisterEvent(frame, "ENCOUNTER_END")
+    self.combatFrame = frame
+    return inCombat or inEncounter
+end
+
 -- Posts `text` to guild chat. Retail keeps the call in C_ChatInfo; older
 -- clients have it as a global. Returns true when the client accepted it.
 function Client:SendGuildMessage(text)

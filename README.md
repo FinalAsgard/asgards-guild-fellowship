@@ -171,6 +171,7 @@ When a guild member comes online, a small prompt appears at the left side of the
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
 - Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
 - Prompts disappear after 2 minutes; the **X** closes one without greeting.
+- In combat or a boss encounter, prompts wait. When it's over, any that are still under 2 minutes old appear.
 
 Greetings can use these placeholders, in any capitalization:
 

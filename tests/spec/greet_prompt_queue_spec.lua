@@ -50,3 +50,25 @@ test.test("prompt queue: greeting or closing removes the prompt, and clearing re
     queue:Clear()
     test.assertEqual("", players(queue:Visible(START)))
 end)
+
+test.test("prompt queue: held prompts are hidden, then shown in arrival order when released", function()
+    local queue = newQueue()
+    queue:SetHeld(true)
+    queue:Add({ player = 1 }, START)
+    queue:Add({ player = 2 }, START + 10)
+
+    test.assertEqual("", players(queue:Visible(START + 20)))
+
+    queue:SetHeld(false)
+    test.assertEqual("1,2", players(queue:Visible(START + 30)))
+end)
+
+test.test("prompt queue: a prompt that expires while held never appears", function()
+    local queue = newQueue()
+    queue:SetHeld(true)
+    queue:Add({ player = 1 }, START)
+    queue:Add({ player = 2 }, START + 60)
+
+    queue:SetHeld(false)
+    test.assertEqual("2", players(queue:Visible(START + 150)))
+end)

@@ -435,6 +435,13 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     client:ObservePresence(function(kind, name)
         guildGreet:OnPresence(kind, name)
     end)
+    -- Prompts wait out combat and boss encounters.
+    local busy = client:ObserveCombat(function(inCombat)
+        guildGreet:OnCombatChanged(inCombat)
+    end)
+    if busy then
+        guildGreet:OnCombatChanged(true)
+    end
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)

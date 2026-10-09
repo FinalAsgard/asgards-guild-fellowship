@@ -3,7 +3,10 @@ local _, addon = ...
 -- The greet prompts waiting for the user, oldest first. There is at most one
 -- per player: a newer prompt for the same player replaces the older one. A
 -- prompt disappears `lifetime` seconds after the event that raised it, so a
--- greeting never arrives long after someone did. Pure: time is passed in.
+-- greeting never arrives long after someone did. While prompts are held (the
+-- user is in combat) none are shown, but they keep their expiry times, so
+-- releasing the hold shows only those still current. Pure: time is passed
+-- in.
 local GreetPromptQueue = {
     LIFETIME_SECONDS = 2 * 60,
 }
@@ -16,6 +19,7 @@ function GreetPromptQueue.Create()
     return setmetatable({
         lifetime = GreetPromptQueue.LIFETIME_SECONDS,
         prompts = {},
+        held = false,
     }, Queue)
 end
 
@@ -42,8 +46,13 @@ function Queue:Add(prompt, now)
     return prompt.expiresAt
 end
 
+-- Holds prompts back (true) or lets them show again (false).
+function Queue:SetHeld(held)
+    self.held = held == true
+end
+
 -- Drops prompts that have expired by `now`, and returns the rest, oldest
--- first.
+-- first, or none while they're held.
 function Queue:Visible(now)
     local index = 1
     while index <= #self.prompts do
@@ -52,6 +61,9 @@ function Queue:Visible(now)
         else
             index = index + 1
         end
+    end
+    if self.held then
+        return {}
     end
     return self.prompts
 end

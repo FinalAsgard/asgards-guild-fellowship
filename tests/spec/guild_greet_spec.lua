@@ -450,3 +450,55 @@ test.test("guild greet: roster last-online times convert to hours away", functio
     test.assertEqual(360 * 24 + 26, hoursAway({ years = 1, months = 0, days = 1, hours = 2 }))
     test.assertEqual(nil, hoursAway(nil))
 end)
+
+-- Combat ---------------------------------------------------------------------
+
+test.test("guild greet: prompts wait out combat and appear afterward if still current", function()
+    local world = setup("Retail")
+
+    world.greet:OnCombatChanged(true)
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(0, #world.shown)
+
+    advance(world, 60)
+    world.greet:OnPresence("online", world.names.rust)
+    advance(world, 61)
+    world.greet:OnCombatChanged(false)
+
+    -- Bolt's prompt expired during the fight; Rust's is still current.
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("longAbsence", world.shown[1].category)
+end)
+
+local combatIndex
+for combatIndex = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[combatIndex]
+
+    test.test(profile .. ": entering and leaving combat is reported", function()
+        local compat, world = client(profile)
+        local states = {}
+
+        test.assertEqual(false, compat:ObserveCombat(function(busy)
+            table.insert(states, tostring(busy))
+        end))
+        fixtures.fire(world, "PLAYER_REGEN_DISABLED")
+        fixtures.fire(world, "PLAYER_REGEN_ENABLED")
+        fixtures.fire(world, "ENCOUNTER_START")
+        fixtures.fire(world, "PLAYER_REGEN_DISABLED")
+        fixtures.fire(world, "PLAYER_REGEN_ENABLED")
+        -- Still in the encounter after combat drops between pulls.
+        fixtures.fire(world, "ENCOUNTER_END")
+
+        test.assertEqual("true,false,true,true,true,false", table.concat(states, ","))
+    end)
+end
+
+test.test("combat that's already under way when Greet starts is reported", function()
+    local compat, world = client("Retail")
+    world.inCombat = true
+    test.assertEqual(true, compat:ObserveCombat(function() end))
+
+    local encounter, encounterWorld = client("Retail")
+    encounterWorld.inEncounter = true
+    test.assertEqual(true, encounter:ObserveCombat(function() end))
+end)

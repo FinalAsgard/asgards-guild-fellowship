@@ -267,6 +267,13 @@ function Greet:Close(player)
     self:Refresh()
 end
 
+-- The user entered (true) or left (false) combat or a boss encounter.
+-- Prompts wait until it's over; any still current then appear.
+function Greet:OnCombatChanged(inCombat)
+    self.queue:SetHeld(inCombat)
+    self:Refresh()
+end
+
 -- Guild Greet was turned on or off. Turning it off clears waiting prompts.
 function Greet:OnEnabledChanged(enabled)
     if not enabled then
