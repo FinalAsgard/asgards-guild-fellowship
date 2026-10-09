@@ -63,13 +63,71 @@ Fixtures.LIBRARY_MAJORS = {
     "LibDBIcon-1.0",
     "LibSharedMedia-3.0",
     "DetailsFramework-1.0",
+    "AceSerializer-3.0",
+    "AceComm-3.0",
 }
+
+-- A stand-in for AceSerializer-3.0. Each serialized message is kept in this
+-- registry as a copy and named by a token, so a receiver always gets its own
+-- copy, never the sender's tables.
+local serialized = { count = 0 }
+
+local function newSerializer()
+    local serializer = {}
+    function serializer:Serialize(...)
+        serialized.count = serialized.count + 1
+        local token = "serialized#" .. serialized.count
+        serialized[token] = Fixtures.snapshot({ n = select("#", ...), ... })
+        return token
+    end
+    function serializer:Deserialize(text)
+        local packed = serialized[text]
+        if packed == nil then
+            return false, "not a serialized message"
+        end
+        packed = Fixtures.snapshot(packed)
+        return true, unpack(packed, 1, packed.n)
+    end
+    return serializer
+end
+
+-- A stand-in for AceComm-3.0. Messages a world sends are recorded in
+-- `world.sentMessages` and, when the world joined a channel, queued there
+-- until Fixtures.deliver hands them to every world on it.
+local function newComm(world)
+    local comm = {}
+    function comm:Embed(target)
+        function target:RegisterComm(prefix, handler)
+            world.commHandlers[prefix] = handler
+        end
+        function target:SendCommMessage(prefix, text, distribution, recipient, priority)
+            table.insert(world.sentMessages, {
+                prefix = prefix,
+                text = text,
+                distribution = distribution,
+                priority = priority,
+            })
+            if world.channel ~= nil then
+                table.insert(world.channel.queue, {
+                    from = world,
+                    prefix = prefix,
+                    text = text,
+                    distribution = distribution,
+                })
+            end
+        end
+        return target
+    end
+    return comm
+end
 
 -- A fake LibStub registry and Details! Framework global. `options.libStub =
 -- false` omits LibStub, `options.missingLibraries` lists majors left
 -- unregistered, and `options.frameworkFailed` leaves the framework half
 -- loaded (registered, but its core file stopped before finishing).
-local function installLibraries(environment, options)
+local function installLibraries(world, environment, options)
+    world.commHandlers = {}
+    world.sentMessages = {}
     if options.libStub == false then
         return
     end
@@ -93,6 +151,12 @@ local function installLibraries(environment, options)
             libStub.libs[major] = {}
             libStub.minors[major] = 1
         end
+    end
+    if libStub.libs["AceSerializer-3.0"] ~= nil then
+        libStub.libs["AceSerializer-3.0"] = newSerializer()
+    end
+    if libStub.libs["AceComm-3.0"] ~= nil then
+        libStub.libs["AceComm-3.0"] = newComm(world)
     end
     environment.LibStub = libStub
 
@@ -133,8 +197,8 @@ local function metadataReader(world, declaredClient)
     end
 end
 
--- Sample guilds per client: Forever names are "First Last", Retail names are
--- one word, and both carry a realm suffix as the roster API reports them.
+-- Sample guilds per client: Forever names are "First Last" with no realm,
+-- Retail names are one word with a realm suffix, as each roster reports them.
 -- In each, Hammer's note marks it as an alt of the officer, whose note sets
 -- the alias "TheTool".
 Fixtures.GUILDS = {
@@ -142,11 +206,11 @@ Fixtures.GUILDS = {
         name = "Knights of Camelot",
         realm = "Camelot",
         members = {
-            { name = "Tool Box-Camelot", class = "WARRIOR", level = 60, rank = 1, rankName = "Officer",
+            { name = "Tool Box", class = "WARRIOR", level = 60, rank = 1, rankName = "Officer",
                 online = true, zone = "Ironforge", note = "@TheTool raid lead" },
-            { name = "Hammer Smith-Camelot", class = "PALADIN", level = 42, rank = 3, rankName = "Member",
+            { name = "Hammer Smith", class = "PALADIN", level = 42, rank = 3, rankName = "Member",
                 online = false, lastOnline = { 0, 0, 3, 2 }, note = "Healer >Tool Box" },
-            { name = "Zélie Rune-Camelot", class = "MAGE", level = 12, rank = 4, rankName = "Initiate",
+            { name = "Zélie Rune", class = "MAGE", level = 12, rank = 4, rankName = "Initiate",
                 online = false, lastOnline = { 0, 0, 0, 0 } },
         },
     },
@@ -195,7 +259,8 @@ local function installGuild(world, environment, profile)
             return nil
         end
         return member.name, member.rankName, member.rank, member.level, "Class", member.zone,
-            member.note or "", "", member.online, 0, member.class
+            member.note or "", "", member.online, 0, member.class, 0, 0, false, false, 0,
+            "Player-1-" .. member.name
     end
     environment.GetGuildRosterLastOnline = function(index)
         local member = world.rosterReady and world.guild and world.guild.members[index]
@@ -208,13 +273,59 @@ local function installGuild(world, environment, profile)
     local function request()
         world.rosterRequests = world.rosterRequests + 1
     end
+    -- Rank permission flags, as C_GuildInfo.GuildControlGetRankFlags reports
+    -- them for a 1-based rank order; flag 11 is "view officer note". Ranks
+    -- listed in `world.officerRanks` (0-based, like roster rank indexes)
+    -- have it. WoW Forever is assumed to match Retail here.
+    world.officerRanks = { [0] = true, [1] = true }
+    local function rankFlags(rankOrder)
+        local flags = {}
+        local index
+        for index = 1, 20 do
+            flags[index] = false
+        end
+        flags[11] = world.officerRanks[rankOrder - 1] == true
+        return flags
+    end
+    environment.C_GuildInfo = { GuildControlGetRankFlags = rankFlags }
     if profile == "Retail" then
-        environment.C_GuildInfo = { GuildRoster = request }
+        environment.C_GuildInfo.GuildRoster = request
         environment.GetNormalizedRealmName = function()
             return world.guild and string.gsub(world.guild.realm, "%s+", "") or "Camelot"
         end
     else
         environment.GuildRoster = request
+    end
+    -- The logged-in character, named as the roster spells it: the guild's
+    -- first member unless `world.playerName` was set. Retail reports it as
+    -- "Name", "Realm". WoW Forever reports only the first name, plus the
+    -- server's realm, while its roster has "First Last" with no realm.
+    local function playerRosterName()
+        local fullName = world.playerName
+        if fullName == nil and world.guild ~= nil then
+            fullName = world.guild.members[1].name
+        end
+        return fullName
+    end
+    environment.UnitFullName = function(unit)
+        test.assertEqual("player", unit)
+        local fullName = playerRosterName()
+        if fullName == nil then
+            return nil
+        end
+        local name, realm = string.match(fullName, "^(.-)%-([^%-]*)$")
+        name = name or fullName
+        if profile ~= "Retail" then
+            local serverRealm = world.guild and world.guild.realm or "Camelot"
+            return string.match(name, "^(%S+)"), (string.gsub(serverRealm, "%s+", ""))
+        end
+        return name, realm
+    end
+    -- GUIDs are the same in UnitGUID and the roster, whatever the names.
+    environment.UnitGUID = function(unit)
+        test.assertEqual("player", unit)
+        local fullName = playerRosterName()
+        return fullName and ("Player-1-" .. fullName) or nil
     end
     -- A fake clock: `world.time` is wall-clock seconds, `world.precise` the
     -- millisecond profiler clock, and C_Timer callbacks wait in
@@ -233,6 +344,11 @@ local function installGuild(world, environment, profile)
             table.insert(world.timers, { at = world.time + seconds, callback = callback })
         end,
     }
+    -- `world.inCombat = true` puts the player in combat.
+    world.inCombat = false
+    environment.InCombatLockdown = function()
+        return world.inCombat
+    end
     environment.RAID_CLASS_COLORS = {
         WARRIOR = { colorStr = "ffc69b6d" },
         PALADIN = { r = 0.96, g = 0.55, b = 0.73 },
@@ -253,10 +369,22 @@ local PROFILE_APIS = {
             environment.SlashCmdList[key] = callback
         end
     end,
+    -- Retail also reports boss encounters (`world.inEncounter`) and keystone
+    -- runs (`world.inKeystone`).
     Retail = function(world, environment, declaredClient)
         environment.C_AddOns = { GetAddOnMetadata = metadataReader(world, declaredClient) }
         environment.WOW_PROJECT_ID = 1
         environment.WOW_PROJECT_MAINLINE = 1
+        world.inEncounter = false
+        world.inKeystone = false
+        environment.IsEncounterInProgress = function()
+            return world.inEncounter
+        end
+        environment.C_ChallengeMode = {
+            IsChallengeModeActive = function()
+                return world.inKeystone
+            end,
+        }
     end,
 }
 
@@ -266,7 +394,8 @@ local PROFILE_APIS = {
 -- seeds that build's SavedVariables; see installLibraries for the library
 -- options. `options.guild = false` puts the character outside any guild,
 -- `options.guild = {...}` replaces the profile's sample guild, and
--- `options.rosterReady = false` starts with the roster still loading. The SavedVariables global lives in
+-- `options.rosterReady = false` starts with the roster still loading, and
+-- `options.playerName` ("Name-Realm") picks the logged-in character. The SavedVariables global lives in
 -- `world.database`, and every read or write of it through the environment is
 -- counted in `world.savedVariableReads` and `world.savedVariableWrites`.
 function Fixtures.newEnvironment(profile, options)
@@ -280,6 +409,7 @@ function Fixtures.newEnvironment(profile, options)
         loggedIn = false,
         manifestPath = Fixtures.manifestPath(profile, addonName),
         messages = {},
+        playerName = options.playerName,
         savedVariableReads = 0,
         savedVariableWrites = 0,
     }
@@ -323,7 +453,7 @@ function Fixtures.newEnvironment(profile, options)
         declaredClient = profile
     end
     PROFILE_APIS[profile](world, environment, declaredClient)
-    installLibraries(environment, options)
+    installLibraries(world, environment, options)
     if options.guild ~= false then
         world.guild = options.guild or Fixtures.snapshot(Fixtures.GUILDS[profile])
     end
@@ -383,6 +513,45 @@ function Fixtures.runTimers(world, seconds)
             error("timers never settle")
         end
     end
+end
+
+-- A guild add-on channel shared by several worlds: what one sends reaches
+-- them all, the sender included (the game echoes guild add-on messages), once
+-- Fixtures.deliver runs. Returns the channel.
+function Fixtures.newChannel(worlds)
+    local channel = { queue = {}, worlds = worlds or {} }
+    local index
+    for index = 1, #channel.worlds do
+        channel.worlds[index].channel = channel
+    end
+    return channel
+end
+
+function Fixtures.joinChannel(channel, world)
+    table.insert(channel.worlds, world)
+    world.channel = channel
+end
+
+-- Delivers queued messages, including any sent while delivering, as the
+-- sender's full name. Returns how many were delivered.
+function Fixtures.deliver(channel)
+    local delivered = 0
+    while channel.queue[1] ~= nil do
+        local message = table.remove(channel.queue, 1)
+        local sender = message.from.playerName or message.from.guild.members[1].name
+        local index
+        for index = 1, #channel.worlds do
+            local handler = channel.worlds[index].commHandlers[message.prefix]
+            if handler ~= nil then
+                handler(message.prefix, message.text, message.distribution, sender)
+            end
+        end
+        delivered = delivered + 1
+        if delivered > 100000 then
+            error("messages never settle")
+        end
+    end
+    return delivered
 end
 
 -- Runs the build's slash command as a player typing it would.

@@ -131,6 +131,7 @@ local function registerProfileTests(profile)
         test.assertEqual(4, #setup.window.rows)
         test.assertEqual("TheTool (" .. first.name .. ")", setup.window.rows[1].label)
         test.assertContains(setup.window.status, "Last scan just now: 3 new characters")
+        test.assertContains(setup.window.status, "\nNot synced yet")
     end)
 
     test.test(profile .. " opening the window never scans", function()

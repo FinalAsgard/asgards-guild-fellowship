@@ -12,12 +12,15 @@ Libs/LibDataBroker-1.1/LibDataBroker-1.1.lua
 Libs/LibDBIcon-1.0/lib.xml
 Libs/LibSharedMedia-3.0/lib.xml
 Libs/DetailsFramework/load.xml
+Libs/AceSerializer-3.0/AceSerializer-3.0.xml
+Libs/AceComm-3.0/AceComm-3.0.xml
 
 Core/Identity.lua
 Adapters/ClientProfile.lua
 Adapters/WoW.lua
 Adapters/RosterWindow.lua
 Adapters/EntryPoints.lua
+Adapters/Comm.lua
 Core/Persistence.lua
 Core/NameNormalizer.lua
 Core/NoteParser.lua
@@ -28,6 +31,12 @@ Core/RosterViewModel.lua
 Core/ConflictViewModel.lua
 Core/PlayerPanelViewModel.lua
 Core/ChatAnnotator.lua
+Core/OfficerAuthority.lua
+Core/SyncFacts.lua
+Core/SyncDigest.lua
+Core/SuggestionService.lua
+Core/SyncLedger.lua
+Core/SyncSession.lua
 Core/ScanScheduler.lua
 Core/RosterController.lua
 Core/LibraryCheck.lua

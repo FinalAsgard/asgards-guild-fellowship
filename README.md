@@ -2,7 +2,7 @@
 
 A World of Warcraft add-on for the guild's member database and Fellowship roster: who each player is, which characters are their mains and alts, and the alias they choose to be called. It supports WoW Forever and WoW Retail from one source tree.
 
-The add-on groups the guild's characters into **players**. Each player has one main, any number of alts, and an optional alias. The grouping is seeded from public guild notes, and from then on it's kept in a local database that only you change.
+The add-on groups the guild's characters into **players**. Each player has one main, any number of alts, and an optional alias. The grouping is seeded from public guild notes, and from then on it's kept in a local database. You change it by hand, and officers' edits reach it through [guild sync](#guild-sync).
 
 ## Installing
 
@@ -16,6 +16,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf rescan` | Scans the guild's notes right away. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
+| `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## Using the roster
@@ -57,9 +58,10 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 ### The database is the source of truth
 
 - On the first scan, note markers are applied directly to any character the database doesn't know about.
-- After that, a note that disagrees with the database never overwrites it. The difference goes to the **conflict queue** instead. You'll also find there any note naming a character that doesn't exist or matches more than one, and any note that loops back on itself.
+- After that, a note that disagrees with the database never overwrites it. The difference goes to the **conflict queue** instead. One exception: a note's alias is filled in for a player with no alias, as long as nobody ever set or cleared one by hand or through sync. An alias someone deliberately removed is never brought back by a note, and a note naming a different alias than the player has is still a conflict. A conflict like this left over from an earlier version is filled in the next time you use **Rescan**, or you can accept it. You'll also find in the queue any note naming a character that doesn't exist or matches more than one, and any note that loops back on itself.
 - **Conflicts (N)** at the bottom of the window opens the queue. Each entry shows the note and what it suggests next to what the database says. Accept or reject each one, or all at once.
 - A rejected suggestion stays away until that note changes again.
+- Officer data from [guild sync](#guild-sync) beats guild notes. On a new install, notes fill in the roster first, and officer edits replace them where the two disagree. After an officer edit arrives, the next scan checks the notes it affects again. A note that disagrees goes to the conflict queue, and a pending conflict the edit already settled disappears.
 
 ### Mains, alts, and departures
 
@@ -71,7 +73,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 
 Right-click a character for **Set main…**, **Make this the main**, **Set alias…**, **Detach as own player**, and **View player…**. Clicking a character also opens the player panel. It shows the alias, main, alts, and history, and has **Set alias…** and **Set main…** buttons that open the same dialogs as the menu. History lists characters that left the player: ones that left the guild, were detached, or were moved to another player.
 
-Changes show up right away and are recorded as manual. Data is saved per guild and shared by every character on this game install.
+Changes show up right away and are recorded as manual. An officer's changes then reach the rest of the guild through [guild sync](#guild-sync), and a member's are sent to officers as [suggestions](#suggestions). The player panel also has the **Don't sync** checkbox (see [Don't sync](#dont-sync)). Data is saved per guild and shared by every character on this game install.
 
 ### Finding people
 
@@ -80,6 +82,57 @@ Changes show up right away and are recorded as manual. Data is saved per guild a
 - **Expand all** and **Collapse all** open and close every group.
 - Online players come first, then everyone else by name. A group shows "online as …" when the player is on an alt.
 - A player with one character is shown as a single row.
+
+## Guild sync
+
+When an officer changes which characters belong together, or what a player goes by, the change reaches everyone in the guild who runs the add-on and is online. This covers **Set main…**, **Make this the main**, **Detach as own player**, and **Set alias…**, including clearing an alias. Officers' edits update your roster and chat tags without a rescan.
+
+- An officer is anyone whose guild rank can view officer notes. The guild master always counts. Nothing needs to be set up: promoting or demoting someone changes what their edits do.
+- When two officers change the same character or the same alias, the most recent edit wins everywhere.
+- A member's own edits apply in their roster right away and are sent to officers as suggestions (see [Suggestions](#suggestions)). Only officers' edits change everyone's roster directly.
+- Edits made before sync existed: they become official and are sent to the guild once you log in on an officer character with this version. Until then, and for members, they stay in your own roster only.
+- Only main and alt links and aliases are shared. Departures, purges, history, conflicts, and settings stay on your computer.
+- Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
+- The roster window's footer shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
+- Sync never gets in the way of play. It sends and processes nothing while you're in combat, or on Retail during a boss encounter or a keystone run, and picks up where it left off once that's over. Like scans, it works on data a little at a time, so even a large guild's full sync doesn't cause a hitch, and your roster window redraws once per batch rather than once per change.
+
+### Suggestions
+
+Members know their own alts best, so a member's edits become suggestions for the officers:
+
+- When you're not an officer, **Set main…**, **Make this the main**, **Detach as own player**, and **Set alias…** still change your roster at once. Each change is also kept as a suggestion.
+- Suggestions go to the guild as soon as an officer is online. If none is, they wait, and are sent when an officer logs in.
+- Officers find them in their conflict queue, marked "Suggested by" and the member's name. **Accept** and **Reject** work as for any other entry, and so do Accept all and Reject all.
+- The first officer to decide settles the suggestion for every officer, and it disappears from the other officers' queues. Accepting makes it an official edit under that officer's name, which reaches everyone.
+- Rejecting puts your roster back the way the officers have it, so you stay on the same data as everyone else. If no officer ever set that character or alias, it goes back to what the guild notes and the roster say.
+- Until then, your edit stays in your roster unless a newer officer edit about the same character or alias arrives.
+- Your suggestions that are still waiting are listed at the bottom of your **Conflicts** window, marked "Your suggestion" and "Waiting for an officer". They aren't counted on the Conflicts button, and they leave the list once an officer decides them. Suggestions are only sent while you're online, so if you log off before an officer decides, yours are sent again the next time an officer is online.
+
+### Don't sync
+
+To keep your own version of a player, open the player panel and check **Don't sync**. The panel's title and the checkbox show the player in orange while it's on.
+
+- Officers' edits for that player are ignored on your computer: moving its characters in or out, changing its main, and setting or clearing its alias.
+- Every other player keeps syncing as usual.
+- Uncheck it to rejoin. Your own edits to that player stop counting as newer than the officers', and your add-on asks the guild for their data right away, so the player matches what the officers have within a few seconds if anyone online has it, or at your next login otherwise.
+
+### Catching up when you log in
+
+You don't need to be online at the same time as an officer. Officers' edits also reach you through other add-on users:
+
+- About 30 to 60 seconds after you log in, your add-on asks the guild whether your copy of officers' data matches theirs. It sends a short summary, never the data itself.
+- If someone's copy is the same, nothing else is sent. If it differs, one add-on user who has the officers' edits sends back only the part that differs. That can be any member, but an online officer answers first. If you hold officer edits they're missing, yours go back the other way.
+
+### How sync protects your data
+
+Any add-on user can pass officers' edits on, so the add-on checks what it receives:
+
+- An edit is only accepted when the officer it names holds an officer rank on the current roster. A member can't make their own edits official by passing them on.
+- An edit dated more than a few minutes in the future is refused, so a faked date can't make an edit win over every real one.
+- When an officer is online, your data is checked against theirs directly. Officers answer catch-up requests before members do, and the game guarantees who sent each message, so differences come from the officer's own copy.
+- Each officer's add-on keeps a ledger of the edits that officer made. If someone passes on an edit in an officer's name that the officer never made, that officer's add-on catches it as soon as it sees it. That happens either right away, or when the officer next logs in and checks the guild's data. The add-on refuses the edit, sends the officer's own data to the whole guild to replace it, and logs which character passed it on. It also warns the officer in chat.
+- A forged edit can only last until the officer it names is online again. Edits dated before an officer's add-on started its ledger, including ones from before this version, are trusted.
+- The ledger is kept in that computer's saved data. If you're an officer who plays on two computers, an edit you made on one can look forged to the other, which then puts back its own data. Make officer edits on one computer.
 
 ## Chat tags
 
@@ -119,7 +172,7 @@ The rest of this page is for people working on the add-on. To work on it in game
 
 ## Libraries
 
-The add-on uses LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, LibSharedMedia-3.0, and the Details! Framework. They are not committed. [`tools/libraries.txt`](tools/libraries.txt) pins each one to a tag, and both release packages (`.pkgmeta` externals) and development checkouts use those pins. To fetch them into the git-ignored `Libs/` folder, run this in PowerShell (Windows PowerShell or `pwsh`):
+The add-on uses LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, LibSharedMedia-3.0, the Details! Framework, AceSerializer-3.0, and AceComm-3.0 (which brings ChatThrottleLib). They are not committed. [`tools/libraries.txt`](tools/libraries.txt) pins each one to a tag, and both release packages (`.pkgmeta` externals) and development checkouts use those pins. To fetch them into the git-ignored `Libs/` folder, run this in PowerShell (Windows PowerShell or `pwsh`):
 
 ```powershell
 ./tools/Fetch-Libraries.ps1

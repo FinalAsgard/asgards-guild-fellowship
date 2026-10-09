@@ -17,9 +17,25 @@ Controller.__index = Controller
 --   nameRules     the client profile's name rules
 --   getDatabase   function() -> the SavedVariables root, or nil
 --   createWindow  function() -> window or nil, reason
+--   onMainLinksChanged  optional function(keys, before): after a manual
+--                 change to main links, with the set of every character
+--                 key whose player was involved, and each one's main before
+--                 the change (for guild sync)
+--   onAliasChanged  optional function(key): after a manual alias change to
+--                 the player of `key` (for guild sync)
+--   onScanFinished  optional function(): after every completed scan
+--   onSyncResumed  optional function(key): after "Don't sync" was turned
+--                 off for the player of `key`
+--   onDecideSuggestion  optional function(character, kind, approved) ->
+--                 ok, reason: decides a member's suggestion in the queue
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
+        onDecideSuggestion = options.onDecideSuggestion,
+        onMainLinksChanged = options.onMainLinksChanged,
+        onAliasChanged = options.onAliasChanged,
+        onScanFinished = options.onScanFinished,
+        onSyncResumed = options.onSyncResumed,
         collapsed = {},
         showDeparted = false,
         createWindow = options.createWindow,
@@ -80,6 +96,57 @@ function Controller:QuietContext()
         return nil, "The roster can't be shown: " .. tostring(reason) .. "."
     end
     return guild, partition, self:Normalizer(guild)
+end
+
+-- The logged-in character's key in the current guild's roster, or nil.
+-- The game spells the player's own name differently from the roster on
+-- some clients (WoW Forever reports only the first name), so the roster
+-- decides: the stored character named "Name-Realm" when there is one,
+-- otherwise the roster member with the player's GUID, otherwise (with
+-- two-part names) the only roster member with the player's first name.
+-- A key found in the roster is remembered for this guild and character.
+function Controller:SelfKey()
+    local guild, partition, normalizer = self:QuietContext()
+    local fullName = self.client:GetPlayerFullName()
+    if guild == nil or fullName == nil then
+        return nil
+    end
+    local guid = self.client:GetPlayerGuid()
+    local cache = self.selfKeyCache
+    if cache ~= nil and cache.partition == partition.key and cache.fullName == fullName and cache.guid == guid then
+        return cache.key
+    end
+    local key = normalizer:Key(fullName)
+    if key == nil or partition:GetCharacter(key) == nil then
+        key = self:FindSelfInRoster(normalizer, fullName, guid)
+        if key == nil then
+            -- Not in the roster yet: Name-Realm is the best guess, except
+            -- where it can't be right (only the first name).
+            return not self.nameRules.twoPartNames and normalizer:Key(fullName) or nil
+        end
+    end
+    self.selfKeyCache = { partition = partition.key, fullName = fullName, guid = guid, key = key }
+    return key
+end
+
+function Controller:FindSelfInRoster(normalizer, fullName, guid)
+    local firstName = normalizer:FirstName(fullName)
+    local byName
+    local count = self.client:GetGuildRosterCount() or 0
+    local index
+    for index = 1, count do
+        local member = self.client:GetGuildMember(index)
+        if member ~= nil then
+            if guid ~= nil and member.guid == guid then
+                return normalizer:Key(member.name)
+            end
+            if firstName ~= nil and normalizer:FirstName(member.name) == firstName then
+                -- Two members sharing the first name: can't tell which.
+                byName = byName == nil and normalizer:Key(member.name) or false
+            end
+        end
+    end
+    return byName or nil
 end
 
 function Controller:Context()
@@ -160,30 +227,25 @@ function Controller:OnScanFinished(result, summary)
         self:Print("Roster scanned: " .. RosterController.DescribeScan(summary) .. ".")
     end
     self:Invalidate()
+    if self.onScanFinished ~= nil then
+        self.onScanFinished()
+    end
 end
 
--- "Last scan 5 minutes ago: 3 new characters, 1 alt linked".
+-- "Last scan 5 minutes ago: 3 new characters, 1 alt linked", and below it
+-- "Synced 2 minutes ago".
 function Controller:StatusText(partition)
+    local now = self.client:Timestamp()
+    local sync = addon.RosterViewModel.SyncText(partition:GetLastSync(), now)
     if self.scheduler:IsRunning() then
-        return "Scanning the guild roster..."
+        return "Scanning the guild roster...\n" .. sync
     end
     local summary = partition:GetLastScanSummary()
     if summary == nil then
-        return "Not scanned yet. The roster is scanned once it loads, or use Rescan."
+        return "Not scanned yet. The roster is scanned once it loads, or use Rescan.\n" .. sync
     end
-    local now = self.client:Timestamp() or summary.at
-    local elapsed = math.max(0, now - summary.at)
-    local when
-    if elapsed < 60 then
-        when = "just now"
-    elseif elapsed < 3600 then
-        when = plural(math.floor(elapsed / 60), "minute") .. " ago"
-    elseif elapsed < 86400 then
-        when = plural(math.floor(elapsed / 3600), "hour") .. " ago"
-    else
-        when = plural(math.floor(elapsed / 86400), "day") .. " ago"
-    end
-    return "Last scan " .. when .. ": " .. RosterController.DescribeScan(summary)
+    local when = addon.RosterViewModel.Ago(math.max(0, (now or summary.at) - summary.at))
+    return "Last scan " .. when .. ": " .. RosterController.DescribeScan(summary) .. "\n" .. sync
 end
 
 function Controller:UpdateStatus()
@@ -192,25 +254,73 @@ function Controller:UpdateStatus()
     end
 end
 
--- Conflict review. Each action resolves through PlayerService, then
--- redraws the roster and the conflict list.
+-- Decides members' suggestions in the queue (all of them, or the one about
+-- `character` of `kind`) through onDecideSuggestion. Returns how many were
+-- decided, the last refusal, and how many were refused.
+function Controller:DecideSuggestions(approved, character, kind)
+    local decided, reason = 0, nil
+    local entries = {}
+    local conflicts = self.current.partition:GetConflicts() or {}
+    local index
+    for index = 1, #conflicts do
+        local entry = conflicts[index]
+        if entry.from ~= nil and (character == nil or (entry.character == character and entry.kind == kind)) then
+            table.insert(entries, { character = entry.character, kind = entry.kind })
+        end
+    end
+    if self.onDecideSuggestion == nil then
+        return 0, "guild sync is not available", #entries
+    end
+    for index = 1, #entries do
+        local ok, why = self.onDecideSuggestion(entries[index].character, entries[index].kind, approved)
+        if ok then
+            decided = decided + 1
+        else
+            reason = why
+        end
+    end
+    return decided, reason, #entries - decided
+end
+
+-- After deciding everything: says how many members' suggestions are still
+-- waiting, and why.
+function Controller:PrintUndecided(refused, reason)
+    if refused == nil or refused == 0 then
+        return
+    end
+    local count = refused == 1 and "1 suggestion wasn't" or (refused .. " suggestions weren't")
+    self:Print(count .. " decided: " .. (reason or "it was refused") .. ".")
+end
+
+-- Conflict review. Note conflicts resolve through PlayerService, members'
+-- suggestions through guild sync; then the roster and the conflict list are
+-- redrawn.
 function Controller:ResolveConflicts(action, character, kind)
     if self.current == nil then
         return false
     end
     local service = self:Service()
     local ok, reason
-    if action == "accept" then
+    local suggestion = addon.SuggestionService.KINDS[kind] == true
+    if (action == "accept" or action == "reject") and suggestion then
+        local decided
+        decided, reason = self:DecideSuggestions(action == "accept", character, kind)
+        ok = decided > 0
+    elseif action == "accept" then
         ok, reason = service:AcceptConflict(character, kind)
     elseif action == "reject" then
         ok, reason = service:RejectConflict(character, kind)
     elseif action == "acceptAll" then
+        local approved, why, refused = self:DecideSuggestions(true)
         local accepted, dismissed = service:AcceptAll()
-        self:Print("Accepted " .. plural(accepted, "conflict") .. " and dismissed " .. dismissed .. ".")
+        self:Print("Accepted " .. plural(accepted + approved, "conflict") .. " and dismissed " .. dismissed .. ".")
+        self:PrintUndecided(refused, why)
         ok = true
     elseif action == "rejectAll" then
+        local declined, why, refused = self:DecideSuggestions(false)
         local rejected = service:RejectAll()
-        self:Print("Rejected " .. plural(rejected, "conflict") .. ".")
+        self:Print("Rejected " .. plural(rejected + declined, "conflict") .. ".")
+        self:PrintUndecided(refused, why)
         ok = true
     end
     if not ok and reason ~= nil then
@@ -280,15 +390,62 @@ function Controller:MenuFor(row)
     return entries
 end
 
+-- Manual changes that move characters between players or change a main.
+local MAIN_LINK_OPERATIONS = { SetMainPlayer = true, MakeMain = true, Detach = true }
+
+-- Adds every character of `key`'s player to the set `keys`.
+function Controller:AddPlayerKeys(keys, key)
+    local character = self.current.partition:GetCharacter(key)
+    if character == nil then
+        return keys
+    end
+    local members = self.current.partition:CharactersOf(character.player)
+    local index
+    for index = 1, #members do
+        keys[members[index]] = true
+    end
+    return keys
+end
+
+-- The main of each character's player, for a set of character keys.
+function Controller:MainsOf(keys)
+    local mains = {}
+    local key
+    for key in pairs(keys) do
+        local character = self.current.partition:GetCharacter(key)
+        local player = character and self.current.partition:GetPlayer(character.player)
+        mains[key] = player and player.main
+    end
+    return mains
+end
+
 -- Runs a manual change, reports a refusal, and redraws at once (no scan).
-function Controller:Organize(operation, ...)
+-- A change to main links reports every character of the players involved,
+-- before and after, to onMainLinksChanged, with each one's main before the
+-- change; an alias change reports its character to onAliasChanged.
+function Controller:Organize(operation, key, ...)
     if self.current == nil then
         return false
     end
     local service = self:Service()
-    local ok, reason = service[operation](service, ...)
+    local involved, before
+    if MAIN_LINK_OPERATIONS[operation] then
+        involved = self:AddPlayerKeys({}, key)
+        -- "Set main…" also involves the player the character joins.
+        local target = operation == "SetMainPlayer" and select(1, ...) or nil
+        local joined = target ~= nil and self.current.partition:GetPlayer(target)
+        if joined then
+            self:AddPlayerKeys(involved, joined.main)
+        end
+        before = self:MainsOf(involved)
+    end
+    local ok, reason = service[operation](service, key, ...)
     if not ok then
         self:Print("That change wasn't made: " .. tostring(reason) .. ".")
+    elseif involved ~= nil and self.onMainLinksChanged ~= nil then
+        self.onMainLinksChanged(self:AddPlayerKeys(involved, key), before)
+    elseif operation == "SetAlias" and self.onAliasChanged ~= nil then
+        self.onAliasChanged(key)
     end
     self:Refresh()
     return ok == true
@@ -308,6 +465,22 @@ end
 
 function Controller:Detach(key)
     return self:Organize("Detach", key)
+end
+
+-- Turns "Don't sync" on or off for `key`'s player. Turning it off reports
+-- the player to onSyncResumed, so guild sync can bring it back in line.
+function Controller:SetDontSync(key, enabled)
+    if self.current == nil then
+        return false
+    end
+    local ok, reason = self:Service():SetDontSync(key, enabled)
+    if not ok then
+        self:Print("That change wasn't made: " .. tostring(reason) .. ".")
+    elseif not enabled and self.onSyncResumed ~= nil then
+        self.onSyncResumed(key)
+    end
+    self:Refresh()
+    return ok == true
 end
 
 -- Results for the "Set main…" picker, without `key`'s own player.
@@ -524,6 +697,7 @@ function Controller:Redraw()
             partition = self.current.partition,
             members = members,
             normalizer = normalizer,
+            pending = self.current.partition:GetSuggestions(),
         }))
         self:RedrawPanel()
     end

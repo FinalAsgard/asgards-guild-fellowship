@@ -211,3 +211,129 @@ test.test("an unusable chat tags value is left alone and counts as on", function
     test.assertEqual("corrupt", database.chatTags)
     test.assertFalse(store:SetChatTagsEnabled("off"))
 end)
+
+-- Guild sync stamps (schema 2) ------------------------------------------------
+
+test.test("an unstamped main link is the oldest possible and stamps are kept", function()
+    local database = foundationRoot()
+    local partition = newStore(database):Partition(GUILD)
+    partition:RecordCharacter("hammer-area52", MEMBER)
+
+    local at, by = partition:GetMainStamp("hammer-area52")
+    test.assertEqual(0, at)
+    test.assertEqual(nil, by)
+
+    test.assertTrue(partition:SetMainStamp("hammer-area52", 1790000000, "toolbox-area52"))
+    at, by = partition:GetMainStamp("hammer-area52")
+    test.assertEqual(1790000000, at)
+    test.assertEqual("toolbox-area52", by)
+    test.assertEqual(1790000000, database.guilds["Knights of Camelot-Area52"].characters["hammer-area52"].mainAt)
+
+    test.assertFalse(partition:SetMainStamp("hammer-area52", 1.5, "toolbox-area52"))
+    test.assertFalse(partition:SetMainStamp("hammer-area52", 1790000001, ""))
+    test.assertFalse(partition:SetMainStamp("nobody-area52", 1790000001, "toolbox-area52"))
+    test.assertEqual(nil, partition:GetMainStamp("nobody-area52"))
+end)
+
+test.test("a stored stamp of the wrong type quarantines its character intact", function()
+    local database = foundationRoot()
+    database.guilds["Knights of Camelot-Area52"] = {
+        characters = {
+            ["hammer-area52"] = { player = 1, mainAt = "yesterday" },
+            ["wrench-area52"] = { player = 2, mainAt = 1790000000, mainBy = 7 },
+            ["toolbox-area52"] = { player = 3, mainAt = 1790000000, mainBy = "toolbox-area52", source = "sync" },
+        },
+        players = {
+            [1] = { main = "hammer-area52" },
+            [2] = { main = "wrench-area52" },
+            [3] = { main = "toolbox-area52" },
+        },
+    }
+
+    local partition = newStore(database):Partition(GUILD)
+
+    test.assertEqual(nil, partition:GetCharacter("hammer-area52"))
+    test.assertEqual(nil, partition:GetCharacter("wrench-area52"))
+    test.assertEqual("sync", partition:GetCharacter("toolbox-area52").source)
+    local quarantined = database.guilds["Knights of Camelot-Area52"].quarantine
+    test.assertEqual(2, #quarantined)
+end)
+
+test.test("an unstamped alias is the oldest possible and stamps are kept with the player", function()
+    local database = foundationRoot()
+    local partition = newStore(database):Partition(GUILD)
+    partition:RecordCharacter("hammer-area52", MEMBER)
+    local playerId = partition:GetCharacter("hammer-area52").player
+
+    local at, by = partition:GetAliasStamp("hammer-area52")
+    test.assertEqual(0, at)
+    test.assertEqual(nil, by)
+
+    test.assertTrue(partition:SetAliasStamp("hammer-area52", 1790000000, "toolbox-area52"))
+    at, by = partition:GetAliasStamp("hammer-area52")
+    test.assertEqual(1790000000, at)
+    test.assertEqual("toolbox-area52", by)
+    test.assertEqual(1790000000, database.guilds["Knights of Camelot-Area52"].players[playerId].aliasAt)
+
+    test.assertFalse(partition:SetAliasStamp("hammer-area52", 1.5, "toolbox-area52"))
+    test.assertFalse(partition:SetAliasStamp("hammer-area52", 1790000001, ""))
+    test.assertFalse(partition:SetAliasStamp("nobody-area52", 1790000001, "toolbox-area52"))
+    test.assertEqual(nil, partition:GetAliasStamp("nobody-area52"))
+end)
+
+test.test("a stored alias stamp of the wrong type quarantines its player intact", function()
+    local database = foundationRoot()
+    database.guilds["Knights of Camelot-Area52"] = {
+        characters = {
+            ["hammer-area52"] = { player = 1 },
+            ["wrench-area52"] = { player = 2 },
+            ["toolbox-area52"] = { player = 3 },
+        },
+        players = {
+            [1] = { main = "hammer-area52", alias = "Hammer", aliasAt = "yesterday" },
+            [2] = { main = "wrench-area52", alias = "Wrench", aliasAt = 1790000000, aliasBy = 7 },
+            [3] = { main = "toolbox-area52", alias = "Tools", aliasAt = 1790000000, aliasBy = "toolbox-area52" },
+        },
+    }
+
+    local partition = newStore(database):Partition(GUILD)
+
+    test.assertEqual(nil, partition:GetPlayer(1))
+    test.assertEqual(nil, partition:GetPlayer(2))
+    test.assertEqual("Tools", partition:GetPlayer(3).alias)
+    local quarantined = database.guilds["Knights of Camelot-Area52"].quarantine
+    local players = 0
+    local index
+    for index = 1, #quarantined do
+        if quarantined[index].collection == "players" then
+            players = players + 1
+        end
+    end
+    test.assertEqual(2, players)
+end)
+
+test.test("don't sync is kept on the player record, and an unusable flag quarantines the player", function()
+    local database = foundationRoot()
+    database.guilds["Knights of Camelot-Area52"] = {
+        characters = {
+            ["hammer-area52"] = { player = 1 },
+            ["toolbox-area52"] = { player = 2 },
+        },
+        players = {
+            [1] = { main = "hammer-area52", noSync = "yes" },
+            [2] = { main = "toolbox-area52" },
+        },
+    }
+
+    local partition = newStore(database):Partition(GUILD)
+
+    test.assertEqual(nil, partition:GetPlayer(1))
+    test.assertFalse(partition:IsNoSync(2))
+    test.assertTrue(partition:SetNoSync(2, true))
+    test.assertTrue(partition:IsNoSync(2))
+    test.assertEqual(true, database.guilds["Knights of Camelot-Area52"].players[2].noSync)
+    test.assertTrue(partition:SetNoSync(2, false))
+    test.assertFalse(partition:IsNoSync(2))
+    test.assertEqual(nil, database.guilds["Knights of Camelot-Area52"].players[2].noSync)
+    test.assertFalse(partition:SetNoSync(99, true))
+end)

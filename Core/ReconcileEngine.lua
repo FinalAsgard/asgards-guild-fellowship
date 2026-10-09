@@ -72,7 +72,7 @@ end
 
 -- A character with no relationship is unknown, or the only character, main,
 -- and unnamed member of its own player that nobody organized by hand. Only
--- those are seeded from notes; a manual detach or alias change is a choice
+-- those are seeded from notes; a manual or synced detach or alias change is a choice
 -- that only the conflict queue may change.
 local function hasRelationship(partition, sizes, key)
     local character = partition:GetCharacter(key)
@@ -86,7 +86,17 @@ local function hasRelationship(partition, sizes, key)
         or player.alias ~= nil
         or (sizes[character.player] or 0) > 1
         or character.source == manual
+        or character.source == addon.FellowshipStore.SOURCE_SYNC
         or player.aliasSource == manual
+        or player.aliasSource == addon.FellowshipStore.SOURCE_SYNC
+end
+
+-- True when `player` has no alias and nobody ever set or cleared one by
+-- hand or through sync, so a note may name it.
+local function aliasUntouched(player)
+    return player ~= nil and player.alias == nil
+        and player.aliasSource ~= addon.FellowshipStore.SOURCE_MANUAL
+        and player.aliasSource ~= addon.FellowshipStore.SOURCE_SYNC
 end
 
 -- The main a resolved marker ultimately leads to, following other notes
@@ -286,8 +296,9 @@ function ReconcileEngine.Plan(inputs)
     end
 
     -- An alias on any character's note names that character's player. On
-    -- unorganized players it is applied; on organized ones a different
-    -- alias is drift.
+    -- unorganized players it is applied, and so it is on organized players
+    -- nobody named (or un-named) by hand or through sync; otherwise a
+    -- different alias is drift.
     local proposals = {}
     for index = 1, #keys do
         key = keys[index]
@@ -298,6 +309,8 @@ function ReconcileEngine.Plan(inputs)
             table.insert(proposals[root], { alias = alias, character = key })
         end
     end
+    -- Organized players' notes, by player: { main, entries }.
+    local fills = {}
     local root, entries
     for root, entries in pairs(proposals) do
         local agreed = entries[1].alias
@@ -320,9 +333,44 @@ function ReconcileEngine.Plan(inputs)
             for index = 1, #entries do
                 table.insert(plan.aliasNotes[root], entries[index].character)
             end
+        elseif aliasUntouched(player) then
+            -- Notes on several of its characters can name the player.
+            local fill = fills[rootCharacter.player]
+            if fill == nil then
+                fill = { main = player.main, entries = {} }
+                fills[rootCharacter.player] = fill
+            end
+            for index = 1, #entries do
+                table.insert(fill.entries, entries[index])
+            end
         elseif player.alias == nil or string.lower(player.alias) ~= folded then
             for index = 1, #entries do
                 addConflict(plan, partition, entries[index].character, "alias", { alias = agreed })
+            end
+        end
+    end
+    local fill
+    for _, fill in pairs(fills) do
+        table.sort(fill.entries, function(first, second)
+            return first.character < second.character
+        end)
+        local agreed = fill.entries[1].alias
+        local index
+        for index = 2, #fill.entries do
+            if string.lower(fill.entries[index].alias) ~= string.lower(agreed) then
+                agreed = nil
+                break
+            end
+        end
+        if agreed == nil then
+            for index = 1, #fill.entries do
+                addConflict(plan, partition, fill.entries[index].character, "competing aliases")
+            end
+        else
+            plan.aliases[fill.main] = agreed
+            plan.aliasNotes[fill.main] = {}
+            for index = 1, #fill.entries do
+                table.insert(plan.aliasNotes[fill.main], fill.entries[index].character)
             end
         end
     end
@@ -381,11 +429,9 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         local character = partition:GetCharacter(main)
         local player = character and partition:GetPlayer(character.player)
         -- The plan's own links may have given this player alts; what must
-        -- still hold is that nobody named it or organized it by hand.
-        if player ~= nil and player.main == main and player.alias == nil
-            and player.aliasSource ~= addon.FellowshipStore.SOURCE_MANUAL
-            and character.source ~= addon.FellowshipStore.SOURCE_MANUAL
-        then
+        -- still hold is that nobody named it, or cleared its name, by hand or
+        -- through sync.
+        if player ~= nil and player.main == main and aliasUntouched(player) then
             if partition:SetAlias(character.player, alias, addon.FellowshipStore.SOURCE_NOTE) then
                 aliased = aliased + 1
             end
@@ -418,9 +464,11 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
     local previous = partition:GetConflicts() or {}
     for index = 1, #previous do
         local entry = previous[index]
-        -- Promotions wait for the player to confirm them, whatever is
-        -- rescanned.
-        if type(entry) == "table" and (not plan.processed[entry.character] or entry.kind == "promotion") then
+        -- Promotions wait for the player to confirm them, and members'
+        -- suggestions for an officer to decide them, whatever is rescanned.
+        if type(entry) == "table"
+            and (not plan.processed[entry.character] or entry.kind == "promotion" or entry.from ~= nil)
+        then
             table.insert(conflicts, entry)
         end
     end
@@ -500,8 +548,10 @@ end
 -- Keeps the invariant: a player with any in-guild character has an
 -- in-guild acting main. Each promotion records the former main in the
 -- player's history and returns a "promotion" conflict for confirmation.
-function ReconcileEngine.EnsureActingMains(partition, members, now)
+-- `checkpoint`, when given, is called after each player.
+function ReconcileEngine.EnsureActingMains(partition, members, now, checkpoint)
     members = members or {}
+    checkpoint = checkpoint or function() end
     local promotions = {}
     local players = {}
     partition:EachPlayer(function(id, player)
@@ -534,6 +584,7 @@ function ReconcileEngine.EnsureActingMains(partition, members, now)
                 })
             end
         end
+        checkpoint()
     end
     return promotions
 end

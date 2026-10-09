@@ -22,6 +22,12 @@ externals:
   Libs/DetailsFramework:
     url: https://github.com/Tercioo/Details-Framework
     tag: v12.0.7.746
+  Libs/AceSerializer-3.0:
+    url: https://repos.curseforge.com/wow/ace3/tags/Release-r1403/AceSerializer-3.0
+    type: svn
+  Libs/AceComm-3.0:
+    url: https://repos.curseforge.com/wow/ace3/tags/Release-r1403/AceComm-3.0
+    type: svn
 
 ignore:
   - .github

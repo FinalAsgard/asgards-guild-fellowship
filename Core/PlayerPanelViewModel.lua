@@ -60,8 +60,9 @@ end
 -- inputs: partition, playerId, members (live facts by key), normalizer,
 -- formatDate (function(timestamp) -> text).
 -- Returns nil when the player no longer exists, or:
---   { id, label, alias, aliasSource, main, mainName, rows }
--- where `main` is the main's character key and `rows` is a flat list for the
+--   { id, label, alias, aliasSource, main, mainName, dontSync, rows }
+-- where `main` is the main's character key, `dontSync` whether guild sync
+-- leaves this player alone, and `rows` is a flat list for the
 -- panel's scroll list:
 --   { kind = "section", text }
 --   { kind = "character", key, name, level, isMain, inGuild, status, source,
@@ -131,6 +132,7 @@ function PlayerPanelViewModel.Build(inputs)
         aliasSource = SOURCES[player.aliasSource],
         main = player.main,
         mainName = mainName,
+        dontSync = player.noSync == true,
         rows = rows,
     }
 end

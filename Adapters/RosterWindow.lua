@@ -443,6 +443,20 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.aliasText = aliasText
     edit.aliasSource = aliasSource
 
+    -- "Don't sync": keep this client's own version of the player.
+    local dontSync = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    dontSync:SetSize(20, 20)
+    dontSync:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -160, -50)
+    local dontSyncLabel = dontSync:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dontSyncLabel:SetPoint("LEFT", dontSync, "RIGHT", 2, 0)
+    dontSync:SetScript("OnClick", function(button)
+        if edit.model ~= nil then
+            options.onSetDontSync(edit.model.main, button:GetChecked() == true)
+        end
+    end)
+    edit.dontSync = dontSync
+    edit.dontSyncLabel = dontSyncLabel
+
     local lineAmount = math.floor((PANEL_HEIGHT - 90) / RosterWindow.LINE_HEIGHT)
     local function newLine(scroll, index)
         local line = CreateFrame("Frame", nil, scroll)
@@ -530,7 +544,7 @@ end
 
 -- The conflict review panel: one line per pending conflict, with Accept and
 -- Reject (or Dismiss, when there's nothing to apply), plus Accept all and
--- Reject all.
+-- Reject all. A member's own suggestions follow, waiting for an officer.
 local CONFLICT_COLUMNS = {
     { field = "name", header = "Character", x = 8, width = 140 },
     { field = "note", header = "Note (live)", x = 152, width = 170 },
@@ -576,6 +590,10 @@ local function createConflictLine(scroll, index, options)
             options.onRejectConflict(line.row.character, line.row.kind)
         end
     end)
+    line.waiting = line:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    line.waiting:SetPoint("LEFT", line, "LEFT", 748, 0)
+    line.waiting:SetText("Waiting for an officer")
+    line.waiting:Hide()
     return line
 end
 
@@ -596,7 +614,13 @@ local function refreshConflictLines(scroll, rows, offset, totalLines)
                 end
                 line.cells[field]:SetText(value ~= nil and tostring(value) or "")
             end
-            if row.canAccept then
+            line.waiting:Hide()
+            line.reject:Show()
+            if row.pending then
+                line.accept:Hide()
+                line.reject:Hide()
+                line.waiting:Show()
+            elseif row.canAccept then
                 line.accept:Show()
                 line.reject:SetText("Reject")
             else
@@ -626,8 +650,9 @@ local function buildConflictPanel(framework, options, frameName)
     explain:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
     explain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -30)
     explain:SetJustifyH("LEFT")
-    explain:SetText("Guild notes that disagree with the roster. Accepting applies the note's suggestion; " ..
-        "rejecting keeps the roster and hides that suggestion until the note changes. Guild notes are never edited.")
+    explain:SetText("Guild notes that disagree with the roster, and members' suggestions. Accepting applies the " ..
+        "suggestion; rejecting keeps the roster. Guild notes are never edited. Your own suggestions are listed " ..
+        "last until an officer decides them.")
 
     local headerIndex
     for headerIndex = 1, #CONFLICT_COLUMNS do
@@ -917,7 +942,8 @@ end
 -- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them;
 -- options.onSearch(text), onToggleOnlineOnly(), onExpandAll(), and
 -- onCollapseAll() drive the controls row; options.onSelectCharacter(key)
--- opens a player's edit panel and onClosePanel() runs when it closes.
+-- opens a player's edit panel and onClosePanel() runs when it closes;
+-- options.onSetDontSync(key, enabled) runs the panel's "Don't sync" toggle.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then
@@ -957,19 +983,24 @@ function Window:SetTitle(title)
     end
 end
 
--- Shows the pending conflicts and their count on the footer button.
+-- Shows the pending conflicts and this member's own suggestions; the footer
+-- button counts only the ones to review.
 function Window:SetConflicts(rows)
     return (pcall(function()
         local conflicts = self.conflicts
-        conflicts.button:SetText("Conflicts (" .. #rows .. ")")
+        local count = addon.ConflictViewModel.CountToReview(rows)
+        conflicts.button:SetText("Conflicts (" .. count .. ")")
         conflicts.scroll:SetData(rows)
         conflicts.scroll:Refresh()
         if #rows == 0 then
             conflicts.empty:Show()
+        else
+            conflicts.empty:Hide()
+        end
+        if count == 0 then
             conflicts.acceptAll:Disable()
             conflicts.rejectAll:Disable()
         else
-            conflicts.empty:Hide()
             conflicts.acceptAll:Enable()
             conflicts.rejectAll:Enable()
         end
@@ -982,10 +1013,12 @@ function Window:ShowPlayer(model)
         local edit = self.playerPanel
         edit.model = model
         if type(edit.panel.SetTitle) == "function" then
-            edit.panel:SetTitle(model.label)
+            edit.panel:SetTitle(model.dontSync and (model.label .. " |cffff8000(Don't sync)|r") or model.label)
         end
         edit.aliasText:SetText(model.alias and ("Alias: " .. model.alias) or "|cff9d9d9dNo alias|r")
         edit.aliasSource:SetText(model.alias and model.aliasSource and ("Alias " .. model.aliasSource) or "")
+        edit.dontSync:SetChecked(model.dontSync == true)
+        edit.dontSyncLabel:SetText(model.dontSync and "|cffff8000Don't sync: kept as yours|r" or "Don't sync")
         edit.scroll:SetData(model.rows)
         edit.scroll:Refresh()
         edit.panel:Show()

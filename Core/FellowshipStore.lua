@@ -14,6 +14,8 @@ local FellowshipStore = {
     SOURCE_MANUAL = "manual",
     SOURCE_NOTE = "note",
     SOURCE_ROSTER = "roster",
+    -- Applied from an officer's edit received over guild sync.
+    SOURCE_SYNC = "sync",
 }
 addon.FellowshipStore = FellowshipStore
 
@@ -60,6 +62,14 @@ local function characterProblem(character)
     if character.departed ~= nil and type(character.departed) ~= "number" then
         return "character departure date is invalid"
     end
+    -- Guild sync (schema 2): when this character's main link was last set,
+    -- and by whom (a character key).
+    if character.mainAt ~= nil and not isWholeNumber(character.mainAt) then
+        return "character main link time is invalid"
+    end
+    if character.mainBy ~= nil and not isText(character.mainBy) then
+        return "character main link author is invalid"
+    end
     if character.rejected ~= nil then
         if type(character.rejected) ~= "table" then
             return "character rejected fingerprints are invalid"
@@ -86,6 +96,18 @@ local function playerProblem(player)
     end
     if player.aliasSource ~= nil and not isText(player.aliasSource) then
         return "player alias source is invalid"
+    end
+    -- Guild sync (schema 2): when this player's alias was last set or
+    -- cleared, and by whom (a character key).
+    if player.aliasAt ~= nil and not isWholeNumber(player.aliasAt) then
+        return "player alias time is invalid"
+    end
+    if player.aliasBy ~= nil and not isText(player.aliasBy) then
+        return "player alias author is invalid"
+    end
+    -- "Don't sync": this client keeps its own version of the player.
+    if player.noSync ~= nil and player.noSync ~= true then
+        return "player don't sync flag is invalid"
     end
     if player.history ~= nil then
         if type(player.history) ~= "table" then
@@ -121,7 +143,9 @@ local function validatePartition(data)
     if type(data) ~= "table" then
         return false
     end
-    local containers = { "characters", "players", "quarantine", "conflicts", "unapplied" }
+    local containers = {
+        "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
+    }
     local index
     for index = 1, #containers do
         local value = data[containers[index]]
@@ -152,8 +176,10 @@ local function validatePartition(data)
         end
     end
     data.unapplied = nil
+    -- An officer's ledger and forgery log are only created when needed.
+    local optional = { unapplied = true, ledger = true, forgeries = true }
     for index = 1, #containers do
-        if containers[index] ~= "unapplied" and data[containers[index]] == nil then
+        if not optional[containers[index]] and data[containers[index]] == nil then
             data[containers[index]] = {}
         end
     end
@@ -354,6 +380,15 @@ function Partition:SetNoteFingerprint(key, fingerprint)
     return true
 end
 
+-- Marks a character's note as unread, so the next scan, even a quick one,
+-- reads it again against the current data.
+function Partition:ForgetNoteFingerprint(key)
+    local character = self.data.characters[key]
+    if character ~= nil then
+        character.note = nil
+    end
+end
+
 -- After `key` has moved out of `oldPlayer`: removes the old player if it is
 -- now empty, or hands its main role to the highest-level character left
 -- (ties by name). Acting-main rules (in-guild first) are applied on top by
@@ -473,7 +508,9 @@ end
 -- where kind is "main", "alias", "unresolved", "ambiguous", "cycle",
 -- "self reference", "chain too long", or "competing aliases", and
 -- suggestion is { main = key } or { alias = text } for the kinds that can be
--- accepted. Never the note text.
+-- accepted. Never the note text. A member's suggestion queued for an
+-- officer has kind "suggested main" or "suggested alias", plus `from` (the
+-- member's key) and `at` (when they made the edit); see SuggestionService.
 function Partition:SetConflicts(entries)
     if type(entries) ~= "table" then
         return false
@@ -484,6 +521,46 @@ end
 
 function Partition:GetConflicts()
     return self.data.conflicts
+end
+
+-- This member's own edits waiting for an officer's decision: a list of the
+-- facts they stamped (see SyncFacts and SuggestionService).
+function Partition:GetSuggestions()
+    return self.data.suggestions
+end
+
+function Partition:SetSuggestions(entries)
+    if type(entries) ~= "table" then
+        return false
+    end
+    self.data.suggestions = entries
+    return true
+end
+
+-- An officer's ledger of the facts they wrote, and the log of forged edits
+-- relayed in their name (see SyncLedger).
+function Partition:GetLedger()
+    return self.data.ledger
+end
+
+function Partition:SetLedger(ledger)
+    if type(ledger) ~= "table" then
+        return false
+    end
+    self.data.ledger = ledger
+    return true
+end
+
+function Partition:GetForgeries()
+    return self.data.forgeries
+end
+
+function Partition:SetForgeries(entries)
+    if type(entries) ~= "table" then
+        return false
+    end
+    self.data.forgeries = entries
+    return true
 end
 
 -- Removes one conflict, found by character and kind. Returns it, or nil.
@@ -521,6 +598,86 @@ function Partition:ClearRejected(key, kind)
             character.rejected = nil
         end
     end
+end
+
+-- Guild sync ---------------------------------------------------------------
+
+-- When `key`'s main link was last set, and by whom. A link nobody stamped
+-- (seeded from notes or the roster) is the oldest possible: at 0, no author.
+function Partition:GetMainStamp(key)
+    local character = self.data.characters[key]
+    if character == nil then
+        return nil
+    end
+    return character.mainAt or 0, character.mainBy
+end
+
+function Partition:SetMainStamp(key, at, by)
+    local character = self.data.characters[key]
+    if character == nil or not isWholeNumber(at) or not isText(by) then
+        return false
+    end
+    character.mainAt = at
+    character.mainBy = by
+    return true
+end
+
+-- When the alias of `key`'s player was last set or cleared, and by whom;
+-- like main links, an unstamped alias is at 0 with no author.
+function Partition:GetAliasStamp(key)
+    local character = self.data.characters[key]
+    local player = character and self.data.players[character.player]
+    if player == nil then
+        return nil
+    end
+    return player.aliasAt or 0, player.aliasBy
+end
+
+function Partition:SetAliasStamp(key, at, by)
+    local character = self.data.characters[key]
+    local player = character and self.data.players[character.player]
+    if player == nil or not isWholeNumber(at) or not isText(by) then
+        return false
+    end
+    player.aliasAt = at
+    player.aliasBy = by
+    return true
+end
+
+-- Forgets when and by whom `key`'s main link was set, making it the oldest
+-- possible again.
+function Partition:ClearMainStamp(key)
+    local character = self.data.characters[key]
+    if character ~= nil then
+        character.mainAt = nil
+        character.mainBy = nil
+    end
+end
+
+-- The same for the alias of `key`'s player.
+function Partition:ClearAliasStamp(key)
+    local character = self.data.characters[key]
+    local player = character and self.data.players[character.player]
+    if player ~= nil then
+        player.aliasAt = nil
+        player.aliasBy = nil
+    end
+end
+
+-- "Don't sync": whether this client keeps its own version of a player,
+-- ignoring guild sync for it.
+function Partition:IsNoSync(playerId)
+    local player = self.data.players[playerId]
+    return player ~= nil and player.noSync == true
+end
+
+function Partition:SetNoSync(playerId, enabled)
+    local player = self.data.players[playerId]
+    if player == nil then
+        return false
+    end
+    player.noSync = enabled and true or nil
+    return true
 end
 
 -- Departure and history -------------------------------------------------
@@ -668,4 +825,22 @@ end
 
 function Partition:GetLastScan()
     return self.data.lastFullScan
+end
+
+-- When this client last compared or exchanged guild sync data with another
+-- add-on user, or nil.
+function Partition:GetLastSync()
+    local at = self.data.lastSync
+    if type(at) ~= "number" then
+        return nil
+    end
+    return at
+end
+
+function Partition:MarkSynced(timestamp)
+    if type(timestamp) ~= "number" then
+        return false
+    end
+    self.data.lastSync = timestamp
+    return true
 end

@@ -37,9 +37,12 @@ pins each one, and `.pkgmeta` lists the same pins as externals. CI runs
 `lua5.1 tools/check-libraries.lua`, which fails when the two differ, so change
 a pin in both files together.
 
-- LibStub, CallbackHandler-1.0, LibDBIcon-1.0, and LibSharedMedia-3.0 come
-  from CurseForge's svn repositories, pinned by their tag folder URL. The
-  packager fetches these with **svn**, so building needs an svn client.
+- LibStub, CallbackHandler-1.0, LibDBIcon-1.0, LibSharedMedia-3.0,
+  AceSerializer-3.0, and AceComm-3.0 come from CurseForge's svn
+  repositories, pinned by their tag folder URL. The packager fetches these
+  with **svn**, so building needs an svn client. AceComm-3.0 and
+  AceSerializer-3.0 carry guild sync's messages, and AceComm-3.0 brings
+  ChatThrottleLib inside its folder.
 - LibDataBroker-1.1 and the Details! Framework come from GitHub, pinned by
   git tag.
 

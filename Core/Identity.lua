@@ -4,12 +4,14 @@ local addonName, addon = ...
 -- reads the current build's names from `addon.Identity`.
 local VARIANTS = {
     AsgardsGuildFellowship = {
+        commPrefix = "AGFSync",
         displayName = "Asgard's Guild Fellowship",
         shortName = "Guild Fellowship",
         slashAlias = "/asgardsfellowship",
         slashCommand = "/agf",
     },
     AsgardsGuildFellowshipDev = {
+        commPrefix = "AGFSyncDev",
         displayName = "Asgard's Guild Fellowship (Dev)",
         shortName = "Guild Fellowship (Dev)",
         slashAlias = "/asgardsfellowshipdev",
@@ -24,6 +26,9 @@ end
 
 addon.Identity = {
     addonName = addonName,
+    -- The add-on message prefix for guild sync (at most 16 characters), so
+    -- production and development builds never exchange data.
+    commPrefix = variant.commPrefix,
     databaseName = addonName .. "DB",
     displayName = variant.displayName,
     shortName = variant.shortName,

@@ -173,6 +173,37 @@ function Client:GetGuildIdentity()
     return { name = name, realm = realm }
 end
 
+-- The logged-in character as "Name-Realm", or nil while the client can't
+-- say. UnitFullName may leave out the realm (early at login, or on older
+-- clients), so the player's own realm fills it in.
+function Client:GetPlayerFullName()
+    local ok, name, realm = callFunction(self.environment.UnitFullName, "player")
+    if not ok or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    if type(realm) ~= "string" or realm == "" then
+        local realmOk, ownRealm = callFunction(self.environment.GetNormalizedRealmName)
+        if not realmOk or type(ownRealm) ~= "string" or ownRealm == "" then
+            realmOk, ownRealm = callFunction(self.environment.GetRealmName)
+        end
+        realm = realmOk and ownRealm or nil
+    end
+    if type(realm) ~= "string" or realm == "" then
+        return nil
+    end
+    return name .. "-" .. realm
+end
+
+-- The logged-in character's GUID, or nil. Unlike its name, it's spelled the
+-- same way the guild roster reports it on every client.
+function Client:GetPlayerGuid()
+    local ok, guid = callFunction(self.environment.UnitGUID, "player")
+    if not ok or type(guid) ~= "string" or guid == "" then
+        return nil
+    end
+    return guid
+end
+
 function Client:IsInGuild()
     local ok, inGuild = callFunction(self.environment.IsInGuild)
     return ok and inGuild ~= nil and inGuild ~= false
@@ -190,7 +221,7 @@ end
 -- Facts about the roster member at `index`, or nil when the client can't
 -- say (the roster loads asynchronously, so early reads may be empty).
 function Client:GetGuildMember(index)
-    local ok, name, rankName, rankIndex, level, _, zone, note, _, online, _, classToken =
+    local ok, name, rankName, rankIndex, level, _, zone, note, _, online, _, classToken, _, _, _, _, _, guid =
         callFunction(self.environment.GetGuildRosterInfo, index)
     if not ok or type(name) ~= "string" or name == "" then
         return nil
@@ -198,6 +229,7 @@ function Client:GetGuildMember(index)
 
     local member = {
         name = name,
+        guid = type(guid) == "string" and guid ~= "" and guid or nil,
         classToken = type(classToken) == "string" and classToken or nil,
         level = type(level) == "number" and level or nil,
         rankIndex = type(rankIndex) == "number" and rankIndex or nil,
@@ -322,6 +354,17 @@ function Client:After(seconds, callback)
 
     local ok = pcall(timers.After, seconds, callback)
     return ok
+end
+
+-- A random whole number from `low` to `high`, or `low` when the client has
+-- no random numbers.
+function Client:Random(low, high)
+    local math = self.environment.math
+    local ok, value = callFunction(type(math) == "table" and math.random or nil, low, high)
+    if not ok or type(value) ~= "number" then
+        return low
+    end
+    return value
 end
 
 -- A high-resolution clock in milliseconds for time budgets, or nil.

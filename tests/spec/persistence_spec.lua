@@ -16,7 +16,7 @@ local function registerProfileTests(profile)
     test.test(profile .. " fresh install creates a versioned store with an empty guild container", function()
         local world = start(profile)
 
-        test.assertEqual(1, world.database.schemaVersion)
+        test.assertEqual(2, world.database.schemaVersion)
         test.assertEqual("table", type(world.database.guilds))
         test.assertEqual(nil, next(world.database.guilds))
         test.assertEqual(0, #world.messages)
@@ -47,7 +47,7 @@ local function registerProfileTests(profile)
         test.assertEqual(saved, world.database)
         test.assertEqual("hand edited", saved.note)
         test.assertTrue(saved.futureFeature.enabled)
-        test.assertEqual(1, saved.schemaVersion)
+        test.assertEqual(2, saved.schemaVersion)
         test.assertEqual("table", type(saved.guilds))
         test.assertEqual(0, #world.messages)
     end)
@@ -74,11 +74,31 @@ for profileIndex = 1, #fixtures.PROFILES do
     registerProfileTests(fixtures.PROFILES[profileIndex])
 end
 
+test.test("schema 1 saved data is raised to schema 2 with every record kept", function()
+    local saved = {
+        schemaVersion = 1,
+        guilds = {
+            ["Knights of Camelot-Area52"] = {
+                characters = { ["toolbox-area52"] = { player = 1, source = "manual" } },
+                players = { [1] = { main = "toolbox-area52", alias = "TheTool" } },
+            },
+        },
+    }
+    local before = fixtures.snapshot(saved.guilds)
+
+    local world = start("Retail", saved)
+
+    test.assertEqual(saved, world.database)
+    test.assertEqual(2, saved.schemaVersion)
+    fixtures.assertSameData(before, saved.guilds)
+    test.assertEqual(0, #world.messages)
+end)
+
 local CORRUPT_CASES = {
     { name = "a guild container of the wrong type", database = { schemaVersion = 1, guilds = "oops" } },
     { name = "a non-numeric schema version", database = { schemaVersion = "one", guilds = {} } },
     { name = "a fractional schema version", database = { schemaVersion = 1.5, guilds = {} } },
-    { name = "a schema version from a newer add-on", database = { schemaVersion = 2, guilds = {}, newer = true } },
+    { name = "a schema version from a newer add-on", database = { schemaVersion = 3, guilds = {}, newer = true } },
 }
 
 local caseIndex

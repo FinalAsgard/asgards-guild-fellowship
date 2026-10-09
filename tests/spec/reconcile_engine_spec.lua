@@ -6,7 +6,8 @@ local function load()
         "Core/NameNormalizer.lua",
         "Core/NoteParser.lua",
         "Core/FellowshipStore.lua",
-        "Core/ReconcileEngine.lua"
+        "Core/ReconcileEngine.lua",
+        "Core/SyncFacts.lua"
     )
 end
 
@@ -202,6 +203,107 @@ test.test("characters that already have relationships are not reseeded", functio
 
     test.assertEqual(playerOf(partition, "toolbox-area52"), playerOf(partition, "hammer-area52"))
     test.assertEqual("TheTool", playerOf(partition, "toolbox-area52").alias)
+end)
+
+test.test("an organized player nobody named takes a later note's alias, but a different alias is drift", function()
+    local addon, partition, plan = setup(RETAIL, {
+        { "Toolbox-Area52", "" },
+        { "Hammer-Area52", ">Toolbox" },
+    })
+    addon.ReconcileEngine.Apply(partition, plan())
+    local function rescan(entries)
+        local members, normalizer = roster(addon, RETAIL, entries)
+        return addon.ReconcileEngine.Apply(partition, addon.ReconcileEngine.Plan({
+            partition = partition,
+            members = members,
+            normalizer = normalizer,
+            rules = RETAIL,
+            mode = "full",
+        }))
+    end
+
+    -- The alt's note names the whole player.
+    local result = rescan({ { "Toolbox-Area52", "" }, { "Hammer-Area52", ">Toolbox @Bity" } })
+
+    test.assertEqual(1, result.aliased)
+    test.assertEqual(0, result.conflicts)
+    test.assertEqual("Bity", playerOf(partition, "toolbox-area52").alias)
+
+    result = rescan({ { "Toolbox-Area52", "@Tools" }, { "Hammer-Area52", ">Toolbox @Bity" } })
+    test.assertEqual(0, result.aliased)
+    test.assertEqual("Bity", playerOf(partition, "toolbox-area52").alias)
+    test.assertEqual(1, result.conflicts, "the note naming another alias is drift")
+end)
+
+test.test("an organized player's characters naming different aliases compete", function()
+    local addon, partition, plan = setup(RETAIL, {
+        { "Toolbox-Area52", "" },
+        { "Hammer-Area52", ">Toolbox" },
+    })
+    addon.ReconcileEngine.Apply(partition, plan())
+    local members, normalizer = roster(addon, RETAIL, {
+        { "Toolbox-Area52", "@Tools" },
+        { "Hammer-Area52", ">Toolbox @Bity" },
+    })
+
+    local result = addon.ReconcileEngine.Apply(partition, addon.ReconcileEngine.Plan({
+        partition = partition,
+        members = members,
+        normalizer = normalizer,
+        rules = RETAIL,
+        mode = "full",
+    }))
+
+    test.assertEqual(0, result.aliased)
+    test.assertEqual(nil, playerOf(partition, "toolbox-area52").alias)
+    local kinds = {}
+    local conflicts = partition:GetConflicts()
+    local index
+    for index = 1, #conflicts do
+        kinds[conflicts[index].character] = conflicts[index].kind
+    end
+    test.assertEqual("competing aliases", kinds["toolbox-area52"])
+    test.assertEqual("competing aliases", kinds["hammer-area52"])
+end)
+
+test.test("on a new install notes seed first, and officer data arriving later replaces them", function()
+    local entries = {
+        { "Toolbox-Area52", "@TheTool" },
+        { "Hammer-Area52", ">Toolbox" },
+        { "Visitor-Area52", "" },
+        { "Wrench-Area52", "" },
+    }
+    local addon, partition, plan = setup(RETAIL, entries)
+    addon.ReconcileEngine.Apply(partition, plan())
+    test.assertEqual("toolbox-area52", playerOf(partition, "hammer-area52").main)
+
+    local officer = "boss-area52"
+    local applied = addon.SyncFacts.Create(partition, {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    }):ApplyAll({
+        { kind = "main", character = "hammer-area52", main = "visitor-area52", at = 1790000000, by = officer },
+        { kind = "alias", character = "toolbox-area52", alias = "Tools", at = 1790000000, by = officer },
+    })
+
+    test.assertEqual(2, applied)
+    test.assertEqual("visitor-area52", playerOf(partition, "hammer-area52").main)
+    test.assertEqual("Tools", playerOf(partition, "toolbox-area52").alias)
+
+    -- The notes still disagree; a later scan queues them and changes nothing.
+    local result = addon.ReconcileEngine.Apply(partition, addon.ReconcileEngine.Plan({
+        partition = partition,
+        members = roster(addon, RETAIL, entries),
+        normalizer = addon.NameNormalizer.Create(RETAIL),
+        rules = RETAIL,
+        mode = "incremental",
+    }))
+    test.assertEqual(0, result.linked)
+    test.assertEqual(0, result.aliased)
+    test.assertEqual(2, result.conflicts)
+    test.assertEqual("visitor-area52", playerOf(partition, "hammer-area52").main)
+    test.assertEqual("Tools", playerOf(partition, "toolbox-area52").alias)
 end)
 
 test.test("the store keeps a note fingerprint, never the note text", function()
