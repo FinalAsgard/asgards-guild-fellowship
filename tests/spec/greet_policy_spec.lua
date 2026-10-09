@@ -223,3 +223,80 @@ test.test("greet policy: an absence lookup that fails counts as a plain login", 
 
     test.assertEqual("login", category(policy:CameOnline("bolt", START)))
 end)
+
+-- A policy with settings: `settings.off` lists categories turned off, and
+-- `settings.welcomeBack` and `settings.longAbsence` are thresholds in
+-- seconds.
+local function withSettings(settings, absences)
+    local world = guild()
+    local addon = test.newAddon("Core/GreetPolicy.lua")
+    local policy = addon.GreetPolicy.Create({
+        playerOf = function(key)
+            return world.players[key]
+        end,
+        isMember = function(key)
+            return world.members[key] == true
+        end,
+        isOwn = function(key)
+            return world.own[key] == true
+        end,
+        absenceOf = function(key)
+            return (absences or {})[key]
+        end,
+        categoryEnabled = function(name)
+            return not (settings.off or {})[name]
+        end,
+        welcomeBackSeconds = settings.welcomeBack and function()
+            return settings.welcomeBack
+        end,
+        longAbsenceSeconds = settings.longAbsence and function()
+            return settings.longAbsence
+        end,
+    })
+    policy:Seed({ "me", "anvil" })
+    return policy
+end
+
+test.test("greet policy: a category turned off gives no prompt, and the others still do", function()
+    local settings = { off = { login = true } }
+    local policy = withSettings(settings, { stranger = 40 * DAY })
+
+    test.assertEqual(nil, policy:CameOnline("bolt", START))
+    test.assertEqual("longAbsence", category(policy:CameOnline("stranger", START)))
+    test.assertEqual("join", category(policy:Joined("newt", START)))
+
+    -- Turning it back on takes effect for the next arrival.
+    settings.off.login = nil
+    policy:WentOffline("anvil", START)
+    settings.off.welcomeBack = true
+    test.assertEqual(nil, policy:CameOnline("anvil", START + 20 * MINUTE))
+end)
+
+test.test("greet policy: custom thresholds move the relog and long-absence boundaries", function()
+    local policy = withSettings({ welcomeBack = 5 * MINUTE, longAbsence = 7 * DAY },
+        { bolt = 7 * DAY, stranger = 7 * DAY - 1 })
+
+    policy:WentOffline("anvil", START)
+    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 5 * MINUTE)))
+    policy:WentOffline("anvil", START + 10 * MINUTE)
+    test.assertEqual(nil, policy:CameOnline("anvil", START + 15 * MINUTE - 1))
+
+    test.assertEqual("longAbsence", category(policy:CameOnline("bolt", START)))
+    test.assertEqual("login", category(policy:CameOnline("stranger", START)))
+end)
+
+test.test("greet policy: a failing setting falls back to the defaults", function()
+    local addon = test.newAddon("Core/GreetPolicy.lua")
+    local policy = addon.GreetPolicy.Create({
+        playerOf = function() return nil end,
+        isMember = function() return true end,
+        isOwn = function() return false end,
+        categoryEnabled = function() error("boom") end,
+        welcomeBackSeconds = function() error("boom") end,
+    })
+    policy:Seed({ "anvil" })
+
+    test.assertEqual(15 * MINUTE, policy:WelcomeBackSeconds())
+    policy:WentOffline("anvil", START)
+    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 15 * MINUTE)))
+end)

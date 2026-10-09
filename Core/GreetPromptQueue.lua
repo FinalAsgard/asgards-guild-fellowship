@@ -85,6 +85,18 @@ function Queue:Remove(player)
     return true
 end
 
+-- Removes every prompt in `category` (its prompts were turned off).
+function Queue:RemoveCategory(category)
+    local index = 1
+    while index <= #self.prompts do
+        if self.prompts[index].category == category then
+            table.remove(self.prompts, index)
+        else
+            index = index + 1
+        end
+    end
+end
+
 -- Removes every prompt (Guild Greet was turned off).
 function Queue:Clear()
     self.prompts = {}

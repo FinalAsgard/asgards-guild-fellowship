@@ -42,7 +42,12 @@ Policy.__index = Policy
 -- options.absenceOf: function(key) -> seconds between the player's latest
 --   login on any character and the start of this session, or nil when
 --   unknown. Optional; without it nobody is on a long absence.
--- options.enabled: function() -> false when Guild Greet is off. Optional.
+-- options.enabled: function() -> false when Guild Greet is off, or off on
+--   this character. Optional.
+-- options.categoryEnabled: function(category) -> false when that category's
+--   prompts are turned off. Optional.
+-- options.welcomeBackSeconds, options.longAbsenceSeconds: function() -> the
+--   thresholds in seconds. Optional; the defaults above otherwise.
 function GreetPolicy.Create(options)
     return setmetatable({
         playerOf = options.playerOf,
@@ -54,8 +59,15 @@ function GreetPolicy.Create(options)
         enabled = options.enabled or function()
             return true
         end,
-        welcomeBack = GreetPolicy.WELCOME_BACK_SECONDS,
-        longAbsence = GreetPolicy.LONG_ABSENCE_SECONDS,
+        categoryEnabled = options.categoryEnabled or function()
+            return true
+        end,
+        welcomeBack = options.welcomeBackSeconds or function()
+            return GreetPolicy.WELCOME_BACK_SECONDS
+        end,
+        longAbsence = options.longAbsenceSeconds or function()
+            return GreetPolicy.LONG_ABSENCE_SECONDS
+        end,
         ready = false,
         seen = {},
         offlineAt = {},
@@ -105,9 +117,27 @@ function Policy:WentOffline(key, now)
     self.offlineAt[player] = now
 end
 
+-- A threshold in seconds from `callback`, or `default` when it fails.
+local function seconds(callback, default)
+    local ok, value = pcall(callback)
+    if ok and type(value) == "number" then
+        return value
+    end
+    return default
+end
+
+-- The welcome-back threshold in seconds.
+function Policy:WelcomeBackSeconds()
+    return seconds(self.welcomeBack, GreetPolicy.WELCOME_BACK_SECONDS)
+end
+
 function Policy:prompt(category, player, key)
     local ok, enabled = pcall(self.enabled)
     if not ok or enabled == false then
+        return nil
+    end
+    local categoryOk, categoryEnabled = pcall(self.categoryEnabled, category)
+    if categoryOk and categoryEnabled == false then
         return nil
     end
     return { category = category, player = player, key = key }
@@ -142,12 +172,14 @@ function Policy:CameOnline(key, now)
     local category
     if not wasSeen then
         local ok, absence = pcall(self.absenceOf, key)
-        if ok and type(absence) == "number" and absence >= self.longAbsence then
+        if ok and type(absence) == "number"
+            and absence >= seconds(self.longAbsence, GreetPolicy.LONG_ABSENCE_SECONDS)
+        then
             category = GreetPolicy.LONG_ABSENCE
         else
             category = GreetPolicy.LOGIN
         end
-    elseif offlineAt ~= nil and now - offlineAt >= self.welcomeBack then
+    elseif offlineAt ~= nil and now - offlineAt >= self:WelcomeBackSeconds() then
         category = GreetPolicy.WELCOME_BACK
     else
         -- A relog, an alt switch, or a login we never saw end.

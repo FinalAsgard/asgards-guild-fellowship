@@ -39,12 +39,17 @@ local GreetingLibrary = {
     RETIRED = {
         ["Evening, {name}!"] = "Hello, {name}!",
     },
-    -- The categories in the order the Greetings window lists them.
+    -- The categories in the order the Greetings window and the settings
+    -- panel list them, with the panel's on/off label for each.
     CATEGORIES = {
-        { id = "join", label = "Join", when = "Someone joins the guild." },
-        { id = "login", label = "Login", when = "Someone's first login you see this session." },
-        { id = "welcomeBack", label = "Welcome back", when = "Someone you saw log off comes back after a break." },
-        { id = "longAbsence", label = "Long absence", when = "Someone logs in after a long time away." },
+        { id = "join", label = "Join", when = "Someone joins the guild.",
+            toggle = "Prompt when someone joins the guild" },
+        { id = "login", label = "Login", when = "Someone's first login you see this session.",
+            toggle = "Prompt for first logins" },
+        { id = "welcomeBack", label = "Welcome back", when = "Someone you saw log off comes back after a break.",
+            toggle = "Prompt for welcome backs" },
+        { id = "longAbsence", label = "Long absence", when = "Someone logs in after a long time away.",
+            toggle = "Prompt after a long absence" },
     },
     -- Every placeholder and what it's filled with. Case doesn't matter.
     PLACEHOLDERS = {

@@ -312,3 +312,26 @@ test.test("the Guild Greet section sets the greeting cap through the saved data"
     test.assertEqual(4, world.database.greet.cap)
     test.assertEqual(nil, addon.settings:Set("greetCap", 11))
 end)
+
+test.test("the Guild Greet section has category, threshold and this-character settings", function()
+    local world, addon = loggedIn("Forever")
+
+    test.assertTrue(addon.settings:Get("greetCategory:join"))
+    test.assertTrue(addon.settings:Set("greetCategory:join", false))
+    test.assertFalse(world.database.greet.categories.join)
+
+    test.assertEqual(15, addon.settings:Get("welcomeBackMinutes"))
+    test.assertTrue(addon.settings:Set("welcomeBackMinutes", 20))
+    test.assertEqual(20, world.database.greet.welcomeBackMinutes)
+    test.assertEqual(nil, addon.settings:Set("longAbsenceDays", 400))
+    test.assertEqual(30, addon.settings:Get("longAbsenceDays"))
+
+    -- Greet stays on for other characters.
+    test.assertTrue(addon.settings:Get("greetCharacter"))
+    test.assertTrue(addon.settings:Set("greetCharacter", false))
+    test.assertFalse(addon.settings:Get("greetCharacter"))
+    test.assertFalse(addon.guildGreet:IsEnabled())
+    test.assertTrue(addon.settings:Get("guildGreet"))
+    -- Saved by character key, account-wide.
+    test.assertTrue(next(world.database.greet.offCharacters) ~= nil)
+end)

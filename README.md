@@ -27,7 +27,7 @@ The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Gui
 
 - **General**: show or hide the minimap button, an **Open Roster** button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off.
-- **Guild Greet**: turn Guild Greet on or off, set how many greetings close your prompt, unlock the prompts to move them, and an **Edit Greetings** button that opens the Greetings window.
+- **Guild Greet**: turn Guild Greet on or off (everywhere, or just on the character you're playing), turn each category's prompts on or off, set the welcome-back minutes and long-absence days, set how many greetings close your prompt, unlock the prompts to move them, and an **Edit Greetings** button that opens the Greetings window.
 
 The panel and the slash commands change the same settings, so a change made either way shows up in both. Settings are saved for every character on this game install. The development build's panel is labeled "(Dev)".
 
@@ -166,9 +166,9 @@ On Retail, the game hides chat from add-ons during encounters and keystone runs.
 When a guild member comes online, a small prompt appears at the left side of the screen with just the name they go by and a **Greet** button. Press it to post a random greeting to guild chat. Nothing is ever posted unless you press the button.
 
 - **Join**: someone joins the guild. They get this instead of a login prompt.
-- **Long absence**: someone's first login this session when none of their characters had logged in for 30 days or more, going by the guild roster's last-online times when you logged in.
+- **Long absence**: someone's first login this session when none of their characters had logged in for 30 days or more (you can change the days), going by the guild roster's last-online times when you logged in.
 - **Login**: the first time you see someone come online this session.
-- **Welcome back**: someone you saw log off comes back 15 minutes or more later. Coming back sooner (a relog or a disconnect) gets no prompt.
+- **Welcome back**: someone you saw log off comes back 15 minutes or more later (you can change the minutes). Coming back sooner (a relog or a disconnect) gets no prompt.
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
 - Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
 - Prompts disappear after 2 minutes; the **X** closes one without greeting.
@@ -185,11 +185,11 @@ Greetings can use these placeholders, in any capitalization:
 | `{character}` | The character that just logged in. |
 | `{characterFirst}`, `{characterLast}` | The first or last part of that character's name. |
 
-First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** section of the settings panel. Greetings and the setting are shared by every character on this game install.
+First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** section of the settings panel. Greetings and settings are shared by every character on this game install, and **Guild Greet on this character** turns it off on just the one you're playing, say an alt in another guild.
 
 ### Greeting together
 
-When you greet someone, the add-on tells other add-on users in the guild. Once a player has had enough greetings from anyone (2 by default; set it from 1 to 10 in the settings panel), your prompt for them quietly closes, and you aren't prompted for them again until 15 minutes after the last greeting. Each person's greeting counts once, whichever category or character it was for. This only counts members running the add-on; greetings typed by hand aren't seen. If two people press Greet at the same moment, an extra greeting can slip through.
+When you greet someone, the add-on tells other add-on users in the guild. Once a player has had enough greetings from anyone (2 by default; set it from 1 to 10 in the settings panel), your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (15 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever category or character it was for. This only counts members running the add-on; greetings typed by hand aren't seen. If two people press Greet at the same moment, an extra greeting can slip through.
 
 ### Editing greetings
 

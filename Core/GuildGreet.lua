@@ -56,7 +56,7 @@ function GuildGreet.Create(options)
         absences = {},
     }, Greet)
     greet.tally = addon.GreetTally.Create(function()
-        return addon.GreetPolicy.WELCOME_BACK_SECONDS
+        return greet.policy:WelcomeBackSeconds()
     end)
     greet.policy = addon.GreetPolicy.Create({
         playerOf = function(key)
@@ -74,6 +74,16 @@ function GuildGreet.Create(options)
         end,
         enabled = function()
             return greet:IsEnabled()
+        end,
+        categoryEnabled = function(category)
+            local store = greet.store()
+            return store == nil or store:GreetCategoryEnabled(category)
+        end,
+        welcomeBackSeconds = function()
+            return greet:Setting("welcomeBackMinutes") * 60
+        end,
+        longAbsenceSeconds = function()
+            return greet:Setting("longAbsenceDays") * 24 * 60 * 60
         end,
     })
     return greet
@@ -101,9 +111,24 @@ function Greet:Cap()
     return store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
 end
 
+-- A Guild Greet number setting (FellowshipStore.GREET_NUMBERS), or its
+-- default without saved data.
+function Greet:Setting(name)
+    local store = self.store()
+    if store == nil then
+        return addon.FellowshipStore.GREET_NUMBERS[name].default
+    end
+    return store:GreetNumber(name)
+end
+
+-- On unless turned off, everywhere or on the logged-in character.
 function Greet:IsEnabled()
     local store = self.store()
-    return store == nil or store:GreetEnabled()
+    if store == nil then
+        return true
+    end
+    local selfKey = self.selfKey()
+    return store:GreetEnabled() and (selfKey == nil or store:GreetOnCharacter(selfKey))
 end
 
 -- True for any of the user's own characters.
@@ -352,7 +377,17 @@ function Greet:OnCombatChanged(inCombat)
     self:Refresh()
 end
 
--- Guild Greet was turned on or off. Turning it off clears waiting prompts.
+-- A category's prompts were turned on or off. Turning them off closes any
+-- waiting.
+function Greet:OnCategoryChanged(category, enabled)
+    if not enabled then
+        self.queue:RemoveCategory(category)
+        self:Refresh()
+    end
+end
+
+-- Guild Greet was turned on or off, everywhere or on this character.
+-- Turning it off clears waiting prompts.
 function Greet:OnEnabledChanged(enabled)
     if not enabled then
         self.queue:Clear()

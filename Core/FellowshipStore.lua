@@ -388,6 +388,106 @@ function Store:SetGreetCap(cap)
     return true
 end
 
+-- Whether Guild Greet prompts for `category` (a GreetPolicy category). On
+-- unless turned off; an unusable saved value counts as on.
+function Store:GreetCategoryEnabled(category)
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local categories = type(state) == "table" and state.categories or nil
+    return type(categories) ~= "table" or categories[category] ~= false
+end
+
+-- Turns one category's prompts on or off. An unusable existing value is
+-- left alone.
+function Store:SetGreetCategoryEnabled(category, enabled)
+    if not isText(category) or type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil then
+        return false
+    end
+    if state.categories == nil then
+        state.categories = {}
+    end
+    local categories = state.categories
+    if type(categories) ~= "table" or (categories[category] ~= nil and type(categories[category]) ~= "boolean") then
+        return false
+    end
+    categories[category] = enabled
+    return true
+end
+
+-- Guild Greet's whole-number settings: the saved field, default and range.
+FellowshipStore.GREET_NUMBERS = {
+    -- Minutes someone must be gone before coming back is a welcome back.
+    welcomeBackMinutes = { default = 15, min = 1, max = 120 },
+    -- Days since anyone last saw a player before a login is a long absence.
+    longAbsenceDays = { default = 30, min = 1, max = 365 },
+}
+
+local function isInRange(value, range)
+    return type(value) == "number" and value == math.floor(value) and value >= range.min and value <= range.max
+end
+
+-- A Guild Greet number setting (a GREET_NUMBERS name). The default when none
+-- is saved or the saved one is unusable.
+function Store:GreetNumber(name)
+    local range = FellowshipStore.GREET_NUMBERS[name]
+    if range == nil then
+        return nil
+    end
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local value = type(state) == "table" and state[name] or nil
+    if not isInRange(value, range) then
+        return range.default
+    end
+    return value
+end
+
+-- Sets a Guild Greet number setting to a whole number within its range. An
+-- unusable existing value is left alone.
+function Store:SetGreetNumber(name, value)
+    local range = FellowshipStore.GREET_NUMBERS[name]
+    if range == nil or not isInRange(value, range) then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state[name] ~= nil and not isInRange(state[name], range)) then
+        return false
+    end
+    state[name] = value
+    return true
+end
+
+-- Whether Guild Greet is on for the character `key`. Each character is on
+-- unless turned off; the set of characters it's off on is account-wide, and
+-- an unusable one counts as empty.
+function Store:GreetOnCharacter(key)
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local off = type(state) == "table" and state.offCharacters or nil
+    return type(off) ~= "table" or off[key] ~= true
+end
+
+-- Turns Guild Greet on or off for the character `key`. An unusable existing
+-- set is left alone.
+function Store:SetGreetOnCharacter(key, enabled)
+    if not isText(key) or type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil then
+        return false
+    end
+    if state.offCharacters == nil then
+        state.offCharacters = {}
+    end
+    if type(state.offCharacters) ~= "table" then
+        return false
+    end
+    state.offCharacters[key] = (not enabled) or nil
+    return true
+end
+
 -- The points a saved greet prompt position may be measured from.
 local ANCHOR_POINTS = {
     TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, CENTER = true,

@@ -214,6 +214,80 @@ if clientProfile.supported then
             return true
         end,
     })
+    -- The character that's logged in; the set of characters it's off on is
+    -- account-wide.
+    settings:Add("guildGreet", {
+        id = "greetCharacter",
+        kind = "toggle",
+        label = "Guild Greet on this character",
+        get = function()
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            return store == nil or selfKey == nil or store:GreetOnCharacter(selfKey)
+        end,
+        set = function(enabled)
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if selfKey == nil then
+                return nil, "this character isn't in a guild"
+            end
+            if not store:SetGreetOnCharacter(selfKey, enabled) then
+                return nil, "the saved setting is unreadable, so it stays on"
+            end
+            return true
+        end,
+    })
+    local categoryIndex
+    for categoryIndex = 1, #addon.GreetingLibrary.CATEGORIES do
+        local category = addon.GreetingLibrary.CATEGORIES[categoryIndex]
+        settings:Add("guildGreet", {
+            id = "greetCategory:" .. category.id,
+            category = category.id,
+            kind = "toggle",
+            label = category.toggle,
+            get = function()
+                local store = rosterController:Store()
+                return store == nil or store:GreetCategoryEnabled(category.id)
+            end,
+            set = function(enabled)
+                local store = rosterController:Store()
+                if store == nil then
+                    return nil, "saved data is unavailable"
+                end
+                if not store:SetGreetCategoryEnabled(category.id, enabled) then
+                    return nil, "the saved setting is unreadable, so it stays on"
+                end
+                return true
+            end,
+        })
+    end
+    local function greetNumber(id, label)
+        local range = addon.FellowshipStore.GREET_NUMBERS[id]
+        settings:Add("guildGreet", {
+            id = id,
+            kind = "number",
+            label = label,
+            min = range.min,
+            max = range.max,
+            get = function()
+                local store = rosterController:Store()
+                return store and store:GreetNumber(id) or range.default
+            end,
+            set = function(value)
+                local store = rosterController:Store()
+                if store == nil then
+                    return nil, "saved data is unavailable"
+                end
+                if not store:SetGreetNumber(id, value) then
+                    return nil, "the saved setting is unreadable"
+                end
+                return true
+            end,
+        })
+    end
+    greetNumber("welcomeBackMinutes", "Minutes away before coming back is a welcome back")
+    greetNumber("longAbsenceDays", "Days away before a login is a long absence")
     settings:Add("guildGreet", {
         id = "greetCap",
         kind = "number",
@@ -436,8 +510,11 @@ if clientProfile.supported then
         view = greetPrompts,
     })
     settings:OnChange(function(id, value)
-        if id == "guildGreet" then
-            guildGreet:OnEnabledChanged(value)
+        local entry = settings:Entry(id)
+        if id == "guildGreet" or id == "greetCharacter" then
+            guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
+        elseif entry ~= nil and entry.category ~= nil then
+            guildGreet:OnCategoryChanged(entry.category, value)
         end
     end)
     client:ObserveGuildRoster(function()
