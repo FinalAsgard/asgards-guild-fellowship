@@ -693,6 +693,7 @@ function Controller:Redraw()
             partition = self.current.partition,
             members = members,
             normalizer = normalizer,
+            pending = self.current.partition:GetSuggestions(),
         }))
         self:RedrawPanel()
     end

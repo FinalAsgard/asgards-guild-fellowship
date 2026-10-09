@@ -366,6 +366,41 @@ test.test("review rows show the character, live note, suggestion, current state,
     test.assertEqual(nil, rows[1].note)
 end)
 
+test.test("a member's own pending suggestions are listed last, waiting, and not counted for review", function()
+    local state = seeded()
+    local _, members = state.scan({
+        { "Toolbox-Area52", "@TheTool" },
+        { "Hammer-Area52", "healer >Visitor" },
+        { "Visitor-Area52", "" },
+    })
+
+    local rows = state.addon.ConflictViewModel.Build({
+        partition = state.partition,
+        members = members,
+        normalizer = state.normalizer,
+        pending = {
+            { kind = "main", character = "visitor-area52", main = "toolbox-area52", at = 5, by = "visitor-area52" },
+            { kind = "alias", character = "toolbox-area52", alias = "Tools", at = 5, by = "visitor-area52" },
+            { kind = "main", character = "gone-area52", main = "toolbox-area52", at = 5, by = "visitor-area52" },
+        },
+    })
+
+    test.assertEqual(3, #rows)
+    test.assertEqual("main", rows[1].kind)
+    test.assertFalse(rows[1].pending == true)
+    test.assertEqual("suggested main", rows[2].kind)
+    test.assertTrue(rows[2].pending)
+    test.assertEqual("Visitor", rows[2].name)
+    test.assertEqual("Alt of Toolbox", rows[2].suggests)
+    test.assertEqual("Own player", rows[2].current)
+    test.assertEqual("Your suggestion", rows[2].source)
+    test.assertFalse(rows[2].canAccept)
+    test.assertEqual("suggested alias", rows[3].kind)
+    test.assertEqual("Alias \"Tools\"", rows[3].suggests)
+    test.assertEqual("Alias \"TheTool\"", rows[3].current)
+    test.assertEqual(1, state.addon.ConflictViewModel.CountToReview(rows))
+end)
+
 -- Officer data beats guild notes ---------------------------------------------
 
 local OFFICER = "boss-area52"

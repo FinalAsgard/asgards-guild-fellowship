@@ -101,7 +101,9 @@ Members know their own alts best, so a member's edits become suggestions for the
 - Suggestions go to the guild as soon as an officer is online. If none is, they wait, and are sent when an officer logs in.
 - Officers find them in their conflict queue, marked "Suggested by" and the member's name. **Accept** and **Reject** work as for any other entry, and so do Accept all and Reject all.
 - The first officer to decide settles the suggestion for every officer, and it disappears from the other officers' queues. Accepting makes it an official edit under that officer's name, which reaches everyone.
-- Your edit stays in your roster until a newer officer edit about the same character or alias arrives.
+- Rejecting puts your roster back the way the officers have it, so you stay on the same data as everyone else. If no officer ever set that character or alias, it goes back to what the guild notes and the roster say.
+- Until then, your edit stays in your roster unless a newer officer edit about the same character or alias arrives.
+- Your suggestions that are still waiting are listed at the bottom of your **Conflicts** window, marked "Your suggestion" and "Waiting for an officer". They aren't counted on the Conflicts button, and they leave the list once an officer decides them. Suggestions are only sent while you're online, so if you log off before an officer decides, yours are sent again the next time an officer is online.
 
 ### Don't sync
 

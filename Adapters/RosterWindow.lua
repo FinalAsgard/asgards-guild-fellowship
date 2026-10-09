@@ -544,7 +544,7 @@ end
 
 -- The conflict review panel: one line per pending conflict, with Accept and
 -- Reject (or Dismiss, when there's nothing to apply), plus Accept all and
--- Reject all.
+-- Reject all. A member's own suggestions follow, waiting for an officer.
 local CONFLICT_COLUMNS = {
     { field = "name", header = "Character", x = 8, width = 140 },
     { field = "note", header = "Note (live)", x = 152, width = 170 },
@@ -590,6 +590,10 @@ local function createConflictLine(scroll, index, options)
             options.onRejectConflict(line.row.character, line.row.kind)
         end
     end)
+    line.waiting = line:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    line.waiting:SetPoint("LEFT", line, "LEFT", 748, 0)
+    line.waiting:SetText("Waiting for an officer")
+    line.waiting:Hide()
     return line
 end
 
@@ -610,7 +614,13 @@ local function refreshConflictLines(scroll, rows, offset, totalLines)
                 end
                 line.cells[field]:SetText(value ~= nil and tostring(value) or "")
             end
-            if row.canAccept then
+            line.waiting:Hide()
+            line.reject:Show()
+            if row.pending then
+                line.accept:Hide()
+                line.reject:Hide()
+                line.waiting:Show()
+            elseif row.canAccept then
                 line.accept:Show()
                 line.reject:SetText("Reject")
             else
@@ -640,8 +650,9 @@ local function buildConflictPanel(framework, options, frameName)
     explain:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
     explain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -30)
     explain:SetJustifyH("LEFT")
-    explain:SetText("Guild notes that disagree with the roster. Accepting applies the note's suggestion; " ..
-        "rejecting keeps the roster and hides that suggestion until the note changes. Guild notes are never edited.")
+    explain:SetText("Guild notes that disagree with the roster, and members' suggestions. Accepting applies the " ..
+        "suggestion; rejecting keeps the roster. Guild notes are never edited. Your own suggestions are listed " ..
+        "last until an officer decides them.")
 
     local headerIndex
     for headerIndex = 1, #CONFLICT_COLUMNS do
@@ -972,19 +983,24 @@ function Window:SetTitle(title)
     end
 end
 
--- Shows the pending conflicts and their count on the footer button.
+-- Shows the pending conflicts and this member's own suggestions; the footer
+-- button counts only the ones to review.
 function Window:SetConflicts(rows)
     return (pcall(function()
         local conflicts = self.conflicts
-        conflicts.button:SetText("Conflicts (" .. #rows .. ")")
+        local count = addon.ConflictViewModel.CountToReview(rows)
+        conflicts.button:SetText("Conflicts (" .. count .. ")")
         conflicts.scroll:SetData(rows)
         conflicts.scroll:Refresh()
         if #rows == 0 then
             conflicts.empty:Show()
+        else
+            conflicts.empty:Hide()
+        end
+        if count == 0 then
             conflicts.acceptAll:Disable()
             conflicts.rejectAll:Disable()
         else
-            conflicts.empty:Hide()
             conflicts.acceptAll:Enable()
             conflicts.rejectAll:Enable()
         end

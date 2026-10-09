@@ -95,6 +95,67 @@ test.test("a pending suggestion is dropped once decided, or once a newer officer
     test.assertEqual(0, #setup.service:Pending())
 end)
 
+-- The member's own edits: Wrench linked to Hammer, and Hammer named "Hammy".
+local function memberEdited(setup)
+    setup.partition:JoinPlayerOf("wrench-area52", MEMBER, "manual")
+    setup.partition:SetMainStamp("wrench-area52", NOW, MEMBER)
+    setup.partition:SetAlias(setup.partition:GetCharacter(MEMBER).player, "Hammy", "manual")
+    setup.partition:SetAliasStamp(MEMBER, NOW, MEMBER)
+    setup.service:Record({ link("wrench-area52", MEMBER, NOW), alias(MEMBER, "Hammy", NOW) })
+end
+
+local function rejection(kind, character, official, at)
+    return { kind = kind, character = character, from = MEMBER, at = at or NOW, approved = false,
+        official = official }
+end
+
+test.test("a rejected suggestion reverts the member's edit to the officer's value, unstamped", function()
+    local setup = newSetup()
+    memberEdited(setup)
+
+    test.assertEqual(1, setup.service:Revert(rejection("suggested main", "wrench-area52",
+        { main = "wrench-area52" })))
+    test.assertEqual(1, setup.service:Revert(rejection("suggested alias", MEMBER, { alias = "" })))
+
+    test.assertEqual("wrench-area52", mainOf(setup.partition, "wrench-area52"))
+    test.assertEqual(nil, setup.partition:GetPlayer(setup.partition:GetCharacter(MEMBER).player).alias)
+    test.assertEqual(0, (setup.partition:GetMainStamp("wrench-area52")))
+    test.assertEqual(0, (setup.partition:GetAliasStamp(MEMBER)))
+    test.assertEqual(2, setup.service:Prune(nil))
+    -- Unstamped, so the officer's own fact applies over it.
+    test.assertEqual(1, setup.facts:ApplyAll({ link("wrench-area52", "anvil-area52", NOW - 100, OFFICER) }))
+    test.assertEqual("anvil-area52", mainOf(setup.partition, "wrench-area52"))
+end)
+
+test.test("a rejection reverts an alias to the officer's alias", function()
+    local setup = newSetup()
+    memberEdited(setup)
+
+    test.assertEqual(1, setup.service:Revert(rejection("suggested alias", MEMBER, { alias = "The Hammer" })))
+
+    test.assertEqual("The Hammer", setup.partition:GetPlayer(setup.partition:GetCharacter(MEMBER).player).alias)
+    test.assertEqual(1, setup.service:Prune(nil))
+    test.assertEqual("main", setup.service:Pending()[1].kind, "the link suggestion stays pending")
+end)
+
+test.test("a rejection leaves alone an edit made after the rejected one, approvals, and other members' edits", function()
+    local setup = newSetup()
+    memberEdited(setup)
+
+    test.assertEqual(0, setup.service:Revert(rejection("suggested main", "wrench-area52",
+        { main = "wrench-area52" }, NOW - 1)), "the rejected edit was older")
+    local approval = rejection("suggested main", "wrench-area52", { main = "wrench-area52" })
+    approval.approved = true
+    test.assertEqual(0, setup.service:Revert(approval), "approved")
+    local other = rejection("suggested main", "wrench-area52", { main = "wrench-area52" })
+    other.from = "anvil-area52"
+    test.assertEqual(0, setup.service:Revert(other), "someone else's suggestion")
+    test.assertEqual(0, setup.service:Revert(rejection("suggested main", "wrench-area52",
+        { main = "nobody-area52" })), "an unknown main")
+    test.assertEqual(MEMBER, mainOf(setup.partition, "wrench-area52"))
+    test.assertEqual(NOW, (setup.partition:GetMainStamp("wrench-area52")))
+end)
+
 -- The officer's side ----------------------------------------------------------
 
 test.test("a member's suggestions are queued with who sent them", function()
@@ -183,6 +244,23 @@ test.test("a decision settles the suggestion it names, and newer officer facts s
     test.assertEqual(1, setup.service:Settle(nil))
     test.assertEqual(0, #queued(setup))
     test.assertFalse(setup.addon.SuggestionService.IsDecision({ kind = "main", character = MEMBER }))
+end)
+
+test.test("a rejection carries the officer's value, and the officer's own fact when an officer set it", function()
+    local setup = newSetup()
+    setup.facts:ApplyAll({ alias(MEMBER, "The Hammer", NOW - 100, OFFICER) })
+    setup.service:Queue({ link("wrench-area52", MEMBER, NOW), alias(MEMBER, "Hammy", NOW) }, MEMBER)
+    local linkEntry = setup.service:Entry("wrench-area52", "suggested main")
+    local aliasEntry = setup.service:Entry(MEMBER, "suggested alias")
+
+    test.assertEqual("wrench-area52", setup.service:Decision(linkEntry, false).official.main)
+    test.assertEqual("The Hammer", setup.service:Decision(aliasEntry, false).official.alias)
+    test.assertEqual(nil, setup.service:Decision(aliasEntry, true).official)
+    test.assertEqual(nil, setup.service:OfficialFact(linkEntry), "notes or the roster set it")
+    local fact = setup.service:OfficialFact(aliasEntry)
+    test.assertEqual("The Hammer", fact.alias)
+    test.assertEqual(OFFICER, fact.by)
+    test.assertEqual(NOW - 100, fact.at)
 end)
 
 test.test("suggestions stay queued through note scans", function()

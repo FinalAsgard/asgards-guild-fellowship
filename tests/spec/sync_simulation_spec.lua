@@ -672,7 +672,60 @@ test.test("the first officer's decision clears the suggestion from the other off
     test.assertEqual(nil, queuedSuggestion(leader, "hammer-area52", "suggested alias"))
     test.assertFalse(leader.addon.rosterController:AcceptConflict("hammer-area52", "suggested alias"))
     test.assertEqual(nil, aliasOf(leader, "hammer-area52"))
+    test.assertEqual(nil, aliasOf(hammer, "hammer-area52"), "the member's alias reverts")
     test.assertEqual(0, #pendingOf(hammer))
+end)
+
+test.test("a member sees their pending suggestions, and a rejected one reverts their edit", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    fixtures.deliver(channel)
+
+    local row = conflictRow(hammer, "wrench-area52", "suggested main")
+    test.assertTrue(row ~= nil and row.pending, "the member's conflict panel lists it as pending")
+    test.assertEqual("Alt of Hammer", row.suggests)
+    test.assertEqual("Your suggestion", row.source)
+    test.assertFalse(row.canAccept)
+
+    test.assertTrue(officer.addon.rosterController:RejectConflict("wrench-area52", "suggested main"))
+    fixtures.deliver(channel)
+
+    -- Back to what notes and the roster say, the same as everyone else.
+    test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual("wrench-area52", mainOf(officer, "wrench-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+    test.assertEqual(nil, conflictRow(hammer, "wrench-area52", "suggested main"), "no longer listed")
+    test.assertEqual(0, (partitionOf(hammer):GetMainStamp("wrench-area52")))
+end)
+
+test.test("a rejected suggestion reverts to the officers' data, which then matches everywhere", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(officer, "wrench-area52", "toolbox-area52")
+    test.assertTrue(officer.addon.rosterController:SetAlias("toolbox-area52", "The Tool"))
+    fixtures.deliver(channel)
+    hammer.time = officer.time + 60
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("toolbox-area52", "Tooly"))
+    fixtures.deliver(channel)
+    test.assertEqual("hammer-area52", mainOf(hammer, "wrench-area52"))
+
+    test.assertTrue(officer.addon.rosterController:RejectAllConflicts())
+    fixtures.deliver(channel)
+
+    test.assertEqual("toolbox-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual("The Tool", aliasOf(hammer, "toolbox-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+    local _, by = partitionOf(hammer):GetMainStamp("wrench-area52")
+    test.assertEqual("toolbox-area52", by, "the officer's fact again")
+    -- Both hold the same officer data, so catching up has nothing to send.
+    local before = #officer.sentMessages
+    announce(hammer)
+    fixtures.deliver(channel)
+    test.assertEqual(before, #officer.sentMessages)
 end)
 
 test.test("a member's suggestions wait until an officer is online", function()

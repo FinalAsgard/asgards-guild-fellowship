@@ -24,8 +24,10 @@ local _, addon = ...
 -- and is kept as a suggestion. It's sent ("suggest") right away when an
 -- officer is online, and otherwise when an officer's announcement shows one
 -- has logged in. Officers queue it; the first to decide sends a "facts"
--- message with `decided` naming the suggestion (and, when approved, the new
--- officer fact), which settles it everywhere.
+-- message with `decided` naming the suggestion, which settles it everywhere.
+-- Approving sends the new officer fact with it. Rejecting sends the
+-- officer's value for that thing (and its officer fact, when an officer set
+-- it), and the member's edit reverts to it.
 --
 -- Every message is a table { v = PROTOCOL, t = type, ... }. A message with
 -- another protocol version, or a type this version doesn't know, is ignored,
@@ -203,8 +205,9 @@ end
 
 -- This officer approves or rejects the queued suggestion about `character`
 -- of `kind`. Approving makes it an officer fact under this officer's name;
--- either way the decision goes to the guild, so other officers' queues and
--- the member's pending list drop it. Returns true, or false and why not.
+-- rejecting reverts the member's edit to this officer's data. Either way the
+-- decision goes to the guild, so other officers' queues and the member's
+-- pending list drop it. Returns true, or false and why not.
 function Session:Decide(character, kind, approved)
     local partition = self.context()
     local officer = self.selfKey()
@@ -228,6 +231,8 @@ function Session:Decide(character, kind, approved)
             return false, "it can't be applied here (is the player marked Don't sync?)"
         end
         facts = { fact }
+    else
+        facts = { suggestions:OfficialFact(entry) }
     end
     suggestions:Settle(decided)
     self:Send({ t = SyncSession.TYPE_FACTS, facts = facts, decided = decided })
@@ -373,7 +378,6 @@ function Session:Receive(message, sender)
     if message.t ~= SyncSession.TYPE_FACTS then
         return 0
     end
-    local applied = self:Facts(partition):ApplyAll(message.facts)
     -- Only an officer's decision settles a suggestion; newer officer facts
     -- settle the ones they overtake.
     local decided
@@ -381,8 +385,12 @@ function Session:Receive(message, sender)
         decided = message.decided
     end
     local suggestions = self:Suggestions(partition)
+    -- A rejected edit of this member's reverts first, so the officer fact
+    -- sent with the rejection then applies over it.
+    local reverted = suggestions:Revert(decided)
+    local applied = self:Facts(partition):ApplyAll(message.facts)
     local settled = suggestions:Settle(decided) + suggestions:Prune(decided)
-    if applied > 0 or settled > 0 then
+    if applied > 0 or settled > 0 or reverted > 0 then
         self.onApplied(applied)
     end
     if type(message.re) == "string" then

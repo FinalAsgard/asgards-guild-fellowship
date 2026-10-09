@@ -64,13 +64,29 @@ local function sourceText(inputs, key, kind)
     return SOURCES[source] or ""
 end
 
--- inputs: partition, members (live roster facts by key), normalizer.
+-- What a member's suggestion about `key` asks for.
+local function suggestionText(inputs, key, kind, suggestion)
+    if kind == "suggested main" then
+        if suggestion.main == key then
+            return "Main of its own player"
+        end
+        return "Alt of " .. displayName(inputs, suggestion.main)
+    end
+    local alias = suggestion.alias
+    return (alias ~= nil and alias ~= "") and ("Alias \"" .. alias .. "\"") or "No alias"
+end
+
+-- inputs: partition, members (live roster facts by key), normalizer, and
+-- pending (this member's own pending suggestions, as stored: SyncFacts
+-- facts).
 -- Returns rows:
 --   { character, kind, name, note, suggests, current, source, canAccept,
---     from? }
+--     from?, pending? }
 -- `note` is the live public note, or nil when the character isn't in the
 -- current roster. A member's suggestion has `from` (the member's key), no
--- note, and "Suggested by <member>" as its source.
+-- note, and "Suggested by <member>" as its source. This member's own
+-- pending suggestions come last, with `pending` set: they wait for an
+-- officer and can't be accepted or rejected here.
 function ConflictViewModel.Build(inputs)
     inputs.members = inputs.members or {}
     local rows = {}
@@ -81,15 +97,8 @@ function ConflictViewModel.Build(inputs)
         local key = conflict.character
         local suggests
         local fromMember = conflict.from ~= nil and type(conflict.suggestion) == "table"
-        if fromMember and conflict.kind == "suggested main" then
-            if conflict.suggestion.main == key then
-                suggests = "Main of its own player"
-            else
-                suggests = "Alt of " .. displayName(inputs, conflict.suggestion.main)
-            end
-        elseif fromMember and conflict.kind == "suggested alias" then
-            local alias = conflict.suggestion.alias
-            suggests = (alias ~= nil and alias ~= "") and ("Alias \"" .. alias .. "\"") or "No alias"
+        if fromMember and (conflict.kind == "suggested main" or conflict.kind == "suggested alias") then
+            suggests = suggestionText(inputs, key, conflict.kind, conflict.suggestion)
         elseif conflict.kind == "main" and conflict.suggestion then
             suggests = "Alt of " .. displayName(inputs, conflict.suggestion.main)
         elseif conflict.kind == "alias" and conflict.suggestion then
@@ -123,5 +132,45 @@ function ConflictViewModel.Build(inputs)
         end
         table.insert(rows, row)
     end
+    local pending = inputs.pending or {}
+    for index = 1, #pending do
+        local fact = pending[index]
+        local kind = "suggested main"
+        if type(fact) == "table" and fact.kind == "alias" then
+            kind = "suggested alias"
+        end
+        -- Suggestions about characters this client no longer knows are
+        -- left out.
+        if type(fact) == "table" and type(fact.character) == "string"
+            and inputs.partition:GetCharacter(fact.character) ~= nil
+            and (kind == "suggested alias" or type(fact.main) == "string")
+        then
+            local live = inputs.members[fact.character]
+            table.insert(rows, {
+                character = fact.character,
+                kind = kind,
+                name = displayName(inputs, fact.character),
+                note = live and live.note or nil,
+                suggests = suggestionText(inputs, fact.character, kind, fact),
+                current = currentText(inputs, fact.character, kind),
+                source = "Your suggestion",
+                canAccept = false,
+                pending = true,
+            })
+        end
+    end
     return rows
+end
+
+-- How many rows still need a decision here: all but this member's own
+-- pending suggestions.
+function ConflictViewModel.CountToReview(rows)
+    local count = 0
+    local index
+    for index = 1, #rows do
+        if not rows[index].pending then
+            count = count + 1
+        end
+    end
+    return count
 end

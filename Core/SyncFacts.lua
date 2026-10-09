@@ -220,13 +220,12 @@ function Facts:Refusal(fact)
     return nil
 end
 
--- Makes the roster agree with one accepted fact. Officer data beats guild
--- notes, so the notes it concerns are read again by the next scan: one that
--- now disagrees goes to the conflict queue, and a pending conflict the fact
--- settled is dropped.
-function Facts:Change(fact)
+-- Makes the roster agree with `fact`'s value, marking what changed as from
+-- `source`; stamps are left alone. The notes it concerns are read again by
+-- the next scan: one that now disagrees goes to the conflict queue, and a
+-- pending conflict the change settled is dropped.
+function Facts:Reshape(fact, source)
     local partition = self.partition
-    local source = addon.FellowshipStore.SOURCE_SYNC
     local character = partition:GetCharacter(fact.character)
     if fact.kind == SyncFacts.KIND_ALIAS then
         if fact.alias == "" then
@@ -234,7 +233,6 @@ function Facts:Change(fact)
         else
             partition:SetAlias(character.player, fact.alias, source)
         end
-        partition:SetAliasStamp(fact.character, fact.at, fact.by)
         -- Any of the player's characters can name its alias in a note.
         local keys = partition:CharactersOf(character.player)
         local index
@@ -258,7 +256,48 @@ function Facts:Change(fact)
         end
     end
     partition:GetCharacter(fact.character).source = source
-    partition:SetMainStamp(fact.character, fact.at, fact.by)
+end
+
+-- Makes the roster agree with one accepted fact. Officer data beats guild
+-- notes.
+function Facts:Change(fact)
+    self:Reshape(fact, addon.FellowshipStore.SOURCE_SYNC)
+    if fact.kind == SyncFacts.KIND_ALIAS then
+        self.partition:SetAliasStamp(fact.character, fact.at, fact.by)
+    else
+        self.partition:SetMainStamp(fact.character, fact.at, fact.by)
+    end
+end
+
+-- Undoes this user's own edit: makes the roster agree with `value` (a fact
+-- without a stamp: an officer's view of that thing) as if notes or the
+-- roster had set it, so it is the oldest possible again and officer data
+-- wins over it. Returns false when it can't be applied here.
+function Facts:Restore(value)
+    local fact = {
+        kind = type(value) == "table" and value.kind,
+        character = type(value) == "table" and value.character,
+        main = type(value) == "table" and value.main,
+        alias = type(value) == "table" and value.alias,
+        at = 1,
+        by = "?",
+    }
+    if not SyncFacts.IsValid(fact) or self.partition:GetCharacter(fact.character) == nil
+        or (fact.kind == SyncFacts.KIND_MAIN and self.partition:GetCharacter(fact.main) == nil)
+        or self:IsPinned(fact.character) or (fact.kind == SyncFacts.KIND_MAIN and self:IsPinned(fact.main))
+    then
+        return false
+    end
+    local store = addon.FellowshipStore
+    if fact.kind == SyncFacts.KIND_ALIAS then
+        self:Reshape(fact, store.SOURCE_NOTE)
+        self.partition:ClearAliasStamp(fact.character)
+    else
+        self:Reshape(fact, fact.main == fact.character and store.SOURCE_ROSTER or store.SOURCE_NOTE)
+        self.partition:ClearMainStamp(fact.character)
+    end
+    addon.ReconcileEngine.EnsureActingMains(self.partition, {}, self.now())
+    return true
 end
 
 -- True when `key`'s player is marked "Don't sync" on this client.

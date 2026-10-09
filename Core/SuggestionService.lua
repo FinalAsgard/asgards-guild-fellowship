@@ -6,7 +6,8 @@ local _, addon = ...
 -- and each one that differs from the officer's data shows in that officer's
 -- conflict queue, labeled with the member. The first officer to approve or
 -- reject settles it for every officer: approving turns it into an officer
--- fact under the approver's name.
+-- fact under the approver's name; rejecting reverts the member's edit to
+-- the officer's value for that thing.
 --
 -- Queue entries:
 --   { character, kind = "suggested main", suggestion = { main = key },
@@ -135,6 +136,35 @@ function Service:Prune(decided)
     return #pending - #kept
 end
 
+-- After an officer rejected a suggestion (`decided`, see Decision): every
+-- pending suggestion it names that is still this client's data reverts to
+-- the officer's value, as if notes or the roster had set it, so officer
+-- data wins over it again. An edit made after the rejected one stays.
+-- Returns how many were reverted; Prune then drops them.
+function Service:Revert(decided)
+    if type(decided) ~= "table" or decided.approved or type(decided.official) ~= "table" then
+        return 0
+    end
+    local reverted = 0
+    local pending = self:Pending()
+    local index
+    for index = 1, #pending do
+        local fact = pending[index]
+        local heldAt, heldBy = self.facts:HeldStamp(fact)
+        local named = decided.kind == queueKind(fact.kind) and decided.character == fact.character
+            and decided.from == fact.by and type(decided.at) == "number" and fact.at <= decided.at
+        if named and heldAt == fact.at and heldBy == fact.by and self.facts:Restore({
+            kind = fact.kind,
+            character = fact.character,
+            main = decided.official.main,
+            alias = decided.official.alias,
+        }) then
+            reverted = reverted + 1
+        end
+    end
+    return reverted
+end
+
 -- The officer's side ----------------------------------------------------------
 
 -- Whether `fact` would change what this client holds.
@@ -226,15 +256,40 @@ function Service:Entry(character, kind)
 end
 
 -- What deciding `entry` tells everyone: { kind, character, from, at,
--- approved }.
+-- approved }. A rejection also carries `official`, this client's value for
+-- that thing ({ main = key } or { alias = text }), for the member to revert
+-- to.
 function Service:Decision(entry, approved)
-    return {
+    local decided = {
         kind = entry.kind,
         character = entry.character,
         from = entry.from,
         at = entry.at,
         approved = approved == true,
     }
+    if not decided.approved then
+        local held = self:Held(entry) or {}
+        decided.official = { main = held.main, alias = held.alias }
+    end
+    return decided
+end
+
+-- This client's fact for the thing `entry` is about.
+function Service:Held(entry)
+    if entry.kind == SuggestionService.KIND_ALIAS then
+        return self.facts:AliasFactOf(entry.character)
+    end
+    return self.facts:FactOf(entry.character)
+end
+
+-- The officer fact this client holds for the thing `entry` is about, or nil
+-- when an officer never set it (notes or the roster did).
+function Service:OfficialFact(entry)
+    local held = self:Held(entry)
+    if held == nil or held.by == nil or held.at == 0 or not self.isOfficer(held.by) then
+        return nil
+    end
+    return held
 end
 
 -- The officer fact approving `entry` makes, stamped as `officer`'s at `now`
