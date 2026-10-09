@@ -1,23 +1,21 @@
 local _, addon = ...
 
--- Guild Greet's prompts: small boxes stacked down from the right side of the
--- screen, oldest on top, each with the player's name, the kind of greeting,
--- a Greet button, and a close button. Frames are made on first use and
+-- Guild Greet's prompts: small boxes stacked down the left side of the
+-- screen (the right side holds the quest log), oldest on top, each with just
+-- the player's name, a Greet button, and a close button. Frames are made on first use and
 -- reused. Like the other adapters, a failing frame call hides the prompts
 -- rather than raising an error.
 local GreetPrompts = {
-    WIDTH = 230,
-    HEIGHT = 50,
-    GAP = 6,
-    -- The top prompt's place, relative to the screen's right edge.
-    RIGHT = -40,
+    WIDTH = 250,
+    HEIGHT = 40,
+    GAP = 8,
+    PADDING = 14,
+    BUTTON_WIDTH = 72,
+    BUTTON_HEIGHT = 24,
+    CLOSE_SIZE = 24,
+    -- The top prompt's place, relative to the screen's left edge.
+    LEFT = 40,
     TOP = 120,
-    LABELS = {
-        join = "New member",
-        login = "Login",
-        welcomeBack = "Welcome back",
-        longAbsence = "Long time no see",
-    },
 }
 addon.GreetPrompts = GreetPrompts
 
@@ -40,7 +38,7 @@ function Prompts:row(index)
     local frame = createFrame("Frame", nil, parent)
     frame:SetWidth(GreetPrompts.WIDTH)
     frame:SetHeight(GreetPrompts.HEIGHT)
-    frame:SetPoint("RIGHT", parent, "RIGHT", GreetPrompts.RIGHT,
+    frame:SetPoint("LEFT", parent, "LEFT", GreetPrompts.LEFT,
         GreetPrompts.TOP - (index - 1) * (GreetPrompts.HEIGHT + GreetPrompts.GAP))
     if type(frame.SetFrameStrata) == "function" then
         frame:SetFrameStrata("MEDIUM")
@@ -50,26 +48,33 @@ function Prompts:row(index)
     background:SetColorTexture(0, 0, 0, 0.7)
 
     local row = { frame = frame }
-    row.name = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    row.name:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -9)
-    row.name:SetWidth(GreetPrompts.WIDTH - 100)
-    row.name:SetJustifyH("LEFT")
-    row.category = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    row.category:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -4)
+    -- Close sits at the far right, Greet just left of it, and the name fills
+    -- the rest, centered vertically with room on every side.
+    row.close = createFrame("Button", nil, frame, "UIPanelCloseButton")
+    row.close:SetWidth(GreetPrompts.CLOSE_SIZE)
+    row.close:SetHeight(GreetPrompts.CLOSE_SIZE)
+    row.close:SetPoint("RIGHT", frame, "RIGHT", -6, 0)
 
     row.greet = createFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    row.greet:SetWidth(64)
-    row.greet:SetHeight(22)
-    row.greet:SetPoint("RIGHT", frame, "RIGHT", -30, 0)
+    row.greet:SetWidth(GreetPrompts.BUTTON_WIDTH)
+    row.greet:SetHeight(GreetPrompts.BUTTON_HEIGHT)
+    row.greet:SetPoint("RIGHT", row.close, "LEFT", -6, 0)
     row.greet:SetText("Greet")
+
+    row.name = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    row.name:SetPoint("LEFT", frame, "LEFT", GreetPrompts.PADDING, 0)
+    row.name:SetPoint("RIGHT", row.greet, "LEFT", -10, 0)
+    row.name:SetJustifyH("LEFT")
+    if type(row.name.SetWordWrap) == "function" then
+        row.name:SetWordWrap(false)
+    end
+
     row.greet:SetScript("OnClick", function()
         if row.player ~= nil and self.handlers ~= nil then
             self.handlers.greet(row.player)
         end
     end)
 
-    row.close = createFrame("Button", nil, frame, "UIPanelCloseButton")
-    row.close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
     row.close:SetScript("OnClick", function()
         if row.player ~= nil and self.handlers ~= nil then
             self.handlers.close(row.player)
@@ -94,7 +99,6 @@ function Prompts:Show(prompts, handlers)
             local row = self:row(index)
             row.player = prompt.player
             row.name:SetText(prompt.label or "")
-            row.category:SetText(GreetPrompts.LABELS[prompt.category] or "")
             row.frame:Show()
         end
         for index = #prompts + 1, #self.rows do

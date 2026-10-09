@@ -84,3 +84,18 @@ test.test("greeting library: unusable or missing saved greetings give nothing to
     test.assertEqual(nil, addon.GreetingLibrary.Create({ greetings = { login = {} } }, lowest):Pick("login"))
     test.assertEqual(nil, addon.GreetingLibrary.Create({}, lowest):Pick("unknown"))
 end)
+
+test.test("greeting library: no starter greeting mentions a time of day", function()
+    local addon = load()
+    local category, greetings
+    for category, greetings in pairs(addon.GreetingLibrary.STARTERS) do
+        local index
+        for index = 1, #greetings do
+            local lowered = string.lower(greetings[index])
+            local word
+            for _, word in ipairs({ "morning", "afternoon", "evening", "night", "tonight", "today" }) do
+                test.assertEqual(nil, string.find(lowered, word, 1, true), category .. ": " .. greetings[index])
+            end
+        end
+    end
+end)

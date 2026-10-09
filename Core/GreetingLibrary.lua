@@ -12,6 +12,7 @@ local _, addon = ...
 local GreetingLibrary = {
     -- One guild chat message holds at most this many characters.
     MAX_LENGTH = 255,
+    -- No starter mentions the time of day, since nothing checks it.
     STARTERS = {
         join = {
             "Welcome to the guild, {name}!",
@@ -21,7 +22,7 @@ local GreetingLibrary = {
         login = {
             "Hey {name}!",
             "Hi {name}, good to see you!",
-            "Evening, {name}!",
+            "Hello, {name}!",
         },
         welcomeBack = {
             "Welcome back, {name}!",
