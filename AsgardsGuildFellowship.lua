@@ -193,12 +193,7 @@ if clientProfile.supported then
             return partition, normalizer
         end,
         selfKey = function()
-            local guild, _, normalizer = rosterController:QuietContext()
-            local fullName = client:GetPlayerFullName()
-            if guild == nil or fullName == nil then
-                return nil
-            end
-            return normalizer:Key(fullName)
+            return rosterController:SelfKey()
         end,
         isOfficer = function(key)
             return officerAuthority:IsOfficer(key)

@@ -197,8 +197,8 @@ local function metadataReader(world, declaredClient)
     end
 end
 
--- Sample guilds per client: Forever names are "First Last", Retail names are
--- one word, and both carry a realm suffix as the roster API reports them.
+-- Sample guilds per client: Forever names are "First Last" with no realm,
+-- Retail names are one word with a realm suffix, as each roster reports them.
 -- In each, Hammer's note marks it as an alt of the officer, whose note sets
 -- the alias "TheTool".
 Fixtures.GUILDS = {
@@ -206,11 +206,11 @@ Fixtures.GUILDS = {
         name = "Knights of Camelot",
         realm = "Camelot",
         members = {
-            { name = "Tool Box-Camelot", class = "WARRIOR", level = 60, rank = 1, rankName = "Officer",
+            { name = "Tool Box", class = "WARRIOR", level = 60, rank = 1, rankName = "Officer",
                 online = true, zone = "Ironforge", note = "@TheTool raid lead" },
-            { name = "Hammer Smith-Camelot", class = "PALADIN", level = 42, rank = 3, rankName = "Member",
+            { name = "Hammer Smith", class = "PALADIN", level = 42, rank = 3, rankName = "Member",
                 online = false, lastOnline = { 0, 0, 3, 2 }, note = "Healer >Tool Box" },
-            { name = "Zélie Rune-Camelot", class = "MAGE", level = 12, rank = 4, rankName = "Initiate",
+            { name = "Zélie Rune", class = "MAGE", level = 12, rank = 4, rankName = "Initiate",
                 online = false, lastOnline = { 0, 0, 0, 0 } },
         },
     },
@@ -259,7 +259,8 @@ local function installGuild(world, environment, profile)
             return nil
         end
         return member.name, member.rankName, member.rank, member.level, "Class", member.zone,
-            member.note or "", "", member.online, 0, member.class
+            member.note or "", "", member.online, 0, member.class, 0, 0, false, false, 0,
+            "Player-1-" .. member.name
     end
     environment.GetGuildRosterLastOnline = function(index)
         local member = world.rosterReady and world.guild and world.guild.members[index]
@@ -295,19 +296,36 @@ local function installGuild(world, environment, profile)
     else
         environment.GuildRoster = request
     end
-    -- The logged-in character, "Name-Realm" as the roster spells it; the
-    -- guild's first member unless `world.playerName` was set.
-    environment.UnitFullName = function(unit)
-        test.assertEqual("player", unit)
+    -- The logged-in character, named as the roster spells it: the guild's
+    -- first member unless `world.playerName` was set. Retail reports it as
+    -- "Name", "Realm". WoW Forever reports only the first name, plus the
+    -- server's realm, while its roster has "First Last" with no realm.
+    local function playerRosterName()
         local fullName = world.playerName
         if fullName == nil and world.guild ~= nil then
             fullName = world.guild.members[1].name
         end
+        return fullName
+    end
+    environment.UnitFullName = function(unit)
+        test.assertEqual("player", unit)
+        local fullName = playerRosterName()
         if fullName == nil then
             return nil
         end
         local name, realm = string.match(fullName, "^(.-)%-([^%-]*)$")
-        return name or fullName, realm
+        name = name or fullName
+        if profile ~= "Retail" then
+            local serverRealm = world.guild and world.guild.realm or "Camelot"
+            return string.match(name, "^(%S+)"), (string.gsub(serverRealm, "%s+", ""))
+        end
+        return name, realm
+    end
+    -- GUIDs are the same in UnitGUID and the roster, whatever the names.
+    environment.UnitGUID = function(unit)
+        test.assertEqual("player", unit)
+        local fullName = playerRosterName()
+        return fullName and ("Player-1-" .. fullName) or nil
     end
     -- A fake clock: `world.time` is wall-clock seconds, `world.precise` the
     -- millisecond profiler clock, and C_Timer callbacks wait in

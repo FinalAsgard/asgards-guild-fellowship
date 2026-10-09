@@ -98,6 +98,57 @@ function Controller:QuietContext()
     return guild, partition, self:Normalizer(guild)
 end
 
+-- The logged-in character's key in the current guild's roster, or nil.
+-- The game spells the player's own name differently from the roster on
+-- some clients (WoW Forever reports only the first name), so the roster
+-- decides: the stored character named "Name-Realm" when there is one,
+-- otherwise the roster member with the player's GUID, otherwise (with
+-- two-part names) the only roster member with the player's first name.
+-- A key found in the roster is remembered for this guild and character.
+function Controller:SelfKey()
+    local guild, partition, normalizer = self:QuietContext()
+    local fullName = self.client:GetPlayerFullName()
+    if guild == nil or fullName == nil then
+        return nil
+    end
+    local guid = self.client:GetPlayerGuid()
+    local cache = self.selfKeyCache
+    if cache ~= nil and cache.partition == partition.key and cache.fullName == fullName and cache.guid == guid then
+        return cache.key
+    end
+    local key = normalizer:Key(fullName)
+    if key == nil or partition:GetCharacter(key) == nil then
+        key = self:FindSelfInRoster(normalizer, fullName, guid)
+        if key == nil then
+            -- Not in the roster yet: Name-Realm is the best guess, except
+            -- where it can't be right (only the first name).
+            return not self.nameRules.twoPartNames and normalizer:Key(fullName) or nil
+        end
+    end
+    self.selfKeyCache = { partition = partition.key, fullName = fullName, guid = guid, key = key }
+    return key
+end
+
+function Controller:FindSelfInRoster(normalizer, fullName, guid)
+    local firstName = normalizer:FirstName(fullName)
+    local byName
+    local count = self.client:GetGuildRosterCount() or 0
+    local index
+    for index = 1, count do
+        local member = self.client:GetGuildMember(index)
+        if member ~= nil then
+            if guid ~= nil and member.guid == guid then
+                return normalizer:Key(member.name)
+            end
+            if firstName ~= nil and normalizer:FirstName(member.name) == firstName then
+                -- Two members sharing the first name: can't tell which.
+                byName = byName == nil and normalizer:Key(member.name) or false
+            end
+        end
+    end
+    return byName or nil
+end
+
 function Controller:Context()
     local guild, partition, normalizer = self:QuietContext()
     if guild == nil then

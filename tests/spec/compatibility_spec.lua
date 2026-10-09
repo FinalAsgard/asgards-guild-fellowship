@@ -20,6 +20,7 @@ test.test("adapter returns nil or false when every client API is missing", funct
     test.assertFalse(client:Print("hello"))
     test.assertEqual(nil, client:GetAddOnMetadata("Version"))
     test.assertEqual(nil, client:GetAccountDatabase())
+    test.assertEqual(nil, client:GetPlayerGuid())
     test.assertFalse(client:GetClientProfile().supported)
 end)
 

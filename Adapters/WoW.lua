@@ -194,6 +194,16 @@ function Client:GetPlayerFullName()
     return name .. "-" .. realm
 end
 
+-- The logged-in character's GUID, or nil. Unlike its name, it's spelled the
+-- same way the guild roster reports it on every client.
+function Client:GetPlayerGuid()
+    local ok, guid = callFunction(self.environment.UnitGUID, "player")
+    if not ok or type(guid) ~= "string" or guid == "" then
+        return nil
+    end
+    return guid
+end
+
 function Client:IsInGuild()
     local ok, inGuild = callFunction(self.environment.IsInGuild)
     return ok and inGuild ~= nil and inGuild ~= false
@@ -211,7 +221,7 @@ end
 -- Facts about the roster member at `index`, or nil when the client can't
 -- say (the roster loads asynchronously, so early reads may be empty).
 function Client:GetGuildMember(index)
-    local ok, name, rankName, rankIndex, level, _, zone, note, _, online, _, classToken =
+    local ok, name, rankName, rankIndex, level, _, zone, note, _, online, _, classToken, _, _, _, _, _, guid =
         callFunction(self.environment.GetGuildRosterInfo, index)
     if not ok or type(name) ~= "string" or name == "" then
         return nil
@@ -219,6 +229,7 @@ function Client:GetGuildMember(index)
 
     local member = {
         name = name,
+        guid = type(guid) == "string" and guid ~= "" and guid or nil,
         classToken = type(classToken) == "string" and classToken or nil,
         level = type(level) == "number" and level or nil,
         rankIndex = type(rankIndex) == "number" and rankIndex or nil,

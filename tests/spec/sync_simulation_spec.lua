@@ -56,7 +56,7 @@ local function login(channel, playerName, options)
     local world = fixtures.newEnvironment(options.profile or "Retail", {
         addonName = options.addonName,
         database = options.database,
-        guild = guild(),
+        guild = options.guild or guild(),
         playerName = playerName,
     })
     -- Joined first, so anything sent while logging in is heard.
@@ -269,17 +269,6 @@ test.test("production and development builds never exchange data", function()
 
     test.assertEqual("hammer-area52", mainOf(devMember, "hammer-area52"))
     test.assertEqual("AGFSyncDev", devMember.addon.Identity.commPrefix)
-end)
-
-test.test("sync works the same on WoW Forever", function()
-    local channel = fixtures.newChannel()
-    local officer = login(channel, "Toolbox-Area52", { profile = "Forever" })
-    local member = login(channel, "Wrench-Area52", { profile = "Forever" })
-
-    linkAlt(officer, "hammer-area52", "toolbox-area52")
-    fixtures.deliver(channel)
-
-    test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
 end)
 
 -- Catching up at login -------------------------------------------------------
@@ -728,4 +717,91 @@ test.test("a member's edit stays until a newer officer edit about the same thing
         test.assertTrue(pendingOf(hammer)[index].character ~= "wrench-area52", "the overtaken suggestion is gone")
     end
     test.assertEqual(nil, queuedSuggestion(officer, "wrench-area52", "suggested main"))
+end)
+
+-- WoW Forever: names are "First Last" and the roster gives no realm, while
+-- the game reports the logged-in character by first name only.
+local function foreverGuild()
+    return {
+        name = "Knights of Camelot",
+        realm = "Classic Beta PvE",
+        members = {
+            { name = "Grand Master", class = "WARRIOR", level = 60, rank = 0, rankName = "Guild Master",
+                online = true, zone = "Ironforge" },
+            { name = "Tool Box", class = "WARRIOR", level = 60, rank = 1, rankName = "Officer",
+                online = true, zone = "Ironforge" },
+            { name = "Hammer Smith", class = "PALADIN", level = 50, rank = 3, rankName = "Member",
+                online = true, zone = "Ironforge" },
+            { name = "Wrench Bolt", class = "MAGE", level = 40, rank = 3, rankName = "Member",
+                online = true, zone = "Ironforge" },
+        },
+    }
+end
+
+local function foreverLogin(channel, playerName)
+    return login(channel, playerName, { profile = "Forever", guild = foreverGuild() })
+end
+
+local TOOL, HAMMER, WRENCH = "tool box-classicbetapve", "hammer smith-classicbetapve", "wrench bolt-classicbetapve"
+
+test.test("on WoW Forever, an officer known only by first name is recognized and their edits sync", function()
+    local channel = fixtures.newChannel()
+    local officer = foreverLogin(channel, "Tool Box")
+    local member = foreverLogin(channel, "Wrench Bolt")
+    test.assertEqual(TOOL, officer.addon.syncSession.selfKey())
+
+    linkAlt(officer, HAMMER, TOOL)
+    officer.addon.rosterController:SetAlias(HAMMER, "The Tool")
+    fixtures.deliver(channel)
+
+    test.assertEqual(TOOL, mainOf(member, HAMMER))
+    test.assertEqual("The Tool", aliasOf(member, HAMMER))
+    local _, by = partitionOf(member):GetMainStamp(HAMMER)
+    test.assertEqual(TOOL, by)
+end)
+
+test.test("on WoW Forever, members catch up and suggest with two-part names", function()
+    local channel = fixtures.newChannel()
+    local officer = foreverLogin(channel, "Tool Box")
+    local hammer = foreverLogin(channel, "Hammer Smith")
+    linkAlt(officer, HAMMER, TOOL)
+    fixtures.deliver(channel)
+    logOff(channel, officer)
+
+    local wrench = foreverLogin(channel, "Wrench Bolt")
+    announce(wrench)
+    fixtures.deliver(channel)
+    fixtures.runTimers(hammer, 5)
+    fixtures.deliver(channel)
+    test.assertEqual(TOOL, mainOf(wrench, HAMMER))
+
+    -- A member's suggestion reaches an officer under the member's key.
+    local leader = foreverLogin(channel, "Grand Master")
+    linkAlt(wrench, WRENCH, HAMMER)
+    fixtures.deliver(channel)
+    local conflicts = partitionOf(leader):GetConflicts()
+    local found
+    local index
+    for index = 1, #conflicts do
+        if conflicts[index].character == WRENCH and conflicts[index].kind == "suggested main" then
+            found = conflicts[index]
+        end
+    end
+    test.assertTrue(found ~= nil, "the suggestion is queued")
+    test.assertEqual(WRENCH, found.from)
+end)
+
+test.test("on WoW Forever, a first name shared by two roster members is matched by GUID", function()
+    local channel = fixtures.newChannel()
+    local guild = foreverGuild()
+    table.insert(guild.members, { name = "Tool Maker", class = "MAGE", level = 30, rank = 3,
+        rankName = "Member", online = false })
+    local officer = login(channel, "Tool Box", { profile = "Forever", guild = guild })
+
+    test.assertEqual(TOOL, officer.addon.syncSession.selfKey())
+
+    -- Without GUIDs, a shared first name can't be told apart.
+    officer.environment.UnitGUID = nil
+    officer.addon.rosterController.selfKeyCache = nil
+    test.assertEqual(nil, officer.addon.syncSession.selfKey())
 end)

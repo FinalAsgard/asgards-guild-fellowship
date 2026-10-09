@@ -7,7 +7,7 @@ local function newClient(world)
 end
 
 local EXPECTED = {
-    Forever = { realm = "Camelot", first = "Tool Box-Camelot", twoPartNames = true },
+    Forever = { realm = "Camelot", first = "Tool Box", twoPartNames = true },
     Retail = { realm = "Area 52", first = "Toolbox-Area52", twoPartNames = false },
 }
 
@@ -26,6 +26,7 @@ local function registerProfileTests(profile)
 
         local first = client:GetGuildMember(1)
         test.assertEqual(expected.first, first.name)
+        test.assertEqual("Player-1-" .. expected.first, first.guid)
         test.assertEqual("WARRIOR", first.classToken)
         test.assertEqual(1, first.rankIndex)
         test.assertEqual("Officer", first.rankName)
