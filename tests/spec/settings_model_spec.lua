@@ -233,7 +233,7 @@ test.test("/agf options is listed in help and explains when there is no panel", 
     local world = loggedIn("Forever")
 
     fixtures.slash(world, "help")
-    test.assertContains(world.messages[1], "options - open the settings panel")
+    test.assertContains(table.concat(world.messages, "\n"), "/agf options - open the settings panel")
 
     fixtures.slash(world, "options")
     test.assertContains(lastMessage(world), "The settings panel isn't available on this client.")

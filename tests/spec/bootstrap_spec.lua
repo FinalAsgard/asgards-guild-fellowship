@@ -137,22 +137,24 @@ local function registerBootstrapTest(variant)
         test.assertEqual("other build", otherDatabase.sentinel)
 
         environment.SlashCmdList[variant.slashKey]("help")
-        test.assertContains(world.messages[1], variant.chatTag .. "|r Commands: " ..
-            variant.slashCommand .. " help")
-        test.assertContains(world.messages[1], variant.slashCommand .. " roster - show or hide the roster window")
-        test.assertContains(world.messages[1], variant.slashCommand .. " rescan - rescan the guild roster now")
-        test.assertContains(world.messages[1], variant.slashCommand .. " sync - show guild sync status")
+        local helpLines = #world.messages
+        test.assertContains(world.messages[1], variant.chatTag .. "|r Commands:")
+        test.assertEqual("  " .. variant.slashCommand .. " help - show available commands", world.messages[2])
+        local help = table.concat(world.messages, "\n")
+        test.assertContains(help, "\n  " .. variant.slashCommand .. " roster - show or hide the roster window\n")
+        test.assertContains(help, "\n  " .. variant.slashCommand .. " rescan - rescan the guild roster now\n")
+        test.assertContains(help, "\n  " .. variant.slashCommand .. " sync - show guild sync status\n")
         test.assertContains(
-            world.messages[2],
+            world.messages[helpLines - 1],
             "Version " .. variant.version .. " on " .. variant.clientLabel .. "."
         )
-        test.assertContains(world.messages[3], "Libraries: all 8 present.")
+        test.assertContains(world.messages[helpLines], "Libraries: all 8 present.")
 
         -- A bare slash command opens the roster. The fixtures' stand-in
         -- framework can't build windows, so it reports that instead of
         -- raising errors.
         environment.SlashCmdList[variant.slashKey]("")
-        test.assertContains(world.messages[4], "The roster window can't open")
+        test.assertContains(world.messages[helpLines + 1], "The roster window can't open")
     end)
 end
 
