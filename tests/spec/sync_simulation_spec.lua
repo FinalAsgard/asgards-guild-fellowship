@@ -403,6 +403,75 @@ test.test("a relayed answer naming a non-officer author or dated in the future i
     test.assertEqual(nil, aliasOf(wrench, "wrench-area52"))
 end)
 
+-- Forgeries ---------------------------------------------------------------------
+
+-- `world` sends a facts message claiming `facts`, as a forger would.
+local function relay(world, facts)
+    world.addon.comm:Broadcast({ v = 1, t = "facts", facts = facts })
+end
+
+test.test("a forged relay is corrected for every member once the officer it names is online", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+    linkAlt(officer, "wrench-area52", "toolbox-area52")
+    fixtures.deliver(channel)
+    logOff(channel, officer)
+
+    -- With the officer away, Hammer relays an edit in the officer's name.
+    relay(hammer, { { kind = "main", character = "wrench-area52", main = "hammer-area52", at = hammer.time + 10,
+        by = "toolbox-area52" } })
+    fixtures.deliver(channel)
+    test.assertEqual("hammer-area52", mainOf(wrench, "wrench-area52"), "nobody can tell yet")
+
+    -- The officer comes back: their announcement shows Wrench's data differs,
+    -- Wrench's answer carries the forgery, and the officer corrects it.
+    fixtures.joinChannel(channel, officer)
+    officer.time = wrench.time + 60
+    local printed = #officer.messages
+    test.assertTrue(officer.addon.syncSession:Announce())
+    fixtures.deliver(channel)
+    fixtures.runTimers(hammer, 5)
+    fixtures.runTimers(wrench, 5)
+    fixtures.deliver(channel)
+    fixtures.runTimers(officer, 5)
+    fixtures.deliver(channel)
+
+    test.assertEqual("toolbox-area52", mainOf(wrench, "wrench-area52"))
+    test.assertEqual("toolbox-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual("toolbox-area52", mainOf(officer, "wrench-area52"))
+    local warned = false
+    local index
+    for index = printed + 1, #officer.messages do
+        warned = warned or string.find(officer.messages[index], "in your name that you never made", 1, true) ~= nil
+    end
+    test.assertTrue(warned, "the officer is warned")
+    local log = partitionOf(officer):GetForgeries()
+    test.assertEqual(1, #log)
+    test.assertTrue(log[1].relayedBy == "hammer-area52" or log[1].relayedBy == "wrench-area52",
+        "logged with the character that relayed it")
+end)
+
+test.test("a forged relay while the officer is online is corrected at once", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+    test.assertTrue(officer.addon.rosterController:SetAlias("toolbox-area52", "The Tool"))
+    fixtures.deliver(channel)
+
+    relay(hammer, { { kind = "alias", character = "toolbox-area52", alias = "Fool", at = hammer.time + 10,
+        by = "toolbox-area52" } })
+    fixtures.deliver(channel)
+    fixtures.deliver(channel)
+
+    test.assertEqual("The Tool", aliasOf(wrench, "toolbox-area52"))
+    test.assertEqual("The Tool", aliasOf(officer, "toolbox-area52"))
+    local log = partitionOf(officer):GetForgeries()
+    test.assertEqual("hammer-area52", log[1].relayedBy)
+end)
+
 -- Aliases ---------------------------------------------------------------------
 
 test.test("an officer's alias shows in members' roster and chat tags", function()

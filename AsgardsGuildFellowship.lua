@@ -229,6 +229,12 @@ if clientProfile.supported then
         onApplied = function()
             rosterController:Invalidate()
         end,
+        onForgery = function(count, relayedBy)
+            rosterController:Print("Warning: " .. tostring(relayedBy) .. " passed on " ..
+                (count == 1 and "a guild sync edit" or (count .. " guild sync edits")) ..
+                " in your name that you never made. Your own data was sent to the guild to correct it," ..
+                " and the forgery was logged.")
+        end,
     })
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()

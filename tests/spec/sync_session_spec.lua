@@ -18,6 +18,7 @@ local function load()
         "Core/SyncFacts.lua",
         "Core/SyncDigest.lua",
         "Core/SuggestionService.lua",
+        "Core/SyncLedger.lua",
         "Core/SyncSession.lua"
     )
 end
@@ -66,6 +67,7 @@ local function newClient(network, name, options)
         timers = {},
         time = NOW,
         randomCalls = {},
+        forgeries = {},
     }
     client.session = addon.SyncSession.Create({
         comm = {
@@ -94,6 +96,9 @@ local function newClient(network, name, options)
         random = function(low, high)
             table.insert(client.randomCalls, { low, high })
             return client.randomValue or low
+        end,
+        onForgery = function(count, relayedBy)
+            table.insert(client.forgeries, { count = count, relayedBy = relayedBy })
         end,
     })
     table.insert(network.clients, client)
@@ -275,6 +280,114 @@ test.test("any client can answer, and only one answer is sent per announcement",
     test.assertEqual(OFFICER, mainOf(newcomer, "alt" .. ALTS .. "-area52"))
 end)
 
+-- The officer's client, holding officerData() as facts they wrote.
+local function newOfficer(network)
+    local officer = newClient(network, "Toolbox-Area52")
+    give(network, officer, officerData())
+    network.addon.SyncLedger.Create(officer.partition):Record(officerData(), NOW)
+    return officer
+end
+
+test.test("an online officer answers before any member, so data is checked against the officer's", function()
+    local network = newNetwork()
+    local newcomer = newClient(network, "Anvil-Area52")
+    local member = newClient(network, "Hammer-Area52")
+    local officer = newOfficer(network)
+    give(network, member, officerData())
+
+    newcomer.session:Announce()
+    deliver(network)
+    test.assertEqual(1, officer.randomCalls[1][1])
+    test.assertEqual(2, officer.randomCalls[1][2])
+    test.assertEqual(3, member.randomCalls[1][1])
+    test.assertEqual(5, member.randomCalls[1][2])
+    advance(officer, 2)
+    deliver(network)
+    advance(member, 5)
+    deliver(network)
+
+    test.assertEqual(1, #officer.sent)
+    test.assertEqual(0, #member.sent, "the member hears the officer and stays silent")
+    test.assertEqual(OFFICER, mainOf(newcomer, "alt1-area52"))
+end)
+
+test.test("a member's answer doesn't silence an online officer, but another officer's would", function()
+    local network = newNetwork()
+    local newcomer = newClient(network, "Anvil-Area52")
+    local member = newClient(network, "Hammer-Area52")
+    local officer = newOfficer(network)
+    give(network, member, officerData())
+    member.randomValue = 1
+    officer.randomValue = 2
+
+    newcomer.session:Announce()
+    deliver(network)
+    advance(member, 1)
+    deliver(network)
+    advance(officer, 2)
+    deliver(network)
+
+    test.assertEqual(1, #member.sent)
+    local officerReplies = 0
+    local index
+    for index = 1, #officer.sent do
+        officerReplies = officerReplies + (officer.sent[index].re == "anvil-area52" and 1 or 0)
+    end
+    test.assertEqual(1, officerReplies, "the officer still checks the newcomer's data")
+end)
+
+test.test("an officer catches an edit relayed in their name that they never made, and corrects it", function()
+    local network = newNetwork()
+    local officer = newOfficer(network)
+    local member = newClient(network, "Wrench-Area52")
+    local forger = newClient(network, "Hammer-Area52")
+    give(network, member, officerData())
+
+    forger.session:Send({ t = "facts", facts = {
+        { kind = "main", character = "alt2-area52", main = "anvil-area52", at = NOW + 30, by = OFFICER },
+        { kind = "alias", character = OFFICER, alias = "Fake", at = NOW + 30, by = OFFICER },
+        link("alt3-area52"),
+    } })
+    deliver(network)
+    -- Until the correction arrives, a member can't tell it's forged.
+    test.assertEqual(OFFICER, mainOf(officer, "alt2-area52"), "the officer never applies it")
+    test.assertEqual(nil, officer.partition:GetPlayer(officer.partition:GetCharacter(OFFICER).player).alias)
+
+    test.assertEqual(1, #officer.forgeries)
+    test.assertEqual(2, officer.forgeries[1].count)
+    test.assertEqual("Hammer-Area52", officer.forgeries[1].relayedBy)
+    local log = network.addon.SyncLedger.Create(officer.partition):Forgeries()
+    test.assertEqual(2, #log)
+    test.assertEqual("hammer-area52", log[1].relayedBy)
+    test.assertEqual("alt2-area52", log[1].character)
+    local correction = officer.sent[#officer.sent]
+    test.assertEqual("facts", correction.t)
+    test.assertEqual(2, #correction.facts)
+    test.assertTrue(correction.facts[1].at > NOW + 30, "stamped newer than the forgery")
+
+    test.assertEqual(OFFICER, mainOf(member, "alt2-area52"))
+    test.assertEqual(nil, member.partition:GetPlayer(member.partition:GetCharacter(OFFICER).player).alias)
+    -- The officer's own correction isn't mistaken for a forgery later.
+    forger.session:Send({ t = "facts", facts = correction.facts })
+    deliver(network)
+    test.assertEqual(1, #officer.forgeries)
+end)
+
+test.test("the officer's own edits, and approvals, are in their ledger, so relays of them are trusted", function()
+    local network = newNetwork()
+    local officer = newOfficer(network)
+    local member = newClient(network, "Wrench-Area52")
+    officer.time = NOW + 100
+    officer.partition:JoinPlayerOf("alt5-area52", "hammer-area52", "manual")
+    local edits = officer.session:LocalEdit({ ["alt5-area52"] = true })
+
+    member.session:Send({ t = "facts", facts = edits })
+    deliver(network)
+
+    test.assertEqual(0, #officer.forgeries)
+    test.assertEqual("hammer-area52", mainOf(officer, "alt5-area52"))
+end)
+
 test.test("the announcer sends back what the reply lacked or held older", function()
     local network = newNetwork()
     local announcer = newClient(network, "Hammer-Area52")
@@ -319,9 +432,10 @@ test.test("bystanders apply the facts they overhear", function()
 
     announcer.session:Announce()
     deliver(network)
-    -- The bystander's own reply would come later, so it never goes out.
+    -- The bystander's own reply would come later, so it never goes out (a
+    -- member waits 3 to 5 seconds).
     bystander.randomValue = 5
-    advance(replier, 1)
+    advance(replier, 3)
     deliver(network)
     advance(bystander, 5)
 

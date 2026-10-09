@@ -118,9 +118,18 @@ To keep your own version of a player, open the player panel and check **Don't sy
 You don't need to be online at the same time as an officer. Officers' edits also reach you through other add-on users:
 
 - About 30 to 60 seconds after you log in, your add-on asks the guild whether your copy of officers' data matches theirs. It sends a short summary, never the data itself.
-- If someone's copy is the same, nothing else is sent. If it differs, one add-on user who has the officers' edits sends back only the part that differs. That can be any member, not just an officer. If you hold officer edits they're missing, yours go back the other way.
+- If someone's copy is the same, nothing else is sent. If it differs, one add-on user who has the officers' edits sends back only the part that differs. That can be any member, but an online officer answers first. If you hold officer edits they're missing, yours go back the other way.
+
+### How sync protects your data
+
+Any add-on user can pass officers' edits on, so the add-on checks what it receives:
+
 - An edit is only accepted when the officer it names holds an officer rank on the current roster. A member can't make their own edits official by passing them on.
 - An edit dated more than a few minutes in the future is refused, so a faked date can't make an edit win over every real one.
+- When an officer is online, your data is checked against theirs directly. Officers answer catch-up requests before members do, and the game guarantees who sent each message, so differences come from the officer's own copy.
+- Each officer's add-on keeps a ledger of the edits that officer made. If someone passes on an edit in an officer's name that the officer never made, that officer's add-on catches it as soon as it sees it. That happens either right away, or when the officer next logs in and checks the guild's data. The add-on refuses the edit, sends the officer's own data to the whole guild to replace it, and logs which character passed it on. It also warns the officer in chat.
+- A forged edit can only last until the officer it names is online again. Edits dated before an officer's add-on started its ledger, including ones from before this version, are trusted.
+- The ledger is kept in that computer's saved data. If you're an officer who plays on two computers, an edit you made on one can look forged to the other, which then puts back its own data. Make officer edits on one computer.
 
 ## Chat tags
 

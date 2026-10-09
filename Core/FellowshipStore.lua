@@ -143,7 +143,9 @@ local function validatePartition(data)
     if type(data) ~= "table" then
         return false
     end
-    local containers = { "characters", "players", "quarantine", "conflicts", "suggestions", "unapplied" }
+    local containers = {
+        "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
+    }
     local index
     for index = 1, #containers do
         local value = data[containers[index]]
@@ -174,8 +176,10 @@ local function validatePartition(data)
         end
     end
     data.unapplied = nil
+    -- An officer's ledger and forgery log are only created when needed.
+    local optional = { unapplied = true, ledger = true, forgeries = true }
     for index = 1, #containers do
-        if containers[index] ~= "unapplied" and data[containers[index]] == nil then
+        if not optional[containers[index]] and data[containers[index]] == nil then
             data[containers[index]] = {}
         end
     end
@@ -530,6 +534,32 @@ function Partition:SetSuggestions(entries)
         return false
     end
     self.data.suggestions = entries
+    return true
+end
+
+-- An officer's ledger of the facts they wrote, and the log of forged edits
+-- relayed in their name (see SyncLedger).
+function Partition:GetLedger()
+    return self.data.ledger
+end
+
+function Partition:SetLedger(ledger)
+    if type(ledger) ~= "table" then
+        return false
+    end
+    self.data.ledger = ledger
+    return true
+end
+
+function Partition:GetForgeries()
+    return self.data.forgeries
+end
+
+function Partition:SetForgeries(entries)
+    if type(entries) ~= "table" then
+        return false
+    end
+    self.data.forgeries = entries
     return true
 end
 

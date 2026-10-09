@@ -15,10 +15,19 @@ local _, addon = ...
 --      fact the replier holds in the buckets that differ. Every client that
 --      could reply waits a random short delay first, and stays silent once
 --      it hears someone else's reply to the same announcement, so each
---      announcement gets one reply.
+--      announcement gets one reply. Officers wait less than members, and
+--      only another officer's reply silences them, so whenever an officer is
+--      online, data is checked against that officer's directly: the server
+--      guarantees who sent each message.
 --   3. "facts": the announcer's own facts from those buckets that the reply
 --      lacked or held older, so the data settles both ways.
 -- Everyone applies every facts message they hear, so bystanders catch up too.
+--
+-- Forgeries: each officer keeps a ledger (SyncLedger) of the facts they
+-- wrote. When a facts message carries one in this officer's name that the
+-- ledger doesn't know, it isn't applied: this officer's add-on sends a
+-- correction (their own data for that thing, stamped newer), logs who
+-- relayed it, and warns them.
 --
 -- Suggestions (SuggestionService): a member's own edit stays on their side
 -- and is kept as a suggestion. It's sent ("suggest") right away when an
@@ -44,6 +53,9 @@ local _, addon = ...
 --   officerOnline() -> whether another character with an officer rank is
 --                  online now
 --   onApplied(count) called after received facts changed the roster
+--   onForgery(count, relayedBy) called after this officer's add-on caught
+--                and corrected `count` forged edits in their name, relayed
+--                by `relayedBy` (a name as the game reports it)
 local SyncSession = {
     PROTOCOL = 1,
     TYPE_FACTS = "facts",
@@ -57,8 +69,12 @@ local SyncSession = {
     -- Before the roster has been scanned, nobody's rank is known, so the
     -- announcement waits this long and tries again.
     RETRY_SECONDS = 30,
-    -- A reply waits a random REPLY_MIN to REPLY_MAX seconds.
+    -- An officer's reply waits a random REPLY_MIN to OFFICER_REPLY_MAX
+    -- seconds, a member's MEMBER_REPLY_MIN to REPLY_MAX, so an online
+    -- officer answers first.
     REPLY_MIN = 1,
+    OFFICER_REPLY_MAX = 2,
+    MEMBER_REPLY_MIN = 3,
     REPLY_MAX = 5,
 }
 addon.SyncSession = SyncSession
@@ -83,6 +99,7 @@ function SyncSession.Create(options)
             return false
         end,
         onApplied = options.onApplied or function() end,
+        onForgery = options.onForgery or function() end,
         -- Announcer key -> a reply this client is waiting to send.
         replies = {},
     }, Session)
@@ -177,6 +194,7 @@ function Session:StampAndSend(stamp, changed)
     end
     -- An officer's edit settles the queued suggestions it overtakes.
     suggestions:Settle(nil)
+    addon.SyncLedger.Create(partition):Record(facts, now)
     self:Send({ t = SyncSession.TYPE_FACTS, facts = facts })
     return facts
 end
@@ -230,6 +248,7 @@ function Session:Decide(character, kind, approved)
         if self:Facts(partition):ApplyAll({ fact }) == 0 then
             return false, "it can't be applied here (is the player marked Don't sync?)"
         end
+        addon.SyncLedger.Create(partition):Record({ fact }, now)
         facts = { fact }
     else
         facts = { suggestions:OfficialFact(entry) }
@@ -299,7 +318,14 @@ function Session:OnDigest(digest, announcer, partition)
     end
     local reply = { buckets = buckets }
     self.replies[announcer] = reply
-    self:Later(self.random(SyncSession.REPLY_MIN, SyncSession.REPLY_MAX), function()
+    local selfKey = self.selfKey()
+    local delay
+    if selfKey ~= nil and self.isOfficer(selfKey) then
+        delay = self.random(SyncSession.REPLY_MIN, SyncSession.OFFICER_REPLY_MAX)
+    else
+        delay = self.random(SyncSession.MEMBER_REPLY_MIN, SyncSession.REPLY_MAX)
+    end
+    self:Later(delay, function()
         if self.replies[announcer] ~= reply then
             return
         end
@@ -342,6 +368,53 @@ function Session:FollowUp(reply, partition)
     if missing[1] ~= nil then
         self:Send({ t = SyncSession.TYPE_FACTS, facts = missing })
     end
+end
+
+-- Forgeries -------------------------------------------------------------------
+
+-- Of `facts` received from `relayer` (key, and `sender` as the game reports
+-- it), returns the ones to apply. Facts in this officer's (`officer`'s) name
+-- that their ledger doesn't know are left out, logged, and corrected: this
+-- officer's own data for each such thing goes to the guild, stamped newer
+-- than the forgery, and the officer is warned.
+function Session:CatchForgeries(facts, partition, officer, relayer, sender)
+    local now = self.now()
+    if type(facts) ~= "table" or now == nil then
+        return facts
+    end
+    local ledger = addon.SyncLedger.Create(partition)
+    local own = self:Facts(partition)
+    local kept, corrections = {}, {}
+    local forged = 0
+    local index
+    for index = 1, #facts do
+        local fact = facts[index]
+        if addon.SyncFacts.IsValid(fact) and fact.by == officer and ledger:IsForged(fact, now) then
+            forged = forged + 1
+            ledger:LogForgery(fact, relayer, now)
+            local at = math.max(now, fact.at + 1)
+            -- A "Don't sync" player is this officer's own business.
+            if partition:GetCharacter(fact.character) ~= nil and not own:IsPinned(fact.character) then
+                if fact.kind == addon.SyncFacts.KIND_ALIAS then
+                    table.insert(corrections, own:StampAlias(fact.character, officer, at))
+                else
+                    local stamped = own:Stamp({ [fact.character] = true }, officer, at)
+                    table.insert(corrections, stamped[1])
+                end
+            end
+        else
+            table.insert(kept, fact)
+        end
+    end
+    if forged == 0 then
+        return facts
+    end
+    if corrections[1] ~= nil then
+        ledger:Record(corrections, now)
+        self:Send({ t = SyncSession.TYPE_FACTS, facts = corrections })
+    end
+    self.onForgery(forged, sender)
+    return kept
 end
 
 -- A message from `sender` (a name as the game reports it). Returns how many
@@ -388,14 +461,21 @@ function Session:Receive(message, sender)
     -- A rejected edit of this member's reverts first, so the officer fact
     -- sent with the rejection then applies over it.
     local reverted = suggestions:Revert(decided)
-    local applied = self:Facts(partition):ApplyAll(message.facts)
+    local incoming = message.facts
+    if selfIsOfficer then
+        incoming = self:CatchForgeries(incoming, partition, selfKey, senderKey, sender)
+    end
+    local applied = self:Facts(partition):ApplyAll(incoming)
     local settled = suggestions:Settle(decided) + suggestions:Prune(decided)
     if applied > 0 or settled > 0 or reverted > 0 then
         self.onApplied(applied)
     end
     if type(message.re) == "string" then
-        -- Someone answered that announcement, so this client doesn't.
-        self.replies[message.re] = nil
+        -- Someone answered that announcement, so this client doesn't; an
+        -- officer still checks it unless another officer answered.
+        if not selfIsOfficer or self.isOfficer(senderKey) then
+            self.replies[message.re] = nil
+        end
         if message.re == selfKey then
             self:FollowUp(message, partition)
         end
