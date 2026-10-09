@@ -9,6 +9,7 @@ local MANIFEST_FILES = {
     "Adapters/EntryPoints.lua",
     "Adapters/Comm.lua",
     "Adapters/SettingsPanel.lua",
+    "Adapters/GreetPrompts.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",
@@ -30,6 +31,10 @@ local MANIFEST_FILES = {
     "Core/LibraryCheck.lua",
     "Core/CommandRouter.lua",
     "Core/SettingsModel.lua",
+    "Core/GreetPolicy.lua",
+    "Core/GreetingLibrary.lua",
+    "Core/GreetPromptQueue.lua",
+    "Core/GuildGreet.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }

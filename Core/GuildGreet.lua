@@ -1,0 +1,204 @@
+local _, addon = ...
+
+-- Guild Greet: turns guild members coming online into greet prompts, and a
+-- press of Greet into one random greeting in guild chat. It wires
+-- GreetPolicy (who gets a prompt), GreetPromptQueue (what's waiting), and
+-- GreetingLibrary (what to say) to the game through the functions it's
+-- given, so it never touches the game itself. Nothing is ever posted
+-- without the user pressing Greet.
+local GuildGreet = {}
+addon.GuildGreet = GuildGreet
+
+local Greet = {}
+Greet.__index = Greet
+
+-- options:
+--   context       function() -> partition, normalizer, or nil
+--   selfKey       function() -> the logged-in character's key, or nil
+--   store         function() -> the FellowshipStore, or nil
+--   now           function() -> seconds
+--   after         function(seconds, callback) -> false when there's no timer
+--   random        function(low, high) -> a whole number
+--   send          function(text) -> true when posted to guild chat
+--   view          { Show = function(view, prompts, handlers) }: draws the
+--                 prompts; handlers.greet(player) and handlers.close(player)
+function GuildGreet.Create(options)
+    local greet = setmetatable({
+        context = options.context,
+        selfKey = options.selfKey,
+        store = options.store,
+        now = options.now,
+        after = options.after,
+        random = options.random,
+        send = options.send,
+        view = options.view,
+        queue = addon.GreetPromptQueue.Create(),
+    }, Greet)
+    greet.policy = addon.GreetPolicy.Create({
+        playerOf = function(key)
+            return (greet:service():PlayerOf(key))
+        end,
+        isMember = function(key)
+            local partition = greet.context()
+            return partition ~= nil and partition:IsInGuild(key)
+        end,
+        isOwn = function(key)
+            return greet:IsOwn(key)
+        end,
+        enabled = function()
+            return greet:IsEnabled()
+        end,
+    })
+    return greet
+end
+
+-- A PlayerService over the current guild, or nil.
+function Greet:service()
+    local partition, normalizer = self.context()
+    if partition == nil then
+        return nil
+    end
+    return addon.PlayerService.Create(partition, { normalizer = normalizer })
+end
+
+function Greet:IsEnabled()
+    local store = self.store()
+    return store == nil or store:GreetEnabled()
+end
+
+-- True for any of the user's own characters.
+function Greet:IsOwn(key)
+    local selfKey = self.selfKey()
+    if selfKey == nil then
+        return false
+    end
+    if selfKey == key then
+        return true
+    end
+    local service = self:service()
+    local ownPlayer = service and service:PlayerOf(selfKey)
+    return ownPlayer ~= nil and ownPlayer == service:PlayerOf(key)
+end
+
+-- The texts for {name} and {character}: the player's alias, else their
+-- main's name, else the character's; and the character as the game spells
+-- it.
+function Greet:Names(key, rawName)
+    local partition, normalizer = self.context()
+    local character = normalizer and normalizer:Display(rawName) or rawName
+    if partition == nil then
+        return { name = character, character = character }
+    end
+    local service = addon.PlayerService.Create(partition, { normalizer = normalizer })
+    local _, player = service:PlayerOf(key)
+    local name = character
+    if player ~= nil then
+        name = player.alias or service:CharacterName(player.main) or character
+    end
+    return { name = name, character = character }
+end
+
+-- Called on every roster update. The first one with a loaded roster tells
+-- the policy who was already online. `onlineNames()` returns the raw names
+-- of members online now, or nil while the roster is still loading.
+function Greet:OnRosterUpdate(onlineNames)
+    if self.policy:IsReady() then
+        return
+    end
+    local _, normalizer = self.context()
+    local names = normalizer and onlineNames()
+    if names == nil then
+        return
+    end
+    local keys = {}
+    local index
+    for index = 1, #names do
+        local key = normalizer:Key(names[index])
+        if key ~= nil then
+            table.insert(keys, key)
+        end
+    end
+    self.policy:Seed(keys)
+end
+
+-- A guild member came online ("online") or went offline ("offline").
+-- `rawName` is the name the game's message reported.
+function Greet:OnPresence(kind, rawName)
+    local _, normalizer = self.context()
+    local key = normalizer and normalizer:Key(rawName)
+    local now = self.now()
+    if key == nil or type(now) ~= "number" then
+        return
+    end
+    if kind == "offline" then
+        self.policy:WentOffline(key, now)
+        return
+    end
+    if kind ~= "online" then
+        return
+    end
+    local prompt = self.policy:CameOnline(key, now)
+    if prompt == nil then
+        return
+    end
+    prompt.rawName = rawName
+    prompt.label = self:Names(key, rawName).name
+    local expiresAt = self.queue:Add(prompt, now)
+    -- Redraw when it expires, so it leaves the screen on time.
+    self.after(expiresAt - now, function()
+        self:Refresh()
+    end)
+    self:Refresh()
+end
+
+-- Draws the waiting prompts.
+function Greet:Refresh()
+    local now = self.now()
+    if type(now) ~= "number" or self.view == nil then
+        return
+    end
+    pcall(self.view.Show, self.view, self.queue:Visible(now), {
+        greet = function(player)
+            self:Greet(player)
+        end,
+        close = function(player)
+            self:Close(player)
+        end,
+    })
+end
+
+-- The user pressed Greet: posts a random greeting from the prompt's
+-- category, using the names as they are now. Returns the text sent, or nil.
+function Greet:Greet(player)
+    local prompt = self.queue:Get(player)
+    if prompt == nil then
+        return nil
+    end
+    self.queue:Remove(player)
+    local store = self.store()
+    local library = addon.GreetingLibrary.Create(store and store:GetGreetState(), self.random)
+    local greeting = library:Pick(prompt.category)
+    local text
+    if greeting ~= nil then
+        text = addon.GreetingLibrary.Render(greeting, self:Names(prompt.key, prompt.rawName))
+        if not self.send(text) then
+            text = nil
+        end
+    end
+    self:Refresh()
+    return text
+end
+
+-- The user closed a prompt without greeting.
+function Greet:Close(player)
+    self.queue:Remove(player)
+    self:Refresh()
+end
+
+-- Guild Greet was turned on or off. Turning it off clears waiting prompts.
+function Greet:OnEnabledChanged(enabled)
+    if not enabled then
+        self.queue:Clear()
+        self:Refresh()
+    end
+end

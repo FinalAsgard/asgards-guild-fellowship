@@ -26,6 +26,7 @@ The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Gui
 
 - **General**: show or hide the minimap button, an **Open Roster** button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off.
+- **Guild Greet**: turn Guild Greet on or off.
 
 The panel and the slash commands change the same settings, so a change made either way shows up in both. Settings are saved for every character on this game install. The development build's panel is labeled "(Dev)".
 
@@ -158,6 +159,18 @@ An alias tag is medium blue and a main's-name tag is light blue, so you can tell
 Tags are on by default. `/agf tags` or the **Chat Tags** section of the settings panel turns them off, and doing it again turns them back on. The choice is saved for every character on this game install and applies from the next chat line.
 
 On Retail, the game hides chat from add-ons during encounters and keystone runs. Those lines appear without tags, and tags return once the restriction lifts.
+
+## Guild Greet
+
+When a guild member comes online, a small prompt appears at the right side of the screen with the name they go by and a **Greet** button. Press it to post a random greeting to guild chat. Nothing is ever posted unless you press the button.
+
+- **Login**: the first time you see someone come online this session.
+- **Welcome back**: someone you saw log off comes back 15 minutes or more later. Coming back sooner (a relog or a disconnect) gets no prompt.
+- People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
+- Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
+- Prompts disappear after 2 minutes; the **X** closes one without greeting.
+
+Greetings can use `{name}` (the player's alias, else their main's name, else the character's name) and `{character}` (the character that just logged in). Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** section of the settings panel. Greetings and the setting are shared by every character on this game install.
 
 ## Supported clients
 

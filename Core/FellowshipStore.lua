@@ -316,6 +316,43 @@ function Store:SetChatTagsEnabled(enabled)
     return true
 end
 
+-- Guild Greet's saved state, shared by every character on the account and
+-- created on first use: the on/off switch, the greetings, and the last
+-- greeting used in each category (GreetingLibrary owns their shape). Nil
+-- when an unusable value is stored there; it is then left alone.
+function Store:GetGreetState()
+    if type(self.database) ~= "table" then
+        return nil
+    end
+    if self.database.greet == nil then
+        self.database.greet = {}
+    end
+    if type(self.database.greet) ~= "table" then
+        return nil
+    end
+    return self.database.greet
+end
+
+-- Whether Guild Greet is on. On unless turned off; unusable saved data
+-- counts as on, as with chat tags.
+function Store:GreetEnabled()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    return type(state) ~= "table" or state.enabled ~= false
+end
+
+-- Turns Guild Greet on or off. An unusable existing value is left alone.
+function Store:SetGreetEnabled(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.enabled ~= nil and type(state.enabled) ~= "boolean") then
+        return false
+    end
+    state.enabled = enabled
+    return true
+end
+
 function Partition:GetCharacter(key)
     return self.data.characters[key]
 end

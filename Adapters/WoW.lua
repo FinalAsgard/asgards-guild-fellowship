@@ -320,6 +320,81 @@ function Client:AddChatMessageFilter(events, filter)
     return registered
 end
 
+-- The system messages that report someone coming online or going offline,
+-- by kind: the client's own format string (so every locale works), with the
+-- English text as a fallback. These fire for friends too; callers check
+-- guild membership.
+Compatibility.PRESENCE_FORMATS = {
+    { kind = "online", global = "ERR_FRIEND_ONLINE_SS", fallback = "|Hplayer:%s|h[%s]|h has come online." },
+    { kind = "offline", global = "ERR_FRIEND_OFFLINE_S", fallback = "%s has gone offline." },
+}
+
+-- A Lua pattern matching a client format string, capturing each "%s" (or
+-- positional "%1$s"). Nil for anything that isn't text.
+function Compatibility.PatternFor(format)
+    if type(format) ~= "string" or format == "" then
+        return nil
+    end
+    local pattern = string.gsub(format, "[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
+    pattern = string.gsub(pattern, "%%%%%d%%%$s", "(.-)")
+    pattern = string.gsub(pattern, "%%%%s", "(.-)")
+    return "^" .. pattern .. "$"
+end
+
+-- Calls onPresence(kind, name) for every system message saying someone came
+-- online or went offline, with the name as the message gives it (from the
+-- player link when there is one). Messages the client hides from add-ons
+-- are skipped. Returns false when the client can't deliver the event.
+function Client:ObservePresence(onPresence)
+    if type(onPresence) ~= "function" then
+        return false
+    end
+    local patterns = {}
+    local index
+    for index = 1, #Compatibility.PRESENCE_FORMATS do
+        local entry = Compatibility.PRESENCE_FORMATS[index]
+        local format = self.environment[entry.global]
+        local pattern = Compatibility.PatternFor(type(format) == "string" and format or entry.fallback)
+        if pattern ~= nil then
+            table.insert(patterns, { kind = entry.kind, pattern = pattern })
+        end
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil
+        or not self:SetEventHandler(frame, function(_, _, message)
+            if type(message) ~= "string" or self:IsSecretValue(message) then
+                return
+            end
+            local patternIndex
+            for patternIndex = 1, #patterns do
+                local name = string.match(message, patterns[patternIndex].pattern)
+                if name ~= nil and name ~= "" then
+                    pcall(onPresence, patterns[patternIndex].kind, name)
+                    return
+                end
+            end
+        end)
+        or not self:RegisterEvent(frame, "CHAT_MSG_SYSTEM")
+    then
+        return false
+    end
+    self.presenceFrame = frame
+    return true
+end
+
+-- Posts `text` to guild chat. Retail keeps the call in C_ChatInfo; older
+-- clients have it as a global. Returns true when the client accepted it.
+function Client:SendGuildMessage(text)
+    if type(text) ~= "string" or text == "" then
+        return false
+    end
+    local chatInfo = self.environment.C_ChatInfo
+    if type(chatInfo) == "table" and type(chatInfo.SendChatMessage) == "function" then
+        return (callFunction(chatInfo.SendChatMessage, text, "GUILD"))
+    end
+    return (callFunction(self.environment.SendChatMessage, text, "GUILD"))
+end
+
 -- True when the client hides `value` from add-ons (Retail's secret values,
 -- during encounters and keystone runs). False on a client without the
 -- check. A check that errors answers true, so callers leave the value alone.

@@ -26,6 +26,7 @@ if missingLibraries ~= nil then
 end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
+local guildGreet
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -193,6 +194,26 @@ if clientProfile.supported then
             return true
         end,
     })
+    settings:AddSection("guildGreet", "Guild Greet")
+    settings:Add("guildGreet", {
+        id = "guildGreet",
+        kind = "toggle",
+        label = "Offer to greet guild members as they come online",
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:GreetEnabled()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetEnabled(enabled) then
+                return nil, "the saved setting is unreadable, so it stays on"
+            end
+            return true
+        end,
+    })
     settingsPanel = addon.SettingsPanel.Create(client, settings)
     router:Register("options", "open the settings panel", function()
         if not settingsPanel:Open() then
@@ -307,8 +328,58 @@ if clientProfile.supported then
             rosterController:Print(lines[index])
         end
     end)
+    -- Guild Greet reads the same guild context as the roster.
+    guildGreet = addon.GuildGreet.Create({
+        context = function()
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return partition, normalizer
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        store = function()
+            return rosterController:Store()
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        send = function(text)
+            return client:SendGuildMessage(text)
+        end,
+        view = addon.GreetPrompts.Create(client),
+    })
+    settings:OnChange(function(id, value)
+        if id == "guildGreet" then
+            guildGreet:OnEnabledChanged(value)
+        end
+    end)
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
+        -- The first loaded roster tells Guild Greet who was already online.
+        guildGreet:OnRosterUpdate(function()
+            local count = client:GetGuildRosterCount()
+            if count == nil or count == 0 then
+                return nil
+            end
+            local names = {}
+            local index
+            for index = 1, count do
+                local member = client:GetGuildMember(index)
+                if member ~= nil and member.online then
+                    table.insert(names, member.name)
+                end
+            end
+            return names
+        end)
     end)
     -- Chat tags read the same guild context as the roster.
     chatAnnotator = addon.ChatAnnotator.Create({
@@ -359,6 +430,10 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     entryPoints:Start()
     -- Settings show saved values, so the panel waits for saved data too.
     settingsPanel:Register()
+    -- Without the system message event, Guild Greet simply never prompts.
+    client:ObservePresence(function(kind, name)
+        guildGreet:OnPresence(kind, name)
+    end)
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)
@@ -376,6 +451,7 @@ addon.chatAnnotator = chatAnnotator
 addon.comm = comm
 addon.settings = settings
 addon.settingsPanel = settingsPanel
+addon.guildGreet = guildGreet
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version
