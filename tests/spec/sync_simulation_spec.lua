@@ -799,6 +799,27 @@ test.test("a rejected suggestion reverts to the officers' data, which then match
     test.assertEqual(before, #officer.sentMessages)
 end)
 
+test.test("accepting all says how many suggestions were left undecided, and why", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammy"))
+    fixtures.deliver(channel)
+    test.assertTrue(officer.addon.rosterController:SetDontSync("hammer-area52", true))
+    local printed = #officer.messages
+
+    test.assertTrue(officer.addon.rosterController:AcceptAllConflicts())
+
+    test.assertTrue(queuedSuggestion(officer, "hammer-area52", "suggested alias") ~= nil, "still queued")
+    local said = {}
+    local index
+    for index = printed + 1, #officer.messages do
+        table.insert(said, officer.messages[index])
+    end
+    said = table.concat(said, "\n")
+    test.assertTrue(string.find(said, "1 suggestion wasn't decided: it can't be applied here", 1, true) ~= nil, said)
+end)
+
 test.test("a member's suggestions wait until an officer is online", function()
     local channel = fixtures.newChannel()
     local hammer = login(channel, "Hammer-Area52")

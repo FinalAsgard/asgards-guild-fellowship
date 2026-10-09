@@ -256,12 +256,9 @@ end
 
 -- Decides members' suggestions in the queue (all of them, or the one about
 -- `character` of `kind`) through onDecideSuggestion. Returns how many were
--- decided, and the last refusal.
+-- decided, the last refusal, and how many were refused.
 function Controller:DecideSuggestions(approved, character, kind)
     local decided, reason = 0, nil
-    if self.onDecideSuggestion == nil then
-        return 0, "guild sync is not available"
-    end
     local entries = {}
     local conflicts = self.current.partition:GetConflicts() or {}
     local index
@@ -271,6 +268,9 @@ function Controller:DecideSuggestions(approved, character, kind)
             table.insert(entries, { character = entry.character, kind = entry.kind })
         end
     end
+    if self.onDecideSuggestion == nil then
+        return 0, "guild sync is not available", #entries
+    end
     for index = 1, #entries do
         local ok, why = self.onDecideSuggestion(entries[index].character, entries[index].kind, approved)
         if ok then
@@ -279,7 +279,17 @@ function Controller:DecideSuggestions(approved, character, kind)
             reason = why
         end
     end
-    return decided, reason
+    return decided, reason, #entries - decided
+end
+
+-- After deciding everything: says how many members' suggestions are still
+-- waiting, and why.
+function Controller:PrintUndecided(refused, reason)
+    if refused == nil or refused == 0 then
+        return
+    end
+    local count = refused == 1 and "1 suggestion wasn't" or (refused .. " suggestions weren't")
+    self:Print(count .. " decided: " .. (reason or "it was refused") .. ".")
 end
 
 -- Conflict review. Note conflicts resolve through PlayerService, members'
@@ -301,14 +311,16 @@ function Controller:ResolveConflicts(action, character, kind)
     elseif action == "reject" then
         ok, reason = service:RejectConflict(character, kind)
     elseif action == "acceptAll" then
-        local approved = self:DecideSuggestions(true)
+        local approved, why, refused = self:DecideSuggestions(true)
         local accepted, dismissed = service:AcceptAll()
         self:Print("Accepted " .. plural(accepted + approved, "conflict") .. " and dismissed " .. dismissed .. ".")
+        self:PrintUndecided(refused, why)
         ok = true
     elseif action == "rejectAll" then
-        local declined = self:DecideSuggestions(false)
+        local declined, why, refused = self:DecideSuggestions(false)
         local rejected = service:RejectAll()
         self:Print("Rejected " .. plural(rejected + declined, "conflict") .. ".")
+        self:PrintUndecided(refused, why)
         ok = true
     end
     if not ok and reason ~= nil then
