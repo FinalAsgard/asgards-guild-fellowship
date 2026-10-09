@@ -26,7 +26,7 @@ if missingLibraries ~= nil then
 end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
-local guildGreet, greetingsWindow
+local guildGreet, greetingsWindow, greetPrompts
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -214,6 +214,18 @@ if clientProfile.supported then
             return true
         end,
     })
+    -- Not saved: the prompts lock again after a reload.
+    settings:Add("guildGreet", {
+        id = "greetUnlock",
+        kind = "toggle",
+        label = "Unlock greet prompts to drag them somewhere else",
+        get = function()
+            return greetPrompts:IsUnlocked()
+        end,
+        set = function(unlocked)
+            return greetPrompts:SetUnlocked(unlocked)
+        end,
+    })
     -- The greetings themselves are edited in their own window, made on
     -- first use.
     local function openGreetings()
@@ -356,6 +368,19 @@ if clientProfile.supported then
             rosterController:Print(lines[index])
         end
     end)
+    -- Prompts stack from a place the user can move; it's saved account-wide.
+    greetPrompts = addon.GreetPrompts.Create(client, {
+        loadAnchor = function()
+            local store = rosterController:Store()
+            return store and store:GreetAnchor()
+        end,
+        saveAnchor = function(anchor)
+            local store = rosterController:Store()
+            if store ~= nil then
+                store:SetGreetAnchor(anchor)
+            end
+        end,
+    })
     -- Guild Greet reads the same guild context as the roster.
     guildGreet = addon.GuildGreet.Create({
         context = function()
@@ -383,7 +408,7 @@ if clientProfile.supported then
         send = function(text)
             return client:SendGuildMessage(text)
         end,
-        view = addon.GreetPrompts.Create(client),
+        view = greetPrompts,
     })
     settings:OnChange(function(id, value)
         if id == "guildGreet" then

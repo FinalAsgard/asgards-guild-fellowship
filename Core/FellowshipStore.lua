@@ -353,6 +353,49 @@ function Store:SetGreetEnabled(enabled)
     return true
 end
 
+-- The points a saved greet prompt position may be measured from.
+local ANCHOR_POINTS = {
+    TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, CENTER = true,
+    RIGHT = true, BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true,
+}
+
+-- A usable screen offset: a real number, not NaN or far off any screen.
+local function isOffset(value)
+    return type(value) == "number" and value == value and math.abs(value) < 100000
+end
+
+local function isAnchor(anchor)
+    return type(anchor) == "table" and ANCHOR_POINTS[anchor.point] == true
+        and isOffset(anchor.x) and isOffset(anchor.y)
+end
+
+-- Where greet prompts stack from ({ point, x, y }, measured from that point
+-- of the screen), shared by every character. Nil when none is saved or the
+-- saved one is unusable, so the prompts use their default place.
+function Store:GreetAnchor()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local anchor = type(state) == "table" and state.anchor or nil
+    if not isAnchor(anchor) then
+        return nil
+    end
+    return { point = anchor.point, x = anchor.x, y = anchor.y }
+end
+
+-- Saves where greet prompts stack from. Unlike other settings, an unusable
+-- saved position is replaced: the user just placed the prompts, and leaving
+-- it would keep them at the default forever.
+function Store:SetGreetAnchor(anchor)
+    if not isAnchor(anchor) then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil then
+        return false
+    end
+    state.anchor = { point = anchor.point, x = anchor.x, y = anchor.y }
+    return true
+end
+
 function Partition:GetCharacter(key)
     return self.data.characters[key]
 end

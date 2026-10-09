@@ -262,3 +262,16 @@ test.test("/agf greet and the panel's Edit Greetings button open the Greetings w
     test.assertEqual(before + 1, #world.messages)
     test.assertContains(lastMessage(world), "The Greetings window can't open")
 end)
+
+test.test("the Guild Greet section can unlock the prompts, and refuses when they can't be drawn", function()
+    local _, addon = loggedIn("Forever")
+    local entry = addon.settings:Entry("greetUnlock")
+
+    test.assertEqual("toggle", entry.kind)
+    test.assertFalse(addon.settings:Get("greetUnlock"))
+    -- The fixtures' frames can't build prompts, so the toggle stays off.
+    local ok, reason = addon.settings:Set("greetUnlock", true)
+    test.assertEqual(nil, ok)
+    test.assertContains(reason, "can't be drawn")
+    test.assertFalse(addon.settings:Get("greetUnlock"))
+end)

@@ -27,7 +27,7 @@ The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Gui
 
 - **General**: show or hide the minimap button, an **Open Roster** button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off.
-- **Guild Greet**: turn Guild Greet on or off, and an **Edit Greetings** button that opens the Greetings window.
+- **Guild Greet**: turn Guild Greet on or off, unlock the prompts to move them, and an **Edit Greetings** button that opens the Greetings window.
 
 The panel and the slash commands change the same settings, so a change made either way shows up in both. Settings are saved for every character on this game install. The development build's panel is labeled "(Dev)".
 
@@ -172,6 +172,7 @@ When a guild member comes online, a small prompt appears at the left side of the
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
 - Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
 - Prompts disappear after 2 minutes; the **X** closes one without greeting.
+- To move the prompts, tick **Unlock greet prompts** in the settings panel and drag the gold bar that appears. The place is saved for every character. Untick it to hide the bar; it also locks again after a reload.
 - In combat or a boss encounter, prompts wait. When it's over, any that are still under 2 minutes old appear.
 
 Greetings can use these placeholders, in any capitalization:
