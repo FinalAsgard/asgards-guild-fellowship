@@ -163,7 +163,7 @@ On Retail, the game hides chat from add-ons during encounters and keystone runs.
 
 ## Guild Greet
 
-When a guild member comes online, a small prompt appears at the left side of the screen with just the name they go by and a **Greet** button. Press it to post a random greeting to guild chat. Nothing is ever posted unless you press the button.
+When someone joins the guild or a guild member comes online, a small prompt appears (at the left side of the screen unless you move it) with just the name they go by and a **Greet** button. Press it to post a random greeting to guild chat. Nothing is ever posted unless you press the button.
 
 - **Join**: someone joins the guild. They get this instead of a login prompt.
 - **Long absence**: someone's first login this session when none of their characters had logged in for 30 days or more (you can change the days), going by the guild roster's last-online times when you logged in.
@@ -174,6 +174,7 @@ When a guild member comes online, a small prompt appears at the left side of the
 - Prompts disappear after 2 minutes; the **X** closes one without greeting.
 - To move the prompts, tick **Unlock greet prompts** in the settings panel and drag the gold bar that appears. The place is saved for every character. Untick it to hide the bar; it also locks again after a reload.
 - In combat or a boss encounter, prompts wait. When it's over, any that are still under 2 minutes old appear.
+- On Retail, the game hides some system messages from add-ons during encounters and keystone runs. Logins it hides get no prompt; nothing breaks.
 
 Greetings can use these placeholders, in any capitalization:
 
