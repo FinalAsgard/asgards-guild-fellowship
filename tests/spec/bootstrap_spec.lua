@@ -8,6 +8,7 @@ local MANIFEST_FILES = {
     "Adapters/RosterWindow.lua",
     "Adapters/EntryPoints.lua",
     "Adapters/Comm.lua",
+    "Adapters/SettingsPanel.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",
@@ -28,6 +29,7 @@ local MANIFEST_FILES = {
     "Core/RosterController.lua",
     "Core/LibraryCheck.lua",
     "Core/CommandRouter.lua",
+    "Core/SettingsModel.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }

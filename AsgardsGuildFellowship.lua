@@ -25,7 +25,7 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession
+local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -143,8 +143,64 @@ if clientProfile.supported then
     router:Register("rescan", "rescan the guild roster now", function()
         rosterController:Rescan()
     end)
+    -- Every setting, one section per feature. The panel and the slash
+    -- commands both go through it.
+    settings = addon.SettingsModel.Create()
+    settings:AddSection("general", "General")
+    settings:Add("general", {
+        id = "minimap",
+        kind = "toggle",
+        label = "Show the minimap button",
+        get = function()
+            return entryPoints:MinimapShown()
+        end,
+        set = function(shown)
+            return entryPoints:SetMinimapShown(shown)
+        end,
+    })
+    settings:Add("general", {
+        id = "openRoster",
+        kind = "action",
+        label = "Open Roster",
+        run = function()
+            rosterController:Open()
+        end,
+    })
+    settings:Add("general", {
+        id = "version",
+        kind = "text",
+        get = function()
+            return "Version " .. version .. " on " .. clientProfile.label .. "."
+        end,
+    })
+    settings:AddSection("chatTags", "Chat Tags")
+    settings:Add("chatTags", {
+        id = "chatTags",
+        kind = "toggle",
+        label = "Tag guild chat speakers with their alias or main",
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:ChatTagsEnabled()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetChatTagsEnabled(enabled) then
+                return nil, "the saved setting is unreadable, so they stay on"
+            end
+            return true
+        end,
+    })
+    settingsPanel = addon.SettingsPanel.Create(client, settings)
+    router:Register("options", "open the settings panel", function()
+        if not settingsPanel:Open() then
+            rosterController:Print("The settings panel isn't available on this client.")
+        end
+    end)
     router:Register("minimap", "show or hide the minimap button", function()
-        local shown, reason = entryPoints:ToggleMinimap()
+        local shown, reason = settings:Toggle("minimap")
         if shown == nil then
             rosterController:Print("Can't change the minimap button: " .. reason .. ".")
         elseif shown then
@@ -154,14 +210,9 @@ if clientProfile.supported then
         end
     end)
     router:Register("tags", "turn chat tags on or off", function()
-        local store = rosterController:Store()
-        if store == nil then
-            rosterController:Print("Saved data is unavailable, so chat tags can't be changed.")
-            return
-        end
-        local enabled = not store:ChatTagsEnabled()
-        if not store:SetChatTagsEnabled(enabled) then
-            rosterController:Print("Chat tags can't be changed: the saved setting is unreadable. They stay on.")
+        local enabled, reason = settings:Toggle("chatTags")
+        if enabled == nil then
+            rosterController:Print("Chat tags can't be changed: " .. reason .. ".")
         elseif enabled then
             rosterController:Print("Chat tags on.")
         else
@@ -306,6 +357,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     end
     -- The minimap button needs saved data for its position.
     entryPoints:Start()
+    -- Settings show saved values, so the panel waits for saved data too.
+    settingsPanel:Register()
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)
@@ -321,6 +374,8 @@ addon.rosterController = rosterController
 addon.entryPoints = entryPoints
 addon.chatAnnotator = chatAnnotator
 addon.comm = comm
+addon.settings = settings
+addon.settingsPanel = settingsPanel
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version

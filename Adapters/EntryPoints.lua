@@ -103,26 +103,42 @@ function Points:StartMinimap()
     return self.minimapRegistered
 end
 
--- `/agf minimap`: shows or hides the minimap button and saves the choice.
--- Returns true when the button is now shown, false when hidden, or nil
--- and a reason when there is no minimap button.
-function Points:ToggleMinimap()
+-- Whether the minimap button is shown, read from the saved state (shown
+-- unless the player hid it).
+function Points:MinimapShown()
+    local state = self.iconState or self.minimapState()
+    return not (type(state) == "table" and state.hide)
+end
+
+-- Shows or hides the minimap button and saves the choice. Returns true, or
+-- nil and a reason when there is no minimap button.
+function Points:SetMinimapShown(shown)
     if not self.minimapRegistered then
         return nil, "the minimap button isn't available (LibDBIcon is missing)"
     end
-    local hide = not self.iconState.hide
     local ok = pcall(function()
-        if hide then
-            self.icon:Hide(addon.Identity.addonName)
-        else
+        if shown then
             self.icon:Show(addon.Identity.addonName)
+        else
+            self.icon:Hide(addon.Identity.addonName)
         end
     end)
     if not ok then
         return nil, "the minimap button couldn't be changed"
     end
-    self.iconState.hide = hide
-    return not hide
+    self.iconState.hide = not shown
+    return true
+end
+
+-- Flips the minimap button. Returns true when the button is now shown,
+-- false when hidden, or nil and a reason when there is no minimap button.
+function Points:ToggleMinimap()
+    local shown = not self:MinimapShown()
+    local changed, reason = self:SetMinimapShown(shown)
+    if not changed then
+        return nil, reason
+    end
+    return shown
 end
 
 -- The add-on compartment entry, where the client has the compartment.
