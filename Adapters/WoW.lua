@@ -320,13 +320,14 @@ function Client:AddChatMessageFilter(events, filter)
     return registered
 end
 
--- The system messages that report someone coming online or going offline,
--- by kind: the client's own format string (so every locale works), with the
--- English text as a fallback. These fire for friends too; callers check
--- guild membership.
+-- The system messages that report someone coming online, going offline, or
+-- joining the guild, by kind: the client's own format string (so every
+-- locale works), with the English text as a fallback. Online and offline
+-- fire for friends too; callers check guild membership.
 Compatibility.PRESENCE_FORMATS = {
     { kind = "online", global = "ERR_FRIEND_ONLINE_SS", fallback = "|Hplayer:%s|h[%s]|h has come online." },
     { kind = "offline", global = "ERR_FRIEND_OFFLINE_S", fallback = "%s has gone offline." },
+    { kind = "join", global = "ERR_GUILD_JOIN_S", fallback = "%s has joined the guild." },
 }
 
 -- A Lua pattern matching a client format string, capturing each "%s" (or
@@ -342,7 +343,7 @@ function Compatibility.PatternFor(format)
 end
 
 -- Calls onPresence(kind, name) for every system message saying someone came
--- online or went offline, with the name as the message gives it (from the
+-- online, went offline, or joined the guild, with the name as the message gives it (from the
 -- player link when there is one). Messages the client hides from add-ons
 -- are skipped. Returns false when the client can't deliver the event.
 function Client:ObservePresence(onPresence)

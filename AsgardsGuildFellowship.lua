@@ -364,21 +364,22 @@ if clientProfile.supported then
     end)
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
-        -- The first loaded roster tells Guild Greet who was already online.
+        -- The first loaded roster tells Guild Greet who was already online
+        -- and how long everyone else has been away.
         guildGreet:OnRosterUpdate(function()
             local count = client:GetGuildRosterCount()
             if count == nil or count == 0 then
                 return nil
             end
-            local names = {}
+            local members = {}
             local index
             for index = 1, count do
                 local member = client:GetGuildMember(index)
-                if member ~= nil and member.online then
-                    table.insert(names, member.name)
+                if member ~= nil then
+                    table.insert(members, member)
                 end
             end
-            return names
+            return members
         end)
     end)
     -- Chat tags read the same guild context as the roster.

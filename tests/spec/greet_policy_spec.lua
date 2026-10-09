@@ -146,3 +146,80 @@ test.test("greet policy: a failing lookup never raises", function()
     test.assertTrue(ok)
     test.assertEqual(nil, prompt)
 end)
+
+-- A policy whose `absences` table gives each key's seconds away.
+local function withAbsences(absences)
+    local world = guild()
+    local addon = test.newAddon("Core/GreetPolicy.lua")
+    local policy = addon.GreetPolicy.Create({
+        playerOf = function(key)
+            return world.players[key]
+        end,
+        isMember = function(key)
+            return world.members[key] == true
+        end,
+        isOwn = function(key)
+            return world.own[key] == true
+        end,
+        absenceOf = function(key)
+            return absences[key]
+        end,
+    })
+    policy:Seed({ "me" })
+    return policy, world
+end
+
+local DAY = 24 * 60 * MINUTE
+
+test.test("greet policy: a first login after 30 days away is a long absence", function()
+    local policy = withAbsences({ anvil = 30 * DAY, bolt = 30 * DAY - 1 })
+
+    test.assertEqual("longAbsence", category(policy:CameOnline("anvil", START)))
+    test.assertEqual("login", category(policy:CameOnline("bolt", START)))
+end)
+
+test.test("greet policy: a long absence only applies to the first login of the session", function()
+    local policy = withAbsences({ anvil = 60 * DAY })
+    policy:CameOnline("anvil", START)
+
+    policy:WentOffline("anvil", START + MINUTE)
+    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 20 * MINUTE)))
+end)
+
+test.test("greet policy: someone joining the guild gets a join prompt and no login prompt", function()
+    local policy = withAbsences({})
+
+    local prompt = policy:Joined("newt", START)
+
+    test.assertEqual("join", prompt.category)
+    test.assertEqual("character:newt", prompt.player)
+    test.assertEqual(nil, policy:CameOnline("newt", START + 1))
+    -- A join beats a long absence: a returning member who rejoins is greeted
+    -- as new to the guild.
+    local rejoin = withAbsences({ anvil = 90 * DAY })
+    test.assertEqual("join", category(rejoin:Joined("anvil", START)))
+end)
+
+test.test("greet policy: joins are ignored before the roster loads, for the user, or with Greet off", function()
+    local world = guild()
+    local policy = newPolicy(world)
+    test.assertEqual(nil, policy:Joined("newt", START))
+
+    policy:Seed({ "me" })
+    test.assertEqual(nil, policy:Joined("me", START))
+    world.enabled = false
+    test.assertEqual(nil, policy:Joined("newt", START))
+end)
+
+test.test("greet policy: an absence lookup that fails counts as a plain login", function()
+    local addon = test.newAddon("Core/GreetPolicy.lua")
+    local policy = addon.GreetPolicy.Create({
+        playerOf = function() return nil end,
+        isMember = function() return true end,
+        isOwn = function() return false end,
+        absenceOf = function() error("boom") end,
+    })
+    policy:Seed({})
+
+    test.assertEqual("login", category(policy:CameOnline("bolt", START)))
+end)

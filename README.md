@@ -164,6 +164,8 @@ On Retail, the game hides chat from add-ons during encounters and keystone runs.
 
 When a guild member comes online, a small prompt appears at the right side of the screen with the name they go by and a **Greet** button. Press it to post a random greeting to guild chat. Nothing is ever posted unless you press the button.
 
+- **New member**: someone joins the guild. They get this instead of a login prompt.
+- **Long time no see**: someone's first login this session when none of their characters had logged in for 30 days or more, going by the guild roster's last-online times when you logged in.
 - **Login**: the first time you see someone come online this session.
 - **Welcome back**: someone you saw log off comes back 15 minutes or more later. Coming back sooner (a relog or a disconnect) gets no prompt.
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.

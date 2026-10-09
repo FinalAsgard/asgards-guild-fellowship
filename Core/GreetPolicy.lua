@@ -5,20 +5,28 @@ local _, addon = ...
 -- and keeps what it has seen this session in memory.
 --
 -- It works per player, so a player switching alts is one person:
+--   * someone joining the guild is a "join", and the login that comes with
+--     it gets nothing more
 --   * players already online when the session's roster first loads are seen,
 --     and never get a login prompt
---   * the first login seen from a player this session is a "login"
+--   * the first login seen from a player this session is a "longAbsence"
+--     when their latest login on any character was at least `longAbsence`
+--     seconds before, and otherwise a "login"
 --   * a player seen going offline who comes back at least `welcomeBack`
 --     seconds later is a "welcomeBack"; sooner is a relog and gets nothing
 --   * the user's own characters never get a prompt
+-- So the order is join, long absence, welcome back, login.
 -- Events before the roster first loads are ignored, since nobody is known
 -- to be seen yet.
 local GreetPolicy = {
+    JOIN = "join",
     LOGIN = "login",
     WELCOME_BACK = "welcomeBack",
+    LONG_ABSENCE = "longAbsence",
     -- Every category, in the order the Greetings window lists them.
     CATEGORIES = { "join", "login", "welcomeBack", "longAbsence" },
     WELCOME_BACK_SECONDS = 15 * 60,
+    LONG_ABSENCE_SECONDS = 30 * 24 * 60 * 60,
 }
 addon.GreetPolicy = GreetPolicy
 
@@ -31,16 +39,23 @@ Policy.__index = Policy
 -- options.isMember: function(key) -> true for a current guild member, so
 --   friends' online messages are ignored.
 -- options.isOwn: function(key) -> true for the user's own characters.
+-- options.absenceOf: function(key) -> seconds between the player's latest
+--   login on any character and the start of this session, or nil when
+--   unknown. Optional; without it nobody is on a long absence.
 -- options.enabled: function() -> false when Guild Greet is off. Optional.
 function GreetPolicy.Create(options)
     return setmetatable({
         playerOf = options.playerOf,
         isMember = options.isMember,
         isOwn = options.isOwn,
+        absenceOf = options.absenceOf or function()
+            return nil
+        end,
         enabled = options.enabled or function()
             return true
         end,
         welcomeBack = GreetPolicy.WELCOME_BACK_SECONDS,
+        longAbsence = GreetPolicy.LONG_ABSENCE_SECONDS,
         ready = false,
         seen = {},
         offlineAt = {},
@@ -88,6 +103,26 @@ function Policy:WentOffline(key, now)
     self.offlineAt[player] = now
 end
 
+function Policy:prompt(category, player, key)
+    local ok, enabled = pcall(self.enabled)
+    if not ok or enabled == false then
+        return nil
+    end
+    return { category = category, player = player, key = key }
+end
+
+-- Someone joined the guild at `now`. They aren't in the database yet, so
+-- membership isn't checked. Returns the prompt, or nil.
+function Policy:Joined(key, now)
+    if not self.ready or type(key) ~= "string" or type(now) ~= "number" or answers(self.isOwn, key) then
+        return nil
+    end
+    local player = self:identity(key)
+    self.seen[player] = true
+    self.offlineAt[player] = nil
+    return self:prompt(GreetPolicy.JOIN, player, key)
+end
+
 -- A guild member came online at `now`. Returns the prompt
 -- { category, player, key }, or nil when there's none.
 function Policy:CameOnline(key, now)
@@ -104,17 +139,17 @@ function Policy:CameOnline(key, now)
 
     local category
     if not wasSeen then
-        category = GreetPolicy.LOGIN
+        local ok, absence = pcall(self.absenceOf, key)
+        if ok and type(absence) == "number" and absence >= self.longAbsence then
+            category = GreetPolicy.LONG_ABSENCE
+        else
+            category = GreetPolicy.LOGIN
+        end
     elseif offlineAt ~= nil and now - offlineAt >= self.welcomeBack then
         category = GreetPolicy.WELCOME_BACK
     else
         -- A relog, an alt switch, or a login we never saw end.
         return nil
     end
-
-    local ok, enabled = pcall(self.enabled)
-    if not ok or enabled == false then
-        return nil
-    end
-    return { category = category, player = player, key = key }
+    return self:prompt(category, player, key)
 end

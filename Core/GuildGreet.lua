@@ -33,6 +33,9 @@ function GuildGreet.Create(options)
         send = options.send,
         view = options.view,
         queue = addon.GreetPromptQueue.Create(),
+        -- Hours since each offline member's last login, as the roster said
+        -- when the session's roster first loaded.
+        absences = {},
     }, Greet)
     greet.policy = addon.GreetPolicy.Create({
         playerOf = function(key)
@@ -44,6 +47,9 @@ function GuildGreet.Create(options)
         end,
         isOwn = function(key)
             return greet:IsOwn(key)
+        end,
+        absenceOf = function(key)
+            return greet:AbsenceOf(key)
         end,
         enabled = function()
             return greet:IsEnabled()
@@ -126,30 +132,66 @@ function Greet:Names(key, rawName)
     return names
 end
 
+-- Whole hours since the roster's last-online time ({ years, months, days,
+-- hours }), counting a month as 30 days and a year as 12 months.
+function GuildGreet.HoursAway(lastOnline)
+    if type(lastOnline) ~= "table" then
+        return nil
+    end
+    local months = (lastOnline.years or 0) * 12 + (lastOnline.months or 0)
+    return (months * 30 + (lastOnline.days or 0)) * 24 + (lastOnline.hours or 0)
+end
+
+-- Seconds between the player's latest login on any of their characters and
+-- the start of the session, from the roster as it first loaded; nil when
+-- none of their characters was in it.
+function Greet:AbsenceOf(key)
+    local keys = { key }
+    local service = self:service()
+    local playerId = service and service:PlayerOf(key)
+    if playerId ~= nil then
+        keys = service:CharactersOf(playerId)
+    end
+    local shortest
+    local index
+    for index = 1, #keys do
+        local hours = self.absences[keys[index]]
+        if hours ~= nil and (shortest == nil or hours < shortest) then
+            shortest = hours
+        end
+    end
+    return shortest and shortest * 3600 or nil
+end
+
 -- Called on every roster update. The first one with a loaded roster tells
--- the policy who was already online. `onlineNames()` returns the raw names
--- of members online now, or nil while the roster is still loading.
-function Greet:OnRosterUpdate(onlineNames)
+-- the policy who was already online, and records how long everyone else has
+-- been away. `readRoster()` returns the members ({ name, online, lastOnline
+-- }), or nil while the roster is still loading.
+function Greet:OnRosterUpdate(readRoster)
     if self.policy:IsReady() then
         return
     end
     local _, normalizer = self.context()
-    local names = normalizer and onlineNames()
-    if names == nil then
+    local members = normalizer and readRoster()
+    if members == nil then
         return
     end
-    local keys = {}
+    local online = {}
     local index
-    for index = 1, #names do
-        local key = normalizer:Key(names[index])
-        if key ~= nil then
-            table.insert(keys, key)
+    for index = 1, #members do
+        local member = members[index]
+        local key = normalizer:Key(member.name)
+        if key ~= nil and member.online then
+            table.insert(online, key)
+        elseif key ~= nil then
+            self.absences[key] = GuildGreet.HoursAway(member.lastOnline)
         end
     end
-    self.policy:Seed(keys)
+    self.policy:Seed(online)
 end
 
--- A guild member came online ("online") or went offline ("offline").
+-- A guild member came online ("online"), went offline ("offline"), or
+-- someone joined the guild ("join").
 -- `rawName` is the name the game's message reported.
 function Greet:OnPresence(kind, rawName)
     local _, normalizer = self.context()
@@ -162,10 +204,12 @@ function Greet:OnPresence(kind, rawName)
         self.policy:WentOffline(key, now)
         return
     end
-    if kind ~= "online" then
-        return
+    local prompt
+    if kind == "online" then
+        prompt = self.policy:CameOnline(key, now)
+    elseif kind == "join" then
+        prompt = self.policy:Joined(key, now)
     end
-    local prompt = self.policy:CameOnline(key, now)
     if prompt == nil then
         return
     end

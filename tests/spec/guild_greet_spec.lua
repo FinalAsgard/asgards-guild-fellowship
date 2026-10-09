@@ -10,16 +10,18 @@ local RULES = {
 }
 
 -- Per client: the user (Toolbox) with an alt; Anvil with an alt; Bishop with
--- the alias Rip; and Bolt on their own. Names as each client's roster and
--- system messages spell them.
+-- the alias Rip; Bolt on their own; and Rust, away for two months. Names as
+-- each client's roster and system messages spell them.
 local NAMES = {
     Retail = {
         me = "Toolbox-Area52", myAlt = "Hammer-Area52", anvil = "Anvil-Area52", tongs = "Tongs-Area52",
-        bishop = "Bishop-Area52", bolt = "Bolt-Area52", friend = "Pal-Stormrage",
+        bishop = "Bishop-Area52", bolt = "Bolt-Area52", rust = "Rust-Area52", friend = "Pal-Stormrage",
+        newt = "Newt-Area52",
     },
     Forever = {
         me = "Tool Box", myAlt = "Hammer Smith", anvil = "Anvil Stone", tongs = "Tongs Stone",
-        bishop = "Bishop Gray", bolt = "Bolt Iron", friend = "Pal Friend",
+        bishop = "Bishop Gray", bolt = "Bolt Iron", rust = "Rust Iron", friend = "Pal Friend",
+        newt = "Newt Scamander",
     },
 }
 
@@ -52,13 +54,17 @@ local function setup(profile)
         addon = addon, names = names, database = database, store = store,
         sent = {}, timers = {}, time = START, shown = {},
     }
+    -- Each entry: name, note, and the roster's last-online time ({ years,
+    -- months, days, hours }; nil while online). Tongs has been away 45 days,
+    -- but its main Anvil logged in 2 days ago.
     local entries = {
         { names.me, "" },
-        { names.myAlt, ">" .. names.me },
-        { names.anvil, "" },
-        { names.tongs, ">" .. names.anvil },
-        { names.bishop, "@Rip" },
-        { names.bolt, "" },
+        { names.myAlt, ">" .. names.me, { years = 0, months = 0, days = 0, hours = 3 } },
+        { names.anvil, "", { years = 0, months = 0, days = 2, hours = 0 } },
+        { names.tongs, ">" .. names.anvil, { years = 0, months = 1, days = 15, hours = 0 } },
+        { names.bishop, "@Rip", { years = 0, months = 0, days = 1, hours = 0 } },
+        { names.bolt, "", { years = 0, months = 0, days = 0, hours = 5 } },
+        { names.rust, "", { years = 0, months = 2, days = 0, hours = 0 } },
     }
     local members = {}
     local index
@@ -107,7 +113,16 @@ local function setup(profile)
         },
     })
     world.greet:OnRosterUpdate(function()
-        return { names.me }
+        local roster = {}
+        local entryIndex
+        for entryIndex = 1, #entries do
+            table.insert(roster, {
+                name = entries[entryIndex][1],
+                online = entries[entryIndex][3] == nil,
+                lastOnline = entries[entryIndex][3],
+            })
+        end
+        return roster
     end)
     return world
 end
@@ -313,10 +328,11 @@ local profileIndex
 for profileIndex = 1, #fixtures.PROFILES do
     local profile = fixtures.PROFILES[profileIndex]
 
-    test.test(profile .. ": system messages become online and offline events", function()
+    test.test(profile .. ": system messages become online, offline, and join events", function()
         local compat, world = client(profile)
         world.environment.ERR_FRIEND_ONLINE_SS = "|Hplayer:%s|h[%s]|h has come online."
         world.environment.ERR_FRIEND_OFFLINE_S = "%s has gone offline."
+        world.environment.ERR_GUILD_JOIN_S = "%s has joined the guild."
         local heard = {}
 
         test.assertTrue(compat:ObservePresence(function(kind, name)
@@ -327,7 +343,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt Iron has joined the guild.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", nil)
 
-        test.assertEqual("online:Bolt Iron,offline:Bolt-Area52", table.concat(heard, ","))
+        test.assertEqual("online:Bolt Iron,offline:Bolt-Area52,join:Bolt Iron", table.concat(heard, ","))
     end)
 end
 
@@ -369,4 +385,68 @@ test.test("greetings are posted to guild chat on either client", function()
     end
     test.assertFalse(forever:SendGuildMessage("Hi Bolt!"))
     test.assertFalse(forever:SendGuildMessage(""))
+end)
+
+-- Joins and long absences ----------------------------------------------------
+
+local function firstWord(name)
+    return string.match(name, "^[^%-]+")
+end
+
+local joinIndex
+for joinIndex = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[joinIndex]
+
+    test.test(profile .. ": a player away 30+ days gets a long-absence prompt and greeting", function()
+        local world = setup(profile)
+
+        world.greet:OnPresence("online", world.names.rust)
+
+        test.assertEqual("longAbsence", world.shown[1].category)
+        world.handlers.greet(world.shown[1].player)
+        test.assertEqual(firstWord(world.names.rust) .. "! Long time no see, welcome back!", world.sent[1])
+    end)
+
+    test.test(profile .. ": a long absence counts the latest login on any of the player's characters", function()
+        local world = setup(profile)
+
+        -- Tongs was away 45 days, but its main Anvil logged in 2 days ago.
+        world.greet:OnPresence("online", world.names.tongs)
+
+        test.assertEqual("login", world.shown[1].category)
+    end)
+
+    test.test(profile .. ": someone joining gets a join prompt, and their login no separate one", function()
+        local world = setup(profile)
+
+        world.greet:OnPresence("join", world.names.newt)
+        world.greet:OnPresence("online", world.names.newt)
+
+        test.assertEqual(1, #world.shown)
+        test.assertEqual("join", world.shown[1].category)
+        test.assertEqual(firstWord(world.names.newt), world.shown[1].label)
+        world.handlers.greet(world.shown[1].player)
+        test.assertEqual("Welcome to the guild, " .. firstWord(world.names.newt) .. "!", world.sent[1])
+    end)
+
+    test.test(profile .. ": someone not yet in the guild is ignored until their join message", function()
+        local world = setup(profile)
+        local _, normalizer = world.greet.context()
+        world.greet:OnPresence("online", world.names.newt)
+        test.assertEqual(0, #world.shown)
+
+        world.greet:OnPresence("join", world.names.newt)
+        test.assertEqual("join", world.shown[1].category)
+        test.assertEqual("character:" .. normalizer:Key(world.names.newt), world.shown[1].player)
+    end)
+end
+
+test.test("guild greet: roster last-online times convert to hours away", function()
+    local addon = load()
+    local hoursAway = addon.GuildGreet.HoursAway
+
+    test.assertEqual(5, hoursAway({ years = 0, months = 0, days = 0, hours = 5 }))
+    test.assertEqual(30 * 24, hoursAway({ years = 0, months = 1, days = 0, hours = 0 }))
+    test.assertEqual(360 * 24 + 26, hoursAway({ years = 1, months = 0, days = 1, hours = 2 }))
+    test.assertEqual(nil, hoursAway(nil))
 end)
