@@ -12,7 +12,6 @@ local _, addon = ...
 local GreetingLibrary = {
     -- One guild chat message holds at most this many characters.
     MAX_LENGTH = 255,
-    -- No starter mentions the time of day, since nothing checks it.
     STARTERS = {
         join = {
             "Welcome to the guild, {name}!",
@@ -34,6 +33,11 @@ local GreetingLibrary = {
             "Look who it is! Good to have you back, {name}!",
             "{name}! It's been ages, welcome back!",
         },
+    },
+    -- Starters that were replaced, and what replaces them in saved
+    -- greetings that still have the old wording.
+    RETIRED = {
+        ["Evening, {name}!"] = "Hello, {name}!",
     },
 }
 addon.GreetingLibrary = GreetingLibrary
@@ -130,6 +134,9 @@ function Library:Greetings(category)
     local result = {}
     local index
     for index = 1, #saved do
+        if GreetingLibrary.RETIRED[saved[index]] ~= nil then
+            saved[index] = GreetingLibrary.RETIRED[saved[index]]
+        end
         local cleaned = GreetingLibrary.Clean(saved[index])
         if cleaned ~= nil then
             table.insert(result, cleaned)
