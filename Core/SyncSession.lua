@@ -556,7 +556,12 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
     local index
     for index = 1, #facts do
         local fact = facts[index]
-        if addon.SyncFacts.IsValid(fact) and fact.by == officer and ledger:IsForged(fact, now) then
+        -- One dated too far ahead is refused like any other, so its date
+        -- never reaches a correction.
+        if addon.SyncFacts.IsValid(fact) and fact.by == officer
+            and not (now > 0 and fact.at > now + addon.SyncFacts.MAX_FUTURE_SECONDS)
+            and ledger:IsForged(fact, now)
+        then
             forged = forged + 1
             ledger:LogForgery(fact, relayer, now)
             local at = math.max(now, fact.at + 1)

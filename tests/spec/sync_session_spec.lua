@@ -392,6 +392,26 @@ test.test("an officer catches an edit relayed in their name that they never made
     test.assertEqual(1, #officer.forgeries)
 end)
 
+test.test("an edit in an officer's name dated far ahead is refused, and its date never reaches a correction", function()
+    local network = newNetwork()
+    local officer = newOfficer(network)
+    local member = newClient(network, "Wrench-Area52")
+    local forger = newClient(network, "Hammer-Area52")
+    give(network, member, officerData())
+    local sentBefore = #officer.sent
+    local farAhead = NOW + network.addon.SyncFacts.MAX_FUTURE_SECONDS + 86400
+
+    forger.session:Send({ t = "facts", facts = {
+        { kind = "main", character = "alt2-area52", main = "anvil-area52", at = farAhead, by = OFFICER },
+    } })
+    deliver(network)
+
+    test.assertEqual(0, #officer.forgeries)
+    test.assertEqual(sentBefore, #officer.sent, "no correction stamped from the forged date")
+    test.assertEqual(OFFICER, mainOf(officer, "alt2-area52"))
+    test.assertEqual(OFFICER, mainOf(member, "alt2-area52"))
+end)
+
 test.test("the officer's own edits, and approvals, are in their ledger, so relays of them are trusted", function()
     local network = newNetwork()
     local officer = newOfficer(network)
