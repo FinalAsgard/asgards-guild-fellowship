@@ -264,3 +264,49 @@ test.test("an alias cleared by an officer's sync is not set again by a note", fu
 
     test.assertEqual(nil, state.playerOf("toolbox-area52").alias)
 end)
+
+test.test("a player organized by hand with no alias gets the alias a note adds, without a conflict", function()
+    local state = setup()
+    state.scan({ { "Toolbox-Area52", "" }, { "Hammer-Area52", "" } }, "initial")
+    local toolbox = state.partition:GetCharacter("toolbox-area52").player
+    test.assertTrue(state.service():SetMainPlayer("hammer-area52", toolbox))
+
+    state.scan({ { "Toolbox-Area52", "" }, { "Hammer-Area52", "@Bity" } })
+
+    test.assertEqual("Bity", state.playerOf("toolbox-area52").alias)
+    test.assertEqual("toolbox-area52", state.playerOf("hammer-area52").main)
+    test.assertFalse(state.hasConflict("hammer-area52", "alias"))
+end)
+
+test.test("an alias an officer cleared through sync is not set again by a note", function()
+    local state = setup()
+    state.scan({ { "Toolbox-Area52", "@TheTool" } }, "initial")
+    local player = state.partition:GetCharacter("toolbox-area52").player
+    state.partition:ClearAlias(player, state.addon.FellowshipStore.SOURCE_SYNC)
+
+    state.scan({ { "Toolbox-Area52", "@TheTool" } }, "full", true)
+
+    test.assertEqual(nil, state.playerOf("toolbox-area52").alias)
+    test.assertTrue(state.hasConflict("toolbox-area52", "alias"))
+end)
+
+test.test("a pending alias conflict that now qualifies is applied when its note is next scanned", function()
+    local state = setup()
+    state.scan({ { "Toolbox-Area52", "" }, { "Hammer-Area52", ">Toolbox" } }, "initial")
+    -- As an earlier version left it: the note was read and queued as a
+    -- conflict.
+    local note = ">Toolbox @Bity"
+    state.partition:SetNoteFingerprint("hammer-area52", state.addon.NoteParser.Fingerprint(note))
+    state.partition:SetConflicts({ { character = "hammer-area52", kind = "alias", suggestion = { alias = "Bity" } } })
+    local entries = { { "Toolbox-Area52", "" }, { "Hammer-Area52", note } }
+
+    -- An unchanged note isn't read again by an ordinary scan, so the
+    -- conflict still waits to be accepted.
+    state.scan(entries)
+    test.assertTrue(state.hasConflict("hammer-area52", "alias"))
+
+    -- Rescan reads every note.
+    state.scan(entries, "full", true)
+    test.assertEqual("Bity", state.playerOf("toolbox-area52").alias)
+    test.assertFalse(state.hasConflict("hammer-area52", "alias"))
+end)
