@@ -80,22 +80,50 @@ function Greet:IsOwn(key)
     return ownPlayer ~= nil and ownPlayer == service:PlayerOf(key)
 end
 
--- The texts for {name} and {character}: the player's alias, else their
--- main's name, else the character's; and the character as the game spells
--- it.
+-- The first and last words of a two-part (Forever) name, or the whole name
+-- twice on Retail, where names are one word. `display` is the name as shown,
+-- used when the name can't be split.
+local function nameParts(normalizer, rawName, display)
+    if normalizer == nil or not normalizer.twoPartNames then
+        return display, display
+    end
+    local name = normalizer:Split(rawName)
+    if name == nil then
+        return display, display
+    end
+    return string.match(name, "^(%S+)"), string.match(name, "(%S+)$")
+end
+
+-- The texts for a greeting's placeholders, keyed in lowercase:
+--   name                         the alias, else the main's name, else the
+--                                character's
+--   main, mainfirst, mainlast    the main's name and its first and last
+--                                parts
+--   character, characterfirst,   the character that logged in, as the game
+--   characterlast                spells it, and its first and last parts
+-- First and last parts only differ on Forever's two-part names. A character
+-- the database doesn't know is its own main.
 function Greet:Names(key, rawName)
     local partition, normalizer = self.context()
     local character = normalizer and normalizer:Display(rawName) or rawName
+    local characterFirst, characterLast = nameParts(normalizer, rawName, character)
+    local names = {
+        name = character,
+        character = character, characterfirst = characterFirst, characterlast = characterLast,
+        main = character, mainfirst = characterFirst, mainlast = characterLast,
+    }
     if partition == nil then
-        return { name = character, character = character }
+        return names
     end
     local service = addon.PlayerService.Create(partition, { normalizer = normalizer })
     local _, player = service:PlayerOf(key)
-    local name = character
-    if player ~= nil then
-        name = player.alias or service:CharacterName(player.main) or character
+    local mainRecord = player and partition:GetCharacter(player.main)
+    if mainRecord ~= nil then
+        names.main = service:CharacterName(player.main) or character
+        names.mainfirst, names.mainlast = nameParts(normalizer, mainRecord.name or player.main, names.main)
     end
-    return { name = name, character = character }
+    names.name = player and player.alias or names.main
+    return names
 end
 
 -- Called on every roster update. The first one with a loaded roster tells

@@ -70,6 +70,7 @@ test.test("greeting library: {name} and {character} are filled in, other braces 
         name = "TheTool", character = "Hammer",
     }))
     test.assertEqual("Hi {friend}, TheTool", render("Hi {friend}, {name}", { name = "TheTool" }))
+    test.assertEqual("Hello Mr. Box, Box", render("Hello Mr. {MainLast}, {mainlast}", { mainlast = "Box" }))
     test.assertEqual("100% TheTool%", render("100% {name}", { name = "TheTool%" }))
     test.assertEqual(255, #render("{name}" .. string.rep("b", 250), { name = "Twelve chars" }))
 end)

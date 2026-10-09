@@ -161,6 +161,43 @@ for index = 1, #fixtures.PROFILES do
         test.assertEqual("Hi Rip on " .. bishop, world.sent[2])
     end)
 
+    test.test(profile .. ": {main} and the first and last name placeholders", function()
+        local world = setup(profile)
+        world.store:GetGreetState().greetings = {
+            login = { "{main}|{mainFirst}|{MAINLAST}|{characterfirst}|{CharacterLast}|{name}" },
+        }
+
+        world.greet:OnPresence("online", world.names.tongs)
+        world.greet:OnPresence("online", world.names.bishop)
+        world.handlers.greet(world.shown[1].player)
+        world.handlers.greet(world.shown[1].player)
+
+        if profile == "Forever" then
+            test.assertEqual("Anvil Stone|Anvil|Stone|Tongs|Stone|Anvil Stone", world.sent[1])
+            -- {main} is the main's name even when the player has an alias.
+            test.assertEqual("Bishop Gray|Bishop|Gray|Bishop|Gray|Rip", world.sent[2])
+        else
+            -- Retail names are one word, so first and last are the whole name.
+            test.assertEqual("Anvil|Anvil|Anvil|Tongs|Tongs|Anvil", world.sent[1])
+            test.assertEqual("Bishop|Bishop|Bishop|Bishop|Bishop|Rip", world.sent[2])
+        end
+    end)
+
+    test.test(profile .. ": a character the database doesn't know is its own main", function()
+        local world = setup(profile)
+        local raw = profile == "Forever" and "Newt Scamander" or "Newt-Area52"
+        local _, normalizer = world.greet.context()
+
+        local names = world.greet:Names(normalizer:Key(raw), raw)
+
+        local first = "Newt"
+        local last = profile == "Forever" and "Scamander" or "Newt"
+        test.assertEqual(first, names.mainfirst)
+        test.assertEqual(last, names.mainlast)
+        test.assertEqual(names.character, names.main)
+        test.assertEqual(names.character, names.name)
+    end)
+
     test.test(profile .. ": a welcome back follows a logoff of 15 minutes, and relogs are quiet", function()
         local world = setup(profile)
         world.greet:OnPresence("online", world.names.anvil)

@@ -170,7 +170,17 @@ When a guild member comes online, a small prompt appears at the right side of th
 - Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
 - Prompts disappear after 2 minutes; the **X** closes one without greeting.
 
-Greetings can use `{name}` (the player's alias, else their main's name, else the character's name) and `{character}` (the character that just logged in). Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** section of the settings panel. Greetings and the setting are shared by every character on this game install.
+Greetings can use these placeholders, in any capitalization:
+
+| Placeholder | Becomes |
+|---|---|
+| `{name}` | The player's alias, else their main's name. |
+| `{main}` | Their main's name, even when they have an alias. |
+| `{mainFirst}`, `{mainLast}` | The first or last part of the main's name. |
+| `{character}` | The character that just logged in. |
+| `{characterFirst}`, `{characterLast}` | The first or last part of that character's name. |
+
+First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** section of the settings panel. Greetings and the setting are shared by every character on this game install.
 
 ## Supported clients
 

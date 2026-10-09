@@ -6,9 +6,9 @@ local _, addon = ...
 -- one used last in that category when there is another to choose, and the
 -- last one used is saved so that holds across sessions.
 --
--- Greetings may use {name} (the player's alias, else their main's name,
--- else the character's name) and {character} (the character that logged
--- in). Anything else in braces is left as written.
+-- Greetings may use {name}, {main}, {mainFirst}, {mainLast}, {character},
+-- {characterFirst} and {characterLast}, in any case (GuildGreet:Names says
+-- what each holds). Anything else in braces is left as written.
 local GreetingLibrary = {
     -- One guild chat message holds at most this many characters.
     MAX_LENGTH = 255,
@@ -76,12 +76,13 @@ function GreetingLibrary.Clean(text)
     return string.sub(text, 1, GreetingLibrary.MAX_LENGTH)
 end
 
--- Fills in a greeting's placeholders. `names.name` and `names.character` are
--- the texts to use. The result is cut to one chat message.
+-- Fills in a greeting's placeholders from `names`, keyed in lowercase (see
+-- GuildGreet:Names). Placeholders ignore case, so {MainLast} and {mainlast}
+-- are the same. The result is cut to one chat message.
 function GreetingLibrary.Render(text, names)
     names = names or {}
     local rendered = string.gsub(text, "{(%a+)}", function(placeholder)
-        local value = names[placeholder]
+        local value = names[string.lower(placeholder)]
         if type(value) == "string" then
             return value
         end
