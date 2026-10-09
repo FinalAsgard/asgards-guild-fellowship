@@ -1,9 +1,9 @@
 local _, addon = ...
 
 -- The Greetings window, built with the Details! Framework like the roster:
--- a button per Guild Greet category, that category's greetings with Edit and
--- Delete, a box to add or change one, Restore controls, and a key to the
--- placeholders. Every change goes through the GreetingLibrary, which saves
+-- a button per Guild Greet category, that category's greetings each with
+-- Edit, a box to add a greeting or change (or delete) the one being edited,
+-- Restore controls, and a key to the placeholders. Every change goes through the GreetingLibrary, which saves
 -- it account-wide, so the next prompt uses it. It is not unit tested; the
 -- in-game checklist covers it.
 --
@@ -70,13 +70,17 @@ local function build(window, framework)
     window.when:SetPoint("RIGHT", panel, "RIGHT", -14, 0)
     window.when:SetJustifyH("LEFT")
 
-    -- The category's greetings, each with Edit and Delete.
+    -- The category's greetings, each with Edit. Lines past the last greeting
+    -- are hidden, so a shorter category never shows a longer one's leftovers.
     local function refreshLines(scroll, rows, offset, totalLines)
         local lineIndex
         for lineIndex = 1, totalLines do
             local line = scroll:GetLine(lineIndex)
             local row = rows[lineIndex + offset]
-            if row ~= nil then
+            if row == nil then
+                line.position = nil
+                line:Hide()
+            else
                 line:ClearAllPoints()
                 line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(lineIndex - 1) * lineHeight)
                 line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(lineIndex - 1) * lineHeight)
@@ -95,10 +99,8 @@ local function build(window, framework)
         line:SetHeight(lineHeight)
         line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(lineIndex - 1) * lineHeight)
         line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(lineIndex - 1) * lineHeight)
-        line.delete = button(line, "Delete", 60)
-        line.delete:SetPoint("RIGHT", line, "RIGHT", -2, 0)
         line.edit = button(line, "Edit", 50)
-        line.edit:SetPoint("RIGHT", line.delete, "LEFT", -4, 0)
+        line.edit:SetPoint("RIGHT", line, "RIGHT", -2, 0)
         line.text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
         line.text:SetPoint("RIGHT", line.edit, "LEFT", -8, 0)
@@ -107,11 +109,6 @@ local function build(window, framework)
         line.edit:SetScript("OnClick", function()
             if line.position ~= nil then
                 window:StartEdit(line.position)
-            end
-        end)
-        line.delete:SetScript("OnClick", function()
-            if line.position ~= nil then
-                window:Delete(line.position)
             end
         end)
         return line
@@ -132,7 +129,7 @@ local function build(window, framework)
     -- The box for a new greeting, or the one being edited.
     local inputY = -80 - listHeight - 14
     local input = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    input:SetSize(width - 190, 22)
+    input:SetSize(width - 264, 22)
     input:SetPoint("TOPLEFT", panel, "TOPLEFT", 20, inputY)
     input:SetAutoFocus(false)
     input:SetMaxLetters(Library.MAX_LENGTH)
@@ -142,8 +139,16 @@ local function build(window, framework)
     window.save:SetScript("OnClick", function()
         window:Save()
     end)
+    -- Delete sits with the editor and removes the greeting being edited.
+    window.delete = button(panel, "Delete", 70)
+    window.delete:SetPoint("LEFT", window.save, "RIGHT", 4, 0)
+    window.delete:SetScript("OnClick", function()
+        if window.editing ~= nil then
+            window:Delete(window.editing)
+        end
+    end)
     window.cancel = button(panel, "Cancel", 70)
-    window.cancel:SetPoint("LEFT", window.save, "RIGHT", 4, 0)
+    window.cancel:SetPoint("LEFT", window.delete, "RIGHT", 4, 0)
     window.cancel:SetScript("OnClick", function()
         window:CancelEdit()
     end)
@@ -262,9 +267,11 @@ function Window:Redraw()
         end
         if self.editing ~= nil then
             self.save:SetText("Save")
+            self.delete:Show()
             self.cancel:Show()
         else
             self.save:SetText("Add")
+            self.delete:Hide()
             self.cancel:Hide()
         end
         self.restoreOne:SetText(self.confirming == "one" and "Click again to restore" or "Restore starter greetings")

@@ -189,7 +189,7 @@ First and last parts only differ on WoW Forever, where names have two parts, so 
 
 ### Editing greetings
 
-The **Greetings** window (`/agf greet`, or **Edit Greetings** in the settings panel) has a button for each category. Each lists that category's greetings, with **Edit** and **Delete** beside each one. Type in the box at the bottom and press **Add** (or Enter) to add a greeting; after **Edit**, the button reads **Save**. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The window lists every placeholder.
+The **Greetings** window (`/agf greet`, or **Edit Greetings** in the settings panel) has a button for each category. Each lists that category's greetings, with **Edit** beside each one. Type in the box at the bottom and press **Add** (or Enter) to add a greeting. **Edit** puts a greeting in the box, with **Save**, **Delete** and **Cancel** beside it. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The window lists every placeholder.
 
 A category with no greetings shows no prompts, so emptying one is a way to turn it off. **Restore starter greetings** puts back the starters in the open category, and **Restore all categories** does it everywhere. Both replace what's there, so each asks for a second click.
 
