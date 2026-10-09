@@ -161,3 +161,42 @@ test.test("last online text uses the largest unit", function()
     test.assertEqual("less than an hour ago", format({ years = 0, months = 0, days = 0, hours = 0 }))
     test.assertEqual(nil, format(nil))
 end)
+
+test.test("elapsed time uses the largest unit, and the footer says when this client last synced", function()
+    local model = load().RosterViewModel
+    local now = 1790000000
+
+    test.assertEqual("just now", model.Ago(59))
+    test.assertEqual("1 minute ago", model.Ago(60))
+    test.assertEqual("59 minutes ago", model.Ago(3599))
+    test.assertEqual("2 hours ago", model.Ago(7200))
+    test.assertEqual("3 days ago", model.Ago(3 * 86400 + 5))
+
+    test.assertEqual("Not synced yet", model.SyncText(nil, now))
+    test.assertEqual("Synced just now", model.SyncText(now - 10, now))
+    test.assertEqual("Synced 5 minutes ago", model.SyncText(now - 300, now))
+    test.assertEqual("Synced just now", model.SyncText(now + 30, now), "a clock that runs a little behind")
+end)
+
+test.test("/agf sync says whether sync runs or is paused, when it last synced, and what's pending", function()
+    local model = load().RosterViewModel
+    local now = 1790000000
+
+    local lines = model.SyncStatusLines({ on = true, paused = false, lastSync = now - 120, pending = 2 }, now)
+    test.assertEqual(2, #lines)
+    test.assertEqual("Guild sync is running. Synced 2 minutes ago.", lines[1])
+    test.assertEqual("2 suggestions of yours are waiting for an officer.", lines[2])
+
+    lines = model.SyncStatusLines({ on = true, paused = true, pending = 1 }, now)
+    test.assertEqual("Guild sync is paused while you're in combat, a boss encounter or a keystone run." ..
+        " Not synced yet.", lines[1])
+    test.assertEqual("1 suggestion of yours is waiting for an officer.", lines[2])
+
+    lines = model.SyncStatusLines({ on = true, paused = false, lastSync = now, pending = 0 }, now)
+    test.assertEqual("None of your suggestions are waiting for an officer.", lines[2])
+    -- An officer has no suggestions of their own.
+    test.assertEqual(1, #model.SyncStatusLines({ on = true, paused = false, lastSync = now }, now))
+
+    test.assertContains(model.SyncStatusLines({ on = false }, now)[1], "Guild sync is off")
+    test.assertContains(model.SyncStatusLines(nil, now)[1], "isn't available")
+end)

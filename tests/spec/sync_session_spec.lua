@@ -109,6 +109,9 @@ local function newClient(network, name, options)
         onApplied = function(count)
             table.insert(client.applied, count)
         end,
+        onSynced = function()
+            client.synced = (client.synced or 0) + 1
+        end,
         busy = function()
             return client.busy
         end,
@@ -522,6 +525,54 @@ test.test("a large batch of facts is applied a frame's budget at a time, and the
     test.assertEqual(ALTS, client.applied[1])
     test.assertEqual(OFFICER, mainOf(client, "alt1-area52"))
     test.assertEqual(OFFICER, mainOf(client, "alt" .. ALTS .. "-area52"))
+end)
+
+test.test("comparing or receiving another user's data counts as a sync, and a suggestion doesn't", function()
+    local network = newNetwork()
+    local announcer = newClient(network, "Hammer-Area52")
+    local other = newClient(network, "Wrench-Area52")
+    give(network, announcer, officerData())
+    give(network, other, officerData())
+    test.assertEqual(nil, other.partition:GetLastSync())
+
+    other.time = NOW + 100
+    announcer.session:Announce()
+    deliver(network)
+    test.assertEqual(NOW + 100, other.partition:GetLastSync(), "the digests matched")
+    test.assertEqual(1, other.synced)
+    test.assertEqual(nil, announcer.partition:GetLastSync(), "silence proves nothing")
+
+    announcer.time = NOW + 200
+    announcer.session:Receive({ v = 1, t = "facts", facts = { link("alt1-area52") } }, "Toolbox-Area52")
+    test.assertEqual(NOW + 200, announcer.partition:GetLastSync(), "facts arrived, even ones it held")
+    announcer.time = NOW + 300
+    announcer.session:Receive({ v = 1, t = "suggest", facts = { link("alt1-area52") } }, "Wrench-Area52")
+    announcer.session:Receive({ v = 1, t = "digest", digest = "everything" }, "Wrench-Area52")
+    test.assertEqual(NOW + 200, announcer.partition:GetLastSync())
+end)
+
+test.test("the status says whether sync started and is paused, and counts a member's pending suggestions", function()
+    local network = newNetwork()
+    local member = newClient(network, "Hammer-Area52")
+    local officer = newOfficer(network)
+
+    local status = member.session:Status()
+    test.assertFalse(status.on)
+    test.assertFalse(status.paused)
+    test.assertEqual(nil, status.lastSync)
+    test.assertEqual(0, status.pending)
+
+    member.session:Start()
+    member.busy = true
+    member.partition:MarkSynced(NOW)
+    member.session:LocalEdit({ ["alt1-area52"] = true })
+    status = member.session:Status()
+    test.assertTrue(status.on)
+    test.assertTrue(status.paused)
+    test.assertEqual(NOW, status.lastSync)
+    test.assertEqual(1, status.pending)
+
+    test.assertEqual(nil, officer.session:Status().pending)
 end)
 
 test.test("malformed announcements and replies are ignored without errors", function()

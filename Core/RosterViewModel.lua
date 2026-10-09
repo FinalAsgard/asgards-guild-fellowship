@@ -37,6 +37,52 @@ function RosterViewModel.FormatLastOnline(lastOnline)
     return "less than an hour ago"
 end
 
+-- "just now", "5 minutes ago", "2 hours ago" or "3 days ago" for
+-- `elapsed` seconds, using its largest unit.
+function RosterViewModel.Ago(elapsed)
+    if elapsed < 60 then
+        return "just now"
+    elseif elapsed < 3600 then
+        return plural(math.floor(elapsed / 60), "minute") .. " ago"
+    elseif elapsed < 86400 then
+        return plural(math.floor(elapsed / 3600), "hour") .. " ago"
+    end
+    return plural(math.floor(elapsed / 86400), "day") .. " ago"
+end
+
+-- The footer's sync line: "Synced 5 minutes ago", or "Not synced yet".
+function RosterViewModel.SyncText(lastSync, now)
+    if type(lastSync) ~= "number" then
+        return "Not synced yet"
+    end
+    return "Synced " .. RosterViewModel.Ago(math.max(0, (now or lastSync) - lastSync))
+end
+
+-- What `/agf sync` prints, one line each, from SyncSession's status (nil
+-- without a guild).
+function RosterViewModel.SyncStatusLines(status, now)
+    if status == nil then
+        return { "Guild sync isn't available: you're not in a guild, or saved data isn't ready." }
+    end
+    if not status.on then
+        return { "Guild sync is off: the libraries it needs are missing." }
+    end
+    local state = "Guild sync is running."
+    if status.paused then
+        state = "Guild sync is paused while you're in combat, a boss encounter or a keystone run."
+    end
+    local lines = { state .. " " .. RosterViewModel.SyncText(status.lastSync, now) .. "." }
+    if status.pending ~= nil then
+        if status.pending == 0 then
+            table.insert(lines, "None of your suggestions are waiting for an officer.")
+        else
+            table.insert(lines, plural(status.pending, "suggestion") .. " of yours "
+                .. (status.pending == 1 and "is" or "are") .. " waiting for an officer.")
+        end
+    end
+    return lines
+end
+
 local function coloredName(name, color)
     if type(color) ~= "string" then
         return name

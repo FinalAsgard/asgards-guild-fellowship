@@ -232,28 +232,20 @@ function Controller:OnScanFinished(result, summary)
     end
 end
 
--- "Last scan 5 minutes ago: 3 new characters, 1 alt linked".
+-- "Last scan 5 minutes ago: 3 new characters, 1 alt linked", and below it
+-- "Synced 2 minutes ago".
 function Controller:StatusText(partition)
+    local now = self.client:Timestamp()
+    local sync = addon.RosterViewModel.SyncText(partition:GetLastSync(), now)
     if self.scheduler:IsRunning() then
-        return "Scanning the guild roster..."
+        return "Scanning the guild roster...\n" .. sync
     end
     local summary = partition:GetLastScanSummary()
     if summary == nil then
-        return "Not scanned yet. The roster is scanned once it loads, or use Rescan."
+        return "Not scanned yet. The roster is scanned once it loads, or use Rescan.\n" .. sync
     end
-    local now = self.client:Timestamp() or summary.at
-    local elapsed = math.max(0, now - summary.at)
-    local when
-    if elapsed < 60 then
-        when = "just now"
-    elseif elapsed < 3600 then
-        when = plural(math.floor(elapsed / 60), "minute") .. " ago"
-    elseif elapsed < 86400 then
-        when = plural(math.floor(elapsed / 3600), "hour") .. " ago"
-    else
-        when = plural(math.floor(elapsed / 86400), "day") .. " ago"
-    end
-    return "Last scan " .. when .. ": " .. RosterController.DescribeScan(summary)
+    local when = addon.RosterViewModel.Ago(math.max(0, (now or summary.at) - summary.at))
+    return "Last scan " .. when .. ": " .. RosterController.DescribeScan(summary) .. "\n" .. sync
 end
 
 function Controller:UpdateStatus()

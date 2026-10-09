@@ -67,6 +67,8 @@ local _, addon = ...
 --                  keystone run
 --   preciseMs()  -> a high-resolution clock in milliseconds, or nil
 --   onError(problem) called when background work failed (raises by default)
+--   onSynced()   called after another add-on user's data was compared with
+--                or applied to this client's (the time is kept per guild)
 local SyncSession = {
     PROTOCOL = 1,
     TYPE_FACTS = "facts",
@@ -126,6 +128,7 @@ function SyncSession.Create(options)
         onError = options.onError or function(problem)
             error(problem, 0)
         end,
+        onSynced = options.onSynced or function() end,
         -- Announcer key -> a reply this client is waiting to send.
         replies = {},
         -- Background work waiting its turn, oldest first.
@@ -370,6 +373,40 @@ function Session:Decide(character, kind, approved)
     return true
 end
 
+-- Where sync stands, for `/agf sync`, or nil without a guild:
+--   on        whether sync started (it stays off without its libraries)
+--   paused    whether the player is busy, so sync waits
+--   lastSync  when another add-on user's data was last compared or
+--             exchanged with this client's, or nil
+--   pending   how many of this member's suggestions wait for an officer
+--             (nil for an officer)
+function Session:Status()
+    local partition = self.context()
+    if partition == nil then
+        return nil
+    end
+    local selfKey = self.selfKey()
+    local pending
+    if selfKey == nil or not self.isOfficer(selfKey) then
+        pending = #self:Suggestions(partition):Pending()
+    end
+    return {
+        on = self.started == true,
+        paused = self.busy(),
+        lastSync = partition:GetLastSync(),
+        pending = pending,
+    }
+end
+
+-- Another add-on user's data was just compared with or applied to this
+-- client's.
+function Session:Synced(partition)
+    local now = self.now()
+    if now ~= nil and partition:MarkSynced(now) then
+        self.onSynced()
+    end
+end
+
 -- Catching up -----------------------------------------------------------------
 
 -- Called once saved data is ready (at login): schedules the announcement.
@@ -573,6 +610,9 @@ function Session:Process(message, sender)
     end
     local selfIsOfficer = selfKey ~= nil and self.isOfficer(selfKey)
     if message.t == SyncSession.TYPE_DIGEST then
+        if addon.SyncDigest.IsValid(message.digest) then
+            self:Synced(partition)
+        end
         self:OnDigest(message.digest, senderKey, partition)
         -- An officer just logged in: time for this member's suggestions.
         if not selfIsOfficer and self.isOfficer(senderKey) then
@@ -588,6 +628,9 @@ function Session:Process(message, sender)
     end
     if message.t ~= SyncSession.TYPE_FACTS then
         return 0
+    end
+    if type(message.facts) == "table" then
+        self:Synced(partition)
     end
     -- Only an officer's decision settles a suggestion; newer officer facts
     -- settle the ones they overtake.

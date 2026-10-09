@@ -134,6 +134,7 @@ local function registerBootstrapTest(variant)
             variant.slashCommand .. " help")
         test.assertContains(world.messages[1], variant.slashCommand .. " roster - show or hide the roster window")
         test.assertContains(world.messages[1], variant.slashCommand .. " rescan - rescan the guild roster now")
+        test.assertContains(world.messages[1], variant.slashCommand .. " sync - show guild sync status")
         test.assertContains(
             world.messages[2],
             "Version " .. variant.version .. " on " .. variant.clientLabel .. "."

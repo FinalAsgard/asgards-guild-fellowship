@@ -34,7 +34,9 @@ local function newWindow()
         self.shown = false
     end
     function window:SetTitle() end
-    function window:SetStatus() end
+    function window:SetStatus(text)
+        self.status = text
+    end
     function window:SetRows(rows)
         self.rows = rows
         return true
@@ -955,4 +957,43 @@ test.test("sync pauses in combat and boss encounters, and catches up once they e
     fixtures.deliver(channel)
     test.assertEqual(sent + 1, #officer.sentMessages)
     test.assertEqual("wrench-area52", mainOf(member, "wrench-area52"))
+end)
+
+-- What `/agf sync` printed in `world`.
+local function syncStatus(world)
+    local printed = #world.messages
+    fixtures.slash(world, "sync")
+    local lines = {}
+    local index
+    for index = printed + 1, #world.messages do
+        table.insert(lines, world.messages[index])
+    end
+    return table.concat(lines, "\n")
+end
+
+test.test("/agf sync and the roster footer show when this client last synced", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local member = login(channel, "Hammer-Area52")
+    local window = member.addon.rosterController.window
+
+    local status = syncStatus(member)
+    test.assertContains(status, "Guild sync is running. Not synced yet.")
+    test.assertContains(status, "None of your suggestions are waiting for an officer.")
+    test.assertContains(window.status, "\nNot synced yet")
+
+    linkAlt(officer, "wrench-area52", "toolbox-area52")
+    fixtures.deliver(channel)
+    test.assertContains(window.status, "\nSynced just now", "the footer updates as data arrives")
+    member.time = member.time + 300
+    test.assertContains(syncStatus(member), "Guild sync is running. Synced 5 minutes ago.")
+    test.assertFalse(string.find(syncStatus(officer), "suggestions", 1, true) ~= nil, "an officer has none")
+
+    -- A member's edit waits for an officer, and sync pauses in combat.
+    logOff(channel, officer)
+    linkAlt(member, "wrench-area52", "hammer-area52")
+    member.inCombat = true
+    status = syncStatus(member)
+    test.assertContains(status, "Guild sync is paused while you're in combat")
+    test.assertContains(status, "1 suggestion of yours is waiting for an officer.")
 end)

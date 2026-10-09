@@ -245,7 +245,17 @@ if clientProfile.supported then
         onError = function(problem)
             rosterController:Print("Guild sync failed: " .. tostring(problem))
         end,
+        onSynced = function()
+            rosterController:UpdateStatus()
+        end,
     })
+    router:Register("sync", "show guild sync status", function()
+        local lines = addon.RosterViewModel.SyncStatusLines(syncSession:Status(), client:Timestamp())
+        local index
+        for index = 1, #lines do
+            rosterController:Print(lines[index])
+        end
+    end)
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
     end)

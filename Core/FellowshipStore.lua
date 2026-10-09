@@ -826,3 +826,21 @@ end
 function Partition:GetLastScan()
     return self.data.lastFullScan
 end
+
+-- When this client last compared or exchanged guild sync data with another
+-- add-on user, or nil.
+function Partition:GetLastSync()
+    local at = self.data.lastSync
+    if type(at) ~= "number" then
+        return nil
+    end
+    return at
+end
+
+function Partition:MarkSynced(timestamp)
+    if type(timestamp) ~= "number" then
+        return false
+    end
+    self.data.lastSync = timestamp
+    return true
+end
