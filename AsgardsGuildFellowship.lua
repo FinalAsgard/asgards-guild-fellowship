@@ -25,7 +25,8 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession
+local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
+local guildGreet, greetingsWindow, greetPrompts
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -143,8 +144,221 @@ if clientProfile.supported then
     router:Register("rescan", "rescan the guild roster now", function()
         rosterController:Rescan()
     end)
+    -- Every setting, one section per feature. The panel and the slash
+    -- commands both go through it.
+    settings = addon.SettingsModel.Create()
+    settings:AddSection("general", "General")
+    settings:Add("general", {
+        id = "minimap",
+        kind = "toggle",
+        label = "Show the minimap button",
+        get = function()
+            return entryPoints:MinimapShown()
+        end,
+        set = function(shown)
+            return entryPoints:SetMinimapShown(shown)
+        end,
+    })
+    settings:Add("general", {
+        id = "openRoster",
+        kind = "action",
+        label = "Open Roster",
+        run = function()
+            rosterController:Open()
+        end,
+    })
+    settings:Add("general", {
+        id = "version",
+        kind = "text",
+        get = function()
+            return "Version " .. version .. " on " .. clientProfile.label .. "."
+        end,
+    })
+    settings:AddSection("chatTags", "Chat Tags")
+    settings:Add("chatTags", {
+        id = "chatTags",
+        kind = "toggle",
+        label = "Tag guild chat speakers with their alias or main",
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:ChatTagsEnabled()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetChatTagsEnabled(enabled) then
+                return nil, "the saved setting is unreadable, so they stay on"
+            end
+            return true
+        end,
+    })
+    settings:AddSection("guildGreet", "Guild Greet")
+    settings:Add("guildGreet", {
+        id = "guildGreet",
+        kind = "toggle",
+        label = "Offer to greet guild members as they come online",
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:GreetEnabled()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetEnabled(enabled) then
+                return nil, "the saved setting is unreadable, so it stays on"
+            end
+            return true
+        end,
+    })
+    -- The character that's logged in; the set of characters it's off on is
+    -- account-wide.
+    settings:Add("guildGreet", {
+        id = "greetCharacter",
+        kind = "toggle",
+        label = "Guild Greet on this character",
+        get = function()
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            return store == nil or selfKey == nil or store:GreetOnCharacter(selfKey)
+        end,
+        set = function(enabled)
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if selfKey == nil then
+                return nil, "this character isn't in a guild"
+            end
+            if not store:SetGreetOnCharacter(selfKey, enabled) then
+                return nil, "the saved setting is unreadable, so it stays on"
+            end
+            return true
+        end,
+    })
+    local categoryIndex
+    for categoryIndex = 1, #addon.GreetingLibrary.CATEGORIES do
+        local category = addon.GreetingLibrary.CATEGORIES[categoryIndex]
+        settings:Add("guildGreet", {
+            id = "greetCategory:" .. category.id,
+            category = category.id,
+            kind = "toggle",
+            label = category.toggle,
+            get = function()
+                local store = rosterController:Store()
+                return store == nil or store:GreetCategoryEnabled(category.id)
+            end,
+            set = function(enabled)
+                local store = rosterController:Store()
+                if store == nil then
+                    return nil, "saved data is unavailable"
+                end
+                if not store:SetGreetCategoryEnabled(category.id, enabled) then
+                    return nil, "the saved setting is unreadable, so it stays on"
+                end
+                return true
+            end,
+        })
+    end
+    local function greetNumber(id, label)
+        local range = addon.FellowshipStore.GREET_NUMBERS[id]
+        settings:Add("guildGreet", {
+            id = id,
+            kind = "number",
+            label = label,
+            min = range.min,
+            max = range.max,
+            get = function()
+                local store = rosterController:Store()
+                return store and store:GreetNumber(id) or range.default
+            end,
+            set = function(value)
+                local store = rosterController:Store()
+                if store == nil then
+                    return nil, "saved data is unavailable"
+                end
+                if not store:SetGreetNumber(id, value) then
+                    return nil, "the saved setting is unreadable"
+                end
+                return true
+            end,
+        })
+    end
+    greetNumber("welcomeBackMinutes", "Minutes away before coming back is a welcome back")
+    greetNumber("longAbsenceDays", "Days away before a login is a long absence")
+    settings:Add("guildGreet", {
+        id = "greetCap",
+        kind = "number",
+        label = "Close my prompt once a player has had this many greetings",
+        min = addon.FellowshipStore.GREET_CAP_MIN,
+        max = addon.FellowshipStore.GREET_CAP_MAX,
+        get = function()
+            local store = rosterController:Store()
+            return store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
+        end,
+        set = function(cap)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetCap(cap) then
+                return nil, "the saved setting is unreadable"
+            end
+            return true
+        end,
+    })
+    -- Not saved, and only while the panel is open: closing the options, or
+    -- a reload, locks the prompts again.
+    settings:Add("guildGreet", {
+        id = "greetUnlock",
+        kind = "toggle",
+        offOnClose = true,
+        label = "Unlock greet prompts to drag them somewhere else",
+        get = function()
+            return greetPrompts:IsUnlocked()
+        end,
+        set = function(unlocked)
+            return greetPrompts:SetUnlocked(unlocked)
+        end,
+    })
+    -- The greetings themselves are edited in their own window, made on
+    -- first use.
+    local function openGreetings()
+        if greetingsWindow == nil then
+            local reason
+            greetingsWindow, reason = addon.GreetingsWindow.Create(client, {
+                library = function()
+                    return guildGreet:Library()
+                end,
+                after = function(seconds, callback)
+                    return client:After(seconds, callback)
+                end,
+            })
+            if greetingsWindow == nil then
+                rosterController:Print("The Greetings window can't open: " .. tostring(reason) ..
+                    ". Reinstall the add-on, or in a development checkout run tools/Fetch-Libraries.ps1.")
+                return
+            end
+        end
+        greetingsWindow:Open()
+    end
+    settings:Add("guildGreet", {
+        id = "editGreetings",
+        kind = "action",
+        label = "Edit Greetings",
+        run = openGreetings,
+    })
+    settingsPanel = addon.SettingsPanel.Create(client, settings)
+    router:Register("options", "open the settings panel", function()
+        if not settingsPanel:Open() then
+            rosterController:Print("The settings panel isn't available on this client.")
+        end
+    end)
+    router:Register("greet", "edit your Guild Greet greetings", openGreetings)
     router:Register("minimap", "show or hide the minimap button", function()
-        local shown, reason = entryPoints:ToggleMinimap()
+        local shown, reason = settings:Toggle("minimap")
         if shown == nil then
             rosterController:Print("Can't change the minimap button: " .. reason .. ".")
         elseif shown then
@@ -154,14 +368,9 @@ if clientProfile.supported then
         end
     end)
     router:Register("tags", "turn chat tags on or off", function()
-        local store = rosterController:Store()
-        if store == nil then
-            rosterController:Print("Saved data is unavailable, so chat tags can't be changed.")
-            return
-        end
-        local enabled = not store:ChatTagsEnabled()
-        if not store:SetChatTagsEnabled(enabled) then
-            rosterController:Print("Chat tags can't be changed: the saved setting is unreadable. They stay on.")
+        local enabled, reason = settings:Toggle("chatTags")
+        if enabled == nil then
+            rosterController:Print("Chat tags can't be changed: " .. reason .. ".")
         elseif enabled then
             rosterController:Print("Chat tags on.")
         else
@@ -256,8 +465,79 @@ if clientProfile.supported then
             rosterController:Print(lines[index])
         end
     end)
+    -- Prompts stack from a place the user can move; it's saved account-wide.
+    greetPrompts = addon.GreetPrompts.Create(client, {
+        loadAnchor = function()
+            local store = rosterController:Store()
+            return store and store:GreetAnchor()
+        end,
+        saveAnchor = function(anchor)
+            local store = rosterController:Store()
+            if store ~= nil then
+                store:SetGreetAnchor(anchor)
+            end
+        end,
+    })
+    -- Guild Greet reads the same guild context as the roster.
+    guildGreet = addon.GuildGreet.Create({
+        context = function()
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return partition, normalizer
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        store = function()
+            return rosterController:Store()
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        send = function(text)
+            return client:SendGuildMessage(text)
+        end,
+        -- Heard within seconds, unlike sync's bulk traffic.
+        announce = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
+        view = greetPrompts,
+    })
+    settings:OnChange(function(id, value)
+        local entry = settings:Entry(id)
+        if id == "guildGreet" or id == "greetCharacter" then
+            guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
+        elseif entry ~= nil and entry.category ~= nil then
+            guildGreet:OnCategoryChanged(entry.category, value)
+        end
+    end)
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
+        -- The first loaded roster tells Guild Greet who was already online
+        -- and how long everyone else has been away.
+        guildGreet:OnRosterUpdate(function()
+            local count = client:GetGuildRosterCount()
+            if count == nil or count == 0 then
+                return nil
+            end
+            local members = {}
+            local index
+            for index = 1, count do
+                local member = client:GetGuildMember(index)
+                if member ~= nil then
+                    table.insert(members, member)
+                end
+            end
+            return members
+        end)
     end)
     -- Chat tags read the same guild context as the roster.
     chatAnnotator = addon.ChatAnnotator.Create({
@@ -298,14 +578,32 @@ end
 
 local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
     rosterController:OnSavedDataReady()
-    -- Without the comm libraries, sync simply stays off.
+    -- Without the comm libraries, sync simply stays off and Guild Greet
+    -- works uncoordinated.
     if comm:Start(function(message, sender)
-        syncSession:Receive(message, sender)
+        if message.t == addon.GuildGreet.TYPE_GREETED then
+            guildGreet:OnGreeted(message, sender)
+        else
+            syncSession:Receive(message, sender)
+        end
     end) then
         syncSession:Start()
     end
     -- The minimap button needs saved data for its position.
     entryPoints:Start()
+    -- Settings show saved values, so the panel waits for saved data too.
+    settingsPanel:Register()
+    -- Without the system message event, Guild Greet simply never prompts.
+    client:ObservePresence(function(kind, name)
+        guildGreet:OnPresence(kind, name)
+    end)
+    -- Prompts wait out combat and boss encounters.
+    local busy = client:ObserveCombat(function(inCombat)
+        guildGreet:OnCombatChanged(inCombat)
+    end)
+    if busy then
+        guildGreet:OnCombatChanged(true)
+    end
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)
@@ -321,6 +619,9 @@ addon.rosterController = rosterController
 addon.entryPoints = entryPoints
 addon.chatAnnotator = chatAnnotator
 addon.comm = comm
+addon.settings = settings
+addon.settingsPanel = settingsPanel
+addon.guildGreet = guildGreet
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version

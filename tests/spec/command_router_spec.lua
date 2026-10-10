@@ -11,12 +11,14 @@ test.test("empty slash input prints concise help", function()
         router:PrintHelp()
     end)
 
+    router:Register("roster", "show or hide the roster window", function() end)
+
     test.assertTrue(router:Execute(""))
-    test.assertEqual(1, #messages)
-    test.assertEqual(
-        "|cffd4af37[Guild Fellowship]|r Commands: /agf help - show available commands",
-        messages[1]
-    )
+    -- A header, then one line per command, in the order they were added.
+    test.assertEqual(3, #messages)
+    test.assertEqual("|cffd4af37[Guild Fellowship]|r Commands:", messages[1])
+    test.assertEqual("  /agf help - show available commands", messages[2])
+    test.assertEqual("  /agf roster - show or hide the roster window", messages[3])
 end)
 
 test.test("dev build help uses the dev tag and command", function()
@@ -30,10 +32,8 @@ test.test("dev build help uses the dev tag and command", function()
     end)
 
     test.assertTrue(router:Execute("HELP"))
-    test.assertEqual(
-        "|cffd4af37[Guild Fellowship (Dev)]|r Commands: /agfdev help - show available commands",
-        messages[1]
-    )
+    test.assertEqual("|cffd4af37[Guild Fellowship (Dev)]|r Commands:", messages[1])
+    test.assertEqual("  /agfdev help - show available commands", messages[2])
 end)
 
 test.test("commands receive arguments and can be extended", function()

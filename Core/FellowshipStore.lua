@@ -16,6 +16,11 @@ local FellowshipStore = {
     SOURCE_ROSTER = "roster",
     -- Applied from an officer's edit received over guild sync.
     SOURCE_SYNC = "sync",
+    -- How many greetings a player must already have before this user's
+    -- greet prompt for them closes (GreetTally).
+    GREET_CAP_DEFAULT = 2,
+    GREET_CAP_MIN = 1,
+    GREET_CAP_MAX = 10,
 }
 addon.FellowshipStore = FellowshipStore
 
@@ -313,6 +318,216 @@ function Store:SetChatTagsEnabled(enabled)
         return false
     end
     self.database.chatTags = enabled
+    return true
+end
+
+-- Guild Greet's saved state, shared by every character on the account and
+-- created on first use: the on/off switch, the greetings, and the last
+-- greeting used in each category (GreetingLibrary owns their shape). Nil
+-- when an unusable value is stored there; it is then left alone.
+function Store:GetGreetState()
+    if type(self.database) ~= "table" then
+        return nil
+    end
+    if self.database.greet == nil then
+        self.database.greet = {}
+    end
+    if type(self.database.greet) ~= "table" then
+        return nil
+    end
+    return self.database.greet
+end
+
+-- Whether Guild Greet is on. On unless turned off; unusable saved data
+-- counts as on, as with chat tags.
+function Store:GreetEnabled()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    return type(state) ~= "table" or state.enabled ~= false
+end
+
+-- Turns Guild Greet on or off. An unusable existing value is left alone.
+function Store:SetGreetEnabled(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.enabled ~= nil and type(state.enabled) ~= "boolean") then
+        return false
+    end
+    state.enabled = enabled
+    return true
+end
+
+local function isGreetCap(value)
+    return type(value) == "number" and value == math.floor(value)
+        and value >= FellowshipStore.GREET_CAP_MIN and value <= FellowshipStore.GREET_CAP_MAX
+end
+
+-- The greeting cap, shared by every character. The default when none is
+-- saved or the saved one is unusable.
+function Store:GreetCap()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local cap = type(state) == "table" and state.cap or nil
+    if not isGreetCap(cap) then
+        return FellowshipStore.GREET_CAP_DEFAULT
+    end
+    return cap
+end
+
+-- Sets the greeting cap (a whole number from 1 to 10). An unusable existing
+-- value is left alone.
+function Store:SetGreetCap(cap)
+    if not isGreetCap(cap) then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.cap ~= nil and not isGreetCap(state.cap)) then
+        return false
+    end
+    state.cap = cap
+    return true
+end
+
+-- Whether Guild Greet prompts for `category` (a GreetPolicy category). On
+-- unless turned off; an unusable saved value counts as on.
+function Store:GreetCategoryEnabled(category)
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local categories = type(state) == "table" and state.categories or nil
+    return type(categories) ~= "table" or categories[category] ~= false
+end
+
+-- Turns one category's prompts on or off. An unusable existing value is
+-- left alone.
+function Store:SetGreetCategoryEnabled(category, enabled)
+    if not isText(category) or type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil then
+        return false
+    end
+    if state.categories == nil then
+        state.categories = {}
+    end
+    local categories = state.categories
+    if type(categories) ~= "table" or (categories[category] ~= nil and type(categories[category]) ~= "boolean") then
+        return false
+    end
+    categories[category] = enabled
+    return true
+end
+
+-- Guild Greet's whole-number settings: the saved field, default and range.
+FellowshipStore.GREET_NUMBERS = {
+    -- Minutes someone must be gone before coming back is a welcome back.
+    welcomeBackMinutes = { default = 15, min = 1, max = 120 },
+    -- Days since anyone last saw a player before a login is a long absence.
+    longAbsenceDays = { default = 30, min = 1, max = 365 },
+}
+
+local function isInRange(value, range)
+    return type(value) == "number" and value == math.floor(value) and value >= range.min and value <= range.max
+end
+
+-- A Guild Greet number setting (a GREET_NUMBERS name). The default when none
+-- is saved or the saved one is unusable.
+function Store:GreetNumber(name)
+    local range = FellowshipStore.GREET_NUMBERS[name]
+    if range == nil then
+        return nil
+    end
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local value = type(state) == "table" and state[name] or nil
+    if not isInRange(value, range) then
+        return range.default
+    end
+    return value
+end
+
+-- Sets a Guild Greet number setting to a whole number within its range. An
+-- unusable existing value is left alone.
+function Store:SetGreetNumber(name, value)
+    local range = FellowshipStore.GREET_NUMBERS[name]
+    if range == nil or not isInRange(value, range) then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state[name] ~= nil and not isInRange(state[name], range)) then
+        return false
+    end
+    state[name] = value
+    return true
+end
+
+-- Whether Guild Greet is on for the character `key`. Each character is on
+-- unless turned off; the set of characters it's off on is account-wide, and
+-- an unusable one counts as empty.
+function Store:GreetOnCharacter(key)
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local off = type(state) == "table" and state.offCharacters or nil
+    return type(off) ~= "table" or off[key] ~= true
+end
+
+-- Turns Guild Greet on or off for the character `key`. An unusable existing
+-- set is left alone.
+function Store:SetGreetOnCharacter(key, enabled)
+    if not isText(key) or type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil then
+        return false
+    end
+    if state.offCharacters == nil then
+        state.offCharacters = {}
+    end
+    if type(state.offCharacters) ~= "table" then
+        return false
+    end
+    state.offCharacters[key] = (not enabled) or nil
+    return true
+end
+
+-- The points a saved greet prompt position may be measured from.
+local ANCHOR_POINTS = {
+    TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, CENTER = true,
+    RIGHT = true, BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true,
+}
+
+-- A usable screen offset: a real number, not NaN or far off any screen.
+local function isOffset(value)
+    return type(value) == "number" and value == value and math.abs(value) < 100000
+end
+
+local function isAnchor(anchor)
+    return type(anchor) == "table" and ANCHOR_POINTS[anchor.point] == true
+        and isOffset(anchor.x) and isOffset(anchor.y)
+end
+
+-- Where greet prompts stack from ({ point, x, y }, measured from that point
+-- of the screen), shared by every character. Nil when none is saved or the
+-- saved one is unusable, so the prompts use their default place.
+function Store:GreetAnchor()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local anchor = type(state) == "table" and state.anchor or nil
+    if not isAnchor(anchor) then
+        return nil
+    end
+    return { point = anchor.point, x = anchor.x, y = anchor.y }
+end
+
+-- Saves where greet prompts stack from. Unlike other settings, an unusable
+-- saved position is replaced: the user just placed the prompts, and leaving
+-- it would keep them at the default forever.
+function Store:SetGreetAnchor(anchor)
+    if not isAnchor(anchor) then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil then
+        return false
+    end
+    state.anchor = { point = anchor.point, x = anchor.x, y = anchor.y }
     return true
 end
 

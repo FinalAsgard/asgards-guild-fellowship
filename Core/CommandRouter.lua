@@ -53,17 +53,17 @@ function Router:SetDefault(command)
     return true
 end
 
+-- Prints a header, then each command on its own line so the list stays
+-- readable in chat.
 function Router:PrintHelp()
-    local entries = {}
     local index
 
+    self.output(self.chatPrefix .. " Commands:")
     for index = 1, #self.commandOrder do
         local command = self.commandOrder[index]
         local description = self.commands[command].description
-        table.insert(entries, self.slashCommand .. " " .. command .. " - " .. description)
+        self.output("  " .. self.slashCommand .. " " .. command .. " - " .. description)
     end
-
-    self.output(self.chatPrefix .. " Commands: " .. table.concat(entries, "; "))
 end
 
 function Router:Execute(input)

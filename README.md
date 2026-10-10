@@ -14,10 +14,22 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 |---|---|
 | `/agf` or `/agf roster` | Shows or hides the roster window. |
 | `/agf rescan` | Scans the guild's notes right away. |
+| `/agf options` | Opens the add-on's settings panel. |
+| `/agf greet` | Opens the Greetings window, where you edit your Guild Greet greetings. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
+
+## Settings
+
+The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Guild Fellowship** (`/agf options` opens it). It has one section per feature:
+
+- **General**: show or hide the minimap button, an **Open Roster** button, and the version you're running.
+- **Chat Tags**: turn chat tags on or off.
+- **Guild Greet**: turn Guild Greet on or off (everywhere, or just on the character you're playing), turn each category's prompts on or off, set the welcome-back minutes and long-absence days, set how many greetings close your prompt, unlock the prompts to move them, and an **Edit Greetings** button that opens the Greetings window.
+
+The panel and the slash commands change the same settings, so a change made either way shows up in both. Settings are saved for every character on this game install. The development build's panel is labeled "(Dev)".
 
 ## Using the roster
 
@@ -145,9 +157,46 @@ In guild chat, officer chat, and guild achievement announcements, a tag after th
 
 An alias tag is medium blue and a main's-name tag is light blue, so you can tell a nickname from a character name at a glance. Your own messages are tagged the same way. Characters the database doesn't know yet get no tag. The name stays clickable as usual. Tags come from your own database, so changes you make in the roster show up on the next line.
 
-Tags are on by default. `/agf tags` turns them off, and running it again turns them back on. The choice is saved for every character on this game install and applies from the next chat line.
+Tags are on by default. `/agf tags` or the **Chat Tags** section of the settings panel turns them off, and doing it again turns them back on. The choice is saved for every character on this game install and applies from the next chat line.
 
 On Retail, the game hides chat from add-ons during encounters and keystone runs. Those lines appear without tags, and tags return once the restriction lifts.
+
+## Guild Greet
+
+When someone joins the guild or a guild member comes online, a small prompt appears (at the left side of the screen unless you move it) with just the name they go by and a **Greet** button. Press it to post a random greeting to guild chat. Nothing is ever posted unless you press the button.
+
+- **Join**: someone joins the guild. They get this instead of a login prompt.
+- **Long absence**: someone's first login this session when none of their characters had logged in for 30 days or more (you can change the days), going by the guild roster's last-online times when you logged in.
+- **Login**: the first time you see someone come online this session.
+- **Welcome back**: someone you saw log off comes back 15 minutes or more later (you can change the minutes). Coming back sooner (a relog or a disconnect) gets no prompt.
+- People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
+- Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
+- A prompt shows 5 to 10 seconds (at random) after someone arrives, so your greeting doesn't reach them while their game is still loading. It disappears 2 minutes after it shows; the **X** closes one without greeting.
+- To move the prompts, tick **Unlock greet prompts** in the settings panel and drag the gold bar that appears. The place is saved for every character. Untick it, or close the options, to hide the bar; it also locks again after a reload.
+- In combat or a boss encounter, prompts wait. When it's over, any that are still under 2 minutes old appear.
+- On Retail, the game hides some system messages from add-ons during encounters and keystone runs. Logins it hides get no prompt; nothing breaks.
+
+Greetings can use these placeholders, in any capitalization:
+
+| Placeholder | Becomes |
+|---|---|
+| `{name}` | The player's alias, else their main's name. |
+| `{main}` | Their main's name, even when they have an alias. |
+| `{mainFirst}`, `{mainLast}` | The first or last part of the main's name. |
+| `{character}` | The character that just logged in. |
+| `{characterFirst}`, `{characterLast}` | The first or last part of that character's name. |
+
+First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** section of the settings panel. Greetings and settings are shared by every character on this game install, and **Guild Greet on this character** turns it off on just the one you're playing, say an alt in another guild.
+
+### Greeting together
+
+When you greet someone, the add-on tells other add-on users in the guild. Once a player has had enough greetings from anyone (2 by default; set it from 1 to 10 in the settings panel), your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (15 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever category or character it was for. This only counts members running the add-on; greetings typed by hand aren't seen. If two people press Greet at the same moment, an extra greeting can slip through.
+
+### Editing greetings
+
+The **Greetings** window (`/agf greet`, or **Edit Greetings** in the settings panel) has a button for each category. Each lists that category's greetings, with **Edit** beside each one. Type in the box at the bottom and press **Add** (or Enter) to add a greeting. **Edit** puts a greeting in the box, with **Save**, **Delete** and **Cancel** beside it. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The window lists every placeholder.
+
+A category with no greetings shows no prompts, so emptying one is a way to turn it off. **Restore starter greetings** puts back the starters in the open category, and **Restore all categories** does it everywhere. Both replace what's there, so each asks for a second click.
 
 ## Supported clients
 

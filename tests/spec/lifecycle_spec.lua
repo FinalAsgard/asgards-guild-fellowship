@@ -60,10 +60,8 @@ test.test("lifecycle registers slash handling at add-on load", function()
     test.assertEqual("/asgardsfellowship", environment.SLASH_AGF2)
 
     environment.SlashCmdList.AGF("")
-    test.assertEqual(
-        "|cffd4af37[Guild Fellowship]|r Commands: /agf help - show available commands",
-        messages[1]
-    )
+    test.assertEqual("|cffd4af37[Guild Fellowship]|r Commands:", messages[1])
+    test.assertEqual("  /agf help - show available commands", messages[2])
 end)
 
 test.test("lifecycle registers slash handling once when duplicate load events arrive", function()

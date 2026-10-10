@@ -731,3 +731,12 @@ function Controller:Toggle()
     self.window:Show()
     return true
 end
+
+-- The settings panel's Open Roster button: shows the roster, leaving it open
+-- when it already is.
+function Controller:Open()
+    if self.window ~= nil and self.window:IsShown() then
+        return true
+    end
+    return self:Toggle()
+end
