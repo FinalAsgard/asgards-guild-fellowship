@@ -70,17 +70,16 @@ local function build(window, framework)
     window.when:SetPoint("RIGHT", panel, "RIGHT", -14, 0)
     window.when:SetJustifyH("LEFT")
 
-    -- The category's greetings, each with Edit. Lines past the last greeting
-    -- are hidden, so a shorter category never shows a longer one's leftovers.
+    -- The category's greetings, each with Edit. The framework shows only the
+    -- lines fetched with GetLine during a refresh and hides the rest, so a
+    -- line is fetched only when it has a greeting; a shorter category then
+    -- never shows a longer one's leftovers or empty rows with buttons.
     local function refreshLines(scroll, rows, offset, totalLines)
         local lineIndex
         for lineIndex = 1, totalLines do
-            local line = scroll:GetLine(lineIndex)
             local row = rows[lineIndex + offset]
-            if row == nil then
-                line.position = nil
-                line:Hide()
-            else
+            if row ~= nil then
+                local line = scroll:GetLine(lineIndex)
                 line:ClearAllPoints()
                 line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(lineIndex - 1) * lineHeight)
                 line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(lineIndex - 1) * lineHeight)
