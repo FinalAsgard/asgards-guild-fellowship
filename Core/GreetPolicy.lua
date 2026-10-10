@@ -23,8 +23,6 @@ local GreetPolicy = {
     LOGIN = "login",
     WELCOME_BACK = "welcomeBack",
     LONG_ABSENCE = "longAbsence",
-    -- Every category, in the order the Greetings window lists them.
-    CATEGORIES = { "join", "login", "welcomeBack", "longAbsence" },
     WELCOME_BACK_SECONDS = 15 * 60,
     LONG_ABSENCE_SECONDS = 30 * 24 * 60 * 60,
 }

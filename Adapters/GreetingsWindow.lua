@@ -131,7 +131,9 @@ local function build(window, framework)
     input:SetSize(width - 264, 22)
     input:SetPoint("TOPLEFT", panel, "TOPLEFT", 20, inputY)
     input:SetAutoFocus(false)
-    input:SetMaxLetters(Library.MAX_LENGTH)
+    -- Chat's limit is in bytes, and a letter like é takes two; the cap
+    -- counts the terminating byte too.
+    input:SetMaxBytes(Library.MAX_LENGTH + 1)
     window.input = input
     window.save = button(panel, "Add", 70)
     window.save:SetPoint("LEFT", input, "RIGHT", 8, 0)
@@ -219,19 +221,12 @@ function GreetingsWindow.Create(client, options)
     return window
 end
 
-function Window:IsShown()
-    return self.panel:IsShown() == true
-end
-
 -- Shows the window on the open category.
 function Window:Open()
     self:Redraw()
     self.panel:Show()
 end
 
-function Window:Hide()
-    self.panel:Hide()
-end
 
 function Window:setStatus(text, isError)
     self.status:SetText(text and ((isError and ERROR_COLOR or "") .. text .. (isError and "|r" or "")) or "")
