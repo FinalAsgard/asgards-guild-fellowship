@@ -335,3 +335,30 @@ test.test("the Guild Greet section has category, threshold and this-character se
     -- Saved by character key, account-wide.
     test.assertTrue(next(world.database.greet.offCharacters) ~= nil)
 end)
+
+test.test("closing the panel turns off modes marked to end on close, and nothing else", function()
+    local model = newModel()
+    local saved = { unlock = true, minimap = true }
+    model:AddSection("general", "General")
+    model:Add("general", toggle("unlock", saved, { offOnClose = true }))
+    model:Add("general", toggle("minimap", saved))
+    local changes = {}
+    model:OnChange(function(id, value)
+        table.insert(changes, id .. "=" .. tostring(value))
+    end)
+
+    model:Closed()
+
+    test.assertFalse(saved.unlock)
+    test.assertTrue(saved.minimap)
+    test.assertEqual("unlock=false", table.concat(changes, ","))
+    -- Already off: closing again changes nothing.
+    model:Closed()
+    test.assertEqual(1, #changes)
+end)
+
+test.test("the prompt unlock is a mode that ends when the panel closes", function()
+    local _, addon = loggedIn("Retail")
+
+    test.assertTrue(addon.settings:Entry("greetUnlock").offOnClose)
+end)

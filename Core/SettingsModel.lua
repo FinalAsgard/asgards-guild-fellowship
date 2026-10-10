@@ -12,7 +12,8 @@ local _, addon = ...
 --   number   get() -> a whole number from `min` to `max`; set(number) ->
 --            true, or nil and a reason
 -- `get`, `set` and `run` are called protected, so a failing feature never
--- breaks the panel or a slash command.
+-- breaks the panel or a slash command. A toggle marked `offOnClose` is a
+-- mode that only lasts while the panel is open (see Model:Closed).
 local SettingsModel = {
     KINDS = { toggle = true, action = true, text = true, number = true },
 }
@@ -161,6 +162,17 @@ function Model:Toggle(id)
         return nil, reason
     end
     return enabled
+end
+
+-- The settings panel closed: turns off every toggle marked `offOnClose`
+-- that's on, so such a mode is never left on behind a closed panel.
+function Model:Closed()
+    local id, entry
+    for id, entry in pairs(self.entries) do
+        if entry.kind == "toggle" and entry.offOnClose and self:Get(id) == true then
+            self:Set(id, false)
+        end
+    end
 end
 
 -- Performs an action entry. False when it isn't one or it failed.

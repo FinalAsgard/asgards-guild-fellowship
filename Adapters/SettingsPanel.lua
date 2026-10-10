@@ -164,6 +164,11 @@ function Panel:Build()
         panel:SetScript("OnShow", function()
             self:Refresh()
         end)
+        -- However the options window closes (X, Close, Escape), the panel
+        -- hides.
+        panel:SetScript("OnHide", function()
+            self.model:Closed()
+        end)
         return panel
     end)
     if not ok then

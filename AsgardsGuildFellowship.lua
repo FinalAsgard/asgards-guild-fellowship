@@ -309,10 +309,12 @@ if clientProfile.supported then
             return true
         end,
     })
-    -- Not saved: the prompts lock again after a reload.
+    -- Not saved, and only while the panel is open: closing the options, or
+    -- a reload, locks the prompts again.
     settings:Add("guildGreet", {
         id = "greetUnlock",
         kind = "toggle",
+        offOnClose = true,
         label = "Unlock greet prompts to drag them somewhere else",
         get = function()
             return greetPrompts:IsUnlocked()
