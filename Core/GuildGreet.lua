@@ -287,12 +287,15 @@ function Greet:OnPresence(kind, rawName)
     end
     prompt.rawName = rawName
     prompt.label = self:Names(key, rawName).name
-    local delay = self:ShowDelay()
-    local expiresAt = self.queue:Add(prompt, now, delay)
     -- Redraw when it's due and when it expires, so it comes and goes on time.
-    self.after(delay, function()
+    -- Without a timer to show it later, it shows at once.
+    local delay = self:ShowDelay()
+    if delay > 0 and not self.after(delay, function()
         self:Refresh()
-    end)
+    end) then
+        delay = 0
+    end
+    local expiresAt = self.queue:Add(prompt, now, delay)
     self.after(expiresAt - now, function()
         self:Refresh()
     end)

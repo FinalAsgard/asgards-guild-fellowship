@@ -873,3 +873,15 @@ test.test("guild greet: a failing random pick still delays the prompt", function
     advance(world, 5)
     test.assertEqual(1, #world.shown)
 end)
+
+test.test("guild greet: without timers, a prompt shows at once instead of never", function()
+    local world = setup("Retail")
+    world.showDelay = 7
+    world.greet.after = function()
+        return false
+    end
+
+    world.greet:OnPresence("online", world.names.bolt)
+
+    test.assertEqual(1, #world.shown)
+end)
