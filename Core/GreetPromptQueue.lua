@@ -2,8 +2,10 @@ local _, addon = ...
 
 -- The greet prompts waiting for the user, oldest first. There is at most one
 -- per player: a newer prompt for the same player replaces the older one. A
--- prompt disappears `lifetime` seconds after the event that raised it, so a
--- greeting never arrives long after someone did. While prompts are held (the
+-- prompt can wait a few seconds before it shows (so the greeting doesn't
+-- arrive before the player's game has loaded), then disappears `lifetime`
+-- seconds after it showed, so a greeting never arrives long after someone
+-- did. While prompts are held (the
 -- user is in combat) none are shown, but they keep their expiry times, so
 -- releasing the hold shows only those still current. Pure: time is passed
 -- in.
@@ -33,15 +35,17 @@ local function indexOf(prompts, player)
     return nil
 end
 
--- Adds `prompt` ({ category, player, key, ... }) raised at `now`. Returns
--- the second at which it expires.
-function Queue:Add(prompt, now)
+-- Adds `prompt` ({ category, player, key, ... }) raised at `now`, to show
+-- `delay` seconds later (0 when nil). Returns the second at which it
+-- expires.
+function Queue:Add(prompt, now, delay)
     local existing = indexOf(self.prompts, prompt.player)
     if existing ~= nil then
         table.remove(self.prompts, existing)
     end
     prompt.raisedAt = now
-    prompt.expiresAt = now + self.lifetime
+    prompt.showAt = now + (delay or 0)
+    prompt.expiresAt = prompt.showAt + self.lifetime
     table.insert(self.prompts, prompt)
     return prompt.expiresAt
 end
@@ -51,8 +55,8 @@ function Queue:SetHeld(held)
     self.held = held == true
 end
 
--- Drops prompts that have expired by `now`, and returns the rest, oldest
--- first, or none while they're held.
+-- Drops prompts that have expired by `now`, and returns those due to show,
+-- oldest first, or none while they're held.
 function Queue:Visible(now)
     local index = 1
     while index <= #self.prompts do
@@ -65,7 +69,13 @@ function Queue:Visible(now)
     if self.held then
         return {}
     end
-    return self.prompts
+    local due = {}
+    for index = 1, #self.prompts do
+        if self.prompts[index].showAt <= now then
+            table.insert(due, self.prompts[index])
+        end
+    end
+    return due
 end
 
 -- The waiting prompt for `player`, or nil.

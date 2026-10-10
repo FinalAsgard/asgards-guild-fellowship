@@ -47,8 +47,11 @@ local function login(channel, playerName, options)
     return world
 end
 
+-- Someone comes online, and the 5 to 10 seconds before their prompt shows
+-- pass.
 local function comesOnline(world, name)
     fixtures.fire(world, "CHAT_MSG_SYSTEM", "|Hplayer:" .. name .. "|h[" .. name .. "]|h has come online.")
+    fixtures.runTimers(world, 10)
 end
 
 local function waiting(world)

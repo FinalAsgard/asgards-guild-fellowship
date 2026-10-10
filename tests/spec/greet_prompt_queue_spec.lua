@@ -72,3 +72,17 @@ test.test("prompt queue: a prompt that expires while held never appears", functi
     queue:SetHeld(false)
     test.assertEqual("2", players(queue:Visible(START + 150)))
 end)
+
+test.test("prompt queue: a delayed prompt shows when due and lasts 2 minutes from then", function()
+    local queue = newQueue()
+
+    test.assertEqual(START + 7 + 120, queue:Add({ player = 1 }, START, 7))
+    queue:Add({ player = 2 }, START)
+
+    test.assertEqual("2", players(queue:Visible(START + 6)))
+    -- Waiting prompts can still be found, greeted, or closed.
+    test.assertTrue(queue:Get(1) ~= nil)
+    test.assertEqual("1,2", players(queue:Visible(START + 7)))
+    test.assertEqual("1", players(queue:Visible(START + 126)))
+    test.assertEqual("", players(queue:Visible(START + 127)))
+end)

@@ -19,6 +19,11 @@ local GuildGreet = {
     -- greeter is whoever the game says sent it.
     PROTOCOL = 1,
     TYPE_GREETED = "greeted",
+    -- A prompt shows a random whole number of seconds in this range after
+    -- the arrival, so the greeting doesn't reach a player whose game is
+    -- still loading.
+    SHOW_DELAY_MIN = 5,
+    SHOW_DELAY_MAX = 10,
 }
 addon.GuildGreet = GuildGreet
 
@@ -35,6 +40,8 @@ Greet.__index = Greet
 --   send          function(text) -> true when posted to guild chat
 --   announce      function(message) -> sends a "greeted" message to the
 --                 guild's add-on users. Optional.
+--   showDelay     function() -> seconds a new prompt waits before showing.
+--                 Optional; a random 5 to 10 otherwise.
 --   view          { Show = function(view, prompts, handlers) }: draws the
 --                 prompts; handlers.greet(player) and handlers.close(player)
 function GuildGreet.Create(options)
@@ -50,6 +57,7 @@ function GuildGreet.Create(options)
             return false
         end,
         view = options.view,
+        showDelay = options.showDelay,
         queue = addon.GreetPromptQueue.Create(),
         -- Hours since each offline member's last login, as the roster said
         -- when the session's roster first loaded.
@@ -279,12 +287,30 @@ function Greet:OnPresence(kind, rawName)
     end
     prompt.rawName = rawName
     prompt.label = self:Names(key, rawName).name
-    local expiresAt = self.queue:Add(prompt, now)
-    -- Redraw when it expires, so it leaves the screen on time.
+    local delay = self:ShowDelay()
+    local expiresAt = self.queue:Add(prompt, now, delay)
+    -- Redraw when it's due and when it expires, so it comes and goes on time.
+    self.after(delay, function()
+        self:Refresh()
+    end)
     self.after(expiresAt - now, function()
         self:Refresh()
     end)
     self:Refresh()
+end
+
+-- Seconds a new prompt waits before showing.
+function Greet:ShowDelay()
+    local ok, delay
+    if self.showDelay ~= nil then
+        ok, delay = pcall(self.showDelay)
+    else
+        ok, delay = pcall(self.random, GuildGreet.SHOW_DELAY_MIN, GuildGreet.SHOW_DELAY_MAX)
+    end
+    if not ok or type(delay) ~= "number" or delay < 0 then
+        return GuildGreet.SHOW_DELAY_MIN
+    end
+    return delay
 end
 
 -- Draws the waiting prompts.

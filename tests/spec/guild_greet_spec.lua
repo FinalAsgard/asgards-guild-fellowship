@@ -107,6 +107,10 @@ local function setup(profile)
             table.insert(world.announced, message)
             return true
         end,
+        -- Prompts show at once unless a spec sets `world.showDelay`.
+        showDelay = function()
+            return world.showDelay or 0
+        end,
         view = {
             Show = function(_, prompts, handlers)
                 world.shown = {}
@@ -818,4 +822,54 @@ test.test("guild greet: greeting still finishes when the guild data is gone", fu
     test.assertEqual(1, #world.sent)
     test.assertEqual(1, #world.announced)
     test.assertEqual(0, #world.shown)
+end)
+
+-- Show delay -----------------------------------------------------------------------
+
+test.test("guild greet: a prompt shows 5 to 10 seconds after the arrival, picked at random", function()
+    local world = setup("Retail")
+    world.greet.showDelay = nil
+    local asked
+    world.greet.random = function(low, high)
+        asked = low .. "-" .. high
+        return 8
+    end
+
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual("5-10", asked)
+    test.assertEqual(0, #world.shown)
+    advance(world, 7)
+    test.assertEqual(0, #world.shown)
+    advance(world, 1)
+    test.assertEqual(1, #world.shown)
+    -- It still gets its full 2 minutes on screen.
+    advance(world, 119)
+    test.assertEqual(1, #world.shown)
+    advance(world, 1)
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a player greeted enough while their prompt waits never gets one", function()
+    local world = setup("Retail")
+    world.showDelay = 10
+    world.store:SetGreetCap(1)
+
+    world.greet:OnPresence("online", world.names.bolt)
+    greeted(world, "bishop", world.names.bolt)
+    advance(world, 10)
+
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a failing random pick still delays the prompt", function()
+    local world = setup("Retail")
+    world.greet.showDelay = nil
+    world.greet.random = function()
+        error("boom")
+    end
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(0, #world.shown)
+    advance(world, 5)
+    test.assertEqual(1, #world.shown)
 end)
