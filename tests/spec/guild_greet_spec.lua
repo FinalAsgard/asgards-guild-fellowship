@@ -788,3 +788,34 @@ test.test("guild greet: turning Greet off on one character keeps it on the other
     test.assertEqual(1, #world.shown)
     test.assertEqual("table", type(world.store:GetGreetState().greetings))
 end)
+
+test.test("leaving an instance mid-encounter releases prompts after the loading screen", function()
+    local compat, world = client("Retail")
+    local states = {}
+    compat:ObserveCombat(function(busy)
+        table.insert(states, tostring(busy))
+    end)
+
+    world.inEncounter = true
+    fixtures.fire(world, "ENCOUNTER_START")
+    -- Hearthed out: no ENCOUNTER_END, then a loading screen.
+    world.inEncounter = false
+    fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+
+    test.assertEqual("true,false", table.concat(states, ","))
+end)
+
+test.test("guild greet: greeting still finishes when the guild data is gone", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.bolt)
+    local player = world.shown[1].player
+    world.greet.context = function()
+        return nil
+    end
+
+    world.handlers.greet(player)
+
+    test.assertEqual(1, #world.sent)
+    test.assertEqual(1, #world.announced)
+    test.assertEqual(0, #world.shown)
+end)

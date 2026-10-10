@@ -60,7 +60,8 @@ function GuildGreet.Create(options)
     end)
     greet.policy = addon.GreetPolicy.Create({
         playerOf = function(key)
-            return (greet:service():PlayerOf(key))
+            local service = greet:service()
+            return service and (service:PlayerOf(key)) or nil
         end,
         isMember = function(key)
             local partition = greet.context()

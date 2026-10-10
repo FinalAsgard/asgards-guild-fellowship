@@ -88,6 +88,24 @@ function GreetingLibrary.Create(state, random)
     }, Library)
 end
 
+-- The first `limit` bytes of `text`, backed off to the start of a whole
+-- character so a name with letters like é is never cut mid-letter.
+local function cut(text, limit)
+    if #text <= limit then
+        return text
+    end
+    local length = limit
+    -- Bytes 0x80-0xBF continue a character started earlier.
+    while length > 0 do
+        local nextByte = string.byte(text, length + 1)
+        if nextByte < 0x80 or nextByte >= 0xC0 then
+            break
+        end
+        length = length - 1
+    end
+    return string.sub(text, 1, length)
+end
+
 -- Trimmed, with line breaks folded to spaces. Nil when nothing is left.
 local function tidy(text)
     if type(text) ~= "string" then
@@ -106,7 +124,7 @@ end
 -- and cut to one message. Nil when nothing is left.
 function GreetingLibrary.Clean(text)
     text = tidy(text)
-    return text and string.sub(text, 1, GreetingLibrary.MAX_LENGTH)
+    return text and cut(text, GreetingLibrary.MAX_LENGTH)
 end
 
 -- A greeting the user typed, tidied the same way. Returns nil and the reason
@@ -135,7 +153,7 @@ function GreetingLibrary.Render(text, names)
         end
         return nil
     end)
-    return string.sub(rendered, 1, GreetingLibrary.MAX_LENGTH)
+    return cut(rendered, GreetingLibrary.MAX_LENGTH)
 end
 
 -- The saved greetings table, created (with the starters) on first use. Nil

@@ -386,7 +386,9 @@ end
 -- Calls onChange(busy) when the player enters or leaves combat or, on
 -- clients that report them, a boss encounter: busy is true while either
 -- lasts. Returns the current state (false when the client can't say), or
--- nil when the client can't deliver the events.
+-- nil when the client can't deliver the events. Leaving an instance or
+-- reconnecting may skip ENCOUNTER_END, so the encounter state is read again
+-- after every loading screen, where the client can report it.
 function Client:ObserveCombat(onChange)
     if type(onChange) ~= "function" then
         return nil
@@ -407,6 +409,11 @@ function Client:ObserveCombat(onChange)
             inEncounter = true
         elseif eventName == "ENCOUNTER_END" then
             inEncounter = false
+        elseif eventName == "PLAYER_ENTERING_WORLD" then
+            if type(self.environment.IsEncounterInProgress) ~= "function" then
+                return
+            end
+            inEncounter = asks(self.environment.IsEncounterInProgress)
         else
             return
         end
@@ -423,6 +430,7 @@ function Client:ObserveCombat(onChange)
     -- combat.
     self:RegisterEvent(frame, "ENCOUNTER_START")
     self:RegisterEvent(frame, "ENCOUNTER_END")
+    self:RegisterEvent(frame, "PLAYER_ENTERING_WORLD")
     self.combatFrame = frame
     return inCombat or inEncounter
 end

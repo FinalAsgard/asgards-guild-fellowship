@@ -187,3 +187,15 @@ test.test("greeting library: every category and placeholder is described for the
     end
     test.assertEqual(#names, #library.PLACEHOLDERS)
 end)
+
+test.test("greeting library: a long greeting is never cut in the middle of a letter", function()
+    local addon = load()
+    local render = addon.GreetingLibrary.Render
+
+    -- "é" is two bytes; the limit falls between them, so the cut backs off.
+    local rendered = render(string.rep("a", 254) .. "{name}", { name = "éa" })
+    test.assertEqual(254, #rendered)
+    test.assertEqual(string.rep("a", 254), rendered)
+    test.assertEqual(255, #render(string.rep("a", 253) .. "{name}", { name = "éa" }))
+    test.assertEqual(254, #addon.GreetingLibrary.Clean(string.rep("b", 254) .. "é"))
+end)
