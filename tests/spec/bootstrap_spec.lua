@@ -41,6 +41,7 @@ local MANIFEST_FILES = {
     "Core/RecruitLedger.lua",
     "Core/RecruitPolicy.lua",
     "Core/RecruitConfig.lua",
+    "Core/RecruitStats.lua",
     "Core/GuildRecruit.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
