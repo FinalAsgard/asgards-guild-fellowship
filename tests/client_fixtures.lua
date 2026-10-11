@@ -378,6 +378,11 @@ local function installGuild(world, environment, profile)
             return { mapID = mapID, name = world.zone.name, mapType = 3, parentMapID = 0 }
         end,
     }
+    -- `world.inInstance` names the instance type the player is in ("party",
+    -- "raid", "pvp", "arena"), or is nil out in the world.
+    environment.IsInInstance = function()
+        return world.inInstance ~= nil, world.inInstance or "none"
+    end
     environment.GetRealZoneText = function()
         return world.zone and world.zone.name or ""
     end

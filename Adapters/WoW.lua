@@ -507,6 +507,21 @@ function Client:GetZone()
     return { key = "zone:" .. name, name = name }
 end
 
+-- True in a dungeon, raid, scenario, battleground or arena, or a keystone
+-- run on clients that have them. False when the client can't say.
+function Client:IsInInstance()
+    local ok, inside = callFunction(self.environment.IsInInstance)
+    if ok and inside ~= nil and inside ~= false then
+        return true
+    end
+    local challengeMode = self.environment.C_ChallengeMode
+    if type(challengeMode) == "table" then
+        local activeOk, active = callFunction(challengeMode.IsChallengeModeActive)
+        return activeOk and active ~= nil and active ~= false
+    end
+    return false
+end
+
 -- How many channel numbers to look through for the General channel.
 Compatibility.MAX_CHANNELS = 20
 

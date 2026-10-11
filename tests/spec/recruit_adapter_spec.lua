@@ -65,6 +65,19 @@ for index = 1, #fixtures.PROFILES do
         test.assertEqual(1, client:GetGeneralChannel())
     end)
 
+    test.test(profile .. " adapter reports instances and battlegrounds", function()
+        local world = fixtures.newEnvironment(profile)
+        local client = newClient(world.environment)
+
+        test.assertFalse(client:IsInInstance())
+        local kinds = { "party", "raid", "pvp", "arena" }
+        local kindIndex
+        for kindIndex = 1, #kinds do
+            world.inInstance = kinds[kindIndex]
+            test.assertTrue(client:IsInInstance(), kinds[kindIndex])
+        end
+    end)
+
     test.test(profile .. " adapter reports a blocked send as failed", function()
         local world = fixtures.newEnvironment(profile)
         local client = newClient(world.environment)
@@ -89,6 +102,17 @@ for index = 1, #fixtures.PROFILES do
         test.assertEqual(3, changes)
     end)
 end
+
+test.test("Retail keystone runs count as being in an instance", function()
+    local world = fixtures.newEnvironment("Retail")
+    local client = newClient(world.environment)
+    world.environment.IsInInstance = nil
+
+    world.inKeystone = true
+    test.assertTrue(client:IsInInstance())
+    world.inKeystone = false
+    test.assertFalse(client:IsInInstance())
+end)
 
 test.test("the zone key falls back to the zone's name without maps", function()
     local client = newClient({
@@ -161,6 +185,8 @@ test.test("guild recruit adapter methods return nil or false when the APIs are m
             SendChatMessage = raises,
             C_ChatInfo = { SendChatMessage = raises },
             CreateFrame = raises,
+            IsInInstance = raises,
+            C_ChallengeMode = { IsChallengeModeActive = raises },
         }),
     }
     local clientIndex
@@ -173,6 +199,7 @@ test.test("guild recruit adapter methods return nil or false when the APIs are m
         test.assertFalse(client:IsTradeAvailable())
         test.assertFalse(client:SendChannelMessage("Join us!", 1))
         test.assertFalse(client:ObserveZone(function() end))
+        test.assertFalse(client:IsInInstance())
     end
 end)
 
