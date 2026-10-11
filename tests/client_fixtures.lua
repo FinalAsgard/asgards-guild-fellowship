@@ -349,6 +349,54 @@ local function installGuild(world, environment, profile)
     environment.InCombatLockdown = function()
         return world.inCombat
     end
+    -- `world.canInvite = false` takes away the character's invite permission.
+    world.canInvite = true
+    environment.CanGuildInvite = function()
+        return world.canInvite
+    end
+    -- Where the player is: `world.zone` ({ mapID, name }) and the channels
+    -- they're in, by number (`world.channels`, full names as the client
+    -- reports them). Lines sent to chat are recorded in `world.chat` as
+    -- { text, chatType, target }; `world.chatFails = true` makes sending
+    -- raise, as a blocked send does.
+    local zones = {
+        Forever = { mapID = 1455, name = "Ironforge" },
+        Retail = { mapID = 2339, name = "Dornogal" },
+    }
+    world.zone = Fixtures.snapshot(zones[profile])
+    world.channels = { [1] = "General - " .. world.zone.name, [2] = "Trade - City" }
+    world.chat = {}
+    environment.C_Map = {
+        GetBestMapForUnit = function(unit)
+            test.assertEqual("player", unit)
+            return world.zone and world.zone.mapID
+        end,
+        GetMapInfo = function(mapID)
+            if world.zone == nil or mapID ~= world.zone.mapID then
+                return nil
+            end
+            return { mapID = mapID, name = world.zone.name, mapType = 3, parentMapID = 0 }
+        end,
+    }
+    environment.GetRealZoneText = function()
+        return world.zone and world.zone.name or ""
+    end
+    environment.EnumerateServerChannels = function()
+        return "General", "Trade", "LocalDefense"
+    end
+    environment.GetChannelName = function(number)
+        local name = world.channels[number]
+        if name == nil then
+            return 0, nil, 0
+        end
+        return number, name, 0
+    end
+    environment.SendChatMessage = function(text, chatType, _, target)
+        if world.chatFails then
+            error("blocked")
+        end
+        table.insert(world.chat, { text = text, chatType = chatType, target = target })
+    end
     environment.RAID_CLASS_COLORS = {
         WARRIOR = { colorStr = "ffc69b6d" },
         PALADIN = { r = 0.96, g = 0.55, b = 0.73 },

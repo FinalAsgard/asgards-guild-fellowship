@@ -448,6 +448,126 @@ function Client:SendGuildMessage(text)
     return (callFunction(self.environment.SendChatMessage, text, "GUILD"))
 end
 
+-- True when the logged-in character's guild rank can invite to the guild.
+-- False when the client can't say.
+function Client:CanGuildInvite()
+    local guildInfo = self.environment.C_GuildInfo
+    local ok, can
+    if type(guildInfo) == "table" and type(guildInfo.CanGuildInvite) == "function" then
+        ok, can = callFunction(guildInfo.CanGuildInvite)
+    else
+        ok, can = callFunction(self.environment.CanGuildInvite)
+    end
+    return ok and can ~= nil and can ~= false
+end
+
+-- Map types finer than a zone (dungeon levels, micro and orphan maps); the
+-- zone a General channel belongs to is the first map above them.
+local SUB_ZONE_MAP_TYPE = 4
+
+-- The zone's map ID where the client has maps: the player's map, climbing
+-- out of any finer map to the zone it's in. Nil otherwise.
+function Client:zoneMapId()
+    local maps = self.environment.C_Map
+    if type(maps) ~= "table" then
+        return nil
+    end
+    local ok, mapId = callFunction(maps.GetBestMapForUnit, "player")
+    if not ok or type(mapId) ~= "number" then
+        return nil
+    end
+    local steps
+    for steps = 1, 10 do
+        local infoOk, info = callFunction(maps.GetMapInfo, mapId)
+        if not infoOk or type(info) ~= "table" or type(info.mapType) ~= "number"
+            or info.mapType < SUB_ZONE_MAP_TYPE or type(info.parentMapID) ~= "number" or info.parentMapID == 0
+        then
+            return mapId
+        end
+        mapId = info.parentMapID
+    end
+    return mapId
+end
+
+-- The zone the player is in as { key, name }: the key is "map:<ID>" where
+-- the client has maps, else "zone:<name>"; the name is as the client shows
+-- it. Nil when the client can't say.
+function Client:GetZone()
+    local ok, name = callFunction(self.environment.GetRealZoneText)
+    if not ok or type(name) ~= "string" or name == "" then
+        ok, name = callFunction(self.environment.GetZoneText)
+    end
+    if not ok or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    local mapId = self:zoneMapId()
+    if mapId ~= nil then
+        return { key = "map:" .. mapId, name = name }
+    end
+    return { key = "zone:" .. name, name = name }
+end
+
+-- How many channel numbers to look through for the General channel.
+Compatibility.MAX_CHANNELS = 20
+
+-- The number of the General channel the player is in, or nil. The channel's
+-- name is the client's own (so every locale works), with the English as a
+-- fallback; its full name carries the zone ("General - Elwynn Forest").
+function Client:GetGeneralChannel()
+    local ok, baseName = callFunction(self.environment.EnumerateServerChannels)
+    if not ok or type(baseName) ~= "string" or baseName == "" then
+        baseName = "General"
+    end
+    local number
+    for number = 1, Compatibility.MAX_CHANNELS do
+        local nameOk, id, fullName = callFunction(self.environment.GetChannelName, number)
+        if nameOk and type(id) == "number" and id > 0 and type(fullName) == "string"
+            and not self:IsSecretValue(fullName)
+            and (fullName == baseName or string.sub(fullName, 1, string.len(baseName) + 3) == baseName .. " - ")
+        then
+            return id
+        end
+    end
+    return nil
+end
+
+-- Posts `text` to the channel numbered `channelNumber`. Retail keeps the call
+-- in C_ChatInfo; older clients have it as a global. Returns true when the
+-- client accepted it.
+function Client:SendChannelMessage(text, channelNumber)
+    if type(text) ~= "string" or text == "" or type(channelNumber) ~= "number" then
+        return false
+    end
+    local chatInfo = self.environment.C_ChatInfo
+    if type(chatInfo) == "table" and type(chatInfo.SendChatMessage) == "function" then
+        return (callFunction(chatInfo.SendChatMessage, text, "CHANNEL", nil, channelNumber))
+    end
+    return (callFunction(self.environment.SendChatMessage, text, "CHANNEL", nil, channelNumber))
+end
+
+-- Calls onChange() whenever the player may have changed zone or channels:
+-- a new zone, a loading screen, or the channel list changing (the client
+-- moves the player to the new zone's General a moment after arriving).
+-- Returns false when the client can't deliver the events.
+function Client:ObserveZone(onChange)
+    if type(onChange) ~= "function" then
+        return false
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil
+        or not self:SetEventHandler(frame, function()
+            pcall(onChange)
+        end)
+        or not self:RegisterEvent(frame, "ZONE_CHANGED_NEW_AREA")
+    then
+        return false
+    end
+    self:RegisterEvent(frame, "PLAYER_ENTERING_WORLD")
+    self:RegisterEvent(frame, "CHANNEL_UI_UPDATE")
+    self.zoneFrame = frame
+    return true
+end
+
 -- True when the client hides `value` from add-ons (Retail's secret values,
 -- during encounters and keystone runs). False on a client without the
 -- check. A check that errors answers true, so callers leave the value alone.
