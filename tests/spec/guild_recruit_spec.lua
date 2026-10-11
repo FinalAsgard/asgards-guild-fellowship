@@ -203,8 +203,11 @@ test.test("recruitment settings: a fresh install has opt-in off and no ad", func
     end
 
     test.assertEqual("Recruitment", section.label)
-    test.assertEqual("recruitOptIn", section.entries[1].id)
-    test.assertEqual("recruitAd", section.entries[2].id)
+    -- After the line explaining greyed-out settings to a character that
+    -- can't invite.
+    test.assertEqual("recruitCantInvite", section.entries[1].id)
+    test.assertEqual("recruitOptIn", section.entries[2].id)
+    test.assertEqual("recruitAd", section.entries[3].id)
     test.assertFalse(world.addon.settings:Get("recruitOptIn"))
     test.assertEqual("", world.addon.settings:Get("recruitAd"))
 end)
@@ -236,12 +239,16 @@ test.test("recruitment settings: an ad longer than 255 characters is refused", f
     test.assertTrue(world.addon.settings:Set("recruitAd", string.rep("x", 255)))
 end)
 
-test.test("recruitment settings: both are disabled while the character can't invite", function()
+test.test("recruitment settings: both are disabled while the character can't invite, and a line says why", function()
     local world = login("Retail")
+    test.assertFalse(world.addon.settings:IsShown("recruitCantInvite"))
     world.canInvite = false
 
     test.assertFalse(world.addon.settings:IsEnabled("recruitOptIn"))
     test.assertFalse(world.addon.settings:IsEnabled("recruitAd"))
+    test.assertFalse(world.addon.settings:IsEnabled("recruitUseOfficerAd"))
+    test.assertTrue(world.addon.settings:IsShown("recruitCantInvite"))
+    test.assertContains(world.addon.settings:Get("recruitCantInvite"), "can't invite to the guild")
     local changed, reason = world.addon.settings:Set("recruitAd", AD)
     test.assertEqual(nil, changed)
     test.assertEqual("this character can't invite to the guild", reason)
@@ -1244,6 +1251,71 @@ test.test("recruiters: the view lists the channels this client knows were advert
     -- A zone known by its map is named from the map.
     test.assertEqual("Dornogal General", ads[3].label)
     test.assertEqual("1 h 4 min ago", ads[3].recent)
+end)
+
+-- Gives the add-on a master frame that records the pages it shows and the
+-- leaderboard rows it's given, then opens it with `/agf recruit`.
+local function openRecruitment(world)
+    local frame = { shown = false, pages = {}, given = 0 }
+    function frame:IsShown() return self.shown end
+    function frame:Show() self.shown = true end
+    function frame:Hide() self.shown = false end
+    function frame:SetTitle() end
+    function frame:SetStatus() end
+    function frame:SetRows() return true end
+    function frame:SetConflicts() return true end
+    function frame:ShowPage(id) table.insert(self.pages, id) end
+    function frame:SetRecruiters(rows)
+        self.given = self.given + 1
+        self.rows = rows
+        return true
+    end
+    world.addon.RosterWindow.Create = function(_, options)
+        frame.options = options
+        return frame
+    end
+    fixtures.slash(world, "recruit")
+    return frame
+end
+
+test.test("recruitment tab: /agf recruit opens the frame on the Recruitment tab and is listed in help", function()
+    local world = login("Forever")
+    fixtures.slash(world, "help")
+    test.assertContains(table.concat(world.messages, "\n"), "/agf recruit - open your Guild Recruit settings")
+
+    local frame = openRecruitment(world)
+
+    test.assertTrue(frame.shown)
+    test.assertEqual("recruitment", frame.pages[#frame.pages])
+    test.assertTrue(type(frame.options.drawPages.recruitment) == "function")
+end)
+
+test.test("recruitment tab: an officer gets the leaderboard there, and it redraws as counts arrive", function()
+    local world = login("Retail", { playerName = OFFICER })
+    local frame = openRecruitment(world)
+
+    test.assertEqual("Player", frame.rows[1].label)
+    test.assertEqual(0, #rowsOfKind(frame.rows, "recruiter"))
+    local given = frame.given
+
+    world.addon.guildRecruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time,
+        r = { n = 3, t = { world.time, world.time, world.time } } }, MEMBER)
+
+    test.assertTrue(frame.given > given)
+    local recruiters = rowsOfKind(frame.rows, "recruiter")
+    test.assertEqual(1, #recruiters)
+    test.assertEqual(3, recruiters[1].recent)
+end)
+
+test.test("recruitment tab: a regular member gets no leaderboard", function()
+    local world = login("Retail", { playerName = MEMBER })
+    local frame = openRecruitment(world)
+
+    test.assertEqual("recruitment", frame.pages[#frame.pages])
+    test.assertEqual(nil, frame.rows)
+    world.addon.guildRecruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time,
+        r = { n = 1, t = { world.time } } }, OFFICER)
+    test.assertEqual(nil, frame.rows)
 end)
 
 test.test("recruiters: a regular member can't open the view", function()

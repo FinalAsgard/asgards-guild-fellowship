@@ -33,9 +33,9 @@ Controller.__index = Controller
 --   adStats       optional function(keys) -> a player's ad count line for
 --                 the player panel, or nil
 --   recruitRecord optional function(keys) -> a player's ad record (see
---                 RecruitStats), for the officers' Recruiters view
+--                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
---                 is an officer; only officers get the Recruiters view
+--                 is an officer; only officers get the Recruiters leaderboard
 --   recentAds     optional function() -> the channels advertised in lately,
 --                 newest first, as { label, ago } (see GuildRecruit:KnownAds)
 function RosterController.Create(options)
@@ -739,7 +739,7 @@ function Controller:Recruiters()
     })
 end
 
--- The Recruiters view's rows for an officer, or nil for anyone else: the
+-- The Recruiters leaderboard's rows for an officer, or nil for anyone else: the
 -- leaderboard, then the channels this client knows were advertised in
 -- lately. Each part starts with a heading row ({ kind = "heading", label,
 -- recent, total }: its column titles), and an empty part says so.
@@ -772,8 +772,8 @@ function Controller:RecruitersView()
     return rows
 end
 
--- Redraws the Recruiters view when the window is open: officers get their
--- rows, everyone else neither the view nor its button.
+-- Redraws the Recruiters leaderboard on the Recruitment page when the
+-- window is open: officers get their rows, everyone else no leaderboard.
 function Controller:RefreshRecruiters()
     if self.window == nil or not self.window:IsShown() or type(self.window.SetRecruiters) ~= "function" then
         return

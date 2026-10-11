@@ -35,6 +35,7 @@ if clientProfile.supported then
     -- entry points open it.
     pages = addon.PageNavigator.Create()
     pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
+    pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
     pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
     rosterController = addon.RosterController.Create({
@@ -79,6 +80,14 @@ if clientProfile.supported then
                     settings = function(content)
                         frameSettings:Draw(content, settings:SectionsOn("settings"), 28)
                         frameSettings:Refresh()
+                    end,
+                    -- The Recruitment settings, with room below them for the
+                    -- officers' leaderboard (drawn by the roster window).
+                    recruitment = function(content)
+                        local _, below = frameSettings:Draw(content, settings:SectionsOn("recruitment"), 28,
+                            addon.RosterWindow.LEADERBOARD_HEIGHT)
+                        frameSettings:Refresh()
+                        return below
                     end,
                     -- Guild Greet's settings, with the greetings editor below
                     -- them on the same scrolling page.
@@ -430,6 +439,17 @@ if clientProfile.supported then
         return true
     end
     settings:AddSection("recruitment", "Recruitment", { page = "recruitment" })
+    -- Says why the settings below are greyed out, only when they are.
+    settings:Add("recruitment", {
+        id = "recruitCantInvite",
+        kind = "text",
+        shown = function()
+            return not client:CanGuildInvite()
+        end,
+        get = function()
+            return "This character can't invite to the guild, so these settings can't be changed here."
+        end,
+    })
     -- Kept for the logged-in character.
     settings:Add("recruitment", {
         id = "recruitOptIn",
@@ -623,6 +643,9 @@ if clientProfile.supported then
         rosterController:Open("settings")
     end)
     router:Register("greet", "edit your Guild Greet greetings", openGreetings)
+    router:Register("recruit", "open your Guild Recruit settings", function()
+        rosterController:Open("recruitment")
+    end)
     router:Register("minimap", "show or hide the minimap button", function()
         local shown, reason = settings:Toggle("minimap")
         if shown == nil then
@@ -849,7 +872,8 @@ if clientProfile.supported then
         mapName = function(mapID)
             return client:GetMapName(mapID)
         end,
-        -- An open Recruiters view shows new counts and ad times at once.
+        -- An open Recruitment leaderboard shows new counts and ad times at
+        -- once.
         onStatsChanged = function()
             rosterController:RefreshRecruiters()
         end,

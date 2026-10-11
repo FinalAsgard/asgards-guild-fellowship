@@ -663,17 +663,19 @@ local function buildConflictPanel(framework, options, frameName)
     return { panel = panel, scroll = scroll, empty = empty, acceptAll = acceptAll, rejectAll = rejectAll }
 end
 
--- The officers' Recruiters view: players ranked by ads in the last 30 days,
--- then all time, and then the channels this client knows were advertised in
--- lately. Each part starts with a heading row naming its own columns (see
--- RosterController:RecruitersView).
+-- The officers' Recruiters leaderboard on the Recruitment page: players
+-- ranked by ads in the last 30 days, then all time, and then the channels
+-- this client knows were advertised in lately. Each part starts with a
+-- heading row naming its own columns (see RosterController:RecruitersView).
 local RECRUITER_COLUMNS = {
     { field = "label", x = 8, width = 200 },
     { field = "recent", x = 214, width = 110 },
     { field = "total", x = 330, width = 60 },
 }
 local RECRUITERS_WIDTH = 420
-local RECRUITERS_HEIGHT = 360
+local RECRUITER_LINES = 12
+-- The room the leaderboard takes below the Recruitment settings.
+RosterWindow.LEADERBOARD_HEIGHT = 30 + RECRUITER_LINES * RosterWindow.LINE_HEIGHT + 12
 
 local function createRecruiterLine(scroll, index)
     local line = CreateFrame("Frame", nil, scroll)
@@ -725,34 +727,33 @@ local function refreshRecruiterLines(scroll, rows, offset, totalLines)
     end
 end
 
-local function buildRecruitersPanel(framework, frameName)
-    local panel = framework:CreateSimplePanel(
-        UIParent,
-        RECRUITERS_WIDTH,
-        RECRUITERS_HEIGHT,
-        addon.Identity.displayName .. " - Recruiters",
-        frameName .. "Recruiters"
-    )
-    panel:SetFrameStrata("DIALOG")
-    local lineAmount = math.floor((RECRUITERS_HEIGHT - 54) / RosterWindow.LINE_HEIGHT)
+-- Draws the leaderboard into `parent` (LEADERBOARD_HEIGHT tall), hidden
+-- until the controller hands over an officer's rows.
+local function buildLeaderboard(framework, parent, frameName)
+    local holder = CreateFrame("Frame", nil, parent)
+    holder:SetAllPoints(parent)
+    local title = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -4)
+    title:SetText("Recruiters")
+    local height = RECRUITER_LINES * RosterWindow.LINE_HEIGHT
     local scroll = framework:CreateScrollBox(
-        panel,
+        holder,
         frameName .. "RecruiterScroll",
         refreshRecruiterLines,
         {},
-        RECRUITERS_WIDTH - 20,
-        RECRUITERS_HEIGHT - 54,
-        lineAmount,
+        RECRUITERS_WIDTH,
+        height,
+        RECRUITER_LINES,
         RosterWindow.LINE_HEIGHT,
         createRecruiterLine,
         true
     )
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -32)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 12)
-    scroll:CreateLines(createRecruiterLine, lineAmount)
-    panel:Hide()
-    return { panel = panel, scroll = scroll }
+    scroll:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -30)
+    scroll:SetSize(RECRUITERS_WIDTH, height)
+    scroll:CreateLines(createRecruiterLine, RECRUITER_LINES)
+    holder:Hide()
+    return { holder = holder, scroll = scroll }
 end
 
 local function build(framework, options)
@@ -768,12 +769,18 @@ local function build(framework, options)
     local frame = host.panel
     local panel = host:Content("roster")
     -- The other pages draw themselves; one that fails is left empty rather
-    -- than taking the roster down with it.
+    -- than taking the roster down with it. The Recruitment page hands back
+    -- room below its settings for the officers' leaderboard.
+    local recruiters
     local pageId, draw
     for pageId, draw in pairs(options.drawPages or {}) do
         local content = host:Content(pageId)
         if content ~= nil then
-            pcall(draw, content, framework)
+            local drawn, below = pcall(draw, content, framework)
+            if drawn and pageId == "recruitment" and below ~= nil then
+                local built, leaderboard = pcall(buildLeaderboard, framework, below, frameName)
+                recruiters = built and leaderboard or nil
+            end
         end
     end
     if options.onHide ~= nil then
@@ -927,12 +934,6 @@ local function build(framework, options)
     conflictsButton:SetSize(110, 22)
     conflictsButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -36, 10)
     conflictsButton:SetText("Conflicts (0)")
-    -- Officers only: shown once the controller hands over Recruiters rows.
-    local recruitersButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    recruitersButton:SetSize(90, 22)
-    recruitersButton:SetPoint("RIGHT", conflictsButton, "LEFT", -6, 0)
-    recruitersButton:SetText("Recruiters")
-    recruitersButton:Hide()
 
     -- Departed characters are hidden unless this is checked.
     local departed = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
@@ -959,7 +960,7 @@ local function build(framework, options)
 
     local status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     status:SetPoint("LEFT", purgeAll, "RIGHT", 10, 0)
-    status:SetPoint("RIGHT", recruitersButton, "LEFT", -10, 0)
+    status:SetPoint("RIGHT", conflictsButton, "LEFT", -10, 0)
     status:SetJustifyH("LEFT")
     status:SetWordWrap(false)
 
@@ -976,18 +977,8 @@ local function build(framework, options)
         end
     end)
     conflicts.button = conflictsButton
-    local recruiters = buildRecruitersPanel(framework, frameName)
-    recruiters.button = recruitersButton
-    recruitersButton:SetScript("OnClick", function()
-        if recruiters.panel:IsShown() then
-            recruiters.panel:Hide()
-        else
-            recruiters.panel:Show()
-        end
-    end)
     frame:HookScript("OnHide", function()
         conflicts.panel:Hide()
-        recruiters.panel:Hide()
         playerPanel.panel:Hide()
     end)
 
@@ -997,6 +988,8 @@ end
 -- options.navigator is the PageNavigator with the master frame's pages;
 -- options.drawPages maps a page id to function(content, framework) that
 -- draws that page into its content frame (the Roster page is drawn here);
+-- the Recruitment page's returns a frame LEADERBOARD_HEIGHT tall below its
+-- settings, where the officers' leaderboard is drawn;
 -- options.onHide() runs whenever the frame closes;
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
@@ -1085,18 +1078,20 @@ function Window:SetConflicts(rows)
     end))
 end
 
--- Shows the officers' Recruiters view (see
--- RosterController:RecruitersView), or, for nil, hides the view and its
--- footer button.
+-- Shows the officers' Recruiters leaderboard on the Recruitment page (see
+-- RosterController:RecruitersView), or, for nil, hides it. False when the
+-- page has no leaderboard.
 function Window:SetRecruiters(rows)
+    local recruiters = self.recruiters
+    if recruiters == nil then
+        return false
+    end
     return (pcall(function()
-        local recruiters = self.recruiters
         if rows == nil then
-            recruiters.button:Hide()
-            recruiters.panel:Hide()
+            recruiters.holder:Hide()
             return
         end
-        recruiters.button:Show()
+        recruiters.holder:Show()
         recruiters.scroll:SetData(rows)
         recruiters.scroll:Refresh()
     end))
