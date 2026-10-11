@@ -119,6 +119,58 @@ for index = 1, #fixtures.PROFILES do
     end)
 end
 
+for index = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[index]
+    local zones = ZONES[profile]
+
+    -- Arriving by boat, the client can move the player into the new zone's
+    -- General while it still reports the old zone. Post then must not send
+    -- an ad to the new zone's General and count it for the old one.
+    test.test(profile .. ": Post sends nothing while General is another zone's than the one being counted", function()
+        local world = login(profile)
+        optIn(world)
+        local key = world.shown[1].key
+
+        -- Still reported in the first zone, but General is the next zone's.
+        world.channels = { [1] = "General - " .. zones.there[2] }
+        test.assertEqual(nil, world.addon.guildRecruit:Post(key))
+        test.assertEqual(0, #world.chat)
+        local partition = select(2, world.addon.rosterController:QuietContext())
+        test.assertEqual(nil, next(partition:GetRecruitLedger()))
+        test.assertEqual(0, #world.shown)
+
+        -- The client catches up: the next zone is prompted for, and posting
+        -- there counts for it.
+        world.zone = { mapID = zones.there[1], name = zones.there[2] }
+        fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+        fixtures.runTimers(world, 60)
+        test.assertEqual(1, #world.shown)
+        test.assertEqual("Advertise in " .. zones.there[2] .. " General?", world.shown[1].text)
+        world.handlers.post(world.shown[1].key)
+        test.assertEqual(1, #world.chat)
+
+        -- A minute later nothing asks again, and the recent ads name the zone
+        -- the ad went to.
+        fixtures.runTimers(world, 60)
+        test.assertEqual(0, #world.shown)
+        local ads = world.addon.guildRecruit:KnownAds()
+        test.assertEqual(zones.there[2] .. " General", ads[1].label)
+    end)
+
+    test.test(profile .. ": a prompt never shows for a zone before its map is known", function()
+        local world = login(profile)
+        optIn(world)
+        world.handlers.post(world.shown[1].key)
+
+        world.zone = { name = zones.there[2] }
+        world.channels = { [1] = "General - " .. zones.there[2] }
+        fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+        fixtures.runTimers(world, 60)
+
+        test.assertEqual(0, #world.shown)
+    end)
+end
+
 test.test("guild recruit: a failed send records nothing and keeps the prompt", function()
     local world = login("Retail")
     optIn(world)

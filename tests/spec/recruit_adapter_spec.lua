@@ -304,3 +304,34 @@ test.test("reordered names in another language never put an ad in the wrong chan
     test.assertEqual(nil, client:GetGeneralChannel())
     test.assertEqual(nil, client:GetTradeChannel())
 end)
+
+test.test("a zone whose maps work but haven't placed the player yet has no key", function()
+    local client = newClient({
+        GetRealZoneText = function()
+            return "Booty Bay"
+        end,
+        C_Map = {
+            GetBestMapForUnit = function()
+                return nil
+            end,
+        },
+    })
+
+    test.assertEqual(nil, client:GetZone())
+end)
+
+test.test("a channel is the zone's unless its name says it's another zone's", function()
+    local names = { [1] = "General - Booty Bay", [2] = "Trade - City", [3] = "General", [4] = 42 }
+    local client = newClient({
+        GetChannelName = function(number)
+            return names[number] ~= nil and number or 0, names[number]
+        end,
+    })
+
+    test.assertTrue(client:IsChannelOfZone(1, "Booty Bay"))
+    test.assertFalse(client:IsChannelOfZone(1, "Stranglethorn Vale"))
+    -- No zone in the name, or no readable name: nothing is ruled out.
+    test.assertTrue(client:IsChannelOfZone(3, "Booty Bay"))
+    test.assertTrue(client:IsChannelOfZone(4, "Booty Bay"))
+    test.assertTrue(client:IsChannelOfZone(9, "Booty Bay"))
+end)

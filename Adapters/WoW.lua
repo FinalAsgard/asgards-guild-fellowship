@@ -466,13 +466,18 @@ end
 local SUB_ZONE_MAP_TYPE = 4
 
 -- The zone's map ID where the client has maps: the player's map, climbing
--- out of any finer map to the zone it's in. Nil otherwise.
+-- out of any finer map to the zone it's in. Nil otherwise, and then true
+-- as well when the client's maps work but haven't placed the player on one
+-- yet.
 function Client:zoneMapId()
     local maps = self.environment.C_Map
     if type(maps) ~= "table" then
         return nil
     end
     local ok, mapId = callFunction(maps.GetBestMapForUnit, "player")
+    if ok and mapId == nil then
+        return nil, true
+    end
     if not ok or type(mapId) ~= "number" then
         return nil
     end
@@ -504,7 +509,9 @@ end
 
 -- The zone the player is in as { key, name }: the key is "map:<ID>" where
 -- the client has maps, else "zone:<name>"; the name is as the client shows
--- it. Nil when the client can't say.
+-- it. Nil when the client can't say, including while a client whose maps
+-- work hasn't placed the player on one yet (just after a loading screen, or
+-- on a boat), so one zone never goes by two keys.
 function Client:GetZone()
     local ok, name = callFunction(self.environment.GetRealZoneText)
     if not ok or type(name) ~= "string" or name == "" then
@@ -513,9 +520,12 @@ function Client:GetZone()
     if not ok or type(name) ~= "string" or name == "" then
         return nil
     end
-    local mapId = self:zoneMapId()
+    local mapId, unplaced = self:zoneMapId()
     if mapId ~= nil then
         return { key = "map:" .. mapId, name = name }
+    end
+    if unplaced then
+        return nil
     end
     return { key = "zone:" .. name, name = name }
 end
@@ -662,6 +672,19 @@ end
 -- The number of the General channel the player is in, or nil.
 function Client:GetGeneralChannel()
     return self:findServerChannel("General")
+end
+
+-- False when the channel numbered `number` is named for a zone other than
+-- `zoneName` ("General - Booty Bay" while the client still reports the zone
+-- the player just left). True when it's named for that zone, or its name
+-- can't be read or carries no zone, so nothing is ruled out then.
+function Client:IsChannelOfZone(number, zoneName)
+    local ok, _, fullName = callFunction(self.environment.GetChannelName, number)
+    if not ok or type(fullName) ~= "string" or self:IsSecretValue(fullName) then
+        return true
+    end
+    local zone = string.match(fullName, "^[^-]+ %- (.+)$")
+    return zone == nil or zone == zoneName
 end
 
 -- The number of the Trade channel, or nil when the player isn't in it or

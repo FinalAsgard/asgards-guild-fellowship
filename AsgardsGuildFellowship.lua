@@ -832,10 +832,18 @@ if clientProfile.supported then
             if zone == nil then
                 return nil
             end
+            -- Arriving somewhere, the client can put the player in the new
+            -- zone's General a moment before it reports the new zone. Until
+            -- the two agree there's no General here, so an ad is never sent
+            -- to one zone and counted for another.
+            local general = client:GetGeneralChannel()
+            if general ~= nil and not client:IsChannelOfZone(general, zone.name) then
+                general = nil
+            end
             return {
                 key = zone.key,
                 name = zone.name,
-                general = client:GetGeneralChannel(),
+                general = general,
                 trade = client:GetTradeChannel(),
             }
         end,
