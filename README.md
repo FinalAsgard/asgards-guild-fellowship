@@ -23,12 +23,12 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 
 ## Settings
 
-The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Guild Fellowship** (`/agf options` opens it). It has one section per feature:
+The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Guild Fellowship** (`/agf options` opens it). It has one section per feature, and **Recruitment** has a page of its own under the add-on's entry:
 
 - **General**: show or hide the minimap button, an **Open Roster** button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off.
 - **Guild Greet**: turn Guild Greet on or off (everywhere, or just on the character you're playing), turn each category's prompts on or off, set the welcome-back minutes and long-absence days, set how many greetings close your prompt, unlock the prompts to move them, and an **Edit Greetings** button that opens the Greetings window.
-- **Recruitment**: turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, and choose whether you also post the officers' guild ad. These are greyed out on a character that can't invite to the guild. Officers also get the guild ad, the guild ad on/off switch, the minutes between ads in a zone's General and in Trade, and a pause for the whole guild.
+- **Recruitment**: turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, and choose whether you also post the officers' guild ad. These are greyed out on a character that can't invite to the guild. Officers also get the guild ad, the guild ad on/off switch, the minutes between ads in a zone's General and in Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild.
 
 The panel and the slash commands change the same settings, so a change made either way shows up in both. Settings are saved for every character on this game install. The development build's panel is labeled "(Dev)".
 

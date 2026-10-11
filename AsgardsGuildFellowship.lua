@@ -367,7 +367,9 @@ if clientProfile.supported then
         end
         return true
     end
-    settings:AddSection("recruitment", "Recruitment")
+    -- Recruitment has a page of its own in the AddOns options, so the main
+    -- page fits.
+    settings:AddSection("recruitment", "Recruitment", { ownPage = true })
     -- Kept for the logged-in character.
     settings:Add("recruitment", {
         id = "recruitOptIn",
@@ -442,6 +444,12 @@ if clientProfile.supported then
         end
         return true
     end
+    settings:Add("recruitment", {
+        id = "recruitOfficerHeading",
+        kind = "heading",
+        label = "Officer settings: these apply to everyone in the guild",
+        shown = isOfficer,
+    })
     settings:Add("recruitment", {
         id = "recruitGuildAd",
         kind = "input",

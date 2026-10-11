@@ -13,6 +13,8 @@ local _, addon = ...
 --            true, or nil and a reason
 --   input    get() -> a line of text the user edits, at most `maxLength`
 --            characters; set(text) -> true, or nil and a reason
+--   heading  a title within a section that sets the entries after it apart
+--            (e.g. officer-only settings); it holds no value
 -- `get`, `set` and `run` are called protected, so a failing feature never
 -- breaks the panel or a slash command. A toggle marked `offOnClose` is a
 -- mode that only lasts while the panel is open (see Model:Closed). An entry
@@ -20,7 +22,7 @@ local _, addon = ...
 -- answers true again. An entry with `shown() -> false` is left off the panel
 -- (e.g. officer-only settings for other members).
 local SettingsModel = {
-    KINDS = { toggle = true, action = true, text = true, number = true, input = true },
+    KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true },
 }
 addon.SettingsModel = SettingsModel
 
@@ -40,13 +42,14 @@ local function isText(value)
     return type(value) == "string" and value ~= ""
 end
 
--- Adds a section, shown in the order sections are added. False when the id
--- is unusable or already taken.
-function Model:AddSection(id, label)
+-- Adds a section, shown in the order sections are added. `options.ownPage`
+-- puts it on a page of its own in the AddOns options instead of the main
+-- page. False when the id is unusable or already taken.
+function Model:AddSection(id, label, options)
     if not isText(id) or not isText(label) or self.sectionsById[id] ~= nil then
         return false
     end
-    local section = { id = id, label = label, entries = {} }
+    local section = { id = id, label = label, entries = {}, ownPage = type(options) == "table" and options.ownPage == true }
     self.sectionsById[id] = section
     table.insert(self.sections, section)
     return true
@@ -65,6 +68,12 @@ local function entryProblem(entry)
     end
     if entry.kind == "action" then
         return type(entry.run) ~= "function" and "action has no run function" or nil
+    end
+    if entry.kind == "heading" then
+        if entry.shown ~= nil and type(entry.shown) ~= "function" then
+            return "entry's shown check isn't a function"
+        end
+        return nil
     end
     if type(entry.get) ~= "function" then
         return "entry has no get function"

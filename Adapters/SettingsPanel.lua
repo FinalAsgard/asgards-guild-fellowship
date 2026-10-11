@@ -2,7 +2,9 @@ local _, addon = ...
 
 -- The add-on's page in the game's AddOns options (Esc -> Options -> AddOns),
 -- drawn from the SettingsModel: a title, then one header per section with
--- its entries below it (a check box, a button, a line of text, a number
+-- its entries below it. A section that asks for a page of its own gets one
+-- under the add-on's entry. Within a section, a heading sets the entries
+-- after it apart (a check box, a button, a line of text, a number
 -- with minus and plus buttons, or a labelled text box saved on Enter). An
 -- entry the model reports disabled is greyed out and can't be changed, and
 -- one it reports hidden isn't shown. Clients with the newer Settings API get a canvas
@@ -35,6 +37,10 @@ end
 
 -- Enables or greys out a widget's controls and label.
 local function setEnabled(widget, enabled)
+    -- A heading keeps its own color.
+    if widget.kind == "heading" then
+        return
+    end
     local index
     for index = 1, #(widget.controls or {}) do
         local control = widget.controls[index]
@@ -204,19 +210,33 @@ function Panel:addText(frame, entry, y)
     table.insert(self.widgets, { kind = "text", id = entry.id, frame = text })
 end
 
--- Builds the panel frame from the model. Returns the frame, or nil.
-function Panel:Build()
+-- A title within a section, over a thin gold line, setting the entries
+-- after it apart (e.g. officer-only settings).
+function Panel:addHeading(frame, entry, y)
+    local line = frame:CreateTexture(nil, "ARTWORK")
+    line:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT, y - 2)
+    line:SetWidth(SettingsPanel.INPUT_WIDTH)
+    line:SetHeight(1)
+    line:SetColorTexture(0.83, 0.69, 0.22, 0.6)
+    local label = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    label:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT, y - 8)
+    label:SetText(entry.label)
+    table.insert(self.widgets, { kind = "heading", id = entry.id, label = label, value = line })
+end
+
+-- Builds one options page, titled `title`, from `sections`. Returns the
+-- frame, or nil.
+function Panel:Build(sections, title)
     if type(self.environment.CreateFrame) ~= "function" then
         return nil
     end
     local ok, frame = pcall(function()
         local panel = self.environment.CreateFrame("Frame")
-        panel.name = addon.Identity.displayName
-        local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-        title:SetPoint("TOPLEFT", SettingsPanel.LEFT, SettingsPanel.TOP)
-        title:SetText(addon.Identity.displayName)
+        panel.name = title
+        local heading = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+        heading:SetPoint("TOPLEFT", SettingsPanel.LEFT, SettingsPanel.TOP)
+        heading:SetText(title)
         local y = SettingsPanel.TOP - SettingsPanel.ROW - SettingsPanel.SECTION_GAP
-        local sections = self.model:Sections()
         local sectionIndex, entryIndex
         for sectionIndex = 1, #sections do
             local section = sections[sectionIndex]
@@ -236,6 +256,10 @@ function Panel:Build()
                     self:addInput(panel, entry, y)
                     -- The text box sits on a row of its own below the label.
                     y = y - SettingsPanel.ROW
+                elseif entry.kind == "heading" then
+                    -- A gap above it sets it apart from the entries before.
+                    y = y - SettingsPanel.SECTION_GAP
+                    self:addHeading(panel, entry, y)
                 else
                     self:addText(panel, entry, y)
                 end
@@ -246,8 +270,8 @@ function Panel:Build()
         panel:SetScript("OnShow", function()
             self:Refresh()
         end)
-        -- However the options window closes (X, Close, Escape), the panel
-        -- hides.
+        -- However the options window closes (X, Close, Escape), or the user
+        -- moves to another page, the page hides.
         panel:SetScript("OnHide", function()
             self.model:Closed()
         end)
@@ -259,27 +283,73 @@ function Panel:Build()
     return frame
 end
 
--- Adds the panel to the AddOns options. Returns true when it was added.
+-- The model's sections split into the main page's and those that ask for a
+-- page of their own.
+function Panel:pages()
+    local main, own = {}, {}
+    local sections = self.model:Sections()
+    local index
+    for index = 1, #sections do
+        if sections[index].ownPage then
+            table.insert(own, sections[index])
+        else
+            table.insert(main, sections[index])
+        end
+    end
+    return main, own
+end
+
+-- Adds the panel to the AddOns options: the main page, with a page of its
+-- own under it for each section that asks for one. A client that can't
+-- show pages under the main one gets those sections on the main page.
+-- Returns true when the main page was added.
 function Panel:Register()
     if self.registered then
         return true
     end
-    local frame = self:Build()
+    local settings = self.environment.Settings
+    local modern = type(settings) == "table" and type(settings.RegisterCanvasLayoutCategory) == "function"
+        and type(settings.RegisterAddOnCategory) == "function"
+    local legacy = type(self.environment.InterfaceOptions_AddCategory) == "function"
+    local main, own = self:pages()
+    local canNest = (modern and type(settings.RegisterCanvasLayoutSubcategory) == "function") or (not modern and legacy)
+    if not canNest then
+        local index
+        for index = 1, #own do
+            table.insert(main, own[index])
+        end
+        own = {}
+    end
+    local frame = self:Build(main, addon.Identity.displayName)
     if frame == nil then
         return false
     end
-    local settings = self.environment.Settings
     local ok = false
-    if type(settings) == "table" and type(settings.RegisterCanvasLayoutCategory) == "function"
-        and type(settings.RegisterAddOnCategory) == "function"
-    then
+    if modern then
         ok = pcall(function()
             local category = settings.RegisterCanvasLayoutCategory(frame, addon.Identity.displayName)
+            local index
+            for index = 1, #own do
+                local page = self:Build({ own[index] }, own[index].label)
+                if page ~= nil then
+                    settings.RegisterCanvasLayoutSubcategory(category, page, own[index].label)
+                end
+            end
             settings.RegisterAddOnCategory(category)
             self.category = category
         end)
-    elseif type(self.environment.InterfaceOptions_AddCategory) == "function" then
-        ok = pcall(self.environment.InterfaceOptions_AddCategory, frame)
+    elseif legacy then
+        ok = pcall(function()
+            self.environment.InterfaceOptions_AddCategory(frame)
+            local index
+            for index = 1, #own do
+                local page = self:Build({ own[index] }, own[index].label)
+                if page ~= nil then
+                    page.parent = frame.name
+                    self.environment.InterfaceOptions_AddCategory(page)
+                end
+            end
+        end)
     end
     if not ok then
         return false
