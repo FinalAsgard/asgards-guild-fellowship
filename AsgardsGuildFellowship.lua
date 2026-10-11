@@ -602,6 +602,9 @@ if clientProfile.supported then
         send = function(text, channelNumber)
             return client:SendChannelMessage(text, channelNumber)
         end,
+        inInstance = function()
+            return client:IsInInstance()
+        end,
         rosterLoaded = function()
             local count = client:GetGuildRosterCount()
             return count ~= nil and count > 0
@@ -703,9 +706,11 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Prompts wait out combat and boss encounters.
     local busy = client:ObserveCombat(function(inCombat)
         guildGreet:OnCombatChanged(inCombat)
+        guildRecruit:OnCombatChanged(inCombat)
     end)
     if busy then
         guildGreet:OnCombatChanged(true)
+        guildRecruit:OnCombatChanged(true)
     end
     -- Advertise prompts follow the player from zone to zone.
     client:ObserveZone(function()

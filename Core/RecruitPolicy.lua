@@ -8,7 +8,9 @@ local _, addon = ...
 -- the user has opted in, there is an ad to post, the channel is there to
 -- post in, and the ledger has no fresh time for it. An unknown channel
 -- counts as due. The zone's General and Trade (where the user is in it) are
--- separate prompts.
+-- separate prompts. Nothing is prompted while the user is busy, for a
+-- channel the user snoozed with Not now, or in a zone the user turned off
+-- with Off here (its General, and Trade while there).
 local RecruitPolicy = {
     GENERAL = "general",
     TRADE = "trade",
@@ -22,11 +24,26 @@ Policy.__index = Policy
 --   invite to the guild.
 -- options.optedIn: function() -> true when the user turned prompts on.
 -- options.hasAd: function() -> true when the user has an ad to post.
+-- options.busy: function() -> true while prompts are held (combat, boss
+--   encounters, keystones, instances, battlegrounds). Optional.
+-- options.snoozedUntil: function(key) -> when a Not now on that channel
+--   ends, or nil. Optional.
+-- options.muted: function(zoneKey) -> true when Off here was pressed in
+--   that zone. Optional.
 function RecruitPolicy.Create(options)
     return setmetatable({
         canInvite = options.canInvite,
         optedIn = options.optedIn,
         hasAd = options.hasAd,
+        busy = options.busy or function()
+            return false
+        end,
+        snoozedUntil = options.snoozedUntil or function()
+            return nil
+        end,
+        muted = options.muted or function()
+            return false
+        end,
     }, Policy)
 end
 
@@ -71,17 +88,39 @@ local function channelsAt(location)
     return channels
 end
 
+-- When a Not now on `key` ends, if it's still running at `now`.
+function Policy:snoozeEnd(key, now)
+    local ok, untilTime = pcall(self.snoozedUntil, key)
+    if ok and type(untilTime) == "number" and untilTime > now then
+        return untilTime
+    end
+    return nil
+end
+
+-- The channels at `location` the user hasn't turned off here.
+function Policy:channels(location)
+    local channels = channelsAt(location)
+    if #channels > 0 then
+        local ok, muted = pcall(self.muted, location.key)
+        if ok and muted == true then
+            return {}
+        end
+    end
+    return channels
+end
+
 -- The prompts due at `now` at `location` (see channelsAt), in a stable
 -- order: General, then Trade. `ledger` is a RecruitLedger.
 function Policy:Due(location, ledger, now)
     local due = {}
-    if not self:Allowed() then
+    if not self:Allowed() or answers(self.busy) then
         return due
     end
-    local channels = channelsAt(location)
+    local channels = self:channels(location)
     local index
     for index = 1, #channels do
-        if ledger:State(channels[index].key, now) ~= addon.RecruitLedger.FRESH then
+        local key = channels[index].key
+        if ledger:State(key, now) ~= addon.RecruitLedger.FRESH and self:snoozeEnd(key, now) == nil then
             table.insert(due, channels[index])
         end
     end
@@ -89,17 +128,22 @@ function Policy:Due(location, ledger, now)
 end
 
 -- Seconds from `now` until the first channel at `location` that was
--- advertised in lately comes due, so the user can be prompted without
--- moving; nil when there's none or no prompts are allowed.
+-- advertised in lately, or snoozed, comes due, so the user can be prompted
+-- without moving; nil when there's none or no prompts are allowed.
 function Policy:NextDue(location, ledger, now)
     if not self:Allowed() then
         return nil
     end
-    local channels = channelsAt(location)
+    local channels = self:channels(location)
     local soonest
     local index
     for index = 1, #channels do
-        local seconds = ledger:FreshFor(channels[index].key, now)
+        local key = channels[index].key
+        local seconds = ledger:FreshFor(key, now)
+        local snoozeEnd = self:snoozeEnd(key, now)
+        if snoozeEnd ~= nil and (seconds == nil or snoozeEnd - now > seconds) then
+            seconds = snoozeEnd - now
+        end
         if seconds ~= nil and (soonest == nil or seconds < soonest) then
             soonest = seconds
         end

@@ -22,6 +22,8 @@ local GuildRecruit = {
     GENERAL_GAP_SECONDS = 60 * 60,
     -- The same for Trade, one channel shared by every city.
     TRADE_GAP_SECONDS = 20 * 60,
+    -- How long Not now hides a channel's prompt.
+    SNOOZE_SECONDS = 10 * 60,
 }
 addon.GuildRecruit = GuildRecruit
 
@@ -40,11 +42,14 @@ Recruit.__index = Recruit
 --               of Trade (nil where the user isn't in them); nil when the
 --               zone is unknown
 --   after       function(seconds, callback) -> false when there's no timer
+--   inInstance  function() -> true in an instance, battleground or keystone
+--               run, where prompts are held. Optional.
 --   send        function(text, channelNumber) -> true when posted
 --   rosterLoaded function() -> true once the guild roster has loaded
 --   view        { Show = function(view, prompts, handlers),
 --               Ask = function(view, question, handlers) }: draws the
---               prompts (handlers.post(key) answers Post) and the login
+--               prompts (handlers.post(key), handlers.notNow(key) and
+--               handlers.offHere(key) answer their buttons) and the login
 --               question, or hides it when `question` is nil
 --               (handlers.yes(), handlers.no() and handlers.close())
 function GuildRecruit.Create(options)
@@ -60,6 +65,15 @@ function GuildRecruit.Create(options)
             return false
         end,
         rosterLoaded = options.rosterLoaded,
+        inInstance = options.inInstance or function()
+            return false
+        end,
+        -- True during combat or a boss encounter.
+        inCombat = false,
+        -- This session's Not now (channel key -> when it ends) and Off here
+        -- (zone key -> true). Neither is saved.
+        snoozes = {},
+        muted = {},
         view = options.view,
         -- True once this login's permission check has run.
         loginChecked = false,
@@ -80,6 +94,15 @@ function GuildRecruit.Create(options)
         hasAd = function()
             return recruit:Ad() ~= nil
         end,
+        busy = function()
+            return recruit:IsBusy()
+        end,
+        snoozedUntil = function(key)
+            return recruit.snoozes[key]
+        end,
+        muted = function(zoneKey)
+            return recruit.muted[zoneKey] == true
+        end,
     })
     return recruit
 end
@@ -88,6 +111,23 @@ end
 function Recruit:CanInvite()
     local ok, can = pcall(self.canInvite)
     return ok and can == true
+end
+
+-- True while prompts are held: combat, a boss encounter, or an instance,
+-- battleground or keystone run.
+function Recruit:IsBusy()
+    if self.inCombat then
+        return true
+    end
+    local ok, inside = pcall(self.inInstance)
+    return ok and inside == true
+end
+
+-- The user entered (true) or left (false) combat or a boss encounter.
+-- Prompts wait until it's over; any still due appear then.
+function Recruit:OnCombatChanged(inCombat)
+    self.inCombat = inCombat == true
+    self:Refresh()
 end
 
 -- True when the logged-in character turned advertise prompts on.
@@ -265,6 +305,12 @@ function Recruit:draw()
         post = function(key)
             self:Post(key)
         end,
+        notNow = function(key)
+            self:NotNow(key)
+        end,
+        offHere = function(key)
+            self:OffHere(key)
+        end,
     })
 end
 
@@ -306,4 +352,25 @@ function Recruit:Post(key)
     self:Ledger():Record(key, now)
     self:Refresh()
     return ad
+end
+
+-- The user pressed Not now on the prompt for `key`: hides that channel's
+-- prompt for 10 minutes. After that it appears again if still due.
+function Recruit:NotNow(key)
+    local now = self.now()
+    if self:Prompt(key) ~= nil and type(now) == "number" then
+        self.snoozes[key] = now + GuildRecruit.SNOOZE_SECONDS
+    end
+    self:Refresh()
+end
+
+-- The user pressed Off here on the prompt for `key`: no more prompts in that
+-- prompt's zone (its General, and Trade while there) until logout or
+-- reload.
+function Recruit:OffHere(key)
+    local prompt = self:Prompt(key)
+    if prompt ~= nil and prompt.zoneKey ~= nil then
+        self.muted[prompt.zoneKey] = true
+    end
+    self:Refresh()
 end

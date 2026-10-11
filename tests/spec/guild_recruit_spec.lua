@@ -477,3 +477,107 @@ test.test("guild recruit: no Trade prompt where Trade isn't available", function
     test.assertEqual(1, #world.shown)
     test.assertEqual(nil, promptFor(world, "Advertise in Trade?"))
 end)
+
+test.test("guild recruit: Not now hides a channel's prompt for 10 minutes, then it comes back", function()
+    local world = login("Retail")
+    optIn(world)
+    inCity(world, "Dornogal")
+
+    world.handlers.notNow(promptFor(world, "Advertise in Trade?").key)
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("Advertise in Dornogal General?", world.shown[1].text)
+
+    fixtures.runTimers(world, 10 * 60 - 1)
+    test.assertEqual(nil, promptFor(world, "Advertise in Trade?"))
+    fixtures.runTimers(world, 1)
+    test.assertTrue(promptFor(world, "Advertise in Trade?") ~= nil)
+end)
+
+test.test("guild recruit: Off here quiets the zone's General and Trade for the session only", function()
+    local world = login("Retail")
+    optIn(world)
+    inCity(world, "Dornogal")
+
+    world.handlers.offHere(world.shown[1].key)
+    test.assertEqual(0, #world.shown)
+    fixtures.runTimers(world, 2 * HOUR)
+    test.assertEqual(0, #world.shown)
+
+    -- Another zone still prompts, Trade too where the user is in it.
+    travel(world, 2248, "Isle of Dorn")
+    test.assertEqual(1, #world.shown)
+    travel(world, 2339, "Dornogal")
+    inCity(world, "Dornogal")
+    test.assertEqual(0, #world.shown)
+
+    -- Nothing is saved, so a reload prompts again.
+    local reloaded = login("Retail", { database = world.database, time = world.time })
+    inCity(reloaded, "Dornogal")
+    test.assertEqual(2, #reloaded.shown)
+end)
+
+test.test("guild recruit: prompts are held in combat and boss encounters, then appear if still due", function()
+    local world = login("Retail")
+    optIn(world)
+
+    fixtures.fire(world, "PLAYER_REGEN_DISABLED")
+    test.assertEqual(0, #world.shown)
+    fixtures.fire(world, "PLAYER_REGEN_ENABLED")
+    test.assertEqual(1, #world.shown)
+
+    world.inEncounter = true
+    fixtures.fire(world, "ENCOUNTER_START")
+    test.assertEqual(0, #world.shown)
+    world.inEncounter = false
+    fixtures.fire(world, "ENCOUNTER_END")
+    test.assertEqual(1, #world.shown)
+end)
+
+for index = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[index]
+
+    test.test(profile .. ": prompts are held in instances and battlegrounds, then appear once outside", function()
+        local world = login(profile)
+        optIn(world)
+        local kinds = { "party", "raid", "pvp", "arena" }
+        local kindIndex
+        for kindIndex = 1, #kinds do
+            world.inInstance = kinds[kindIndex]
+            fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+            test.assertEqual(0, #world.shown, kinds[kindIndex])
+            world.inInstance = nil
+            fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+            test.assertEqual(1, #world.shown, kinds[kindIndex])
+        end
+    end)
+end
+
+test.test("guild recruit: prompts are held during a keystone run", function()
+    local world = login("Retail")
+    optIn(world)
+    world.environment.IsInInstance = nil
+
+    world.inKeystone = true
+    fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+    test.assertEqual(0, #world.shown)
+    world.inKeystone = false
+    fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild recruit: leaving a zone or city closes the prompts for it", function()
+    local world = login("Retail")
+    optIn(world)
+    inCity(world, "Dornogal")
+    test.assertEqual(2, #world.shown)
+
+    -- Out of the city: Trade is gone, and the new zone has its own General.
+    travel(world, 2248, "Isle of Dorn")
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("Advertise in Isle of Dorn General?", world.shown[1].text)
+
+    -- Somewhere without a General channel: nothing is left.
+    world.channels = {}
+    fixtures.fire(world, "CHANNEL_UI_UPDATE")
+    test.assertEqual(0, #world.shown)
+end)

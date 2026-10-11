@@ -7,7 +7,9 @@ local HOUR = 60 * 60
 -- `state.optedIn` and `state.hasAd`, all true to start with.
 local function setup()
     local addon = test.newAddon("Core/RecruitLedger.lua", "Core/RecruitPolicy.lua")
-    local state = { canInvite = true, optedIn = true, hasAd = true }
+    -- Also `state.busy`, `state.snoozes` (key -> when Not now ends) and
+    -- `state.muted` (zone key -> true).
+    local state = { canInvite = true, optedIn = true, hasAd = true, busy = false, snoozes = {}, muted = {} }
     local policy = addon.RecruitPolicy.Create({
         canInvite = function()
             return state.canInvite
@@ -17,6 +19,15 @@ local function setup()
         end,
         hasAd = function()
             return state.hasAd
+        end,
+        busy = function()
+            return state.busy
+        end,
+        snoozedUntil = function(key)
+            return state.snoozes[key]
+        end,
+        muted = function(zoneKey)
+            return state.muted[zoneKey]
         end,
     })
     local ledger = addon.RecruitLedger.Create({}, function()
@@ -109,4 +120,35 @@ test.test("recruit policy: the next channel here to come due is the soonest fres
 
     state.optedIn = false
     test.assertEqual(nil, policy:NextDue(location, ledger, START + 20))
+end)
+
+test.test("recruit policy: nothing is due while the user is busy", function()
+    local _, policy, state, ledger, location = setup()
+    location.trade = 2
+    state.busy = true
+
+    test.assertEqual(0, #policy:Due(location, ledger, START))
+    state.busy = false
+    test.assertEqual(2, #policy:Due(location, ledger, START))
+end)
+
+test.test("recruit policy: a snoozed channel waits until its Not now ends, and the others don't", function()
+    local addon, policy, state, ledger, location = setup()
+    location.trade = 2
+    state.snoozes[addon.RecruitLedger.TRADE_KEY] = START + 600
+
+    local due = policy:Due(location, ledger, START)
+    test.assertEqual(1, #due)
+    test.assertEqual(addon.RecruitPolicy.GENERAL, due[1].channel)
+    test.assertEqual(600, policy:NextDue(location, ledger, START))
+    test.assertEqual(2, #policy:Due(location, ledger, START + 600))
+end)
+
+test.test("recruit policy: Off here turns off a zone's General and Trade, and no other zone", function()
+    local _, policy, state, ledger, location = setup()
+    location.trade = 2
+    state.muted["map:1455"] = true
+
+    test.assertEqual(0, #policy:Due(location, ledger, START))
+    test.assertEqual(2, #policy:Due({ key = "map:1453", name = "Stormwind City", general = 1, trade = 2 }, ledger, START))
 end)

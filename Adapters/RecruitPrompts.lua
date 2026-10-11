@@ -4,11 +4,12 @@ local _, addon = ...
 -- about a quarter to a third of the way down the screen, well away from
 -- Guild Greet's prompts on the left. It has a "Guild Recruit" heading over
 -- a deep blue panel with a blue edge, so it's never mistaken for a greet
--- prompt, and one row per prompt with its question and a Post button. The
+-- prompt, and one row per prompt with its question and Post, Not now and
+-- Off here buttons. The
 -- frame is made on first use and reused. Like the other adapters, a failing
 -- frame call hides the prompts rather than raising an error.
 local RecruitPrompts = {
-    WIDTH = 340,
+    WIDTH = 460,
     HEADER_HEIGHT = 30,
     ROW_HEIGHT = 36,
     PADDING = 12,
@@ -91,11 +92,20 @@ function Prompts:row(index)
         -RecruitPrompts.HEADER_HEIGHT - (index - 1) * RecruitPrompts.ROW_HEIGHT)
 
     local row = { frame = frame }
-    row.post = createFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    row.post:SetWidth(RecruitPrompts.BUTTON_WIDTH)
-    row.post:SetHeight(RecruitPrompts.BUTTON_HEIGHT)
-    row.post:SetPoint("RIGHT", frame, "RIGHT", -RecruitPrompts.PADDING, 0)
-    row.post:SetText("Post")
+    local function button(text, width)
+        local made = createFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        made:SetWidth(width)
+        made:SetHeight(RecruitPrompts.BUTTON_HEIGHT)
+        made:SetText(text)
+        return made
+    end
+    -- Off here sits at the far right, Not now left of it, then Post.
+    row.offHere = button("Off here", RecruitPrompts.BUTTON_WIDTH)
+    row.offHere:SetPoint("RIGHT", frame, "RIGHT", -RecruitPrompts.PADDING, 0)
+    row.notNow = button("Not now", RecruitPrompts.BUTTON_WIDTH)
+    row.notNow:SetPoint("RIGHT", row.offHere, "LEFT", -4, 0)
+    row.post = button("Post", RecruitPrompts.SMALL_BUTTON_WIDTH)
+    row.post:SetPoint("RIGHT", row.notNow, "LEFT", -4, 0)
 
     row.text = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     row.text:SetPoint("LEFT", frame, "LEFT", RecruitPrompts.PADDING, 0)
@@ -105,11 +115,16 @@ function Prompts:row(index)
         row.text:SetWordWrap(false)
     end
 
-    row.post:SetScript("OnClick", function()
-        if row.key ~= nil and self.handlers ~= nil then
-            self.handlers.post(row.key)
+    local function answer(name)
+        return function()
+            if row.key ~= nil and self.handlers ~= nil then
+                self.handlers[name](row.key)
+            end
         end
-    end)
+    end
+    row.post:SetScript("OnClick", answer("post"))
+    row.notNow:SetScript("OnClick", answer("notNow"))
+    row.offHere:SetScript("OnClick", answer("offHere"))
 
     self.rows[index] = row
     return row
@@ -200,7 +215,8 @@ function Prompts:layout()
     end
 end
 
--- Draws `prompts` ({ key, text } each). `handlers.post(key)` answers Post.
+-- Draws `prompts` ({ key, text } each). `handlers.post(key)`,
+-- `handlers.notNow(key)` and `handlers.offHere(key)` answer the buttons.
 function Prompts:Show(prompts, handlers)
     if type(self.environment.CreateFrame) ~= "function" then
         return false
