@@ -213,7 +213,7 @@ test.test("the zone key climbs out of dungeon levels and micro maps to the zone"
     test.assertEqual("map:37", client:GetZone().key)
 end)
 
-test.test("the General and Trade channels are found by the client's own channel names", function()
+test.test("General is found by the client's own channel name, and Trade never by position", function()
     local client = newClient({
         EnumerateServerChannels = function()
             return "Allgemein", "Handel"
@@ -229,7 +229,9 @@ test.test("the General and Trade channels are found by the client's own channel 
     })
 
     test.assertEqual(2, client:GetGeneralChannel())
-    test.assertEqual(3, client:GetTradeChannel())
+    -- Trade is never found by position: the order of the client's names
+    -- isn't reliable for it (WoW Forever's list has no Trade at all).
+    test.assertEqual(nil, client:GetTradeChannel())
 end)
 
 test.test("guild recruit adapter methods return nil or false when the APIs are missing or raise", function()

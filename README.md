@@ -216,7 +216,7 @@ Guild Recruit spreads the guild's recruitment ads out: every zone sees the guild
 ### Channels and timing
 
 - **General**: each zone has its own timer. You're asked to post in a zone's General once it has gone 60 minutes (by default) without a guild ad there.
-- **Trade**: one channel in every city, so an ad in one city counts for all of them. You're asked once it has gone 60 minutes (by default) without one. You're only prompted for Trade where the game has you in the Trade channel and can post there.
+- **Trade**: one channel in every city, so an ad in one city counts for all of them. You're asked once it has gone 60 minutes (by default) without one. You're only prompted for Trade where the game has you in the Trade channel and can post there. Trade is found by its English name, so on a client in another language there are no Trade prompts.
 - **Your timers**: set your own General and Trade timers in the **Recruitment** settings, from 5 minutes to 4 hours, to be asked more or less often.
 - **The guild's floor**: officers set the shortest time the guild allows between ads, 30 minutes for General and 10 for Trade by default (never below 15 and 5, at most 4 hours). Nobody's timer goes below it, so officers decide how often the guild can advertise. The Recruitment page shows the current floor.
 - Officers can also pause recruitment for the whole guild, and turn the guild ad off by clearing it.

@@ -1324,8 +1324,28 @@ test.test("/agf channels shows the channels the game lists and which Guild Recru
     local text = table.concat(world.messages, "\n", before + 1)
     test.assertContains(text, "Zone: Ironforge (map:1455)")
     test.assertContains(text, "1. General (General - Ironforge)")
-    test.assertContains(text, "2. Trade (Trade - City), disabled here")
+    -- The client gives a disabled channel no full name.
+    test.assertContains(text, "2. Trade, disabled here")
     test.assertContains(text, "3. LocalDefense (LocalDefense - Ironforge)")
     test.assertContains(text, "General: channel 1")
     test.assertContains(text, "Trade: none here")
+end)
+
+test.test("guild recruit: with a tester's WoW Forever channel names, Trade out in the world is none, not LocalDefense", function()
+    local world = login("Forever")
+    -- Exactly what the tester's client listed: no Trade, LocalDefense second.
+    world.environment.EnumerateServerChannels = function()
+        return "General", "LocalDefense", "LookingForGroup", "BigfootWorldChannel", "MeetingStone",
+            "ShadowlandsBetaDiscussion", "ShadowlandsPTRDiscussion", "ChromieTime"
+    end
+    optIn(world)
+    world.zone = { mapID = 1434, name = "Stranglethorn Vale" }
+    outInTheWorld(world, "Stranglethorn Vale")
+    fixtures.fire(world, "CHANNEL_UI_UPDATE")
+
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("Advertise in Stranglethorn Vale General?", world.shown[1].text)
+    local before = #world.messages
+    fixtures.slash(world, "channels")
+    test.assertContains(table.concat(world.messages, "\n", before + 1), "Trade: none here")
 end)

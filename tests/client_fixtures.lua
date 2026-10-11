@@ -404,9 +404,10 @@ local function installGuild(world, environment, profile)
         end
         return unpack(list)
     end
+    -- Like the real client, a channel disabled here has no full name.
     environment.GetChannelName = function(number)
         local name = world.channels[number]
-        if name == nil then
+        if name == nil or world.disabledChannels[number] then
             return 0, nil, 0
         end
         return number, name, 0

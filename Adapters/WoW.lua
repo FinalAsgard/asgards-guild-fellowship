@@ -620,31 +620,43 @@ function Client:joinedChannel(name)
 end
 
 -- The number of a server channel the player is in and can post to here, or
--- nil. The channel is found by its English name (`english`) first. Only on
--- a client with no channel of that name is it found by the client's own
--- name for it, `index`th in the client's list of server channel names (for
--- other languages); that list's order differs between clients, so it's
--- never trusted over the name. A channel the client reports disabled here
--- doesn't count.
-function Client:findServerChannel(index, english)
+-- nil. The channel is found by its English name (`english`) in the
+-- client's channel list, which also names channels the client has disabled
+-- here (out of a city, Trade is listed but disabled, and the client gives
+-- it no full name). The channel by that name decides: when it's disabled,
+-- there's none here. Only a channel the client doesn't list at all is
+-- looked for by the client's own name for it, `ownIndex`th in its list of
+-- server channel names (for other languages); that list's order differs
+-- between clients, so a caller passes `ownIndex` only where it's known to
+-- hold. Without a channel list, joined channels are found by full name.
+function Client:findServerChannel(english, ownIndex)
     local candidates = { english }
-    local ok, names = callFunction(function()
-        return { self.environment.EnumerateServerChannels() }
-    end)
-    local own = ok and type(names) == "table" and names[index] or nil
-    if type(own) == "string" and own ~= "" and own ~= english then
-        table.insert(candidates, own)
+    if ownIndex ~= nil then
+        local ok, names = callFunction(function()
+            return { self.environment.EnumerateServerChannels() }
+        end)
+        local own = ok and type(names) == "table" and names[ownIndex] or nil
+        if type(own) == "string" and own ~= "" and own ~= english then
+            table.insert(candidates, own)
+        end
     end
-    local disabled = self:disabledChannels()
-    local candidateIndex
+    local listed = self:ListedChannels()
+    local candidateIndex, index
     for candidateIndex = 1, #candidates do
-        local id = self:joinedChannel(candidates[candidateIndex])
-        if id ~= nil then
-            -- The channel by that name decides, even when it's disabled.
-            if disabled[id] then
-                return nil
+        if listed[1] ~= nil then
+            for index = 1, #listed do
+                if listed[index].name == candidates[candidateIndex] then
+                    if listed[index].disabled then
+                        return nil
+                    end
+                    return listed[index].number
+                end
             end
-            return id
+        else
+            local id = self:joinedChannel(candidates[candidateIndex])
+            if id ~= nil then
+                return id
+            end
         end
     end
     return nil
@@ -652,14 +664,16 @@ end
 
 -- The number of the General channel the player is in, or nil.
 function Client:GetGeneralChannel()
-    return self:findServerChannel(1, "General")
+    return self:findServerChannel("General", 1)
 end
 
 -- The number of the Trade channel, or nil when the player isn't in it or
 -- the client reports it disabled here (outside a city). Trade is one channel
 -- in every city, so this also answers whether Trade is available here.
 function Client:GetTradeChannel()
-    return self:findServerChannel(2, "Trade")
+    -- Never by position: WoW Forever's list of server channel names doesn't
+    -- include Trade, and its second name is LocalDefense.
+    return self:findServerChannel("Trade")
 end
 
 -- True when the player can post to the Trade channel here.
