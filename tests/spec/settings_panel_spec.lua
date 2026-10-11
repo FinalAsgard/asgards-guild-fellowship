@@ -537,3 +537,23 @@ test.test("settings panel: Custom... opens the game's color picker and saves the
         test.assertEqual("4a90ff", saved.color, styles[index])
     end
 end)
+
+test.test("settings panel: a color that can't be read shows its entry's default, not the first swatch", function()
+    local environment = newEnvironment()
+    environment.InterfaceOptions_AddCategory = function() end
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local model = addon.SettingsModel.Create()
+    model:AddSection("chatTags", "Chat Tags")
+    model:Add("chatTags", { id = "mainColor", kind = "color", label = "Main's name tag color", sample = "[Hammer]",
+        default = "7fd4ff",
+        swatches = { { label = "Blue", color = "4a90ff" }, { label = "Light blue", color = "7fd4ff" } },
+        get = function() error("saved data exploded") end,
+        set = function() return true end })
+    local panel = addon.SettingsPanel.Create({ environment = environment }, model)
+    panel:Register()
+    local widget = widgetFor(panel, "mainColor")
+
+    test.assertEqual("|cff7fd4ff[Hammer]|r", widget.value.text)
+    test.assertFalse(widget.swatches[1].selected.shown)
+    test.assertTrue(widget.swatches[2].selected.shown)
+end)

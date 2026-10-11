@@ -20,7 +20,8 @@ local _, addon = ...
 --            (e.g. officer-only settings); it holds no value
 --   color    get() -> a color as "rrggbb"; set(color) -> true, or nil and a
 --            reason. `swatches` lists the colors offered to click, each
---            { label, color }; `sample` is text shown in the chosen color
+--            { label, color }; `sample` is text shown in the chosen color;
+--            `default` is the color shown when the setting can't be read
 -- `get`, `set` and `run` are called protected, so a failing feature never
 -- breaks the panel or a slash command. A toggle marked `offOnClose` is a
 -- mode that only lasts while the panel is open (see Model:Closed). An entry

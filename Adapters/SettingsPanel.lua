@@ -206,7 +206,8 @@ function Panel:Refresh()
             elseif widget.kind == "text" then
                 widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
             elseif widget.kind == "color" then
-                local color = self.model:Get(widget.id)
+                -- A color that can't be read shows the entry's default.
+                local color = self.model:Get(widget.id) or widget.entry.default or widget.entry.swatches[1].color
                 widget.value:SetText("|cff" .. tostring(color) .. (widget.entry.sample or "Sample") .. "|r")
                 local swatchIndex
                 for swatchIndex = 1, #widget.swatches do

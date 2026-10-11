@@ -270,6 +270,7 @@ if clientProfile.supported then
             kind = "color",
             label = label,
             sample = sample,
+            default = addon.ChatAnnotator.COLORS[kind],
             swatches = addon.ChatAnnotator.SWATCHES,
             get = function()
                 local store = rosterController:Store()
