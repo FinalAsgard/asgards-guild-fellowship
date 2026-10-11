@@ -1234,20 +1234,16 @@ test.test("recruiters: the view lists the channels this client knows were advert
     recruit:OnMessage({ v = 1, t = "advertised", k = "general:zone:Somewhere", n = "Somewhere General",
         a = world.time }, MEMBER)
 
+    -- Times are kept past the user's own timer, as history.
     local ads = rowsOfKind(window.rows, "ad")
-    test.assertEqual(2, #ads)
+    test.assertEqual(3, #ads)
     test.assertEqual("Somewhere General", ads[1].label)
     test.assertEqual("just now", ads[1].recent)
     test.assertEqual("Trade", ads[2].label)
     test.assertEqual("12 min ago", ads[2].recent)
-
-    -- A zone known by its map is named from the map; times kept longer by
-    -- a longer own timer still show.
-    world.addon.settings:Set("recruitMyGeneralGap", 90)
-    recruit:OnMessage({ v = 1, t = "channel-time", k = "general:map:2339", a = world.time - 65 * 60 }, MEMBER)
-    ads = rowsOfKind(window.rows, "ad")
+    -- A zone known by its map is named from the map.
     test.assertEqual("Dornogal General", ads[3].label)
-    test.assertEqual("1 h 5 min ago", ads[3].recent)
+    test.assertEqual("1 h 4 min ago", ads[3].recent)
 end)
 
 test.test("recruiters: a regular member can't open the view", function()
@@ -1405,4 +1401,34 @@ test.test("guild recruit: an ad time dated far in the future is refused, so it c
     test.assertTrue(recruit:OnMessage({ v = 1, t = "advertised", k = "general:map:2339", n = "Dornogal General",
         a = world.time + 60 }, "Anvil-Area52"))
     test.assertEqual(0, #world.shown)
+end)
+
+test.test("recent ads: ads posted before a relog are still known, and nothing is prompted again too soon", function()
+    local first = login("Retail", { playerName = OFFICER })
+    optIn(first)
+    inCity(first, "Dornogal")
+    first.handlers.post(promptFor(first, "Advertise in Trade?").key)
+    first.handlers.post(first.shown[1].key)
+
+    -- Logging back in 20 minutes later.
+    local again = login("Retail", { playerName = OFFICER, database = first.database, time = first.time + 20 * 60,
+        askWait = 8 })
+    inCity(again, "Dornogal")
+    fixtures.runTimers(again, 8)
+    test.assertEqual(0, #again.shown)
+    local ads = again.addon.guildRecruit:KnownAds()
+    test.assertEqual(2, #ads)
+    test.assertEqual("20 min ago", ads[1].ago)
+
+    -- Two hours on: still listed, and both channels are due again.
+    local later = login("Retail", { playerName = OFFICER, database = first.database,
+        time = first.time + 2 * HOUR })
+    inCity(later, "Dornogal")
+    test.assertEqual(2, #later.shown)
+    test.assertEqual("2 h ago", later.addon.guildRecruit:KnownAds()[1].ago)
+
+    -- After four hours they're forgotten.
+    local much = login("Retail", { playerName = OFFICER, database = first.database,
+        time = first.time + 4 * HOUR })
+    test.assertEqual(0, #much.addon.guildRecruit:KnownAds())
 end)

@@ -106,11 +106,12 @@ function Ledger:FreshFor(key, now)
     return self:Time(key) + self:gap(key) - now
 end
 
--- Forgets every time older than its channel's gap, any dated further ahead
--- than MAX_FUTURE_SECONDS (saved before such times were refused), and
--- anything that isn't a time. A channel whose gap can't be read keeps its
--- time unless it's in the future.
-function Ledger:Prune(now)
+-- Forgets every time older than `keep` seconds (by default its channel's
+-- gap), any dated further ahead than MAX_FUTURE_SECONDS (saved before such
+-- times were refused), and anything that isn't a time. A channel whose gap
+-- can't be read keeps its time unless it's in the future. A time kept past
+-- its gap is only history: it counts as unknown, never as fresh.
+function Ledger:Prune(now, keep)
     if not isTime(now) then
         return
     end
@@ -118,6 +119,9 @@ function Ledger:Prune(now)
     local stale = {}
     for key, time in pairs(self.times) do
         local gap = self:gap(key)
+        if type(keep) == "number" then
+            gap = keep
+        end
         if type(key) ~= "string" or not isTime(time) or time > now + RecruitLedger.MAX_FUTURE_SECONDS
             or (gap ~= nil and now - time >= gap)
         then

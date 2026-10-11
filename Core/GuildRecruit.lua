@@ -61,6 +61,10 @@ local GuildRecruit = {
     SHOW_DELAY_MIN = 3,
     SHOW_DELAY_MAX = 20,
     QUESTION = "Help with guild recruitment?",
+    -- How long a channel's last ad time is kept: the longest anyone's timer
+    -- can be, so the Recruiters view can show it whatever the user's own
+    -- timer. Past the user's timer it's only history (see RecruitLedger).
+    KEEP_SECONDS = 4 * 60 * 60,
     -- How long Not now hides a channel's prompt.
     SNOOZE_SECONDS = 10 * 60,
 }
@@ -502,7 +506,7 @@ function Recruit:Refresh()
     if type(now) == "number" and self.loginChecked and self.policy:Allowed() then
         local ledger = self:Ledger()
         local location = self:Location()
-        ledger:Prune(now)
+        ledger:Prune(now, GuildRecruit.KEEP_SECONDS)
         self:ask(self.policy:Unknown(location, ledger, now), ledger)
         due = self.policy:Due(location, ledger, now)
         self:wakeIn(self.policy:NextDue(location, ledger, now), now)
@@ -904,8 +908,8 @@ function Recruit:ChannelLabel(key)
 end
 
 -- The channels this add-on knows were advertised in lately, newest first,
--- as { key, label, at, ago }: `ago` reads like "12 min ago". Only the times
--- it still keeps (within the user's own timer) are listed.
+-- as { key, label, at, ago }: `ago` reads like "12 min ago". Times are kept
+-- for KEEP_SECONDS, across reloads and logouts.
 function Recruit:KnownAds()
     local now = self.now()
     local ads = {}
@@ -914,7 +918,7 @@ function Recruit:KnownAds()
         return ads
     end
     local ledger = self:Ledger()
-    ledger:Prune(now)
+    ledger:Prune(now, GuildRecruit.KEEP_SECONDS)
     local key, at
     for key, at in pairs(partition:GetRecruitLedger()) do
         if type(key) == "string" and type(at) == "number" then

@@ -153,3 +153,17 @@ test.test("recruit ledger: pruning drops times dated in the future, and keeps on
     test.assertEqual(nil, saved.far)
     test.assertEqual(START + 60, saved.near)
 end)
+
+test.test("recruit ledger: pruning can keep times longer than their gap, as history that's never fresh", function()
+    local addon = load()
+    local key = addon.RecruitLedger.GeneralKey("map:1")
+    local saved = { [key] = START }
+    local ledger = newLedger(addon, saved)
+
+    ledger:Prune(START + 2 * HOUR, 4 * HOUR)
+    test.assertEqual(START, saved[key])
+    test.assertEqual(addon.RecruitLedger.UNKNOWN, ledger:State(key, START + 2 * HOUR))
+
+    ledger:Prune(START + 4 * HOUR, 4 * HOUR)
+    test.assertEqual(nil, saved[key])
+end)

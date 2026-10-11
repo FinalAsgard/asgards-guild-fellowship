@@ -231,7 +231,7 @@ Add-on users tell each other when and where they advertised, so nobody double-po
 
 - When your ad posts, other add-on users record it and their prompt for that channel closes. Prompts wait a few seconds (at random) before showing, so two people rarely get the same one at once.
 - When you log in, or enter a zone or city you have no recent time for, your add-on asks the others. If nobody answers within a few seconds, the channel counts as not advertised in. Only one or a few add-ons answer each question.
-- Times are saved for each guild, so they last across reloads; a saved time older than the gap is asked about again, never taken as the last ad.
+- Times are saved for each guild, so they last across reloads and logouts, and a relog doesn't prompt you for a channel the guild advertised in within your timer. A saved time older than your timer is asked about again, never taken as the last ad.
 - No officer needs to be online, or use the add-on at all: members recruit and coordinate with their own ads and the default timers. The officers' ad, gaps and pause only take effect once an officer sets them, and they're only accepted from officers. The newest change wins.
 - Without the add-on's messaging libraries, Guild Recruit still works, going only by your own posts.
 
@@ -239,7 +239,7 @@ Add-on users tell each other when and where they advertised, so nobody double-po
 
 Every post counts toward the player who made it, on all their characters together. The player panel shows **Advertised: N (M in last 30 days)**. The 30-day number falls as ads get older, even if they don't post again. Only ads posted through the add-on are counted.
 
-Officers also get a **Recruiters** button in the roster window's footer, left of **Conflicts**. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Below that, **Recent ads** lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade") and how long ago, newest first. It only shows times your add-on still keeps, which is up to your own timer. Both parts update as new ads arrive.
+Officers also get a **Recruiters** button in the roster window's footer, left of **Conflicts**. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Below that, **Recent ads** lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade") and how long ago, newest first. Ad times are kept for 4 hours, across reloads and logouts, so a relog never forgets where the guild just advertised. Both parts update as new ads arrive.
 
 ## Supported clients
 
