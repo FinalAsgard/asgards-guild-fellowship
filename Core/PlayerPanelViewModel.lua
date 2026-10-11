@@ -58,12 +58,14 @@ local function datesText(entry, formatDate)
 end
 
 -- inputs: partition, playerId, members (live facts by key), normalizer,
--- formatDate (function(timestamp) -> text).
+-- formatDate (function(timestamp) -> text), adStats (optional function(keys)
+-- -> the player's ad count line, or nil).
 -- Returns nil when the player no longer exists, or:
 --   { id, label, alias, aliasSource, main, mainName, dontSync, rows }
 -- where `main` is the main's character key, `dontSync` whether guild sync
 -- leaves this player alone, and `rows` is a flat list for the
 -- panel's scroll list:
+--   { kind = "stat", text }  (the player's ad count, first, when there is one)
 --   { kind = "section", text }
 --   { kind = "character", key, name, level, isMain, inGuild, status, source,
 --     canMakeMain, canDetach }
@@ -83,8 +85,15 @@ function PlayerPanelViewModel.Build(inputs)
     local altCount = #keys - 1
     local rows = {}
 
+    if inputs.adStats ~= nil then
+        local ok, line = pcall(inputs.adStats, keys)
+        if ok and type(line) == "string" then
+            table.insert(rows, { kind = "stat", text = line })
+        end
+    end
     table.insert(rows, { kind = "section", text = "Main" })
-    table.insert(rows, characterEntry(inputs, player.main, true, altCount))
+    local mainRow = characterEntry(inputs, player.main, true, altCount)
+    table.insert(rows, mainRow)
 
     table.insert(rows, { kind = "section", text = "Alts" })
     local index
@@ -124,7 +133,7 @@ function PlayerPanelViewModel.Build(inputs)
         table.insert(rows, { kind = "empty", text = "No former characters" })
     end
 
-    local mainName = rows[2].name
+    local mainName = mainRow.name
     return {
         id = inputs.playerId,
         label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,

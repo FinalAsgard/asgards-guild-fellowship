@@ -448,6 +448,277 @@ function Client:SendGuildMessage(text)
     return (callFunction(self.environment.SendChatMessage, text, "GUILD"))
 end
 
+-- True when the logged-in character's guild rank can invite to the guild.
+-- False when the client can't say.
+function Client:CanGuildInvite()
+    local guildInfo = self.environment.C_GuildInfo
+    local ok, can
+    if type(guildInfo) == "table" and type(guildInfo.CanGuildInvite) == "function" then
+        ok, can = callFunction(guildInfo.CanGuildInvite)
+    else
+        ok, can = callFunction(self.environment.CanGuildInvite)
+    end
+    return ok and can ~= nil and can ~= false
+end
+
+-- Map types finer than a zone (dungeon levels, micro and orphan maps); the
+-- zone a General channel belongs to is the first map above them.
+local SUB_ZONE_MAP_TYPE = 4
+
+-- The zone's map ID where the client has maps: the player's map, climbing
+-- out of any finer map to the zone it's in. Nil otherwise.
+function Client:zoneMapId()
+    local maps = self.environment.C_Map
+    if type(maps) ~= "table" then
+        return nil
+    end
+    local ok, mapId = callFunction(maps.GetBestMapForUnit, "player")
+    if not ok or type(mapId) ~= "number" then
+        return nil
+    end
+    local steps
+    for steps = 1, 10 do
+        local infoOk, info = callFunction(maps.GetMapInfo, mapId)
+        if not infoOk or type(info) ~= "table" or type(info.mapType) ~= "number"
+            or info.mapType < SUB_ZONE_MAP_TYPE or type(info.parentMapID) ~= "number" or info.parentMapID == 0
+        then
+            return mapId
+        end
+        mapId = info.parentMapID
+    end
+    return mapId
+end
+
+-- The name of the map `mapID`, as the client shows it, or nil.
+function Client:GetMapName(mapID)
+    local maps = self.environment.C_Map
+    if type(maps) ~= "table" or type(mapID) ~= "number" then
+        return nil
+    end
+    local ok, info = callFunction(maps.GetMapInfo, mapID)
+    if not ok or type(info) ~= "table" or type(info.name) ~= "string" or info.name == "" then
+        return nil
+    end
+    return info.name
+end
+
+-- The zone the player is in as { key, name }: the key is "map:<ID>" where
+-- the client has maps, else "zone:<name>"; the name is as the client shows
+-- it. Nil when the client can't say.
+function Client:GetZone()
+    local ok, name = callFunction(self.environment.GetRealZoneText)
+    if not ok or type(name) ~= "string" or name == "" then
+        ok, name = callFunction(self.environment.GetZoneText)
+    end
+    if not ok or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    local mapId = self:zoneMapId()
+    if mapId ~= nil then
+        return { key = "map:" .. mapId, name = name }
+    end
+    return { key = "zone:" .. name, name = name }
+end
+
+-- True in a dungeon, raid, scenario, battleground or arena, or a keystone
+-- run on clients that have them. False when the client can't say.
+function Client:IsInInstance()
+    local ok, inside = callFunction(self.environment.IsInInstance)
+    if ok and inside ~= nil and inside ~= false then
+        return true
+    end
+    local challengeMode = self.environment.C_ChallengeMode
+    if type(challengeMode) == "table" then
+        local activeOk, active = callFunction(challengeMode.IsChallengeModeActive)
+        return activeOk and active ~= nil and active ~= false
+    end
+    return false
+end
+
+-- How many channel numbers to look through for the General channel.
+Compatibility.MAX_CHANNELS = 20
+
+-- The channel numbers the client reports as disabled here. The player stays
+-- in Trade after leaving a city, but the client marks it disabled (greyed out
+-- in the channel list) until they're back in one. GetChannelList gives each
+-- channel as its number, name and, on clients that report it, whether it's
+-- disabled; a list that can't be read disables nothing.
+function Client:disabledChannels()
+    local disabled = {}
+    local ok, list = callFunction(function()
+        return { self.environment.GetChannelList() }
+    end)
+    if not ok or type(list) ~= "table" then
+        return disabled
+    end
+    local current
+    local index
+    for index = 1, #list do
+        local value = list[index]
+        if type(value) == "number" then
+            current = value
+        elseif value == true and current ~= nil then
+            disabled[current] = true
+        end
+    end
+    return disabled
+end
+
+-- The channels the client lists here, in order, as { number, name,
+-- disabled }, read from GetChannelList as the channel lookup reads it; an
+-- empty list when it can't be read.
+function Client:ListedChannels()
+    local listed = {}
+    local ok, list = callFunction(function()
+        return { self.environment.GetChannelList() }
+    end)
+    if not ok or type(list) ~= "table" then
+        return listed
+    end
+    local index
+    for index = 1, #list do
+        local value = list[index]
+        if type(value) == "number" then
+            table.insert(listed, { number = value, disabled = false })
+        elseif type(value) == "string" and listed[#listed] ~= nil and listed[#listed].name == nil then
+            listed[#listed].name = value
+        elseif value == true and listed[#listed] ~= nil then
+            listed[#listed].disabled = true
+        end
+    end
+    return listed
+end
+
+-- What Guild Recruit sees where the player stands, for `/agf channels`:
+-- lines of text naming the zone, every channel the client lists (and
+-- whether it's disabled), and the channels it would use for General and
+-- Trade.
+function Client:ChannelReport()
+    local lines = {}
+    local zone = self:GetZone()
+    table.insert(lines, "Zone: " .. (zone and (zone.name .. " (" .. zone.key .. ")") or "unknown"))
+    local listed = self:ListedChannels()
+    if listed[1] == nil then
+        table.insert(lines, "The game lists no channels here.")
+    end
+    local index
+    for index = 1, #listed do
+        local channel = listed[index]
+        local _, _, fullName = callFunction(self.environment.GetChannelName, channel.number)
+        table.insert(lines, channel.number .. ". " .. tostring(channel.name or "?") ..
+            (type(fullName) == "string" and fullName ~= channel.name and (" (" .. fullName .. ")") or "") ..
+            (channel.disabled and ", disabled here" or ""))
+    end
+    local general, trade = self:GetGeneralChannel(), self:GetTradeChannel()
+    table.insert(lines, "General: " .. (general and ("channel " .. general) or "none here"))
+    table.insert(lines, "Trade: " .. (trade and ("channel " .. trade) or "none here"))
+    return lines
+end
+
+-- The number of the joined channel named `name` ("Trade - City" and plain
+-- "Trade" are both named Trade), or nil when the player isn't in one.
+function Client:joinedChannel(name)
+    local prefix = name .. " - "
+    local number
+    for number = 1, Compatibility.MAX_CHANNELS do
+        local ok, id, fullName = callFunction(self.environment.GetChannelName, number)
+        if ok and type(id) == "number" and id > 0 and type(fullName) == "string"
+            and not self:IsSecretValue(fullName)
+            and (fullName == name or string.sub(fullName, 1, string.len(prefix)) == prefix)
+        then
+            return id
+        end
+    end
+    return nil
+end
+
+-- The number of a server channel the player is in and can post to here, or
+-- nil. The channel is found by its English name (`name`) in the client's
+-- channel list, which also names channels the client has disabled here (out
+-- of a city, Trade is listed but disabled, and the client gives it no full
+-- name). The channel by that name decides: when it's disabled, there's none
+-- here. It's never found by position in the client's list of server channel
+-- names, whose order differs between clients (WoW Forever's has no Trade,
+-- and LocalDefense second), so a client in another language finds neither
+-- channel rather than the wrong one. Without a channel list, joined
+-- channels are found by full name.
+function Client:findServerChannel(name)
+    local listed = self:ListedChannels()
+    if listed[1] == nil then
+        return self:joinedChannel(name)
+    end
+    local index
+    for index = 1, #listed do
+        if listed[index].name == name then
+            if listed[index].disabled then
+                return nil
+            end
+            return listed[index].number
+        end
+    end
+    return nil
+end
+
+-- The number of the General channel the player is in, or nil.
+function Client:GetGeneralChannel()
+    return self:findServerChannel("General")
+end
+
+-- The number of the Trade channel, or nil when the player isn't in it or
+-- the client reports it disabled here (outside a city). Trade is one channel
+-- in every city, so this also answers whether Trade is available here.
+function Client:GetTradeChannel()
+    return self:findServerChannel("Trade")
+end
+
+-- True when the player can post to the Trade channel here.
+function Client:IsTradeAvailable()
+    return self:GetTradeChannel() ~= nil
+end
+
+-- Posts `text` to the channel numbered `channelNumber`. Retail keeps the call
+-- in C_ChatInfo; older clients have it as a global. Returns true when the
+-- client accepted it.
+function Client:SendChannelMessage(text, channelNumber)
+    if type(text) ~= "string" or text == "" or type(channelNumber) ~= "number" then
+        return false
+    end
+    local chatInfo = self.environment.C_ChatInfo
+    if type(chatInfo) == "table" and type(chatInfo.SendChatMessage) == "function" then
+        return (callFunction(chatInfo.SendChatMessage, text, "CHANNEL", nil, channelNumber))
+    end
+    return (callFunction(self.environment.SendChatMessage, text, "CHANNEL", nil, channelNumber))
+end
+
+-- Calls onChange() whenever the player may have changed zone or channels:
+-- a new zone, a loading screen, the channel list changing (the client moves
+-- the player to the new zone's General a moment after arriving), or a
+-- channel being joined, left, or disabled or enabled here.
+-- Returns false when the client can't deliver the events.
+function Client:ObserveZone(onChange)
+    if type(onChange) ~= "function" then
+        return false
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil
+        or not self:SetEventHandler(frame, function()
+            pcall(onChange)
+        end)
+        or not self:RegisterEvent(frame, "ZONE_CHANGED_NEW_AREA")
+    then
+        return false
+    end
+    self:RegisterEvent(frame, "PLAYER_ENTERING_WORLD")
+    self:RegisterEvent(frame, "CHANNEL_UI_UPDATE")
+    -- Leaving a city, the client reports the new zone first and disables
+    -- Trade a moment later, with a channel notice, so channels are checked
+    -- again then. Newer clients also report channel flag changes.
+    self:RegisterEvent(frame, "CHAT_MSG_CHANNEL_NOTICE")
+    self:RegisterEvent(frame, "CHANNEL_FLAGS_UPDATED")
+    self.zoneFrame = frame
+    return true
+end
+
 -- True when the client hides `value` from add-ons (Retail's secret values,
 -- during encounters and keystone runs). False on a client without the
 -- check. A check that errors answers true, so callers leave the value alone.

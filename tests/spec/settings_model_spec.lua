@@ -249,7 +249,13 @@ test.test("/agf greet and the panel's Edit Greetings button open the Greetings w
     test.assertEqual("action", entry.kind)
     test.assertEqual("Edit Greetings", entry.label)
     local sections = addon.settings:Sections()
-    local guildGreet = sections[#sections]
+    local guildGreet
+    local sectionIndex
+    for sectionIndex = 1, #sections do
+        if sections[sectionIndex].id == "guildGreet" then
+            guildGreet = sections[sectionIndex]
+        end
+    end
     test.assertEqual("Guild Greet", guildGreet.label)
     test.assertEqual("editGreetings", guildGreet.entries[#guildGreet.entries].id)
 
@@ -361,4 +367,107 @@ test.test("the prompt unlock is a mode that ends when the panel closes", functio
     local _, addon = loggedIn("Retail")
 
     test.assertTrue(addon.settings:Entry("greetUnlock").offOnClose)
+end)
+
+test.test("a text setting saves text up to its length and refuses anything else", function()
+    local model = newModel()
+    local saved = { ad = "" }
+    model:AddSection("general", "General")
+    test.assertFalse(model:Add("general", {
+        id = "nolimit", kind = "input", label = "x", get = function() end, set = function() end,
+    }))
+    test.assertTrue(model:Add("general", {
+        id = "ad",
+        kind = "input",
+        label = "My ad",
+        maxLength = 5,
+        get = function()
+            return saved.ad
+        end,
+        set = function(text)
+            saved.ad = text
+            return true
+        end,
+    }))
+
+    test.assertTrue(model:Set("ad", "Hello"))
+    test.assertEqual("Hello", model:Get("ad"))
+    local changed, reason = model:Set("ad", "Hello!")
+    test.assertEqual(nil, changed)
+    test.assertEqual("it can be at most 5 characters", reason)
+    changed, reason = model:Set("ad", 5)
+    test.assertEqual(nil, changed)
+    test.assertEqual("it must be text", reason)
+    test.assertEqual("Hello", saved.ad)
+end)
+
+test.test("a disabled setting can't be changed or run, and says why", function()
+    local model = newModel()
+    local saved = {}
+    local available = false
+    local runs = 0
+    local function enabled()
+        if not available then
+            return false, "not now"
+        end
+        return true
+    end
+    model:AddSection("general", "General")
+    model:Add("general", toggle("tags", saved, { enabled = enabled }))
+    model:Add("general", { id = "open", kind = "action", label = "Open", enabled = enabled, run = function()
+        runs = runs + 1
+    end })
+    model:Add("general", toggle("broken", saved, { enabled = function() error("boom") end }))
+    test.assertFalse(model:Add("general", toggle("odd", saved, { enabled = true })))
+
+    test.assertFalse(model:IsEnabled("tags"))
+    local changed, reason = model:Set("tags", false)
+    test.assertEqual(nil, changed)
+    test.assertEqual("not now", reason)
+    test.assertEqual(nil, saved.tags)
+    test.assertFalse(model:Run("open"))
+    test.assertEqual(0, runs)
+    test.assertFalse(model:IsEnabled("broken"))
+
+    available = true
+    test.assertTrue(model:IsEnabled("tags"))
+    test.assertTrue(model:Set("tags", false))
+    test.assertTrue(model:Run("open"))
+    test.assertEqual(1, runs)
+end)
+
+test.test("a number with a step only takes values on its steps", function()
+    local model = newModel()
+    local saved = {}
+    model:AddSection("general", "General")
+    model:Add("general", { id = "gap", kind = "number", slider = true, label = "Gap", min = 5, max = 240, step = 5,
+        get = function() return saved.gap end,
+        set = function(value)
+            saved.gap = value
+            return true
+        end })
+
+    local changed, reason = model:Set("gap", 12)
+    test.assertEqual(nil, changed)
+    test.assertEqual("it must go in steps of 5", reason)
+    test.assertTrue(model:Set("gap", 15))
+    test.assertEqual(15, saved.gap)
+end)
+
+test.test("a setting's info text is read when asked, and a failing or missing one gives nothing", function()
+    local model = newModel()
+    local saved = {}
+    local ad = "Knights recruit!"
+    model:AddSection("general", "General")
+    model:Add("general", toggle("useAd", saved, { info = function() return ad end }))
+    model:Add("general", toggle("plain", saved))
+    model:Add("general", toggle("broken", saved, { info = function() error("boom") end }))
+    test.assertFalse(model:Add("general", toggle("odd", saved, { info = "text" })))
+
+    test.assertEqual("Knights recruit!", model:Info("useAd"))
+    ad = "New ad"
+    test.assertEqual("New ad", model:Info("useAd"))
+    test.assertEqual(nil, model:Info("plain"))
+    test.assertEqual(nil, model:Info("broken"))
+    test.assertEqual(nil, model:Info("nothing"))
 end)

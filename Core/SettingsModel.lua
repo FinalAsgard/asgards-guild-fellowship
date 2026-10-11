@@ -10,12 +10,23 @@ local _, addon = ...
 --   action   run() performs it (a button, e.g. "Open Roster")
 --   text     get() -> a line of text shown as is (e.g. the version)
 --   number   get() -> a whole number from `min` to `max`; set(number) ->
---            true, or nil and a reason
+--            true, or nil and a reason. With `step`, the value goes in
+--            steps of that size from `min`; with `slider = true` it's drawn
+--            as a slider, its value shown beside it through
+--            `format(value) -> text` when given
+--   input    get() -> a line of text the user edits, at most `maxLength`
+--            characters; set(text) -> true, or nil and a reason
+--   heading  a title within a section that sets the entries after it apart
+--            (e.g. officer-only settings); it holds no value
 -- `get`, `set` and `run` are called protected, so a failing feature never
 -- breaks the panel or a slash command. A toggle marked `offOnClose` is a
--- mode that only lasts while the panel is open (see Model:Closed).
+-- mode that only lasts while the panel is open (see Model:Closed). An entry
+-- with `enabled() -> false, reason` can't be changed or run until it
+-- answers true again. An entry with `shown() -> false` is left off the panel
+-- (e.g. officer-only settings for other members). An entry with `info() ->
+-- text` gets an info icon on the panel that shows the text on mouseover.
 local SettingsModel = {
-    KINDS = { toggle = true, action = true, text = true, number = true },
+    KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true },
 }
 addon.SettingsModel = SettingsModel
 
@@ -35,13 +46,14 @@ local function isText(value)
     return type(value) == "string" and value ~= ""
 end
 
--- Adds a section, shown in the order sections are added. False when the id
--- is unusable or already taken.
-function Model:AddSection(id, label)
+-- Adds a section, shown in the order sections are added. `options.ownPage`
+-- puts it on a page of its own in the AddOns options instead of the main
+-- page. False when the id is unusable or already taken.
+function Model:AddSection(id, label, options)
     if not isText(id) or not isText(label) or self.sectionsById[id] ~= nil then
         return false
     end
-    local section = { id = id, label = label, entries = {} }
+    local section = { id = id, label = label, entries = {}, ownPage = type(options) == "table" and options.ownPage == true }
     self.sectionsById[id] = section
     table.insert(self.sections, section)
     return true
@@ -61,11 +73,29 @@ local function entryProblem(entry)
     if entry.kind == "action" then
         return type(entry.run) ~= "function" and "action has no run function" or nil
     end
+    if entry.kind == "heading" then
+        if entry.shown ~= nil and type(entry.shown) ~= "function" then
+            return "entry's shown check isn't a function"
+        end
+        return nil
+    end
     if type(entry.get) ~= "function" then
         return "entry has no get function"
     end
-    if (entry.kind == "toggle" or entry.kind == "number") and type(entry.set) ~= "function" then
+    if (entry.kind == "toggle" or entry.kind == "number" or entry.kind == "input") and type(entry.set) ~= "function" then
         return "entry has no set function"
+    end
+    if entry.kind == "input" and (type(entry.maxLength) ~= "number" or entry.maxLength < 1) then
+        return "input has no length limit"
+    end
+    if entry.enabled ~= nil and type(entry.enabled) ~= "function" then
+        return "entry's enabled check isn't a function"
+    end
+    if entry.shown ~= nil and type(entry.shown) ~= "function" then
+        return "entry's shown check isn't a function"
+    end
+    if entry.info ~= nil and type(entry.info) ~= "function" then
+        return "entry's info isn't a function"
     end
     if entry.kind == "number" and (type(entry.min) ~= "number" or type(entry.max) ~= "number"
         or entry.min > entry.max)
@@ -109,6 +139,51 @@ function Model:Get(id)
     return value
 end
 
+-- True unless the entry's `enabled` check answers otherwise; false and its
+-- reason then (a failing check counts as disabled).
+function Model:IsEnabled(id)
+    local entry = self.entries[id]
+    if entry == nil then
+        return false, "there is no such setting"
+    end
+    if entry.enabled == nil then
+        return true
+    end
+    local ok, enabled, reason = pcall(entry.enabled)
+    if ok and enabled == true then
+        return true
+    end
+    return false, ok and reason or nil
+end
+
+-- True unless the entry's `shown` check answers otherwise (a failing check
+-- hides it).
+function Model:IsShown(id)
+    local entry = self.entries[id]
+    if entry == nil then
+        return false
+    end
+    if entry.shown == nil then
+        return true
+    end
+    local ok, shown = pcall(entry.shown)
+    return ok and shown == true
+end
+
+-- The entry's info text for its info icon, or nil when it has none or
+-- reading it failed.
+function Model:Info(id)
+    local entry = self.entries[id]
+    if entry == nil or entry.info == nil then
+        return nil
+    end
+    local ok, text = pcall(entry.info)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
 -- Calls listener(id, value) after every successful change.
 function Model:OnChange(listener)
     if type(listener) == "function" then
@@ -134,10 +209,24 @@ function Model:Set(id, value)
         if type(value) ~= "number" or value ~= math.floor(value) or value < entry.min or value > entry.max then
             return nil, "it must be a whole number from " .. entry.min .. " to " .. entry.max
         end
+        if type(entry.step) == "number" and entry.step > 1 and (value - entry.min) % entry.step ~= 0 then
+            return nil, "it must go in steps of " .. entry.step
+        end
+    elseif entry.kind == "input" then
+        if type(value) ~= "string" then
+            return nil, "it must be text"
+        end
+        if string.len(value) > entry.maxLength then
+            return nil, "it can be at most " .. entry.maxLength .. " characters"
+        end
     elseif entry.kind ~= "toggle" then
         return nil, "it can't be changed"
     elseif type(value) ~= "boolean" then
         return nil, "it can only be on or off"
+    end
+    local enabled, disabledReason = self:IsEnabled(id)
+    if not enabled then
+        return nil, disabledReason or "it can't be changed right now"
     end
     local ok, changed, reason = pcall(entry.set, value)
     if not ok then
@@ -178,7 +267,7 @@ end
 -- Performs an action entry. False when it isn't one or it failed.
 function Model:Run(id)
     local entry = self.entries[id]
-    if entry == nil or entry.kind ~= "action" then
+    if entry == nil or entry.kind ~= "action" or not self:IsEnabled(id) then
         return false
     end
     return (pcall(entry.run))

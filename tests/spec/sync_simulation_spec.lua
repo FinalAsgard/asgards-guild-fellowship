@@ -70,6 +70,19 @@ local function login(channel, playerName, options)
     fixtures.fire(world, "PLAYER_ENTERING_WORLD")
     fixtures.fire(world, "GUILD_ROSTER_UPDATE")
     fixtures.runTimers(world)
+    -- Guild Recruit's own messages at login (an officer asks for the
+    -- recruiting settings) aren't sync traffic, so these specs don't count
+    -- them.
+    local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
+    local kept = {}
+    local index
+    for index = 1, #world.sentMessages do
+        local _, message = serializer:Deserialize(world.sentMessages[index].text)
+        if type(message) ~= "table" or world.addon.GuildRecruit.TYPES[message.t] == nil then
+            table.insert(kept, world.sentMessages[index])
+        end
+    end
+    world.sentMessages = kept
     local controller = world.addon.rosterController
     controller.createWindow = function()
         return newWindow()

@@ -26,7 +26,7 @@ if missingLibraries ~= nil then
 end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
-local guildGreet, greetingsWindow, greetPrompts
+local guildGreet, greetingsWindow, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -47,6 +47,18 @@ if clientProfile.supported then
         end,
         onDecideSuggestion = function(character, kind, approved)
             return syncSession:Decide(character, kind, approved)
+        end,
+        adStats = function(keys)
+            return guildRecruit:StatsLine(keys)
+        end,
+        recruitRecord = function(keys)
+            return guildRecruit:RecordFor(keys)
+        end,
+        recentAds = function()
+            return guildRecruit:KnownAds()
+        end,
+        isOfficer = function()
+            return guildRecruit:IsOfficer()
         end,
         getDatabase = function()
             return persistence:GetDatabase()
@@ -350,6 +362,201 @@ if clientProfile.supported then
         label = "Edit Greetings",
         run = openGreetings,
     })
+    -- Guild Recruit's settings only change for a character that can invite
+    -- to the guild.
+    local function recruitAvailable()
+        if not client:CanGuildInvite() then
+            return false, "this character can't invite to the guild"
+        end
+        return true
+    end
+    -- Recruitment has a page of its own in the AddOns options, so the main
+    -- page fits.
+    settings:AddSection("recruitment", "Recruitment", { ownPage = true })
+    -- Kept for the logged-in character.
+    settings:Add("recruitment", {
+        id = "recruitOptIn",
+        kind = "toggle",
+        label = "Offer to post my recruitment ad where the guild hasn't advertised lately",
+        enabled = recruitAvailable,
+        get = function()
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            return store ~= nil and selfKey ~= nil and store:RecruitOptedIn(selfKey)
+        end,
+        set = function(enabled)
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if selfKey == nil then
+                return nil, "this character isn't in a guild"
+            end
+            if not store:SetRecruitOptIn(selfKey, enabled) then
+                return nil, "the saved setting is unreadable, so it stays off"
+            end
+            return true
+        end,
+    })
+    settings:Add("recruitment", {
+        id = "recruitAd",
+        kind = "input",
+        label = "My ad, posted exactly as written",
+        lines = 3,
+        maxLength = addon.FellowshipStore.RECRUIT_AD_MAX,
+        enabled = recruitAvailable,
+        get = function()
+            local store = rosterController:Store()
+            return store and store:RecruitAd() or ""
+        end,
+        set = function(text)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetRecruitAd(text) then
+                return nil, "the saved ad is unreadable"
+            end
+            return true
+        end,
+    })
+    settings:Add("recruitment", {
+        id = "recruitUseOfficerAd",
+        kind = "toggle",
+        label = "Also post the officers' guild ad",
+        enabled = recruitAvailable,
+        -- Mousing over the info icon shows the guild ad as it is now.
+        info = function()
+            local ad = guildRecruit:Config():Get("guildAd")
+            if type(ad) ~= "string" or string.find(ad, "%S") == nil then
+                return "The officers haven't set a guild ad yet."
+            end
+            return ad
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:RecruitUseOfficerAd()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            store:SetRecruitUseOfficerAd(enabled)
+            return true
+        end,
+    })
+    -- The member's own timers: how long a channel goes without an ad before
+    -- they're asked. The guild's gaps are a floor under them.
+    local function myGap(id, channel, label)
+        settings:Add("recruitment", {
+            id = id,
+            kind = "number",
+            slider = true,
+            label = label,
+            min = addon.FellowshipStore.RECRUIT_MY_GAP_MIN,
+            max = addon.FellowshipStore.RECRUIT_MY_GAP_MAX,
+            step = addon.RecruitConfig.GAP_STEP_MINUTES,
+            format = addon.GuildRecruit.FormatMinutes,
+            enabled = recruitAvailable,
+            get = function()
+                local store = rosterController:Store()
+                return store and store:RecruitMyGap(channel)
+                    or addon.FellowshipStore.RECRUIT_MY_GAPS[channel].default
+            end,
+            set = function(minutes)
+                local store = rosterController:Store()
+                if store == nil then
+                    return nil, "saved data is unavailable"
+                end
+                if not store:SetRecruitMyGap(channel, minutes) then
+                    return nil, "the saved timer is unreadable"
+                end
+                return true
+            end,
+        })
+    end
+    myGap("recruitMyGeneralGap", "general", "Ask me to post in a zone's General after it's gone this long without a guild ad")
+    myGap("recruitMyTradeGap", "trade", "Ask me to post in Trade after it's gone this long without a guild ad")
+    settings:Add("recruitment", {
+        id = "recruitGuildFloor",
+        kind = "text",
+        get = function()
+            local config = guildRecruit:Config()
+            return "The guild asks for at least " ..
+                addon.GuildRecruit.FormatMinutes(config:Get("generalGapMinutes")) .. " in General and " ..
+                addon.GuildRecruit.FormatMinutes(config:Get("tradeGapMinutes")) ..
+                " in Trade; a shorter timer of yours waits that long."
+        end,
+    })
+    -- Officers only: the guild ad, saved per guild and sent to every
+    -- add-on user.
+    local function isOfficer()
+        return guildRecruit ~= nil and guildRecruit:IsOfficer()
+    end
+    local function officerOnly()
+        if not isOfficer() then
+            return false, "only officers can change it"
+        end
+        return true
+    end
+    settings:Add("recruitment", {
+        id = "recruitOfficerHeading",
+        kind = "heading",
+        label = "Officer settings: these apply to everyone in the guild",
+        shown = isOfficer,
+    })
+    settings:Add("recruitment", {
+        id = "recruitGuildAd",
+        kind = "input",
+        label = "Guild ad, for every member",
+        lines = 3,
+        maxLength = addon.RecruitConfig.AD_MAX,
+        shown = isOfficer,
+        enabled = officerOnly,
+        get = function()
+            return guildRecruit:Config():Get("guildAd")
+        end,
+        set = function(text)
+            return guildRecruit:SetOfficerSetting("guildAd", text)
+        end,
+    })
+    local function officerGap(id, setting, label)
+        settings:Add("recruitment", {
+            id = id,
+            kind = "number",
+            slider = true,
+            label = label,
+            min = addon.RecruitConfig.SETTINGS[setting].min,
+            max = addon.RecruitConfig.GAP_MAX_MINUTES,
+            step = addon.RecruitConfig.GAP_STEP_MINUTES,
+            format = addon.GuildRecruit.FormatMinutes,
+            shown = isOfficer,
+            enabled = officerOnly,
+            get = function()
+                return guildRecruit:Config():Get(setting)
+            end,
+            set = function(minutes)
+                return guildRecruit:SetOfficerSetting(setting, minutes)
+            end,
+        })
+    end
+    officerGap("recruitGeneralGap", "generalGapMinutes",
+        "Shortest time between guild ads in a zone's General (no member's timer goes below it)")
+    officerGap("recruitTradeGap", "tradeGapMinutes",
+        "Shortest time between guild ads in Trade (no member's timer goes below it)")
+    settings:Add("recruitment", {
+        id = "recruitPaused",
+        kind = "toggle",
+        label = "Pause recruitment for the whole guild",
+        shown = isOfficer,
+        enabled = officerOnly,
+        get = function()
+            return guildRecruit:Config():Get("paused")
+        end,
+        set = function(paused)
+            return guildRecruit:SetOfficerSetting("paused", paused)
+        end,
+    })
     settingsPanel = addon.SettingsPanel.Create(client, settings)
     router:Register("options", "open the settings panel", function()
         if not settingsPanel:Open() then
@@ -380,7 +587,7 @@ if clientProfile.supported then
     router:SetDefault("roster")
     -- Guild sync: officers are ranks that can view officer notes, judged
     -- from the stored roster (current members only).
-    local officerAuthority = addon.OfficerAuthority.Create({
+    officerAuthority = addon.OfficerAuthority.Create({
         rankOf = function(key)
             local guild, partition = rosterController:QuietContext()
             if guild == nil or not partition:IsInGuild(key) then
@@ -458,6 +665,13 @@ if clientProfile.supported then
             rosterController:UpdateStatus()
         end,
     })
+    router:Register("channels", "show the chat channels Guild Recruit sees here", function()
+        local lines = client:ChannelReport()
+        local index
+        for index = 1, #lines do
+            rosterController:Print(lines[index])
+        end
+    end)
     router:Register("sync", "show guild sync status", function()
         local lines = addon.RosterViewModel.SyncStatusLines(syncSession:Status(), client:Timestamp())
         local index
@@ -511,9 +725,96 @@ if clientProfile.supported then
         end,
         view = greetPrompts,
     })
+    recruitPrompts = addon.RecruitPrompts.Create(client)
+    -- Guild Recruit keeps its ad times with the current guild.
+    guildRecruit = addon.GuildRecruit.Create({
+        partition = function()
+            local guild, partition = rosterController:QuietContext()
+            return guild and partition or nil
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        store = function()
+            return rosterController:Store()
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        canInvite = function()
+            return client:CanGuildInvite()
+        end,
+        location = function()
+            local zone = client:GetZone()
+            if zone == nil then
+                return nil
+            end
+            return {
+                key = zone.key,
+                name = zone.name,
+                general = client:GetGeneralChannel(),
+                trade = client:GetTradeChannel(),
+            }
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        send = function(text, channelNumber)
+            return client:SendChannelMessage(text, channelNumber)
+        end,
+        inInstance = function()
+            return client:IsInInstance()
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        -- Heard within seconds, so others' prompts close quickly.
+        announce = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        senderIsOfficer = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            return key ~= nil and officerAuthority:IsOfficer(key)
+        end,
+        keyOf = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(sender) or nil
+        end,
+        isOwnKey = function(key)
+            return guildGreet:IsOwn(key)
+        end,
+        mapName = function(mapID)
+            return client:GetMapName(mapID)
+        end,
+        -- An open Recruiters view shows new counts and ad times at once.
+        onStatsChanged = function()
+            rosterController:RefreshRecruiters()
+        end,
+        isOwn = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            if key == nil then
+                return nil
+            end
+            return guildGreet:IsOwn(key)
+        end,
+        rosterLoaded = function()
+            local count = client:GetGuildRosterCount()
+            return count ~= nil and count > 0
+        end,
+        view = recruitPrompts,
+    })
     settings:OnChange(function(id, value)
         local entry = settings:Entry(id)
-        if id == "guildGreet" or id == "greetCharacter" then
+        if id == "recruitOptIn" or id == "recruitAd" or id == "recruitUseOfficerAd"
+            or id == "recruitMyGeneralGap" or id == "recruitMyTradeGap"
+        then
+            guildRecruit:Refresh()
+        elseif id == "guildGreet" or id == "greetCharacter" then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
         elseif entry ~= nil and entry.category ~= nil then
             guildGreet:OnCategoryChanged(entry.category, value)
@@ -538,6 +839,10 @@ if clientProfile.supported then
             end
             return members
         end)
+        -- The first loaded roster runs Guild Recruit's login check; a rank
+        -- change later can grant or take away invite permission.
+        guildRecruit:OnRosterUpdate()
+        settingsPanel:Refresh()
     end)
     -- Chat tags read the same guild context as the roster.
     chatAnnotator = addon.ChatAnnotator.Create({
@@ -578,11 +883,13 @@ end
 
 local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
     rosterController:OnSavedDataReady()
-    -- Without the comm libraries, sync simply stays off and Guild Greet
-    -- works uncoordinated.
+    -- Without the comm libraries, sync simply stays off, and Guild Greet and
+    -- Guild Recruit work uncoordinated.
     if comm:Start(function(message, sender)
         if message.t == addon.GuildGreet.TYPE_GREETED then
             guildGreet:OnGreeted(message, sender)
+        elseif addon.GuildRecruit.TYPES[message.t] ~= nil then
+            guildRecruit:OnMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end
@@ -600,10 +907,17 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Prompts wait out combat and boss encounters.
     local busy = client:ObserveCombat(function(inCombat)
         guildGreet:OnCombatChanged(inCombat)
+        guildRecruit:OnCombatChanged(inCombat)
     end)
     if busy then
         guildGreet:OnCombatChanged(true)
+        guildRecruit:OnCombatChanged(true)
     end
+    -- Advertise prompts follow the player from zone to zone.
+    client:ObserveZone(function()
+        guildRecruit:Refresh()
+    end)
+    guildRecruit:Refresh()
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)
@@ -622,6 +936,7 @@ addon.comm = comm
 addon.settings = settings
 addon.settingsPanel = settingsPanel
 addon.guildGreet = guildGreet
+addon.guildRecruit = guildRecruit
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version

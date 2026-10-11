@@ -27,6 +27,11 @@ local function newWindow()
         self.rows = rows
         return true
     end
+    -- `window.recruiters` is false once told to hide the Recruiters view.
+    function window:SetRecruiters(rows)
+        self.recruiters = rows or false
+        return true
+    end
     return window
 end
 
@@ -41,6 +46,7 @@ local MODULES = {
     "Core/RosterViewModel.lua",
     "Core/ConflictViewModel.lua",
     "Core/ScanScheduler.lua",
+    "Core/RecruitStats.lua",
     "Core/RosterController.lua",
 }
 
@@ -61,6 +67,8 @@ local function build(profile, options)
         getDatabase = function()
             return database or nil
         end,
+        isOfficer = options.isOfficer,
+        recruitRecord = options.recruitRecord,
         createWindow = function()
             windowsCreated = windowsCreated + 1
             if options.noFramework then
@@ -283,4 +291,49 @@ test.test("scan descriptions name what was found", function()
     test.assertEqual("0 new characters", describe({ newCharacters = 0 }))
     test.assertEqual("1 new character, 2 alts linked, 2 aliases set, 3 new conflicts to review",
         describe({ newCharacters = 1, linked = 2, aliased = 2, conflicts = 3 }))
+end)
+
+test.test("the Recruiters view and its button are for officers only", function()
+    local officer = true
+    local setup = build("Retail", {
+        isOfficer = function()
+            return officer
+        end,
+        recruitRecord = function(keys)
+            local index
+            for index = 1, #keys do
+                if keys[index] == "toolbox-area52" then
+                    return { n = 3, t = {} }
+                end
+            end
+            return nil
+        end,
+    })
+    setup.login()
+    setup.controller:Toggle()
+
+    local rows = setup.window.recruiters
+    test.assertEqual("heading", rows[1].kind)
+    test.assertEqual("Player", rows[1].label)
+    test.assertEqual("recruiter", rows[2].kind)
+    test.assertEqual("TheTool", rows[2].label)
+    test.assertEqual(3, rows[2].total)
+    test.assertEqual("heading", rows[3].kind)
+    -- Without a source of recent ads, that part says there are none.
+    test.assertEqual("empty", rows[4].kind)
+    test.assertEqual("No recent ads known.", rows[4].label)
+
+    officer = false
+    test.assertEqual(nil, setup.controller:Recruiters())
+    setup.controller:RefreshRecruiters()
+    test.assertFalse(setup.window.recruiters)
+end)
+
+test.test("without a stats source, nobody gets the Recruiters view", function()
+    local setup = build("Retail", { isOfficer = function() return true end })
+    setup.login()
+    setup.controller:Toggle()
+
+    test.assertEqual(nil, setup.controller:Recruiters())
+    test.assertFalse(setup.window.recruiters)
 end)

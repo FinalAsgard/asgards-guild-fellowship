@@ -349,6 +349,75 @@ local function installGuild(world, environment, profile)
     environment.InCombatLockdown = function()
         return world.inCombat
     end
+    -- `world.canInvite = false` takes away the character's invite permission.
+    world.canInvite = true
+    environment.CanGuildInvite = function()
+        return world.canInvite
+    end
+    -- Where the player is: `world.zone` ({ mapID, name }) and the channels
+    -- they're in, by number (`world.channels`, full names as the client
+    -- reports them; only the zone's General unless a spec adds Trade). Lines sent to chat are recorded in `world.chat` as
+    -- { text, chatType, target }; `world.chatFails = true` makes sending
+    -- raise, as a blocked send does.
+    local zones = {
+        Forever = { mapID = 1455, name = "Ironforge" },
+        Retail = { mapID = 2339, name = "Dornogal" },
+    }
+    world.zone = Fixtures.snapshot(zones[profile])
+    world.channels = { [1] = "General - " .. world.zone.name }
+    world.chat = {}
+    environment.C_Map = {
+        GetBestMapForUnit = function(unit)
+            test.assertEqual("player", unit)
+            return world.zone and world.zone.mapID
+        end,
+        GetMapInfo = function(mapID)
+            if world.zone == nil or mapID ~= world.zone.mapID then
+                return nil
+            end
+            return { mapID = mapID, name = world.zone.name, mapType = 3, parentMapID = 0 }
+        end,
+    }
+    -- `world.inInstance` names the instance type the player is in ("party",
+    -- "raid", "pvp", "arena"), or is nil out in the world.
+    environment.IsInInstance = function()
+        return world.inInstance ~= nil, world.inInstance or "none"
+    end
+    environment.GetRealZoneText = function()
+        return world.zone and world.zone.name or ""
+    end
+    environment.EnumerateServerChannels = function()
+        return "General", "Trade", "LocalDefense"
+    end
+    -- As the client lists the channels: number, name, and whether it's
+    -- disabled here (`world.disabledChannels`, by number), for each one.
+    world.disabledChannels = {}
+    environment.GetChannelList = function()
+        local list = {}
+        local number
+        for number = 1, 20 do
+            if world.channels[number] ~= nil then
+                table.insert(list, number)
+                table.insert(list, (string.match(world.channels[number], "^(.-) %- ") or world.channels[number]))
+                table.insert(list, world.disabledChannels[number] == true)
+            end
+        end
+        return unpack(list)
+    end
+    -- Like the real client, a channel disabled here has no full name.
+    environment.GetChannelName = function(number)
+        local name = world.channels[number]
+        if name == nil or world.disabledChannels[number] then
+            return 0, nil, 0
+        end
+        return number, name, 0
+    end
+    environment.SendChatMessage = function(text, chatType, _, target)
+        if world.chatFails then
+            error("blocked")
+        end
+        table.insert(world.chat, { text = text, chatType = chatType, target = target })
+    end
     environment.RAID_CLASS_COLORS = {
         WARRIOR = { colorStr = "ffc69b6d" },
         PALADIN = { r = 0.96, g = 0.55, b = 0.73 },

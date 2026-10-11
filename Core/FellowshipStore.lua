@@ -21,6 +21,8 @@ local FellowshipStore = {
     GREET_CAP_DEFAULT = 2,
     GREET_CAP_MIN = 1,
     GREET_CAP_MAX = 10,
+    -- The longest recruitment ad: one chat message.
+    RECRUIT_AD_MAX = 255,
 }
 addon.FellowshipStore = FellowshipStore
 
@@ -150,6 +152,7 @@ local function validatePartition(data)
     end
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
+        "recruitLedger", "recruitConfig", "recruitStats",
     }
     local index
     for index = 1, #containers do
@@ -181,8 +184,12 @@ local function validatePartition(data)
         end
     end
     data.unapplied = nil
-    -- An officer's ledger and forgery log are only created when needed.
-    local optional = { unapplied = true, ledger = true, forgeries = true }
+    -- An officer's ledger and forgery log, and Guild Recruit's ad times,
+    -- are only created when needed.
+    local optional = {
+        unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
+        recruitStats = true,
+    }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
             data[containers[index]] = {}
@@ -531,6 +538,176 @@ function Store:SetGreetAnchor(anchor)
     return true
 end
 
+-- Guild Recruit's saved state, shared by every character on the account and
+-- created on first use: the user's own ad, and the characters that turned
+-- advertise prompts on. Nil when an unusable value is stored there; it is
+-- then left alone.
+function Store:GetRecruitState()
+    if type(self.database) ~= "table" then
+        return nil
+    end
+    if self.database.recruit == nil then
+        self.database.recruit = {}
+    end
+    if type(self.database.recruit) ~= "table" then
+        return nil
+    end
+    return self.database.recruit
+end
+
+-- The user's own ad, exactly as written. Empty when none is saved or the
+-- saved one is unusable.
+function Store:RecruitAd()
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local ad = type(state) == "table" and state.ad or nil
+    if type(ad) ~= "string" or string.len(ad) > FellowshipStore.RECRUIT_AD_MAX then
+        return ""
+    end
+    return ad
+end
+
+-- Saves the user's own ad. Refuses text longer than one chat message.
+function Store:SetRecruitAd(text)
+    if type(text) ~= "string" or string.len(text) > FellowshipStore.RECRUIT_AD_MAX then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    state.ad = text
+    return true
+end
+
+-- The user's own ad record (see RecruitStats), shared by every character
+-- on the account and created on first use. Nil when an unusable value is
+-- stored there; it is then left alone.
+function Store:RecruitOwnStats()
+    local state = self:GetRecruitState()
+    if state == nil then
+        return nil
+    end
+    if state.stats == nil then
+        state.stats = { n = 0, t = {} }
+    end
+    if type(state.stats) ~= "table" then
+        return nil
+    end
+    return state.stats
+end
+
+-- The user's own timers: how long a zone's General ("general") or Trade
+-- ("trade") must go without an ad before the user is asked to post there.
+-- The guild's gap is a floor under them (see GuildRecruit).
+FellowshipStore.RECRUIT_MY_GAPS = {
+    general = { field = "myGeneralGapMinutes", default = 60 },
+    trade = { field = "myTradeGapMinutes", default = 60 },
+}
+FellowshipStore.RECRUIT_MY_GAP_MIN = 5
+FellowshipStore.RECRUIT_MY_GAP_MAX = 4 * 60
+
+local function isMyGap(value)
+    return type(value) == "number" and value == math.floor(value)
+        and value >= FellowshipStore.RECRUIT_MY_GAP_MIN and value <= FellowshipStore.RECRUIT_MY_GAP_MAX
+end
+
+-- The user's own timer for `channel` ("general" or "trade"), in minutes,
+-- shared by every character on the account. The default when none is saved
+-- or the saved one is unusable.
+function Store:RecruitMyGap(channel)
+    local gap = FellowshipStore.RECRUIT_MY_GAPS[channel]
+    if gap == nil then
+        return nil
+    end
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local value = type(state) == "table" and state[gap.field] or nil
+    if not isMyGap(value) then
+        return gap.default
+    end
+    return value
+end
+
+-- Sets the user's own timer for `channel`, in whole minutes from 5 to 240.
+function Store:SetRecruitMyGap(channel, minutes)
+    local gap = FellowshipStore.RECRUIT_MY_GAPS[channel]
+    if gap == nil or not isMyGap(minutes) then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    state[gap.field] = minutes
+    return true
+end
+
+-- Whether the user posts the officers' guild ad too. On unless turned off;
+-- an unusable saved value counts as on.
+function Store:RecruitUseOfficerAd()
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    return type(state) ~= "table" or state.useOfficerAd ~= false
+end
+
+-- Turns posting the officers' guild ad on or off, for every character on
+-- the account.
+function Store:SetRecruitUseOfficerAd(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    state.useOfficerAd = enabled
+    return true
+end
+
+-- The character `key`'s answer to "Help with guild recruitment?": true
+-- (Yes), false (No), or nil while undecided. An unusable saved set, or an
+-- unusable answer in it, counts as undecided.
+function Store:RecruitOptIn(key)
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local optIn = type(state) == "table" and state.optIn or nil
+    if type(optIn) ~= "table" then
+        return nil
+    end
+    local answer = optIn[key]
+    if type(answer) ~= "boolean" then
+        return nil
+    end
+    return answer
+end
+
+-- True only when the character `key` answered Yes; only that allows
+-- advertise prompts.
+function Store:RecruitOptedIn(key)
+    return self:RecruitOptIn(key) == true
+end
+
+-- Saves the character `key`'s answer: true or false, or nil to make it
+-- undecided again. Each character's answer is its own. An unusable
+-- existing set is left alone.
+function Store:SetRecruitOptIn(key, answer)
+    if not isText(key) or (answer ~= nil and type(answer) ~= "boolean") then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    if state.optIn == nil then
+        if answer == nil then
+            return true
+        end
+        state.optIn = {}
+    end
+    if type(state.optIn) ~= "table" then
+        return false
+    end
+    state.optIn[key] = answer
+    return true
+end
+
 function Partition:GetCharacter(key)
     return self.data.characters[key]
 end
@@ -768,6 +945,33 @@ end
 
 function Partition:GetForgeries()
     return self.data.forgeries
+end
+
+-- Guild Recruit's ad counts heard from other add-on users, by character
+-- (see RecruitStats), created on first use.
+function Partition:GetRecruitStats()
+    if self.data.recruitStats == nil then
+        self.data.recruitStats = {}
+    end
+    return self.data.recruitStats
+end
+
+-- Guild Recruit's officer settings (see RecruitConfig), created on first
+-- use.
+function Partition:GetRecruitConfig()
+    if self.data.recruitConfig == nil then
+        self.data.recruitConfig = {}
+    end
+    return self.data.recruitConfig
+end
+
+-- Guild Recruit's last ad time in each channel (see RecruitLedger), created
+-- on first use.
+function Partition:GetRecruitLedger()
+    if self.data.recruitLedger == nil then
+        self.data.recruitLedger = {}
+    end
+    return self.data.recruitLedger
 end
 
 function Partition:SetForgeries(entries)
