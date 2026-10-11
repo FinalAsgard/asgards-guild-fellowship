@@ -25,8 +25,15 @@ local _, addon = ...
 -- answers true again. An entry with `shown() -> false` is left off the panel
 -- (e.g. officer-only settings for other members). An entry with `info() ->
 -- text` gets an info icon on the panel that shows the text on mouseover.
+--
+-- Settings are drawn in two hosts: the master frame's pages ("frame") and
+-- the game's AddOns options ("options"). Each section names the master
+-- frame page it belongs on. An entry with `host` set is drawn only in that
+-- host (e.g. the "Open Roster" button, which the frame doesn't need).
 local SettingsModel = {
     KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true },
+    HOSTS = { frame = true, options = true },
+    PAGES = { settings = true, greetings = true, recruitment = true },
 }
 addon.SettingsModel = SettingsModel
 
@@ -46,17 +53,39 @@ local function isText(value)
     return type(value) == "string" and value ~= ""
 end
 
--- Adds a section, shown in the order sections are added. `options.ownPage`
--- puts it on a page of its own in the AddOns options instead of the main
--- page. False when the id is unusable or already taken.
+-- Adds a section, shown in the order sections are added. `options.page`
+-- names the master frame page it belongs on (see SettingsModel.PAGES; the
+-- Settings page unless given). `options.ownPage` puts it on a page of its
+-- own in the AddOns options instead of the main page. False when the id is
+-- unusable or already taken, or the page is unknown.
 function Model:AddSection(id, label, options)
-    if not isText(id) or not isText(label) or self.sectionsById[id] ~= nil then
+    options = type(options) == "table" and options or {}
+    local page = options.page or "settings"
+    if not isText(id) or not isText(label) or self.sectionsById[id] ~= nil or not SettingsModel.PAGES[page] then
         return false
     end
-    local section = { id = id, label = label, entries = {}, ownPage = type(options) == "table" and options.ownPage == true }
+    local section = { id = id, label = label, entries = {}, page = page, ownPage = options.ownPage == true }
     self.sectionsById[id] = section
     table.insert(self.sections, section)
     return true
+end
+
+-- The sections on the master frame page `page`, in order.
+function Model:SectionsOn(page)
+    local found = {}
+    local index
+    for index = 1, #self.sections do
+        if self.sections[index].page == page then
+            table.insert(found, self.sections[index])
+        end
+    end
+    return found
+end
+
+-- Whether the entry is drawn in `host` ("frame" or "options").
+function Model:InHost(id, host)
+    local entry = self.entries[id]
+    return entry ~= nil and (entry.host == nil or entry.host == host)
 end
 
 -- Returns nil when `entry` can be added, or why not.
@@ -69,6 +98,9 @@ local function entryProblem(entry)
     end
     if not isText(entry.label) and entry.kind ~= "text" then
         return "entry has no label"
+    end
+    if entry.host ~= nil and not SettingsModel.HOSTS[entry.host] then
+        return "entry's host is unknown"
     end
     if entry.kind == "action" then
         return type(entry.run) ~= "function" and "action has no run function" or nil

@@ -229,14 +229,64 @@ test.test("without a minimap button the setting explains why and keeps its value
     test.assertTrue(addon.settings:Get("minimap"))
 end)
 
-test.test("/agf options is listed in help and explains when there is no panel", function()
+test.test("each section names its master frame page, Settings unless it says otherwise", function()
+    local model = newModel()
+
+    test.assertTrue(model:AddSection("general", "General"))
+    test.assertTrue(model:AddSection("greet", "Guild Greet", { page = "greetings" }))
+    test.assertTrue(model:AddSection("chat", "Chat Tags", { page = "settings" }))
+    test.assertTrue(model:AddSection("recruit", "Recruitment", { page = "recruitment", ownPage = true }))
+    test.assertFalse(model:AddSection("odd", "Odd", { page = "nowhere" }))
+
+    local onSettings = model:SectionsOn("settings")
+    test.assertEqual(2, #onSettings)
+    test.assertEqual("general", onSettings[1].id)
+    test.assertEqual("chat", onSettings[2].id)
+    test.assertEqual("greet", model:SectionsOn("greetings")[1].id)
+    test.assertEqual("recruit", model:SectionsOn("recruitment")[1].id)
+    test.assertTrue(model:SectionsOn("recruitment")[1].ownPage)
+    test.assertEqual(0, #model:SectionsOn("nowhere"))
+end)
+
+test.test("an entry kept to one host is drawn only there; others are drawn in both", function()
+    local model = newModel()
+    model:AddSection("general", "General")
+    local saved = {}
+    test.assertTrue(model:Add("general", toggle("minimap", saved)))
+    test.assertTrue(model:Add("general", { id = "openRoster", kind = "action", label = "Open Roster", host = "options",
+        run = function() end }))
+    test.assertFalse(model:Add("general", toggle("odd", saved, { host = "elsewhere" })))
+
+    test.assertTrue(model:InHost("minimap", "frame"))
+    test.assertTrue(model:InHost("minimap", "options"))
+    test.assertTrue(model:InHost("openRoster", "options"))
+    test.assertFalse(model:InHost("openRoster", "frame"))
+    test.assertFalse(model:InHost("missing", "options"))
+end)
+
+test.test("the composed add-on puts each section on its page and keeps Open Roster to the options", function()
+    local _, addon = loggedIn("Retail")
+    local settings = addon.settings
+
+    local onSettings = settings:SectionsOn("settings")
+    test.assertEqual(2, #onSettings)
+    test.assertEqual("general", onSettings[1].id)
+    test.assertEqual("chatTags", onSettings[2].id)
+    test.assertEqual("guildGreet", settings:SectionsOn("greetings")[1].id)
+    test.assertEqual("recruitment", settings:SectionsOn("recruitment")[1].id)
+    test.assertFalse(settings:InHost("openRoster", "frame"))
+    test.assertTrue(settings:InHost("version", "frame"))
+    test.assertTrue(settings:InHost("minimap", "frame"))
+end)
+
+test.test("/agf options is listed in help and explains when the window can't open", function()
     local world = loggedIn("Forever")
 
     fixtures.slash(world, "help")
-    test.assertContains(table.concat(world.messages, "\n"), "/agf options - open the settings panel")
+    test.assertContains(table.concat(world.messages, "\n"), "/agf options - open the add-on's settings")
 
     fixtures.slash(world, "options")
-    test.assertContains(lastMessage(world), "The settings panel isn't available on this client.")
+    test.assertContains(lastMessage(world), "can't open")
 end)
 
 test.test("/agf greet and the panel's Edit Greetings button open the Greetings window", function()

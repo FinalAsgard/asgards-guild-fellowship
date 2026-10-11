@@ -26,6 +26,7 @@ if missingLibraries ~= nil then
 end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
+local frameSettings
 local guildGreet, greetingsWindow, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
@@ -34,6 +35,7 @@ if clientProfile.supported then
     -- entry points open it.
     pages = addon.PageNavigator.Create()
     pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
+    pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
     rosterController = addon.RosterController.Create({
         pages = pages,
         client = client,
@@ -71,6 +73,13 @@ if clientProfile.supported then
         createWindow = function()
             return addon.RosterWindow.Create(client, {
                 navigator = pages,
+                drawPages = {
+                    -- Below the frame's title bar.
+                    settings = function(content)
+                        frameSettings:Draw(content, settings:SectionsOn("settings"), 28)
+                        frameSettings:Refresh()
+                    end,
+                },
                 loadGeometry = function()
                     local store = rosterController:Store()
                     return store and store:GetFrameState()
@@ -177,9 +186,11 @@ if clientProfile.supported then
             return entryPoints:SetMinimapShown(shown)
         end,
     })
+    -- The frame's own Settings tab doesn't need a button to open the frame.
     settings:Add("general", {
         id = "openRoster",
         kind = "action",
+        host = "options",
         label = "Open Roster",
         run = function()
             rosterController:Open()
@@ -212,7 +223,7 @@ if clientProfile.supported then
             return true
         end,
     })
-    settings:AddSection("guildGreet", "Guild Greet")
+    settings:AddSection("guildGreet", "Guild Greet", { page = "greetings" })
     settings:Add("guildGreet", {
         id = "guildGreet",
         kind = "toggle",
@@ -378,7 +389,7 @@ if clientProfile.supported then
     end
     -- Recruitment has a page of its own in the AddOns options, so the main
     -- page fits.
-    settings:AddSection("recruitment", "Recruitment", { ownPage = true })
+    settings:AddSection("recruitment", "Recruitment", { page = "recruitment", ownPage = true })
     -- Kept for the logged-in character.
     settings:Add("recruitment", {
         id = "recruitOptIn",
@@ -563,11 +574,13 @@ if clientProfile.supported then
             return guildRecruit:SetOfficerSetting("paused", paused)
         end,
     })
+    -- The same settings, drawn twice: in the game's AddOns options and on
+    -- the master frame's pages. Each refreshes on every change.
     settingsPanel = addon.SettingsPanel.Create(client, settings)
-    router:Register("options", "open the settings panel", function()
-        if not settingsPanel:Open() then
-            rosterController:Print("The settings panel isn't available on this client.")
-        end
+    frameSettings = addon.SettingsPanel.Create(client, settings, "frame")
+    frameSettings:Watch()
+    router:Register("options", "open the add-on's settings", function()
+        rosterController:Open("settings")
     end)
     router:Register("greet", "edit your Guild Greet greetings", openGreetings)
     router:Register("minimap", "show or hide the minimap button", function()
@@ -849,6 +862,7 @@ if clientProfile.supported then
         -- change later can grant or take away invite permission.
         guildRecruit:OnRosterUpdate()
         settingsPanel:Refresh()
+        frameSettings:Refresh()
     end)
     -- Chat tags read the same guild context as the roster.
     chatAnnotator = addon.ChatAnnotator.Create({

@@ -767,6 +767,15 @@ local function build(framework, options)
     -- the pop-out panels stay beside the master frame.
     local frame = host.panel
     local panel = host:Content("roster")
+    -- The other pages draw themselves; one that fails is left empty rather
+    -- than taking the roster down with it.
+    local pageId, draw
+    for pageId, draw in pairs(options.drawPages or {}) do
+        local content = host:Content(pageId)
+        if content ~= nil then
+            pcall(draw, content)
+        end
+    end
 
     -- Controls: search, online only, expand and collapse all.
     local search = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
@@ -983,6 +992,8 @@ local function build(framework, options)
 end
 
 -- options.navigator is the PageNavigator with the master frame's pages;
+-- options.drawPages maps a page id to function(content) that draws that
+-- page into its content frame (the Roster page is drawn here);
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
 -- options.onToggleGroup(playerId) runs when a player header is clicked;

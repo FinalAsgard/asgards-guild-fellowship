@@ -152,6 +152,25 @@ local function registerProfileTests(profile)
         test.assertEqual("roster", addon.pages:Current())
     end)
 
+    test.test(profile .. " /agf options opens the frame on the Settings tab", function()
+        local world, addon, frame = loggedIn(profile)
+
+        fixtures.slash(world, "options")
+        test.assertTrue(frame.shown)
+        test.assertEqual("settings", frame:LastPage())
+        test.assertEqual("settings", addon.pages:Current())
+
+        -- Already open: it stays open on Settings.
+        fixtures.slash(world, "options")
+        test.assertTrue(frame.shown)
+        test.assertEqual("settings", frame:LastPage())
+
+        -- /agf brings the Roster tab back.
+        fixtures.slash(world, "")
+        test.assertTrue(frame.shown)
+        test.assertEqual("roster", frame:LastPage())
+    end)
+
     test.test(profile .. " the guild window's button opens the frame on the Roster tab", function()
         local world, addon, frame = loggedIn(profile)
         addon.pages:Add("other", "Other", "other.blp")

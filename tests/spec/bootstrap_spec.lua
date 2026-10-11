@@ -34,6 +34,7 @@ local MANIFEST_FILES = {
     "Core/RosterController.lua",
     "Core/LibraryCheck.lua",
     "Core/CommandRouter.lua",
+    "Core/SettingsLayout.lua",
     "Core/SettingsModel.lua",
     "Core/GreetPolicy.lua",
     "Core/GreetingLibrary.lua",

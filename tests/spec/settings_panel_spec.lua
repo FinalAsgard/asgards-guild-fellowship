@@ -3,11 +3,12 @@ local test = require("tests.test_helper")
 -- A stand-in for the game's frames: every method does nothing, except that
 -- text set on a font string is recorded on the page it belongs to, so a spec
 -- can read what each options page shows. Pages are the plain frames the
--- panel creates with no parent.
+-- panel creates with no parent; a frame made inside a page (a scroll area,
+-- a row) records into that same page.
 local function newEnvironment()
     local environment = { pages = {} }
     local function widget(page)
-        local object = { shown = true }
+        local object = { shown = true, page = page }
         return setmetatable(object, {
             __index = function(_, method)
                 if method == "SetText" then
@@ -30,9 +31,21 @@ local function newEnvironment()
                     return function()
                         return widget(page)
                     end
-                elseif method == "GetChecked" or method == "HasFocus" then
+                elseif method == "HasFocus" then
                     return function()
                         return false
+                    end
+                elseif method == "SetChecked" then
+                    return function(self, checked)
+                        rawset(self, "checked", checked)
+                    end
+                elseif method == "GetChecked" then
+                    return function(self)
+                        return rawget(self, "checked") == true
+                    end
+                elseif method == "SetHeight" then
+                    return function(self, height)
+                        rawset(self, "height", height)
                     end
                 elseif method == "SetScript" then
                     return function(self, name, handler)
@@ -60,8 +73,9 @@ local function newEnvironment()
     environment.CreateFrame = function(frameType, _, parent)
         -- `environment.editBoxFails` lists methods that raise on text boxes,
         -- as on a client that lacks them.
+        local owner = parent and (rawget(parent, "texts") ~= nil and parent or rawget(parent, "page"))
         if frameType == "EditBox" and environment.editBoxFails ~= nil then
-            local box = widget(parent)
+            local box = widget(owner)
             local name
             for name in pairs(environment.editBoxFails) do
                 rawset(box, name, function()
@@ -87,7 +101,7 @@ local function newEnvironment()
             table.insert(environment.pages, page)
             return page
         end
-        return widget(parent)
+        return widget(owner)
     end
     return environment
 end
@@ -106,7 +120,7 @@ end
 -- page, holding a member toggle and, after an officer heading, an officer
 -- toggle shown only while `state.officer` is true.
 local function newPanel(environment)
-    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
     local state = { officer = false }
     local model = addon.SettingsModel.Create()
     model:AddSection("general", "General")
@@ -210,7 +224,7 @@ end)
 
 -- A model with one text setting backed by `saved.ad`, on the main page.
 local function newTextPanel(environment, savedAd, lines)
-    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
     local saved = { ad = savedAd or "" }
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
@@ -294,7 +308,7 @@ end)
 
 test.test("settings panel: leaving a box unchanged saves nothing", function()
     local environment = newEnvironment()
-    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
     local saves = 0
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
@@ -347,7 +361,7 @@ end)
 
 test.test("settings panel: a slider shows its value as it's dragged and saves it on release", function()
     local environment = newEnvironment()
-    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
     local saved = { gap = 60 }
     local saves = 0
     local model = addon.SettingsModel.Create()
@@ -395,7 +409,7 @@ test.test("settings panel: a setting with info gets an icon that shows it in the
     function tooltip:Hide() self.shown = false end
     environment.GameTooltip = tooltip
     environment.InterfaceOptions_AddCategory = function() end
-    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
     local ad = "Knights recruit!"
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
@@ -434,7 +448,7 @@ test.test("settings panel: a change that isn't saved says why in chat", function
     local environment = newEnvironment()
     local printed = {}
     environment.InterfaceOptions_AddCategory = function() end
-    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
     model:Add("recruitment", { id = "ad", kind = "input", label = "My ad", maxLength = 255,
@@ -452,4 +466,78 @@ test.test("settings panel: a change that isn't saved says why in chat", function
 
     test.assertEqual(1, #printed)
     test.assertContains(printed[1], "Couldn't save \"My ad\": saved data is unavailable.")
+end)
+
+local function widgetFor(panel, id)
+    local index
+    for index = 1, #panel.widgets do
+        if panel.widgets[index].id == id then
+            return panel.widgets[index]
+        end
+    end
+    return nil
+end
+
+test.test("settings panel: a setting changed in one host reads back in the other", function()
+    local environment = newEnvironment()
+    environment.InterfaceOptions_AddCategory = function() end
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local saved = { minimap = true }
+    local model = addon.SettingsModel.Create()
+    model:AddSection("general", "General")
+    model:Add("general", { id = "minimap", kind = "toggle", label = "Show the minimap button",
+        get = function() return saved.minimap end,
+        set = function(shown)
+            saved.minimap = shown
+            return true
+        end })
+    model:Add("general", { id = "openRoster", kind = "action", label = "Open Roster", host = "options",
+        run = function() end })
+    local options = addon.SettingsPanel.Create({ environment = environment }, model)
+    options:Register()
+    local frame = addon.SettingsPanel.Create({ environment = environment }, model, "frame")
+    local page = environment.CreateFrame("Frame")
+    frame:Draw(page, model:SectionsOn("settings"), 28)
+    frame:Watch()
+    frame:Refresh()
+
+    local inOptions = widgetFor(options, "minimap").frame
+    local inFrame = widgetFor(frame, "minimap").frame
+    test.assertTrue(inFrame.checked)
+
+    -- Unticked in the AddOns options: the frame's copy follows.
+    inOptions.checked = false
+    inOptions.scripts.OnClick(inOptions)
+    test.assertFalse(saved.minimap)
+    test.assertFalse(inFrame.checked)
+
+    -- Ticked again on the frame's Settings tab: the options follow.
+    inFrame.checked = true
+    inFrame.scripts.OnClick(inFrame)
+    test.assertTrue(saved.minimap)
+    test.assertTrue(inOptions.checked)
+
+    -- The Open Roster button is only drawn in the options.
+    test.assertTrue(widgetFor(options, "openRoster") ~= nil)
+    test.assertEqual(nil, widgetFor(frame, "openRoster"))
+    test.assertTrue(contains(page.texts, "Show the minimap button"))
+    test.assertFalse(contains(page.texts, "Open Roster"))
+end)
+
+test.test("settings panel: hidden settings leave no gap and the scroll area grows when they show", function()
+    local environment = newEnvironment()
+    environment.InterfaceOptions_AddCategory = function() end
+    local addon, panel, _, state = newPanel(environment)
+    panel:Register()
+    -- The Recruitment page's area: its own page under the add-on's.
+    local area = panel.areas[2]
+    local Layout = addon.SettingsLayout
+
+    test.assertEqual(Layout.TOP + Layout.HEADER + Layout.ROW + Layout.SECTION_GAP, area.content.height)
+
+    state.officer = true
+    panel:Refresh()
+
+    test.assertEqual(Layout.TOP + Layout.HEADER + 3 * Layout.ROW + 2 * Layout.SECTION_GAP, area.content.height)
+    test.assertEqual(Layout.ROW, area.rows.guildAd.height)
 end)
