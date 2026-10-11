@@ -30,10 +30,18 @@ Controller.__index = Controller
 --                 ok, reason: decides a member's suggestion in the queue
 --   adStats       optional function(keys) -> a player's ad count line for
 --                 the player panel, or nil
+--   recruitRecord optional function(keys) -> a player's ad record (see
+--                 RecruitStats), for the officers' Recruiters view
+--   isOfficer     optional function() -> true when the logged-in character
+--                 is an officer; only officers get the Recruiters view
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
         adStats = options.adStats,
+        recruitRecord = options.recruitRecord,
+        isOfficer = options.isOfficer or function()
+            return false
+        end,
         onDecideSuggestion = options.onDecideSuggestion,
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
@@ -705,7 +713,33 @@ function Controller:Redraw()
         }))
         self:RedrawPanel()
     end
+    self:RefreshRecruiters()
     self:UpdateStatus()
+end
+
+-- The officers' Recruiters rows (see RecruitStats.Recruiters) for the
+-- current guild, or nil for anyone who isn't an officer.
+function Controller:Recruiters()
+    local ok, officer = pcall(self.isOfficer)
+    local guild, partition, normalizer = self:QuietContext()
+    if not ok or officer ~= true or guild == nil or self.recruitRecord == nil then
+        return nil
+    end
+    return addon.RecruitStats.Recruiters({
+        partition = partition,
+        normalizer = normalizer,
+        recordOf = self.recruitRecord,
+        now = self.client:Timestamp(),
+    })
+end
+
+-- Redraws the Recruiters view when the window is open: officers get their
+-- rows, everyone else neither the view nor its button.
+function Controller:RefreshRecruiters()
+    if self.window == nil or not self.window:IsShown() or type(self.window.SetRecruiters) ~= "function" then
+        return
+    end
+    self.window:SetRecruiters(self:Recruiters())
 end
 
 -- `/agf`: shows or hides the roster window. Never scans.
@@ -733,6 +767,7 @@ function Controller:Toggle()
     self.current = { guild = guild, partition = partition }
     self:Redraw()
     self.window:Show()
+    self:RefreshRecruiters()
     return true
 end
 

@@ -94,6 +94,8 @@ Recruit.__index = Recruit
 --               Optional; without it, heard ad counts aren't kept.
 --   isOwnKey    function(key) -> true for one of the user's own characters.
 --               Optional.
+--   onStatsChanged function() -> runs after an ad count changes (the user
+--               posted, or heard a newer count). Optional.
 --   askWait     function() -> seconds an ask waits for answers. Optional;
 --               ASK_WAIT_SECONDS otherwise.
 --   isOfficer   function(key) -> true when a character is an officer.
@@ -140,6 +142,7 @@ function GuildRecruit.Create(options)
         isOwnKey = options.isOwnKey or function()
             return false
         end,
+        onStatsChanged = options.onStatsChanged or function() end,
         askWait = options.askWait,
         isOfficer = options.isOfficer or function()
             return false
@@ -610,6 +613,7 @@ function Recruit:Post(key)
     local store = self.store()
     local record = store and store:RecruitOwnStats()
     local report = record and addon.RecruitStats.AddOwn(record, now)
+    pcall(self.onStatsChanged)
     pcall(self.announce, {
         v = GuildRecruit.PROTOCOL,
         t = GuildRecruit.TYPE_ADVERTISED,
@@ -679,7 +683,9 @@ function Recruit:OnAdvertised(message, sender)
     local okKey, senderKey = pcall(self.keyOf, sender)
     local partition = self.partition()
     if okKey and type(senderKey) == "string" and partition ~= nil and message.r ~= nil then
-        addon.RecruitStats.Create(partition:GetRecruitStats()):File(senderKey, message.r)
+        if addon.RecruitStats.Create(partition:GetRecruitStats()):File(senderKey, message.r) then
+            pcall(self.onStatsChanged)
+        end
     end
     return self:hear(message.k, message.a)
 end
@@ -816,11 +822,10 @@ function Recruit:OnAskConfig(message, sender)
     return true
 end
 
--- The player panel's ad count line for a player with the characters `keys`:
--- the user's own record for the user's own player, else the highest heard
--- among their characters. Nil when there's none.
-function Recruit:StatsLine(keys)
-    local now = self.now()
+-- The ad record of the player with the characters `keys`: the user's own
+-- for the user's own player, else the highest heard among their
+-- characters. Nil when there's none.
+function Recruit:RecordFor(keys)
     local index
     for index = 1, #(keys or {}) do
         local ok, own = pcall(self.isOwnKey, keys[index])
@@ -830,14 +835,20 @@ function Recruit:StatsLine(keys)
             if record == nil or record.n == 0 then
                 return nil
             end
-            return addon.RecruitStats.Line(record, now)
+            return record
         end
     end
     local partition = self.partition()
     if partition == nil then
         return nil
     end
-    return addon.RecruitStats.Line(addon.RecruitStats.Create(partition:GetRecruitStats()):Best(keys), now)
+    return addon.RecruitStats.Create(partition:GetRecruitStats()):Best(keys)
+end
+
+-- The player panel's ad count line for a player with the characters `keys`,
+-- or nil when they have no record.
+function Recruit:StatsLine(keys)
+    return addon.RecruitStats.Line(self:RecordFor(keys), self.now())
 end
 
 -- Every Guild Recruit message type, for routing.

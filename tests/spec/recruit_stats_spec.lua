@@ -72,3 +72,83 @@ test.test("recruit stats: the user's own record counts each ad and drops old tim
     addon.RecruitStats.AddOwn(broken, START)
     test.assertEqual(1, broken.n)
 end)
+
+-- A partition with just the parts the Recruiters view reads: players (id ->
+-- { main, alias }) and their characters (key -> { name }).
+local function fakePartition(players, characters, owners)
+    local partition = {}
+    function partition:EachPlayer(callback)
+        local ids = {}
+        local id
+        for id in pairs(players) do
+            table.insert(ids, id)
+        end
+        table.sort(ids)
+        local index
+        for index = 1, #ids do
+            callback(ids[index], players[ids[index]])
+        end
+    end
+    function partition:CharactersOf(id)
+        return owners[id]
+    end
+    function partition:GetCharacter(key)
+        return characters[key]
+    end
+    return partition
+end
+
+test.test("recruiters: players are ranked by 30-day count, then all time, labelled by alias or main", function()
+    local addon = load()
+    local partition = fakePartition({
+        [1] = { main = "anvil-area52", alias = "Rip" },
+        [2] = { main = "bolt-area52" },
+        [3] = { main = "cog-area52" },
+        [4] = { main = "dent-area52" },
+        [5] = { main = "quiet-area52" },
+    }, {
+        ["anvil-area52"] = { name = "Anvil-Area52" },
+        ["bolt-area52"] = { name = "Bolt-Area52" },
+        ["cog-area52"] = { name = "Cog-Area52" },
+        ["dent-area52"] = { name = "Dent-Area52" },
+        ["quiet-area52"] = { name = "Quiet-Area52" },
+    }, {
+        [1] = { "anvil-area52", "tongs-area52" },
+        [2] = { "bolt-area52" },
+        [3] = { "cog-area52" },
+        [4] = { "dent-area52" },
+        [5] = { "quiet-area52" },
+    })
+    local records = {
+        ["anvil-area52"] = { n = 4, t = { START, START + 1 } },
+        ["bolt-area52"] = { n = 9, t = { START } },
+        ["cog-area52"] = { n = 20, t = { START, START + 1 } },
+        -- All of Dent's ads are older than 30 days.
+        ["dent-area52"] = { n = 50, t = {} },
+    }
+    local normalizer = {
+        Display = function(_, name)
+            return (string.gsub(name, "%-Area52$", ""))
+        end,
+    }
+
+    local rows = addon.RecruitStats.Recruiters({
+        partition = partition,
+        normalizer = normalizer,
+        recordOf = function(keys)
+            return records[keys[1]]
+        end,
+        now = START + 2,
+    })
+
+    test.assertEqual(4, #rows)
+    test.assertEqual("Cog", rows[1].label)
+    test.assertEqual(2, rows[1].recent)
+    test.assertEqual(20, rows[1].total)
+    test.assertEqual("Rip", rows[2].label)
+    test.assertEqual(2, rows[2].recent)
+    test.assertEqual("Bolt", rows[3].label)
+    test.assertEqual("Dent", rows[4].label)
+    test.assertEqual(0, rows[4].recent)
+    test.assertEqual(50, rows[4].total)
+end)

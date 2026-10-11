@@ -1124,3 +1124,45 @@ test.test("ad stats: a player who has never advertised shows no line", function(
 
     test.assertEqual(nil, world.addon.guildRecruit:StatsLine({ selfKey }))
 end)
+
+-- A roster window that records what it was last told about Recruiters.
+local function recruitersWindow(world)
+    local window = {}
+    function window:IsShown()
+        return true
+    end
+    function window:SetRecruiters(rows)
+        self.rows = rows
+    end
+    world.addon.rosterController.window = window
+    return window
+end
+
+test.test("recruiters: an officer's open view updates when new stats arrive, ranked", function()
+    local world = login("Retail", { playerName = OFFICER })
+    local window = recruitersWindow(world)
+    local recruit = world.addon.guildRecruit
+
+    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time,
+        r = { n = 2, t = { world.time, world.time } } }, MEMBER)
+    test.assertEqual(1, #window.rows)
+    test.assertEqual("Visitor-Stormrage", window.rows[1].label)
+    test.assertEqual(2, window.rows[1].recent)
+
+    -- The officer's own posts count too, under their alias.
+    optIn(world)
+    world.handlers.post(world.shown[1].key)
+    test.assertEqual(2, #window.rows)
+    test.assertEqual("Visitor-Stormrage", window.rows[1].label)
+    test.assertEqual("TheTool", window.rows[2].label)
+    test.assertEqual(1, window.rows[2].total)
+end)
+
+test.test("recruiters: a regular member can't open the view", function()
+    local world = login("Retail", { playerName = MEMBER })
+    local window = recruitersWindow(world)
+
+    test.assertEqual(nil, world.addon.rosterController:Recruiters())
+    world.addon.rosterController:RefreshRecruiters()
+    test.assertEqual(nil, window.rows)
+end)

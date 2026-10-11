@@ -51,6 +51,12 @@ if clientProfile.supported then
         adStats = function(keys)
             return guildRecruit:StatsLine(keys)
         end,
+        recruitRecord = function(keys)
+            return guildRecruit:RecordFor(keys)
+        end,
+        isOfficer = function()
+            return guildRecruit:IsOfficer()
+        end,
         getDatabase = function()
             return persistence:GetDatabase()
         end,
@@ -717,6 +723,10 @@ if clientProfile.supported then
         end,
         isOwnKey = function(key)
             return guildGreet:IsOwn(key)
+        end,
+        -- An open Recruiters view shows new counts at once.
+        onStatsChanged = function()
+            rosterController:RefreshRecruiters()
         end,
         isOwn = function(sender)
             local guild, _, normalizer = rosterController:QuietContext()

@@ -125,3 +125,35 @@ function Stats:Best(keys)
     end
     return best
 end
+
+-- The officers' Recruiters view: every player with a record, as { label,
+-- recent, total }, labelled by alias, else the main's name, and ranked by
+-- 30-day count, then lifetime total, highest first (then by label, so the
+-- order is stable).
+-- inputs: partition, normalizer (for display names), recordOf(keys) -> the
+-- player's record or nil, now.
+function RecruitStats.Recruiters(inputs)
+    local rows = {}
+    inputs.partition:EachPlayer(function(id, player)
+        local record = inputs.recordOf(inputs.partition:CharactersOf(id))
+        if RecruitStats.IsValid(record) and record.n > 0 then
+            local main = inputs.partition:GetCharacter(player.main)
+            local name = main and main.name or player.main
+            table.insert(rows, {
+                label = player.alias or (inputs.normalizer and inputs.normalizer:Display(name)) or name,
+                recent = RecruitStats.Recent(record, inputs.now),
+                total = record.n,
+            })
+        end
+    end)
+    table.sort(rows, function(a, b)
+        if a.recent ~= b.recent then
+            return a.recent > b.recent
+        end
+        if a.total ~= b.total then
+            return a.total > b.total
+        end
+        return a.label < b.label
+    end)
+    return rows
+end

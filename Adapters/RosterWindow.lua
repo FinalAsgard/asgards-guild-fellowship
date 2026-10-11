@@ -707,6 +707,98 @@ local function buildConflictPanel(framework, options, frameName)
     return { panel = panel, scroll = scroll, empty = empty, acceptAll = acceptAll, rejectAll = rejectAll }
 end
 
+-- The officers' Recruiters view: players ranked by ads in the last 30 days,
+-- then all time.
+local RECRUITER_COLUMNS = {
+    { field = "label", header = "Player", x = 8, width = 200 },
+    { field = "recent", header = "Last 30 days", x = 214, width = 90 },
+    { field = "total", header = "All time", x = 310, width = 80 },
+}
+local RECRUITERS_WIDTH = 420
+local RECRUITERS_HEIGHT = 360
+
+local function createRecruiterLine(scroll, index)
+    local line = CreateFrame("Frame", nil, scroll)
+    line:SetHeight(RosterWindow.LINE_HEIGHT)
+    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
+    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
+    line.background = line:CreateTexture(nil, "BACKGROUND")
+    line.background:SetAllPoints(line)
+    line.cells = {}
+    local columnIndex
+    for columnIndex = 1, #RECRUITER_COLUMNS do
+        local column = RECRUITER_COLUMNS[columnIndex]
+        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
+        cell:SetWidth(column.width)
+        cell:SetJustifyH("LEFT")
+        cell:SetWordWrap(false)
+        line.cells[column.field] = cell
+    end
+    return line
+end
+
+local function refreshRecruiterLines(scroll, rows, offset, totalLines)
+    local lineIndex
+    for lineIndex = 1, totalLines do
+        local dataIndex = lineIndex + offset
+        local row = rows[dataIndex]
+        if row ~= nil then
+            local line = scroll:GetLine(lineIndex)
+            local columnIndex
+            for columnIndex = 1, #RECRUITER_COLUMNS do
+                local field = RECRUITER_COLUMNS[columnIndex].field
+                line.cells[field]:SetText(tostring(row[field] or ""))
+            end
+            if dataIndex % 2 == 0 then
+                setBackground(line, STRIPE_BACKGROUND)
+            else
+                setBackground(line, NO_BACKGROUND)
+            end
+        end
+    end
+end
+
+local function buildRecruitersPanel(framework, frameName)
+    local panel = framework:CreateSimplePanel(
+        UIParent,
+        RECRUITERS_WIDTH,
+        RECRUITERS_HEIGHT,
+        addon.Identity.displayName .. " - Recruiters",
+        frameName .. "Recruiters"
+    )
+    panel:SetFrameStrata("DIALOG")
+    local headerIndex
+    for headerIndex = 1, #RECRUITER_COLUMNS do
+        local column = RECRUITER_COLUMNS[headerIndex]
+        local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -32)
+        header:SetText(column.header)
+    end
+    local lineAmount = math.floor((RECRUITERS_HEIGHT - 70) / RosterWindow.LINE_HEIGHT)
+    local scroll = framework:CreateScrollBox(
+        panel,
+        frameName .. "RecruiterScroll",
+        refreshRecruiterLines,
+        {},
+        RECRUITERS_WIDTH - 20,
+        RECRUITERS_HEIGHT - 70,
+        lineAmount,
+        RosterWindow.LINE_HEIGHT,
+        createRecruiterLine,
+        true
+    )
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -48)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 12)
+    scroll:CreateLines(createRecruiterLine, lineAmount)
+    local empty = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    empty:SetPoint("CENTER", panel, "CENTER", 0, 0)
+    empty:SetText("Nobody has advertised yet.")
+    panel:Hide()
+    return { panel = panel, scroll = scroll, empty = empty }
+end
+
 local function build(framework, options)
     local parent = UIParent
     local frameName = addon.Identity.addonName .. "RosterWindow"
@@ -868,6 +960,12 @@ local function build(framework, options)
     conflictsButton:SetSize(110, 22)
     conflictsButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -36, 10)
     conflictsButton:SetText("Conflicts (0)")
+    -- Officers only: shown once the controller hands over Recruiters rows.
+    local recruitersButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    recruitersButton:SetSize(90, 22)
+    recruitersButton:SetPoint("RIGHT", conflictsButton, "LEFT", -6, 0)
+    recruitersButton:SetText("Recruiters")
+    recruitersButton:Hide()
 
     -- Departed characters are hidden unless this is checked.
     local departed = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
@@ -894,7 +992,7 @@ local function build(framework, options)
 
     local status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     status:SetPoint("LEFT", purgeAll, "RIGHT", 10, 0)
-    status:SetPoint("RIGHT", conflictsButton, "LEFT", -10, 0)
+    status:SetPoint("RIGHT", recruitersButton, "LEFT", -10, 0)
     status:SetJustifyH("LEFT")
     status:SetWordWrap(false)
 
@@ -923,12 +1021,22 @@ local function build(framework, options)
         end
     end)
     conflicts.button = conflictsButton
+    local recruiters = buildRecruitersPanel(framework, frameName)
+    recruiters.button = recruitersButton
+    recruitersButton:SetScript("OnClick", function()
+        if recruiters.panel:IsShown() then
+            recruiters.panel:Hide()
+        else
+            recruiters.panel:Show()
+        end
+    end)
     panel:HookScript("OnHide", function()
         conflicts.panel:Hide()
+        recruiters.panel:Hide()
         playerPanel.panel:Hide()
     end)
 
-    return panel, scroll, status, conflicts, playerPanel
+    return panel, scroll, status, conflicts, playerPanel, recruiters
 end
 
 -- options.loadGeometry() returns saved geometry or nil;
@@ -952,7 +1060,7 @@ function RosterWindow.Create(client, options)
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, panel, scroll, status, conflicts, playerPanel = pcall(build, framework, options)
+    local ok, panel, scroll, status, conflicts, playerPanel, recruiters = pcall(build, framework, options)
     if not ok or panel == nil then
         return nil, "the Details! Framework could not build the window"
     end
@@ -962,6 +1070,7 @@ function RosterWindow.Create(client, options)
         status = status,
         conflicts = conflicts,
         playerPanel = playerPanel,
+        recruiters = recruiters,
     }, Window)
 end
 
@@ -1005,6 +1114,27 @@ function Window:SetConflicts(rows)
         else
             conflicts.acceptAll:Enable()
             conflicts.rejectAll:Enable()
+        end
+    end))
+end
+
+-- Shows the officers' Recruiters rows (see RecruitStats.Recruiters), or, for
+-- nil, hides the view and its footer button.
+function Window:SetRecruiters(rows)
+    return (pcall(function()
+        local recruiters = self.recruiters
+        if rows == nil then
+            recruiters.button:Hide()
+            recruiters.panel:Hide()
+            return
+        end
+        recruiters.button:Show()
+        recruiters.scroll:SetData(rows)
+        recruiters.scroll:Refresh()
+        if #rows == 0 then
+            recruiters.empty:Show()
+        else
+            recruiters.empty:Hide()
         end
     end))
 end
