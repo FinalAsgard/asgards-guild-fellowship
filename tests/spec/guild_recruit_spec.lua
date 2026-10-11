@@ -874,3 +874,137 @@ test.test("guild recruit: own and malformed asks and answers are ignored", funct
     test.assertFalse(recruit:OnMessage({ v = 1, t = "something", k = "trade", a = world.time }, "Anvil-Area52"))
     test.assertFalse(recruit:OnMessage("ask-channel", "Anvil-Area52"))
 end)
+
+-- The fixtures' Retail guild: Toolbox is an officer (rank 1, which can view
+-- officer notes), Visitor a member (rank 4).
+local OFFICER = "Toolbox-Area52"
+local MEMBER = "Visitor-Stormrage"
+
+test.test("officer guild ad: only officers see and can change the guild ad controls", function()
+    local officer = login("Retail", { playerName = OFFICER })
+    test.assertTrue(officer.addon.settings:IsShown("recruitGuildAd"))
+    test.assertTrue(officer.addon.settings:IsShown("recruitGuildAdOn"))
+    test.assertTrue(officer.addon.settings:Set("recruitGuildAd", "Knights recruit!"))
+
+    local member = login("Retail", { playerName = MEMBER })
+    test.assertFalse(member.addon.settings:IsShown("recruitGuildAd"))
+    test.assertFalse(member.addon.settings:IsShown("recruitGuildAdOn"))
+    test.assertTrue(member.addon.settings:IsShown("recruitUseOfficerAd"))
+    local changed, reason = member.addon.settings:Set("recruitGuildAd", "Forged")
+    test.assertEqual(nil, changed)
+    test.assertEqual("only officers can change it", reason)
+end)
+
+test.test("officer guild ad: a change is saved per guild with when and by whom, and broadcast", function()
+    local world = login("Retail", { playerName = OFFICER })
+
+    test.assertTrue(world.addon.settings:Set("recruitGuildAd", "Knights recruit!"))
+    test.assertTrue(world.addon.settings:Set("recruitGuildAdOn", false))
+
+    local partition = select(2, world.addon.rosterController:QuietContext())
+    local saved = partition:GetRecruitConfig()
+    test.assertEqual("Knights recruit!", saved.guildAd.value)
+    test.assertEqual(world.time, saved.guildAd.at)
+    test.assertEqual(world.addon.rosterController:SelfKey(), saved.guildAd.by)
+    local configs = sentOfType(world, "config")
+    test.assertEqual(2, #configs)
+    test.assertEqual("Knights recruit!", configs[2].s.guildAd.value)
+    test.assertFalse(configs[2].s.guildAdOn.value)
+
+    local reloaded = login("Retail", { playerName = OFFICER, database = world.database })
+    test.assertEqual("Knights recruit!", reloaded.addon.settings:Get("recruitGuildAd"))
+    test.assertFalse(reloaded.addon.settings:Get("recruitGuildAdOn"))
+end)
+
+test.test("officer guild ad: a member with only the guild ad is prompted and posts it", function()
+    local world = login("Retail", { playerName = OFFICER })
+    world.addon.settings:Set("recruitGuildAd", "Knights recruit!")
+    world.addon.settings:Set("recruitOptIn", true)
+
+    test.assertEqual(1, #world.shown)
+    world.handlers.post(world.shown[1].key)
+    test.assertEqual("Knights recruit!", world.chat[1].text)
+end)
+
+test.test("officer guild ad: each post picks at random between the guild ad and the user's own", function()
+    local world = login("Retail", { playerName = OFFICER })
+    world.addon.settings:Set("recruitGuildAd", "Knights recruit!")
+    optIn(world, "My own ad")
+    world.environment.math = { random = function(low) return low + 1 end }
+    world.handlers.post(world.shown[1].key)
+    test.assertEqual("My own ad", world.chat[1].text)
+
+    world.environment.math = { random = function(low) return low end }
+    inCity(world, "Dornogal")
+    world.handlers.post(promptFor(world, "Advertise in Trade?").key)
+    test.assertEqual("Knights recruit!", world.chat[2].text)
+end)
+
+test.test("officer guild ad: unchecking use officer ad, or the ad being off, posts only the user's own", function()
+    local world = login("Retail", { playerName = OFFICER })
+    world.addon.settings:Set("recruitGuildAd", "Knights recruit!")
+    world.addon.settings:Set("recruitOptIn", true)
+    test.assertTrue(world.addon.settings:Get("recruitUseOfficerAd"))
+
+    test.assertTrue(world.addon.settings:Set("recruitUseOfficerAd", false))
+    test.assertFalse(world.database.recruit.useOfficerAd)
+    -- No usable ad now: no prompts.
+    test.assertEqual(0, #world.shown)
+
+    world.addon.settings:Set("recruitAd", "My own ad")
+    world.addon.settings:Set("recruitUseOfficerAd", true)
+    world.addon.settings:Set("recruitGuildAdOn", false)
+    world.handlers.post(world.shown[1].key)
+    test.assertEqual("My own ad", world.chat[1].text)
+end)
+
+test.test("officer guild ad: config is taken only from officers, newest change winning", function()
+    local world = login("Retail", { playerName = MEMBER })
+    optIn(world, "My own ad")
+    local recruit = world.addon.guildRecruit
+    local officerKey = "toolbox-area52"
+    local function config(value, at, by)
+        return { v = 1, t = "config", s = { guildAd = { value = value, at = at, by = by } } }
+    end
+
+    -- A member can't send settings, even naming an officer as the author.
+    test.assertFalse(recruit:OnMessage(config("Forged", world.time, officerKey), "Hammer-Area52"))
+    -- An officer can't pass on a change by a non-officer.
+    test.assertFalse(recruit:OnMessage(config("Relayed", world.time, "visitor-stormrage"), OFFICER))
+    test.assertEqual("", recruit:Config():Get("guildAd"))
+
+    test.assertTrue(recruit:OnMessage(config("Knights recruit!", world.time, officerKey), OFFICER))
+    test.assertEqual("Knights recruit!", recruit:Config():Get("guildAd"))
+    test.assertFalse(recruit:OnMessage(config("Stale", world.time - 1, officerKey), OFFICER))
+    test.assertTrue(recruit:OnMessage(config("Newest", world.time + 1, officerKey), OFFICER))
+    test.assertEqual("Newest", recruit:Config():Get("guildAd"))
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "config", s = "everything" }, OFFICER))
+end)
+
+test.test("officer guild ad: with no officer around, ask-config goes unanswered and the user's own ad posts", function()
+    local world = login("Retail", { playerName = MEMBER })
+    optIn(world, "My own ad")
+
+    test.assertEqual(1, #sentOfType(world, "ask-config"))
+    fixtures.runTimers(world, 60)
+    test.assertTrue(world.addon.settings:Get("recruitUseOfficerAd"))
+    world.handlers.post(world.shown[1].key)
+    test.assertEqual("My own ad", world.chat[1].text)
+    -- Asked once a session.
+    fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+    test.assertEqual(1, #sentOfType(world, "ask-config"))
+end)
+
+test.test("officer guild ad: only an officer with settings answers ask-config", function()
+    local member = login("Retail", { playerName = MEMBER })
+    test.assertFalse(member.addon.guildRecruit:OnMessage({ v = 1, t = "ask-config" }, "Anvil-Area52"))
+
+    local officer = login("Retail", { playerName = OFFICER })
+    test.assertFalse(officer.addon.guildRecruit:OnMessage({ v = 1, t = "ask-config" }, "Anvil-Area52"))
+    officer.addon.settings:Set("recruitGuildAd", "Knights recruit!")
+    local before = #sentOfType(officer, "config")
+    officer.environment.math = { random = function() return 2 end }
+    test.assertTrue(officer.addon.guildRecruit:OnMessage({ v = 1, t = "ask-config" }, "Anvil-Area52"))
+    fixtures.runTimers(officer, 2)
+    test.assertEqual(before + 1, #sentOfType(officer, "config"))
+end)

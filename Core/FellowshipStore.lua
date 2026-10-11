@@ -152,7 +152,7 @@ local function validatePartition(data)
     end
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
-        "recruitLedger",
+        "recruitLedger", "recruitConfig",
     }
     local index
     for index = 1, #containers do
@@ -186,7 +186,9 @@ local function validatePartition(data)
     data.unapplied = nil
     -- An officer's ledger and forgery log, and Guild Recruit's ad times,
     -- are only created when needed.
-    local optional = { unapplied = true, ledger = true, forgeries = true, recruitLedger = true }
+    local optional = {
+        unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
+    }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
             data[containers[index]] = {}
@@ -576,6 +578,27 @@ function Store:SetRecruitAd(text)
     return true
 end
 
+-- Whether the user posts the officers' guild ad too. On unless turned off;
+-- an unusable saved value counts as on.
+function Store:RecruitUseOfficerAd()
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    return type(state) ~= "table" or state.useOfficerAd ~= false
+end
+
+-- Turns posting the officers' guild ad on or off, for every character on
+-- the account.
+function Store:SetRecruitUseOfficerAd(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    state.useOfficerAd = enabled
+    return true
+end
+
 -- The character `key`'s answer to "Help with guild recruitment?": true
 -- (Yes), false (No), or nil while undecided. An unusable saved set, or an
 -- unusable answer in it, counts as undecided.
@@ -859,6 +882,15 @@ end
 
 function Partition:GetForgeries()
     return self.data.forgeries
+end
+
+-- Guild Recruit's officer settings (see RecruitConfig), created on first
+-- use.
+function Partition:GetRecruitConfig()
+    if self.data.recruitConfig == nil then
+        self.data.recruitConfig = {}
+    end
+    return self.data.recruitConfig
 end
 
 -- Guild Recruit's last ad time in each channel (see RecruitLedger), created

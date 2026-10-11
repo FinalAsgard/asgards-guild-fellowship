@@ -4,7 +4,8 @@ local _, addon = ...
 -- drawn from the SettingsModel: a title, then one header per section with
 -- its entries below it (a check box, a button, a line of text, a number
 -- with minus and plus buttons, or a labelled text box saved on Enter). An
--- entry the model reports disabled is greyed out and can't be changed. Clients with the newer Settings API get a canvas
+-- entry the model reports disabled is greyed out and can't be changed, and
+-- one it reports hidden isn't shown. Clients with the newer Settings API get a canvas
 -- category; older ones get an Interface Options panel. Like the other
 -- adapters, everything is optional and protected: a client with neither API,
 -- or a frame call that fails, just leaves the panel out without an error.
@@ -52,12 +53,31 @@ local function setEnabled(widget, enabled)
     end
 end
 
+-- Shows or hides a widget's controls and label.
+local function setShown(widget, shown)
+    local parts = { widget.label }
+    local index
+    for index = 1, #(widget.controls or {}) do
+        table.insert(parts, widget.controls[index])
+    end
+    for index = 1, #parts do
+        if parts[index] ~= nil then
+            if shown then
+                parts[index]:Show()
+            else
+                parts[index]:Hide()
+            end
+        end
+    end
+end
+
 -- Fills in every widget from the model's current values.
 function Panel:Refresh()
     local index
     for index = 1, #self.widgets do
         local widget = self.widgets[index]
         pcall(function()
+            setShown(widget, self.model:IsShown(widget.id))
             setEnabled(widget, self.model:IsEnabled(widget.id) == true)
             if widget.kind == "input" then
                 -- Text being typed is left alone until it's saved.

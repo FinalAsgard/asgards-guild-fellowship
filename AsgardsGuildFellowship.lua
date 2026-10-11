@@ -26,7 +26,7 @@ if missingLibraries ~= nil then
 end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
-local guildGreet, greetingsWindow, greetPrompts, guildRecruit, recruitPrompts
+local guildGreet, greetingsWindow, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -404,6 +404,62 @@ if clientProfile.supported then
             return true
         end,
     })
+    settings:Add("recruitment", {
+        id = "recruitUseOfficerAd",
+        kind = "toggle",
+        label = "Also post the officers' guild ad",
+        enabled = recruitAvailable,
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:RecruitUseOfficerAd()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            store:SetRecruitUseOfficerAd(enabled)
+            return true
+        end,
+    })
+    -- Officers only: the guild ad, saved per guild and sent to every
+    -- add-on user.
+    local function isOfficer()
+        return guildRecruit ~= nil and guildRecruit:IsOfficer()
+    end
+    local function officerOnly()
+        if not isOfficer() then
+            return false, "only officers can change it"
+        end
+        return true
+    end
+    settings:Add("recruitment", {
+        id = "recruitGuildAd",
+        kind = "input",
+        label = "Guild ad, for every member (press Enter to save)",
+        maxLength = addon.RecruitConfig.AD_MAX,
+        shown = isOfficer,
+        enabled = officerOnly,
+        get = function()
+            return guildRecruit:Config():Get("guildAd")
+        end,
+        set = function(text)
+            return guildRecruit:SetOfficerSetting("guildAd", text)
+        end,
+    })
+    settings:Add("recruitment", {
+        id = "recruitGuildAdOn",
+        kind = "toggle",
+        label = "Guild ad on",
+        shown = isOfficer,
+        enabled = officerOnly,
+        get = function()
+            return guildRecruit:Config():Get("guildAdOn")
+        end,
+        set = function(enabled)
+            return guildRecruit:SetOfficerSetting("guildAdOn", enabled)
+        end,
+    })
     settingsPanel = addon.SettingsPanel.Create(client, settings)
     router:Register("options", "open the settings panel", function()
         if not settingsPanel:Open() then
@@ -434,7 +490,7 @@ if clientProfile.supported then
     router:SetDefault("roster")
     -- Guild sync: officers are ranks that can view officer notes, judged
     -- from the stored roster (current members only).
-    local officerAuthority = addon.OfficerAuthority.Create({
+    officerAuthority = addon.OfficerAuthority.Create({
         rankOf = function(key)
             local guild, partition = rosterController:QuietContext()
             if guild == nil or not partition:IsInGuild(key) then
@@ -612,6 +668,14 @@ if clientProfile.supported then
         announce = function(message)
             return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
         end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        senderIsOfficer = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            return key ~= nil and officerAuthority:IsOfficer(key)
+        end,
         isOwn = function(sender)
             local guild, _, normalizer = rosterController:QuietContext()
             local key = guild and normalizer:Key(sender)
@@ -628,7 +692,7 @@ if clientProfile.supported then
     })
     settings:OnChange(function(id, value)
         local entry = settings:Entry(id)
-        if id == "recruitOptIn" or id == "recruitAd" then
+        if id == "recruitOptIn" or id == "recruitAd" or id == "recruitUseOfficerAd" then
             guildRecruit:Refresh()
         elseif id == "guildGreet" or id == "greetCharacter" then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())

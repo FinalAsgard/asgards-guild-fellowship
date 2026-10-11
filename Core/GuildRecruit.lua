@@ -27,6 +27,13 @@ local _, addon = ...
 -- first with the same time or a newer one. When nobody answers, the channel
 -- is taken as not advertised in. Without add-on messaging, it simply works
 -- uncoordinated: an ask nobody can hear counts as unanswered at once.
+--
+-- Officers write the guild ad and switch it on or off (RecruitConfig). A
+-- change is broadcast as "config", and every add-on asks for the newest
+-- settings at login with "ask-config"; officers' add-ons answer. Settings
+-- are taken only from officers. Each post picks at random between the
+-- usable ads: the guild ad, when it's on and the user posts it, and the
+-- user's own.
 local GuildRecruit = {
     -- The "advertised" message: { v = PROTOCOL, t = TYPE_ADVERTISED, k = the
     -- channel key, n = the channel's display name, a = when it was posted
@@ -40,6 +47,11 @@ local GuildRecruit = {
     TYPE_CHANNEL_TIME = "channel-time",
     -- How long an ask waits for answers before the channel counts as due.
     ASK_WAIT_SECONDS = 8,
+    -- { v, t = TYPE_CONFIG, s = { [setting] = { value, at, by } } }: the
+    -- officer settings that have been changed (see RecruitConfig).
+    TYPE_CONFIG = "config",
+    -- { v, t = TYPE_ASK_CONFIG }: who has the officer settings?
+    TYPE_ASK_CONFIG = "ask-config",
     -- An answer waits a random whole number of seconds in this range, so
     -- the first answer heard can stop the rest.
     ANSWER_DELAY_MIN = 1,
@@ -84,6 +96,10 @@ Recruit.__index = Recruit
 --               the user's own characters. Optional.
 --   askWait     function() -> seconds an ask waits for answers. Optional;
 --               ASK_WAIT_SECONDS otherwise.
+--   isOfficer   function(key) -> true when a character is an officer.
+--               Optional; nobody is without it.
+--   senderIsOfficer function(sender) -> true when a message's sender is an
+--               officer. Optional; nobody is without it.
 --   send        function(text, channelNumber) -> true when posted
 --   rosterLoaded function() -> true once the guild roster has loaded
 --   view        { Show = function(view, prompts, handlers),
@@ -119,6 +135,16 @@ function GuildRecruit.Create(options)
             return false
         end,
         askWait = options.askWait,
+        isOfficer = options.isOfficer or function()
+            return false
+        end,
+        senderIsOfficer = options.senderIsOfficer or function()
+            return false
+        end,
+        -- True while this add-on's answer to an ask-config waits, and once
+        -- this session's ask-config was sent.
+        answeringConfig = false,
+        askedConfig = false,
         -- When each channel that's due but not yet shown will show.
         showAt = {},
         -- This session's due marks (see RecruitLedger), the channels being
@@ -150,7 +176,7 @@ function GuildRecruit.Create(options)
             return recruit:IsOptedIn()
         end,
         hasAd = function()
-            return recruit:Ad() ~= nil
+            return recruit:HasAd()
         end,
         busy = function()
             return recruit:IsBusy()
@@ -194,14 +220,74 @@ function Recruit:IsOptedIn()
     return store ~= nil and selfKey ~= nil and store:RecruitOptedIn(selfKey)
 end
 
--- The ad to post, exactly as the user wrote it, or nil when there's none.
-function Recruit:Ad()
+-- The officer settings for the current guild, saved with its partition.
+function Recruit:Config()
+    local partition = self.partition()
+    return addon.RecruitConfig.Create(partition and partition:GetRecruitConfig(), {
+        isOfficer = self.isOfficer,
+    })
+end
+
+-- One usable ad, exactly as written, picked with `random`; nil when none is
+-- usable.
+function Recruit:pickAd(random)
     local store = self.store()
-    local ad = store and store:RecruitAd() or ""
-    if string.find(ad, "%S") == nil then
-        return nil
+    local config = self:Config()
+    return addon.RecruitConfig.PickAd({
+        officerAd = config:Get("guildAd"),
+        officerOn = config:Get("guildAdOn"),
+        useOfficer = store == nil or store:RecruitUseOfficerAd(),
+        ownAd = store and store:RecruitAd() or "",
+        random = random,
+    })
+end
+
+-- The ad to post: picked at random between the usable ones, or nil when
+-- there's none.
+function Recruit:Ad()
+    return self:pickAd(self.random)
+end
+
+-- True when there's an ad to post.
+function Recruit:HasAd()
+    return self:pickAd(function(low)
+        return low
+    end) ~= nil
+end
+
+-- True when the logged-in character is an officer.
+function Recruit:IsOfficer()
+    local selfKey = self.selfKey()
+    local ok, officer = pcall(self.isOfficer, selfKey)
+    return selfKey ~= nil and ok and officer == true
+end
+
+-- An officer changed setting `name` (see RecruitConfig) to `value`: saves it
+-- stamped with now and the officer's character, tells the other add-on
+-- users, and redraws. Returns true, or nil and a reason a player can read.
+function Recruit:SetOfficerSetting(name, value)
+    local selfKey, now = self.selfKey(), self.now()
+    if not self:IsOfficer() then
+        return nil, "only officers can change it"
     end
-    return ad
+    if self.partition() == nil or type(now) ~= "number" then
+        return nil, "saved data is unavailable"
+    end
+    local entry = self:Config():Set(name, value, now, selfKey)
+    if entry == nil then
+        return nil, "it can't be set to that"
+    end
+    self:sendConfig()
+    self:Refresh()
+    return true
+end
+
+-- Sends the officer settings that have been changed, if any.
+function Recruit:sendConfig()
+    local changes = self:Config():Changes()
+    if changes ~= nil then
+        pcall(self.announce, { v = GuildRecruit.PROTOCOL, t = GuildRecruit.TYPE_CONFIG, s = changes })
+    end
 end
 
 -- The ledger of ad times for the current guild, saved with its partition.
@@ -354,8 +440,16 @@ end
 function Recruit:Refresh()
     local now = self.now()
     local due = {}
-    -- Saved guild data is only opened for a user who may be prompted.
-    if type(now) == "number" and self.policy:Allowed() then
+    -- Nothing is prompted before this login's check, once the roster has
+    -- loaded; saved guild data is only opened then.
+    -- The first time this session the user recruits (can invite, and opted
+    -- in), the officers' add-ons are asked for the newest settings, which
+    -- may hold the only ad the user has.
+    if self.loginChecked and not self.askedConfig and self:CanInvite() and self:IsOptedIn() then
+        self.askedConfig = true
+        pcall(self.announce, { v = GuildRecruit.PROTOCOL, t = GuildRecruit.TYPE_ASK_CONFIG })
+    end
+    if type(now) == "number" and self.loginChecked and self.policy:Allowed() then
         local ledger = self:Ledger()
         local location = self:Location()
         ledger:Prune(now)
@@ -639,11 +733,71 @@ function Recruit:OffHere(key)
     self:Refresh()
 end
 
+-- A "config" message: applied setting by setting, newest wins, when both
+-- the sender and each change's author are officers. Hearing one that holds
+-- everything this add-on knows stops its own answer to an ask-config.
+-- Returns true when any setting changed.
+function Recruit:OnConfig(message, sender)
+    if type(message) ~= "table" or message.v ~= GuildRecruit.PROTOCOL or message.t ~= GuildRecruit.TYPE_CONFIG
+        or type(message.s) ~= "table" or not self:fromOthers(sender) or self.partition() == nil
+    then
+        return false
+    end
+    local ok, officer = pcall(self.senderIsOfficer, sender)
+    if not ok or officer ~= true then
+        return false
+    end
+    local config = self:Config()
+    if self.answeringConfig and config:CoveredBy(message.s) then
+        self.answeringConfig = false
+    end
+    local changed = false
+    local name
+    for name in pairs(addon.RecruitConfig.SETTINGS) do
+        if config:Apply(name, message.s[name]) then
+            changed = true
+        end
+    end
+    if changed then
+        self:Refresh()
+    end
+    return changed
+end
+
+-- Another add-on user's "ask-config": an officer's add-on that has settings
+-- answers with them after a random short wait, unless a config holding them
+-- all is heard first. Returns true when an answer was scheduled.
+function Recruit:OnAskConfig(message, sender)
+    if type(message) ~= "table" or message.v ~= GuildRecruit.PROTOCOL or message.t ~= GuildRecruit.TYPE_ASK_CONFIG
+        or not self:fromOthers(sender) or self.answeringConfig or not self:IsOfficer()
+        or self.partition() == nil or self:Config():Changes() == nil
+    then
+        return false
+    end
+    self.answeringConfig = true
+    local function answer()
+        if self.answeringConfig then
+            self.answeringConfig = false
+            self:sendConfig()
+        end
+    end
+    local okDelay, delay = pcall(self.random, GuildRecruit.ANSWER_DELAY_MIN, GuildRecruit.ANSWER_DELAY_MAX)
+    if not okDelay or type(delay) ~= "number" or delay < 0 then
+        delay = GuildRecruit.ANSWER_DELAY_MIN
+    end
+    if not self.after(delay, answer) then
+        answer()
+    end
+    return true
+end
+
 -- Every Guild Recruit message type, for routing.
 GuildRecruit.TYPES = {
     [GuildRecruit.TYPE_ADVERTISED] = "OnAdvertised",
     [GuildRecruit.TYPE_ASK] = "OnAsk",
     [GuildRecruit.TYPE_CHANNEL_TIME] = "OnChannelTime",
+    [GuildRecruit.TYPE_CONFIG] = "OnConfig",
+    [GuildRecruit.TYPE_ASK_CONFIG] = "OnAskConfig",
 }
 
 -- Hands a received Guild Recruit message to its handler. Returns false for

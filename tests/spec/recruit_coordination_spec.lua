@@ -26,8 +26,8 @@ end
 -- `secondsLater` after the channel's clock (`channel.time`). Asks wait
 -- `askWait` seconds (none when nil). The prompts the add-on last drew are in
 -- `world.shown`.
-local function login(channel, playerName, zone, inCity, askWait, secondsLater)
-    local world = fixtures.newEnvironment("Retail", { guild = guild(), playerName = playerName })
+local function login(channel, playerName, zone, inCity, askWait, secondsLater, guildData)
+    local world = fixtures.newEnvironment("Retail", { guild = guildData or guild(), playerName = playerName })
     world.time = (channel.time or world.time) + (secondsLater or 0)
     channel.time = world.time
     world.askWait = askWait
@@ -220,4 +220,61 @@ test.test("recruit coordination: when nobody holds a fresh time, the asker is pr
 
     test.assertEqual(1, #anvil.shown)
     test.assertEqual(0, channelTimes(channel))
+end)
+
+local function sentConfigs(channel)
+    local count = 0
+    local index, sentIndex
+    for index = 1, #channel.worlds do
+        local world = channel.worlds[index]
+        local serializer = world.environment.LibStub.libs["AceSerializer-3.0"]
+        for sentIndex = 1, #world.sentMessages do
+            local _, message = serializer:Deserialize(world.sentMessages[sentIndex].text)
+            if type(message) == "table" and message.t == "config" then
+                count = count + 1
+            end
+        end
+    end
+    return count
+end
+
+-- Toolbox and Wrench are both officers here.
+local function twoOfficers()
+    local data = guild()
+    data.members[3].rank = 1
+    data.members[3].rankName = "Officer"
+    return data
+end
+
+test.test("recruit coordination: an officer's guild ad reaches members online now", function()
+    local channel = fixtures.newChannel()
+    local toolbox = login(channel, "Toolbox-Area52", DORNOGAL, false)
+    local anvil = login(channel, "Anvil-Area52", DORNOGAL, false)
+    fixtures.deliver(channel)
+
+    toolbox.addon.settings:Set("recruitGuildAd", "Knights recruit!")
+    fixtures.deliver(channel)
+
+    test.assertEqual("Knights recruit!", anvil.addon.guildRecruit:Config():Get("guildAd"))
+end)
+
+test.test("recruit coordination: a member logging in later catches up on the guild ad, from one officer", function()
+    local channel = fixtures.newChannel()
+    local officers = {
+        login(channel, "Toolbox-Area52", ISLE, false, nil, nil, twoOfficers()),
+        login(channel, "Wrench-Area52", ISLE, false, nil, nil, twoOfficers()),
+    }
+    fixtures.deliver(channel)
+    officers[1].addon.settings:Set("recruitGuildAd", "Knights recruit!")
+    fixtures.deliver(channel)
+    test.assertEqual("Knights recruit!", officers[2].addon.guildRecruit:Config():Get("guildAd"))
+    answersAfter(officers[1], 4)
+    answersAfter(officers[2], 2)
+    local before = sentConfigs(channel)
+
+    local anvil = login(channel, "Anvil-Area52", DORNOGAL, false, nil, nil, twoOfficers())
+    tick(channel, 10)
+
+    test.assertEqual("Knights recruit!", anvil.addon.guildRecruit:Config():Get("guildAd"))
+    test.assertEqual(before + 1, sentConfigs(channel))
 end)

@@ -395,3 +395,13 @@ test.test("guild recruit: the opt-in is undecided, true or false, and resetting 
     database.recruit.optIn["Toolbox-Area52"] = "maybe"
     test.assertEqual(nil, store:RecruitOptIn("Toolbox-Area52"))
 end)
+
+test.test("guild recruit: posting the officer ad is on by default and saved account-wide", function()
+    local database = foundationRoot()
+    local store = newStore(database)
+
+    test.assertTrue(store:RecruitUseOfficerAd())
+    test.assertTrue(store:SetRecruitUseOfficerAd(false))
+    test.assertFalse(newStore(database):RecruitUseOfficerAd())
+    test.assertFalse(store:SetRecruitUseOfficerAd("no"))
+end)

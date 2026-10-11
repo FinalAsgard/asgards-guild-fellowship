@@ -17,7 +17,8 @@ local _, addon = ...
 -- breaks the panel or a slash command. A toggle marked `offOnClose` is a
 -- mode that only lasts while the panel is open (see Model:Closed). An entry
 -- with `enabled() -> false, reason` can't be changed or run until it
--- answers true again.
+-- answers true again. An entry with `shown() -> false` is left off the panel
+-- (e.g. officer-only settings for other members).
 local SettingsModel = {
     KINDS = { toggle = true, action = true, text = true, number = true, input = true },
 }
@@ -77,6 +78,9 @@ local function entryProblem(entry)
     if entry.enabled ~= nil and type(entry.enabled) ~= "function" then
         return "entry's enabled check isn't a function"
     end
+    if entry.shown ~= nil and type(entry.shown) ~= "function" then
+        return "entry's shown check isn't a function"
+    end
     if entry.kind == "number" and (type(entry.min) ~= "number" or type(entry.max) ~= "number"
         or entry.min > entry.max)
     then
@@ -134,6 +138,20 @@ function Model:IsEnabled(id)
         return true
     end
     return false, ok and reason or nil
+end
+
+-- True unless the entry's `shown` check answers otherwise (a failing check
+-- hides it).
+function Model:IsShown(id)
+    local entry = self.entries[id]
+    if entry == nil then
+        return false
+    end
+    if entry.shown == nil then
+        return true
+    end
+    local ok, shown = pcall(entry.shown)
+    return ok and shown == true
 end
 
 -- Calls listener(id, value) after every successful change.
