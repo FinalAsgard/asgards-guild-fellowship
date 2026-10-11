@@ -7,7 +7,16 @@ local _, addon = ...
 -- and RecruitPolicy (which channels are due) to the game through the
 -- functions it's given, so it never touches the game itself. Nothing is ever
 -- posted without the user pressing Post.
+--
+-- Each character has its own answer to "Help with guild recruitment?":
+-- undecided (nil), Yes (true) or No (false), and only Yes allows prompts.
+-- Once per login, when the guild roster has loaded, the character's invite
+-- permission is checked: without it the answer goes back to undecided;
+-- with it, an undecided character is asked. Within a session, permission is
+-- checked live, so losing it stops prompts at once, but only the login check
+-- resets the answer.
 local GuildRecruit = {
+    QUESTION = "Help with guild recruitment?",
     -- How long after an ad in a zone's General channel the next one is due.
     GENERAL_GAP_SECONDS = 60 * 60,
 }
@@ -27,8 +36,12 @@ Recruit.__index = Recruit
 --               name, and its General channel's number (nil when the user
 --               isn't in it); nil when the zone is unknown
 --   send        function(text, channelNumber) -> true when posted
---   view        { Show = function(view, prompts, handlers) }: draws the
---               prompts; handlers.post(key) answers Post
+--   rosterLoaded function() -> true once the guild roster has loaded
+--   view        { Show = function(view, prompts, handlers),
+--               Ask = function(view, question, handlers) }: draws the
+--               prompts (handlers.post(key) answers Post) and the login
+--               question, or hides it when `question` is nil
+--               (handlers.yes(), handlers.no() and handlers.close())
 function GuildRecruit.Create(options)
     local recruit = setmetatable({
         partition = options.partition,
@@ -38,7 +51,12 @@ function GuildRecruit.Create(options)
         canInvite = options.canInvite,
         location = options.location,
         send = options.send,
+        rosterLoaded = options.rosterLoaded,
         view = options.view,
+        -- True once this login's permission check has run.
+        loginChecked = false,
+        -- True while the login question is waiting for an answer.
+        asking = false,
         -- The prompts on screen, in order.
         prompts = {},
     }, Recruit)
@@ -117,7 +135,85 @@ function Recruit:Refresh()
         due[index].text = GuildRecruit.PromptText(due[index])
     end
     self.prompts = due
+    -- An answer given some other way (the settings) settles the question.
+    if self.asking and self:Answer() ~= nil then
+        self.asking = false
+        self:drawQuestion()
+    end
     self:draw()
+end
+
+-- The logged-in character's saved answer: true, false, or nil (undecided,
+-- or no saved data).
+function Recruit:Answer()
+    local store, selfKey = self.store(), self.selfKey()
+    if store == nil or selfKey == nil then
+        return nil
+    end
+    return store:RecruitOptIn(selfKey)
+end
+
+-- Called on every roster update. The first one with the roster loaded and
+-- the character known runs this login's permission check; later calls only
+-- refresh the prompts.
+function Recruit:OnRosterUpdate()
+    if not self.loginChecked then
+        local ok, loaded = pcall(self.rosterLoaded)
+        local store, selfKey = self.store(), self.selfKey()
+        if ok and loaded == true and store ~= nil and selfKey ~= nil then
+            self.loginChecked = true
+            if not self:CanInvite() then
+                if store:RecruitOptIn(selfKey) ~= nil then
+                    store:SetRecruitOptIn(selfKey, nil)
+                end
+            elseif store:RecruitOptIn(selfKey) == nil then
+                self.asking = true
+                self:drawQuestion()
+            end
+        end
+    end
+    self:Refresh()
+end
+
+-- The user answered the login question: Yes (true) or No (false). Saves
+-- it for the logged-in character and closes the question.
+function Recruit:AnswerQuestion(answer)
+    local store, selfKey = self.store(), self.selfKey()
+    if store ~= nil and selfKey ~= nil then
+        store:SetRecruitOptIn(selfKey, answer == true)
+    end
+    self.asking = false
+    self:drawQuestion()
+    self:Refresh()
+end
+
+-- The user closed the question without answering: it stays undecided, so
+-- it's asked again at the next login.
+function Recruit:CloseQuestion()
+    self.asking = false
+    self:drawQuestion()
+end
+
+-- True while the login question is on screen.
+function Recruit:IsAsking()
+    return self.asking
+end
+
+function Recruit:drawQuestion()
+    if self.view == nil or type(self.view.Ask) ~= "function" then
+        return
+    end
+    pcall(self.view.Ask, self.view, self.asking and GuildRecruit.QUESTION or nil, {
+        yes = function()
+            self:AnswerQuestion(true)
+        end,
+        no = function()
+            self:AnswerQuestion(false)
+        end,
+        close = function()
+            self:CloseQuestion()
+        end,
+    })
 end
 
 function Recruit:draw()

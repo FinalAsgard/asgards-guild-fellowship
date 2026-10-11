@@ -576,18 +576,33 @@ function Store:SetRecruitAd(text)
     return true
 end
 
--- Whether the character `key` turned advertise prompts on. Off unless turned
--- on; an unusable saved set counts as empty.
-function Store:RecruitOptedIn(key)
+-- The character `key`'s answer to "Help with guild recruitment?": true
+-- (Yes), false (No), or nil while undecided. An unusable saved set, or an
+-- unusable answer in it, counts as undecided.
+function Store:RecruitOptIn(key)
     local state = type(self.database) == "table" and self.database.recruit or nil
     local optIn = type(state) == "table" and state.optIn or nil
-    return type(optIn) == "table" and optIn[key] == true
+    if type(optIn) ~= "table" then
+        return nil
+    end
+    local answer = optIn[key]
+    if type(answer) ~= "boolean" then
+        return nil
+    end
+    return answer
 end
 
--- Turns advertise prompts on or off for the character `key`. An unusable
+-- True only when the character `key` answered Yes; only that allows
+-- advertise prompts.
+function Store:RecruitOptedIn(key)
+    return self:RecruitOptIn(key) == true
+end
+
+-- Saves the character `key`'s answer: true or false, or nil to make it
+-- undecided again. Each character's answer is its own. An unusable
 -- existing set is left alone.
-function Store:SetRecruitOptedIn(key, enabled)
-    if not isText(key) or type(enabled) ~= "boolean" then
+function Store:SetRecruitOptIn(key, answer)
+    if not isText(key) or (answer ~= nil and type(answer) ~= "boolean") then
         return false
     end
     local state = self:GetRecruitState()
@@ -595,12 +610,15 @@ function Store:SetRecruitOptedIn(key, enabled)
         return false
     end
     if state.optIn == nil then
+        if answer == nil then
+            return true
+        end
         state.optIn = {}
     end
     if type(state.optIn) ~= "table" then
         return false
     end
-    state.optIn[key] = enabled
+    state.optIn[key] = answer
     return true
 end
 

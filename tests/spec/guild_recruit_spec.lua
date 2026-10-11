@@ -6,11 +6,16 @@ local AD = "Knights of Camelot is recruiting! Whisper me for an invite."
 
 -- The whole add-on logged in on `profile`, with the roster scanned, and the
 -- recruit prompts it last drew in `world.shown` (Post through
--- `world.handlers.post`).
+-- `world.handlers.post`), and the login question in `world.question`
+-- (answered through `world.answers`). `options.before(world)` runs before
+-- the add-on loads.
 local function login(profile, options)
     local world = fixtures.newEnvironment(profile, options)
     if options and options.time then
         world.time = options.time
+    end
+    if options and options.before then
+        options.before(world)
     end
     fixtures.loadAddon(world)
     world.shown = {}
@@ -22,6 +27,10 @@ local function login(profile, options)
                 table.insert(world.shown, prompts[index])
             end
             world.handlers = handlers
+        end,
+        Ask = function(_, question, handlers)
+            world.question = question
+            world.answers = handlers
         end,
     }
     fixtures.fire(world, "ADDON_LOADED", world.addonName)
@@ -231,4 +240,150 @@ test.test("recruitment settings: both are disabled while the character can't inv
     world.canInvite = true
     test.assertTrue(world.addon.settings:IsEnabled("recruitOptIn"))
     test.assertTrue(world.addon.settings:IsEnabled("recruitAd"))
+end)
+
+-- The logged-in character's saved answer, read straight from saved data.
+local function savedAnswer(world)
+    local key = world.addon.rosterController:SelfKey()
+    return world.database.recruit and world.database.recruit.optIn and world.database.recruit.optIn[key]
+end
+
+for index = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[index]
+
+    test.test(profile .. ": an undecided member who can invite is asked at login, and Yes turns prompts on", function()
+        local world = login(profile)
+
+        test.assertEqual("Help with guild recruitment?", world.question)
+        test.assertEqual(nil, savedAnswer(world))
+        world.addon.settings:Set("recruitAd", AD)
+        test.assertEqual(0, #world.shown)
+
+        world.answers.yes()
+
+        test.assertEqual(nil, world.question)
+        test.assertTrue(savedAnswer(world))
+        test.assertEqual(1, #world.shown)
+    end)
+
+    test.test(profile .. ": No saves false, and the member isn't asked again", function()
+        local world = login(profile)
+        world.answers.no()
+
+        test.assertEqual(nil, world.question)
+        test.assertFalse(savedAnswer(world))
+
+        local again = login(profile, { database = world.database })
+        test.assertEqual(nil, again.question)
+        test.assertFalse(savedAnswer(again))
+    end)
+
+    test.test(profile .. ": closing the question leaves it undecided, so it's asked at the next login", function()
+        local world = login(profile)
+        world.answers.close()
+
+        test.assertEqual(nil, world.question)
+        test.assertEqual(nil, savedAnswer(world))
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        test.assertEqual(nil, world.question)
+
+        local again = login(profile, { database = world.database })
+        test.assertEqual("Help with guild recruitment?", again.question)
+    end)
+
+    test.test(profile .. ": without invite permission, a saved answer goes back to undecided and nobody is asked", function()
+        local answers = { true, false }
+        local answerIndex
+        for answerIndex = 1, #answers do
+            local world = login(profile)
+            if answers[answerIndex] then
+                world.answers.yes()
+            else
+                world.answers.no()
+            end
+
+            local demoted = login(profile, {
+                database = world.database,
+                before = function(next)
+                    next.canInvite = false
+                end,
+            })
+
+            test.assertEqual(nil, demoted.question)
+            test.assertEqual(nil, savedAnswer(demoted))
+        end
+    end)
+end
+
+test.test("guild recruit: a member who answered and can invite isn't asked, and nothing changes", function()
+    local world = login("Retail")
+    world.answers.yes()
+
+    local again = login("Retail", { database = world.database })
+
+    test.assertEqual(nil, again.question)
+    test.assertTrue(savedAnswer(again))
+end)
+
+test.test("guild recruit: resetting one character's answer leaves the others alone", function()
+    local main = login("Retail")
+    main.answers.yes()
+
+    local alt = login("Retail", {
+        database = main.database,
+        playerName = "Hammer-Area52",
+        before = function(next)
+            next.canInvite = false
+        end,
+    })
+    test.assertEqual(nil, savedAnswer(alt))
+
+    local back = login("Retail", { database = main.database })
+    test.assertEqual(nil, back.question)
+    test.assertTrue(savedAnswer(back))
+end)
+
+test.test("guild recruit: the login check waits for the roster, and runs once", function()
+    local world = login("Retail", { rosterReady = false })
+    test.assertEqual(nil, world.question)
+
+    world.rosterReady = true
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world)
+    test.assertEqual("Help with guild recruitment?", world.question)
+
+    world.answers.close()
+    world.canInvite = false
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    world.canInvite = true
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    test.assertEqual(nil, world.question)
+end)
+
+test.test("guild recruit: losing permission mid-session stops prompts but keeps the answer until next login", function()
+    local world = login("Retail")
+    optIn(world)
+    test.assertEqual(1, #world.shown)
+
+    world.canInvite = false
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+
+    test.assertEqual(0, #world.shown)
+    test.assertFalse(world.addon.settings:IsEnabled("recruitOptIn"))
+    test.assertTrue(savedAnswer(world))
+end)
+
+test.test("recruitment settings: undecided shows unchecked, and the checkbox saves true or false", function()
+    local world = login("Retail")
+
+    test.assertEqual(nil, savedAnswer(world))
+    test.assertFalse(world.addon.settings:Get("recruitOptIn"))
+
+    test.assertTrue(world.addon.settings:Set("recruitOptIn", true))
+    test.assertTrue(savedAnswer(world))
+    -- Answering in the settings settles the login question.
+    test.assertEqual(nil, world.question)
+    test.assertTrue(world.addon.settings:Set("recruitOptIn", false))
+    test.assertFalse(savedAnswer(world))
+    test.assertFalse(world.addon.settings:Get("recruitOptIn"))
 end)

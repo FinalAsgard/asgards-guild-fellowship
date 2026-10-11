@@ -346,7 +346,7 @@ test.test("guild recruit: the ad is account-wide and the opt-in is kept per char
     test.assertFalse(store:RecruitOptedIn("Toolbox-Area52"))
     test.assertTrue(store:SetRecruitAd("Join us!"))
     test.assertFalse(store:SetRecruitAd(string.rep("x", 256)))
-    test.assertTrue(store:SetRecruitOptedIn("Toolbox-Area52", true))
+    test.assertTrue(store:SetRecruitOptIn("Toolbox-Area52", true))
 
     local reloaded = newStore(database)
     test.assertEqual("Join us!", reloaded:RecruitAd())
@@ -361,7 +361,7 @@ test.test("guild recruit: unusable saved recruit state is left alone", function(
 
     test.assertEqual("", store:RecruitAd())
     test.assertFalse(store:SetRecruitAd("Join us!"))
-    test.assertFalse(store:SetRecruitOptedIn("Toolbox-Area52", true))
+    test.assertFalse(store:SetRecruitOptIn("Toolbox-Area52", true))
     test.assertEqual("broken", database.recruit)
 end)
 
@@ -373,4 +373,25 @@ test.test("guild recruit: ad times are kept per guild", function()
 
     test.assertEqual(1790000000, newStore(database):Partition(GUILD):GetRecruitLedger()["general:map:2339"])
     test.assertEqual(nil, next(newStore(database):Partition(OTHER_GUILD):GetRecruitLedger()))
+end)
+
+test.test("guild recruit: the opt-in is undecided, true or false, and resetting one character leaves the rest", function()
+    local database = foundationRoot()
+    local store = newStore(database)
+
+    test.assertEqual(nil, store:RecruitOptIn("Toolbox-Area52"))
+    test.assertTrue(store:SetRecruitOptIn("Toolbox-Area52", false))
+    test.assertTrue(store:SetRecruitOptIn("Hammer-Area52", true))
+    test.assertFalse(store:RecruitOptIn("Toolbox-Area52"))
+    test.assertFalse(store:RecruitOptedIn("Toolbox-Area52"))
+    test.assertTrue(store:RecruitOptedIn("Hammer-Area52"))
+
+    test.assertTrue(store:SetRecruitOptIn("Toolbox-Area52", nil))
+    test.assertEqual(nil, store:RecruitOptIn("Toolbox-Area52"))
+    test.assertEqual(nil, database.recruit.optIn["Toolbox-Area52"])
+    test.assertTrue(store:RecruitOptIn("Hammer-Area52"))
+    test.assertFalse(store:SetRecruitOptIn("Toolbox-Area52", "yes"))
+
+    database.recruit.optIn["Toolbox-Area52"] = "maybe"
+    test.assertEqual(nil, store:RecruitOptIn("Toolbox-Area52"))
 end)

@@ -377,7 +377,7 @@ if clientProfile.supported then
             if selfKey == nil then
                 return nil, "this character isn't in a guild"
             end
-            if not store:SetRecruitOptedIn(selfKey, enabled) then
+            if not store:SetRecruitOptIn(selfKey, enabled) then
                 return nil, "the saved setting is unreadable, so it stays off"
             end
             return true
@@ -594,6 +594,10 @@ if clientProfile.supported then
         send = function(text, channelNumber)
             return client:SendChannelMessage(text, channelNumber)
         end,
+        rosterLoaded = function()
+            local count = client:GetGuildRosterCount()
+            return count ~= nil and count > 0
+        end,
         view = recruitPrompts,
     })
     settings:OnChange(function(id, value)
@@ -625,8 +629,9 @@ if clientProfile.supported then
             end
             return members
         end)
-        -- A rank change can grant or take away invite permission.
-        guildRecruit:Refresh()
+        -- The first loaded roster runs Guild Recruit's login check; a rank
+        -- change later can grant or take away invite permission.
+        guildRecruit:OnRosterUpdate()
         settingsPanel:Refresh()
     end)
     -- Chat tags read the same guild context as the roster.
