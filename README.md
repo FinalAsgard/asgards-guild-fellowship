@@ -12,38 +12,52 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 
 | Command | What it does |
 |---|---|
-| `/agf` or `/agf roster` | Shows or hides the roster window. |
+| `/agf` or `/agf roster` | Opens the add-on's window on the **Roster** tab, or closes it. |
 | `/agf rescan` | Scans the guild's notes right away. |
-| `/agf options` | Opens the add-on's settings panel. |
-| `/agf greet` | Opens the Greetings window, where you edit your Guild Greet greetings. |
+| `/agf recruit` | Opens the window on the **Recruitment** tab. |
+| `/agf greet` | Opens the window on the **Greetings** tab, where you edit your Guild Greet greetings. |
+| `/agf options` | Opens the window on the **Settings** tab. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
+## The add-on's window
+
+Everything the add-on does is in one window, with picture tabs down its right edge. Hover a tab to see its name, and click it to show its page; the tab you're on looks selected. Every page scrolls when it's taller than the window.
+
+- **Roster**: the guild's players, mains and alts (see [Using the roster](#using-the-roster)).
+- **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
+- **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
+- **Settings**: everything else (General and Chat Tags), and the version you're running.
+
+The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
+
 ## Settings
 
-The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Guild Fellowship** (`/agf options` opens it). It has one section per feature, and **Recruitment** has a page of its own under the add-on's entry:
+The settings are in two places that always agree: the window's tabs, and **Esc → Options → AddOns → Asgard's Guild Fellowship**. In the AddOns options, the add-on's own page has an **Open window** button and the version, and each feature has a sub-page of its own under it:
 
-- **General**: show or hide the minimap button, an **Open Roster** button, and the version you're running.
-- **Chat Tags**: turn chat tags on or off.
-- **Guild Greet**: turn Guild Greet on or off (everywhere, or just on the character you're playing), turn each category's prompts on or off, set the welcome-back minutes and long-absence days, set how many greetings close your prompt, unlock the prompts to move them, and an **Edit Greetings** button that opens the Greetings window.
-- **Recruitment**: turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, choose whether you also post the officers' guild ad (hover the info icon beside it to read the guild ad), and set your own timers (sliders) for how long General and Trade go without a guild ad before you're asked. These are greyed out on a character that can't invite to the guild. Officers also get the guild ad, the guild's floor under everyone's timers for General and for Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild.
+- **General**: show or hide the minimap button, and the version you're running.
+- **Chat Tags**: turn chat tags on or off, and choose the colors of the alias tag and the main's-name tag (see [Chat tags](#chat-tags)).
+- **Guild Greet**: turn Guild Greet on or off (everywhere, or just on the character you're playing), turn each category's prompts on or off, set the welcome-back minutes and long-absence days, set how many greetings close your prompt, and unlock the prompts to move them. In the AddOns options it also has an **Edit Greetings** button that opens the window's Greetings tab.
+- **Recruitment**: turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, choose whether you also post the officers' guild ad (hover the info icon beside it to read the guild ad), and set your own timers (sliders) for how long General and Trade go without a guild ad before you're asked. On a character that can't invite to the guild these are greyed out, with a line saying why. Officers also get the guild ad, the guild's floor under everyone's timers for General and for Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild. Regular members don't see the officer settings.
 
-The panel and the slash commands change the same settings, so a change made either way shows up in both. Settings are saved for every character on this game install. The development build's panel is labeled "(Dev)".
+A change made in the window, the AddOns options or a slash command shows up in the other places at once. Settings are saved for every character on this game install. The development build's options are labeled "(Dev)".
 
 ## Using the roster
 
 ### Opening it
 
-- `/agf` (or `/agf roster`) shows or hides the roster window. The development build uses `/agfdev`.
-- The minimap button toggles it too. Its tooltip shows how many conflicts are waiting. Drag it to move it; its position is saved. `/agf minimap` hides it, and running it again brings it back.
+The roster is the **Roster** tab of [the add-on's window](#the-add-ons-window).
+
+- `/agf` (or `/agf roster`) opens the window on the Roster tab. If it's already showing the Roster tab, it closes the window; on another tab, it switches to Roster. The development build uses `/agfdev`.
+- The minimap button does the same. Its tooltip shows how many conflicts are waiting. Drag it to move it; its position is saved. `/agf minimap` hides it, and running it again brings it back.
 - On Retail, the add-on compartment has an entry for it as well.
 - The guild window gets a **Guild Fellowship** button left of **Invite Member**. If the add-on can't find that button, it skips this one quietly.
 - `/agf help` lists the commands with the version, client, and library status.
 
-Opening the window never scans the guild, so it's always quick. The window remembers its position and size, and Escape closes it.
+Opening the window never scans the guild, so it's always quick. The Conflicts window and the player panel open beside the window, and close with it.
 
 ### The guild note convention
 
@@ -109,8 +123,8 @@ When an officer changes which characters belong together, or what a player goes 
 - Edits made before sync existed: they become official and are sent to the guild once you log in on an officer character with this version. Until then, and for members, they stay in your own roster only.
 - Only main and alt links and aliases are shared. Departures, purges, history, conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
-- The roster window's footer shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
-- Sync never gets in the way of play. It sends and processes nothing while you're in combat, or on Retail during a boss encounter or a keystone run, and picks up where it left off once that's over. Like scans, it works on data a little at a time, so even a large guild's full sync doesn't cause a hitch, and your roster window redraws once per batch rather than once per change.
+- The Roster tab's footer shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
+- Sync never gets in the way of play. It sends and processes nothing while you're in combat, or on Retail during a boss encounter or a keystone run, and picks up where it left off once that's over. Like scans, it works on data a little at a time, so even a large guild's full sync doesn't cause a hitch, and your roster redraws once per batch rather than once per change.
 
 ### Suggestions
 
@@ -159,9 +173,9 @@ In guild chat, officer chat, and guild achievement announcements, a tag after th
 - Achievements read the same way: `[Hammer] [TheTool] has earned the achievement …`.
 - There's no tag when they're on their main with no alias, or when the tag would just repeat their own name.
 
-An alias tag is medium blue and a main's-name tag is light blue, so you can tell a nickname from a character name at a glance. Your own messages are tagged the same way. Characters the database doesn't know yet get no tag. The name stays clickable as usual. Tags come from your own database, so changes you make in the roster show up on the next line.
+An alias tag is medium blue and a main's-name tag is light blue, so you can tell a nickname from a character name at a glance. To use other colors, pick one of the swatches beside **Alias tag color** and **Main's name tag color** in the **Chat Tags** settings; a sample tag shows the color chosen. Where the game has a color picker, **Custom...** opens it for any color. The colors are saved for every character on this game install. Your own messages are tagged the same way. Characters the database doesn't know yet get no tag. The name stays clickable as usual. Tags come from your own database, so changes you make in the roster show up on the next line.
 
-Tags are on by default. `/agf tags` or the **Chat Tags** section of the settings panel turns them off, and doing it again turns them back on. The choice is saved for every character on this game install and applies from the next chat line.
+Tags are on by default. `/agf tags` or the **Chat Tags** settings turn them off, and doing it again turns them back on. The choice is saved for every character on this game install and applies from the next chat line.
 
 On Retail, the game hides chat from add-ons during encounters and keystone runs. Those lines appear without tags, and tags return once the restriction lifts.
 
@@ -176,7 +190,7 @@ When someone joins the guild or a guild member comes online, a small prompt appe
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
 - Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
 - A prompt shows 5 to 10 seconds (at random) after someone arrives, so your greeting doesn't reach them while their game is still loading. It disappears 2 minutes after it shows; the **X** closes one without greeting.
-- To move the prompts, tick **Unlock greet prompts** in the settings panel and drag the gold bar that appears. The place is saved for every character. Untick it, or close the options, to hide the bar; it also locks again after a reload.
+- To move the prompts, tick **Unlock greet prompts** in the Guild Greet settings and drag the gold bar that appears. The place is saved for every character. The bar stays while the add-on's window is open, on any tab. Untick it, or close the window or the AddOns options, to hide it; it also locks again after a reload.
 - In combat or a boss encounter, prompts wait. When it's over, any that are still under 2 minutes old appear.
 - On Retail, the game hides some system messages from add-ons during encounters and keystone runs. Logins it hides get no prompt; nothing breaks.
 
@@ -190,15 +204,15 @@ Greetings can use these placeholders, in any capitalization:
 | `{character}` | The character that just logged in. |
 | `{characterFirst}`, `{characterLast}` | The first or last part of that character's name. |
 
-First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** section of the settings panel. Greetings and settings are shared by every character on this game install, and **Guild Greet on this character** turns it off on just the one you're playing, say an alt in another guild.
+First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** settings. Greetings and settings are shared by every character on this game install, and **Guild Greet on this character** turns it off on just the one you're playing, say an alt in another guild.
 
 ### Greeting together
 
-When you greet someone, the add-on tells other add-on users in the guild. Once a player has had enough greetings from anyone (2 by default; set it from 1 to 10 in the settings panel), your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (15 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever category or character it was for. This only counts members running the add-on; greetings typed by hand aren't seen. If two people press Greet at the same moment, an extra greeting can slip through.
+When you greet someone, the add-on tells other add-on users in the guild. Once a player has had enough greetings from anyone (2 by default; set it from 1 to 10 in the Guild Greet settings), your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (15 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever category or character it was for. This only counts members running the add-on; greetings typed by hand aren't seen. If two people press Greet at the same moment, an extra greeting can slip through.
 
 ### Editing greetings
 
-The **Greetings** window (`/agf greet`, or **Edit Greetings** in the settings panel) has a button for each category. Each lists that category's greetings, with **Edit** beside each one. Type in the box at the bottom and press **Add** (or Enter) to add a greeting. **Edit** puts a greeting in the box, with **Save**, **Delete** and **Cancel** beside it. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The window lists every placeholder.
+Greetings are edited on the window's **Greetings** tab (`/agf greet`, or **Edit Greetings** in the AddOns options), below Guild Greet's settings. The editor has a button for each category. Each lists that category's greetings, with **Edit** beside each one. Type in the box below the list and press **Add** (or Enter) to add a greeting. **Edit** puts a greeting in the box, with **Save**, **Delete** and **Cancel** beside it. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The editor lists every placeholder.
 
 A category with no greetings shows no prompts, so emptying one is a way to turn it off. **Restore starter greetings** puts back the starters in the open category, and **Restore all categories** does it everywhere. Both replace what's there, so each asks for a second click.
 
@@ -239,7 +253,7 @@ Add-on users tell each other when and where they advertised, so nobody double-po
 
 Every post counts toward the player who made it, on all their characters together. The player panel shows **Advertised: N (M in last 30 days)**. The 30-day number falls as ads get older, even if they don't post again. Only ads posted through the add-on are counted.
 
-Officers also get a **Recruiters** button in the roster window's footer, left of **Conflicts**. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Below that, **Recent ads** lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade") and how long ago, newest first. Ad times are kept for 4 hours, across reloads and logouts, so a relog never forgets where the guild just advertised. Both parts update as new ads arrive.
+Officers also get the **Recruiters** leaderboard on the window's **Recruitment** tab (`/agf recruit`), below the settings. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Below that, **Recent ads** lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade") and how long ago, newest first. Ad times are kept for 4 hours, across reloads and logouts, so a relog never forgets where the guild just advertised. Both parts update as new ads arrive. Regular members don't see the leaderboard.
 
 ## Supported clients
 
