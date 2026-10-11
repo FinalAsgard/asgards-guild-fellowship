@@ -223,6 +223,32 @@ if clientProfile.supported then
             return true
         end,
     })
+    -- Each kind of tag's color, account-wide; unset, its default.
+    local function tagColor(kind, label, sample)
+        settings:Add("chatTags", {
+            id = "chatTagColor:" .. kind,
+            kind = "color",
+            label = label,
+            sample = sample,
+            swatches = addon.ChatAnnotator.SWATCHES,
+            get = function()
+                local store = rosterController:Store()
+                return store and store:ChatTagColor(kind) or addon.ChatAnnotator.COLORS[kind]
+            end,
+            set = function(color)
+                local store = rosterController:Store()
+                if store == nil then
+                    return nil, "saved data is unavailable"
+                end
+                if not store:SetChatTagColor(kind, color) then
+                    return nil, "the saved colors are unreadable"
+                end
+                return true
+            end,
+        })
+    end
+    tagColor("alias", "Alias tag color", "[TheTool]")
+    tagColor("main", "Main's name tag color", "[Hammer]")
     settings:AddSection("guildGreet", "Guild Greet", { page = "greetings" })
     settings:Add("guildGreet", {
         id = "guildGreet",
@@ -879,6 +905,10 @@ if clientProfile.supported then
         enabled = function()
             local store = rosterController:Store()
             return store == nil or store:ChatTagsEnabled()
+        end,
+        colorFor = function(kind)
+            local store = rosterController:Store()
+            return store and store:ChatTagColor(kind)
         end,
     })
     entryPoints = addon.EntryPoints.Create({

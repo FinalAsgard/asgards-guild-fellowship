@@ -41,14 +41,15 @@ function SettingsLayout.InputRows(entry)
 end
 
 -- The room an entry takes: a text box its label's row plus the box's rows,
--- a slider its label's row plus the slider's, a heading a gap and a row,
--- and everything else one row. Returns the gap above it and its height.
+-- a slider or a color its label's row plus a row of controls, a heading a
+-- gap and a row, and everything else one row. Returns the gap above it and
+-- its height.
 local function measure(entry)
     local row = SettingsLayout.ROW
     if entry.kind == "input" then
         return 0, (1 + SettingsLayout.InputRows(entry)) * row
     end
-    if entry.kind == "number" and entry.slider then
+    if (entry.kind == "number" and entry.slider) or entry.kind == "color" then
         return 0, 2 * row
     end
     if entry.kind == "heading" then

@@ -415,3 +415,70 @@ test.test("a setting that can't be read leaves the line unchanged", function()
     })
     test.assertEqual(nil, annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
 end)
+
+-- Choosing tag colors -----------------------------------------------------------
+
+test.test("tags are drawn in the colors the player chose, each kind its own", function()
+    local world = retail()
+    local chosen = { alias = "ffd100", main = "ff7fbf" }
+    local annotator = world.addon.ChatAnnotator.Create({
+        context = function()
+            return world.partition, world.normalizer
+        end,
+        colorFor = function(kind)
+            return chosen[kind]
+        end,
+    })
+    test.assertEqual("|cffffd100[TheTool]|r hi", annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+    test.assertEqual("|cffff7fbf[Anvil]|r hi", annotator:Annotate("CHAT_MSG_OFFICER", "hi", "Tongs-Area52"))
+    test.assertEqual("%s |cffffd100[TheTool]|r has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!",
+        annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", ACHIEVEMENT, "Hammer-Area52"))
+end)
+
+test.test("no chosen color, an unusable one, or a failing lookup falls back to the default", function()
+    local world = retail()
+    local answers = { function() return nil end, function() return "not a color" end,
+        function() error("colors exploded") end }
+    local index
+    for index = 1, #answers do
+        local annotator = world.addon.ChatAnnotator.Create({
+            context = function()
+                return world.partition, world.normalizer
+            end,
+            colorFor = answers[index],
+        })
+        test.assertEqual(alias("TheTool") .. "hi", annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52"))
+    end
+end)
+
+test.test("the colors offered include both defaults", function()
+    local addon = load()
+    local offered = {}
+    local index
+    for index = 1, #addon.ChatAnnotator.SWATCHES do
+        offered[addon.ChatAnnotator.SWATCHES[index].color] = true
+    end
+    test.assertTrue(offered[addon.ChatAnnotator.COLORS.alias])
+    test.assertTrue(offered[addon.ChatAnnotator.COLORS.main])
+end)
+
+test.test("tag colors are saved account-wide, and an unusable saved value is ignored and kept", function()
+    local addon = test.newAddon("Core/FellowshipStore.lua")
+    local database = { schemaVersion = 2, guilds = {} }
+    local store = addon.FellowshipStore.Create(database)
+
+    test.assertEqual(nil, store:ChatTagColor("alias"))
+    test.assertTrue(store:SetChatTagColor("alias", "FFD100"))
+    test.assertEqual("ffd100", store:ChatTagColor("alias"))
+    test.assertEqual(nil, store:ChatTagColor("main"))
+    test.assertFalse(store:SetChatTagColor("alias", "gold"))
+    test.assertFalse(store:SetChatTagColor("speaker", "ffd100"))
+    test.assertEqual("ffd100", store:ChatTagColor("alias"))
+
+    database.chatTagColors.main = 42
+    test.assertEqual(nil, store:ChatTagColor("main"))
+    database.chatTagColors = "corrupt"
+    test.assertEqual(nil, store:ChatTagColor("alias"))
+    test.assertFalse(store:SetChatTagColor("alias", "ffffff"))
+    test.assertEqual("corrupt", database.chatTagColors)
+end)

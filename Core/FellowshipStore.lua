@@ -338,6 +338,42 @@ function Store:SetChatTagsEnabled(enabled)
     return true
 end
 
+-- The kinds of chat tag whose color can be chosen (see ChatAnnotator).
+local CHAT_TAG_KINDS = { alias = true, main = true }
+
+-- Whether `color` is a color as saved: six hex digits, "rrggbb".
+function FellowshipStore.IsColor(color)
+    return type(color) == "string" and string.find(color, "^%x%x%x%x%x%x$") ~= nil
+end
+
+-- The color chosen for a kind of chat tag ("alias" or "main"), shared by
+-- every guild, as "rrggbb" in lower case; nil when none was chosen or the
+-- saved value is unusable.
+function Store:ChatTagColor(kind)
+    local colors = type(self.database) == "table" and self.database.chatTagColors or nil
+    if type(colors) ~= "table" or not FellowshipStore.IsColor(colors[kind]) then
+        return nil
+    end
+    return string.lower(colors[kind])
+end
+
+-- Saves the color for a kind of chat tag. False for an unknown kind or
+-- anything that isn't a color; an unusable existing value is left alone.
+function Store:SetChatTagColor(kind, color)
+    if type(self.database) ~= "table" or not CHAT_TAG_KINDS[kind] or not FellowshipStore.IsColor(color) then
+        return false
+    end
+    local colors = self.database.chatTagColors
+    if colors == nil then
+        colors = {}
+        self.database.chatTagColors = colors
+    elseif type(colors) ~= "table" then
+        return false
+    end
+    colors[kind] = string.lower(color)
+    return true
+end
+
 -- Guild Greet's saved state, shared by every character on the account and
 -- created on first use: the on/off switch, the greetings, and the last
 -- greeting used in each category (GreetingLibrary owns their shape). Nil

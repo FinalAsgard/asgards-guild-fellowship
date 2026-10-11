@@ -541,3 +541,81 @@ test.test("settings panel: hidden settings leave no gap and the scroll area grow
     test.assertEqual(Layout.TOP + Layout.HEADER + 3 * Layout.ROW + 2 * Layout.SECTION_GAP, area.content.height)
     test.assertEqual(Layout.ROW, area.rows.guildAd.height)
 end)
+
+-- A model with one color setting backed by `saved.color`.
+local function newColorPanel(environment)
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local saved = { color = "4a90ff" }
+    local model = addon.SettingsModel.Create()
+    model:AddSection("chatTags", "Chat Tags")
+    model:Add("chatTags", { id = "aliasColor", kind = "color", label = "Alias tag color", sample = "[TheTool]",
+        swatches = { { label = "Blue", color = "4a90ff" }, { label = "Gold", color = "ffd100" } },
+        get = function() return saved.color end,
+        set = function(color)
+            saved.color = color
+            return true
+        end })
+    environment.InterfaceOptions_AddCategory = function() end
+    local panel = addon.SettingsPanel.Create({ environment = environment }, model)
+    panel:Register()
+    return panel, saved, widgetFor(panel, "aliasColor")
+end
+
+test.test("settings panel: clicking a color swatch saves it, outlines it, and shows the sample in it", function()
+    local panel, saved, widget = newColorPanel(newEnvironment())
+
+    test.assertEqual(2, #widget.swatches)
+    test.assertTrue(widget.swatches[1].selected.shown)
+    test.assertFalse(widget.swatches[2].selected.shown)
+    test.assertEqual("|cff4a90ff[TheTool]|r", widget.value.text)
+
+    local gold = widget.swatches[2].frame
+    gold.scripts.OnClick(gold)
+
+    test.assertEqual("ffd100", saved.color)
+    test.assertFalse(widget.swatches[1].selected.shown)
+    test.assertTrue(widget.swatches[2].selected.shown)
+    test.assertEqual("|cffffd100[TheTool]|r", widget.value.text)
+    test.assertEqual(nil, panel.environment.ColorPickerFrame)
+    -- Without the game's color picker there's no Custom... button.
+    test.assertEqual(nil, widget.custom)
+end)
+
+test.test("settings panel: Custom... opens the game's color picker and saves the color picked", function()
+    -- Retail's picker is set up with one call; older clients' by its fields.
+    local styles = { "setup", "fields" }
+    local index
+    for index = 1, #styles do
+        local environment = newEnvironment()
+        local picker = { color = { 0, 0, 0 } }
+        function picker:GetColorRGB() return self.color[1], self.color[2], self.color[3] end
+        if styles[index] == "setup" then
+            function picker:SetupColorPickerAndShow(info)
+                self.info = info
+                self.color = { info.r, info.g, info.b }
+                self.shown = true
+            end
+        else
+            function picker:SetColorRGB(r, g, b) self.color = { r, g, b } end
+            function picker:Show() self.shown = true end
+        end
+        environment.ColorPickerFrame = picker
+        local _, saved, widget = newColorPanel(environment)
+        test.assertTrue(widget.custom ~= nil, styles[index])
+
+        widget.custom.scripts.OnClick(widget.custom)
+        test.assertTrue(picker.shown, styles[index])
+        test.assertEqual(0x4a / 255, picker.color[1], styles[index])
+
+        picker.color = { 1, 0x80 / 255, 0 }
+        local picked = picker.info and picker.info.swatchFunc or picker.func
+        picked()
+        test.assertEqual("ff8000", saved.color, styles[index])
+        test.assertEqual("|cffff8000[TheTool]|r", widget.value.text, styles[index])
+
+        -- Cancelling puts the color it started on back.
+        local cancel = picker.info and picker.info.cancelFunc or picker.cancelFunc
+        cancel()
+        test.assertEqual("4a90ff", saved.color, styles[index])
+    end
+end)

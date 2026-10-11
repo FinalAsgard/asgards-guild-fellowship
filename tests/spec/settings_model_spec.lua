@@ -521,3 +521,49 @@ test.test("a setting's info text is read when asked, and a failing or missing on
     test.assertEqual(nil, model:Info("broken"))
     test.assertEqual(nil, model:Info("nothing"))
 end)
+
+test.test("a color setting takes only six hex digits, saved in lower case", function()
+    local model = newModel()
+    model:AddSection("chatTags", "Chat Tags")
+    local saved = {}
+    local swatches = { { label = "Gold", color = "ffd100" } }
+    test.assertFalse(model:Add("chatTags", { id = "bare", kind = "color", label = "Bare",
+        get = function() return "ffffff" end, set = function() return true end }))
+    test.assertTrue(model:Add("chatTags", { id = "aliasColor", kind = "color", label = "Alias tag color",
+        swatches = swatches,
+        get = function() return saved.color or "4a90ff" end,
+        set = function(color)
+            saved.color = color
+            return true
+        end }))
+
+    test.assertTrue(model:Set("aliasColor", "FFD100"))
+    test.assertEqual("ffd100", saved.color)
+    local changed, reason = model:Set("aliasColor", "gold")
+    test.assertEqual(nil, changed)
+    test.assertContains(reason, "six hex digits")
+    test.assertEqual(nil, (model:Set("aliasColor", "#ffd100")))
+    test.assertEqual(nil, (model:Set("aliasColor", 16766976)))
+    test.assertEqual("ffd100", model:Get("aliasColor"))
+end)
+
+local function registerTagColorTest(profile)
+    test.test(profile .. ": choosing a tag color in the settings recolors chat tags", function()
+        local world, addon = loggedIn(profile)
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local speaker = profile == "Forever" and "Hammer Smith" or "Hammer-Area52"
+        local before = addon.chatAnnotator:Annotate("CHAT_MSG_GUILD", "hi", speaker)
+        test.assertContains(before, "|cff4a90ff[")
+        test.assertEqual("4a90ff", addon.settings:Get("chatTagColor:alias"))
+
+        test.assertTrue(addon.settings:Set("chatTagColor:alias", "ffd100"))
+
+        test.assertContains(addon.chatAnnotator:Annotate("CHAT_MSG_GUILD", "hi", speaker), "|cffffd100[")
+        test.assertEqual("ffd100", world.database.chatTagColors.alias)
+        test.assertEqual("7fd4ff", addon.settings:Get("chatTagColor:main"))
+    end)
+end
+
+registerTagColorTest("Forever")
+registerTagColorTest("Retail")

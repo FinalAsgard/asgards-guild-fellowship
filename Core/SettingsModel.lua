@@ -18,6 +18,9 @@ local _, addon = ...
 --            characters; set(text) -> true, or nil and a reason
 --   heading  a title within a section that sets the entries after it apart
 --            (e.g. officer-only settings); it holds no value
+--   color    get() -> a color as "rrggbb"; set(color) -> true, or nil and a
+--            reason. `swatches` lists the colors offered to click, each
+--            { label, color }; `sample` is text shown in the chosen color
 -- `get`, `set` and `run` are called protected, so a failing feature never
 -- breaks the panel or a slash command. A toggle marked `offOnClose` is a
 -- mode that only lasts while the panel is open (see Model:Closed). An entry
@@ -31,7 +34,7 @@ local _, addon = ...
 -- frame page it belongs on. An entry with `host` set is drawn only in that
 -- host (e.g. the "Open Roster" button, which the frame doesn't need).
 local SettingsModel = {
-    KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true },
+    KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true, color = true },
     HOSTS = { frame = true, options = true },
     PAGES = { settings = true, greetings = true, recruitment = true },
 }
@@ -114,8 +117,13 @@ local function entryProblem(entry)
     if type(entry.get) ~= "function" then
         return "entry has no get function"
     end
-    if (entry.kind == "toggle" or entry.kind == "number" or entry.kind == "input") and type(entry.set) ~= "function" then
+    if (entry.kind == "toggle" or entry.kind == "number" or entry.kind == "input" or entry.kind == "color")
+        and type(entry.set) ~= "function"
+    then
         return "entry has no set function"
+    end
+    if entry.kind == "color" and (type(entry.swatches) ~= "table" or entry.swatches[1] == nil) then
+        return "color has no swatches"
     end
     if entry.kind == "input" and (type(entry.maxLength) ~= "number" or entry.maxLength < 1) then
         return "input has no length limit"
@@ -251,6 +259,11 @@ function Model:Set(id, value)
         if string.len(value) > entry.maxLength then
             return nil, "it can be at most " .. entry.maxLength .. " characters"
         end
+    elseif entry.kind == "color" then
+        if type(value) ~= "string" or string.find(value, "^%x%x%x%x%x%x$") == nil then
+            return nil, "it must be a color, six hex digits like 4a90ff"
+        end
+        value = string.lower(value)
     elseif entry.kind ~= "toggle" then
         return nil, "it can't be changed"
     elseif type(value) ~= "boolean" then

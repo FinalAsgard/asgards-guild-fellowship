@@ -4,7 +4,8 @@ local _, addon = ...
 -- of sections onto any parent frame inside a scroll area: one header per
 -- section with its entries below it (a check box, a button, a line of text,
 -- a number with minus and plus buttons, a slider, a labelled text box saved
--- on Enter, or a heading that sets the entries after it apart). Where each
+-- on Enter, a row of color swatches, or a heading that sets the entries
+-- after it apart). Where each
 -- one goes comes from SettingsLayout, worked out again on every refresh, so
 -- an entry the model reports hidden leaves no gap, and a list taller than
 -- its area scrolls instead of running off the bottom. An entry the model
@@ -24,6 +25,8 @@ local SettingsPanel = {
     BUTTON_WIDTH = 140,
     INPUT_WIDTH = 520,
     SLIDER_WIDTH = 260,
+    -- A color swatch's width and height.
+    SWATCH_SIZE = 18,
     -- Room on the right of a scroll area for its scroll bar.
     SCROLL_BAR = 28,
     -- The info icon beside a label that shows a setting's info on
@@ -196,6 +199,18 @@ function Panel:Refresh()
                 widget.pending = nil
             elseif widget.kind == "text" then
                 widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
+            elseif widget.kind == "color" then
+                local color = self.model:Get(widget.id)
+                widget.value:SetText("|cff" .. tostring(color) .. (widget.entry.sample or "Sample") .. "|r")
+                local swatchIndex
+                for swatchIndex = 1, #widget.swatches do
+                    local swatch = widget.swatches[swatchIndex]
+                    if swatch.color == color then
+                        swatch.selected:Show()
+                    else
+                        swatch.selected:Hide()
+                    end
+                end
             end
         end)
         pcall(setShown, widget, self.model:IsShown(widget.id))
@@ -482,6 +497,137 @@ function Panel:addAction(frame, entry)
     return { kind = "action", id = entry.id, frame = button, controls = { button } }
 end
 
+-- "rrggbb" as red, green and blue from 0 to 1, and back.
+local function toRGB(color)
+    return tonumber(string.sub(color, 1, 2), 16) / 255, tonumber(string.sub(color, 3, 4), 16) / 255,
+        tonumber(string.sub(color, 5, 6), 16) / 255
+end
+
+local function toHex(r, g, b)
+    local function byte(value)
+        return math.max(0, math.min(255, math.floor(value * 255 + 0.5)))
+    end
+    return string.format("%02x%02x%02x", byte(r), byte(g), byte(b))
+end
+
+-- Opens the game's color picker on a color entry's current color: the
+-- color picked is saved as it changes, and cancelling puts the starting
+-- color back. Retail sets the picker up with one call; older clients set
+-- its fields and show it. Returns false where there's no picker.
+function Panel:OpenColorPicker(entry)
+    local picker = self.environment.ColorPickerFrame
+    if type(picker) ~= "table" then
+        return false
+    end
+    local start = self.model:Get(entry.id) or entry.swatches[1].color
+    local r, g, b = toRGB(start)
+    local function picked()
+        local ok, newR, newG, newB = pcall(picker.GetColorRGB, picker)
+        if ok and type(newR) == "number" and type(newG) == "number" and type(newB) == "number" then
+            self:report(entry.id, self.model:Set(entry.id, toHex(newR, newG, newB)))
+        end
+        self:Refresh()
+    end
+    local function cancelled()
+        if self.model:Get(entry.id) ~= start then
+            self.model:Set(entry.id, start)
+        end
+        self:Refresh()
+    end
+    return (pcall(function()
+        if type(picker.SetupColorPickerAndShow) == "function" then
+            picker:SetupColorPickerAndShow({
+                r = r, g = g, b = b, hasOpacity = false, swatchFunc = picked, cancelFunc = cancelled,
+            })
+            return
+        end
+        picker.hasOpacity = false
+        picker.opacityFunc = nil
+        picker.func = picked
+        picker.cancelFunc = cancelled
+        picker.previousValues = { r, g, b }
+        picker:SetColorRGB(r, g, b)
+        if type(self.environment.ShowUIPanel) == "function" then
+            self.environment.ShowUIPanel(picker)
+        else
+            picker:Show()
+        end
+    end))
+end
+
+-- A color: its label with a sample in the chosen color, then a row of
+-- swatches to click, the chosen one outlined. Where the client has the
+-- game's color picker, a Custom... button opens it for any other color.
+function Panel:addColor(frame, entry)
+    local createFrame = self.environment.CreateFrame
+    local label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    label:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 4, -4)
+    label:SetText(entry.label)
+    local sample = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    sample:SetPoint("LEFT", label, "RIGHT", 10, 0)
+    local widget = { kind = "color", id = entry.id, entry = entry, label = label, value = sample, swatches = {},
+        controls = {} }
+    local size = SettingsPanel.SWATCH_SIZE
+    local index
+    for index = 1, #entry.swatches do
+        local choice = entry.swatches[index]
+        local swatch = createFrame("Button", nil, frame)
+        swatch:SetWidth(size)
+        swatch:SetHeight(size)
+        swatch:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 10 + (index - 1) * (size + 6),
+            -addon.SettingsLayout.ROW + 2)
+        -- A white outline behind the chosen swatch, then a dark edge and
+        -- the color itself.
+        local selected = swatch:CreateTexture(nil, "BACKGROUND")
+        selected:SetPoint("TOPLEFT", swatch, "TOPLEFT", -2, 2)
+        selected:SetPoint("BOTTOMRIGHT", swatch, "BOTTOMRIGHT", 2, -2)
+        selected:SetColorTexture(1, 1, 1, 1)
+        local edge = swatch:CreateTexture(nil, "BORDER")
+        edge:SetAllPoints(swatch)
+        edge:SetColorTexture(0, 0, 0, 1)
+        local fill = swatch:CreateTexture(nil, "ARTWORK")
+        fill:SetPoint("TOPLEFT", swatch, "TOPLEFT", 1, -1)
+        fill:SetPoint("BOTTOMRIGHT", swatch, "BOTTOMRIGHT", -1, 1)
+        fill:SetColorTexture(toRGB(choice.color))
+        swatch:SetScript("OnClick", function()
+            self:report(entry.id, self.model:Set(entry.id, choice.color))
+            self:Refresh()
+        end)
+        swatch:SetScript("OnEnter", function()
+            local tooltip = self.environment.GameTooltip
+            if type(tooltip) == "table" then
+                pcall(function()
+                    tooltip:SetOwner(swatch, "ANCHOR_RIGHT")
+                    tooltip:SetText(choice.label)
+                    tooltip:Show()
+                end)
+            end
+        end)
+        swatch:SetScript("OnLeave", function()
+            local tooltip = self.environment.GameTooltip
+            if type(tooltip) == "table" then
+                pcall(tooltip.Hide, tooltip)
+            end
+        end)
+        table.insert(widget.swatches, { frame = swatch, color = choice.color, selected = selected })
+        table.insert(widget.controls, swatch)
+    end
+    if type(self.environment.ColorPickerFrame) == "table" then
+        local custom = createFrame("Button", nil, frame, "UIPanelButtonTemplate")
+        custom:SetWidth(80)
+        custom:SetHeight(20)
+        custom:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 16 + #entry.swatches * (size + 6),
+            -addon.SettingsLayout.ROW + 3)
+        custom:SetText("Custom...")
+        custom:SetScript("OnClick", function()
+            self:OpenColorPicker(entry)
+        end)
+        widget.custom = custom
+        table.insert(widget.controls, custom)
+    end
+    return widget
+end
+
 function Panel:addText(frame, entry)
     local text = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     text:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT, -4)
@@ -520,6 +666,8 @@ function Panel:addEntry(content, entry)
         widget = self:addInput(row, entry)
     elseif entry.kind == "heading" then
         widget = self:addHeading(row, entry)
+    elseif entry.kind == "color" then
+        widget = self:addColor(row, entry)
     else
         widget = self:addText(row, entry)
     end

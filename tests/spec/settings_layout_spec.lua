@@ -89,3 +89,15 @@ test.test("settings layout: a list taller than its frame reports the height to s
     -- Taller than the master frame's default height, so the page scrolls.
     test.assertTrue(layout.height > 560)
 end)
+
+test.test("settings layout: a color takes its label's row and a row of swatches", function()
+    local layout = Layout.Layout({
+        section("chatTags", {
+            { id = "aliasColor", kind = "color", label = "Alias tag color", swatches = {} },
+            toggle("after"),
+        }),
+    })
+
+    test.assertEqual(2 * ROW, layout.byId.aliasColor.height)
+    test.assertEqual(TOP + HEADER + 2 * ROW, layout.byId.after.y)
+end)
