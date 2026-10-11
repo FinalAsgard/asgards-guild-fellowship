@@ -1,6 +1,8 @@
 local _, addon = ...
 
--- Guild Recruit's officer settings: the guild ad and whether it's on. Pure:
+-- Guild Recruit's officer settings: the guild ad and whether it's on, the
+-- gaps between ads in a zone's General and in Trade, and a guild-wide
+-- pause. Pure:
 -- it keeps them in the saved table it's given, one per guild, so they last
 -- across reloads and logouts.
 --
@@ -12,6 +14,8 @@ local _, addon = ...
 local RecruitConfig = {
     -- The longest guild ad: one chat message.
     AD_MAX = 255,
+    -- The longest gap an officer can set, in minutes: a day.
+    GAP_MAX_MINUTES = 24 * 60,
 }
 addon.RecruitConfig = RecruitConfig
 
@@ -29,7 +33,28 @@ RecruitConfig.SETTINGS = {
             return type(value) == "boolean"
         end,
     },
+    -- Gaps in whole minutes, never below a minimum, so no setting can turn
+    -- the guild into spammers.
+    generalGapMinutes = { default = 60, min = 15 },
+    tradeGapMinutes = { default = 20, min = 5 },
+    -- True stops every member's advertise prompts.
+    paused = {
+        default = false,
+        valid = function(value)
+            return type(value) == "boolean"
+        end,
+    },
 }
+
+-- A gap setting accepts whole minutes from its minimum to GAP_MAX_MINUTES.
+local function gapValidator(setting)
+    return function(value)
+        return type(value) == "number" and value == math.floor(value)
+            and value >= setting.min and value <= RecruitConfig.GAP_MAX_MINUTES
+    end
+end
+RecruitConfig.SETTINGS.generalGapMinutes.valid = gapValidator(RecruitConfig.SETTINGS.generalGapMinutes)
+RecruitConfig.SETTINGS.tradeGapMinutes.valid = gapValidator(RecruitConfig.SETTINGS.tradeGapMinutes)
 
 local Config = {}
 Config.__index = Config

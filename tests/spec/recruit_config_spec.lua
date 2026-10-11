@@ -125,3 +125,64 @@ test.test("recruit config: PickAd picks between the usable ads, or none", functi
         random = function() error("boom") end,
     }))
 end)
+
+test.test("recruit config: gaps default to 60 and 20 minutes and never go below 15 and 5", function()
+    local _, config = setup()
+
+    test.assertEqual(60, config:Get("generalGapMinutes"))
+    test.assertEqual(20, config:Get("tradeGapMinutes"))
+    test.assertFalse(config:Get("paused"))
+
+    test.assertEqual(nil, config:Set("generalGapMinutes", 14, START, "boss"))
+    test.assertEqual(nil, config:Set("tradeGapMinutes", 4, START, "boss"))
+    test.assertEqual(nil, config:Set("generalGapMinutes", 30.5, START, "boss"))
+    test.assertEqual(nil, config:Set("generalGapMinutes", 24 * 60 + 1, START, "boss"))
+    test.assertTrue(config:Set("generalGapMinutes", 15, START, "boss") ~= nil)
+    test.assertTrue(config:Set("tradeGapMinutes", 5, START, "boss") ~= nil)
+    test.assertEqual(15, config:Get("generalGapMinutes"))
+    test.assertEqual(5, config:Get("tradeGapMinutes"))
+
+    -- A received gap under the minimum is refused too.
+    test.assertFalse(config:Apply("tradeGapMinutes", { value = 1, at = START + 9, by = "boss" }))
+    test.assertEqual(5, config:Get("tradeGapMinutes"))
+end)
+
+test.test("recruit config: every setting follows newest wins on its own", function()
+    local _, config = setup()
+    local values = {
+        generalGapMinutes = { 45, 90 },
+        tradeGapMinutes = { 10, 30 },
+        paused = { true, false },
+    }
+    local name, pair
+    for name, pair in pairs(values) do
+        test.assertTrue(config:Apply(name, { value = pair[1], at = START + 10, by = "boss" }), name)
+        test.assertFalse(config:Apply(name, { value = pair[2], at = START + 9, by = "lieutenant" }), name)
+        test.assertEqual(pair[1], config:Get(name), name)
+        test.assertTrue(config:Apply(name, { value = pair[2], at = START + 11, by = "boss" }), name)
+        test.assertEqual(pair[2], config:Get(name), name)
+    end
+    -- Settings change independently.
+    test.assertEqual("", config:Get("guildAd"))
+end)
+
+test.test("recruit config: the ledger's fresh and stale decisions follow the configured gaps", function()
+    local addon = test.newAddon("Core/SyncFacts.lua", "Core/RecruitConfig.lua", "Core/RecruitLedger.lua",
+        "Core/RecruitPolicy.lua", "Core/GuildRecruit.lua")
+    local config = addon.RecruitConfig.Create({}, { isOfficer = function() return true end })
+    local ledger = addon.RecruitLedger.Create({}, function(key)
+        return addon.GuildRecruit.GapOf(key, config)
+    end)
+    local general = addon.RecruitLedger.GeneralKey("map:1")
+    ledger:Record(general, START)
+    ledger:Record(addon.RecruitLedger.TRADE_KEY, START)
+
+    -- Defaults: 60 and 20 minutes.
+    test.assertEqual(addon.RecruitLedger.FRESH, ledger:State(general, START + 59 * 60))
+    test.assertEqual(addon.RecruitLedger.UNKNOWN, ledger:State(addon.RecruitLedger.TRADE_KEY, START + 20 * 60))
+
+    config:Set("generalGapMinutes", 15, START, "boss")
+    config:Set("tradeGapMinutes", 30, START, "boss")
+    test.assertEqual(addon.RecruitLedger.UNKNOWN, ledger:State(general, START + 15 * 60))
+    test.assertEqual(addon.RecruitLedger.FRESH, ledger:State(addon.RecruitLedger.TRADE_KEY, START + 29 * 60))
+end)

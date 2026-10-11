@@ -31,6 +31,8 @@ Policy.__index = Policy
 --   ends, or nil. Optional.
 -- options.muted: function(zoneKey) -> true when Off here was pressed in
 --   that zone. Optional.
+-- options.paused: function() -> true while officers have paused recruitment
+--   for the whole guild. Optional.
 function RecruitPolicy.Create(options)
     return setmetatable({
         canInvite = options.canInvite,
@@ -45,6 +47,9 @@ function RecruitPolicy.Create(options)
         muted = options.muted or function()
             return false
         end,
+        paused = options.paused or function()
+            return false
+        end,
     }, Policy)
 end
 
@@ -53,10 +58,10 @@ local function answers(callback)
     return ok and result == true
 end
 
--- True when the user may be prompted at all: permission, an ad, and opt-in.
--- The opt-in is asked last, since it's the only one that reads guild data.
+-- True when the user may be prompted at all: permission, an ad, opt-in, and
+-- recruitment not paused for the guild.
 function Policy:Allowed()
-    return answers(self.canInvite) and answers(self.hasAd) and answers(self.optedIn)
+    return answers(self.canInvite) and answers(self.hasAd) and answers(self.optedIn) and not answers(self.paused)
 end
 
 -- The channels the user could advertise in at `location` ({ key, name,

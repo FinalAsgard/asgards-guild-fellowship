@@ -61,10 +61,6 @@ local GuildRecruit = {
     SHOW_DELAY_MIN = 3,
     SHOW_DELAY_MAX = 20,
     QUESTION = "Help with guild recruitment?",
-    -- How long after an ad in a zone's General channel the next one is due.
-    GENERAL_GAP_SECONDS = 60 * 60,
-    -- The same for Trade, one channel shared by every city.
-    TRADE_GAP_SECONDS = 20 * 60,
     -- How long Not now hides a channel's prompt.
     SNOOZE_SECONDS = 10 * 60,
 }
@@ -187,6 +183,9 @@ function GuildRecruit.Create(options)
         muted = function(zoneKey)
             return recruit.muted[zoneKey] == true
         end,
+        paused = function()
+            return recruit:Config():Get("paused") == true
+        end,
     })
     return recruit
 end
@@ -293,7 +292,10 @@ end
 -- The ledger of ad times for the current guild, saved with its partition.
 function Recruit:Ledger()
     local partition = self.partition()
-    return addon.RecruitLedger.Create(partition and partition:GetRecruitLedger(), GuildRecruit.GapOf, self.dueMarks)
+    local config = self:Config()
+    return addon.RecruitLedger.Create(partition and partition:GetRecruitLedger(), function(key)
+        return GuildRecruit.GapOf(key, config)
+    end, self.dueMarks)
 end
 
 -- The current location, or nil.
@@ -305,12 +307,14 @@ function Recruit:Location()
     return nil
 end
 
--- The gap in seconds for a channel key.
-function GuildRecruit.GapOf(key)
+-- The gap in seconds for a channel key, as the guild's officer settings
+-- (a RecruitConfig) have it: how long after an ad in a zone's General, or
+-- in Trade (one channel in every city), the next one is due.
+function GuildRecruit.GapOf(key, config)
     if key == addon.RecruitLedger.TRADE_KEY then
-        return GuildRecruit.TRADE_GAP_SECONDS
+        return config:Get("tradeGapMinutes") * 60
     end
-    return GuildRecruit.GENERAL_GAP_SECONDS
+    return config:Get("generalGapMinutes") * 60
 end
 
 -- The question a prompt asks.

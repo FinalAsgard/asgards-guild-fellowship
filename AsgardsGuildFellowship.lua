@@ -460,6 +460,38 @@ if clientProfile.supported then
             return guildRecruit:SetOfficerSetting("guildAdOn", enabled)
         end,
     })
+    local function officerGap(id, setting, label)
+        settings:Add("recruitment", {
+            id = id,
+            kind = "number",
+            label = label,
+            min = addon.RecruitConfig.SETTINGS[setting].min,
+            max = addon.RecruitConfig.GAP_MAX_MINUTES,
+            shown = isOfficer,
+            enabled = officerOnly,
+            get = function()
+                return guildRecruit:Config():Get(setting)
+            end,
+            set = function(minutes)
+                return guildRecruit:SetOfficerSetting(setting, minutes)
+            end,
+        })
+    end
+    officerGap("recruitGeneralGap", "generalGapMinutes", "Minutes between guild ads in a zone's General")
+    officerGap("recruitTradeGap", "tradeGapMinutes", "Minutes between guild ads in Trade")
+    settings:Add("recruitment", {
+        id = "recruitPaused",
+        kind = "toggle",
+        label = "Pause recruitment for the whole guild",
+        shown = isOfficer,
+        enabled = officerOnly,
+        get = function()
+            return guildRecruit:Config():Get("paused")
+        end,
+        set = function(paused)
+            return guildRecruit:SetOfficerSetting("paused", paused)
+        end,
+    })
     settingsPanel = addon.SettingsPanel.Create(client, settings)
     router:Register("options", "open the settings panel", function()
         if not settingsPanel:Open() then

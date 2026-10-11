@@ -55,7 +55,7 @@ end
 
 -- Shows or hides a widget's controls and label.
 local function setShown(widget, shown)
-    local parts = { widget.label }
+    local parts = { widget.label, widget.value }
     local index
     for index = 1, #(widget.controls or {}) do
         table.insert(parts, widget.controls[index])
@@ -77,8 +77,9 @@ function Panel:Refresh()
     for index = 1, #self.widgets do
         local widget = self.widgets[index]
         pcall(function()
+            local enabled = self.model:IsEnabled(widget.id) == true
             setShown(widget, self.model:IsShown(widget.id))
-            setEnabled(widget, self.model:IsEnabled(widget.id) == true)
+            setEnabled(widget, enabled)
             if widget.kind == "input" then
                 -- Text being typed is left alone until it's saved.
                 if not widget.frame:HasFocus() then
@@ -89,12 +90,12 @@ function Panel:Refresh()
             elseif widget.kind == "number" then
                 local value = self.model:Get(widget.id)
                 widget.frame:SetText(tostring(value or ""))
-                if value ~= nil and value <= widget.entry.min then
+                if not enabled or (value ~= nil and value <= widget.entry.min) then
                     widget.down:Disable()
                 else
                     widget.down:Enable()
                 end
-                if value ~= nil and value >= widget.entry.max then
+                if not enabled or (value ~= nil and value >= widget.entry.max) then
                     widget.up:Disable()
                 else
                     widget.up:Enable()
@@ -181,6 +182,7 @@ function Panel:addNumber(frame, entry, y)
     end)
     table.insert(self.widgets, {
         kind = "number", id = entry.id, entry = entry, frame = value, down = down, up = up, label = label,
+        value = value, controls = { down, up },
     })
 end
 

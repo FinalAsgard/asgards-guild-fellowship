@@ -1008,3 +1008,75 @@ test.test("officer guild ad: only an officer with settings answers ask-config", 
     fixtures.runTimers(officer, 2)
     test.assertEqual(before + 1, #sentOfType(officer, "config"))
 end)
+
+test.test("officer gaps and pause: only officers see them, and gaps under the minimum are refused", function()
+    local officer = login("Retail", { playerName = OFFICER })
+    local ids = { "recruitGeneralGap", "recruitTradeGap", "recruitPaused" }
+    local index
+    for index = 1, #ids do
+        test.assertTrue(officer.addon.settings:IsShown(ids[index]), ids[index])
+    end
+    test.assertEqual(60, officer.addon.settings:Get("recruitGeneralGap"))
+    test.assertEqual(20, officer.addon.settings:Get("recruitTradeGap"))
+    test.assertEqual(nil, officer.addon.settings:Set("recruitGeneralGap", 14))
+    test.assertEqual(nil, officer.addon.settings:Set("recruitTradeGap", 4))
+    test.assertTrue(officer.addon.settings:Set("recruitTradeGap", 5))
+
+    local member = login("Retail", { playerName = MEMBER })
+    for index = 1, #ids do
+        test.assertFalse(member.addon.settings:IsShown(ids[index]), ids[index])
+    end
+    test.assertEqual(nil, member.addon.settings:Set("recruitGeneralGap", 30))
+end)
+
+test.test("officer gaps and pause: the guild's gaps decide when a channel is due again", function()
+    local world = login("Retail", { playerName = OFFICER })
+    optIn(world)
+    world.addon.settings:Set("recruitGeneralGap", 15)
+    world.handlers.post(world.shown[1].key)
+    test.assertEqual(0, #world.shown)
+
+    fixtures.runTimers(world, 15 * 60 - 1)
+    test.assertEqual(0, #world.shown)
+    fixtures.runTimers(world, 1)
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("officer gaps and pause: a member uses gaps an officer sends", function()
+    local world = login("Retail", { playerName = MEMBER })
+    optIn(world)
+    inCity(world, "Dornogal")
+    world.handlers.post(promptFor(world, "Advertise in Trade?").key)
+
+    world.addon.guildRecruit:OnMessage({ v = 1, t = "config", s = {
+        tradeGapMinutes = { value = 5, at = world.time, by = "toolbox-area52" },
+    } }, OFFICER)
+    fixtures.runTimers(world, 5 * 60)
+
+    test.assertTrue(promptFor(world, "Advertise in Trade?") ~= nil)
+end)
+
+test.test("officer gaps and pause: pausing closes everyone's prompts, and lifting it brings due ones back", function()
+    local officer = login("Retail", { playerName = OFFICER })
+    optIn(officer)
+    local member = login("Retail", { playerName = MEMBER })
+    optIn(member)
+    test.assertEqual(1, #officer.shown)
+    test.assertEqual(1, #member.shown)
+
+    test.assertTrue(officer.addon.settings:Set("recruitPaused", true))
+    test.assertEqual(0, #officer.shown)
+    local paused = sentOfType(officer, "config")
+    member.addon.guildRecruit:OnMessage(paused[#paused], OFFICER)
+    test.assertEqual(0, #member.shown)
+    test.assertEqual(nil, member.addon.guildRecruit:Post("general:map:2339"))
+    fixtures.runTimers(member, 2 * 60 * 60)
+    test.assertEqual(0, #member.shown)
+
+    officer.time = member.time
+    test.assertTrue(officer.addon.settings:Set("recruitPaused", false))
+    local resumed = sentOfType(officer, "config")
+    member.addon.guildRecruit:OnMessage(resumed[#resumed], OFFICER)
+    test.assertEqual(1, #member.shown)
+    test.assertEqual(1, #officer.shown)
+end)
