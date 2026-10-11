@@ -121,6 +121,28 @@ for index = 1, #fixtures.PROFILES do
     end)
 end
 
+test.test("Trade and General are found by name, whatever order the client lists its channel names in", function()
+    local world = fixtures.newEnvironment("Forever")
+    local client = newClient(world.environment)
+    -- A client whose list of server channel names isn't General, Trade, ...
+    world.environment.EnumerateServerChannels = function()
+        return "LocalDefense", "General", "Trade"
+    end
+    -- The channels a tester had out in the world.
+    world.channels = {
+        [1] = "General - Ironforge", [2] = "Trade - City", [3] = "LocalDefense - Ironforge",
+        [4] = "Services - City", [5] = "TradeLocal - City",
+    }
+    world.disabledChannels = { [2] = true, [4] = true, [5] = true }
+
+    test.assertEqual(nil, client:GetTradeChannel())
+    test.assertEqual(1, client:GetGeneralChannel())
+
+    -- In a city, Trade is enabled.
+    world.disabledChannels = { [4] = true, [5] = true }
+    test.assertEqual(2, client:GetTradeChannel())
+end)
+
 test.test("a channel list without disabled flags, or one that can't be read, disables nothing", function()
     local function channelName(number)
         if number == 2 then

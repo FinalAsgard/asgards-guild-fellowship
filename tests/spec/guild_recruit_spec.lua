@@ -1294,3 +1294,22 @@ test.test("guild recruit: Trade disabled a moment after leaving a city closes it
     test.assertEqual(nil, promptFor(world, "Advertise in Trade?"))
     test.assertEqual("Advertise in Isle of Dorn General?", world.shown[1].text)
 end)
+
+test.test("guild recruit: out in the world there's no Trade prompt, whatever order the client lists channels in", function()
+    local world = login("Forever")
+    world.environment.EnumerateServerChannels = function()
+        return "LocalDefense", "General", "Trade"
+    end
+    optIn(world)
+    outInTheWorld(world, "Ironforge")
+    fixtures.fire(world, "CHANNEL_UI_UPDATE")
+
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("Advertise in Ironforge General?", world.shown[1].text)
+
+    -- Back in a city, Trade is prompted and Post sends to Trade itself.
+    world.disabledChannels = { [4] = true, [5] = true }
+    fixtures.fire(world, "CHANNEL_UI_UPDATE")
+    world.handlers.post(promptFor(world, "Advertise in Trade?").key)
+    test.assertEqual(2, world.chat[1].target)
+end)

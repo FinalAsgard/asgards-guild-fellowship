@@ -551,29 +551,48 @@ function Client:disabledChannels()
     return disabled
 end
 
+-- The number of the joined channel named `name` ("Trade - City" and plain
+-- "Trade" are both named Trade), or nil when the player isn't in one.
+function Client:joinedChannel(name)
+    local prefix = name .. " - "
+    local number
+    for number = 1, Compatibility.MAX_CHANNELS do
+        local ok, id, fullName = callFunction(self.environment.GetChannelName, number)
+        if ok and type(id) == "number" and id > 0 and type(fullName) == "string"
+            and not self:IsSecretValue(fullName)
+            and (fullName == name or string.sub(fullName, 1, string.len(prefix)) == prefix)
+        then
+            return id
+        end
+    end
+    return nil
+end
+
 -- The number of a server channel the player is in and can post to here, or
--- nil. `index` is the channel's place in the client's own list of server
--- channel names (so every locale works), with `fallback` as the English
--- name; the channel's full name carries the zone or "City" ("General -
--- Elwynn Forest", "Trade - City"). A channel the client reports disabled
--- here doesn't count.
-function Client:findServerChannel(index, fallback)
+-- nil. The channel is found by its English name (`english`) first. Only on
+-- a client with no channel of that name is it found by the client's own
+-- name for it, `index`th in the client's list of server channel names (for
+-- other languages); that list's order differs between clients, so it's
+-- never trusted over the name. A channel the client reports disabled here
+-- doesn't count.
+function Client:findServerChannel(index, english)
+    local candidates = { english }
     local ok, names = callFunction(function()
         return { self.environment.EnumerateServerChannels() }
     end)
-    local baseName = ok and type(names) == "table" and names[index] or nil
-    if type(baseName) ~= "string" or baseName == "" then
-        baseName = fallback
+    local own = ok and type(names) == "table" and names[index] or nil
+    if type(own) == "string" and own ~= "" and own ~= english then
+        table.insert(candidates, own)
     end
-    local prefix = baseName .. " - "
     local disabled = self:disabledChannels()
-    local number
-    for number = 1, Compatibility.MAX_CHANNELS do
-        local nameOk, id, fullName = callFunction(self.environment.GetChannelName, number)
-        if nameOk and type(id) == "number" and id > 0 and not disabled[id] and type(fullName) == "string"
-            and not self:IsSecretValue(fullName)
-            and (fullName == baseName or string.sub(fullName, 1, string.len(prefix)) == prefix)
-        then
+    local candidateIndex
+    for candidateIndex = 1, #candidates do
+        local id = self:joinedChannel(candidates[candidateIndex])
+        if id ~= nil then
+            -- The channel by that name decides, even when it's disabled.
+            if disabled[id] then
+                return nil
+            end
             return id
         end
     end
