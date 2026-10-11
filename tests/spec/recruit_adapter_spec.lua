@@ -50,6 +50,21 @@ for index = 1, #fixtures.PROFILES do
         test.assertEqual(nil, client:GetGeneralChannel())
     end)
 
+    test.test(profile .. " adapter finds Trade where the player is in it, and nowhere else", function()
+        local world = fixtures.newEnvironment(profile)
+        local client = newClient(world.environment)
+
+        test.assertEqual(nil, client:GetTradeChannel())
+        test.assertFalse(client:IsTradeAvailable())
+
+        world.channels = {
+            [1] = "General - " .. expected.name, [2] = "Trade (Services) - City", [5] = "Trade - City",
+        }
+        test.assertEqual(5, client:GetTradeChannel())
+        test.assertTrue(client:IsTradeAvailable())
+        test.assertEqual(1, client:GetGeneralChannel())
+    end)
+
     test.test(profile .. " adapter reports a blocked send as failed", function()
         local world = fixtures.newEnvironment(profile)
         local client = newClient(world.environment)
@@ -110,7 +125,7 @@ test.test("the zone key climbs out of dungeon levels and micro maps to the zone"
     test.assertEqual("map:37", client:GetZone().key)
 end)
 
-test.test("the General channel is found by the client's own channel name", function()
+test.test("the General and Trade channels are found by the client's own channel names", function()
     local client = newClient({
         EnumerateServerChannels = function()
             return "Allgemein", "Handel"
@@ -118,12 +133,15 @@ test.test("the General channel is found by the client's own channel name", funct
         GetChannelName = function(number)
             if number == 2 then
                 return 2, "Allgemein - Eisenschmiede", 0
+            elseif number == 3 then
+                return 3, "Handel - Stadt", 0
             end
             return 0, nil, 0
         end,
     })
 
     test.assertEqual(2, client:GetGeneralChannel())
+    test.assertEqual(3, client:GetTradeChannel())
 end)
 
 test.test("guild recruit adapter methods return nil or false when the APIs are missing or raise", function()
@@ -151,6 +169,8 @@ test.test("guild recruit adapter methods return nil or false when the APIs are m
         test.assertFalse(client:CanGuildInvite())
         test.assertEqual(nil, client:GetZone())
         test.assertEqual(nil, client:GetGeneralChannel())
+        test.assertEqual(nil, client:GetTradeChannel())
+        test.assertFalse(client:IsTradeAvailable())
         test.assertFalse(client:SendChannelMessage("Join us!", 1))
         test.assertFalse(client:ObserveZone(function() end))
     end

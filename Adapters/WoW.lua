@@ -510,25 +510,49 @@ end
 -- How many channel numbers to look through for the General channel.
 Compatibility.MAX_CHANNELS = 20
 
--- The number of the General channel the player is in, or nil. The channel's
--- name is the client's own (so every locale works), with the English as a
--- fallback; its full name carries the zone ("General - Elwynn Forest").
-function Client:GetGeneralChannel()
-    local ok, baseName = callFunction(self.environment.EnumerateServerChannels)
-    if not ok or type(baseName) ~= "string" or baseName == "" then
-        baseName = "General"
+-- The number of a server channel the player is in, or nil. `index` is the
+-- channel's place in the client's own list of server channel names (so
+-- every locale works), with `fallback` as the English name; the channel's
+-- full name carries the zone or "City" ("General - Elwynn Forest", "Trade -
+-- City").
+function Client:findServerChannel(index, fallback)
+    local ok, names = callFunction(function()
+        return { self.environment.EnumerateServerChannels() }
+    end)
+    local baseName = ok and type(names) == "table" and names[index] or nil
+    if type(baseName) ~= "string" or baseName == "" then
+        baseName = fallback
     end
+    local prefix = baseName .. " - "
     local number
     for number = 1, Compatibility.MAX_CHANNELS do
         local nameOk, id, fullName = callFunction(self.environment.GetChannelName, number)
         if nameOk and type(id) == "number" and id > 0 and type(fullName) == "string"
             and not self:IsSecretValue(fullName)
-            and (fullName == baseName or string.sub(fullName, 1, string.len(baseName) + 3) == baseName .. " - ")
+            and (fullName == baseName or string.sub(fullName, 1, string.len(prefix)) == prefix)
         then
             return id
         end
     end
     return nil
+end
+
+-- The number of the General channel the player is in, or nil.
+function Client:GetGeneralChannel()
+    return self:findServerChannel(1, "General")
+end
+
+-- The number of the Trade channel, or nil when the player isn't in it. Trade
+-- is one channel in every city, and the client only puts the player in it
+-- where it's available, so this also answers whether Trade is available
+-- here.
+function Client:GetTradeChannel()
+    return self:findServerChannel(2, "Trade")
+end
+
+-- True when the player is in the Trade channel here.
+function Client:IsTradeAvailable()
+    return self:GetTradeChannel() ~= nil
 end
 
 -- Posts `text` to the channel numbered `channelNumber`. Retail keeps the call

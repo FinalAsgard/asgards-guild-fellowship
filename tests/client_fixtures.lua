@@ -356,7 +356,7 @@ local function installGuild(world, environment, profile)
     end
     -- Where the player is: `world.zone` ({ mapID, name }) and the channels
     -- they're in, by number (`world.channels`, full names as the client
-    -- reports them). Lines sent to chat are recorded in `world.chat` as
+    -- reports them; only the zone's General unless a spec adds Trade). Lines sent to chat are recorded in `world.chat` as
     -- { text, chatType, target }; `world.chatFails = true` makes sending
     -- raise, as a blocked send does.
     local zones = {
@@ -364,7 +364,7 @@ local function installGuild(world, environment, profile)
         Retail = { mapID = 2339, name = "Dornogal" },
     }
     world.zone = Fixtures.snapshot(zones[profile])
-    world.channels = { [1] = "General - " .. world.zone.name, [2] = "Trade - City" }
+    world.channels = { [1] = "General - " .. world.zone.name }
     world.chat = {}
     environment.C_Map = {
         GetBestMapForUnit = function(unit)
