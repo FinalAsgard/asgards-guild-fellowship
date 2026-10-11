@@ -44,11 +44,21 @@ local function setEnabled(widget, enabled)
     local index
     for index = 1, #(widget.controls or {}) do
         local control = widget.controls[index]
-        if enabled then
-            control:Enable()
-        else
-            control:Disable()
-        end
+        -- Not every client gives every kind of control Enable and Disable
+        -- (text boxes in particular), so whatever it has is used.
+        pcall(function()
+            if type(control.Enable) == "function" and type(control.Disable) == "function" then
+                if enabled then
+                    control:Enable()
+                else
+                    control:Disable()
+                end
+            elseif type(control.SetEnabled) == "function" then
+                control:SetEnabled(enabled)
+            elseif type(control.EnableMouse) == "function" then
+                control:EnableMouse(enabled)
+            end
+        end)
     end
     if widget.label ~= nil then
         if enabled then
@@ -82,14 +92,17 @@ function Panel:Refresh()
     local index
     for index = 1, #self.widgets do
         local widget = self.widgets[index]
+        local enabled = self.model:IsEnabled(widget.id) == true
+        -- The value goes in first, and each step on its own, so a call the
+        -- client doesn't support can't leave a setting showing blank.
         pcall(function()
-            local enabled = self.model:IsEnabled(widget.id) == true
-            setShown(widget, self.model:IsShown(widget.id))
-            setEnabled(widget, enabled)
             if widget.kind == "input" then
                 -- Text being typed is left alone until it's saved.
-                if not widget.frame:HasFocus() then
-                    widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
+                local focused = type(widget.frame.HasFocus) == "function" and widget.frame:HasFocus()
+                if not focused then
+                    local text = tostring(self.model:Get(widget.id) or "")
+                    widget.frame:SetText(text)
+                    widget.shownText = text
                 end
             elseif widget.kind == "toggle" then
                 widget.frame:SetChecked(self.model:Get(widget.id) == true)
@@ -110,6 +123,8 @@ function Panel:Refresh()
                 widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
             end
         end)
+        pcall(setShown, widget, self.model:IsShown(widget.id))
+        pcall(setEnabled, widget, enabled)
     end
 end
 
@@ -128,11 +143,16 @@ function Panel:addToggle(frame, entry, y)
     table.insert(self.widgets, { kind = "toggle", id = entry.id, frame = check, controls = { check }, label = label })
 end
 
--- Saves what's typed in a text box when it differs from the saved text. A
--- refused change puts the saved text back.
+-- Saves what's typed in a text box when the player changed it: it differs
+-- from the text the panel last put there. A box the panel never filled in
+-- saves nothing, so it can't blank out a saved value. A refused change puts
+-- the saved text back.
 function Panel:commitInput(widget)
+    if widget.shownText == nil then
+        return
+    end
     local ok, text = pcall(widget.frame.GetText, widget.frame)
-    if ok and type(text) == "string" and text ~= self.model:Get(widget.id) then
+    if ok and type(text) == "string" and text ~= widget.shownText then
         self.model:Set(widget.id, text)
     end
 end
@@ -376,6 +396,8 @@ function Panel:Register()
     self.model:OnChange(function()
         self:Refresh()
     end)
+    -- Filled in now, not only when a page is first shown.
+    self:Refresh()
     return true
 end
 

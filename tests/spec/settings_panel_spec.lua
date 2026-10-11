@@ -37,15 +37,28 @@ local function newEnvironment()
                         self.scripts[name] = handler
                     end
                 elseif method == "GetText" then
+                    -- Like a real text box, an empty one gives "".
                     return function(self)
-                        return rawget(self, "text")
+                        return rawget(self, "text") or ""
                     end
                 end
                 return function() end
             end,
         })
     end
-    environment.CreateFrame = function(_, _, parent)
+    environment.CreateFrame = function(frameType, _, parent)
+        -- `environment.editBoxFails` lists methods that raise on text boxes,
+        -- as on a client that lacks them.
+        if frameType == "EditBox" and environment.editBoxFails ~= nil then
+            local box = widget(parent)
+            local name
+            for name in pairs(environment.editBoxFails) do
+                rawset(box, name, function()
+                    error("no " .. name .. " on this client")
+                end)
+            end
+            return box
+        end
         if parent == nil then
             local page = widget(nil)
             page.texts = {}
@@ -185,9 +198,9 @@ test.test("settings panel: the officer heading and settings show only for office
 end)
 
 -- A model with one text setting backed by `saved.ad`, on the main page.
-local function newTextPanel(environment)
+local function newTextPanel(environment, savedAd)
     local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
-    local saved = { ad = "" }
+    local saved = { ad = savedAd or "" }
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
     model:Add("recruitment", { id = "ad", kind = "input", label = "My ad", maxLength = 255,
@@ -245,4 +258,48 @@ test.test("settings panel: closing the options saves an ad still being typed", f
     panel.frame.scripts.OnHide(panel.frame)
 
     test.assertEqual("Typed, then closed", saved.ad)
+end)
+
+test.test("settings panel: a saved ad shows in its box even where the box can't be greyed out", function()
+    local environment = newEnvironment()
+    environment.editBoxFails = { Enable = true, Disable = true }
+
+    local panel = newTextPanel(environment, "Knights recruit!")
+
+    test.assertEqual("Knights recruit!", textBox(panel).text)
+end)
+
+test.test("settings panel: a box the panel couldn't fill in never saves over the saved ad", function()
+    local environment = newEnvironment()
+    environment.editBoxFails = { SetText = true }
+    local panel, saved = newTextPanel(environment, "Knights recruit!")
+    local box = textBox(panel)
+
+    box.scripts.OnEditFocusLost(box)
+    panel.frame.scripts.OnHide(panel.frame)
+
+    test.assertEqual("Knights recruit!", saved.ad)
+end)
+
+test.test("settings panel: leaving a box unchanged saves nothing", function()
+    local environment = newEnvironment()
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local saves = 0
+    local model = addon.SettingsModel.Create()
+    model:AddSection("recruitment", "Recruitment")
+    model:Add("recruitment", { id = "ad", kind = "input", label = "My ad", maxLength = 255,
+        get = function() return "Knights recruit!" end,
+        set = function()
+            saves = saves + 1
+            return true
+        end })
+    environment.InterfaceOptions_AddCategory = function() end
+    local panel = addon.SettingsPanel.Create({ environment = environment }, model)
+    panel:Register()
+    local box = textBox(panel)
+
+    box.scripts.OnEditFocusLost(box)
+    panel.frame.scripts.OnHide(panel.frame)
+
+    test.assertEqual(0, saves)
 end)
