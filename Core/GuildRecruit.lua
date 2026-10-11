@@ -16,7 +16,22 @@ local _, addon = ...
 -- with it, an undecided character is asked. Within a session, permission is
 -- checked live, so losing it stops prompts at once, but only the login check
 -- resets the answer.
+--
+-- Add-on users coordinate: after the user's ad posts, an "advertised" message
+-- tells the guild's other add-on users, who record the time for that channel
+-- (in any zone) and close their own prompt for it. A prompt waits a short
+-- random moment before showing, so two users rarely get the same one at the
+-- same instant. Without add-on messaging, it simply works uncoordinated.
 local GuildRecruit = {
+    -- The "advertised" message: { v = PROTOCOL, t = TYPE_ADVERTISED, k = the
+    -- channel key, n = the channel's display name, a = when it was posted
+    -- (server time) }. The poster is whoever the game says sent it.
+    PROTOCOL = 1,
+    TYPE_ADVERTISED = "advertised",
+    -- A prompt shows a random whole number of seconds in this range after
+    -- its channel comes due.
+    SHOW_DELAY_MIN = 3,
+    SHOW_DELAY_MAX = 20,
     QUESTION = "Help with guild recruitment?",
     -- How long after an ad in a zone's General channel the next one is due.
     GENERAL_GAP_SECONDS = 60 * 60,
@@ -44,6 +59,13 @@ Recruit.__index = Recruit
 --   after       function(seconds, callback) -> false when there's no timer
 --   inInstance  function() -> true in an instance, battleground or keystone
 --               run, where prompts are held. Optional.
+--   random      function(low, high) -> a whole number. Optional.
+--   showDelay   function() -> seconds a newly due prompt waits before
+--               showing. Optional; a random 3 to 20 otherwise.
+--   announce    function(message) -> sends an "advertised" message to the
+--               guild's add-on users. Optional.
+--   isOwn       function(sender) -> true when a message's sender is one of
+--               the user's own characters. Optional.
 --   send        function(text, channelNumber) -> true when posted
 --   rosterLoaded function() -> true once the guild roster has loaded
 --   view        { Show = function(view, prompts, handlers),
@@ -68,6 +90,18 @@ function GuildRecruit.Create(options)
         inInstance = options.inInstance or function()
             return false
         end,
+        random = options.random or function(low)
+            return low
+        end,
+        showDelay = options.showDelay,
+        announce = options.announce or function()
+            return false
+        end,
+        isOwn = options.isOwn or function()
+            return false
+        end,
+        -- When each channel that's due but not yet shown will show.
+        showAt = {},
         -- True during combat or a boss encounter.
         inCombat = false,
         -- This session's Not now (channel key -> when it ends) and Off here
@@ -197,6 +231,58 @@ function Recruit:wakeIn(seconds, now)
     end
 end
 
+-- Seconds a newly due prompt waits before showing.
+function Recruit:ShowDelay()
+    local ok, delay
+    if self.showDelay ~= nil then
+        ok, delay = pcall(self.showDelay)
+    else
+        ok, delay = pcall(self.random, GuildRecruit.SHOW_DELAY_MIN, GuildRecruit.SHOW_DELAY_MAX)
+    end
+    if not ok or type(delay) ~= "number" or delay < 0 then
+        return GuildRecruit.SHOW_DELAY_MIN
+    end
+    return delay
+end
+
+-- The due prompts that have waited out their show delay, with their text.
+-- A channel newly due starts its delay now; one no longer due forgets it,
+-- so a channel advertised in while it waits never shows. Without a timer
+-- to show it later, a prompt shows at once.
+function Recruit:visible(due, now)
+    local shown = {}
+    local stillDue = {}
+    local index
+    for index = 1, #due do
+        local prompt = due[index]
+        stillDue[prompt.key] = true
+        if self.showAt[prompt.key] == nil then
+            local delay = self:ShowDelay()
+            if delay > 0 and not self.after(delay, function()
+                self:Refresh()
+            end) then
+                delay = 0
+            end
+            self.showAt[prompt.key] = now + delay
+        end
+        if type(now) == "number" and self.showAt[prompt.key] <= now then
+            prompt.text = GuildRecruit.PromptText(prompt)
+            table.insert(shown, prompt)
+        end
+    end
+    local key
+    local forgotten = {}
+    for key in pairs(self.showAt) do
+        if not stillDue[key] then
+            table.insert(forgotten, key)
+        end
+    end
+    for index = 1, #forgotten do
+        self.showAt[forgotten[index]] = nil
+    end
+    return shown
+end
+
 -- Works out the prompts due now and draws them: new ones appear, and ones
 -- no longer due (advertised, left behind, or not allowed any more) close.
 -- Called whenever anything they depend on may have changed.
@@ -211,11 +297,7 @@ function Recruit:Refresh()
         due = self.policy:Due(location, ledger, now)
         self:wakeIn(self.policy:NextDue(location, ledger, now), now)
     end
-    local index
-    for index = 1, #due do
-        due[index].text = GuildRecruit.PromptText(due[index])
-    end
-    self.prompts = due
+    self.prompts = self:visible(due, now)
     -- An answer given some other way (the settings) settles the question.
     if self.asking and self:Answer() ~= nil then
         self.asking = false
@@ -350,8 +432,49 @@ function Recruit:Post(key)
         return nil
     end
     self:Ledger():Record(key, now)
+    pcall(self.announce, {
+        v = GuildRecruit.PROTOCOL,
+        t = GuildRecruit.TYPE_ADVERTISED,
+        k = key,
+        n = prompt.channel == addon.RecruitPolicy.TRADE and "Trade" or ((prompt.zoneName or "") .. " General"),
+        a = now,
+    })
     self:Refresh()
     return ad
+end
+
+-- True for a channel key this add-on could have written: a zone's General
+-- or Trade.
+local function isChannelKey(key)
+    return key == addon.RecruitLedger.TRADE_KEY
+        or (type(key) == "string" and string.sub(key, 1, 8) == "general:" and string.len(key) > 8)
+end
+
+-- Another add-on user's "advertised" message, from `sender` (a name as the
+-- game reports it). Records the time for that channel, in any zone, and
+-- closes the user's prompt for it if it's now fresh. Messages from the
+-- user's own characters and malformed ones are ignored. Returns true when
+-- the time was recorded.
+function Recruit:OnAdvertised(message, sender)
+    if type(message) ~= "table" or message.v ~= GuildRecruit.PROTOCOL or message.t ~= GuildRecruit.TYPE_ADVERTISED
+        or not isChannelKey(message.k) or type(message.a) ~= "number" or message.a ~= message.a
+        or (message.n ~= nil and type(message.n) ~= "string") or type(sender) ~= "string"
+    then
+        return false
+    end
+    local ok, own = pcall(self.isOwn, sender)
+    if not ok or own ~= false then
+        return false
+    end
+    local partition = self.partition()
+    if partition == nil then
+        return false
+    end
+    local recorded = self:Ledger():Record(message.k, message.a)
+    if recorded then
+        self:Refresh()
+    end
+    return recorded
 end
 
 -- The user pressed Not now on the prompt for `key`: hides that channel's

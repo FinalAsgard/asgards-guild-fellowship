@@ -18,6 +18,10 @@ local function login(profile, options)
         options.before(world)
     end
     fixtures.loadAddon(world)
+    -- Prompts show at once unless a spec sets `world.showDelay`.
+    world.addon.guildRecruit.showDelay = function()
+        return world.showDelay or 0
+    end
     world.shown = {}
     world.addon.guildRecruit.view = {
         Show = function(_, prompts, handlers)
@@ -581,3 +585,155 @@ test.test("guild recruit: leaving a zone or city closes the prompts for it", fun
     fixtures.fire(world, "CHANNEL_UI_UPDATE")
     test.assertEqual(0, #world.shown)
 end)
+
+-- The `advertised` messages the world sent, deserialized, with their
+-- priorities.
+local function advertised(world)
+    local serializer = world.environment.LibStub.libs["AceSerializer-3.0"]
+    local found = {}
+    local index
+    for index = 1, #world.sentMessages do
+        local sent = world.sentMessages[index]
+        local _, message = serializer:Deserialize(sent.text)
+        if type(message) == "table" and message.t == "advertised" then
+            message.priority = sent.priority
+            table.insert(found, message)
+        end
+    end
+    return found
+end
+
+test.test("guild recruit: a successful post tells other add-on users at NORMAL priority", function()
+    local world = login("Retail")
+    optIn(world)
+    inCity(world, "Dornogal")
+
+    world.handlers.post(promptFor(world, "Advertise in Dornogal General?").key)
+    world.handlers.post(promptFor(world, "Advertise in Trade?").key)
+
+    local messages = advertised(world)
+    test.assertEqual(2, #messages)
+    test.assertEqual(1, messages[1].v)
+    test.assertEqual("general:map:2339", messages[1].k)
+    test.assertEqual("Dornogal General", messages[1].n)
+    test.assertEqual(world.time, messages[1].a)
+    test.assertEqual("NORMAL", messages[1].priority)
+    test.assertEqual("trade", messages[2].k)
+    test.assertEqual("Trade", messages[2].n)
+end)
+
+test.test("guild recruit: a failed post tells nobody", function()
+    local world = login("Retail")
+    optIn(world)
+    world.chatFails = true
+
+    world.handlers.post(world.shown[1].key)
+
+    test.assertEqual(0, #advertised(world))
+end)
+
+test.test("guild recruit: an advertised message records the time for any zone and closes the prompt", function()
+    local world = login("Retail")
+    optIn(world)
+    inCity(world, "Dornogal")
+    local recruit = world.addon.guildRecruit
+
+    test.assertTrue(recruit:OnAdvertised(
+        { v = 1, t = "advertised", k = "general:map:2248", n = "Isle of Dorn General", a = world.time },
+        "Anvil-Area52"))
+    test.assertEqual(2, #world.shown)
+    test.assertTrue(recruit:OnAdvertised({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time },
+        "Anvil-Area52"))
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("Advertise in Dornogal General?", world.shown[1].text)
+
+    -- An older time than the one known changes nothing.
+    test.assertFalse(recruit:OnAdvertised({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 60 },
+        "Anvil-Area52"))
+
+    -- The other zone was recorded too, so travelling there prompts nothing.
+    travel(world, 2248, "Isle of Dorn")
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild recruit: advertised messages from the user's characters, or malformed ones, are ignored", function()
+    local world = login("Retail")
+    optIn(world)
+    local recruit = world.addon.guildRecruit
+    local good = { v = 1, t = "advertised", k = "general:map:2339", n = "Dornogal General", a = world.time }
+
+    -- Hammer's note makes it an alt of the user's Toolbox.
+    test.assertFalse(recruit:OnAdvertised(good, "Hammer-Area52"))
+    test.assertFalse(recruit:OnAdvertised(good, "Toolbox-Area52"))
+    local broken = {
+        "not a table",
+        { v = 2, t = "advertised", k = "trade", a = world.time },
+        { v = 1, t = "greeted", k = "trade", a = world.time },
+        { v = 1, t = "advertised", k = "elsewhere", a = world.time },
+        { v = 1, t = "advertised", k = "general:", a = world.time },
+        { v = 1, t = "advertised", k = "trade", a = "now" },
+        { v = 1, t = "advertised", k = "trade", n = 7, a = world.time },
+    }
+    local index
+    for index = 1, #broken do
+        test.assertFalse(recruit:OnAdvertised(broken[index], "Anvil-Area52"), "message " .. index)
+    end
+    test.assertFalse(recruit:OnAdvertised(good, nil))
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild recruit: a prompt waits its show delay, and is dropped if advertised in meanwhile", function()
+    local world = login("Retail")
+    world.showDelay = 15
+    optIn(world)
+    test.assertEqual(0, #world.shown)
+    fixtures.runTimers(world, 14)
+    test.assertEqual(0, #world.shown)
+    fixtures.runTimers(world, 1)
+    test.assertEqual(1, #world.shown)
+
+    inCity(world, "Dornogal")
+    test.assertEqual(1, #world.shown)
+    world.addon.guildRecruit:OnAdvertised({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time },
+        "Anvil-Area52")
+    fixtures.runTimers(world, 15)
+    test.assertEqual(1, #world.shown)
+    test.assertEqual(nil, promptFor(world, "Advertise in Trade?"))
+end)
+
+test.test("guild recruit: the show delay is a random 3 to 20 seconds, and a failing pick still delays", function()
+    local addon = test.newAddon("Core/RecruitLedger.lua", "Core/RecruitPolicy.lua", "Core/GuildRecruit.lua")
+    local asked = {}
+    local recruit = addon.GuildRecruit.Create({
+        random = function(low, high)
+            asked = { low, high }
+            return 12
+        end,
+    })
+    test.assertEqual(12, recruit:ShowDelay())
+    test.assertEqual(3, asked[1])
+    test.assertEqual(20, asked[2])
+
+    local failing = addon.GuildRecruit.Create({ random = function() error("boom") end })
+    test.assertEqual(3, failing:ShowDelay())
+end)
+
+for index = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[index]
+
+    test.test(profile .. ": without AceComm or AceSerializer, prompts and posting still work", function()
+        local missing = { { "AceComm-3.0" }, { "AceSerializer-3.0" } }
+        local missingIndex
+        for missingIndex = 1, #missing do
+            local world = login(profile, { missingLibraries = missing[missingIndex] })
+            optIn(world)
+            test.assertEqual(1, #world.shown)
+
+            world.handlers.post(world.shown[1].key)
+
+            test.assertEqual(1, #world.chat)
+            test.assertEqual(0, #world.shown)
+            test.assertEqual(0, #world.sentMessages)
+        end
+    end)
+end

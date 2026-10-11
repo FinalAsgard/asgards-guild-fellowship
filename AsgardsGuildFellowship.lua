@@ -605,6 +605,21 @@ if clientProfile.supported then
         inInstance = function()
             return client:IsInInstance()
         end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        -- Heard within seconds, so others' prompts close quickly.
+        announce = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
+        isOwn = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            if key == nil then
+                return nil
+            end
+            return guildGreet:IsOwn(key)
+        end,
         rosterLoaded = function()
             local count = client:GetGuildRosterCount()
             return count ~= nil and count > 0
@@ -684,11 +699,13 @@ end
 
 local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
     rosterController:OnSavedDataReady()
-    -- Without the comm libraries, sync simply stays off and Guild Greet
-    -- works uncoordinated.
+    -- Without the comm libraries, sync simply stays off, and Guild Greet and
+    -- Guild Recruit work uncoordinated.
     if comm:Start(function(message, sender)
         if message.t == addon.GuildGreet.TYPE_GREETED then
             guildGreet:OnGreeted(message, sender)
+        elseif message.t == addon.GuildRecruit.TYPE_ADVERTISED then
+            guildRecruit:OnAdvertised(message, sender)
         else
             syncSession:Receive(message, sender)
         end
