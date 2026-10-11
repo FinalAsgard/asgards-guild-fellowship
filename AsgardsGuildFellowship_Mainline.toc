@@ -18,6 +18,7 @@ Libs/AceComm-3.0/AceComm-3.0.xml
 Core/Identity.lua
 Adapters/ClientProfile.lua
 Adapters/WoW.lua
+Adapters/MasterFrame.lua
 Adapters/RosterWindow.lua
 Adapters/EntryPoints.lua
 Adapters/Comm.lua
@@ -42,6 +43,7 @@ Core/SuggestionService.lua
 Core/SyncLedger.lua
 Core/SyncSession.lua
 Core/ScanScheduler.lua
+Core/PageNavigator.lua
 Core/RosterController.lua
 Core/LibraryCheck.lua
 Core/CommandRouter.lua

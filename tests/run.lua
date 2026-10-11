@@ -49,6 +49,7 @@ require("tests.spec.scan_scheduler_spec")
 require("tests.spec.scan_performance_spec")
 require("tests.spec.sync_performance_spec")
 require("tests.spec.roster_controller_spec")
+require("tests.spec.master_frame_spec")
 require("tests.spec.lifecycle_spec")
 require("tests.spec.bootstrap_spec")
 

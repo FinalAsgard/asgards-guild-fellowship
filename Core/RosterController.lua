@@ -17,6 +17,8 @@ Controller.__index = Controller
 --   nameRules     the client profile's name rules
 --   getDatabase   function() -> the SavedVariables root, or nil
 --   createWindow  function() -> window or nil, reason
+--   pages         optional PageNavigator: the window's pages, chosen by
+--                 the entry point that opens it
 --   onMainLinksChanged  optional function(keys, before): after a manual
 --                 change to main links, with the set of every character
 --                 key whose player was involved, and each one's main before
@@ -53,6 +55,7 @@ function RosterController.Create(options)
         collapsed = {},
         showDeparted = false,
         createWindow = options.createWindow,
+        pages = options.pages,
         getDatabase = options.getDatabase,
         nameRules = options.nameRules or {},
     }, Controller)
@@ -778,9 +781,28 @@ function Controller:RefreshRecruiters()
     self.window:SetRecruiters(self:RecruitersView())
 end
 
--- `/agf`: shows or hides the roster window. Never scans.
-function Controller:Toggle()
+-- Selects the page `entry` opens (see PageNavigator:PageFor) and shows it
+-- in the window.
+function Controller:ShowPage(entry)
+    if self.pages == nil then
+        return
+    end
+    self.pages:Select(self.pages:PageFor(entry))
+    if type(self.window.ShowPage) == "function" then
+        self.window:ShowPage(self.pages:Current())
+    end
+end
+
+-- `/agf` and the other entry points: opens the window on the page `entry`
+-- opens (the Roster page unless it names another), whatever page showed
+-- last. When the window is already showing that page, it closes instead.
+-- Never scans.
+function Controller:Toggle(entry)
     if self.window ~= nil and self.window:IsShown() then
+        if self.pages ~= nil and self.pages:Current() ~= self.pages:PageFor(entry) then
+            self:ShowPage(entry)
+            return true
+        end
         self.window:Hide()
         return true
     end
@@ -802,16 +824,18 @@ function Controller:Toggle()
     -- Reopening with nothing changed reuses the last build.
     self.current = { guild = guild, partition = partition }
     self:Redraw()
+    self:ShowPage(entry)
     self.window:Show()
     self:RefreshRecruiters()
     return true
 end
 
--- The settings panel's Open Roster button: shows the roster, leaving it open
--- when it already is.
-function Controller:Open()
+-- The settings panel's Open Roster button: shows the window on the page
+-- `entry` opens, leaving it open when it already is.
+function Controller:Open(entry)
     if self.window ~= nil and self.window:IsShown() then
+        self:ShowPage(entry)
         return true
     end
-    return self:Toggle()
+    return self:Toggle(entry)
 end

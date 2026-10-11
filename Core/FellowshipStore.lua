@@ -272,25 +272,35 @@ function Store:Partition(guild)
     return partition
 end
 
--- Saved window geometry, shared by every guild. Returns nil when absent or
--- unusable.
-function Store:GetWindowState()
-    local window = type(self.database) == "table" and self.database.window or nil
-    if type(window) ~= "table" then
+-- The master frame's saved geometry, shared by every guild, or nil when
+-- absent or unusable. Until the frame saves its own, the old roster
+-- window's saved position is its starting point; that window's size is
+-- left behind, so the frame opens at its larger default size.
+function Store:GetFrameState()
+    if type(self.database) ~= "table" then
         return nil
     end
-    return window
+    local frame = self.database.frame
+    if type(frame) == "table" then
+        return frame
+    end
+    local window = self.database.window
+    if frame ~= nil or type(window) ~= "table" then
+        return nil
+    end
+    return { point = window.point, relativePoint = window.relativePoint, x = window.x, y = window.y }
 end
 
--- Replaces the saved geometry. An unusable existing value is left alone.
-function Store:SetWindowState(state)
+-- Replaces the master frame's saved geometry. An unusable existing value is
+-- left alone.
+function Store:SetFrameState(state)
     if type(self.database) ~= "table" or type(state) ~= "table" then
         return false
     end
-    if self.database.window ~= nil and type(self.database.window) ~= "table" then
+    if self.database.frame ~= nil and type(self.database.frame) ~= "table" then
         return false
     end
-    self.database.window = state
+    self.database.frame = state
     return true
 end
 

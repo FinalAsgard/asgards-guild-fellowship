@@ -1,19 +1,15 @@
 local _, addon = ...
 
--- The roster window, built with the Details! Framework. It lives in
--- Adapters/ because it uses game globals (CreateFrame, UIParent) and the
--- framework directly; Core never sees either. It is not unit tested; the
--- in-game checklist covers it.
+-- The master frame with the roster on its Roster page, built with the
+-- Details! Framework. It lives in Adapters/ because it uses game globals
+-- (CreateFrame, UIParent) and the framework directly; Core never sees
+-- either. It is not unit tested; the in-game checklist covers it.
 --
 -- Create() returns nil when the framework is missing or fails to build the
--- window (its behavior on WoW Forever is unconfirmed), so the caller can
--- print a message instead of raising Lua errors. The window is created once,
+-- frame (its behavior on WoW Forever is unconfirmed), so the caller can
+-- print a message instead of raising Lua errors. The frame is created once,
 -- then hidden and shown; it is never destroyed.
 local RosterWindow = {
-    DEFAULT_WIDTH = 640,
-    DEFAULT_HEIGHT = 440,
-    MIN_WIDTH = 480,
-    MIN_HEIGHT = 240,
     LINE_HEIGHT = 22,
     -- How far an alt's name sits in from its player's header.
     INDENT = 18,
@@ -173,46 +169,6 @@ local function refreshLines(scroll, rows, offset, totalLines)
             end
         end
     end
-end
-
-local function setResizeBounds(frame)
-    frame:SetResizable(true)
-    if type(frame.SetResizeBounds) == "function" then
-        frame:SetResizeBounds(RosterWindow.MIN_WIDTH, RosterWindow.MIN_HEIGHT)
-    elseif type(frame.SetMinResize) == "function" then
-        frame:SetMinResize(RosterWindow.MIN_WIDTH, RosterWindow.MIN_HEIGHT)
-    end
-end
-
-local function restoreGeometry(frame, state, parent)
-    if type(state) ~= "table" then
-        return
-    end
-    if type(state.width) == "number" and type(state.height) == "number" then
-        frame:SetSize(
-            math.max(state.width, RosterWindow.MIN_WIDTH),
-            math.max(state.height, RosterWindow.MIN_HEIGHT)
-        )
-    end
-    if type(state.point) == "string" and type(state.relativePoint) == "string"
-        and type(state.x) == "number" and type(state.y) == "number"
-    then
-        frame:ClearAllPoints()
-        frame:SetPoint(state.point, parent, state.relativePoint, state.x, state.y)
-    end
-end
-
-local function readGeometry(frame)
-    local point, _, relativePoint, x, y = frame:GetPoint(1)
-    local width, height = frame:GetSize()
-    return {
-        point = point,
-        relativePoint = relativePoint,
-        x = x,
-        y = y,
-        width = width,
-        height = height,
-    }
 end
 
 -- Organize menu, alias dialog, and "Set main…" picker ---------------------
@@ -410,7 +366,7 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
     panel:SetFrameStrata("HIGH")
     panel:ClearAllPoints()
-    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
+    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
     local edit = { panel = panel }
 
     -- The alias, and the same Set alias… and Set main… dialogs as the
@@ -800,20 +756,17 @@ local function buildRecruitersPanel(framework, frameName)
 end
 
 local function build(framework, options)
-    local parent = UIParent
     local frameName = addon.Identity.addonName .. "RosterWindow"
-    -- The simple panel is movable, has a close button, and joins
-    -- UISpecialFrames, so Escape closes it.
-    local panel = framework:CreateSimplePanel(
-        parent,
-        RosterWindow.DEFAULT_WIDTH,
-        RosterWindow.DEFAULT_HEIGHT,
-        addon.Identity.displayName,
-        frameName
-    )
-    panel:SetFrameStrata("HIGH")
-    setResizeBounds(panel)
-    restoreGeometry(panel, options.loadGeometry(), parent)
+    local host = addon.MasterFrame.Build(framework, {
+        navigator = options.navigator,
+        frameName = frameName,
+        loadGeometry = options.loadGeometry,
+        saveGeometry = options.saveGeometry,
+    })
+    -- The roster's controls, list, and footer are drawn on the Roster page;
+    -- the pop-out panels stay beside the master frame.
+    local frame = host.panel
+    local panel = host:Content("roster")
 
     -- Controls: search, online only, expand and collapse all.
     local search = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
@@ -872,7 +825,9 @@ local function build(framework, options)
         header:SetText(column.header)
     end
 
-    local lineAmount = math.floor((RosterWindow.DEFAULT_HEIGHT - 120) / RosterWindow.LINE_HEIGHT)
+    -- Enough lines for the frame's restored height.
+    local width, height = frame:GetSize()
+    local lineAmount = math.floor((height - 120) / RosterWindow.LINE_HEIGHT)
     local picker = buildPicker(framework, frameName)
     -- "Set main…": links `key` (named `name`) as an alt of the picked player.
     local function openSetMain(key, name)
@@ -936,8 +891,8 @@ local function build(framework, options)
         frameName .. "Scroll",
         refreshLines,
         {},
-        RosterWindow.DEFAULT_WIDTH - 20,
-        RosterWindow.DEFAULT_HEIGHT - 120,
+        width - 20,
+        height - 120,
         lineAmount,
         RosterWindow.LINE_HEIGHT,
         newLine,
@@ -996,20 +951,8 @@ local function build(framework, options)
     status:SetJustifyH("LEFT")
     status:SetWordWrap(false)
 
-    local function save()
-        options.saveGeometry(readGeometry(panel))
-    end
-    panel:HookScript("OnMouseUp", save)
-    if type(framework.CreateResizeGrips) == "function" then
-        local leftGrip, rightGrip = framework:CreateResizeGrips(panel)
-        leftGrip:HookScript("OnMouseUp", save)
-        rightGrip:HookScript("OnMouseUp", save)
-    end
-    panel:HookScript("OnHide", save)
-    panel:Hide()
-
     local conflicts = buildConflictPanel(framework, options, frameName)
-    local playerPanel = buildPlayerPanel(framework, options, frameName, panel, {
+    local playerPanel = buildPlayerPanel(framework, options, frameName, frame, {
         openSetAlias = openSetAlias,
         openSetMain = openSetMain,
     })
@@ -1030,15 +973,16 @@ local function build(framework, options)
             recruiters.panel:Show()
         end
     end)
-    panel:HookScript("OnHide", function()
+    frame:HookScript("OnHide", function()
         conflicts.panel:Hide()
         recruiters.panel:Hide()
         playerPanel.panel:Hide()
     end)
 
-    return panel, scroll, status, conflicts, playerPanel, recruiters
+    return host, scroll, status, conflicts, playerPanel, recruiters
 end
 
+-- options.navigator is the PageNavigator with the master frame's pages;
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
 -- options.onToggleGroup(playerId) runs when a player header is clicked;
@@ -1060,12 +1004,13 @@ function RosterWindow.Create(client, options)
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, panel, scroll, status, conflicts, playerPanel, recruiters = pcall(build, framework, options)
-    if not ok or panel == nil then
+    local ok, host, scroll, status, conflicts, playerPanel, recruiters = pcall(build, framework, options)
+    if not ok or host == nil then
         return nil, "the Details! Framework could not build the window"
     end
     return setmetatable({
-        panel = panel,
+        host = host,
+        panel = host.panel,
         scroll = scroll,
         status = status,
         conflicts = conflicts,
@@ -1084,6 +1029,13 @@ end
 
 function Window:Hide()
     self.panel:Hide()
+end
+
+-- Shows the page `id` on the master frame (see MasterFrame).
+function Window:ShowPage(id)
+    return (pcall(function()
+        self.host:ShowPage(id)
+    end))
 end
 
 function Window:SetTitle(title)

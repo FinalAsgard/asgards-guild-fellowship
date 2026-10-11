@@ -25,12 +25,17 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
+local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local guildGreet, greetingsWindow, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
+    -- The master frame's tabs, in order. The first is where the general
+    -- entry points open it.
+    pages = addon.PageNavigator.Create()
+    pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
     rosterController = addon.RosterController.Create({
+        pages = pages,
         client = client,
         nameRules = clientProfile.nameRules,
         onMainLinksChanged = function(keys, before)
@@ -65,14 +70,15 @@ if clientProfile.supported then
         end,
         createWindow = function()
             return addon.RosterWindow.Create(client, {
+                navigator = pages,
                 loadGeometry = function()
                     local store = rosterController:Store()
-                    return store and store:GetWindowState()
+                    return store and store:GetFrameState()
                 end,
                 saveGeometry = function(state)
                     local store = rosterController:Store()
                     if store ~= nil then
-                        store:SetWindowState(state)
+                        store:SetFrameState(state)
                     end
                 end,
                 onToggleGroup = function(playerId)
@@ -930,6 +936,7 @@ addon.libraryCheck = libraryCheck
 addon.lifecycle = lifecycle
 addon.persistence = persistence
 addon.rosterController = rosterController
+addon.pages = pages
 addon.entryPoints = entryPoints
 addon.chatAnnotator = chatAnnotator
 addon.comm = comm
