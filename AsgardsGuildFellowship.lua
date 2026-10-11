@@ -48,6 +48,9 @@ if clientProfile.supported then
         onDecideSuggestion = function(character, kind, approved)
             return syncSession:Decide(character, kind, approved)
         end,
+        adStats = function(keys)
+            return guildRecruit:StatsLine(keys)
+        end,
         getDatabase = function()
             return persistence:GetDatabase()
         end,
@@ -707,6 +710,13 @@ if clientProfile.supported then
             local guild, _, normalizer = rosterController:QuietContext()
             local key = guild and normalizer:Key(sender)
             return key ~= nil and officerAuthority:IsOfficer(key)
+        end,
+        keyOf = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(sender) or nil
+        end,
+        isOwnKey = function(key)
+            return guildGreet:IsOwn(key)
         end,
         isOwn = function(sender)
             local guild, _, normalizer = rosterController:QuietContext()

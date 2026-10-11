@@ -500,6 +500,8 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                     text = "|cffffd100" .. row.text .. "|r"
                 elseif row.kind == "empty" then
                     text = "|cff9d9d9d" .. row.text .. "|r"
+                elseif row.kind == "stat" then
+                    text = row.text
                 elseif row.kind == "character" then
                     text = "  " .. row.name .. (row.level and ("  |cff9d9d9d" .. row.level .. "|r") or "") ..
                         "  |cff9d9d9d" .. tostring(row.status) .. "|r"

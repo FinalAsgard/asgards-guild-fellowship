@@ -154,7 +154,7 @@ end
 
 -- Answers from this world wait `seconds` seconds.
 local function answersAfter(world, seconds)
-    world.environment.math = { random = function() return seconds end }
+    world.environment.math = setmetatable({ random = function() return seconds end }, { __index = math })
 end
 
 local function channelTimes(channel)

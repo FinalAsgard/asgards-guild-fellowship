@@ -53,12 +53,14 @@ local function setup()
         addon = addon,
         partition = partition,
         playerId = playerId,
-        build = function()
+        -- `adStats`, when given, answers the panel's ad count line.
+        build = function(adStats)
             return addon.PlayerPanelViewModel.Build({
                 partition = partition,
                 playerId = playerId,
                 members = members({ guild[1], guild[2] }),
                 normalizer = normalizer,
+                adStats = adStats,
                 formatDate = function(timestamp)
                     return "day " .. (timestamp - START) / 86400
                 end,
@@ -273,4 +275,27 @@ test.test("dates are formatted by the client", function()
 
     test.assertEqual("2026-09-21", client:FormatDate(1790000000))
     test.assertEqual("", client:FormatDate(nil))
+end)
+
+test.test("player panel: a player with an ad record shows it first, and one without shows nothing", function()
+    local state = setup()
+    local asked
+    local model = state.build(function(keys)
+        asked = keys
+        return "Advertised: 12 (3 in last 30 days)"
+    end)
+
+    test.assertEqual("stat", model.rows[1].kind)
+    test.assertEqual("Advertised: 12 (3 in last 30 days)", model.rows[1].text)
+    test.assertEqual("section", model.rows[2].kind)
+    -- Every one of the player's characters is asked about.
+    test.assertEqual(2, #asked)
+
+    local none = state.build(function()
+        return nil
+    end)
+    test.assertEqual("section", none.rows[1].kind)
+    test.assertEqual(0, #rowsOf(none, "stat"))
+    test.assertEqual(0, #rowsOf(state.build(), "stat"))
+    test.assertEqual(0, #rowsOf(state.build(function() error("boom") end), "stat"))
 end)

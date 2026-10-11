@@ -152,7 +152,7 @@ local function validatePartition(data)
     end
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
-        "recruitLedger", "recruitConfig",
+        "recruitLedger", "recruitConfig", "recruitStats",
     }
     local index
     for index = 1, #containers do
@@ -188,6 +188,7 @@ local function validatePartition(data)
     -- are only created when needed.
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
+        recruitStats = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -578,6 +579,23 @@ function Store:SetRecruitAd(text)
     return true
 end
 
+-- The user's own ad record (see RecruitStats), shared by every character
+-- on the account and created on first use. Nil when an unusable value is
+-- stored there; it is then left alone.
+function Store:RecruitOwnStats()
+    local state = self:GetRecruitState()
+    if state == nil then
+        return nil
+    end
+    if state.stats == nil then
+        state.stats = { n = 0, t = {} }
+    end
+    if type(state.stats) ~= "table" then
+        return nil
+    end
+    return state.stats
+end
+
 -- Whether the user posts the officers' guild ad too. On unless turned off;
 -- an unusable saved value counts as on.
 function Store:RecruitUseOfficerAd()
@@ -882,6 +900,15 @@ end
 
 function Partition:GetForgeries()
     return self.data.forgeries
+end
+
+-- Guild Recruit's ad counts heard from other add-on users, by character
+-- (see RecruitStats), created on first use.
+function Partition:GetRecruitStats()
+    if self.data.recruitStats == nil then
+        self.data.recruitStats = {}
+    end
+    return self.data.recruitStats
 end
 
 -- Guild Recruit's officer settings (see RecruitConfig), created on first

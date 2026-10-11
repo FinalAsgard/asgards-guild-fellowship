@@ -28,9 +28,12 @@ Controller.__index = Controller
 --                 off for the player of `key`
 --   onDecideSuggestion  optional function(character, kind, approved) ->
 --                 ok, reason: decides a member's suggestion in the queue
+--   adStats       optional function(keys) -> a player's ad count line for
+--                 the player panel, or nil
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
+        adStats = options.adStats,
         onDecideSuggestion = options.onDecideSuggestion,
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
@@ -580,6 +583,7 @@ function Controller:RedrawPanel()
         formatDate = function(timestamp)
             return self.client:FormatDate(timestamp)
         end,
+        adStats = self.adStats,
     })
     if model == nil then
         self:ClosePanel()

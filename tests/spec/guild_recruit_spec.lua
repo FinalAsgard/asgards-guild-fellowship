@@ -831,7 +831,7 @@ test.test("guild recruit: only an add-on with a fresh time answers, after a rand
     optIn(world)
     world.handlers.post(world.shown[1].key)
     local recruit = world.addon.guildRecruit
-    world.environment.math = { random = function() return 3 end }
+    world.environment.math = setmetatable({ random = function() return 3 end }, { __index = math })
 
     test.assertFalse(recruit:OnMessage({ v = 1, t = "ask-channel", k = "trade" }, "Anvil-Area52"))
     test.assertTrue(recruit:OnMessage({ v = 1, t = "ask-channel", k = "general:map:2339" }, "Anvil-Area52"))
@@ -930,11 +930,11 @@ test.test("officer guild ad: each post picks at random between the guild ad and 
     local world = login("Retail", { playerName = OFFICER })
     world.addon.settings:Set("recruitGuildAd", "Knights recruit!")
     optIn(world, "My own ad")
-    world.environment.math = { random = function(low) return low + 1 end }
+    world.environment.math = setmetatable({ random = function(low) return low + 1 end }, { __index = math })
     world.handlers.post(world.shown[1].key)
     test.assertEqual("My own ad", world.chat[1].text)
 
-    world.environment.math = { random = function(low) return low end }
+    world.environment.math = setmetatable({ random = function(low) return low end }, { __index = math })
     inCity(world, "Dornogal")
     world.handlers.post(promptFor(world, "Advertise in Trade?").key)
     test.assertEqual("Knights recruit!", world.chat[2].text)
@@ -1003,7 +1003,7 @@ test.test("officer guild ad: only an officer with settings answers ask-config", 
     test.assertFalse(officer.addon.guildRecruit:OnMessage({ v = 1, t = "ask-config" }, "Anvil-Area52"))
     officer.addon.settings:Set("recruitGuildAd", "Knights recruit!")
     local before = #sentOfType(officer, "config")
-    officer.environment.math = { random = function() return 2 end }
+    officer.environment.math = setmetatable({ random = function() return 2 end }, { __index = math })
     test.assertTrue(officer.addon.guildRecruit:OnMessage({ v = 1, t = "ask-config" }, "Anvil-Area52"))
     fixtures.runTimers(officer, 2)
     test.assertEqual(before + 1, #sentOfType(officer, "config"))
@@ -1079,4 +1079,48 @@ test.test("officer gaps and pause: pausing closes everyone's prompts, and liftin
     member.addon.guildRecruit:OnMessage(resumed[#resumed], OFFICER)
     test.assertEqual(1, #member.shown)
     test.assertEqual(1, #officer.shown)
+end)
+
+test.test("ad stats: each post counts in the user's own record, sent with the advertised message", function()
+    local world = login("Retail")
+    optIn(world)
+
+    world.handlers.post(world.shown[1].key)
+
+    test.assertEqual(1, world.database.recruit.stats.n)
+    test.assertEqual(world.time, world.database.recruit.stats.t[1])
+    local messages = sentOfType(world, "advertised")
+    test.assertEqual(1, messages[1].r.n)
+    test.assertEqual(world.time, messages[1].r.t[1])
+    -- The user's own player shows the own record.
+    local selfKey = world.addon.rosterController:SelfKey()
+    test.assertEqual("Advertised: 1 (1 in last 30 days)", world.addon.guildRecruit:StatsLine({ selfKey }))
+end)
+
+test.test("ad stats: a heard report is kept under the poster, highest total winning, across their characters", function()
+    local world = login("Retail", { playerName = MEMBER })
+    local recruit = world.addon.guildRecruit
+    local function advertised(sender, total, at)
+        return recruit:OnMessage({
+            v = 1, t = "advertised", k = "trade", n = "Trade", a = at, r = { n = total, t = { at } },
+        }, sender)
+    end
+
+    advertised("Toolbox-Area52", 4, world.time)
+    -- Hammer is Toolbox's alt: the same player, a newer report.
+    advertised("Hammer-Area52", 5, world.time + 1)
+    advertised("Toolbox-Area52", 3, world.time + 2)
+
+    local partition = select(2, world.addon.rosterController:QuietContext())
+    test.assertEqual(4, partition:GetRecruitStats()["toolbox-area52"].n)
+    test.assertEqual("Advertised: 5 (1 in last 30 days)",
+        recruit:StatsLine({ "toolbox-area52", "hammer-area52" }))
+    test.assertEqual(nil, recruit:StatsLine({ "nobody-area52" }))
+end)
+
+test.test("ad stats: a player who has never advertised shows no line", function()
+    local world = login("Retail")
+    local selfKey = world.addon.rosterController:SelfKey()
+
+    test.assertEqual(nil, world.addon.guildRecruit:StatsLine({ selfKey }))
 end)
