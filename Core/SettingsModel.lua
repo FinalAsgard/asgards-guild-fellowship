@@ -11,11 +11,15 @@ local _, addon = ...
 --   text     get() -> a line of text shown as is (e.g. the version)
 --   number   get() -> a whole number from `min` to `max`; set(number) ->
 --            true, or nil and a reason
+--   input    get() -> a line of text the user edits, at most `maxLength`
+--            characters; set(text) -> true, or nil and a reason
 -- `get`, `set` and `run` are called protected, so a failing feature never
 -- breaks the panel or a slash command. A toggle marked `offOnClose` is a
--- mode that only lasts while the panel is open (see Model:Closed).
+-- mode that only lasts while the panel is open (see Model:Closed). An entry
+-- with `enabled() -> false, reason` can't be changed or run until it
+-- answers true again.
 local SettingsModel = {
-    KINDS = { toggle = true, action = true, text = true, number = true },
+    KINDS = { toggle = true, action = true, text = true, number = true, input = true },
 }
 addon.SettingsModel = SettingsModel
 
@@ -64,8 +68,14 @@ local function entryProblem(entry)
     if type(entry.get) ~= "function" then
         return "entry has no get function"
     end
-    if (entry.kind == "toggle" or entry.kind == "number") and type(entry.set) ~= "function" then
+    if (entry.kind == "toggle" or entry.kind == "number" or entry.kind == "input") and type(entry.set) ~= "function" then
         return "entry has no set function"
+    end
+    if entry.kind == "input" and (type(entry.maxLength) ~= "number" or entry.maxLength < 1) then
+        return "input has no length limit"
+    end
+    if entry.enabled ~= nil and type(entry.enabled) ~= "function" then
+        return "entry's enabled check isn't a function"
     end
     if entry.kind == "number" and (type(entry.min) ~= "number" or type(entry.max) ~= "number"
         or entry.min > entry.max)
@@ -109,6 +119,23 @@ function Model:Get(id)
     return value
 end
 
+-- True unless the entry's `enabled` check answers otherwise; false and its
+-- reason then (a failing check counts as disabled).
+function Model:IsEnabled(id)
+    local entry = self.entries[id]
+    if entry == nil then
+        return false, "there is no such setting"
+    end
+    if entry.enabled == nil then
+        return true
+    end
+    local ok, enabled, reason = pcall(entry.enabled)
+    if ok and enabled == true then
+        return true
+    end
+    return false, ok and reason or nil
+end
+
 -- Calls listener(id, value) after every successful change.
 function Model:OnChange(listener)
     if type(listener) == "function" then
@@ -134,10 +161,21 @@ function Model:Set(id, value)
         if type(value) ~= "number" or value ~= math.floor(value) or value < entry.min or value > entry.max then
             return nil, "it must be a whole number from " .. entry.min .. " to " .. entry.max
         end
+    elseif entry.kind == "input" then
+        if type(value) ~= "string" then
+            return nil, "it must be text"
+        end
+        if string.len(value) > entry.maxLength then
+            return nil, "it can be at most " .. entry.maxLength .. " characters"
+        end
     elseif entry.kind ~= "toggle" then
         return nil, "it can't be changed"
     elseif type(value) ~= "boolean" then
         return nil, "it can only be on or off"
+    end
+    local enabled, disabledReason = self:IsEnabled(id)
+    if not enabled then
+        return nil, disabledReason or "it can't be changed right now"
     end
     local ok, changed, reason = pcall(entry.set, value)
     if not ok then
@@ -178,7 +216,7 @@ end
 -- Performs an action entry. False when it isn't one or it failed.
 function Model:Run(id)
     local entry = self.entries[id]
-    if entry == nil or entry.kind ~= "action" then
+    if entry == nil or entry.kind ~= "action" or not self:IsEnabled(id) then
         return false
     end
     return (pcall(entry.run))

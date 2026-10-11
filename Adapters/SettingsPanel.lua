@@ -2,8 +2,9 @@ local _, addon = ...
 
 -- The add-on's page in the game's AddOns options (Esc -> Options -> AddOns),
 -- drawn from the SettingsModel: a title, then one header per section with
--- its entries below it (a check box, a button, a line of text, or a number
--- with minus and plus buttons). Clients with the newer Settings API get a canvas
+-- its entries below it (a check box, a button, a line of text, a number
+-- with minus and plus buttons, or a labelled text box saved on Enter). An
+-- entry the model reports disabled is greyed out and can't be changed. Clients with the newer Settings API get a canvas
 -- category; older ones get an Interface Options panel. Like the other
 -- adapters, everything is optional and protected: a client with neither API,
 -- or a frame call that fails, just leaves the panel out without an error.
@@ -14,6 +15,7 @@ local SettingsPanel = {
     SECTION_GAP = 12,
     INDENT = 8,
     BUTTON_WIDTH = 140,
+    INPUT_WIDTH = 520,
 }
 addon.SettingsPanel = SettingsPanel
 
@@ -30,13 +32,39 @@ function SettingsPanel.Create(client, model)
     }, Panel)
 end
 
+-- Enables or greys out a widget's controls and label.
+local function setEnabled(widget, enabled)
+    local index
+    for index = 1, #(widget.controls or {}) do
+        local control = widget.controls[index]
+        if enabled then
+            control:Enable()
+        else
+            control:Disable()
+        end
+    end
+    if widget.label ~= nil then
+        if enabled then
+            widget.label:SetTextColor(1, 1, 1)
+        else
+            widget.label:SetTextColor(0.5, 0.5, 0.5)
+        end
+    end
+end
+
 -- Fills in every widget from the model's current values.
 function Panel:Refresh()
     local index
     for index = 1, #self.widgets do
         local widget = self.widgets[index]
         pcall(function()
-            if widget.kind == "toggle" then
+            setEnabled(widget, self.model:IsEnabled(widget.id) == true)
+            if widget.kind == "input" then
+                -- Text being typed is left alone until it's saved.
+                if not widget.frame:HasFocus() then
+                    widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
+                end
+            elseif widget.kind == "toggle" then
                 widget.frame:SetChecked(self.model:Get(widget.id) == true)
             elseif widget.kind == "number" then
                 local value = self.model:Get(widget.id)
@@ -70,7 +98,32 @@ function Panel:addToggle(frame, entry, y)
     local label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     label:SetPoint("LEFT", check, "RIGHT", 4, 0)
     label:SetText(entry.label)
-    table.insert(self.widgets, { kind = "toggle", id = entry.id, frame = check })
+    table.insert(self.widgets, { kind = "toggle", id = entry.id, frame = check, controls = { check }, label = label })
+end
+
+-- A line of text: its label, then a text box below it. Enter saves it (a
+-- refused change puts the saved text back); Escape puts the saved text back.
+function Panel:addInput(frame, entry, y)
+    local label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    label:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 4, y - 4)
+    label:SetText(entry.label)
+    local box = self.environment.CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
+    box:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 10, y - SettingsPanel.ROW + 2)
+    box:SetWidth(SettingsPanel.INPUT_WIDTH)
+    box:SetHeight(22)
+    box:SetAutoFocus(false)
+    box:SetMaxLetters(entry.maxLength)
+    local widget = { kind = "input", id = entry.id, frame = box, controls = { box }, label = label }
+    box:SetScript("OnEnterPressed", function()
+        self.model:Set(entry.id, box:GetText())
+        box:ClearFocus()
+        self:Refresh()
+    end)
+    box:SetScript("OnEscapePressed", function()
+        box:ClearFocus()
+        self:Refresh()
+    end)
+    table.insert(self.widgets, widget)
 end
 
 -- A whole number: its label, then a minus button, the value and a plus
@@ -106,7 +159,9 @@ function Panel:addNumber(frame, entry, y)
     up:SetScript("OnClick", function()
         step(1)
     end)
-    table.insert(self.widgets, { kind = "number", id = entry.id, entry = entry, frame = value, down = down, up = up })
+    table.insert(self.widgets, {
+        kind = "number", id = entry.id, entry = entry, frame = value, down = down, up = up, label = label,
+    })
 end
 
 function Panel:addAction(frame, entry, y)
@@ -118,6 +173,7 @@ function Panel:addAction(frame, entry, y)
     button:SetScript("OnClick", function()
         self.model:Run(entry.id)
     end)
+    table.insert(self.widgets, { kind = "action", id = entry.id, frame = button, controls = { button } })
 end
 
 function Panel:addText(frame, entry, y)
@@ -154,6 +210,10 @@ function Panel:Build()
                     self:addAction(panel, entry, y)
                 elseif entry.kind == "number" then
                     self:addNumber(panel, entry, y)
+                elseif entry.kind == "input" then
+                    self:addInput(panel, entry, y)
+                    -- The text box sits on a row of its own below the label.
+                    y = y - SettingsPanel.ROW
                 else
                     self:addText(panel, entry, y)
                 end
