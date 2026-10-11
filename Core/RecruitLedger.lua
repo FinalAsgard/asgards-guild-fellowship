@@ -18,6 +18,9 @@ local RecruitLedger = {
     DUE = "due",
     UNKNOWN = "unknown",
     TRADE_KEY = "trade",
+    -- How far ahead of this client's clock a time may be: enough for clocks
+    -- that disagree a little, as guild sync allows.
+    MAX_FUTURE_SECONDS = 300,
 }
 addon.RecruitLedger = RecruitLedger
 
@@ -103,8 +106,10 @@ function Ledger:FreshFor(key, now)
     return self:Time(key) + self:gap(key) - now
 end
 
--- Forgets every time older than its channel's gap, and anything that isn't
--- a time. A channel whose gap can't be read keeps its time.
+-- Forgets every time older than its channel's gap, any dated further ahead
+-- than MAX_FUTURE_SECONDS (saved before such times were refused), and
+-- anything that isn't a time. A channel whose gap can't be read keeps its
+-- time unless it's in the future.
 function Ledger:Prune(now)
     if not isTime(now) then
         return
@@ -113,7 +118,9 @@ function Ledger:Prune(now)
     local stale = {}
     for key, time in pairs(self.times) do
         local gap = self:gap(key)
-        if type(key) ~= "string" or not isTime(time) or (gap ~= nil and now - time >= gap) then
+        if type(key) ~= "string" or not isTime(time) or time > now + RecruitLedger.MAX_FUTURE_SECONDS
+            or (gap ~= nil and now - time >= gap)
+        then
             table.insert(stale, key)
         end
     end

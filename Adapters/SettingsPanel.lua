@@ -242,7 +242,7 @@ function Panel:commitInput(widget)
     end
     text = string.gsub(text, "[\r\n]", "")
     if text ~= widget.shownText then
-        self.model:Set(widget.id, text)
+        self:report(widget.id, self.model:Set(widget.id, text))
     end
 end
 
@@ -382,8 +382,20 @@ function Panel:commitSlider(widget)
     local pending = widget.pending
     widget.pending = nil
     if type(pending) == "number" and pending ~= self.model:Get(widget.id) then
-        self.model:Set(widget.id, pending)
+        self:report(widget.id, self.model:Set(widget.id, pending))
     end
+end
+
+-- Tells the player in chat when a change they made wasn't saved, and why,
+-- since the setting then shows its saved value again.
+function Panel:report(id, changed, reason)
+    if changed then
+        return
+    end
+    local entry = self.model:Entry(id)
+    local name = entry and entry.label or id
+    pcall(self.client.Print, self.client, addon.Identity.chatPrefix .. " Couldn't save \"" .. tostring(name) ..
+        "\": " .. tostring(reason or "it couldn't be saved") .. ".")
 end
 
 -- A whole number: its label, then a minus button, the value and a plus

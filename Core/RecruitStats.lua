@@ -12,6 +12,9 @@ local _, addon = ...
 -- worked out when it's shown, so it falls as ads age out.
 local RecruitStats = {
     WINDOW_SECONDS = 30 * 24 * 60 * 60,
+    -- How far ahead of this client's clock an ad's time may be: enough for
+    -- clocks that disagree a little.
+    MAX_FUTURE_SECONDS = 300,
     -- The most timestamps a report may carry; more is not a real record.
     MAX_RECENT = 2000,
 }
@@ -24,10 +27,11 @@ local function isTime(value)
     return type(value) == "number" and value == value
 end
 
--- True for a record with a whole, non-negative total and a list of times.
+-- True for a record with a whole, non-negative total and a list of times
+-- no longer than the total (a player can't have more recent ads than ads).
 function RecruitStats.IsValid(record)
     if type(record) ~= "table" or type(record.n) ~= "number" or record.n < 0 or record.n ~= math.floor(record.n)
-        or type(record.t) ~= "table" or #record.t > RecruitStats.MAX_RECENT
+        or type(record.t) ~= "table" or #record.t > RecruitStats.MAX_RECENT or #record.t > record.n
     then
         return false
     end
@@ -40,12 +44,15 @@ function RecruitStats.IsValid(record)
     return true
 end
 
--- How many of the record's ads were within the last 30 days at `now`.
+-- How many of the record's ads were within the last 30 days at `now`. An
+-- ad dated further ahead than MAX_FUTURE_SECONDS doesn't count, so it can't
+-- stay recent forever.
 function RecruitStats.Recent(record, now)
     local count = 0
     local index
     for index = 1, #record.t do
-        if now - record.t[index] < RecruitStats.WINDOW_SECONDS then
+        local age = now - record.t[index]
+        if age >= -RecruitStats.MAX_FUTURE_SECONDS and age < RecruitStats.WINDOW_SECONDS then
             count = count + 1
         end
     end

@@ -429,3 +429,27 @@ test.test("settings panel: a setting with info gets an icon that shows it in the
     icon.scripts.OnEnter(icon)
     test.assertEqual("Raiding Fridays", tooltip.lines[2])
 end)
+
+test.test("settings panel: a change that isn't saved says why in chat", function()
+    local environment = newEnvironment()
+    local printed = {}
+    environment.InterfaceOptions_AddCategory = function() end
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local model = addon.SettingsModel.Create()
+    model:AddSection("recruitment", "Recruitment")
+    model:Add("recruitment", { id = "ad", kind = "input", label = "My ad", maxLength = 255,
+        get = function() return "" end,
+        set = function() return nil, "saved data is unavailable" end })
+    local panel = addon.SettingsPanel.Create({
+        environment = environment,
+        Print = function(_, message) table.insert(printed, message) end,
+    }, model)
+    panel:Register()
+    local box = textBox(panel)
+
+    type_(box, "Join us")
+    box.scripts.OnEditFocusLost(box)
+
+    test.assertEqual(1, #printed)
+    test.assertContains(printed[1], "Couldn't save \"My ad\": saved data is unavailable.")
+end)

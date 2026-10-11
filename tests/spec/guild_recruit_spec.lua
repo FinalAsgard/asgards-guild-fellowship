@@ -1349,3 +1349,19 @@ test.test("guild recruit: with a tester's WoW Forever channel names, Trade out i
     fixtures.slash(world, "channels")
     test.assertContains(table.concat(world.messages, "\n", before + 1), "Trade: none here")
 end)
+
+test.test("guild recruit: an ad time dated far in the future is refused, so it can't silence a channel", function()
+    local world = login("Retail")
+    optIn(world)
+    local recruit = world.addon.guildRecruit
+
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "advertised", k = "general:map:2339", n = "Dornogal General",
+        a = world.time + 24 * HOUR }, "Anvil-Area52"))
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "channel-time", k = "general:map:2339",
+        a = world.time + 24 * HOUR }, "Anvil-Area52"))
+    test.assertEqual(1, #world.shown)
+    -- A clock a little ahead is still fine.
+    test.assertTrue(recruit:OnMessage({ v = 1, t = "advertised", k = "general:map:2339", n = "Dornogal General",
+        a = world.time + 60 }, "Anvil-Area52"))
+    test.assertEqual(0, #world.shown)
+end)

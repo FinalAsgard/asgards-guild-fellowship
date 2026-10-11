@@ -682,10 +682,15 @@ function Recruit:fromOthers(sender)
 end
 
 -- Records another add-on user's time for `key`. Refreshes when it was
--- newer, so a prompt for a channel that's now fresh closes. Returns true
--- when the time was kept.
+-- newer, so a prompt for a channel that's now fresh closes. A time dated
+-- more than a few minutes ahead of this client's clock is refused, as guild
+-- sync refuses such edits: it would keep the channel fresh for everyone
+-- indefinitely. Returns true when the time was kept.
 function Recruit:hear(key, at)
-    if self.partition() == nil then
+    local now = self.now()
+    if self.partition() == nil or type(now) ~= "number"
+        or at > now + addon.RecruitLedger.MAX_FUTURE_SECONDS
+    then
         return false
     end
     local recorded = self:Ledger():Record(key, at)

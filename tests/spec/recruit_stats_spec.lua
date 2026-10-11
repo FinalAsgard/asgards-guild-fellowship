@@ -152,3 +152,14 @@ test.test("recruiters: players are ranked by 30-day count, then all time, labell
     test.assertEqual(0, rows[4].recent)
     test.assertEqual(50, rows[4].total)
 end)
+
+test.test("recruit stats: a report can't claim more recent ads than its total, or future ones", function()
+    local addon = load()
+    local stats = addon.RecruitStats.Create({})
+
+    test.assertFalse(stats:File("anvil-area52", { n = 1, t = { START, START, START } }))
+    test.assertTrue(stats:File("anvil-area52", { n = 3, t = { START, START + 60, START + 10 * DAY } }))
+    -- The ad dated ten days ahead doesn't count as recent.
+    test.assertEqual("Advertised: 3 (2 in last 30 days)",
+        addon.RecruitStats.Line(stats:Best({ "anvil-area52" }), START + 120))
+end)

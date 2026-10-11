@@ -213,7 +213,7 @@ test.test("the zone key climbs out of dungeon levels and micro maps to the zone"
     test.assertEqual("map:37", client:GetZone().key)
 end)
 
-test.test("General is found by the client's own channel name, and Trade never by position", function()
+test.test("a client in another language finds neither channel rather than the wrong one", function()
     local client = newClient({
         EnumerateServerChannels = function()
             return "Allgemein", "Handel"
@@ -228,9 +228,9 @@ test.test("General is found by the client's own channel name, and Trade never by
         end,
     })
 
-    test.assertEqual(2, client:GetGeneralChannel())
-    -- Trade is never found by position: the order of the client's names
-    -- isn't reliable for it (WoW Forever's list has no Trade at all).
+    -- Channels are never found by position in the client's list of names,
+    -- whose order isn't reliable: here it would make Allgemein Trade.
+    test.assertEqual(nil, client:GetGeneralChannel())
     test.assertEqual(nil, client:GetTradeChannel())
 end)
 
@@ -282,4 +282,25 @@ test.test("a zone whose maps can't be read still has a key from its name", funct
     })
 
     test.assertEqual("zone:Ironforge", client:GetZone().key)
+end)
+
+test.test("reordered names in another language never put an ad in the wrong channel", function()
+    local client = newClient({
+        EnumerateServerChannels = function()
+            return "LocalDefense", "Allgemein", "Handel"
+        end,
+        GetChannelList = function()
+            return 1, "Allgemein", false, 2, "Handel", false, 3, "LocalDefense", false
+        end,
+        GetChannelName = function(number)
+            local names = { "Allgemein - Eisenschmiede", "Handel - Stadt", "LocalDefense - Eisenschmiede" }
+            if names[number] then
+                return number, names[number], 0
+            end
+            return 0, nil, 0
+        end,
+    })
+
+    test.assertEqual(nil, client:GetGeneralChannel())
+    test.assertEqual(nil, client:GetTradeChannel())
 end)

@@ -142,3 +142,14 @@ test.test("recruit ledger: a channel asked about with no answer is due, and a ne
     -- Once the new time goes stale, it's unknown again, so it's asked about.
     test.assertEqual(addon.RecruitLedger.UNKNOWN, ledger:State(key, START + HOUR))
 end)
+
+test.test("recruit ledger: pruning drops times dated in the future, and keeps ones a little ahead", function()
+    local addon = load()
+    local saved = { far = START + 3600, near = START + 60 }
+    local ledger = newLedger(addon, saved)
+
+    ledger:Prune(START)
+
+    test.assertEqual(nil, saved.far)
+    test.assertEqual(START + 60, saved.near)
+end)
