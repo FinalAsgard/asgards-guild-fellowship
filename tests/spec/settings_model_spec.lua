@@ -453,3 +453,21 @@ test.test("a number with a step only takes values on its steps", function()
     test.assertTrue(model:Set("gap", 15))
     test.assertEqual(15, saved.gap)
 end)
+
+test.test("a setting's info text is read when asked, and a failing or missing one gives nothing", function()
+    local model = newModel()
+    local saved = {}
+    local ad = "Knights recruit!"
+    model:AddSection("general", "General")
+    model:Add("general", toggle("useAd", saved, { info = function() return ad end }))
+    model:Add("general", toggle("plain", saved))
+    model:Add("general", toggle("broken", saved, { info = function() error("boom") end }))
+    test.assertFalse(model:Add("general", toggle("odd", saved, { info = "text" })))
+
+    test.assertEqual("Knights recruit!", model:Info("useAd"))
+    ad = "New ad"
+    test.assertEqual("New ad", model:Info("useAd"))
+    test.assertEqual(nil, model:Info("plain"))
+    test.assertEqual(nil, model:Info("broken"))
+    test.assertEqual(nil, model:Info("nothing"))
+end)

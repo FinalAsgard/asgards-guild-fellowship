@@ -20,6 +20,10 @@ local SettingsPanel = {
     BUTTON_WIDTH = 140,
     INPUT_WIDTH = 520,
     SLIDER_WIDTH = 260,
+    -- The info icon beside a label that shows a setting's info on
+    -- mouseover; this texture is on both supported clients.
+    INFO_ICON = "Interface\\FriendsFrame\\InformationIcon",
+    INFO_SIZE = 16,
     -- A text line's height in a multi-line box, and the room around the
     -- text inside the box.
     INPUT_LINE_HEIGHT = 14,
@@ -90,8 +94,13 @@ end
 
 -- Shows or hides a widget's controls and label.
 local function setShown(widget, shown)
-    local parts = { widget.label, widget.value }
+    local parts = {}
     local index
+    for index, part in ipairs({ "label", "value", "info" }) do
+        if widget[part] ~= nil then
+            table.insert(parts, widget[part])
+        end
+    end
     for index = 1, #(widget.controls or {}) do
         table.insert(parts, widget.controls[index])
     end
@@ -172,7 +181,51 @@ function Panel:addToggle(frame, entry, y)
     local label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     label:SetPoint("LEFT", check, "RIGHT", 4, 0)
     label:SetText(entry.label)
-    table.insert(self.widgets, { kind = "toggle", id = entry.id, frame = check, controls = { check }, label = label })
+    local widget = { kind = "toggle", id = entry.id, frame = check, controls = { check }, label = label }
+    self:addInfo(frame, entry, label, widget)
+    table.insert(self.widgets, widget)
+end
+
+-- An info icon just after `label`, for an entry with `info`: hovering it
+-- shows the entry's label and its info text in the game's tooltip, read as
+-- it is at that moment.
+function Panel:addInfo(frame, entry, label, widget)
+    if entry.info == nil then
+        return
+    end
+    local icon = self.environment.CreateFrame("Frame", nil, frame)
+    icon:SetWidth(SettingsPanel.INFO_SIZE)
+    icon:SetHeight(SettingsPanel.INFO_SIZE)
+    icon:SetPoint("LEFT", label, "RIGHT", 4, 0)
+    local texture = icon:CreateTexture(nil, "ARTWORK")
+    texture:SetAllPoints(icon)
+    texture:SetTexture(SettingsPanel.INFO_ICON)
+    icon:EnableMouse(true)
+    icon:SetScript("OnEnter", function()
+        self:ShowInfo(icon, entry)
+    end)
+    icon:SetScript("OnLeave", function()
+        local tooltip = self.environment.GameTooltip
+        if type(tooltip) == "table" then
+            pcall(tooltip.Hide, tooltip)
+        end
+    end)
+    widget.info = icon
+end
+
+-- Shows an entry's info in the game's tooltip beside `owner`.
+function Panel:ShowInfo(owner, entry)
+    local tooltip = self.environment.GameTooltip
+    local text = self.model:Info(entry.id)
+    if type(tooltip) ~= "table" or text == nil then
+        return false
+    end
+    return (pcall(function()
+        tooltip:SetOwner(owner, "ANCHOR_RIGHT")
+        tooltip:SetText(entry.label, 1, 0.82, 0)
+        tooltip:AddLine(text, 1, 1, 1, true)
+        tooltip:Show()
+    end))
 end
 
 -- Saves what's typed in a text box when the player changed it: it differs

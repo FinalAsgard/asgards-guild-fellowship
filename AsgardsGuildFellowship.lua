@@ -421,6 +421,14 @@ if clientProfile.supported then
         kind = "toggle",
         label = "Also post the officers' guild ad",
         enabled = recruitAvailable,
+        -- Mousing over the info icon shows the guild ad as it is now.
+        info = function()
+            local ad = guildRecruit:Config():Get("guildAd")
+            if type(ad) ~= "string" or string.find(ad, "%S") == nil then
+                return "The officers haven't set a guild ad yet."
+            end
+            return ad
+        end,
         get = function()
             local store = rosterController:Store()
             return store == nil or store:RecruitUseOfficerAd()

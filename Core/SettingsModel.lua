@@ -23,7 +23,8 @@ local _, addon = ...
 -- mode that only lasts while the panel is open (see Model:Closed). An entry
 -- with `enabled() -> false, reason` can't be changed or run until it
 -- answers true again. An entry with `shown() -> false` is left off the panel
--- (e.g. officer-only settings for other members).
+-- (e.g. officer-only settings for other members). An entry with `info() ->
+-- text` gets an info icon on the panel that shows the text on mouseover.
 local SettingsModel = {
     KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true },
 }
@@ -92,6 +93,9 @@ local function entryProblem(entry)
     end
     if entry.shown ~= nil and type(entry.shown) ~= "function" then
         return "entry's shown check isn't a function"
+    end
+    if entry.info ~= nil and type(entry.info) ~= "function" then
+        return "entry's info isn't a function"
     end
     if entry.kind == "number" and (type(entry.min) ~= "number" or type(entry.max) ~= "number"
         or entry.min > entry.max)
@@ -164,6 +168,20 @@ function Model:IsShown(id)
     end
     local ok, shown = pcall(entry.shown)
     return ok and shown == true
+end
+
+-- The entry's info text for its info icon, or nil when it has none or
+-- reading it failed.
+function Model:Info(id)
+    local entry = self.entries[id]
+    if entry == nil or entry.info == nil then
+        return nil
+    end
+    local ok, text = pcall(entry.info)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
 end
 
 -- Calls listener(id, value) after every successful change.

@@ -1242,3 +1242,12 @@ for index = 1, #fixtures.PROFILES do
         test.assertEqual(0, #world.chat)
     end)
 end
+
+test.test("recruitment settings: the use-officer-ad info shows the guild ad, or that there isn't one", function()
+    local officer = login("Retail", { playerName = OFFICER })
+    test.assertEqual("The officers haven't set a guild ad yet.", officer.addon.settings:Info("recruitUseOfficerAd"))
+
+    officer.addon.settings:Set("recruitGuildAd", "Knights recruit! Whisper for an invite.")
+
+    test.assertEqual("Knights recruit! Whisper for an invite.", officer.addon.settings:Info("recruitUseOfficerAd"))
+end)

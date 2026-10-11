@@ -384,3 +384,48 @@ test.test("settings panel: a slider shows its value as it's dragged and saves it
     widget.frame.scripts.OnMouseUp(widget.frame)
     test.assertEqual(1, saves)
 end)
+
+test.test("settings panel: a setting with info gets an icon that shows it in the tooltip on mouseover", function()
+    local environment = newEnvironment()
+    local tooltip = { lines = {}, shown = false }
+    function tooltip:SetOwner(owner) self.owner = owner end
+    function tooltip:SetText(text) self.lines = { text } end
+    function tooltip:AddLine(text) table.insert(self.lines, text) end
+    function tooltip:Show() self.shown = true end
+    function tooltip:Hide() self.shown = false end
+    environment.GameTooltip = tooltip
+    environment.InterfaceOptions_AddCategory = function() end
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local ad = "Knights recruit!"
+    local model = addon.SettingsModel.Create()
+    model:AddSection("recruitment", "Recruitment")
+    model:Add("recruitment", { id = "useAd", kind = "toggle", label = "Also post the officers' guild ad",
+        info = function() return ad end,
+        get = function() return true end, set = function() return true end })
+    model:Add("recruitment", { id = "plain", kind = "toggle", label = "Plain",
+        get = function() return true end, set = function() return true end })
+    local panel = addon.SettingsPanel.Create({ environment = environment }, model)
+    panel:Register()
+    local widgets = {}
+    local index
+    for index = 1, #panel.widgets do
+        widgets[panel.widgets[index].id] = panel.widgets[index]
+    end
+
+    test.assertEqual(nil, widgets.plain.info)
+    local icon = widgets.useAd.info
+    test.assertTrue(icon ~= nil)
+
+    icon.scripts.OnEnter(icon)
+    test.assertTrue(tooltip.shown)
+    test.assertEqual(icon, tooltip.owner)
+    test.assertEqual("Also post the officers' guild ad", tooltip.lines[1])
+    test.assertEqual("Knights recruit!", tooltip.lines[2])
+    icon.scripts.OnLeave(icon)
+    test.assertFalse(tooltip.shown)
+
+    -- It's read again each time, so a changed ad shows.
+    ad = "Raiding Fridays"
+    icon.scripts.OnEnter(icon)
+    test.assertEqual("Raiding Fridays", tooltip.lines[2])
+end)
