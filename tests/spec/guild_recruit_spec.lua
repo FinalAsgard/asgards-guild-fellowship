@@ -462,9 +462,12 @@ test.test("guild recruit: a failed Trade send records nothing", function()
     test.assertEqual(nil, partition:GetRecruitLedger().trade)
 end)
 
-test.test("guild recruit: staying put, Trade is prompted again after 20 minutes and General after 60", function()
+test.test("guild recruit: staying put, each channel is prompted again when its timer runs out", function()
     local world = login("Retail")
     optIn(world)
+    -- Trade on a 20-minute timer of the user's own; General on the default
+    -- 60 minutes.
+    test.assertTrue(world.addon.settings:Set("recruitMyTradeGap", 20))
     inCity(world, "Dornogal")
     world.handlers.post(promptFor(world, "Advertise in Trade?").key)
     world.handlers.post(world.shown[1].key)
@@ -883,12 +886,10 @@ local MEMBER = "Visitor-Stormrage"
 test.test("officer guild ad: only officers see and can change the guild ad controls", function()
     local officer = login("Retail", { playerName = OFFICER })
     test.assertTrue(officer.addon.settings:IsShown("recruitGuildAd"))
-    test.assertTrue(officer.addon.settings:IsShown("recruitGuildAdOn"))
     test.assertTrue(officer.addon.settings:Set("recruitGuildAd", "Knights recruit!"))
 
     local member = login("Retail", { playerName = MEMBER })
     test.assertFalse(member.addon.settings:IsShown("recruitGuildAd"))
-    test.assertFalse(member.addon.settings:IsShown("recruitGuildAdOn"))
     test.assertTrue(member.addon.settings:IsShown("recruitUseOfficerAd"))
     local changed, reason = member.addon.settings:Set("recruitGuildAd", "Forged")
     test.assertEqual(nil, changed)
@@ -899,7 +900,6 @@ test.test("officer guild ad: a change is saved per guild with when and by whom, 
     local world = login("Retail", { playerName = OFFICER })
 
     test.assertTrue(world.addon.settings:Set("recruitGuildAd", "Knights recruit!"))
-    test.assertTrue(world.addon.settings:Set("recruitGuildAdOn", false))
 
     local partition = select(2, world.addon.rosterController:QuietContext())
     local saved = partition:GetRecruitConfig()
@@ -907,13 +907,11 @@ test.test("officer guild ad: a change is saved per guild with when and by whom, 
     test.assertEqual(world.time, saved.guildAd.at)
     test.assertEqual(world.addon.rosterController:SelfKey(), saved.guildAd.by)
     local configs = sentOfType(world, "config")
-    test.assertEqual(2, #configs)
-    test.assertEqual("Knights recruit!", configs[2].s.guildAd.value)
-    test.assertFalse(configs[2].s.guildAdOn.value)
+    test.assertEqual(1, #configs)
+    test.assertEqual("Knights recruit!", configs[1].s.guildAd.value)
 
     local reloaded = login("Retail", { playerName = OFFICER, database = world.database })
     test.assertEqual("Knights recruit!", reloaded.addon.settings:Get("recruitGuildAd"))
-    test.assertFalse(reloaded.addon.settings:Get("recruitGuildAdOn"))
 end)
 
 test.test("officer guild ad: a member with only the guild ad is prompted and posts it", function()
@@ -940,7 +938,7 @@ test.test("officer guild ad: each post picks at random between the guild ad and 
     test.assertEqual("Knights recruit!", world.chat[2].text)
 end)
 
-test.test("officer guild ad: unchecking use officer ad, or the ad being off, posts only the user's own", function()
+test.test("officer guild ad: unchecking use officer ad, or the guild ad being cleared, posts only the user's own", function()
     local world = login("Retail", { playerName = OFFICER })
     world.addon.settings:Set("recruitGuildAd", "Knights recruit!")
     world.addon.settings:Set("recruitOptIn", true)
@@ -953,7 +951,8 @@ test.test("officer guild ad: unchecking use officer ad, or the ad being off, pos
 
     world.addon.settings:Set("recruitAd", "My own ad")
     world.addon.settings:Set("recruitUseOfficerAd", true)
-    world.addon.settings:Set("recruitGuildAdOn", false)
+    -- Clearing the guild ad is how officers turn it off.
+    world.addon.settings:Set("recruitGuildAd", "")
     world.handlers.post(world.shown[1].key)
     test.assertEqual("My own ad", world.chat[1].text)
 end)
@@ -1016,11 +1015,15 @@ test.test("officer gaps and pause: only officers see them, and gaps under the mi
     for index = 1, #ids do
         test.assertTrue(officer.addon.settings:IsShown(ids[index]), ids[index])
     end
-    test.assertEqual(60, officer.addon.settings:Get("recruitGeneralGap"))
-    test.assertEqual(20, officer.addon.settings:Get("recruitTradeGap"))
+    test.assertEqual(30, officer.addon.settings:Get("recruitGeneralGap"))
+    test.assertEqual(10, officer.addon.settings:Get("recruitTradeGap"))
     test.assertEqual(nil, officer.addon.settings:Set("recruitGeneralGap", 14))
     test.assertEqual(nil, officer.addon.settings:Set("recruitTradeGap", 4))
+    -- Gaps go in 5-minute steps, up to 4 hours.
+    test.assertEqual(nil, officer.addon.settings:Set("recruitTradeGap", 7))
+    test.assertEqual(nil, officer.addon.settings:Set("recruitTradeGap", 245))
     test.assertTrue(officer.addon.settings:Set("recruitTradeGap", 5))
+    test.assertTrue(officer.addon.settings:Set("recruitGeneralGap", 240))
 
     local member = login("Retail", { playerName = MEMBER })
     for index = 1, #ids do
@@ -1029,31 +1032,79 @@ test.test("officer gaps and pause: only officers see them, and gaps under the mi
     test.assertEqual(nil, member.addon.settings:Set("recruitGeneralGap", 30))
 end)
 
-test.test("officer gaps and pause: the guild's gaps decide when a channel is due again", function()
+test.test("officer gaps and pause: the guild's gap is a floor no member's own timer goes below", function()
     local world = login("Retail", { playerName = OFFICER })
     optIn(world)
-    world.addon.settings:Set("recruitGeneralGap", 15)
+    test.assertTrue(world.addon.settings:Set("recruitGeneralGap", 20))
+    -- The user's own timer is shorter than the guild allows.
+    test.assertTrue(world.addon.settings:Set("recruitMyGeneralGap", 5))
     world.handlers.post(world.shown[1].key)
     test.assertEqual(0, #world.shown)
 
-    fixtures.runTimers(world, 15 * 60 - 1)
+    fixtures.runTimers(world, 20 * 60 - 1)
     test.assertEqual(0, #world.shown)
     fixtures.runTimers(world, 1)
     test.assertEqual(1, #world.shown)
 end)
 
-test.test("officer gaps and pause: a member uses gaps an officer sends", function()
+test.test("guild recruit: a member's own longer timer means they're asked less often", function()
+    local world = login("Retail")
+    optIn(world)
+    test.assertEqual(60, world.addon.settings:Get("recruitMyGeneralGap"))
+    test.assertTrue(world.addon.settings:Set("recruitMyGeneralGap", 90))
+    test.assertEqual(90, world.database.recruit.myGeneralGapMinutes)
+    world.handlers.post(world.shown[1].key)
+
+    -- The guild's 30-minute floor has long passed, but not the user's 90.
+    fixtures.runTimers(world, 90 * 60 - 1)
+    test.assertEqual(0, #world.shown)
+    fixtures.runTimers(world, 1)
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild recruit: a time only the user's own longer timer keeps isn't sent to others", function()
+    local world = login("Retail")
+    optIn(world)
+    world.handlers.post(world.shown[1].key)
+    local recruit = world.addon.guildRecruit
+
+    -- 40 minutes on: past the guild's 30, inside the user's own 60.
+    fixtures.runTimers(world, 40 * 60)
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "ask-channel", k = "general:map:2339" }, "Anvil-Area52"))
+    -- Inside the guild's gap, it answers.
+    world.time = world.time - 20 * 60
+    test.assertTrue(recruit:OnMessage({ v = 1, t = "ask-channel", k = "general:map:2339" }, "Anvil-Area52"))
+end)
+
+test.test("officer gaps and pause: a member goes by the floor an officer sends", function()
     local world = login("Retail", { playerName = MEMBER })
     optIn(world)
+    test.assertTrue(world.addon.settings:Set("recruitMyTradeGap", 5))
     inCity(world, "Dornogal")
     world.handlers.post(promptFor(world, "Advertise in Trade?").key)
 
     world.addon.guildRecruit:OnMessage({ v = 1, t = "config", s = {
-        tradeGapMinutes = { value = 5, at = world.time, by = "toolbox-area52" },
+        tradeGapMinutes = { value = 15, at = world.time, by = "toolbox-area52" },
     } }, OFFICER)
-    fixtures.runTimers(world, 5 * 60)
+    fixtures.runTimers(world, 15 * 60 - 1)
+    test.assertEqual(nil, promptFor(world, "Advertise in Trade?"))
+    fixtures.runTimers(world, 1)
 
     test.assertTrue(promptFor(world, "Advertise in Trade?") ~= nil)
+end)
+
+test.test("guild recruit: timers read as minutes and hours", function()
+    local recruit = login("Retail").addon.GuildRecruit
+    test.assertEqual("45 min", recruit.FormatMinutes(45))
+    test.assertEqual("1 h", recruit.FormatMinutes(60))
+    test.assertEqual("2 h 15 min", recruit.FormatMinutes(135))
+    test.assertEqual("", recruit.FormatMinutes(nil))
+end)
+
+test.test("recruitment settings: the page says what floor the guild sets", function()
+    local world = login("Retail")
+    test.assertEqual("The guild asks for at least 30 min in General and 10 min in Trade; a shorter timer of yours"
+        .. " waits that long.", world.addon.settings:Get("recruitGuildFloor"))
 end)
 
 test.test("officer gaps and pause: pausing closes everyone's prompts, and lifting it brings due ones back", function()

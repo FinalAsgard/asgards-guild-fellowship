@@ -435,3 +435,21 @@ test.test("a disabled setting can't be changed or run, and says why", function()
     test.assertTrue(model:Run("open"))
     test.assertEqual(1, runs)
 end)
+
+test.test("a number with a step only takes values on its steps", function()
+    local model = newModel()
+    local saved = {}
+    model:AddSection("general", "General")
+    model:Add("general", { id = "gap", kind = "number", slider = true, label = "Gap", min = 5, max = 240, step = 5,
+        get = function() return saved.gap end,
+        set = function(value)
+            saved.gap = value
+            return true
+        end })
+
+    local changed, reason = model:Set("gap", 12)
+    test.assertEqual(nil, changed)
+    test.assertEqual("it must go in steps of 5", reason)
+    test.assertTrue(model:Set("gap", 15))
+    test.assertEqual(15, saved.gap)
+end)

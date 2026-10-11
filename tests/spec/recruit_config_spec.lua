@@ -19,7 +19,7 @@ test.test("recruit config: settings have defaults until an officer changes them"
     local _, config, saved = setup()
 
     test.assertEqual("", config:Get("guildAd"))
-    test.assertTrue(config:Get("guildAdOn"))
+    test.assertEqual(nil, config:Get("guildAdOn"))
     test.assertEqual(nil, config:Changes())
 
     local entry = config:Set("guildAd", "Join us!", START, "boss")
@@ -28,7 +28,7 @@ test.test("recruit config: settings have defaults until an officer changes them"
     test.assertEqual("boss", saved.guildAd.by)
     test.assertEqual("Join us!", config:Get("guildAd"))
     test.assertEqual("Join us!", config:Changes().guildAd.value)
-    test.assertEqual(nil, config:Changes().guildAdOn)
+    test.assertEqual(nil, config:Changes().paused)
 end)
 
 test.test("recruit config: only officers change settings, and only to acceptable values", function()
@@ -36,7 +36,9 @@ test.test("recruit config: only officers change settings, and only to acceptable
 
     test.assertEqual(nil, config:Set("guildAd", "Join us!", START, "member"))
     test.assertEqual(nil, config:Set("guildAd", string.rep("x", 256), START, "boss"))
-    test.assertEqual(nil, config:Set("guildAdOn", "yes", START, "boss"))
+    test.assertEqual(nil, config:Set("paused", "yes", START, "boss"))
+    -- The old on/off switch for the guild ad is gone: clearing the ad does it.
+    test.assertEqual(nil, config:Set("guildAdOn", false, START, "boss"))
     test.assertEqual(nil, config:Set("unknown", true, START, "boss"))
     test.assertTrue(config:Set("guildAd", string.rep("x", 255), START, "boss") ~= nil)
     test.assertEqual("", config:Set("guildAd", "", START + 1, "boss").value)
@@ -45,11 +47,11 @@ end)
 test.test("recruit config: a second change in the same second still wins", function()
     local _, config = setup()
 
-    config:Set("guildAdOn", false, START, "boss")
-    local entry = config:Set("guildAdOn", true, START, "boss")
+    config:Set("paused", false, START, "boss")
+    local entry = config:Set("paused", true, START, "boss")
 
     test.assertEqual(START + 1, entry.at)
-    test.assertTrue(config:Get("guildAdOn"))
+    test.assertTrue(config:Get("paused"))
 end)
 
 test.test("recruit config: received changes follow newest wins, then author", function()
@@ -91,10 +93,9 @@ end)
 
 test.test("recruit config: PickAd picks between the usable ads, or none", function()
     local addon = setup()
-    local function pick(officerAd, officerOn, useOfficer, ownAd, choice)
+    local function pick(officerAd, useOfficer, ownAd, choice)
         return addon.RecruitConfig.PickAd({
             officerAd = officerAd,
-            officerOn = officerOn,
             useOfficer = useOfficer,
             ownAd = ownAd,
             random = function(low, high)
@@ -106,37 +107,36 @@ test.test("recruit config: PickAd picks between the usable ads, or none", functi
     end
 
     -- Both usable: either can be picked.
-    test.assertEqual("Guild", pick("Guild", true, true, "Mine", 1))
-    test.assertEqual("Mine", pick("Guild", true, true, "Mine", 2))
+    test.assertEqual("Guild", pick("Guild", true, "Mine", 1))
+    test.assertEqual("Mine", pick("Guild", true, "Mine", 2))
     -- Only one usable.
-    test.assertEqual("Mine", pick("Guild", false, true, "Mine"))
-    test.assertEqual("Mine", pick("Guild", true, false, "Mine"))
-    test.assertEqual("Mine", pick("", true, true, "Mine"))
-    test.assertEqual("Mine", pick("   ", true, true, "Mine"))
-    test.assertEqual("Guild", pick("Guild", true, true, ""))
-    test.assertEqual("Guild", pick("Guild", true, true, "  "))
+    test.assertEqual("Mine", pick("Guild", false, "Mine"))
+    test.assertEqual("Mine", pick("", true, "Mine"))
+    test.assertEqual("Mine", pick("   ", true, "Mine"))
+    test.assertEqual("Guild", pick("Guild", true, ""))
+    test.assertEqual("Guild", pick("Guild", true, "  "))
     -- None usable.
-    test.assertEqual(nil, pick("Guild", false, true, ""))
-    test.assertEqual(nil, pick("Guild", true, false, ""))
-    test.assertEqual(nil, pick("", true, true, ""))
+    test.assertEqual(nil, pick("Guild", false, ""))
+    test.assertEqual(nil, pick("", true, ""))
     -- A failing random pick still gives an ad.
     test.assertEqual("Guild", addon.RecruitConfig.PickAd({
-        officerAd = "Guild", officerOn = true, useOfficer = true, ownAd = "Mine",
+        officerAd = "Guild", useOfficer = true, ownAd = "Mine",
         random = function() error("boom") end,
     }))
 end)
 
-test.test("recruit config: gaps default to 60 and 20 minutes and never go below 15 and 5", function()
+test.test("recruit config: the guild's floors default to 30 and 10 minutes, never below 15 and 5, up to 4 hours", function()
     local _, config = setup()
 
-    test.assertEqual(60, config:Get("generalGapMinutes"))
-    test.assertEqual(20, config:Get("tradeGapMinutes"))
+    test.assertEqual(30, config:Get("generalGapMinutes"))
+    test.assertEqual(10, config:Get("tradeGapMinutes"))
     test.assertFalse(config:Get("paused"))
 
     test.assertEqual(nil, config:Set("generalGapMinutes", 14, START, "boss"))
     test.assertEqual(nil, config:Set("tradeGapMinutes", 4, START, "boss"))
     test.assertEqual(nil, config:Set("generalGapMinutes", 30.5, START, "boss"))
-    test.assertEqual(nil, config:Set("generalGapMinutes", 24 * 60 + 1, START, "boss"))
+    test.assertEqual(nil, config:Set("generalGapMinutes", 4 * 60 + 5, START, "boss"))
+    test.assertTrue(config:Set("generalGapMinutes", 4 * 60, START, "boss") ~= nil)
     test.assertTrue(config:Set("generalGapMinutes", 15, START, "boss") ~= nil)
     test.assertTrue(config:Set("tradeGapMinutes", 5, START, "boss") ~= nil)
     test.assertEqual(15, config:Get("generalGapMinutes"))
@@ -177,9 +177,9 @@ test.test("recruit config: the ledger's fresh and stale decisions follow the con
     ledger:Record(general, START)
     ledger:Record(addon.RecruitLedger.TRADE_KEY, START)
 
-    -- Defaults: 60 and 20 minutes.
-    test.assertEqual(addon.RecruitLedger.FRESH, ledger:State(general, START + 59 * 60))
-    test.assertEqual(addon.RecruitLedger.UNKNOWN, ledger:State(addon.RecruitLedger.TRADE_KEY, START + 20 * 60))
+    -- Defaults: 30 and 10 minutes.
+    test.assertEqual(addon.RecruitLedger.FRESH, ledger:State(general, START + 29 * 60))
+    test.assertEqual(addon.RecruitLedger.UNKNOWN, ledger:State(addon.RecruitLedger.TRADE_KEY, START + 10 * 60))
 
     config:Set("generalGapMinutes", 15, START, "boss")
     config:Set("tradeGapMinutes", 30, START, "boss")

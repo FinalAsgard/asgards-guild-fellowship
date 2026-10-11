@@ -405,3 +405,20 @@ test.test("guild recruit: posting the officer ad is on by default and saved acco
     test.assertFalse(newStore(database):RecruitUseOfficerAd())
     test.assertFalse(store:SetRecruitUseOfficerAd("no"))
 end)
+
+test.test("guild recruit: the user's own timers default to 60 minutes and save account-wide", function()
+    local database = foundationRoot()
+    local store = newStore(database)
+
+    test.assertEqual(60, store:RecruitMyGap("general"))
+    test.assertEqual(60, store:RecruitMyGap("trade"))
+    test.assertTrue(store:SetRecruitMyGap("trade", 25))
+    test.assertEqual(25, newStore(database):RecruitMyGap("trade"))
+    test.assertEqual(60, newStore(database):RecruitMyGap("general"))
+
+    test.assertFalse(store:SetRecruitMyGap("trade", 4))
+    test.assertFalse(store:SetRecruitMyGap("trade", 241))
+    test.assertFalse(store:SetRecruitMyGap("elsewhere", 30))
+    database.recruit.myGeneralGapMinutes = "often"
+    test.assertEqual(60, store:RecruitMyGap("general"))
+end)

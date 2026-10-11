@@ -434,6 +434,49 @@ if clientProfile.supported then
             return true
         end,
     })
+    -- The member's own timers: how long a channel goes without an ad before
+    -- they're asked. The guild's gaps are a floor under them.
+    local function myGap(id, channel, label)
+        settings:Add("recruitment", {
+            id = id,
+            kind = "number",
+            slider = true,
+            label = label,
+            min = addon.FellowshipStore.RECRUIT_MY_GAP_MIN,
+            max = addon.FellowshipStore.RECRUIT_MY_GAP_MAX,
+            step = addon.RecruitConfig.GAP_STEP_MINUTES,
+            format = addon.GuildRecruit.FormatMinutes,
+            enabled = recruitAvailable,
+            get = function()
+                local store = rosterController:Store()
+                return store and store:RecruitMyGap(channel)
+                    or addon.FellowshipStore.RECRUIT_MY_GAPS[channel].default
+            end,
+            set = function(minutes)
+                local store = rosterController:Store()
+                if store == nil then
+                    return nil, "saved data is unavailable"
+                end
+                if not store:SetRecruitMyGap(channel, minutes) then
+                    return nil, "the saved timer is unreadable"
+                end
+                return true
+            end,
+        })
+    end
+    myGap("recruitMyGeneralGap", "general", "Ask me to post in a zone's General after it's gone this long without a guild ad")
+    myGap("recruitMyTradeGap", "trade", "Ask me to post in Trade after it's gone this long without a guild ad")
+    settings:Add("recruitment", {
+        id = "recruitGuildFloor",
+        kind = "text",
+        get = function()
+            local config = guildRecruit:Config()
+            return "The guild asks for at least " ..
+                addon.GuildRecruit.FormatMinutes(config:Get("generalGapMinutes")) .. " in General and " ..
+                addon.GuildRecruit.FormatMinutes(config:Get("tradeGapMinutes")) ..
+                " in Trade; a shorter timer of yours waits that long."
+        end,
+    })
     -- Officers only: the guild ad, saved per guild and sent to every
     -- add-on user.
     local function isOfficer()
@@ -466,26 +509,16 @@ if clientProfile.supported then
             return guildRecruit:SetOfficerSetting("guildAd", text)
         end,
     })
-    settings:Add("recruitment", {
-        id = "recruitGuildAdOn",
-        kind = "toggle",
-        label = "Guild ad on",
-        shown = isOfficer,
-        enabled = officerOnly,
-        get = function()
-            return guildRecruit:Config():Get("guildAdOn")
-        end,
-        set = function(enabled)
-            return guildRecruit:SetOfficerSetting("guildAdOn", enabled)
-        end,
-    })
     local function officerGap(id, setting, label)
         settings:Add("recruitment", {
             id = id,
             kind = "number",
+            slider = true,
             label = label,
             min = addon.RecruitConfig.SETTINGS[setting].min,
             max = addon.RecruitConfig.GAP_MAX_MINUTES,
+            step = addon.RecruitConfig.GAP_STEP_MINUTES,
+            format = addon.GuildRecruit.FormatMinutes,
             shown = isOfficer,
             enabled = officerOnly,
             get = function()
@@ -496,8 +529,10 @@ if clientProfile.supported then
             end,
         })
     end
-    officerGap("recruitGeneralGap", "generalGapMinutes", "Minutes between guild ads in a zone's General")
-    officerGap("recruitTradeGap", "tradeGapMinutes", "Minutes between guild ads in Trade")
+    officerGap("recruitGeneralGap", "generalGapMinutes",
+        "Shortest time between guild ads in a zone's General (no member's timer goes below it)")
+    officerGap("recruitTradeGap", "tradeGapMinutes",
+        "Shortest time between guild ads in Trade (no member's timer goes below it)")
     settings:Add("recruitment", {
         id = "recruitPaused",
         kind = "toggle",
@@ -754,7 +789,9 @@ if clientProfile.supported then
     })
     settings:OnChange(function(id, value)
         local entry = settings:Entry(id)
-        if id == "recruitOptIn" or id == "recruitAd" or id == "recruitUseOfficerAd" then
+        if id == "recruitOptIn" or id == "recruitAd" or id == "recruitUseOfficerAd"
+            or id == "recruitMyGeneralGap" or id == "recruitMyTradeGap"
+        then
             guildRecruit:Refresh()
         elseif id == "guildGreet" or id == "greetCharacter" then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())

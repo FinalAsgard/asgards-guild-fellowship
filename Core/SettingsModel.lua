@@ -10,7 +10,10 @@ local _, addon = ...
 --   action   run() performs it (a button, e.g. "Open Roster")
 --   text     get() -> a line of text shown as is (e.g. the version)
 --   number   get() -> a whole number from `min` to `max`; set(number) ->
---            true, or nil and a reason
+--            true, or nil and a reason. With `step`, the value goes in
+--            steps of that size from `min`; with `slider = true` it's drawn
+--            as a slider, its value shown beside it through
+--            `format(value) -> text` when given
 --   input    get() -> a line of text the user edits, at most `maxLength`
 --            characters; set(text) -> true, or nil and a reason
 --   heading  a title within a section that sets the entries after it apart
@@ -187,6 +190,9 @@ function Model:Set(id, value)
     if entry.kind == "number" then
         if type(value) ~= "number" or value ~= math.floor(value) or value < entry.min or value > entry.max then
             return nil, "it must be a whole number from " .. entry.min .. " to " .. entry.max
+        end
+        if type(entry.step) == "number" and entry.step > 1 and (value - entry.min) % entry.step ~= 0 then
+            return nil, "it must go in steps of " .. entry.step
         end
     elseif entry.kind == "input" then
         if type(value) ~= "string" then

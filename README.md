@@ -28,7 +28,7 @@ The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Gui
 - **General**: show or hide the minimap button, an **Open Roster** button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off.
 - **Guild Greet**: turn Guild Greet on or off (everywhere, or just on the character you're playing), turn each category's prompts on or off, set the welcome-back minutes and long-absence days, set how many greetings close your prompt, unlock the prompts to move them, and an **Edit Greetings** button that opens the Greetings window.
-- **Recruitment**: turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, and choose whether you also post the officers' guild ad. These are greyed out on a character that can't invite to the guild. Officers also get the guild ad, the guild ad on/off switch, the minutes between ads in a zone's General and in Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild.
+- **Recruitment**: turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, choose whether you also post the officers' guild ad, and set your own timers (sliders) for how long General and Trade go without a guild ad before you're asked. These are greyed out on a character that can't invite to the guild. Officers also get the guild ad, the guild's floor under everyone's timers for General and for Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild.
 
 The panel and the slash commands change the same settings, so a change made either way shows up in both. Settings are saved for every character on this game install. The development build's panel is labeled "(Dev)".
 
@@ -214,9 +214,11 @@ Guild Recruit spreads the guild's recruitment ads out: every zone sees the guild
 
 ### Channels and timing
 
-- **General**: each zone has its own timer. By default a zone's General is due again 60 minutes after the guild's last ad there.
-- **Trade**: one channel in every city, so an ad in one city counts for all of them. It's due again after 20 minutes by default. You're only prompted for Trade where the game has you in the Trade channel.
-- Officers can change both gaps (never below 15 minutes for General or 5 for Trade) and pause recruitment for the whole guild.
+- **General**: each zone has its own timer. You're asked to post in a zone's General once it has gone 60 minutes (by default) without a guild ad there.
+- **Trade**: one channel in every city, so an ad in one city counts for all of them. You're asked once it has gone 60 minutes (by default) without one. You're only prompted for Trade where the game has you in the Trade channel and can post there.
+- **Your timers**: set your own General and Trade timers in the **Recruitment** settings, from 5 minutes to 4 hours, to be asked more or less often.
+- **The guild's floor**: officers set the shortest time the guild allows between ads, 30 minutes for General and 10 for Trade by default (never below 15 and 5, at most 4 hours). Nobody's timer goes below it, so officers decide how often the guild can advertise. The Recruitment page shows the current floor.
+- Officers can also pause recruitment for the whole guild, and turn the guild ad off by clearing it.
 - Staying in one place, you're prompted again when a timer runs out.
 - **Not now** hides that channel's prompt for 10 minutes. **Off here** stops prompts in the current zone (its General, and Trade while you're there) until you log out or reload.
 - Prompts wait during combat, boss encounters, dungeons, raids, battlegrounds, arenas, and keystone runs, and close when you leave the zone or city they're for.
@@ -229,7 +231,7 @@ Add-on users tell each other when and where they advertised, so nobody double-po
 - When your ad posts, other add-on users record it and their prompt for that channel closes. Prompts wait a few seconds (at random) before showing, so two people rarely get the same one at once.
 - When you log in, or enter a zone or city you have no recent time for, your add-on asks the others. If nobody answers within a few seconds, the channel counts as not advertised in. Only one or a few add-ons answer each question.
 - Times are saved for each guild, so they last across reloads; a saved time older than the gap is asked about again, never taken as the last ad.
-- No officer needs to be online, or use the add-on at all: members recruit and coordinate with their own ads and the default gaps. The officers' ad, gaps and pause only take effect once an officer sets them, and they're only accepted from officers. The newest change wins.
+- No officer needs to be online, or use the add-on at all: members recruit and coordinate with their own ads and the default timers. The officers' ad, gaps and pause only take effect once an officer sets them, and they're only accepted from officers. The newest change wins.
 - Without the add-on's messaging libraries, Guild Recruit still works, going only by your own posts.
 
 ### Ad counts

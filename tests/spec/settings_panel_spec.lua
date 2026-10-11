@@ -344,3 +344,43 @@ test.test("settings panel: Enter in a multi-line box saves, and line breaks are 
     box.scripts.OnEditFocusLost(box)
     test.assertEqual("Raids onFriday", saved.ad)
 end)
+
+test.test("settings panel: a slider shows its value as it's dragged and saves it on release", function()
+    local environment = newEnvironment()
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local saved = { gap = 60 }
+    local saves = 0
+    local model = addon.SettingsModel.Create()
+    model:AddSection("recruitment", "Recruitment")
+    model:Add("recruitment", { id = "gap", kind = "number", slider = true, label = "Gap", min = 5, max = 240, step = 5,
+        format = function(value) return value .. " min" end,
+        get = function() return saved.gap end,
+        set = function(value)
+            saves = saves + 1
+            saved.gap = value
+            return true
+        end })
+    environment.InterfaceOptions_AddCategory = function() end
+    local panel = addon.SettingsPanel.Create({ environment = environment }, model)
+    panel:Register()
+    local widget
+    local index
+    for index = 1, #panel.widgets do
+        if panel.widgets[index].kind == "slider" then
+            widget = panel.widgets[index]
+        end
+    end
+
+    test.assertEqual("60 min", widget.value.text)
+    -- Dragging: the value shown follows, snapped to the steps, unsaved.
+    widget.frame.scripts.OnValueChanged(widget.frame, 87.2)
+    test.assertEqual("85 min", widget.value.text)
+    test.assertEqual(0, saves)
+    -- Letting go saves it.
+    widget.frame.scripts.OnMouseUp(widget.frame)
+    test.assertEqual(85, saved.gap)
+    test.assertEqual(1, saves)
+    -- Releasing again without moving saves nothing.
+    widget.frame.scripts.OnMouseUp(widget.frame)
+    test.assertEqual(1, saves)
+end)

@@ -596,6 +596,51 @@ function Store:RecruitOwnStats()
     return state.stats
 end
 
+-- The user's own timers: how long a zone's General ("general") or Trade
+-- ("trade") must go without an ad before the user is asked to post there.
+-- The guild's gap is a floor under them (see GuildRecruit).
+FellowshipStore.RECRUIT_MY_GAPS = {
+    general = { field = "myGeneralGapMinutes", default = 60 },
+    trade = { field = "myTradeGapMinutes", default = 60 },
+}
+FellowshipStore.RECRUIT_MY_GAP_MIN = 5
+FellowshipStore.RECRUIT_MY_GAP_MAX = 4 * 60
+
+local function isMyGap(value)
+    return type(value) == "number" and value == math.floor(value)
+        and value >= FellowshipStore.RECRUIT_MY_GAP_MIN and value <= FellowshipStore.RECRUIT_MY_GAP_MAX
+end
+
+-- The user's own timer for `channel` ("general" or "trade"), in minutes,
+-- shared by every character on the account. The default when none is saved
+-- or the saved one is unusable.
+function Store:RecruitMyGap(channel)
+    local gap = FellowshipStore.RECRUIT_MY_GAPS[channel]
+    if gap == nil then
+        return nil
+    end
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local value = type(state) == "table" and state[gap.field] or nil
+    if not isMyGap(value) then
+        return gap.default
+    end
+    return value
+end
+
+-- Sets the user's own timer for `channel`, in whole minutes from 5 to 240.
+function Store:SetRecruitMyGap(channel, minutes)
+    local gap = FellowshipStore.RECRUIT_MY_GAPS[channel]
+    if gap == nil or not isMyGap(minutes) then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    state[gap.field] = minutes
+    return true
+end
+
 -- Whether the user posts the officers' guild ad too. On unless turned off;
 -- an unusable saved value counts as on.
 function Store:RecruitUseOfficerAd()

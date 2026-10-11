@@ -1,8 +1,9 @@
 local _, addon = ...
 
--- Guild Recruit's officer settings: the guild ad and whether it's on, the
--- gaps between ads in a zone's General and in Trade, and a guild-wide
--- pause. Pure:
+-- Guild Recruit's officer settings: the guild ad (empty is no guild ad),
+-- the shortest gaps the guild allows between ads in a zone's General and in
+-- Trade (a floor under every member's own timer), and a guild-wide pause.
+-- Pure:
 -- it keeps them in the saved table it's given, one per guild, so they last
 -- across reloads and logouts.
 --
@@ -14,8 +15,10 @@ local _, addon = ...
 local RecruitConfig = {
     -- The longest guild ad: one chat message.
     AD_MAX = 255,
-    -- The longest gap an officer can set, in minutes: a day.
-    GAP_MAX_MINUTES = 24 * 60,
+    -- The longest gap anyone can set, in minutes: four hours. Gaps go in
+    -- steps of GAP_STEP_MINUTES.
+    GAP_MAX_MINUTES = 4 * 60,
+    GAP_STEP_MINUTES = 5,
 }
 addon.RecruitConfig = RecruitConfig
 
@@ -27,16 +30,10 @@ RecruitConfig.SETTINGS = {
             return type(value) == "string" and string.len(value) <= RecruitConfig.AD_MAX
         end,
     },
-    guildAdOn = {
-        default = true,
-        valid = function(value)
-            return type(value) == "boolean"
-        end,
-    },
-    -- Gaps in whole minutes, never below a minimum, so no setting can turn
-    -- the guild into spammers.
-    generalGapMinutes = { default = 60, min = 15 },
-    tradeGapMinutes = { default = 20, min = 5 },
+    -- The guild's floor under every member's own timer, in whole minutes,
+    -- never below a minimum, so no setting can turn the guild into spammers.
+    generalGapMinutes = { default = 30, min = 15 },
+    tradeGapMinutes = { default = 10, min = 5 },
     -- True stops every member's advertise prompts.
     paused = {
         default = false,
@@ -172,8 +169,7 @@ end
 
 -- One ad picked at random from the usable ones, or nil when none is usable.
 -- options:
---   officerAd     the guild ad's text
---   officerOn     true when the guild ad is on
+--   officerAd     the guild ad's text (empty when there's none)
 --   useOfficer    true when the user posts the guild ad
 --   ownAd         the user's own ad
 --   random        function(low, high) -> a whole number
@@ -183,7 +179,7 @@ function RecruitConfig.PickAd(options)
     local function usable(text)
         return type(text) == "string" and string.find(text, "%S") ~= nil
     end
-    if options.useOfficer and options.officerOn and usable(options.officerAd) then
+    if options.useOfficer and usable(options.officerAd) then
         table.insert(ads, options.officerAd)
     end
     if usable(options.ownAd) then

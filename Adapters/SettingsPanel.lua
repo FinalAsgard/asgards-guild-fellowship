@@ -19,6 +19,7 @@ local SettingsPanel = {
     INDENT = 8,
     BUTTON_WIDTH = 140,
     INPUT_WIDTH = 520,
+    SLIDER_WIDTH = 260,
     -- A text line's height in a multi-line box, and the room around the
     -- text inside the box.
     INPUT_LINE_HEIGHT = 14,
@@ -37,6 +38,20 @@ function SettingsPanel.Create(client, model)
         environment = client.environment,
         widgets = {},
     }, Panel)
+end
+
+-- The text shown beside a slider for `value`.
+local function sliderText(entry, value)
+    if type(value) ~= "number" then
+        return ""
+    end
+    if type(entry.format) == "function" then
+        local ok, text = pcall(entry.format, value)
+        if ok and type(text) == "string" then
+            return text
+        end
+    end
+    return tostring(value)
 end
 
 -- Enables or greys out a widget's controls and label.
@@ -128,6 +143,14 @@ function Panel:Refresh()
                 else
                     widget.up:Enable()
                 end
+            elseif widget.kind == "slider" then
+                local value = self.model:Get(widget.id)
+                if type(value) == "number" then
+                    widget.frame:SetValue(value)
+                    widget.value:SetText(sliderText(widget.entry, value))
+                end
+                -- Putting the saved value in isn't a change by the player.
+                widget.pending = nil
             elseif widget.kind == "text" then
                 widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
             end
@@ -252,6 +275,64 @@ function Panel:addInput(frame, entry, y)
     table.insert(self.widgets, widget)
 end
 
+-- A whole number as a slider: its label, then a slider across the entry's
+-- range in the entry's steps, with the value beside it. The value shown
+-- follows the slider as it's dragged; it's saved when the mouse is let go.
+function Panel:addSlider(frame, entry, y)
+    local label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    label:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 4, y - 4)
+    label:SetText(entry.label)
+    local slider = self.environment.CreateFrame("Slider", nil, frame)
+    slider:SetOrientation("HORIZONTAL")
+    slider:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 10, y - SettingsPanel.ROW + 2)
+    slider:SetWidth(SettingsPanel.SLIDER_WIDTH)
+    slider:SetHeight(17)
+    slider:SetMinMaxValues(entry.min, entry.max)
+    local step = type(entry.step) == "number" and entry.step or 1
+    slider:SetValueStep(step)
+    if type(slider.SetObeyStepDrag) == "function" then
+        slider:SetObeyStepDrag(true)
+    end
+    local track = slider:CreateTexture(nil, "BACKGROUND")
+    track:SetPoint("LEFT", slider, "LEFT", 0, 0)
+    track:SetPoint("RIGHT", slider, "RIGHT", 0, 0)
+    track:SetHeight(6)
+    track:SetColorTexture(0.25, 0.25, 0.25, 0.9)
+    slider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    local value = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    value:SetPoint("LEFT", slider, "RIGHT", 10, 0)
+    local widget = { kind = "slider", id = entry.id, entry = entry, frame = slider, value = value, label = label,
+        controls = { slider } }
+    -- Snaps a dragged value to the entry's steps.
+    local function snapped(raw)
+        if type(raw) ~= "number" then
+            return nil
+        end
+        return entry.min + math.floor((raw - entry.min) / step + 0.5) * step
+    end
+    slider:SetScript("OnValueChanged", function(_, raw)
+        local current = snapped(raw)
+        if current ~= nil then
+            value:SetText(sliderText(entry, current))
+            widget.pending = current
+        end
+    end)
+    slider:SetScript("OnMouseUp", function()
+        self:commitSlider(widget)
+        self:Refresh()
+    end)
+    table.insert(self.widgets, widget)
+end
+
+-- Saves a slider's value when the player moved it from the saved one.
+function Panel:commitSlider(widget)
+    local pending = widget.pending
+    widget.pending = nil
+    if type(pending) == "number" and pending ~= self.model:Get(widget.id) then
+        self.model:Set(widget.id, pending)
+    end
+end
+
 -- A whole number: its label, then a minus button, the value and a plus
 -- button, each press stepping it by one within the entry's range.
 function Panel:addNumber(frame, entry, y)
@@ -349,6 +430,10 @@ function Panel:Build(sections, title)
                     self:addToggle(panel, entry, y)
                 elseif entry.kind == "action" then
                     self:addAction(panel, entry, y)
+                elseif entry.kind == "number" and entry.slider then
+                    self:addSlider(panel, entry, y)
+                    -- The slider sits on a row of its own below the label.
+                    y = y - SettingsPanel.ROW
                 elseif entry.kind == "number" then
                     self:addNumber(panel, entry, y)
                 elseif entry.kind == "input" then
@@ -377,6 +462,8 @@ function Panel:Build(sections, title)
             for index = 1, #self.widgets do
                 if self.widgets[index].kind == "input" then
                     self:commitInput(self.widgets[index])
+                elseif self.widgets[index].kind == "slider" then
+                    self:commitSlider(self.widgets[index])
                 end
             end
             self.model:Closed()

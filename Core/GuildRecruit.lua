@@ -247,7 +247,6 @@ function Recruit:pickAd(random)
     local config = self:Config()
     return addon.RecruitConfig.PickAd({
         officerAd = config:Get("guildAd"),
-        officerOn = config:Get("guildAdOn"),
         useOfficer = store == nil or store:RecruitUseOfficerAd(),
         ownAd = store and store:RecruitAd() or "",
         random = random,
@@ -305,9 +304,9 @@ end
 -- The ledger of ad times for the current guild, saved with its partition.
 function Recruit:Ledger()
     local partition = self.partition()
-    local config = self:Config()
+    local config, store = self:Config(), self.store()
     return addon.RecruitLedger.Create(partition and partition:GetRecruitLedger(), function(key)
-        return GuildRecruit.GapOf(key, config)
+        return GuildRecruit.GapOf(key, config, store)
     end, self.dueMarks)
 end
 
@@ -320,14 +319,42 @@ function Recruit:Location()
     return nil
 end
 
--- The gap in seconds for a channel key, as the guild's officer settings
--- (a RecruitConfig) have it: how long after an ad in a zone's General, or
--- in Trade (one channel in every city), the next one is due.
-function GuildRecruit.GapOf(key, config)
+-- Minutes as a player reads them: "45 min", "1 h", "1 h 30 min".
+function GuildRecruit.FormatMinutes(minutes)
+    if type(minutes) ~= "number" then
+        return ""
+    end
+    if minutes < 60 then
+        return minutes .. " min"
+    end
+    local hours, rest = math.floor(minutes / 60), minutes % 60
+    if rest == 0 then
+        return hours .. " h"
+    end
+    return hours .. " h " .. rest .. " min"
+end
+
+-- The guild's gap in seconds for a channel key, as its officer settings (a
+-- RecruitConfig) have it: the shortest time after an ad in a zone's
+-- General, or in Trade (one channel in every city), before the next one.
+function GuildRecruit.GuildGapOf(key, config)
     if key == addon.RecruitLedger.TRADE_KEY then
         return config:Get("tradeGapMinutes") * 60
     end
     return config:Get("generalGapMinutes") * 60
+end
+
+-- The gap in seconds the user goes by for a channel key: their own timer
+-- (from the FellowshipStore `store`, when given), never shorter than the
+-- guild's.
+function GuildRecruit.GapOf(key, config, store)
+    local gap = GuildRecruit.GuildGapOf(key, config)
+    local channel = key == addon.RecruitLedger.TRADE_KEY and "trade" or "general"
+    local mine = store and store:RecruitMyGap(channel)
+    if type(mine) == "number" and mine * 60 > gap then
+        return mine * 60
+    end
+    return gap
 end
 
 -- The question a prompt asks.
@@ -703,16 +730,20 @@ function Recruit:OnAsk(message, sender)
     local key = message.k
     local now = self.now()
     local ledger = self:Ledger()
-    if type(now) ~= "number" or ledger:State(key, now) ~= addon.RecruitLedger.FRESH then
+    -- Answers go by the guild's gap, which every add-on shares: a time the
+    -- user keeps only for their own longer timer isn't news to anyone.
+    local function freshForGuild(at)
+        local time = self:Ledger():Time(key)
+        return time ~= nil and type(at) == "number" and at - time < GuildRecruit.GuildGapOf(key, self:Config())
+    end
+    if type(now) ~= "number" or not freshForGuild(now) then
         return false
     end
     local function answer()
         local time = self.answering[key]
         self.answering[key] = nil
         local current = self.now()
-        if time ~= nil and type(current) == "number"
-            and self:Ledger():State(key, current) == addon.RecruitLedger.FRESH
-        then
+        if time ~= nil and type(current) == "number" and freshForGuild(current) then
             pcall(self.announce, {
                 v = GuildRecruit.PROTOCOL, t = GuildRecruit.TYPE_CHANNEL_TIME, k = key, a = self:Ledger():Time(key),
             })
