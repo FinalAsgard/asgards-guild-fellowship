@@ -1166,3 +1166,28 @@ test.test("recruiters: a regular member can't open the view", function()
     world.addon.rosterController:RefreshRecruiters()
     test.assertEqual(nil, window.rows)
 end)
+
+for index = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[index]
+    local zones = ZONES[profile]
+
+    test.test(profile .. ": out in the world with Trade greyed out, there's no Trade prompt", function()
+        local world = login(profile)
+        optIn(world)
+        inCity(world, zones.here[2])
+        test.assertTrue(promptFor(world, "Advertise in Trade?") ~= nil)
+
+        -- Leaving the city: the client keeps the player in Trade but
+        -- disables it until they're back in one.
+        world.zone = { mapID = zones.there[1], name = zones.there[2] }
+        world.channels = { [1] = "General - " .. zones.there[2], [2] = "Trade - City" }
+        world.disabledChannels = { [2] = true }
+        fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+
+        test.assertEqual(nil, promptFor(world, "Advertise in Trade?"))
+        test.assertEqual(1, #world.shown)
+        test.assertEqual("Advertise in " .. zones.there[2] .. " General?", world.shown[1].text)
+        test.assertEqual(nil, world.addon.guildRecruit:Post("trade"))
+        test.assertEqual(0, #world.chat)
+    end)
+end

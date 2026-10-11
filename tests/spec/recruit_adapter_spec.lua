@@ -65,6 +65,23 @@ for index = 1, #fixtures.PROFILES do
         test.assertEqual(1, client:GetGeneralChannel())
     end)
 
+    test.test(profile .. " adapter doesn't count Trade the client has disabled outside a city", function()
+        local world = fixtures.newEnvironment(profile)
+        local client = newClient(world.environment)
+        world.channels = { [1] = "General - " .. expected.name, [2] = "Trade - City" }
+
+        test.assertEqual(2, client:GetTradeChannel())
+        -- Out in the world: still joined to Trade, but it's greyed out.
+        world.disabledChannels = { [2] = true }
+        test.assertEqual(nil, client:GetTradeChannel())
+        test.assertFalse(client:IsTradeAvailable())
+        test.assertEqual(1, client:GetGeneralChannel())
+
+        world.disabledChannels = { [1] = true }
+        test.assertEqual(nil, client:GetGeneralChannel())
+        test.assertEqual(2, client:GetTradeChannel())
+    end)
+
     test.test(profile .. " adapter reports instances and battlegrounds", function()
         local world = fixtures.newEnvironment(profile)
         local client = newClient(world.environment)
@@ -102,6 +119,30 @@ for index = 1, #fixtures.PROFILES do
         test.assertEqual(3, changes)
     end)
 end
+
+test.test("a channel list without disabled flags, or one that can't be read, disables nothing", function()
+    local function channelName(number)
+        if number == 2 then
+            return 2, "Trade - City", 0
+        end
+        return 0, nil, 0
+    end
+    local older = newClient({
+        GetChannelName = channelName,
+        GetChannelList = function()
+            return 2, "Trade"
+        end,
+    })
+    local failing = newClient({
+        GetChannelName = channelName,
+        GetChannelList = function()
+            error("client API failed")
+        end,
+    })
+
+    test.assertEqual(2, older:GetTradeChannel())
+    test.assertEqual(2, failing:GetTradeChannel())
+end)
 
 test.test("Retail keystone runs count as being in an instance", function()
     local world = fixtures.newEnvironment("Retail")

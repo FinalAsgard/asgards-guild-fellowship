@@ -389,6 +389,21 @@ local function installGuild(world, environment, profile)
     environment.EnumerateServerChannels = function()
         return "General", "Trade", "LocalDefense"
     end
+    -- As the client lists the channels: number, name, and whether it's
+    -- disabled here (`world.disabledChannels`, by number), for each one.
+    world.disabledChannels = {}
+    environment.GetChannelList = function()
+        local list = {}
+        local number
+        for number = 1, 20 do
+            if world.channels[number] ~= nil then
+                table.insert(list, number)
+                table.insert(list, (string.match(world.channels[number], "^(.-) %- ") or world.channels[number]))
+                table.insert(list, world.disabledChannels[number] == true)
+            end
+        end
+        return unpack(list)
+    end
     environment.GetChannelName = function(number)
         local name = world.channels[number]
         if name == nil then

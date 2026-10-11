@@ -525,11 +525,38 @@ end
 -- How many channel numbers to look through for the General channel.
 Compatibility.MAX_CHANNELS = 20
 
--- The number of a server channel the player is in, or nil. `index` is the
--- channel's place in the client's own list of server channel names (so
--- every locale works), with `fallback` as the English name; the channel's
--- full name carries the zone or "City" ("General - Elwynn Forest", "Trade -
--- City").
+-- The channel numbers the client reports as disabled here. The player stays
+-- in Trade after leaving a city, but the client marks it disabled (greyed out
+-- in the channel list) until they're back in one. GetChannelList gives each
+-- channel as its number, name and, on clients that report it, whether it's
+-- disabled; a list that can't be read disables nothing.
+function Client:disabledChannels()
+    local disabled = {}
+    local ok, list = callFunction(function()
+        return { self.environment.GetChannelList() }
+    end)
+    if not ok or type(list) ~= "table" then
+        return disabled
+    end
+    local current
+    local index
+    for index = 1, #list do
+        local value = list[index]
+        if type(value) == "number" then
+            current = value
+        elseif value == true and current ~= nil then
+            disabled[current] = true
+        end
+    end
+    return disabled
+end
+
+-- The number of a server channel the player is in and can post to here, or
+-- nil. `index` is the channel's place in the client's own list of server
+-- channel names (so every locale works), with `fallback` as the English
+-- name; the channel's full name carries the zone or "City" ("General -
+-- Elwynn Forest", "Trade - City"). A channel the client reports disabled
+-- here doesn't count.
 function Client:findServerChannel(index, fallback)
     local ok, names = callFunction(function()
         return { self.environment.EnumerateServerChannels() }
@@ -539,10 +566,11 @@ function Client:findServerChannel(index, fallback)
         baseName = fallback
     end
     local prefix = baseName .. " - "
+    local disabled = self:disabledChannels()
     local number
     for number = 1, Compatibility.MAX_CHANNELS do
         local nameOk, id, fullName = callFunction(self.environment.GetChannelName, number)
-        if nameOk and type(id) == "number" and id > 0 and type(fullName) == "string"
+        if nameOk and type(id) == "number" and id > 0 and not disabled[id] and type(fullName) == "string"
             and not self:IsSecretValue(fullName)
             and (fullName == baseName or string.sub(fullName, 1, string.len(prefix)) == prefix)
         then
@@ -557,15 +585,14 @@ function Client:GetGeneralChannel()
     return self:findServerChannel(1, "General")
 end
 
--- The number of the Trade channel, or nil when the player isn't in it. Trade
--- is one channel in every city, and the client only puts the player in it
--- where it's available, so this also answers whether Trade is available
--- here.
+-- The number of the Trade channel, or nil when the player isn't in it or
+-- the client reports it disabled here (outside a city). Trade is one channel
+-- in every city, so this also answers whether Trade is available here.
 function Client:GetTradeChannel()
     return self:findServerChannel(2, "Trade")
 end
 
--- True when the player is in the Trade channel here.
+-- True when the player can post to the Trade channel here.
 function Client:IsTradeAvailable()
     return self:GetTradeChannel() ~= nil
 end
