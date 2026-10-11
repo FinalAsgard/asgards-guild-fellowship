@@ -551,6 +551,57 @@ function Client:disabledChannels()
     return disabled
 end
 
+-- The channels the client lists here, in order, as { number, name,
+-- disabled }, read from GetChannelList as the channel lookup reads it; an
+-- empty list when it can't be read.
+function Client:ListedChannels()
+    local listed = {}
+    local ok, list = callFunction(function()
+        return { self.environment.GetChannelList() }
+    end)
+    if not ok or type(list) ~= "table" then
+        return listed
+    end
+    local index
+    for index = 1, #list do
+        local value = list[index]
+        if type(value) == "number" then
+            table.insert(listed, { number = value, disabled = false })
+        elseif type(value) == "string" and listed[#listed] ~= nil and listed[#listed].name == nil then
+            listed[#listed].name = value
+        elseif value == true and listed[#listed] ~= nil then
+            listed[#listed].disabled = true
+        end
+    end
+    return listed
+end
+
+-- What Guild Recruit sees where the player stands, for `/agf channels`:
+-- lines of text naming the zone, every channel the client lists (and
+-- whether it's disabled), and the channels it would use for General and
+-- Trade.
+function Client:ChannelReport()
+    local lines = {}
+    local zone = self:GetZone()
+    table.insert(lines, "Zone: " .. (zone and (zone.name .. " (" .. zone.key .. ")") or "unknown"))
+    local listed = self:ListedChannels()
+    if listed[1] == nil then
+        table.insert(lines, "The game lists no channels here.")
+    end
+    local index
+    for index = 1, #listed do
+        local channel = listed[index]
+        local _, _, fullName = callFunction(self.environment.GetChannelName, channel.number)
+        table.insert(lines, channel.number .. ". " .. tostring(channel.name or "?") ..
+            (type(fullName) == "string" and fullName ~= channel.name and (" (" .. fullName .. ")") or "") ..
+            (channel.disabled and ", disabled here" or ""))
+    end
+    local general, trade = self:GetGeneralChannel(), self:GetTradeChannel()
+    table.insert(lines, "General: " .. (general and ("channel " .. general) or "none here"))
+    table.insert(lines, "Trade: " .. (trade and ("channel " .. trade) or "none here"))
+    return lines
+end
+
 -- The number of the joined channel named `name` ("Trade - City" and plain
 -- "Trade" are both named Trade), or nil when the player isn't in one.
 function Client:joinedChannel(name)

@@ -18,6 +18,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf greet` | Opens the Greetings window, where you edit your Guild Greet greetings. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
+| `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 

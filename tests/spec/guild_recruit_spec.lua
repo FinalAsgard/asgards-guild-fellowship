@@ -1313,3 +1313,19 @@ test.test("guild recruit: out in the world there's no Trade prompt, whatever ord
     world.handlers.post(promptFor(world, "Advertise in Trade?").key)
     test.assertEqual(2, world.chat[1].target)
 end)
+
+test.test("/agf channels shows the channels the game lists and which Guild Recruit would use", function()
+    local world = login("Forever")
+    outInTheWorld(world, "Ironforge")
+    local before = #world.messages
+
+    fixtures.slash(world, "channels")
+
+    local text = table.concat(world.messages, "\n", before + 1)
+    test.assertContains(text, "Zone: Ironforge (map:1455)")
+    test.assertContains(text, "1. General (General - Ironforge)")
+    test.assertContains(text, "2. Trade (Trade - City), disabled here")
+    test.assertContains(text, "3. LocalDefense (LocalDefense - Ironforge)")
+    test.assertContains(text, "General: channel 1")
+    test.assertContains(text, "Trade: none here")
+end)

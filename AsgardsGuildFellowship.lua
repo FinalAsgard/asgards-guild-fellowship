@@ -662,6 +662,13 @@ if clientProfile.supported then
             rosterController:UpdateStatus()
         end,
     })
+    router:Register("channels", "show the chat channels Guild Recruit sees here", function()
+        local lines = client:ChannelReport()
+        local index
+        for index = 1, #lines do
+            rosterController:Print(lines[index])
+        end
+    end)
     router:Register("sync", "show guild sync status", function()
         local lines = addon.RosterViewModel.SyncStatusLines(syncSession:Status(), client:Timestamp())
         local index
