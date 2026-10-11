@@ -31,6 +31,15 @@ local function newEnvironment()
                     return function()
                         return false
                     end
+                elseif method == "SetScript" then
+                    return function(self, name, handler)
+                        rawset(self, "scripts", rawget(self, "scripts") or {})
+                        self.scripts[name] = handler
+                    end
+                elseif method == "GetText" then
+                    return function(self)
+                        return rawget(self, "text")
+                    end
                 end
                 return function() end
             end,
@@ -173,4 +182,67 @@ test.test("settings panel: the officer heading and settings show only for office
     test.assertTrue(widget("officerHeading").label.shown)
     test.assertEqual("Officer settings", widget("officerHeading").label.text)
     test.assertTrue(widget("guildAd").label.shown)
+end)
+
+-- A model with one text setting backed by `saved.ad`, on the main page.
+local function newTextPanel(environment)
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local saved = { ad = "" }
+    local model = addon.SettingsModel.Create()
+    model:AddSection("recruitment", "Recruitment")
+    model:Add("recruitment", { id = "ad", kind = "input", label = "My ad", maxLength = 255,
+        get = function() return saved.ad end,
+        set = function(text)
+            saved.ad = text
+            return true
+        end })
+    local panel = addon.SettingsPanel.Create({ environment = environment }, model)
+    environment.InterfaceOptions_AddCategory = function() end
+    test.assertTrue(panel:Register())
+    return panel, saved
+end
+
+local function textBox(panel)
+    local index
+    for index = 1, #panel.widgets do
+        if panel.widgets[index].kind == "input" then
+            return panel.widgets[index].frame
+        end
+    end
+end
+
+-- Types `text` into the box, as the player would before leaving it.
+local function type_(box, text)
+    box.text = text
+end
+
+test.test("settings panel: a typed ad is saved however the player leaves the box", function()
+    local leaving = { "OnEnterPressed", "OnEscapePressed" }
+    local index
+    for index = 1, #leaving do
+        local panel, saved = newTextPanel(newEnvironment())
+        local box = textBox(panel)
+        type_(box, "Join us! " .. index)
+
+        box.scripts[leaving[index]](box)
+        -- The game drops the box's focus, which is what saves it.
+        box.scripts.OnEditFocusLost(box)
+
+        test.assertEqual("Join us! " .. index, saved.ad, leaving[index])
+    end
+
+    local panel, saved = newTextPanel(newEnvironment())
+    local box = textBox(panel)
+    type_(box, "Clicked away")
+    box.scripts.OnEditFocusLost(box)
+    test.assertEqual("Clicked away", saved.ad)
+end)
+
+test.test("settings panel: closing the options saves an ad still being typed", function()
+    local panel, saved = newTextPanel(newEnvironment())
+    type_(textBox(panel), "Typed, then closed")
+
+    panel.frame.scripts.OnHide(panel.frame)
+
+    test.assertEqual("Typed, then closed", saved.ad)
 end)

@@ -128,8 +128,18 @@ function Panel:addToggle(frame, entry, y)
     table.insert(self.widgets, { kind = "toggle", id = entry.id, frame = check, controls = { check }, label = label })
 end
 
--- A line of text: its label, then a text box below it. Enter saves it (a
--- refused change puts the saved text back); Escape puts the saved text back.
+-- Saves what's typed in a text box when it differs from the saved text. A
+-- refused change puts the saved text back.
+function Panel:commitInput(widget)
+    local ok, text = pcall(widget.frame.GetText, widget.frame)
+    if ok and type(text) == "string" and text ~= self.model:Get(widget.id) then
+        self.model:Set(widget.id, text)
+    end
+end
+
+-- A line of text: its label, then a text box below it. Whatever way the
+-- user leaves the box saves what they typed: Enter, Escape, clicking away,
+-- or closing the options.
 function Panel:addInput(frame, entry, y)
     local label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     label:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 4, y - 4)
@@ -141,13 +151,13 @@ function Panel:addInput(frame, entry, y)
     box:SetAutoFocus(false)
     box:SetMaxLetters(entry.maxLength)
     local widget = { kind = "input", id = entry.id, frame = box, controls = { box }, label = label }
-    box:SetScript("OnEnterPressed", function()
-        self.model:Set(entry.id, box:GetText())
+    local function leave()
         box:ClearFocus()
-        self:Refresh()
-    end)
-    box:SetScript("OnEscapePressed", function()
-        box:ClearFocus()
+    end
+    box:SetScript("OnEnterPressed", leave)
+    box:SetScript("OnEscapePressed", leave)
+    box:SetScript("OnEditFocusLost", function()
+        self:commitInput(widget)
         self:Refresh()
     end)
     table.insert(self.widgets, widget)
@@ -273,6 +283,13 @@ function Panel:Build(sections, title)
         -- However the options window closes (X, Close, Escape), or the user
         -- moves to another page, the page hides.
         panel:SetScript("OnHide", function()
+            -- Text still being typed is saved, as if the user clicked away.
+            local index
+            for index = 1, #self.widgets do
+                if self.widgets[index].kind == "input" then
+                    self:commitInput(self.widgets[index])
+                end
+            end
             self.model:Closed()
         end)
         return panel
