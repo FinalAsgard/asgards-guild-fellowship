@@ -12,7 +12,7 @@ local MANIFEST_FILES = {
     "Adapters/SettingsPanel.lua",
     "Adapters/GreetPrompts.lua",
     "Adapters/RecruitPrompts.lua",
-    "Adapters/GreetingsWindow.lua",
+    "Adapters/GreetingsPage.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",

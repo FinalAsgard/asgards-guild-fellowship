@@ -22,6 +22,7 @@ local MasterFrame = {
     -- together so they're easy to swap after testing.
     ICONS = {
         roster = "Interface\\Icons\\INV_Misc_GroupNeedMore",
+        greetings = "Interface\\Icons\\INV_Letter_15",
         settings = "Interface\\Icons\\INV_Misc_Gear_01",
     },
 }

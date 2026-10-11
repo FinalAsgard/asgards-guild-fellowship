@@ -773,8 +773,11 @@ local function build(framework, options)
     for pageId, draw in pairs(options.drawPages or {}) do
         local content = host:Content(pageId)
         if content ~= nil then
-            pcall(draw, content)
+            pcall(draw, content, framework)
         end
+    end
+    if options.onHide ~= nil then
+        frame:HookScript("OnHide", options.onHide)
     end
 
     -- Controls: search, online only, expand and collapse all.
@@ -992,8 +995,9 @@ local function build(framework, options)
 end
 
 -- options.navigator is the PageNavigator with the master frame's pages;
--- options.drawPages maps a page id to function(content) that draws that
--- page into its content frame (the Roster page is drawn here);
+-- options.drawPages maps a page id to function(content, framework) that
+-- draws that page into its content frame (the Roster page is drawn here);
+-- options.onHide() runs whenever the frame closes;
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
 -- options.onToggleGroup(playerId) runs when a player header is clicked;

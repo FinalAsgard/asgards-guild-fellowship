@@ -27,7 +27,7 @@ end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
-local guildGreet, greetingsWindow, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
+local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -35,6 +35,7 @@ if clientProfile.supported then
     -- entry points open it.
     pages = addon.PageNavigator.Create()
     pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
+    pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
     pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
     rosterController = addon.RosterController.Create({
         pages = pages,
@@ -79,7 +80,29 @@ if clientProfile.supported then
                         frameSettings:Draw(content, settings:SectionsOn("settings"), 28)
                         frameSettings:Refresh()
                     end,
+                    -- Guild Greet's settings, with the greetings editor below
+                    -- them on the same scrolling page.
+                    greetings = function(content, framework)
+                        local _, footer = frameSettings:Draw(content, settings:SectionsOn("greetings"), 28,
+                            addon.GreetingsPage.HEIGHT)
+                        frameSettings:Refresh()
+                        local editor, reason = addon.GreetingsPage.Create(framework, footer, {
+                            library = function()
+                                return guildGreet:Library()
+                            end,
+                            after = function(seconds, callback)
+                                return client:After(seconds, callback)
+                            end,
+                        })
+                        if editor == nil then
+                            rosterController:Print("The greetings editor can't be shown: " .. tostring(reason) .. ".")
+                        end
+                    end,
                 },
+                -- Modes that last only while the frame is open end with it.
+                onHide = function()
+                    settings:Closed()
+                end,
                 loadGeometry = function()
                     local store = rosterController:Store()
                     return store and store:GetFrameState()
@@ -372,8 +395,8 @@ if clientProfile.supported then
             return true
         end,
     })
-    -- Not saved, and only while the panel is open: closing the options, or
-    -- a reload, locks the prompts again.
+    -- Not saved, and only while the master frame or the options are open:
+    -- closing either, or a reload, locks the prompts again.
     settings:Add("guildGreet", {
         id = "greetUnlock",
         kind = "toggle",
@@ -386,30 +409,15 @@ if clientProfile.supported then
             return greetPrompts:SetUnlocked(unlocked)
         end,
     })
-    -- The greetings themselves are edited in their own window, made on
-    -- first use.
+    -- The greetings are edited below these settings on the master frame's
+    -- Greetings tab; the AddOns options get a button to go there.
     local function openGreetings()
-        if greetingsWindow == nil then
-            local reason
-            greetingsWindow, reason = addon.GreetingsWindow.Create(client, {
-                library = function()
-                    return guildGreet:Library()
-                end,
-                after = function(seconds, callback)
-                    return client:After(seconds, callback)
-                end,
-            })
-            if greetingsWindow == nil then
-                rosterController:Print("The Greetings window can't open: " .. tostring(reason) ..
-                    ". Reinstall the add-on, or in a development checkout run tools/Fetch-Libraries.ps1.")
-                return
-            end
-        end
-        greetingsWindow:Open()
+        rosterController:Open("greetings")
     end
     settings:Add("guildGreet", {
         id = "editGreetings",
         kind = "action",
+        host = "options",
         label = "Edit Greetings",
         run = openGreetings,
     })

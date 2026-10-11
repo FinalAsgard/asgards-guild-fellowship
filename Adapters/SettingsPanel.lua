@@ -147,8 +147,14 @@ function Panel:place(area)
             end
         end
     end
-    area.content:SetHeight(layout.height)
-    area.height = layout.height
+    local height = layout.height
+    if area.footer ~= nil then
+        area.footer:ClearAllPoints()
+        area.footer:SetPoint("TOPLEFT", area.content, "TOPLEFT", 0, -height)
+        height = height + area.footerHeight
+    end
+    area.content:SetHeight(height)
+    area.height = height
 end
 
 -- Fills in every widget from the model's current values, then lays out
@@ -679,8 +685,11 @@ end
 -- Draws `sections` onto `parent` inside a scroll area that fills it below
 -- `top` (an offset down from its top edge). Only this panel's host's
 -- entries are drawn. The area keeps its scroll position while it's open.
--- Raises when a frame call fails; callers run it protected.
-function Panel:Draw(parent, sections, top)
+-- With `footerHeight`, the scrolling content also holds a frame that tall
+-- just below the settings, for a page to draw more into, and it's
+-- returned after the scroll area. Raises when a frame call fails; callers
+-- run it protected.
+function Panel:Draw(parent, sections, top, footerHeight)
     local createFrame = self.environment.CreateFrame
     -- Older clients' scroll frame template names its scroll bar after the
     -- frame, so every scroll area gets a name of its own.
@@ -710,13 +719,19 @@ function Panel:Draw(parent, sections, top)
         end
         table.insert(area.sections, drawn)
     end
+    if footerHeight ~= nil then
+        area.footer = createFrame("Frame", nil, content)
+        area.footer:SetWidth(SettingsPanel.INPUT_WIDTH + 2 * SettingsPanel.LEFT + 40)
+        area.footer:SetHeight(footerHeight)
+        area.footerHeight = footerHeight
+    end
     table.insert(self.areas, area)
     -- Leaving the page saves what's still being typed or dragged.
     scroll:SetScript("OnHide", function()
         self:commitAll()
     end)
     self:place(area)
-    return scroll
+    return scroll, area.footer
 end
 
 -- Listens for every setting change from now on, so this panel's drawn

@@ -1,5 +1,6 @@
 local test = require("tests.test_helper")
 local fixtures = require("tests.client_fixtures")
+local fakeFrames = require("tests.fake_frames")
 
 local function newNavigator()
     local addon = test.newAddon("Core/PageNavigator.lua")
@@ -103,7 +104,9 @@ local function loggedIn(profile)
     local broker = installMinimapLibraries(world.environment)
     local addon = fixtures.loadAddon(world)
     local frame = newFrame()
-    addon.RosterWindow.Create = function()
+    -- The options the add-on built the frame with, kept for the specs.
+    addon.RosterWindow.Create = function(_, options)
+        frame.options = options
         return frame
     end
     fixtures.fire(world, "ADDON_LOADED", world.addonName)
@@ -169,6 +172,44 @@ local function registerProfileTests(profile)
         fixtures.slash(world, "")
         test.assertTrue(frame.shown)
         test.assertEqual("roster", frame:LastPage())
+    end)
+
+    test.test(profile .. " /agf greet and the options' Edit Greetings button open the Greetings tab", function()
+        local world, addon, frame = loggedIn(profile)
+
+        fixtures.slash(world, "help")
+        test.assertContains(table.concat(world.messages, "\n"), "/agf greet - edit your Guild Greet greetings")
+
+        fixtures.slash(world, "greet")
+        test.assertTrue(frame.shown)
+        test.assertEqual("greetings", frame:LastPage())
+
+        fixtures.slash(world, "")
+        test.assertEqual("roster", frame:LastPage())
+        test.assertTrue(addon.settings:Run("editGreetings"))
+        test.assertTrue(frame.shown)
+        test.assertEqual("greetings", frame:LastPage())
+        -- The button belongs to the options; the tab has the editor itself.
+        test.assertFalse(addon.settings:InHost("editGreetings", "frame"))
+        test.assertTrue(addon.settings:InHost("editGreetings", "options"))
+    end)
+
+    test.test(profile .. " unlocked greet prompts stay unlocked on any tab and lock when the frame closes", function()
+        local world, addon, frame = loggedIn(profile)
+        -- Frames that can draw, so the prompts can be unlocked.
+        fakeFrames.install(world.environment)
+        fixtures.slash(world, "greet")
+        test.assertTrue(addon.settings:Set("greetUnlock", true))
+
+        -- Moving between tabs keeps the mode on.
+        fixtures.slash(world, "options")
+        fixtures.slash(world, "")
+        test.assertTrue(addon.settings:Get("greetUnlock"))
+
+        -- The frame closing (Escape, its close button, or /agf) ends it.
+        frame:Hide()
+        frame.options.onHide()
+        test.assertFalse(addon.settings:Get("greetUnlock"))
     end)
 
     test.test(profile .. " the guild window's button opens the frame on the Roster tab", function()
