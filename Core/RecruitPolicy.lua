@@ -6,8 +6,9 @@ local _, addon = ...
 --
 -- A channel is prompted only when the character can invite to the guild,
 -- the user has opted in, there is an ad to post, the channel is there to
--- post in, and the ledger has no fresh time for it. An unknown channel
--- counts as due. The zone's General and Trade (where the user is in it) are
+-- post in, and the ledger has it due: asked about, with no fresh time
+-- from anyone. A channel whose time is unknown is asked about first, and
+-- never prompted while that ask waits. The zone's General and Trade (where the user is in it) are
 -- separate prompts. Nothing is prompted while the user is busy, for a
 -- channel the user snoozed with Not now, or in a zone the user turned off
 -- with Off here (its General, and Trade while there).
@@ -109,22 +110,41 @@ function Policy:channels(location)
     return channels
 end
 
--- The prompts due at `now` at `location` (see channelsAt), in a stable
--- order: General, then Trade. `ledger` is a RecruitLedger.
-function Policy:Due(location, ledger, now)
-    local due = {}
+-- The channels at `location` in ledger state `state` that the user could be
+-- prompted for (allowed, not busy, not turned off here).
+function Policy:inState(location, ledger, now, state)
+    local found = {}
     if not self:Allowed() or answers(self.busy) then
-        return due
+        return found
     end
     local channels = self:channels(location)
     local index
     for index = 1, #channels do
-        local key = channels[index].key
-        if ledger:State(key, now) ~= addon.RecruitLedger.FRESH and self:snoozeEnd(key, now) == nil then
+        if ledger:State(channels[index].key, now) == state then
+            table.insert(found, channels[index])
+        end
+    end
+    return found
+end
+
+-- The prompts due at `now` at `location` (see channelsAt), in a stable
+-- order: General, then Trade. `ledger` is a RecruitLedger.
+function Policy:Due(location, ledger, now)
+    local due = {}
+    local channels = self:inState(location, ledger, now, addon.RecruitLedger.DUE)
+    local index
+    for index = 1, #channels do
+        if self:snoozeEnd(channels[index].key, now) == nil then
             table.insert(due, channels[index])
         end
     end
     return due
+end
+
+-- The channels at `location` whose time is unknown and that the user could
+-- be prompted for: the ones to ask the other add-on users about.
+function Policy:Unknown(location, ledger, now)
+    return self:inState(location, ledger, now, addon.RecruitLedger.UNKNOWN)
 end
 
 -- Seconds from `now` until the first channel at `location` that was

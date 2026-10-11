@@ -22,10 +22,15 @@ local function guild()
     }
 end
 
--- Logs `playerName` in at `zone` ({ mapID, name }), in Trade when `inCity`.
--- The prompts the add-on last drew are in `world.shown`.
-local function login(channel, playerName, zone, inCity)
+-- Logs `playerName` in at `zone` ({ mapID, name }), in Trade when `inCity`,
+-- `secondsLater` after the channel's clock (`channel.time`). Asks wait
+-- `askWait` seconds (none when nil). The prompts the add-on last drew are in
+-- `world.shown`.
+local function login(channel, playerName, zone, inCity, askWait, secondsLater)
     local world = fixtures.newEnvironment("Retail", { guild = guild(), playerName = playerName })
+    world.time = (channel.time or world.time) + (secondsLater or 0)
+    channel.time = world.time
+    world.askWait = askWait
     world.zone = { mapID = zone[1], name = zone[2] }
     world.channels = { [1] = "General - " .. zone[2] }
     if inCity then
@@ -35,6 +40,9 @@ local function login(channel, playerName, zone, inCity)
     fixtures.loadAddon(world)
     world.addon.guildRecruit.showDelay = function()
         return 0
+    end
+    world.addon.guildRecruit.askWait = function()
+        return world.askWait or 0
     end
     world.shown = {}
     world.addon.guildRecruit.view = {
@@ -130,4 +138,86 @@ test.test("recruit coordination: every user posting what's due leaves each chann
         test.assertEqual(0, #users[index].shown)
     end
     test.assertEqual(2, posts)
+end)
+
+-- Moves every world's clock on by one second at a time, delivering add-on
+-- messages after each step, for `seconds` seconds.
+local function tick(channel, seconds)
+    local step, index
+    for step = 1, seconds do
+        for index = 1, #channel.worlds do
+            fixtures.runTimers(channel.worlds[index], 1)
+        end
+        fixtures.deliver(channel)
+    end
+end
+
+-- Answers from this world wait `seconds` seconds.
+local function answersAfter(world, seconds)
+    world.environment.math = { random = function() return seconds end }
+end
+
+local function channelTimes(channel)
+    local count = 0
+    local index, sentIndex
+    for index = 1, #channel.worlds do
+        local world = channel.worlds[index]
+        local serializer = world.environment.LibStub.libs["AceSerializer-3.0"]
+        for sentIndex = 1, #world.sentMessages do
+            local _, message = serializer:Deserialize(world.sentMessages[sentIndex].text)
+            if type(message) == "table" and message.t == "channel-time" then
+                count = count + 1
+            end
+        end
+    end
+    return count
+end
+
+test.test("recruit coordination: logging in where someone just posted asks, hears back, and isn't prompted", function()
+    local channel = fixtures.newChannel()
+    local toolbox = login(channel, "Toolbox-Area52", DORNOGAL, false)
+    fixtures.deliver(channel)
+    toolbox.handlers.post("general:map:2339")
+    fixtures.deliver(channel)
+
+    local anvil = login(channel, "Anvil-Area52", DORNOGAL, false, 8, 60)
+    toolbox.time = anvil.time
+    tick(channel, 10)
+
+    test.assertEqual(0, #anvil.shown)
+    test.assertEqual(0, #anvil.chat)
+    test.assertEqual(1, channelTimes(channel))
+end)
+
+test.test("recruit coordination: with several add-on users holding the time, only the first answers", function()
+    local channel = fixtures.newChannel()
+    local holders = {
+        login(channel, "Toolbox-Area52", DORNOGAL, false),
+        login(channel, "Wrench-Area52", DORNOGAL, false),
+    }
+    fixtures.deliver(channel)
+    holders[1].handlers.post("general:map:2339")
+    fixtures.deliver(channel)
+    answersAfter(holders[1], 4)
+    answersAfter(holders[2], 2)
+
+    local anvil = login(channel, "Anvil-Area52", DORNOGAL, false, 8)
+    tick(channel, 10)
+
+    test.assertEqual(1, channelTimes(channel))
+    test.assertEqual(0, #anvil.shown)
+end)
+
+test.test("recruit coordination: when nobody holds a fresh time, the asker is prompted after the wait", function()
+    local channel = fixtures.newChannel()
+    login(channel, "Toolbox-Area52", ISLE, false)
+    fixtures.deliver(channel)
+
+    local anvil = login(channel, "Anvil-Area52", DORNOGAL, false, 8)
+    tick(channel, 7)
+    test.assertEqual(0, #anvil.shown)
+    tick(channel, 1)
+
+    test.assertEqual(1, #anvil.shown)
+    test.assertEqual(0, channelTimes(channel))
 end)

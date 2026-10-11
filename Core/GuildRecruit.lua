@@ -21,13 +21,29 @@ local _, addon = ...
 -- tells the guild's other add-on users, who record the time for that channel
 -- (in any zone) and close their own prompt for it. A prompt waits a short
 -- random moment before showing, so two users rarely get the same one at the
--- same instant. Without add-on messaging, it simply works uncoordinated.
+-- same instant. A channel whose time is unknown (no time, or a stale one)
+-- is asked about with "ask-channel"; add-ons holding a fresh time answer
+-- with "channel-time" after a random moment, unless someone else answered
+-- first with the same time or a newer one. When nobody answers, the channel
+-- is taken as not advertised in. Without add-on messaging, it simply works
+-- uncoordinated: an ask nobody can hear counts as unanswered at once.
 local GuildRecruit = {
     -- The "advertised" message: { v = PROTOCOL, t = TYPE_ADVERTISED, k = the
     -- channel key, n = the channel's display name, a = when it was posted
     -- (server time) }. The poster is whoever the game says sent it.
     PROTOCOL = 1,
     TYPE_ADVERTISED = "advertised",
+    -- { v, t = TYPE_ASK, k = the channel key }: who has a fresh time for it?
+    TYPE_ASK = "ask-channel",
+    -- { v, t = TYPE_CHANNEL_TIME, k = the channel key, a = the newest time
+    -- the sender knows }.
+    TYPE_CHANNEL_TIME = "channel-time",
+    -- How long an ask waits for answers before the channel counts as due.
+    ASK_WAIT_SECONDS = 8,
+    -- An answer waits a random whole number of seconds in this range, so
+    -- the first answer heard can stop the rest.
+    ANSWER_DELAY_MIN = 1,
+    ANSWER_DELAY_MAX = 5,
     -- A prompt shows a random whole number of seconds in this range after
     -- its channel comes due.
     SHOW_DELAY_MIN = 3,
@@ -66,6 +82,8 @@ Recruit.__index = Recruit
 --               guild's add-on users. Optional.
 --   isOwn       function(sender) -> true when a message's sender is one of
 --               the user's own characters. Optional.
+--   askWait     function() -> seconds an ask waits for answers. Optional;
+--               ASK_WAIT_SECONDS otherwise.
 --   send        function(text, channelNumber) -> true when posted
 --   rosterLoaded function() -> true once the guild roster has loaded
 --   view        { Show = function(view, prompts, handlers),
@@ -100,8 +118,14 @@ function GuildRecruit.Create(options)
         isOwn = options.isOwn or function()
             return false
         end,
+        askWait = options.askWait,
         -- When each channel that's due but not yet shown will show.
         showAt = {},
+        -- This session's due marks (see RecruitLedger), the channels being
+        -- asked about, and the answers waiting to be sent (key -> time).
+        dueMarks = {},
+        askingAbout = {},
+        answering = {},
         -- True during combat or a boss encounter.
         inCombat = false,
         -- This session's Not now (channel key -> when it ends) and Off here
@@ -183,7 +207,7 @@ end
 -- The ledger of ad times for the current guild, saved with its partition.
 function Recruit:Ledger()
     local partition = self.partition()
-    return addon.RecruitLedger.Create(partition and partition:GetRecruitLedger(), GuildRecruit.GapOf)
+    return addon.RecruitLedger.Create(partition and partition:GetRecruitLedger(), GuildRecruit.GapOf, self.dueMarks)
 end
 
 -- The current location, or nil.
@@ -228,6 +252,47 @@ function Recruit:wakeIn(seconds, now)
         self:Refresh()
     end) then
         self.wakeAt = at
+    end
+end
+
+-- Seconds an ask waits for answers.
+function Recruit:AskWait()
+    if self.askWait == nil then
+        return GuildRecruit.ASK_WAIT_SECONDS
+    end
+    local ok, wait = pcall(self.askWait)
+    if not ok or type(wait) ~= "number" or wait < 0 then
+        return GuildRecruit.ASK_WAIT_SECONDS
+    end
+    return wait
+end
+
+-- Asks the other add-on users about each of `channels` not already being
+-- asked about. When the wait ends with no fresh time heard, the channel is
+-- due. An ask that can't be sent, or can't be waited for, ends at once.
+function Recruit:ask(channels, ledger)
+    local index
+    for index = 1, #channels do
+        local key = channels[index].key
+        if not self.askingAbout[key] then
+            local wait = self:AskWait()
+            local okSent, sent = pcall(self.announce, { v = GuildRecruit.PROTOCOL, t = GuildRecruit.TYPE_ASK, k = key })
+            if okSent and sent == true and wait > 0 and self.after(wait, function()
+                self.askingAbout[key] = nil
+                -- An answer heard meanwhile made it fresh; once that goes
+                -- stale it's asked about again, so it isn't marked due.
+                local ledger = self:Ledger()
+                local current = self.now()
+                if type(current) ~= "number" or ledger:State(key, current) ~= addon.RecruitLedger.FRESH then
+                    ledger:MarkDue(key)
+                end
+                self:Refresh()
+            end) then
+                self.askingAbout[key] = true
+            else
+                ledger:MarkDue(key)
+            end
+        end
     end
 end
 
@@ -294,6 +359,7 @@ function Recruit:Refresh()
         local ledger = self:Ledger()
         local location = self:Location()
         ledger:Prune(now)
+        self:ask(self.policy:Unknown(location, ledger, now), ledger)
         due = self.policy:Due(location, ledger, now)
         self:wakeIn(self.policy:NextDue(location, ledger, now), now)
     end
@@ -450,31 +516,106 @@ local function isChannelKey(key)
         or (type(key) == "string" and string.sub(key, 1, 8) == "general:" and string.len(key) > 8)
 end
 
+-- True for a message of `kind` in this protocol about a channel key, with a
+-- time when `timed`.
+local function isMessage(message, kind, timed)
+    if type(message) ~= "table" or message.v ~= GuildRecruit.PROTOCOL or message.t ~= kind
+        or not isChannelKey(message.k)
+    then
+        return false
+    end
+    return not timed or (type(message.a) == "number" and message.a == message.a)
+end
+
+-- True when `sender` is someone else's add-on; a sender that can't be
+-- placed counts as the user's own.
+function Recruit:fromOthers(sender)
+    if type(sender) ~= "string" then
+        return false
+    end
+    local ok, own = pcall(self.isOwn, sender)
+    return ok and own == false
+end
+
+-- Records another add-on user's time for `key`. Refreshes when it was
+-- newer, so a prompt for a channel that's now fresh closes. Returns true
+-- when the time was kept.
+function Recruit:hear(key, at)
+    if self.partition() == nil then
+        return false
+    end
+    local recorded = self:Ledger():Record(key, at)
+    if recorded then
+        self:Refresh()
+    end
+    return recorded
+end
+
 -- Another add-on user's "advertised" message, from `sender` (a name as the
 -- game reports it). Records the time for that channel, in any zone, and
 -- closes the user's prompt for it if it's now fresh. Messages from the
 -- user's own characters and malformed ones are ignored. Returns true when
 -- the time was recorded.
 function Recruit:OnAdvertised(message, sender)
-    if type(message) ~= "table" or message.v ~= GuildRecruit.PROTOCOL or message.t ~= GuildRecruit.TYPE_ADVERTISED
-        or not isChannelKey(message.k) or type(message.a) ~= "number" or message.a ~= message.a
-        or (message.n ~= nil and type(message.n) ~= "string") or type(sender) ~= "string"
+    if not isMessage(message, GuildRecruit.TYPE_ADVERTISED, true)
+        or (message.n ~= nil and type(message.n) ~= "string") or not self:fromOthers(sender)
     then
         return false
     end
-    local ok, own = pcall(self.isOwn, sender)
-    if not ok or own ~= false then
+    return self:hear(message.k, message.a)
+end
+
+-- Another add-on user's "ask-channel": when this add-on has a fresh time
+-- for the channel, it answers after a random short wait, unless an answer
+-- with the same time or a newer one is heard first. Returns true when an
+-- answer was scheduled.
+function Recruit:OnAsk(message, sender)
+    if not isMessage(message, GuildRecruit.TYPE_ASK, false) or not self:fromOthers(sender)
+        or self.partition() == nil or self.answering[message.k] ~= nil
+    then
         return false
     end
-    local partition = self.partition()
-    if partition == nil then
+    local key = message.k
+    local now = self.now()
+    local ledger = self:Ledger()
+    if type(now) ~= "number" or ledger:State(key, now) ~= addon.RecruitLedger.FRESH then
         return false
     end
-    local recorded = self:Ledger():Record(message.k, message.a)
-    if recorded then
-        self:Refresh()
+    local function answer()
+        local time = self.answering[key]
+        self.answering[key] = nil
+        local current = self.now()
+        if time ~= nil and type(current) == "number"
+            and self:Ledger():State(key, current) == addon.RecruitLedger.FRESH
+        then
+            pcall(self.announce, {
+                v = GuildRecruit.PROTOCOL, t = GuildRecruit.TYPE_CHANNEL_TIME, k = key, a = self:Ledger():Time(key),
+            })
+        end
     end
-    return recorded
+    self.answering[key] = ledger:Time(key)
+    local okDelay, delay = pcall(self.random, GuildRecruit.ANSWER_DELAY_MIN, GuildRecruit.ANSWER_DELAY_MAX)
+    if not okDelay or type(delay) ~= "number" or delay < 0 then
+        delay = GuildRecruit.ANSWER_DELAY_MIN
+    end
+    if not self.after(delay, answer) then
+        answer()
+    end
+    return true
+end
+
+-- Another add-on user's "channel-time": recorded like an "advertised"
+-- message, and it stops this add-on's own answer for that channel when it's
+-- as new or newer. Returns true when the time was recorded.
+function Recruit:OnChannelTime(message, sender)
+    if not isMessage(message, GuildRecruit.TYPE_CHANNEL_TIME, true) or not self:fromOthers(sender) then
+        return false
+    end
+    local pending = self.answering[message.k]
+    if pending ~= nil and message.a >= pending then
+        self.answering[message.k] = nil
+    end
+    return self:hear(message.k, message.a)
 end
 
 -- The user pressed Not now on the prompt for `key`: hides that channel's
@@ -496,4 +637,21 @@ function Recruit:OffHere(key)
         self.muted[prompt.zoneKey] = true
     end
     self:Refresh()
+end
+
+-- Every Guild Recruit message type, for routing.
+GuildRecruit.TYPES = {
+    [GuildRecruit.TYPE_ADVERTISED] = "OnAdvertised",
+    [GuildRecruit.TYPE_ASK] = "OnAsk",
+    [GuildRecruit.TYPE_CHANNEL_TIME] = "OnChannelTime",
+}
+
+-- Hands a received Guild Recruit message to its handler. Returns false for
+-- any other message.
+function Recruit:OnMessage(message, sender)
+    local handler = type(message) == "table" and GuildRecruit.TYPES[message.t] or nil
+    if handler == nil then
+        return false
+    end
+    return self[handler](self, message, sender)
 end

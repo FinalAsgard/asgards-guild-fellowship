@@ -8,7 +8,7 @@ local AD = "Knights of Camelot is recruiting! Whisper me for an invite."
 -- recruit prompts it last drew in `world.shown` (Post through
 -- `world.handlers.post`), and the login question in `world.question`
 -- (answered through `world.answers`). `options.before(world)` runs before
--- the add-on loads.
+-- the add-on loads, and `options.askWait` sets how long asks wait.
 local function login(profile, options)
     local world = fixtures.newEnvironment(profile, options)
     if options and options.time then
@@ -17,10 +17,16 @@ local function login(profile, options)
     if options and options.before then
         options.before(world)
     end
+    world.askWait = options and options.askWait
     fixtures.loadAddon(world)
     -- Prompts show at once unless a spec sets `world.showDelay`.
     world.addon.guildRecruit.showDelay = function()
         return world.showDelay or 0
+    end
+    -- Asks end at once, with nobody answering, unless a spec sets
+    -- `world.askWait`.
+    world.addon.guildRecruit.askWait = function()
+        return world.askWait or 0
     end
     world.shown = {}
     world.addon.guildRecruit.view = {
@@ -737,3 +743,134 @@ for index = 1, #fixtures.PROFILES do
         end
     end)
 end
+
+-- Every Guild Recruit message of type `kind` the world sent, deserialized.
+local function sentOfType(world, kind)
+    local serializer = world.environment.LibStub.libs["AceSerializer-3.0"]
+    local found = {}
+    local index
+    for index = 1, #world.sentMessages do
+        local _, message = serializer:Deserialize(world.sentMessages[index].text)
+        if type(message) == "table" and message.t == kind then
+            table.insert(found, message)
+        end
+    end
+    return found
+end
+
+test.test("guild recruit: an unknown channel is asked about, and prompted only after nobody answers", function()
+    local world = login("Retail")
+    world.askWait = 8
+    optIn(world)
+
+    local asks = sentOfType(world, "ask-channel")
+    test.assertEqual(1, #asks)
+    test.assertEqual("general:map:2339", asks[1].k)
+    test.assertEqual(0, #world.shown)
+
+    fixtures.runTimers(world, 7)
+    test.assertEqual(0, #world.shown)
+    fixtures.runTimers(world, 1)
+    test.assertEqual(1, #world.shown)
+    -- A due channel isn't asked about again.
+    fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+    test.assertEqual(1, #sentOfType(world, "ask-channel"))
+end)
+
+test.test("guild recruit: entering a zone or city asks only about the unknown channels there", function()
+    local world = login("Retail")
+    world.askWait = 8
+    optIn(world)
+    fixtures.runTimers(world, 8)
+    world.handlers.post(world.shown[1].key)
+
+    inCity(world, "Dornogal")
+    local asks = sentOfType(world, "ask-channel")
+    test.assertEqual(2, #asks)
+    test.assertEqual("trade", asks[2].k)
+
+    travel(world, 2248, "Isle of Dorn")
+    asks = sentOfType(world, "ask-channel")
+    test.assertEqual(3, #asks)
+    test.assertEqual("general:map:2248", asks[3].k)
+end)
+
+test.test("guild recruit: a channel-time heard while asking prevents the prompt", function()
+    local world = login("Retail")
+    world.askWait = 8
+    optIn(world)
+
+    test.assertTrue(world.addon.guildRecruit:OnMessage(
+        { v = 1, t = "channel-time", k = "general:map:2339", a = world.time - 60 }, "Anvil-Area52"))
+    fixtures.runTimers(world, 8)
+
+    test.assertEqual(0, #world.shown)
+    -- It's prompted once that time goes stale and a new ask gets no answer.
+    fixtures.runTimers(world, HOUR - 60 - 8)
+    test.assertEqual(0, #world.shown)
+    test.assertEqual(2, #sentOfType(world, "ask-channel"))
+    fixtures.runTimers(world, 8)
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild recruit: a saved time older than the gap is asked about, never taken as the last ad", function()
+    local first = login("Retail")
+    optIn(first)
+    first.handlers.post(first.shown[1].key)
+
+    local later = login("Retail", { database = first.database, time = first.time + HOUR, askWait = 8 })
+
+    test.assertEqual(1, #sentOfType(later, "ask-channel"))
+    test.assertEqual(0, #later.shown)
+    fixtures.runTimers(later, 8)
+    test.assertEqual(1, #later.shown)
+end)
+
+test.test("guild recruit: only an add-on with a fresh time answers, after a random short wait", function()
+    local world = login("Retail")
+    optIn(world)
+    world.handlers.post(world.shown[1].key)
+    local recruit = world.addon.guildRecruit
+    world.environment.math = { random = function() return 3 end }
+
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "ask-channel", k = "trade" }, "Anvil-Area52"))
+    test.assertTrue(recruit:OnMessage({ v = 1, t = "ask-channel", k = "general:map:2339" }, "Anvil-Area52"))
+    fixtures.runTimers(world, 2)
+    test.assertEqual(0, #sentOfType(world, "channel-time"))
+    fixtures.runTimers(world, 1)
+
+    local answers = sentOfType(world, "channel-time")
+    test.assertEqual(1, #answers)
+    test.assertEqual("general:map:2339", answers[1].k)
+    test.assertEqual(world.time - 3, answers[1].a)
+end)
+
+test.test("guild recruit: an answer is dropped when an equal or newer one is heard first", function()
+    local world = login("Retail")
+    optIn(world)
+    world.handlers.post(world.shown[1].key)
+    local recruit = world.addon.guildRecruit
+    local posted = world.time
+
+    recruit:OnMessage({ v = 1, t = "ask-channel", k = "general:map:2339" }, "Anvil-Area52")
+    recruit:OnMessage({ v = 1, t = "channel-time", k = "general:map:2339", a = posted - 1 }, "Wrench-Area52")
+    recruit:OnMessage({ v = 1, t = "channel-time", k = "general:map:2339", a = posted }, "Wrench-Area52")
+    fixtures.runTimers(world, 20)
+
+    test.assertEqual(0, #sentOfType(world, "channel-time"))
+end)
+
+test.test("guild recruit: own and malformed asks and answers are ignored", function()
+    local world = login("Retail")
+    optIn(world)
+    world.handlers.post(world.shown[1].key)
+    local recruit = world.addon.guildRecruit
+
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "ask-channel", k = "general:map:2339" }, "Hammer-Area52"))
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "ask-channel", k = "nowhere" }, "Anvil-Area52"))
+    test.assertFalse(recruit:OnMessage({ v = 2, t = "ask-channel", k = "trade" }, "Anvil-Area52"))
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "channel-time", k = "trade" }, "Anvil-Area52"))
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "channel-time", k = "trade", a = world.time }, "Hammer-Area52"))
+    test.assertFalse(recruit:OnMessage({ v = 1, t = "something", k = "trade", a = world.time }, "Anvil-Area52"))
+    test.assertFalse(recruit:OnMessage("ask-channel", "Anvil-Area52"))
+end)

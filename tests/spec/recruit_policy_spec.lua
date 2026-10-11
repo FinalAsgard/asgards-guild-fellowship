@@ -33,6 +33,10 @@ local function setup()
     local ledger = addon.RecruitLedger.Create({}, function()
         return HOUR
     end)
+    -- Every channel the specs use was asked about, and nobody answered.
+    ledger:MarkDue(addon.RecruitLedger.GeneralKey("map:1455"))
+    ledger:MarkDue(addon.RecruitLedger.GeneralKey("map:1453"))
+    ledger:MarkDue(addon.RecruitLedger.TRADE_KEY)
     local location = { key = "map:1455", name = "Ironforge", general = 1 }
     return addon, policy, state, ledger, location
 end
@@ -50,12 +54,35 @@ test.test("recruit policy: an unadvertised General is due, named for its zone", 
     test.assertEqual(1, due[1].channelNumber)
 end)
 
-test.test("recruit policy: a channel advertised within the gap isn't due until the gap passes", function()
+test.test("recruit policy: a channel advertised within the gap isn't due, and is unknown once the gap passes", function()
     local addon, policy, _, ledger, location = setup()
     ledger:Record(addon.RecruitLedger.GeneralKey("map:1455"), START)
 
     test.assertEqual(0, #policy:Due(location, ledger, START + HOUR - 1))
-    test.assertEqual(1, #policy:Due(location, ledger, START + HOUR))
+    test.assertEqual(0, #policy:Unknown(location, ledger, START + HOUR - 1))
+    -- A stale time is asked about again, never taken as the last ad.
+    test.assertEqual(0, #policy:Due(location, ledger, START + HOUR))
+    test.assertEqual(1, #policy:Unknown(location, ledger, START + HOUR))
+end)
+
+test.test("recruit policy: an unknown channel is asked about, never prompted, until it's marked due", function()
+    local addon, policy, state, ledger, location = setup()
+    local fresh = addon.RecruitLedger.Create({}, function()
+        return HOUR
+    end)
+
+    test.assertEqual(0, #policy:Due(location, fresh, START))
+    local unknown = policy:Unknown(location, fresh, START)
+    test.assertEqual(1, #unknown)
+    test.assertEqual(addon.RecruitLedger.GeneralKey("map:1455"), unknown[1].key)
+
+    fresh:MarkDue(unknown[1].key)
+    test.assertEqual(1, #policy:Due(location, fresh, START))
+    test.assertEqual(0, #policy:Unknown(location, fresh, START))
+
+    -- Nothing is asked about while the user couldn't be prompted anyway.
+    state.optedIn = false
+    test.assertEqual(0, #policy:Unknown(location, addon.RecruitLedger.Create({}, function() return HOUR end), START))
 end)
 
 test.test("recruit policy: no prompt without permission, opt-in, or an ad", function()

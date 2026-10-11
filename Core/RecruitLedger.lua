@@ -6,11 +6,16 @@ local _, addon = ...
 --
 -- A channel's key is RecruitLedger.GeneralKey(zone) for a zone's General
 -- channel, so each zone has its own time, and RecruitLedger.TRADE_KEY for
--- Trade, which is one channel in every city and so has one time. A time within the channel's gap is
--- fresh: the guild advertised there lately. No time, or only one older than
--- the gap, is unknown. Unknown never means "advertised".
+-- Trade, which is one channel in every city and so has one time. A time
+-- within the channel's gap is fresh: the guild advertised there lately. No
+-- time, or only one older than the gap, is unknown: the add-on should ask
+-- the other add-on users. Unknown never means "advertised". A channel marked
+-- due was asked about and nobody had a fresh time, so it's taken as not
+-- advertised in. Due marks are kept only for the session, and a new time
+-- clears one, so a time that later goes stale is asked about again.
 local RecruitLedger = {
     FRESH = "fresh",
+    DUE = "due",
     UNKNOWN = "unknown",
     TRADE_KEY = "trade",
 }
@@ -25,11 +30,13 @@ function RecruitLedger.GeneralKey(zoneKey)
 end
 
 -- `saved` is the table to keep times in (nil keeps them only in memory).
--- `gapOf(key)` returns the channel's gap in seconds.
-function RecruitLedger.Create(saved, gapOf)
+-- `gapOf(key)` returns the channel's gap in seconds. `due` is the table to
+-- keep this session's due marks in (nil keeps them only in this ledger).
+function RecruitLedger.Create(saved, gapOf, due)
     return setmetatable({
         times = type(saved) == "table" and saved or {},
         gapOf = gapOf,
+        due = type(due) == "table" and due or {},
     }, Ledger)
 end
 
@@ -57,7 +64,15 @@ function Ledger:Record(key, at)
         return false
     end
     self.times[key] = at
+    self.due[key] = nil
     return true
+end
+
+-- Marks `key` due: asked about, and nobody had a fresh time.
+function Ledger:MarkDue(key)
+    if type(key) == "string" then
+        self.due[key] = true
+    end
 end
 
 -- The last ad time recorded for `key`, or nil.
@@ -66,11 +81,15 @@ function Ledger:Time(key)
     return isTime(time) and time or nil
 end
 
--- FRESH when `key` has a time within its gap at `now`, UNKNOWN otherwise.
+-- FRESH when `key` has a time within its gap at `now`; otherwise DUE when
+-- it's marked due, and UNKNOWN when not.
 function Ledger:State(key, now)
     local time, gap = self:Time(key), self:gap(key)
     if time ~= nil and gap ~= nil and isTime(now) and now - time < gap then
         return RecruitLedger.FRESH
+    end
+    if self.due[key] then
+        return RecruitLedger.DUE
     end
     return RecruitLedger.UNKNOWN
 end

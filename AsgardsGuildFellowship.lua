@@ -704,8 +704,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     if comm:Start(function(message, sender)
         if message.t == addon.GuildGreet.TYPE_GREETED then
             guildGreet:OnGreeted(message, sender)
-        elseif message.t == addon.GuildRecruit.TYPE_ADVERTISED then
-            guildRecruit:OnAdvertised(message, sender)
+        elseif addon.GuildRecruit.TYPES[message.t] ~= nil then
+            guildRecruit:OnMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end

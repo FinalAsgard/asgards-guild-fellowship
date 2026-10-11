@@ -120,3 +120,25 @@ test.test("recruit ledger: Trade has one key, and each key has its own gap", fun
     test.assertEqual(nil, ledger:FreshFor(addon.RecruitLedger.TRADE_KEY, START + 20 * 60))
     test.assertEqual(addon.RecruitLedger.FRESH, ledger:State(general, START + 20 * 60))
 end)
+
+test.test("recruit ledger: a channel asked about with no answer is due, and a new time clears that", function()
+    local addon = load()
+    local marks = {}
+    local ledger = addon.RecruitLedger.Create({}, function()
+        return HOUR
+    end, marks)
+    local key = addon.RecruitLedger.GeneralKey("map:1")
+
+    test.assertEqual(addon.RecruitLedger.UNKNOWN, ledger:State(key, START))
+    ledger:MarkDue(key)
+    test.assertEqual(addon.RecruitLedger.DUE, ledger:State(key, START))
+    -- Marks are kept in the table given, not the saved times.
+    test.assertTrue(marks[key])
+    test.assertEqual(addon.RecruitLedger.DUE,
+        addon.RecruitLedger.Create({}, function() return HOUR end, marks):State(key, START))
+
+    ledger:Record(key, START)
+    test.assertEqual(addon.RecruitLedger.FRESH, ledger:State(key, START + 1))
+    -- Once the new time goes stale, it's unknown again, so it's asked about.
+    test.assertEqual(addon.RecruitLedger.UNKNOWN, ledger:State(key, START + HOUR))
+end)
