@@ -2,7 +2,8 @@ local _, addon = ...
 
 -- Guild Recruit: prompts a member who can invite to the guild, and who
 -- turned advertise prompts on, to post their ad in the current zone's General
--- channel when the guild hasn't advertised there lately. A press of Post
+-- channel, or in Trade, when the guild hasn't advertised there lately. A
+-- channel that comes due while the user stays put is prompted then too. A press of Post
 -- sends it. It wires RecruitLedger (when each channel was last advertised in)
 -- and RecruitPolicy (which channels are due) to the game through the
 -- functions it's given, so it never touches the game itself. Nothing is ever
@@ -19,6 +20,8 @@ local GuildRecruit = {
     QUESTION = "Help with guild recruitment?",
     -- How long after an ad in a zone's General channel the next one is due.
     GENERAL_GAP_SECONDS = 60 * 60,
+    -- The same for Trade, one channel shared by every city.
+    TRADE_GAP_SECONDS = 20 * 60,
 }
 addon.GuildRecruit = GuildRecruit
 
@@ -32,9 +35,11 @@ Recruit.__index = Recruit
 --   now         function() -> server time in seconds
 --   canInvite   function() -> true when the character can invite to the
 --               guild
---   location    function() -> { key, name, general }: the zone's key and
---               name, and its General channel's number (nil when the user
---               isn't in it); nil when the zone is unknown
+--   location    function() -> { key, name, general, trade }: the zone's
+--               key and name, and the numbers of its General channel and
+--               of Trade (nil where the user isn't in them); nil when the
+--               zone is unknown
+--   after       function(seconds, callback) -> false when there's no timer
 --   send        function(text, channelNumber) -> true when posted
 --   rosterLoaded function() -> true once the guild roster has loaded
 --   view        { Show = function(view, prompts, handlers),
@@ -51,6 +56,9 @@ function GuildRecruit.Create(options)
         canInvite = options.canInvite,
         location = options.location,
         send = options.send,
+        after = options.after or function()
+            return false
+        end,
         rosterLoaded = options.rosterLoaded,
         view = options.view,
         -- True once this login's permission check has run.
@@ -59,6 +67,8 @@ function GuildRecruit.Create(options)
         asking = false,
         -- The prompts on screen, in order.
         prompts = {},
+        -- When the pending timer for the next channel to come due fires.
+        wakeAt = nil,
     }, Recruit)
     recruit.policy = addon.RecruitPolicy.Create({
         canInvite = function()
@@ -99,9 +109,7 @@ end
 -- The ledger of ad times for the current guild, saved with its partition.
 function Recruit:Ledger()
     local partition = self.partition()
-    return addon.RecruitLedger.Create(partition and partition:GetRecruitLedger(), function()
-        return GuildRecruit.GENERAL_GAP_SECONDS
-    end)
+    return addon.RecruitLedger.Create(partition and partition:GetRecruitLedger(), GuildRecruit.GapOf)
 end
 
 -- The current location, or nil.
@@ -113,9 +121,40 @@ function Recruit:Location()
     return nil
 end
 
+-- The gap in seconds for a channel key.
+function GuildRecruit.GapOf(key)
+    if key == addon.RecruitLedger.TRADE_KEY then
+        return GuildRecruit.TRADE_GAP_SECONDS
+    end
+    return GuildRecruit.GENERAL_GAP_SECONDS
+end
+
 -- The question a prompt asks.
 function GuildRecruit.PromptText(prompt)
+    if prompt.channel == addon.RecruitPolicy.TRADE then
+        return "Advertise in Trade?"
+    end
     return "Advertise in " .. tostring(prompt.zoneName or "this zone") .. " General?"
+end
+
+-- Sets a timer for when the next channel here comes due, unless one is
+-- already set for then or sooner.
+function Recruit:wakeIn(seconds, now)
+    if seconds == nil then
+        return
+    end
+    local at = now + seconds
+    if self.wakeAt ~= nil and self.wakeAt > now and self.wakeAt <= at then
+        return
+    end
+    if self.after(seconds, function()
+        if self.wakeAt == at then
+            self.wakeAt = nil
+        end
+        self:Refresh()
+    end) then
+        self.wakeAt = at
+    end
 end
 
 -- Works out the prompts due now and draws them: new ones appear, and ones
@@ -127,8 +166,10 @@ function Recruit:Refresh()
     -- Saved guild data is only opened for a user who may be prompted.
     if type(now) == "number" and self.policy:Allowed() then
         local ledger = self:Ledger()
+        local location = self:Location()
         ledger:Prune(now)
-        due = self.policy:Due(self:Location(), ledger, now)
+        due = self.policy:Due(location, ledger, now)
+        self:wakeIn(self.policy:NextDue(location, ledger, now), now)
     end
     local index
     for index = 1, #due do
@@ -253,11 +294,12 @@ function Recruit:Post(key)
     -- The channel is looked up again, in case the user moved since the
     -- prompt appeared.
     local location = self:Location()
-    if location == nil or location.key ~= prompt.zoneKey or type(location.general) ~= "number" then
+    local channelNumber = location and location[prompt.channel]
+    if location == nil or location.key ~= prompt.zoneKey or type(channelNumber) ~= "number" then
         self:Refresh()
         return nil
     end
-    local ok, sent = pcall(self.send, ad, location.general)
+    local ok, sent = pcall(self.send, ad, channelNumber)
     if not ok or sent ~= true then
         return nil
     end

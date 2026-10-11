@@ -589,7 +589,15 @@ if clientProfile.supported then
             if zone == nil then
                 return nil
             end
-            return { key = zone.key, name = zone.name, general = client:GetGeneralChannel() }
+            return {
+                key = zone.key,
+                name = zone.name,
+                general = client:GetGeneralChannel(),
+                trade = client:GetTradeChannel(),
+            }
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
         end,
         send = function(text, channelNumber)
             return client:SendChannelMessage(text, channelNumber)

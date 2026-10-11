@@ -5,12 +5,14 @@ local _, addon = ...
 -- last across reloads and logouts.
 --
 -- A channel's key is RecruitLedger.GeneralKey(zone) for a zone's General
--- channel, so each zone has its own time. A time within the channel's gap is
+-- channel, so each zone has its own time, and RecruitLedger.TRADE_KEY for
+-- Trade, which is one channel in every city and so has one time. A time within the channel's gap is
 -- fresh: the guild advertised there lately. No time, or only one older than
 -- the gap, is unknown. Unknown never means "advertised".
 local RecruitLedger = {
     FRESH = "fresh",
     UNKNOWN = "unknown",
+    TRADE_KEY = "trade",
 }
 addon.RecruitLedger = RecruitLedger
 
@@ -71,6 +73,15 @@ function Ledger:State(key, now)
         return RecruitLedger.FRESH
     end
     return RecruitLedger.UNKNOWN
+end
+
+-- Seconds from `now` until a fresh `key` stops being fresh, or nil when it
+-- isn't fresh.
+function Ledger:FreshFor(key, now)
+    if self:State(key, now) ~= RecruitLedger.FRESH then
+        return nil
+    end
+    return self:Time(key) + self:gap(key) - now
 end
 
 -- Forgets every time older than its channel's gap, and anything that isn't

@@ -51,7 +51,7 @@ end
 -- Moves the player to another zone, in its General channel.
 local function travel(world, mapID, name)
     world.zone = { mapID = mapID, name = name }
-    world.channels = { [1] = "General - " .. name, [2] = "Trade - City" }
+    world.channels = { [1] = "General - " .. name }
     fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
 end
 
@@ -163,7 +163,7 @@ end)
 
 test.test("guild recruit: no prompt outside the zone's General channel", function()
     local world = login("Retail")
-    world.channels = { [2] = "Trade - City" }
+    world.channels = {}
     optIn(world)
 
     test.assertEqual(0, #world.shown)
@@ -386,4 +386,94 @@ test.test("recruitment settings: undecided shows unchecked, and the checkbox sav
     test.assertTrue(world.addon.settings:Set("recruitOptIn", false))
     test.assertFalse(savedAnswer(world))
     test.assertFalse(world.addon.settings:Get("recruitOptIn"))
+end)
+
+-- Puts the player in Trade too, as the client does in a city.
+local function inCity(world, zoneName)
+    world.channels = { [1] = "General - " .. zoneName, [2] = "Trade - City" }
+    fixtures.fire(world, "CHANNEL_UI_UPDATE")
+end
+
+local function promptFor(world, text)
+    local index
+    for index = 1, #world.shown do
+        if world.shown[index].text == text then
+            return world.shown[index]
+        end
+    end
+    return nil
+end
+
+for index = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[index]
+    local zones = ZONES[profile]
+
+    test.test(profile .. ": in a city, Trade gets its own prompt, and Post sends to Trade", function()
+        local world = login(profile)
+        optIn(world)
+        inCity(world, zones.here[2])
+
+        test.assertEqual(2, #world.shown)
+        local trade = promptFor(world, "Advertise in Trade?")
+        test.assertTrue(trade ~= nil)
+        test.assertTrue(promptFor(world, "Advertise in " .. zones.here[2] .. " General?") ~= nil)
+
+        world.handlers.post(trade.key)
+
+        test.assertEqual(2, world.chat[1].target)
+        test.assertEqual(1, #world.shown)
+        test.assertEqual("Advertise in " .. zones.here[2] .. " General?", world.shown[1].text)
+    end)
+
+    test.test(profile .. ": an ad in one city's Trade makes Trade fresh in every city", function()
+        local world = login(profile)
+        optIn(world)
+        inCity(world, zones.here[2])
+        world.handlers.post(promptFor(world, "Advertise in Trade?").key)
+
+        travel(world, zones.there[1], zones.there[2])
+        inCity(world, zones.there[2])
+
+        test.assertEqual(1, #world.shown)
+        test.assertEqual("Advertise in " .. zones.there[2] .. " General?", world.shown[1].text)
+    end)
+end
+
+test.test("guild recruit: a failed Trade send records nothing", function()
+    local world = login("Retail")
+    optIn(world)
+    inCity(world, "Dornogal")
+    world.chatFails = true
+
+    test.assertEqual(nil, world.addon.guildRecruit:Post("trade"))
+
+    test.assertEqual(2, #world.shown)
+    local partition = select(2, world.addon.rosterController:QuietContext())
+    test.assertEqual(nil, partition:GetRecruitLedger().trade)
+end)
+
+test.test("guild recruit: staying put, Trade is prompted again after 20 minutes and General after 60", function()
+    local world = login("Retail")
+    optIn(world)
+    inCity(world, "Dornogal")
+    world.handlers.post(promptFor(world, "Advertise in Trade?").key)
+    world.handlers.post(world.shown[1].key)
+    test.assertEqual(0, #world.shown)
+
+    fixtures.runTimers(world, 20 * 60 - 1)
+    test.assertEqual(0, #world.shown)
+    fixtures.runTimers(world, 1)
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("Advertise in Trade?", world.shown[1].text)
+
+    fixtures.runTimers(world, 40 * 60)
+    test.assertEqual(2, #world.shown)
+end)
+
+test.test("guild recruit: no Trade prompt where Trade isn't available", function()
+    local world = login("Retail")
+    optIn(world)
+
+    test.assertEqual(1, #world.shown)
+    test.assertEqual(nil, promptFor(world, "Advertise in Trade?"))
 end)

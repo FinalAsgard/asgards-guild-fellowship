@@ -77,3 +77,36 @@ test.test("recruit policy: no prompt in an unknown zone or outside its General c
     test.assertEqual(0, #policy:Due({ name = "Nowhere", general = 1 }, ledger, START))
     test.assertEqual(0, #policy:Due({ key = "map:1455", name = "Ironforge" }, ledger, START))
 end)
+
+test.test("recruit policy: Trade is its own prompt, only where the user is in Trade", function()
+    local addon, policy, _, ledger, location = setup()
+
+    test.assertEqual(1, #policy:Due(location, ledger, START))
+
+    location.trade = 2
+    local due = policy:Due(location, ledger, START)
+    test.assertEqual(2, #due)
+    test.assertEqual(addon.RecruitPolicy.GENERAL, due[1].channel)
+    test.assertEqual(addon.RecruitPolicy.TRADE, due[2].channel)
+    test.assertEqual(addon.RecruitLedger.TRADE_KEY, due[2].key)
+    test.assertEqual(2, due[2].channelNumber)
+
+    ledger:Record(addon.RecruitLedger.TRADE_KEY, START)
+    due = policy:Due(location, ledger, START + 1)
+    test.assertEqual(1, #due)
+    test.assertEqual(addon.RecruitPolicy.GENERAL, due[1].channel)
+end)
+
+test.test("recruit policy: the next channel here to come due is the soonest fresh one", function()
+    local addon, policy, state, ledger, location = setup()
+    location.trade = 2
+
+    test.assertEqual(nil, policy:NextDue(location, ledger, START))
+    ledger:Record(addon.RecruitLedger.GeneralKey("map:1455"), START)
+    test.assertEqual(HOUR - 10, policy:NextDue(location, ledger, START + 10))
+    ledger:Record(addon.RecruitLedger.TRADE_KEY, START + 10)
+    test.assertEqual(HOUR - 20, policy:NextDue(location, ledger, START + 20))
+
+    state.optedIn = false
+    test.assertEqual(nil, policy:NextDue(location, ledger, START + 20))
+end)

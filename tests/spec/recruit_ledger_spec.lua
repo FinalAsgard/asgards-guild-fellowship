@@ -102,3 +102,21 @@ test.test("recruit ledger: without a saved table, times are kept in memory", fun
     test.assertTrue(ledger:Record(key, START))
     test.assertEqual(START, ledger:Time(key))
 end)
+
+test.test("recruit ledger: Trade has one key, and each key has its own gap", function()
+    local addon = load()
+    local gaps = { [addon.RecruitLedger.TRADE_KEY] = 20 * 60 }
+    local ledger = addon.RecruitLedger.Create({}, function(key)
+        return gaps[key] or HOUR
+    end)
+    local general = addon.RecruitLedger.GeneralKey("map:1455")
+
+    ledger:Record(addon.RecruitLedger.TRADE_KEY, START)
+    ledger:Record(general, START)
+
+    test.assertEqual(20 * 60 - 60, ledger:FreshFor(addon.RecruitLedger.TRADE_KEY, START + 60))
+    test.assertEqual(HOUR - 60, ledger:FreshFor(general, START + 60))
+    test.assertEqual(addon.RecruitLedger.UNKNOWN, ledger:State(addon.RecruitLedger.TRADE_KEY, START + 20 * 60))
+    test.assertEqual(nil, ledger:FreshFor(addon.RecruitLedger.TRADE_KEY, START + 20 * 60))
+    test.assertEqual(addon.RecruitLedger.FRESH, ledger:State(general, START + 20 * 60))
+end)
