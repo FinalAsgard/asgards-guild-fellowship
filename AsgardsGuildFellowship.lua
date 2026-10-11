@@ -174,6 +174,24 @@ if clientProfile.supported then
     -- Every setting, one section per feature. The panel and the slash
     -- commands both go through it.
     settings = addon.SettingsModel.Create()
+    -- The add-on's own page in the AddOns options; each feature's section
+    -- gets a sub-page under it.
+    settings:AddSection("about", addon.Identity.displayName, { home = true })
+    settings:Add("about", {
+        id = "openWindow",
+        kind = "action",
+        label = "Open window",
+        run = function()
+            rosterController:Open()
+        end,
+    })
+    settings:Add("about", {
+        id = "aboutVersion",
+        kind = "text",
+        get = function()
+            return "Version " .. version .. " on " .. clientProfile.label .. "."
+        end,
+    })
     settings:AddSection("general", "General")
     settings:Add("general", {
         id = "minimap",
@@ -184,16 +202,6 @@ if clientProfile.supported then
         end,
         set = function(shown)
             return entryPoints:SetMinimapShown(shown)
-        end,
-    })
-    -- The frame's own Settings tab doesn't need a button to open the frame.
-    settings:Add("general", {
-        id = "openRoster",
-        kind = "action",
-        host = "options",
-        label = "Open Roster",
-        run = function()
-            rosterController:Open()
         end,
     })
     settings:Add("general", {
@@ -413,9 +421,7 @@ if clientProfile.supported then
         end
         return true
     end
-    -- Recruitment has a page of its own in the AddOns options, so the main
-    -- page fits.
-    settings:AddSection("recruitment", "Recruitment", { page = "recruitment", ownPage = true })
+    settings:AddSection("recruitment", "Recruitment", { page = "recruitment" })
     -- Kept for the logged-in character.
     settings:Add("recruitment", {
         id = "recruitOptIn",
@@ -986,6 +992,7 @@ addon.chatAnnotator = chatAnnotator
 addon.comm = comm
 addon.settings = settings
 addon.settingsPanel = settingsPanel
+addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
 addon.syncSession = syncSession

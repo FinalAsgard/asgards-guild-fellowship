@@ -159,8 +159,10 @@ for index = 1, #fixtures.PROFILES do
         local world, addon = loggedIn(profile)
         local sections = addon.settings:Sections()
 
-        test.assertEqual("General", sections[1].label)
-        test.assertEqual("Chat Tags", sections[2].label)
+        -- After the add-on's own page in the AddOns options.
+        test.assertTrue(sections[1].home)
+        test.assertEqual("General", sections[2].label)
+        test.assertEqual("Chat Tags", sections[3].label)
         test.assertTrue(addon.settings:Get("minimap"))
         test.assertTrue(addon.settings:Get("chatTags"))
         test.assertContains(addon.settings:Get("version"), "Version ")
@@ -235,7 +237,8 @@ test.test("each section names its master frame page, Settings unless it says oth
     test.assertTrue(model:AddSection("general", "General"))
     test.assertTrue(model:AddSection("greet", "Guild Greet", { page = "greetings" }))
     test.assertTrue(model:AddSection("chat", "Chat Tags", { page = "settings" }))
-    test.assertTrue(model:AddSection("recruit", "Recruitment", { page = "recruitment", ownPage = true }))
+    test.assertTrue(model:AddSection("recruit", "Recruitment", { page = "recruitment" }))
+    test.assertTrue(model:AddSection("about", "Asgard's Guild Fellowship", { home = true }))
     test.assertFalse(model:AddSection("odd", "Odd", { page = "nowhere" }))
 
     local onSettings = model:SectionsOn("settings")
@@ -244,8 +247,11 @@ test.test("each section names its master frame page, Settings unless it says oth
     test.assertEqual("chat", onSettings[2].id)
     test.assertEqual("greet", model:SectionsOn("greetings")[1].id)
     test.assertEqual("recruit", model:SectionsOn("recruitment")[1].id)
-    test.assertTrue(model:SectionsOn("recruitment")[1].ownPage)
     test.assertEqual(0, #model:SectionsOn("nowhere"))
+    -- A home section belongs to the AddOns options' own page, on no tab.
+    local sections = model:Sections()
+    test.assertTrue(sections[5].home)
+    test.assertEqual(nil, sections[5].page)
 end)
 
 test.test("an entry kept to one host is drawn only there; others are drawn in both", function()
@@ -264,7 +270,7 @@ test.test("an entry kept to one host is drawn only there; others are drawn in bo
     test.assertFalse(model:InHost("missing", "options"))
 end)
 
-test.test("the composed add-on puts each section on its page and keeps Open Roster to the options", function()
+test.test("the composed add-on puts each section on its page and the Open window button on no tab", function()
     local _, addon = loggedIn("Retail")
     local settings = addon.settings
 
@@ -274,7 +280,8 @@ test.test("the composed add-on puts each section on its page and keeps Open Rost
     test.assertEqual("chatTags", onSettings[2].id)
     test.assertEqual("guildGreet", settings:SectionsOn("greetings")[1].id)
     test.assertEqual("recruitment", settings:SectionsOn("recruitment")[1].id)
-    test.assertFalse(settings:InHost("openRoster", "frame"))
+    test.assertTrue(settings:Sections()[1].home)
+    test.assertEqual("openWindow", settings:Sections()[1].entries[1].id)
     test.assertTrue(settings:InHost("version", "frame"))
     test.assertTrue(settings:InHost("minimap", "frame"))
 end)

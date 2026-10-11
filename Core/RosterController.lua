@@ -830,7 +830,7 @@ function Controller:Toggle(entry)
     return true
 end
 
--- The settings panel's Open Roster button: shows the window on the page
+-- The AddOns options' Open window button: shows the window on the page
 -- `entry` opens, leaving it open when it already is.
 function Controller:Open(entry)
     if self.window ~= nil and self.window:IsShown() then

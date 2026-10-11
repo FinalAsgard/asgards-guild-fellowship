@@ -762,25 +762,26 @@ function Panel:Build(sections, title)
     return frame
 end
 
--- The model's sections split into the main page's and those that ask for a
--- page of their own.
+-- The model's sections split into the add-on's own page's (home sections)
+-- and the features', each of which gets a sub-page.
 function Panel:pages()
     local main, own = {}, {}
     local sections = self.model:Sections()
     local index
     for index = 1, #sections do
-        if sections[index].ownPage then
-            table.insert(own, sections[index])
-        else
+        if sections[index].home then
             table.insert(main, sections[index])
+        else
+            table.insert(own, sections[index])
         end
     end
     return main, own
 end
 
--- Adds the panel to the AddOns options: the main page, with a page of its
--- own under it for each section that asks for one. A client that can't
--- show pages under the main one gets those sections on the main page.
+-- Adds the panel to the AddOns options: the add-on's own page with the
+-- home sections, and under it a sub-page for each feature's section, so
+-- each page fits the options window. A client that can't show pages under
+-- the main one gets every section on the main page, scrolling.
 -- Returns true when the main page was added.
 function Panel:Register()
     if self.registered then

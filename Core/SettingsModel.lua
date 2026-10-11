@@ -7,7 +7,7 @@ local _, addon = ...
 --
 -- Entry kinds:
 --   toggle   get() -> boolean; set(boolean) -> true, or nil and a reason
---   action   run() performs it (a button, e.g. "Open Roster")
+--   action   run() performs it (a button, e.g. "Open window")
 --   text     get() -> a line of text shown as is (e.g. the version)
 --   number   get() -> a whole number from `min` to `max`; set(number) ->
 --            true, or nil and a reason. With `step`, the value goes in
@@ -32,7 +32,7 @@ local _, addon = ...
 -- Settings are drawn in two hosts: the master frame's pages ("frame") and
 -- the game's AddOns options ("options"). Each section names the master
 -- frame page it belongs on. An entry with `host` set is drawn only in that
--- host (e.g. the "Open Roster" button, which the frame doesn't need).
+-- host (e.g. a button that opens the frame, which the frame doesn't need).
 local SettingsModel = {
     KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true, color = true },
     HOSTS = { frame = true, options = true },
@@ -58,16 +58,20 @@ end
 
 -- Adds a section, shown in the order sections are added. `options.page`
 -- names the master frame page it belongs on (see SettingsModel.PAGES; the
--- Settings page unless given). `options.ownPage` puts it on a page of its
--- own in the AddOns options instead of the main page. False when the id is
--- unusable or already taken, or the page is unknown.
+-- Settings page unless given); in the AddOns options each section gets a
+-- sub-page of its own. A section with `options.home` is instead drawn on
+-- the add-on's own page in the AddOns options, and on no master frame page.
+-- False when the id is unusable or already taken, or the page is unknown.
 function Model:AddSection(id, label, options)
     options = type(options) == "table" and options or {}
-    local page = options.page or "settings"
-    if not isText(id) or not isText(label) or self.sectionsById[id] ~= nil or not SettingsModel.PAGES[page] then
+    local home = options.home == true
+    local page = not home and (options.page or "settings") or nil
+    if not isText(id) or not isText(label) or self.sectionsById[id] ~= nil
+        or (not home and not SettingsModel.PAGES[page])
+    then
         return false
     end
-    local section = { id = id, label = label, entries = {}, page = page, ownPage = options.ownPage == true }
+    local section = { id = id, label = label, entries = {}, page = page, home = home }
     self.sectionsById[id] = section
     table.insert(self.sections, section)
     return true
