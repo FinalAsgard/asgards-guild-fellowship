@@ -23,6 +23,7 @@ Adapters/EntryPoints.lua
 Adapters/Comm.lua
 Adapters/SettingsPanel.lua
 Adapters/GreetPrompts.lua
+Adapters/RecruitPrompts.lua
 Adapters/GreetingsWindow.lua
 Core/Persistence.lua
 Core/NameNormalizer.lua
@@ -50,5 +51,8 @@ Core/GreetingLibrary.lua
 Core/GreetPromptQueue.lua
 Core/GreetTally.lua
 Core/GuildGreet.lua
+Core/RecruitLedger.lua
+Core/RecruitPolicy.lua
+Core/GuildRecruit.lua
 Core/Lifecycle.lua
 AsgardsGuildFellowship.lua

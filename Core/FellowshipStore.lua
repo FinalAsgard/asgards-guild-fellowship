@@ -21,6 +21,8 @@ local FellowshipStore = {
     GREET_CAP_DEFAULT = 2,
     GREET_CAP_MIN = 1,
     GREET_CAP_MAX = 10,
+    -- The longest recruitment ad: one chat message.
+    RECRUIT_AD_MAX = 255,
 }
 addon.FellowshipStore = FellowshipStore
 
@@ -150,6 +152,7 @@ local function validatePartition(data)
     end
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
+        "recruitLedger",
     }
     local index
     for index = 1, #containers do
@@ -181,8 +184,9 @@ local function validatePartition(data)
         end
     end
     data.unapplied = nil
-    -- An officer's ledger and forgery log are only created when needed.
-    local optional = { unapplied = true, ledger = true, forgeries = true }
+    -- An officer's ledger and forgery log, and Guild Recruit's ad times,
+    -- are only created when needed.
+    local optional = { unapplied = true, ledger = true, forgeries = true, recruitLedger = true }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
             data[containers[index]] = {}
@@ -531,6 +535,75 @@ function Store:SetGreetAnchor(anchor)
     return true
 end
 
+-- Guild Recruit's saved state, shared by every character on the account and
+-- created on first use: the user's own ad, and the characters that turned
+-- advertise prompts on. Nil when an unusable value is stored there; it is
+-- then left alone.
+function Store:GetRecruitState()
+    if type(self.database) ~= "table" then
+        return nil
+    end
+    if self.database.recruit == nil then
+        self.database.recruit = {}
+    end
+    if type(self.database.recruit) ~= "table" then
+        return nil
+    end
+    return self.database.recruit
+end
+
+-- The user's own ad, exactly as written. Empty when none is saved or the
+-- saved one is unusable.
+function Store:RecruitAd()
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local ad = type(state) == "table" and state.ad or nil
+    if type(ad) ~= "string" or string.len(ad) > FellowshipStore.RECRUIT_AD_MAX then
+        return ""
+    end
+    return ad
+end
+
+-- Saves the user's own ad. Refuses text longer than one chat message.
+function Store:SetRecruitAd(text)
+    if type(text) ~= "string" or string.len(text) > FellowshipStore.RECRUIT_AD_MAX then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    state.ad = text
+    return true
+end
+
+-- Whether the character `key` turned advertise prompts on. Off unless turned
+-- on; an unusable saved set counts as empty.
+function Store:RecruitOptedIn(key)
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local optIn = type(state) == "table" and state.optIn or nil
+    return type(optIn) == "table" and optIn[key] == true
+end
+
+-- Turns advertise prompts on or off for the character `key`. An unusable
+-- existing set is left alone.
+function Store:SetRecruitOptedIn(key, enabled)
+    if not isText(key) or type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    if state.optIn == nil then
+        state.optIn = {}
+    end
+    if type(state.optIn) ~= "table" then
+        return false
+    end
+    state.optIn[key] = enabled
+    return true
+end
+
 function Partition:GetCharacter(key)
     return self.data.characters[key]
 end
@@ -768,6 +841,15 @@ end
 
 function Partition:GetForgeries()
     return self.data.forgeries
+end
+
+-- Guild Recruit's last ad time in each channel (see RecruitLedger), created
+-- on first use.
+function Partition:GetRecruitLedger()
+    if self.data.recruitLedger == nil then
+        self.data.recruitLedger = {}
+    end
+    return self.data.recruitLedger
 end
 
 function Partition:SetForgeries(entries)

@@ -26,7 +26,7 @@ if missingLibraries ~= nil then
 end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
-local guildGreet, greetingsWindow, greetPrompts
+local guildGreet, greetingsWindow, greetPrompts, guildRecruit, recruitPrompts
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -350,6 +350,60 @@ if clientProfile.supported then
         label = "Edit Greetings",
         run = openGreetings,
     })
+    -- Guild Recruit's settings only change for a character that can invite
+    -- to the guild.
+    local function recruitAvailable()
+        if not client:CanGuildInvite() then
+            return false, "this character can't invite to the guild"
+        end
+        return true
+    end
+    settings:AddSection("recruitment", "Recruitment")
+    -- Kept for the logged-in character.
+    settings:Add("recruitment", {
+        id = "recruitOptIn",
+        kind = "toggle",
+        label = "Offer to post my recruitment ad where the guild hasn't advertised lately",
+        enabled = recruitAvailable,
+        get = function()
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            return store ~= nil and selfKey ~= nil and store:RecruitOptedIn(selfKey)
+        end,
+        set = function(enabled)
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if selfKey == nil then
+                return nil, "this character isn't in a guild"
+            end
+            if not store:SetRecruitOptedIn(selfKey, enabled) then
+                return nil, "the saved setting is unreadable, so it stays off"
+            end
+            return true
+        end,
+    })
+    settings:Add("recruitment", {
+        id = "recruitAd",
+        kind = "input",
+        label = "My ad, posted exactly as written (press Enter to save)",
+        maxLength = addon.FellowshipStore.RECRUIT_AD_MAX,
+        enabled = recruitAvailable,
+        get = function()
+            local store = rosterController:Store()
+            return store and store:RecruitAd() or ""
+        end,
+        set = function(text)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetRecruitAd(text) then
+                return nil, "the saved ad is unreadable"
+            end
+            return true
+        end,
+    })
     settingsPanel = addon.SettingsPanel.Create(client, settings)
     router:Register("options", "open the settings panel", function()
         if not settingsPanel:Open() then
@@ -511,9 +565,42 @@ if clientProfile.supported then
         end,
         view = greetPrompts,
     })
+    recruitPrompts = addon.RecruitPrompts.Create(client)
+    -- Guild Recruit keeps its ad times with the current guild.
+    guildRecruit = addon.GuildRecruit.Create({
+        partition = function()
+            local guild, partition = rosterController:QuietContext()
+            return guild and partition or nil
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        store = function()
+            return rosterController:Store()
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        canInvite = function()
+            return client:CanGuildInvite()
+        end,
+        location = function()
+            local zone = client:GetZone()
+            if zone == nil then
+                return nil
+            end
+            return { key = zone.key, name = zone.name, general = client:GetGeneralChannel() }
+        end,
+        send = function(text, channelNumber)
+            return client:SendChannelMessage(text, channelNumber)
+        end,
+        view = recruitPrompts,
+    })
     settings:OnChange(function(id, value)
         local entry = settings:Entry(id)
-        if id == "guildGreet" or id == "greetCharacter" then
+        if id == "recruitOptIn" or id == "recruitAd" then
+            guildRecruit:Refresh()
+        elseif id == "guildGreet" or id == "greetCharacter" then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
         elseif entry ~= nil and entry.category ~= nil then
             guildGreet:OnCategoryChanged(entry.category, value)
@@ -538,6 +625,9 @@ if clientProfile.supported then
             end
             return members
         end)
+        -- A rank change can grant or take away invite permission.
+        guildRecruit:Refresh()
+        settingsPanel:Refresh()
     end)
     -- Chat tags read the same guild context as the roster.
     chatAnnotator = addon.ChatAnnotator.Create({
@@ -604,6 +694,11 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     if busy then
         guildGreet:OnCombatChanged(true)
     end
+    -- Advertise prompts follow the player from zone to zone.
+    client:ObserveZone(function()
+        guildRecruit:Refresh()
+    end)
+    guildRecruit:Refresh()
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)
@@ -622,6 +717,7 @@ addon.comm = comm
 addon.settings = settings
 addon.settingsPanel = settingsPanel
 addon.guildGreet = guildGreet
+addon.guildRecruit = guildRecruit
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version
