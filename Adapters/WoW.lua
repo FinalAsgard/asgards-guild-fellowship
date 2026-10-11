@@ -612,8 +612,9 @@ function Client:SendChannelMessage(text, channelNumber)
 end
 
 -- Calls onChange() whenever the player may have changed zone or channels:
--- a new zone, a loading screen, or the channel list changing (the client
--- moves the player to the new zone's General a moment after arriving).
+-- a new zone, a loading screen, the channel list changing (the client moves
+-- the player to the new zone's General a moment after arriving), or a
+-- channel being joined, left, or disabled or enabled here.
 -- Returns false when the client can't deliver the events.
 function Client:ObserveZone(onChange)
     if type(onChange) ~= "function" then
@@ -630,6 +631,11 @@ function Client:ObserveZone(onChange)
     end
     self:RegisterEvent(frame, "PLAYER_ENTERING_WORLD")
     self:RegisterEvent(frame, "CHANNEL_UI_UPDATE")
+    -- Leaving a city, the client reports the new zone first and disables
+    -- Trade a moment later, with a channel notice, so channels are checked
+    -- again then. Newer clients also report channel flag changes.
+    self:RegisterEvent(frame, "CHAT_MSG_CHANNEL_NOTICE")
+    self:RegisterEvent(frame, "CHANNEL_FLAGS_UPDATED")
     self.zoneFrame = frame
     return true
 end

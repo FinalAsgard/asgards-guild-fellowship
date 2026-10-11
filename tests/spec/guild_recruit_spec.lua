@@ -1251,3 +1251,46 @@ test.test("recruitment settings: the use-officer-ad info shows the guild ad, or 
 
     test.assertEqual("Knights recruit! Whisper for an invite.", officer.addon.settings:Info("recruitUseOfficerAd"))
 end)
+
+-- The channels a tester's Retail client listed out in the world: Trade,
+-- Services and TradeLocal are there but disabled.
+local function outInTheWorld(world, zoneName)
+    world.channels = {
+        [1] = "General - " .. zoneName,
+        [2] = "Trade - City",
+        [3] = "LocalDefense - " .. zoneName,
+        [4] = "Services - City",
+        [5] = "TradeLocal - City",
+    }
+    world.disabledChannels = { [2] = true, [4] = true, [5] = true }
+end
+
+test.test("guild recruit: with the channel list a tester's client gave out in the world, there's no Trade prompt", function()
+    local world = login("Retail")
+    optIn(world)
+    outInTheWorld(world, "Dornogal")
+    fixtures.fire(world, "CHANNEL_UI_UPDATE")
+
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("Advertise in Dornogal General?", world.shown[1].text)
+end)
+
+test.test("guild recruit: Trade disabled a moment after leaving a city closes its prompt", function()
+    local world = login("Retail")
+    optIn(world)
+    inCity(world, "Dornogal")
+    test.assertTrue(promptFor(world, "Advertise in Trade?") ~= nil)
+
+    -- The new zone is reported while Trade still looks usable...
+    world.zone = { mapID = 2248, name = "Isle of Dorn" }
+    world.channels = { [1] = "General - Isle of Dorn", [2] = "Trade - City" }
+    fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+    test.assertTrue(promptFor(world, "Advertise in Trade?") ~= nil)
+
+    -- ...and the client disables it a moment later, with a channel notice.
+    world.disabledChannels = { [2] = true }
+    fixtures.fire(world, "CHAT_MSG_CHANNEL_NOTICE", "SUSPENDED", "", "", "2. Trade - City")
+
+    test.assertEqual(nil, promptFor(world, "Advertise in Trade?"))
+    test.assertEqual("Advertise in Isle of Dorn General?", world.shown[1].text)
+end)

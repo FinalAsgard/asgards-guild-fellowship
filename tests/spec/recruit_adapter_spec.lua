@@ -116,7 +116,8 @@ for index = 1, #fixtures.PROFILES do
         fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
         fixtures.fire(world, "PLAYER_ENTERING_WORLD")
         fixtures.fire(world, "CHANNEL_UI_UPDATE")
-        test.assertEqual(3, changes)
+        fixtures.fire(world, "CHAT_MSG_CHANNEL_NOTICE", "SUSPENDED")
+        test.assertEqual(4, changes)
     end)
 end
 
