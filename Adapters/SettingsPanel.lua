@@ -19,6 +19,10 @@ local SettingsPanel = {
     INDENT = 8,
     BUTTON_WIDTH = 140,
     INPUT_WIDTH = 520,
+    -- A text line's height in a multi-line box, and the room around the
+    -- text inside the box.
+    INPUT_LINE_HEIGHT = 14,
+    INPUT_INSET = 6,
 }
 addon.SettingsPanel = SettingsPanel
 
@@ -103,6 +107,11 @@ function Panel:Refresh()
                     local text = tostring(self.model:Get(widget.id) or "")
                     widget.frame:SetText(text)
                     widget.shownText = text
+                    -- Filling a box puts its cursor at the end, which scrolls
+                    -- a long line out of view; the start is shown instead.
+                    if type(widget.frame.SetCursorPosition) == "function" then
+                        widget.frame:SetCursorPosition(0)
+                    end
                 end
             elseif widget.kind == "toggle" then
                 widget.frame:SetChecked(self.model:Get(widget.id) == true)
@@ -152,22 +161,73 @@ function Panel:commitInput(widget)
         return
     end
     local ok, text = pcall(widget.frame.GetText, widget.frame)
-    if ok and type(text) == "string" and text ~= widget.shownText then
+    if not ok or type(text) ~= "string" then
+        return
+    end
+    text = string.gsub(text, "[\r\n]", "")
+    if text ~= widget.shownText then
         self.model:Set(widget.id, text)
     end
 end
 
--- A line of text: its label, then a text box below it. Whatever way the
--- user leaves the box saves what they typed: Enter, Escape, clicking away,
--- or closing the options.
+-- The text box's height for an entry: one line, or `entry.lines` lines.
+local function inputLines(entry)
+    if type(entry.lines) == "number" and entry.lines > 1 then
+        return math.floor(entry.lines)
+    end
+    return 1
+end
+
+-- How many panel rows an entry's text box takes below its label.
+function SettingsPanel.InputRows(entry)
+    local lines = inputLines(entry)
+    if lines == 1 then
+        return 1
+    end
+    local height = lines * SettingsPanel.INPUT_LINE_HEIGHT + 2 * SettingsPanel.INPUT_INSET
+    return math.ceil(height / SettingsPanel.ROW)
+end
+
+-- A line of text: its label, then a text box below it, one line tall or,
+-- for an entry with `lines`, that many lines with the text wrapping. A
+-- setting is one line of text, so Enter saves rather than starting a new
+-- line, and line breaks are never kept. Whatever way the user leaves the
+-- box saves what they typed: Enter, Escape, clicking away, or closing the
+-- options.
 function Panel:addInput(frame, entry, y)
     local label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     label:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 4, y - 4)
     label:SetText(entry.label)
-    local box = self.environment.CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
-    box:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 10, y - SettingsPanel.ROW + 2)
-    box:SetWidth(SettingsPanel.INPUT_WIDTH)
-    box:SetHeight(22)
+    local lines = inputLines(entry)
+    local createFrame = self.environment.CreateFrame
+    local box
+    if lines == 1 then
+        box = createFrame("EditBox", nil, frame, "InputBoxTemplate")
+        box:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 10, y - SettingsPanel.ROW + 2)
+        box:SetWidth(SettingsPanel.INPUT_WIDTH)
+        box:SetHeight(22)
+    else
+        -- A dark box with a thin edge, the text wrapping inside it.
+        local height = lines * SettingsPanel.INPUT_LINE_HEIGHT + 2 * SettingsPanel.INPUT_INSET
+        local holder = createFrame("Frame", nil, frame)
+        holder:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 4, y - SettingsPanel.ROW + 4)
+        holder:SetWidth(SettingsPanel.INPUT_WIDTH + 6)
+        holder:SetHeight(height)
+        local edge = holder:CreateTexture(nil, "BACKGROUND")
+        edge:SetAllPoints(holder)
+        edge:SetColorTexture(0.5, 0.5, 0.5, 0.8)
+        local fill = holder:CreateTexture(nil, "BORDER")
+        fill:SetPoint("TOPLEFT", holder, "TOPLEFT", 1, -1)
+        fill:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -1, 1)
+        fill:SetColorTexture(0, 0, 0, 0.75)
+        box = createFrame("EditBox", nil, holder)
+        box:SetMultiLine(true)
+        box:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+        box:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", 0, 0)
+        box:SetFontObject("ChatFontNormal")
+        box:SetTextInsets(SettingsPanel.INPUT_INSET, SettingsPanel.INPUT_INSET,
+            SettingsPanel.INPUT_INSET, SettingsPanel.INPUT_INSET)
+    end
     box:SetAutoFocus(false)
     box:SetMaxLetters(entry.maxLength)
     local widget = { kind = "input", id = entry.id, frame = box, controls = { box }, label = label }
@@ -176,6 +236,15 @@ function Panel:addInput(frame, entry, y)
     end
     box:SetScript("OnEnterPressed", leave)
     box:SetScript("OnEscapePressed", leave)
+    -- In a multi-line box Enter types a line break: it's taken out again,
+    -- and the box is left, so Enter saves there too.
+    box:SetScript("OnTextChanged", function()
+        local text = box:GetText()
+        if type(text) == "string" and string.find(text, "[\r\n]") then
+            box:SetText((string.gsub(text, "[\r\n]", "")))
+            box:ClearFocus()
+        end
+    end)
     box:SetScript("OnEditFocusLost", function()
         self:commitInput(widget)
         self:Refresh()
@@ -284,8 +353,8 @@ function Panel:Build(sections, title)
                     self:addNumber(panel, entry, y)
                 elseif entry.kind == "input" then
                     self:addInput(panel, entry, y)
-                    -- The text box sits on a row of its own below the label.
-                    y = y - SettingsPanel.ROW
+                    -- The text box sits on rows of its own below the label.
+                    y = y - SettingsPanel.InputRows(entry) * SettingsPanel.ROW
                 elseif entry.kind == "heading" then
                     -- A gap above it sets it apart from the entries before.
                     y = y - SettingsPanel.SECTION_GAP

@@ -13,7 +13,10 @@ local function newEnvironment()
                 if method == "SetText" then
                     return function(self, text)
                         self.text = text
-                        table.insert(page.texts, text)
+                        local texts = type(page) == "table" and rawget(page, "texts")
+                        if texts then
+                            table.insert(texts, text)
+                        end
                     end
                 elseif method == "Show" then
                     return function(self)
@@ -35,6 +38,14 @@ local function newEnvironment()
                     return function(self, name, handler)
                         rawset(self, "scripts", rawget(self, "scripts") or {})
                         self.scripts[name] = handler
+                    end
+                elseif method == "SetCursorPosition" then
+                    return function(self, position)
+                        rawset(self, "cursor", position)
+                    end
+                elseif method == "SetMultiLine" then
+                    return function(self, multiLine)
+                        rawset(self, "multiLine", multiLine)
                     end
                 elseif method == "GetText" then
                     -- Like a real text box, an empty one gives "".
@@ -198,12 +209,12 @@ test.test("settings panel: the officer heading and settings show only for office
 end)
 
 -- A model with one text setting backed by `saved.ad`, on the main page.
-local function newTextPanel(environment, savedAd)
+local function newTextPanel(environment, savedAd, lines)
     local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
     local saved = { ad = savedAd or "" }
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
-    model:Add("recruitment", { id = "ad", kind = "input", label = "My ad", maxLength = 255,
+    model:Add("recruitment", { id = "ad", kind = "input", label = "My ad", maxLength = 255, lines = lines,
         get = function() return saved.ad end,
         set = function(text)
             saved.ad = text
@@ -302,4 +313,34 @@ test.test("settings panel: leaving a box unchanged saves nothing", function()
     panel.frame.scripts.OnHide(panel.frame)
 
     test.assertEqual(0, saves)
+end)
+
+test.test("settings panel: a filled-in box shows the start of its text", function()
+    local panel = newTextPanel(newEnvironment(), string.rep("Knights of Camelot recruit! ", 8))
+
+    test.assertEqual(0, textBox(panel).cursor)
+end)
+
+test.test("settings panel: an entry with lines gets a multi-line box, and others one line", function()
+    local tall = newTextPanel(newEnvironment(), "", 3)
+    local short = newTextPanel(newEnvironment(), "")
+
+    test.assertTrue(textBox(tall).multiLine)
+    test.assertEqual(nil, rawget(textBox(short), "multiLine"))
+end)
+
+test.test("settings panel: Enter in a multi-line box saves, and line breaks are never kept", function()
+    local panel, saved = newTextPanel(newEnvironment(), "", 3)
+    local box = textBox(panel)
+
+    -- Enter types a line break into a multi-line box.
+    type_(box, "Join us\n")
+    box.scripts.OnTextChanged(box)
+    test.assertEqual("Join us", box.text)
+    box.scripts.OnEditFocusLost(box)
+    test.assertEqual("Join us", saved.ad)
+
+    type_(box, "Raids on\r\nFriday")
+    box.scripts.OnEditFocusLost(box)
+    test.assertEqual("Raids onFriday", saved.ad)
 end)

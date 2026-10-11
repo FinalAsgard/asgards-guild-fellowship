@@ -398,6 +398,7 @@ if clientProfile.supported then
         id = "recruitAd",
         kind = "input",
         label = "My ad, posted exactly as written",
+        lines = 3,
         maxLength = addon.FellowshipStore.RECRUIT_AD_MAX,
         enabled = recruitAvailable,
         get = function()
@@ -454,6 +455,7 @@ if clientProfile.supported then
         id = "recruitGuildAd",
         kind = "input",
         label = "Guild ad, for every member",
+        lines = 3,
         maxLength = addon.RecruitConfig.AD_MAX,
         shown = isOfficer,
         enabled = officerOnly,
