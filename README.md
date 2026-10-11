@@ -28,6 +28,7 @@ The add-on has a settings panel at **Esc → Options → AddOns → Asgard's Gui
 - **General**: show or hide the minimap button, an **Open Roster** button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off.
 - **Guild Greet**: turn Guild Greet on or off (everywhere, or just on the character you're playing), turn each category's prompts on or off, set the welcome-back minutes and long-absence days, set how many greetings close your prompt, unlock the prompts to move them, and an **Edit Greetings** button that opens the Greetings window.
+- **Recruitment**: turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, and choose whether you also post the officers' guild ad. These are greyed out on a character that can't invite to the guild. Officers also get the guild ad, the guild ad on/off switch, the minutes between ads in a zone's General and in Trade, and a pause for the whole guild.
 
 The panel and the slash commands change the same settings, so a change made either way shows up in both. Settings are saved for every character on this game install. The development build's panel is labeled "(Dev)".
 
@@ -84,6 +85,8 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 ### Organizing by hand
 
 Right-click a character for **Set main…**, **Make this the main**, **Set alias…**, **Detach as own player**, and **View player…**. Clicking a character also opens the player panel. It shows the alias, main, alts, and history, and has **Set alias…** and **Set main…** buttons that open the same dialogs as the menu. History lists characters that left the player: ones that left the guild, were detached, or were moved to another player.
+
+For a player who has posted recruitment ads, the player panel also shows **Advertised: N (M in last 30 days)** (see [Ad counts](#ad-counts)).
 
 Changes show up right away and are recorded as manual. An officer's changes then reach the rest of the guild through [guild sync](#guild-sync), and a member's are sent to officers as [suggestions](#suggestions). The player panel also has the **Don't sync** checkbox (see [Don't sync](#dont-sync)). Data is saved per guild and shared by every character on this game install.
 
@@ -197,6 +200,43 @@ When you greet someone, the add-on tells other add-on users in the guild. Once a
 The **Greetings** window (`/agf greet`, or **Edit Greetings** in the settings panel) has a button for each category. Each lists that category's greetings, with **Edit** beside each one. Type in the box at the bottom and press **Add** (or Enter) to add a greeting. **Edit** puts a greeting in the box, with **Save**, **Delete** and **Cancel** beside it. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The window lists every placeholder.
 
 A category with no greetings shows no prompts, so emptying one is a way to turn it off. **Restore starter greetings** puts back the starters in the open category, and **Restore all categories** does it everywhere. Both replace what's there, so each asks for a second click.
+
+## Guild Recruit
+
+Guild Recruit spreads the guild's recruitment ads out: every zone sees the guild now and then, and nobody spams a channel. When you're somewhere the guild hasn't advertised lately, a small **Guild Recruit** window (centered, about a quarter of the way down the screen, so it's never mistaken for a greet prompt) asks **Advertise in Elwynn Forest General?** or **Advertise in Trade?**. Press **Post** to send an ad there. Nothing is ever posted unless you press the button.
+
+### Who gets prompts
+
+- Only characters whose guild rank can invite to the guild. Without that permission there are no prompts, and the Recruitment settings are greyed out.
+- The first time you log in on such a character, Guild Recruit asks **Help with guild recruitment?**. **Yes** turns prompts on and **No** turns them off; closing the question asks again next login. Each character has its own answer, and you can change it any time in the **Recruitment** settings.
+- If a character loses invite permission, its prompts stop at once, and its answer goes back to undecided at the next login, so you're asked again if it's promoted later.
+- You need an ad to post: your own, the officers' guild ad, or both. When both are usable, each post picks one at random. Uncheck **Also post the officers' guild ad** to post only yours. With no usable ad, there are no prompts.
+
+### Channels and timing
+
+- **General**: each zone has its own timer. By default a zone's General is due again 60 minutes after the guild's last ad there.
+- **Trade**: one channel in every city, so an ad in one city counts for all of them. It's due again after 20 minutes by default. You're only prompted for Trade where the game has you in the Trade channel.
+- Officers can change both gaps (never below 15 minutes for General or 5 for Trade) and pause recruitment for the whole guild.
+- Staying in one place, you're prompted again when a timer runs out.
+- **Not now** hides that channel's prompt for 10 minutes. **Off here** stops prompts in the current zone (its General, and Trade while you're there) until you log out or reload.
+- Prompts wait during combat, boss encounters, dungeons, raids, battlegrounds, arenas, and keystone runs, and close when you leave the zone or city they're for.
+- Ads are posted exactly as written, up to 255 characters. A send the game refuses doesn't count as an ad.
+
+### Advertising together
+
+Add-on users tell each other when and where they advertised, so nobody double-posts:
+
+- When your ad posts, other add-on users record it and their prompt for that channel closes. Prompts wait a few seconds (at random) before showing, so two people rarely get the same one at once.
+- When you log in, or enter a zone or city you have no recent time for, your add-on asks the others. If nobody answers within a few seconds, the channel counts as not advertised in. Only one or a few add-ons answer each question.
+- Times are saved for each guild, so they last across reloads; a saved time older than the gap is asked about again, never taken as the last ad.
+- No officer needs to be online, or use the add-on at all: members recruit and coordinate with their own ads and the default gaps. The officers' ad, gaps and pause only take effect once an officer sets them, and they're only accepted from officers. The newest change wins.
+- Without the add-on's messaging libraries, Guild Recruit still works, going only by your own posts.
+
+### Ad counts
+
+Every post counts toward the player who made it, on all their characters together. The player panel shows **Advertised: N (M in last 30 days)**. The 30-day number falls as ads get older, even if they don't post again. Only ads posted through the add-on are counted.
+
+Officers also get a **Recruiters** button in the roster window's footer, left of **Conflicts**. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time, and updates as new ads arrive.
 
 ## Supported clients
 
