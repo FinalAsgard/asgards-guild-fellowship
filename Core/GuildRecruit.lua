@@ -494,15 +494,18 @@ end
 function Recruit:Refresh()
     local now = self.now()
     local due = {}
-    -- Nothing is prompted before this login's check, once the roster has
-    -- loaded; saved guild data is only opened then.
     -- The first time this session the user recruits (can invite, and opted
     -- in), the officers' add-ons are asked for the newest settings, which
-    -- may hold the only ad the user has.
-    if self.loginChecked and not self.askedConfig and self:CanInvite() and self:IsOptedIn() then
+    -- may hold the only ad the user has. An officer asks too, so the officer
+    -- settings they see and change are the newest.
+    if self.loginChecked and not self.askedConfig
+        and ((self:CanInvite() and self:IsOptedIn()) or self:IsOfficer())
+    then
         self.askedConfig = true
         pcall(self.announce, { v = GuildRecruit.PROTOCOL, t = GuildRecruit.TYPE_ASK_CONFIG })
     end
+    -- Nothing is prompted before this login's check, once the roster has
+    -- loaded; saved guild data is only opened then.
     if type(now) == "number" and self.loginChecked and self.policy:Allowed() then
         local ledger = self:Ledger()
         local location = self:Location()
@@ -569,11 +572,6 @@ end
 function Recruit:CloseQuestion()
     self.asking = false
     self:drawQuestion()
-end
-
--- True while the login question is on screen.
-function Recruit:IsAsking()
-    return self.asking
 end
 
 function Recruit:drawQuestion()

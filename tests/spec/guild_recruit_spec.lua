@@ -1432,3 +1432,15 @@ test.test("recent ads: ads posted before a relog are still known, and nothing is
         time = first.time + 4 * HOUR })
     test.assertEqual(0, #much.addon.guildRecruit:KnownAds())
 end)
+
+test.test("officer guild ad: an officer who isn't recruiting still asks for the newest settings at login", function()
+    local officer = login("Retail", { playerName = OFFICER })
+    test.assertEqual(nil, officer.addon.settings:Get("recruitOptIn") and true or nil)
+    test.assertEqual(1, #sentOfType(officer, "ask-config"))
+    -- Once a session.
+    fixtures.fire(officer, "GUILD_ROSTER_UPDATE")
+    test.assertEqual(1, #sentOfType(officer, "ask-config"))
+
+    local member = login("Retail", { playerName = MEMBER })
+    test.assertEqual(0, #sentOfType(member, "ask-config"))
+end)
