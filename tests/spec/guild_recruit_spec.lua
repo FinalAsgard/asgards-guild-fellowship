@@ -1189,6 +1189,18 @@ local function recruitersWindow(world)
     return window
 end
 
+-- The Recruiters view's rows of `kind`, in order.
+local function rowsOfKind(rows, kind)
+    local found = {}
+    local index
+    for index = 1, #(rows or {}) do
+        if rows[index].kind == kind then
+            table.insert(found, rows[index])
+        end
+    end
+    return found
+end
+
 test.test("recruiters: an officer's open view updates when new stats arrive, ranked", function()
     local world = login("Retail", { playerName = OFFICER })
     local window = recruitersWindow(world)
@@ -1196,17 +1208,46 @@ test.test("recruiters: an officer's open view updates when new stats arrive, ran
 
     recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time,
         r = { n = 2, t = { world.time, world.time } } }, MEMBER)
-    test.assertEqual(1, #window.rows)
-    test.assertEqual("Visitor-Stormrage", window.rows[1].label)
-    test.assertEqual(2, window.rows[1].recent)
+    local recruiters = rowsOfKind(window.rows, "recruiter")
+    test.assertEqual(1, #recruiters)
+    test.assertEqual("Visitor-Stormrage", recruiters[1].label)
+    test.assertEqual(2, recruiters[1].recent)
 
     -- The officer's own posts count too, under their alias.
     optIn(world)
     world.handlers.post(world.shown[1].key)
-    test.assertEqual(2, #window.rows)
-    test.assertEqual("Visitor-Stormrage", window.rows[1].label)
-    test.assertEqual("TheTool", window.rows[2].label)
-    test.assertEqual(1, window.rows[2].total)
+    recruiters = rowsOfKind(window.rows, "recruiter")
+    test.assertEqual(2, #recruiters)
+    test.assertEqual("Visitor-Stormrage", recruiters[1].label)
+    test.assertEqual("TheTool", recruiters[2].label)
+    test.assertEqual(1, recruiters[2].total)
+end)
+
+test.test("recruiters: the view lists the channels this client knows were advertised in, newest first", function()
+    local world = login("Retail", { playerName = OFFICER })
+    local window = recruitersWindow(world)
+    local recruit = world.addon.guildRecruit
+
+    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 12 * 60 }, MEMBER)
+    recruit:OnMessage({ v = 1, t = "channel-time", k = "general:map:2339", a = world.time - 65 * 60 + 30 },
+        MEMBER)
+    recruit:OnMessage({ v = 1, t = "advertised", k = "general:zone:Somewhere", n = "Somewhere General",
+        a = world.time }, MEMBER)
+
+    local ads = rowsOfKind(window.rows, "ad")
+    test.assertEqual(2, #ads)
+    test.assertEqual("Somewhere General", ads[1].label)
+    test.assertEqual("just now", ads[1].recent)
+    test.assertEqual("Trade", ads[2].label)
+    test.assertEqual("12 min ago", ads[2].recent)
+
+    -- A zone known by its map is named from the map; times kept longer by
+    -- a longer own timer still show.
+    world.addon.settings:Set("recruitMyGeneralGap", 90)
+    recruit:OnMessage({ v = 1, t = "channel-time", k = "general:map:2339", a = world.time - 65 * 60 }, MEMBER)
+    ads = rowsOfKind(window.rows, "ad")
+    test.assertEqual("Dornogal General", ads[3].label)
+    test.assertEqual("1 h 5 min ago", ads[3].recent)
 end)
 
 test.test("recruiters: a regular member can't open the view", function()

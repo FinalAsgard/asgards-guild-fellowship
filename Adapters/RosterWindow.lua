@@ -708,11 +708,13 @@ local function buildConflictPanel(framework, options, frameName)
 end
 
 -- The officers' Recruiters view: players ranked by ads in the last 30 days,
--- then all time.
+-- then all time, and then the channels this client knows were advertised in
+-- lately. Each part starts with a heading row naming its own columns (see
+-- RosterController:RecruitersView).
 local RECRUITER_COLUMNS = {
-    { field = "label", header = "Player", x = 8, width = 200 },
-    { field = "recent", header = "Last 30 days", x = 214, width = 90 },
-    { field = "total", header = "All time", x = 310, width = 80 },
+    { field = "label", x = 8, width = 200 },
+    { field = "recent", x = 214, width = 110 },
+    { field = "total", x = 330, width = 60 },
 }
 local RECRUITERS_WIDTH = 420
 local RECRUITERS_HEIGHT = 360
@@ -748,9 +750,17 @@ local function refreshRecruiterLines(scroll, rows, offset, totalLines)
             local columnIndex
             for columnIndex = 1, #RECRUITER_COLUMNS do
                 local field = RECRUITER_COLUMNS[columnIndex].field
-                line.cells[field]:SetText(tostring(row[field] or ""))
+                local text = tostring(row[field] or "")
+                if row.kind == "heading" then
+                    text = "|cffffd100" .. text .. "|r"
+                elseif row.kind == "empty" then
+                    text = "|cff9d9d9d" .. text .. "|r"
+                end
+                line.cells[field]:SetText(text)
             end
-            if dataIndex % 2 == 0 then
+            if row.kind == "heading" or row.kind == "empty" then
+                setBackground(line, NO_BACKGROUND)
+            elseif dataIndex % 2 == 0 then
                 setBackground(line, STRIPE_BACKGROUND)
             else
                 setBackground(line, NO_BACKGROUND)
@@ -768,35 +778,25 @@ local function buildRecruitersPanel(framework, frameName)
         frameName .. "Recruiters"
     )
     panel:SetFrameStrata("DIALOG")
-    local headerIndex
-    for headerIndex = 1, #RECRUITER_COLUMNS do
-        local column = RECRUITER_COLUMNS[headerIndex]
-        local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -32)
-        header:SetText(column.header)
-    end
-    local lineAmount = math.floor((RECRUITERS_HEIGHT - 70) / RosterWindow.LINE_HEIGHT)
+    local lineAmount = math.floor((RECRUITERS_HEIGHT - 54) / RosterWindow.LINE_HEIGHT)
     local scroll = framework:CreateScrollBox(
         panel,
         frameName .. "RecruiterScroll",
         refreshRecruiterLines,
         {},
         RECRUITERS_WIDTH - 20,
-        RECRUITERS_HEIGHT - 70,
+        RECRUITERS_HEIGHT - 54,
         lineAmount,
         RosterWindow.LINE_HEIGHT,
         createRecruiterLine,
         true
     )
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -48)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -32)
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 12)
     scroll:CreateLines(createRecruiterLine, lineAmount)
-    local empty = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    empty:SetPoint("CENTER", panel, "CENTER", 0, 0)
-    empty:SetText("Nobody has advertised yet.")
     panel:Hide()
-    return { panel = panel, scroll = scroll, empty = empty }
+    return { panel = panel, scroll = scroll }
 end
 
 local function build(framework, options)
@@ -1118,8 +1118,9 @@ function Window:SetConflicts(rows)
     end))
 end
 
--- Shows the officers' Recruiters rows (see RecruitStats.Recruiters), or, for
--- nil, hides the view and its footer button.
+-- Shows the officers' Recruiters view (see
+-- RosterController:RecruitersView), or, for nil, hides the view and its
+-- footer button.
 function Window:SetRecruiters(rows)
     return (pcall(function()
         local recruiters = self.recruiters
@@ -1131,11 +1132,6 @@ function Window:SetRecruiters(rows)
         recruiters.button:Show()
         recruiters.scroll:SetData(rows)
         recruiters.scroll:Refresh()
-        if #rows == 0 then
-            recruiters.empty:Show()
-        else
-            recruiters.empty:Hide()
-        end
     end))
 end
 

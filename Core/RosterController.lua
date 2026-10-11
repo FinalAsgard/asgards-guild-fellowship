@@ -34,11 +34,14 @@ Controller.__index = Controller
 --                 RecruitStats), for the officers' Recruiters view
 --   isOfficer     optional function() -> true when the logged-in character
 --                 is an officer; only officers get the Recruiters view
+--   recentAds     optional function() -> the channels advertised in lately,
+--                 newest first, as { label, ago } (see GuildRecruit:KnownAds)
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
         adStats = options.adStats,
         recruitRecord = options.recruitRecord,
+        recentAds = options.recentAds,
         isOfficer = options.isOfficer or function()
             return false
         end,
@@ -733,13 +736,46 @@ function Controller:Recruiters()
     })
 end
 
+-- The Recruiters view's rows for an officer, or nil for anyone else: the
+-- leaderboard, then the channels this client knows were advertised in
+-- lately. Each part starts with a heading row ({ kind = "heading", label,
+-- recent, total }: its column titles), and an empty part says so.
+--   { kind = "recruiter", label, recent, total }
+--   { kind = "ad", label, recent }        -- recent: how long ago
+--   { kind = "empty", label }
+function Controller:RecruitersView()
+    local recruiters = self:Recruiters()
+    if recruiters == nil then
+        return nil
+    end
+    local rows = { { kind = "heading", label = "Player", recent = "Last 30 days", total = "All time" } }
+    local index
+    for index = 1, #recruiters do
+        local row = recruiters[index]
+        table.insert(rows, { kind = "recruiter", label = row.label, recent = row.recent, total = row.total })
+    end
+    if recruiters[1] == nil then
+        table.insert(rows, { kind = "empty", label = "Nobody has advertised yet." })
+    end
+    table.insert(rows, { kind = "heading", label = "Recent ads", recent = "How long ago" })
+    local ok, ads = pcall(self.recentAds or function() return {} end)
+    ads = ok and type(ads) == "table" and ads or {}
+    for index = 1, #ads do
+        table.insert(rows, { kind = "ad", label = ads[index].label, recent = ads[index].ago })
+    end
+    if ads[1] == nil then
+        table.insert(rows, { kind = "empty", label = "No recent ads known." })
+    end
+    return rows
+end
+
 -- Redraws the Recruiters view when the window is open: officers get their
 -- rows, everyone else neither the view nor its button.
 function Controller:RefreshRecruiters()
     if self.window == nil or not self.window:IsShown() or type(self.window.SetRecruiters) ~= "function" then
         return
     end
-    self.window:SetRecruiters(self:Recruiters())
+    self.window:SetRecruiters(self:RecruitersView())
 end
 
 -- `/agf`: shows or hides the roster window. Never scans.

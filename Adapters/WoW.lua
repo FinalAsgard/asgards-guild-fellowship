@@ -489,6 +489,19 @@ function Client:zoneMapId()
     return mapId
 end
 
+-- The name of the map `mapID`, as the client shows it, or nil.
+function Client:GetMapName(mapID)
+    local maps = self.environment.C_Map
+    if type(maps) ~= "table" or type(mapID) ~= "number" then
+        return nil
+    end
+    local ok, info = callFunction(maps.GetMapInfo, mapID)
+    if not ok or type(info) ~= "table" or type(info.name) ~= "string" or info.name == "" then
+        return nil
+    end
+    return info.name
+end
+
 -- The zone the player is in as { key, name }: the key is "map:<ID>" where
 -- the client has maps, else "zone:<name>"; the name is as the client shows
 -- it. Nil when the client can't say.

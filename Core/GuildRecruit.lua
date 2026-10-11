@@ -94,8 +94,11 @@ Recruit.__index = Recruit
 --               Optional; without it, heard ad counts aren't kept.
 --   isOwnKey    function(key) -> true for one of the user's own characters.
 --               Optional.
---   onStatsChanged function() -> runs after an ad count changes (the user
---               posted, or heard a newer count). Optional.
+--   onStatsChanged function() -> runs after an ad count or a channel's last
+--               ad time changes (the user posted, or heard of an ad).
+--               Optional.
+--   mapName     function(mapID) -> the map's name, for naming a zone's
+--               General in the Recruiters view. Optional.
 --   askWait     function() -> seconds an ask waits for answers. Optional;
 --               ASK_WAIT_SECONDS otherwise.
 --   isOfficer   function(key) -> true when a character is an officer.
@@ -143,6 +146,9 @@ function GuildRecruit.Create(options)
             return false
         end,
         onStatsChanged = options.onStatsChanged or function() end,
+        mapName = options.mapName or function()
+            return nil
+        end,
         askWait = options.askWait,
         isOfficer = options.isOfficer or function()
             return false
@@ -696,6 +702,7 @@ function Recruit:hear(key, at)
     local recorded = self:Ledger():Record(key, at)
     if recorded then
         self:Refresh()
+        pcall(self.onStatsChanged)
     end
     return recorded
 end
@@ -879,6 +886,54 @@ function Recruit:RecordFor(keys)
         return nil
     end
     return addon.RecruitStats.Create(partition:GetRecruitStats()):Best(keys)
+end
+
+-- A channel key as a player reads it: "Trade", or a zone's General as
+-- "Elwynn Forest General" (the zone's name from the map, or as it was keyed).
+function Recruit:ChannelLabel(key)
+    if key == addon.RecruitLedger.TRADE_KEY then
+        return "Trade"
+    end
+    local mapID = string.match(key, "^general:map:(%d+)$")
+    if mapID ~= nil then
+        local ok, name = pcall(self.mapName, tonumber(mapID))
+        return (ok and type(name) == "string" and name or ("Zone " .. mapID)) .. " General"
+    end
+    local zone = string.match(key, "^general:zone:(.+)$")
+    return (zone or key) .. " General"
+end
+
+-- The channels this add-on knows were advertised in lately, newest first,
+-- as { key, label, at, ago }: `ago` reads like "12 min ago". Only the times
+-- it still keeps (within the user's own timer) are listed.
+function Recruit:KnownAds()
+    local now = self.now()
+    local ads = {}
+    local partition = self.partition()
+    if partition == nil or type(now) ~= "number" then
+        return ads
+    end
+    local ledger = self:Ledger()
+    ledger:Prune(now)
+    local key, at
+    for key, at in pairs(partition:GetRecruitLedger()) do
+        if type(key) == "string" and type(at) == "number" then
+            local minutes = math.max(0, math.floor((now - at) / 60))
+            table.insert(ads, {
+                key = key,
+                label = self:ChannelLabel(key),
+                at = at,
+                ago = minutes == 0 and "just now" or (GuildRecruit.FormatMinutes(minutes) .. " ago"),
+            })
+        end
+    end
+    table.sort(ads, function(a, b)
+        if a.at ~= b.at then
+            return a.at > b.at
+        end
+        return a.label < b.label
+    end)
+    return ads
 end
 
 -- The player panel's ad count line for a player with the characters `keys`,

@@ -239,7 +239,7 @@ Add-on users tell each other when and where they advertised, so nobody double-po
 
 Every post counts toward the player who made it, on all their characters together. The player panel shows **Advertised: N (M in last 30 days)**. The 30-day number falls as ads get older, even if they don't post again. Only ads posted through the add-on are counted.
 
-Officers also get a **Recruiters** button in the roster window's footer, left of **Conflicts**. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time, and updates as new ads arrive.
+Officers also get a **Recruiters** button in the roster window's footer, left of **Conflicts**. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Below that, **Recent ads** lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade") and how long ago, newest first. It only shows times your add-on still keeps, which is up to your own timer. Both parts update as new ads arrive.
 
 ## Supported clients
 

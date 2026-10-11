@@ -312,9 +312,16 @@ test.test("the Recruiters view and its button are for officers only", function()
     setup.login()
     setup.controller:Toggle()
 
-    test.assertEqual(1, #setup.window.recruiters)
-    test.assertEqual("TheTool", setup.window.recruiters[1].label)
-    test.assertEqual(3, setup.window.recruiters[1].total)
+    local rows = setup.window.recruiters
+    test.assertEqual("heading", rows[1].kind)
+    test.assertEqual("Player", rows[1].label)
+    test.assertEqual("recruiter", rows[2].kind)
+    test.assertEqual("TheTool", rows[2].label)
+    test.assertEqual(3, rows[2].total)
+    test.assertEqual("heading", rows[3].kind)
+    -- Without a source of recent ads, that part says there are none.
+    test.assertEqual("empty", rows[4].kind)
+    test.assertEqual("No recent ads known.", rows[4].label)
 
     officer = false
     test.assertEqual(nil, setup.controller:Recruiters())

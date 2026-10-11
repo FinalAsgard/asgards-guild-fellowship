@@ -54,6 +54,9 @@ if clientProfile.supported then
         recruitRecord = function(keys)
             return guildRecruit:RecordFor(keys)
         end,
+        recentAds = function()
+            return guildRecruit:KnownAds()
+        end,
         isOfficer = function()
             return guildRecruit:IsOfficer()
         end,
@@ -784,7 +787,10 @@ if clientProfile.supported then
         isOwnKey = function(key)
             return guildGreet:IsOwn(key)
         end,
-        -- An open Recruiters view shows new counts at once.
+        mapName = function(mapID)
+            return client:GetMapName(mapID)
+        end,
+        -- An open Recruiters view shows new counts and ad times at once.
         onStatsChanged = function()
             rosterController:RefreshRecruiters()
         end,
