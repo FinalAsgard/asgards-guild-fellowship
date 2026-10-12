@@ -12,6 +12,7 @@ local MANIFEST_FILES = {
     "Adapters/SettingsPanel.lua",
     "Adapters/GreetPrompts.lua",
     "Adapters/RecruitPrompts.lua",
+    "Adapters/GroupFinderWindow.lua",
     "Adapters/GreetingsPage.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
@@ -46,6 +47,7 @@ local MANIFEST_FILES = {
     "Core/RecruitConfig.lua",
     "Core/RecruitStats.lua",
     "Core/GuildRecruit.lua",
+    "Core/DungeonCatalog.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }

@@ -695,6 +695,38 @@ if clientProfile.supported then
             rosterController:Print("Chat tags off.")
         end
     end)
+    -- The Group Finder's own window, made on first use. Its dungeons come
+    -- from the game's Dungeon Finder where the client has one, read each
+    -- time it opens; its place is saved account-wide.
+    local groupFinder
+    router:Register("group", "open or close the Group Finder", function()
+        if groupFinder == nil then
+            local reason
+            groupFinder, reason = addon.GroupFinderWindow.Create(client, {
+                dungeons = function()
+                    return addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList())
+                end,
+                playerLevel = function()
+                    return client:GetPlayerLevel()
+                end,
+                loadAnchor = function()
+                    local store = rosterController:Store()
+                    return store and store:GroupFinderAnchor()
+                end,
+                saveAnchor = function(anchor)
+                    local store = rosterController:Store()
+                    if store ~= nil then
+                        store:SetGroupFinderAnchor(anchor)
+                    end
+                end,
+            })
+            if groupFinder == nil then
+                rosterController:Print("The Group Finder can't be shown: " .. tostring(reason) .. ".")
+                return
+            end
+        end
+        groupFinder:Toggle()
+    end)
     router:SetDefault("roster")
     -- Guild sync: officers are ranks that can view officer notes, judged
     -- from the stored roster (current members only).

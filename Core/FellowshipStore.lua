@@ -627,6 +627,33 @@ function Store:SetRecruitAnchor(anchor)
     return true
 end
 
+-- Where the Group Finder window sits ({ point, x, y }), shared by every
+-- character. Nil when none is saved or the saved one is unusable.
+function Store:GroupFinderAnchor()
+    local state = type(self.database) == "table" and self.database.groupFinder or nil
+    local anchor = type(state) == "table" and state.anchor or nil
+    if not isAnchor(anchor) then
+        return nil
+    end
+    return { point = anchor.point, x = anchor.x, y = anchor.y }
+end
+
+-- Saves where the Group Finder window sits, replacing an unusable saved
+-- position. Refuses when an unusable value is stored for the Group Finder.
+function Store:SetGroupFinderAnchor(anchor)
+    if not isAnchor(anchor) or type(self.database) ~= "table" then
+        return false
+    end
+    if self.database.groupFinder == nil then
+        self.database.groupFinder = {}
+    end
+    if type(self.database.groupFinder) ~= "table" then
+        return false
+    end
+    self.database.groupFinder.anchor = { point = anchor.point, x = anchor.x, y = anchor.y }
+    return true
+end
+
 -- The user's own ad, exactly as written. Empty when none is saved or the
 -- saved one is unusable.
 function Store:RecruitAd()

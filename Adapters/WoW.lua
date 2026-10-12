@@ -754,6 +754,46 @@ function Client:IsSecretValue(value)
     return not ok or (secret ~= nil and secret ~= false)
 end
 
+-- The logged-in character's level, or nil while the client can't say.
+function Client:GetPlayerLevel()
+    local ok, level = callFunction(self.environment.UnitLevel, "player")
+    if not ok or type(level) ~= "number" or level < 1 then
+        return nil
+    end
+    return level
+end
+
+-- The game's Dungeon Finder classifies each entry; the Group Finder lists
+-- only regular dungeons at normal difficulty, not random queues or heroics.
+Compatibility.LFG_TYPE_RANDOM = 6
+Compatibility.LFG_SUBTYPE_DUNGEON = 1
+
+-- The Dungeon Finder's dungeons as { id, name, minLevel, maxLevel }, or nil
+-- on a client without one (WoW Forever) or when it lists none.
+function Client:GetDungeonList()
+    local environment = self.environment
+    local ok, order = callFunction(environment.GetLFDChoiceOrder, {})
+    if not ok or type(order) ~= "table" or type(environment.GetLFGDungeonInfo) ~= "function" then
+        return nil
+    end
+    local dungeons = {}
+    local index
+    for index = 1, #order do
+        local id = order[index]
+        local infoOk, name, typeId, subtypeId, minLevel, maxLevel = callFunction(environment.GetLFGDungeonInfo, id)
+        if infoOk and type(name) == "string" and name ~= ""
+            and typeId ~= Compatibility.LFG_TYPE_RANDOM and subtypeId == Compatibility.LFG_SUBTYPE_DUNGEON
+            and type(minLevel) == "number" and type(maxLevel) == "number"
+        then
+            table.insert(dungeons, { id = id, name = name, minLevel = minLevel, maxLevel = maxLevel })
+        end
+    end
+    if #dungeons == 0 then
+        return nil
+    end
+    return dungeons
+end
+
 -- Wall-clock seconds for saved records, or nil.
 function Client:Timestamp()
     local ok, now = callFunction(self.environment.GetServerTime)

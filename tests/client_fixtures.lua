@@ -327,6 +327,15 @@ local function installGuild(world, environment, profile)
         local fullName = playerRosterName()
         return fullName and ("Player-1-" .. fullName) or nil
     end
+    -- The logged-in character's level: `world.playerLevel`, else the
+    -- first member's roster level.
+    environment.UnitLevel = function(unit)
+        test.assertEqual("player", unit)
+        if world.playerLevel ~= nil then
+            return world.playerLevel
+        end
+        return world.guild and world.guild.members[1].level or 0
+    end
     -- A fake clock: `world.time` is wall-clock seconds, `world.precise` the
     -- millisecond profiler clock, and C_Timer callbacks wait in
     -- `world.timers` until Fixtures.runTimers delivers them.
