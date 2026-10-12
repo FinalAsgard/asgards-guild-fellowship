@@ -48,6 +48,8 @@ local MANIFEST_FILES = {
     "Core/RecruitStats.lua",
     "Core/GuildRecruit.lua",
     "Core/DungeonCatalog.lua",
+    "Core/RoleCatalog.lua",
+    "Core/GroupSession.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }

@@ -265,7 +265,14 @@ Everyone gets the window's **Recent Guild Advertisements** tab. It lists each ch
 
 The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
 
-On WoW Retail the list comes from the game's own Dungeon Finder, so it stays current without add-on updates. WoW Forever has no Dungeon Finder, so the add-on ships the Classic dungeons with their fixed level ranges.
+On WoW Retail the list comes from the game's own Dungeon Finder, so it stays current without add-on updates. WoW Forever has no Dungeon Finder, so the add-on ships its dungeons (the Classic ones and Forever's new ones) with their fixed level ranges.
+
+Picking a dungeon starts your group and shows its five slots: 1 tank, 1 healer and 3 DPS. Everyone already in your party, guild members or not, fills a slot, and the slots update as people join or leave:
+
+- On Retail, each party member takes the slot for the role the game assigned them.
+- Anyone without an assigned role (everyone on WoW Forever) starts in the first open slot their class can fill: tank, then healer, then DPS. Under **Party roles**, use the **Tank**, **Healer** and **DPS** buttons beside each name (yours included) to put them where they belong. Only the roles their class can play have buttons.
+
+When all five slots are filled, the window shows **Group complete**. **Change dungeon** takes you back to the list to pick another dungeon, keeping everyone in their slots. **End group** ends the group, and so does leaving the party. Closing the window doesn't: open it again with `/agf group` and your group is still there.
 
 ## Supported clients
 

@@ -763,6 +763,79 @@ function Client:GetPlayerLevel()
     return level
 end
 
+-- Whether the player is in a party or raid. False when the client can't say.
+function Client:IsInGroup()
+    local environment = self.environment
+    local ok, grouped = callFunction(environment.IsInGroup)
+    if ok then
+        return grouped ~= nil and grouped ~= false
+    end
+    local count
+    ok, count = callFunction(environment.GetNumGroupMembers)
+    if not ok then
+        ok, count = callFunction(environment.GetNumPartyMembers)
+    end
+    return ok and type(count) == "number" and count > 0
+end
+
+-- The game's assigned roles, as the Group Finder names them.
+Compatibility.ASSIGNED_ROLES = { TANK = "tank", HEALER = "healer", DAMAGER = "dps" }
+Compatibility.PARTY_UNITS = { "player", "party1", "party2", "party3", "party4" }
+
+-- The player and their party members, each { key, name, classToken, level,
+-- assignedRole, inGuild, isPlayer }. `key` is the GUID where the client
+-- gives one. `assignedRole` is nil where the client assigns none.
+function Client:GetPartyMembers()
+    local environment = self.environment
+    local members = {}
+    local index
+    for index = 1, #Compatibility.PARTY_UNITS do
+        local unit = Compatibility.PARTY_UNITS[index]
+        local existsOk, exists = callFunction(environment.UnitExists, unit)
+        if unit == "player" or (existsOk and exists) then
+            local nameOk, name = callFunction(environment.UnitName, unit)
+            if nameOk and type(name) == "string" and name ~= "" then
+                local _, guid = callFunction(environment.UnitGUID, unit)
+                local _, _, classToken = callFunction(environment.UnitClass, unit)
+                local _, level = callFunction(environment.UnitLevel, unit)
+                local _, role = callFunction(environment.UnitGroupRolesAssigned, unit)
+                local _, inGuild = callFunction(environment.UnitIsInMyGuild, unit)
+                table.insert(members, {
+                    key = type(guid) == "string" and guid ~= "" and guid or name,
+                    name = name,
+                    classToken = type(classToken) == "string" and classToken or nil,
+                    level = type(level) == "number" and level > 0 and level or nil,
+                    assignedRole = Compatibility.ASSIGNED_ROLES[role],
+                    inGuild = unit == "player" or (inGuild ~= nil and inGuild ~= false),
+                    isPlayer = unit == "player",
+                })
+            end
+        end
+    end
+    return members
+end
+
+-- Calls onChange() whenever the party or its assigned roles change.
+-- Returns false when the client can't deliver the events.
+function Client:ObserveParty(onChange)
+    if type(onChange) ~= "function" then
+        return false
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil or not self:SetEventHandler(frame, function()
+        pcall(onChange)
+    end) then
+        return false
+    end
+    -- Retail and newer clients send GROUP_ROSTER_UPDATE; older ones the
+    -- party events. Each client registers whichever it knows.
+    local registered = self:RegisterEvent(frame, "GROUP_ROSTER_UPDATE")
+    registered = self:RegisterEvent(frame, "PARTY_MEMBERS_CHANGED") or registered
+    self:RegisterEvent(frame, "PLAYER_ROLES_ASSIGNED")
+    self.partyFrame = frame
+    return registered
+end
+
 -- The game's Dungeon Finder classifies each entry; the Group Finder lists
 -- only regular dungeons at normal difficulty, not random queues or heroics.
 Compatibility.LFG_TYPE_RANDOM = 6

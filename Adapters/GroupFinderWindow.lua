@@ -3,9 +3,15 @@ local _, addon = ...
 -- The Group Finder's own window, separate from the master frame, built with
 -- the Details! Framework's simple panel (draggable, with a close button, and
 -- Escape closes it). It remembers where it was dropped, across reloads and
--- on every character. It starts with a dungeon picker: the dungeons that fit
+-- on every character.
+--
+-- With no group going, it shows the dungeon picker: the dungeons that fit
 -- the character's level first, and the rest behind "Show all". Picking one
--- shows it, with its level range, as the group's dungeon.
+-- starts the group and shows its slots (1 tank, 1 healer, 3 DPS) filled
+-- from the party, with Tank/Healer/DPS buttons for each party member the
+-- game hasn't assigned a role, "Group complete" once all five are filled,
+-- and Change dungeon and End group buttons. Closing the window keeps the
+-- group.
 --
 -- Like the other adapters, it reaches the game only through the client's
 -- environment (CreateFrame, UIParent) and the framework, so specs can draw
@@ -15,9 +21,13 @@ local GroupFinderWindow = {
     HEIGHT = 440,
     PADDING = 12,
     ROW_HEIGHT = 20,
-    -- Where the dungeon list starts, below the title bar and its headings.
+    PARTY_ROW_HEIGHT = 24,
+    -- Where the dungeon list and the slots start, below the title bar and
+    -- the dungeon's heading.
     LIST_TOP = 86,
     CHECK_SIZE = 24,
+    BUTTON_HEIGHT = 20,
+    ROLE_BUTTON_WIDTH = 56,
     STRATA = "HIGH",
 }
 addon.GroupFinderWindow = GroupFinderWindow
@@ -30,9 +40,27 @@ function GroupFinderWindow.Label(dungeon)
     return dungeon.name .. " (" .. dungeon.minLevel .. "–" .. dungeon.maxLevel .. ")"
 end
 
+-- "Hammer (42, not in guild)".
+function GroupFinderWindow.MemberLabel(member)
+    local details = {}
+    if member.level ~= nil then
+        table.insert(details, tostring(member.level))
+    end
+    if not member.inGuild then
+        table.insert(details, "not in guild")
+    end
+    if #details == 0 then
+        return member.name
+    end
+    return member.name .. " (" .. table.concat(details, ", ") .. ")"
+end
+
 -- options:
 --   dungeons()          the DungeonCatalog to pick from, read on every open
 --   playerLevel()       the character's level, or nil
+--   session             the GroupSession
+--   roles               the client's RoleCatalog
+--   syncParty()         hands the current party to the session
 --   loadAnchor()        the saved position ({ point, x, y }), or nil
 --   saveAnchor(anchor)  saves a new one
 -- Returns nil and the reason when the framework is missing or can't build
@@ -47,10 +75,16 @@ function GroupFinderWindow.Create(client, options)
         framework = framework,
         dungeons = options.dungeons,
         playerLevel = options.playerLevel,
+        session = options.session,
+        roles = options.roles,
+        syncParty = options.syncParty or function() end,
         loadAnchor = options.loadAnchor or function() return nil end,
         saveAnchor = options.saveAnchor or function() end,
         showAll = false,
+        choosing = false,
         rows = {},
+        slotRows = {},
+        partyRows = {},
     }, Window)
     local ok, reason = pcall(window.build, window)
     if not ok then
@@ -91,9 +125,97 @@ function Window:saveCurrent()
     end)
 end
 
-function Window:build()
+function Window:button(parent, text, width, onClick)
+    local made = self.environment.CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    made:SetWidth(width)
+    made:SetHeight(GroupFinderWindow.BUTTON_HEIGHT)
+    made:SetText(text)
+    made:SetScript("OnClick", onClick)
+    return made
+end
+
+-- A frame covering the panel, holding one view.
+function Window:view()
+    local frame = self.environment.CreateFrame("Frame", nil, self.panel)
+    frame:SetAllPoints(self.panel)
+    return frame
+end
+
+function Window:buildPicker()
     local createFrame = self.environment.CreateFrame
     local padding = GroupFinderWindow.PADDING
+    local picker = self:view()
+    self.picker = picker
+
+    self.hintText = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self.hintText:SetPoint("TOPLEFT", picker, "TOPLEFT", padding, -60)
+    self.hintText:SetJustifyH("LEFT")
+
+    local showAll = createFrame("CheckButton", nil, picker, "UICheckButtonTemplate")
+    showAll:SetWidth(GroupFinderWindow.CHECK_SIZE)
+    showAll:SetHeight(GroupFinderWindow.CHECK_SIZE)
+    showAll:SetPoint("TOPRIGHT", picker, "TOPRIGHT", -70, -54)
+    showAll:SetScript("OnClick", function(button)
+        self.showAll = button:GetChecked() == true
+        self:Refresh()
+    end)
+    local showAllLabel = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    showAllLabel:SetPoint("LEFT", showAll, "RIGHT", 2, 0)
+    showAllLabel:SetText("Show all")
+    self.showAllButton = showAll
+
+    local scroll = createFrame("ScrollFrame", nil, picker, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", picker, "TOPLEFT", padding, -GroupFinderWindow.LIST_TOP)
+    scroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -padding - 22, padding)
+    local list = createFrame("Frame", nil, scroll)
+    list:SetWidth(GroupFinderWindow.WIDTH - 2 * padding - 22)
+    list:SetHeight(GroupFinderWindow.ROW_HEIGHT)
+    scroll:SetScrollChild(list)
+    self.list = list
+end
+
+function Window:buildGroup()
+    local padding = GroupFinderWindow.PADDING
+    local group = self:view()
+    self.group = group
+
+    self.endButton = self:button(group, "End group", 90, function()
+        self.session:End()
+        self.choosing = false
+        self:Refresh()
+    end)
+    self.endButton:SetPoint("TOPRIGHT", group, "TOPRIGHT", -padding, -54)
+    self.changeButton = self:button(group, "Change dungeon", 120, function()
+        self.choosing = true
+        self:Refresh()
+    end)
+    self.changeButton:SetPoint("RIGHT", self.endButton, "LEFT", -4, 0)
+
+    local index
+    for index = 1, #addon.GroupSession.LAYOUT do
+        local top = -GroupFinderWindow.LIST_TOP - (index - 1) * GroupFinderWindow.ROW_HEIGHT
+        local role = group:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        role:SetPoint("TOPLEFT", group, "TOPLEFT", padding, top)
+        role:SetText(addon.RoleCatalog.LABELS[addon.GroupSession.LAYOUT[index].role] .. ":")
+        local text = group:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        text:SetPoint("TOPLEFT", group, "TOPLEFT", padding + 70, top)
+        text:SetPoint("RIGHT", group, "RIGHT", -padding, 0)
+        text:SetJustifyH("LEFT")
+        self.slotRows[index] = { role = role, text = text }
+    end
+
+    local below = -GroupFinderWindow.LIST_TOP - #addon.GroupSession.LAYOUT * GroupFinderWindow.ROW_HEIGHT
+    self.completeText = group:CreateFontString(nil, "OVERLAY", "GameFontGreen")
+    self.completeText:SetPoint("TOPLEFT", group, "TOPLEFT", padding, below - 6)
+    self.completeText:SetText("Group complete")
+
+    self.partyHeading = group:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.partyHeading:SetPoint("TOPLEFT", group, "TOPLEFT", padding, below - 32)
+    self.partyHeading:SetText("Party roles")
+    self.partyTop = below - 52
+end
+
+function Window:build()
     local panel = self.framework:CreateSimplePanel(self.environment.UIParent,
         GroupFinderWindow.WIDTH, GroupFinderWindow.HEIGHT, "Group Finder",
         addon.Identity.addonName .. "GroupFinder")
@@ -107,41 +229,17 @@ function Window:build()
     end)
 
     self.dungeonText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    self.dungeonText:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -34)
-    self.dungeonText:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
+    self.dungeonText:SetPoint("TOPLEFT", panel, "TOPLEFT", GroupFinderWindow.PADDING, -34)
+    self.dungeonText:SetPoint("RIGHT", panel, "RIGHT", -GroupFinderWindow.PADDING, 0)
     self.dungeonText:SetJustifyH("LEFT")
 
-    self.hintText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    self.hintText:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -60)
-    self.hintText:SetJustifyH("LEFT")
-
-    local showAll = createFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    showAll:SetWidth(GroupFinderWindow.CHECK_SIZE)
-    showAll:SetHeight(GroupFinderWindow.CHECK_SIZE)
-    showAll:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -70, -54)
-    showAll:SetScript("OnClick", function(button)
-        self.showAll = button:GetChecked() == true
-        self:refresh()
-    end)
-    local showAllLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    showAllLabel:SetPoint("LEFT", showAll, "RIGHT", 2, 0)
-    showAllLabel:SetText("Show all")
-    self.showAllButton = showAll
-
-    local scroll = createFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -GroupFinderWindow.LIST_TOP)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -padding - 22, padding)
-    local list = createFrame("Frame", nil, scroll)
-    list:SetWidth(GroupFinderWindow.WIDTH - 2 * padding - 22)
-    list:SetHeight(GroupFinderWindow.ROW_HEIGHT)
-    scroll:SetScrollChild(list)
-    self.list = list
-
+    self:buildPicker()
+    self:buildGroup()
     panel:Hide()
 end
 
--- The list's row `index`, made on first use: a button showing one dungeon
--- that picks it when clicked.
+-- The dungeon list's row `index`, made on first use: a button showing one
+-- dungeon that picks it when clicked.
 function Window:row(index)
     if self.rows[index] ~= nil then
         return self.rows[index]
@@ -164,18 +262,49 @@ function Window:row(index)
     return row
 end
 
--- Redraws the picked dungeon and the list from the catalog and level.
-function Window:refresh()
-    local catalog = self.catalog
-    local level = self.level
-    local picked = catalog:Get(self.picked)
-    if picked ~= nil then
-        self.dungeonText:SetText("Dungeon: " .. GroupFinderWindow.Label(picked))
-    else
-        self.dungeonText:SetText("Pick a dungeon")
+-- The party list's row `index`, made on first use: a member's name and a
+-- button for each role.
+function Window:partyRow(index)
+    if self.partyRows[index] ~= nil then
+        return self.partyRows[index]
     end
+    local padding = GroupFinderWindow.PADDING
+    local frame = self.environment.CreateFrame("Frame", nil, self.group)
+    frame:SetHeight(GroupFinderWindow.PARTY_ROW_HEIGHT)
+    frame:SetPoint("TOPLEFT", self.group, "TOPLEFT", padding,
+        self.partyTop - (index - 1) * GroupFinderWindow.PARTY_ROW_HEIGHT)
+    frame:SetPoint("RIGHT", self.group, "RIGHT", -padding, 0)
+    local row = { frame = frame, buttons = {} }
+    local previous
+    local roleIndex
+    for roleIndex = #addon.RoleCatalog.ROLES, 1, -1 do
+        local role = addon.RoleCatalog.ROLES[roleIndex]
+        local button = self:button(frame, addon.RoleCatalog.LABELS[role], GroupFinderWindow.ROLE_BUTTON_WIDTH,
+            function()
+                if row.key ~= nil then
+                    self.session:Assign(row.key, role)
+                    self:Refresh()
+                end
+            end)
+        if previous == nil then
+            button:SetPoint("RIGHT", frame, "RIGHT", 0, 0)
+        else
+            button:SetPoint("RIGHT", previous, "LEFT", -2, 0)
+        end
+        previous = button
+        row.buttons[role] = button
+    end
+    row.text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.text:SetPoint("LEFT", frame, "LEFT", 0, 0)
+    row.text:SetPoint("RIGHT", previous, "LEFT", -6, 0)
+    row.text:SetJustifyH("LEFT")
+    self.partyRows[index] = row
+    return row
+end
 
-    local fitting, others = catalog:Split(level)
+function Window:drawPicker()
+    local level = self.level
+    local fitting, others = self.catalog:Split(level)
     local shown = {}
     local index
     for index = 1, #fitting do
@@ -208,19 +337,103 @@ function Window:refresh()
     self.list:SetHeight(math.max(#shown, 1) * GroupFinderWindow.ROW_HEIGHT)
 end
 
--- Picks the dungeon with `id` as the group's dungeon.
+function Window:drawGroup()
+    local slots = self.session:Slots()
+    local index
+    for index = 1, #self.slotRows do
+        local slot = slots[index]
+        if slot ~= nil and slot.member ~= nil then
+            self.slotRows[index].text:SetText(GroupFinderWindow.MemberLabel(slot.member))
+        else
+            self.slotRows[index].text:SetText("open")
+        end
+    end
+    if self.session:IsComplete() then
+        self.completeText:Show()
+    else
+        self.completeText:Hide()
+    end
+
+    -- Members the game assigned a role need no buttons.
+    local members = self.session:Members()
+    local count = 0
+    for index = 1, #members do
+        local member = members[index]
+        if member.assignedRole == nil then
+            count = count + 1
+            local row = self:partyRow(count)
+            row.key = member.key
+            row.text:SetText(GroupFinderWindow.MemberLabel(member))
+            local role, button
+            for role, button in pairs(row.buttons) do
+                if self.roles:Can(member.classToken, role) then
+                    button:Show()
+                else
+                    button:Hide()
+                end
+            end
+            row.frame:Show()
+        end
+    end
+    for index = count + 1, #self.partyRows do
+        self.partyRows[index].key = nil
+        self.partyRows[index].frame:Hide()
+    end
+    if count > 0 then
+        self.partyHeading:Show()
+    else
+        self.partyHeading:Hide()
+    end
+end
+
+-- Redraws the window from the session, the catalog and the level.
+function Window:draw()
+    local picked = self:Picked()
+    if picked ~= nil then
+        self.dungeonText:SetText("Dungeon: " .. GroupFinderWindow.Label(picked))
+    elseif self.session:IsActive() then
+        self.dungeonText:SetText("Dungeon: unknown")
+    else
+        self.dungeonText:SetText("Pick a dungeon")
+    end
+    if self.session:IsActive() and not self.choosing then
+        self.picker:Hide()
+        self:drawGroup()
+        self.group:Show()
+    else
+        self.group:Hide()
+        self:drawPicker()
+        self.picker:Show()
+    end
+end
+
+-- Redraws the window, when it has been opened.
+function Window:Refresh()
+    if self.catalog ~= nil then
+        pcall(self.draw, self)
+    end
+end
+
+-- Picks the dungeon with `id`: starts the group, or changes its dungeon
+-- keeping its slots.
 function Window:Pick(id)
     if self.catalog == nil or self.catalog:Get(id) == nil then
         return false
     end
-    self.picked = id
-    pcall(self.refresh, self)
+    if self.session:IsActive() then
+        self.session:SetDungeon(id)
+    else
+        self.session:Start(id)
+        self.syncParty()
+    end
+    self.choosing = false
+    self:Refresh()
     return true
 end
 
--- The picked dungeon, or nil.
+-- The group's dungeon, or nil.
 function Window:Picked()
-    return self.catalog ~= nil and self.catalog:Get(self.picked) or nil
+    return self.catalog ~= nil and self.catalog:Get(self.session:Dungeon()) or nil
 end
 
 function Window:IsShown()
@@ -228,8 +441,8 @@ function Window:IsShown()
     return ok and shown == true
 end
 
--- Opens the window with the current dungeons and level, or closes it.
--- Returns whether it's now open.
+-- Opens the window with the current dungeons, level and party, or closes
+-- it. Returns whether it's now open.
 function Window:Toggle()
     if self:IsShown() then
         self.panel:Hide()
@@ -238,7 +451,8 @@ function Window:Toggle()
     self.catalog = self.dungeons()
     self.level = self.playerLevel()
     self.showAllButton:SetChecked(self.showAll)
-    pcall(self.refresh, self)
+    self.syncParty()
+    self:Refresh()
     self.panel:Show()
     return true
 end

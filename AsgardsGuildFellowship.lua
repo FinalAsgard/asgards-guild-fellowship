@@ -28,6 +28,7 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
+local groupFinder, groupSession, syncParty
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -697,8 +698,15 @@ if clientProfile.supported then
     end)
     -- The Group Finder's own window, made on first use. Its dungeons come
     -- from the game's Dungeon Finder where the client has one, read each
-    -- time it opens; its place is saved account-wide.
-    local groupFinder
+    -- time it opens; its place is saved account-wide. The group outlives
+    -- the window and follows the party.
+    local roleCatalog = addon.RoleCatalog.For(clientProfile.id)
+    groupSession = addon.GroupSession.Create(roleCatalog)
+    syncParty = function()
+        if groupSession:IsActive() then
+            groupSession:UpdateParty(client:GetPartyMembers(), client:IsInGroup())
+        end
+    end
     router:Register("group", "open or close the Group Finder", function()
         if groupFinder == nil then
             local reason
@@ -709,6 +717,9 @@ if clientProfile.supported then
                 playerLevel = function()
                     return client:GetPlayerLevel()
                 end,
+                session = groupSession,
+                roles = roleCatalog,
+                syncParty = syncParty,
                 loadAnchor = function()
                     local store = rosterController:Store()
                     return store and store:GroupFinderAnchor()
@@ -1090,6 +1101,13 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         guildRecruit:Refresh()
     end)
     guildRecruit:Refresh()
+    -- The Group Finder's slots follow the party.
+    client:ObserveParty(function()
+        syncParty()
+        if groupFinder ~= nil then
+            groupFinder:Refresh()
+        end
+    end)
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)
@@ -1111,6 +1129,7 @@ addon.settingsPanel = settingsPanel
 addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
+addon.groupSession = groupSession
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version

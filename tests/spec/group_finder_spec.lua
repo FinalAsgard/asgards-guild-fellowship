@@ -190,19 +190,37 @@ end
 
 local function newWindow(options)
     options = options or {}
-    local addon = test.newAddon("Core/DungeonCatalog.lua", "Adapters/GroupFinderWindow.lua")
+    local addon = test.newAddon("Core/DungeonCatalog.lua", "Core/RoleCatalog.lua", "Core/GroupSession.lua",
+        "Adapters/GroupFinderWindow.lua")
     local environment = newScreen()
-    local world = { level = options.level, saved = options.saved, saves = 0, environment = environment }
+    local world = {
+        level = options.level,
+        saved = options.saved,
+        saves = 0,
+        environment = environment,
+        -- The party the session is handed: `world.party` and `world.inGroup`.
+        party = options.party or {},
+        inGroup = options.party ~= nil,
+    }
     local client = {
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
     }
+    local roles = addon.RoleCatalog.For(options.client or "forever")
+    world.session = addon.GroupSession.Create(roles)
     world.window = addon.GroupFinderWindow.Create(client, {
         dungeons = function()
             return addon.DungeonCatalog.Create(SAMPLE)
         end,
         playerLevel = function()
             return world.level
+        end,
+        session = world.session,
+        roles = roles,
+        syncParty = function()
+            if world.session:IsActive() then
+                world.session:UpdateParty(world.party, world.inGroup)
+            end
         end,
         loadAnchor = function()
             return world.saved
