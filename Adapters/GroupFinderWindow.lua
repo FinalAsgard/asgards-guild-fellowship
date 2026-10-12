@@ -90,6 +90,8 @@ end
 --   cancelRequest(id)   withdraws a pending request
 --   isOnline(key)       whether a guild character is online now
 --   invite(key)         sends the game's party invite to that character
+--   zone()              the zone the character is in, by name, or nil
+--   selfKey()           the logged-in character's key, or nil
 --   loadAnchor()        the saved position ({ point, x, y }), or nil
 --   saveAnchor(anchor)  saves a new one
 -- Returns nil and the reason when the framework is missing or can't build
@@ -122,6 +124,12 @@ function GroupFinderWindow.Create(client, options)
             return false
         end,
         invite = options.invite or function() end,
+        zone = options.zone or function()
+            return nil
+        end,
+        selfKey = options.selfKey or function()
+            return nil
+        end,
         suggestionButtons = {},
         loadAnchor = options.loadAnchor or function() return nil end,
         saveAnchor = options.saveAnchor or function() end,
@@ -198,7 +206,7 @@ function Window:buildSuggestions()
     self.suggestions = column
     local heading = column:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     heading:SetPoint("TOPLEFT", column, "TOPLEFT", 0, 0)
-    heading:SetText("Guildmates who could join")
+    self.columnHeading = heading
     local scroll = createFrame("ScrollFrame", nil, column, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", column, "TOPLEFT", 0, -GroupFinderWindow.LIST_TOP + 60)
     scroll:SetPoint("BOTTOMRIGHT", column, "BOTTOMRIGHT", -22, 0)
@@ -281,14 +289,40 @@ function GroupFinderWindow.SuggestionTexts(lists)
     return texts
 end
 
-function Window:drawSuggestions(candidates, dungeon)
+-- The Nearby lines: a heading naming the zone, then one line per player.
+function GroupFinderWindow.NearbyItems(entries, zone)
+    local items = { { text = "|cffffd100Nearby" .. (zone and (" in " .. zone) or "") .. "|r" } }
+    if #entries == 0 then
+        table.insert(items, { text = "  |cff9d9d9dNo guildmates nearby.|r" })
+    end
+    local index
+    for index = 1, #entries do
+        table.insert(items, { text = "  " .. addon.GroupCandidates.DescribeNearby(entries[index]) })
+    end
+    return items
+end
+
+-- The right column: with a group going, who could join each open role;
+-- always, the guildmates nearby.
+function Window:drawSuggestions(candidates, dungeon, grouping)
     local items = {}
-    if candidates ~= nil and dungeon ~= nil then
+    if grouping and candidates ~= nil and dungeon ~= nil then
         items = GroupFinderWindow.SuggestionItems(candidates:Suggestions(dungeon, self.session:OpenRoles()),
             function(playerId)
                 return self.session:RequestFor(playerId)
             end)
     end
+    if candidates ~= nil then
+        local okZone, zone = pcall(self.zone)
+        zone = okZone and zone or nil
+        local okSelf, selfKey = pcall(self.selfKey)
+        local nearby = GroupFinderWindow.NearbyItems(candidates:Nearby(zone, okSelf and selfKey or nil), zone)
+        local index
+        for index = 1, #nearby do
+            table.insert(items, nearby[index])
+        end
+    end
+    self.columnHeading:SetText(grouping and "Guildmates who could join" or "Guildmates")
     local index
     for index = 1, #items do
         local line = self:suggestionLine(index)
@@ -708,14 +742,14 @@ function Window:draw()
         self.picker:Hide()
         self:drawGroup()
         self.group:Show()
-        self:drawSuggestions(self.candidatesNow, picked)
-        self.suggestions:Show()
+        self:drawSuggestions(self.candidatesNow, picked, true)
     else
         self.group:Hide()
-        self.suggestions:Hide()
         self:drawPicker()
         self.picker:Show()
+        self:drawSuggestions(self.candidatesNow, picked, false)
     end
+    self.suggestions:Show()
     self:drawFooter()
 end
 

@@ -281,6 +281,7 @@ test.test("group finder window: add-on users get Request, then Cancel while it's
     local candidates = {
         Suggestions = function() return { { role = "healer", players = players } } end,
         Counts = function() return { tank = 0, healer = 2, dps = 0 } end,
+        Nearby = function() return {} end,
     }
     local calls = {}
     local window = addon.GroupFinderWindow.Create({

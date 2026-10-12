@@ -283,6 +283,10 @@ Each player appears once, under their alias (or main), with the character they'r
 
 Guildmates whose add-on didn't answer (see below) are marked **(no add-on)**, and are suggested by what their class can do. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
 
+### Nearby
+
+The right side of the window always ends with **Nearby in <zone>**: the guildmates online in the same zone as you, at any level, one line per player under their alias (or main), with the characters they have there and their levels, for example **Thunderer — Bolt 22**. It's there before you pick a dungeon too, so you can see who you might quest with. It's worked out again each time the window opens or refreshes.
+
 ### Requesting a guildmate
 
 Guildmates with the add-on have a **Request** button beside their suggestion. Pressing it sends them a request, and their line shows its state: **pending** until they answer, then **accepted**, **declined**, **expired** (after about 2 minutes with no answer) or **cancelled**. While it's pending the button reads **Cancel**, to withdraw it. **End group** withdraws every pending request.

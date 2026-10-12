@@ -1082,6 +1082,13 @@ if clientProfile.supported then
                 end,
                 request = sendRequest,
                 cancelRequest = cancelRequest,
+                zone = function()
+                    local zone = client:GetZone()
+                    return zone and zone.name or nil
+                end,
+                selfKey = function()
+                    return rosterController:SelfKey()
+                end,
                 isOnline = function(key)
                     local guild, _, normalizer = rosterController:QuietContext()
                     local live = guild and rosterController:LiveMembers(normalizer)[key]

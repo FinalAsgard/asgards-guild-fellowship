@@ -256,7 +256,9 @@ test.test("group finder window: the picker shows each dungeon's role counts", fu
 
     test.assertContains(window.rows[1].label.text, "The Deadmines (17–26)")
     test.assertContains(window.rows[1].label.text, "T 1 · H 2 · D 3")
-    test.assertFalse(window.suggestions.shown)
+    -- Before a dungeon is picked, the column holds only Nearby.
+    test.assertTrue(window.suggestions.shown)
+    test.assertContains(window.suggestionLines[1].text, "Nearby")
 end)
 
 test.test("group finder window: each open role lists who could fill it, and filled roles none", function()
@@ -285,4 +287,86 @@ test.test("group finder window: a role nobody online fits says so", function()
     test.assertEqual("|cffffd100Tank|r", texts[1])
     test.assertContains(texts[2], "No one online fits.")
     test.assertEqual("Every role is filled.", addon.GroupFinderWindow.SuggestionTexts({})[1])
+end)
+
+-- Nearby ------------------------------------------------------------------------
+
+test.test("nearby: online guildmates in the zone, at any level and whatever their availability", function()
+    local world = newGuild()
+    -- Oldbolt (60) is online in Westfall too, beside Zap and Me and Mate.
+    world.members.oldbolt = { online = true, zone = "Westfall", level = 60, name = "Oldbolt" }
+    world.members.busy.zone = "Westfall"
+
+    local nearby = world.candidates():Nearby("Westfall", "me")
+
+    -- The organizer's own player is left out; Busy (unavailable) and Mate
+    -- (in the party) are still nearby.
+    test.assertEqual("Busy, Mate, Thunderer, Zap", labels(nearby))
+    test.assertEqual("Oldbolt 60", names(nearby[3].characters))
+    test.assertEqual("Thunderer — Oldbolt 60", world.addon.GroupCandidates.DescribeNearby(nearby[3]))
+    test.assertEqual(0, #world.candidates():Nearby("Moonglade", "me"))
+    test.assertEqual(0, #world.candidates():Nearby(nil, "me"))
+end)
+
+test.test("nearby: one entry per player, with each of their characters there", function()
+    local world = newGuild()
+    world.members.hammer = { online = true, zone = "Ironforge", level = 24, name = "Hammer" }
+
+    local nearby = world.candidates():Nearby("Ironforge", "me")
+
+    test.assertEqual("Thunderer", labels(nearby))
+    test.assertEqual("Bolt 22, Hammer 24", names(nearby[1].characters))
+end)
+
+test.test("group finder window: Nearby shows before a dungeon is picked, and under the suggestions after", function()
+    local world = newGuild()
+    local addon = world.addon
+    local environment = fakeFrames.install({})
+    environment.UIParent = environment.CreateFrame("Frame", nil, nil)
+    environment.DetailsFramework = {
+        CreateSimplePanel = function()
+            local panel = environment.CreateFrame("Frame", nil, nil)
+            rawset(panel, "IsShown", function(self) return self.shown end)
+            return panel
+        end,
+    }
+    local roles = addon.RoleCatalog.For("forever")
+    local session = addon.GroupSession.Create(roles)
+    local window = addon.GroupFinderWindow.Create({
+        environment = environment,
+        GetGlobal = function(_, name) return environment[name] end,
+    }, {
+        dungeons = function() return addon.DungeonCatalog.Create({ DEADMINES }) end,
+        playerLevel = function() return 24 end,
+        session = session,
+        roles = roles,
+        candidates = world.candidates,
+        zone = function() return "Westfall" end,
+        selfKey = function() return "me" end,
+    })
+    window:Toggle()
+
+    local lines = shownLines(window)
+    test.assertEqual("|cffffd100Nearby in Westfall|r", lines[1])
+    test.assertEqual("  Mate — Mate 23", lines[2])
+    test.assertEqual("  Zap — Zap 22", lines[3])
+
+    window:Pick("dm")
+    lines = shownLines(window)
+    test.assertEqual("|cffffd100Tank|r", lines[1])
+    test.assertEqual("|cffffd100Nearby in Westfall|r", lines[#lines - 2])
+
+    -- It updates on a refresh.
+    world.members.zap.zone = "Duskwood"
+    window:Refresh()
+    lines = shownLines(window)
+    test.assertEqual("  Mate — Mate 23", lines[#lines])
+end)
+
+test.test("group finder window: nobody nearby says so", function()
+    local addon = load()
+    local items = addon.GroupFinderWindow.NearbyItems({}, "Moonglade")
+
+    test.assertEqual("|cffffd100Nearby in Moonglade|r", items[1].text)
+    test.assertContains(items[2].text, "No guildmates nearby.")
 end)

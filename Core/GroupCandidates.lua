@@ -208,6 +208,53 @@ function Candidates:Counts(dungeon)
     }
 end
 
+-- Nearby: guildmates online in `zone` (a zone name), at any level and
+-- whatever their availability, one entry per player, sorted by label:
+-- { id, label, characters = { { name, level } } } with the characters of
+-- theirs online there. The player of `selfKey` is left out.
+function Candidates:Nearby(zone, selfKey)
+    local partition = self.partition
+    local own = selfKey and partition:GetCharacter(selfKey)
+    local byPlayer, entries = {}, {}
+    local key, live
+    for key, live in pairs(self.members) do
+        local character = live.online and zone ~= nil and live.zone == zone and partition:GetCharacter(key)
+        if character and not (own and character.player == own.player) then
+            local entry = byPlayer[character.player]
+            if entry == nil then
+                local player = partition:GetPlayer(character.player)
+                entry = { id = character.player, label = player.alias or self:nameOf(player.main), characters = {} }
+                byPlayer[character.player] = entry
+                table.insert(entries, entry)
+            end
+            table.insert(entry.characters, { name = self:nameOf(key), level = self:levelOf(key) })
+        end
+    end
+    table.sort(entries, function(a, b)
+        if a.label ~= b.label then
+            return a.label < b.label
+        end
+        return a.id < b.id
+    end)
+    local index
+    for index = 1, #entries do
+        table.sort(entries[index].characters, function(a, b)
+            return a.name < b.name
+        end)
+    end
+    return entries
+end
+
+-- "Thunderer — Bolt 22".
+function GroupCandidates.DescribeNearby(entry)
+    local characters = {}
+    local index
+    for index = 1, #entry.characters do
+        characters[index] = entry.characters[index].name .. " " .. tostring(entry.characters[index].level or "?")
+    end
+    return entry.label .. " — " .. table.concat(characters, ", ")
+end
+
 -- "Thunderer — on Bolt, Ironforge: Hammer 34, Bolt 30", with "(no add-on)"
 -- for a player whose add-on didn't reply.
 function GroupCandidates.Describe(entry)
