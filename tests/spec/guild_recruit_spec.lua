@@ -1235,7 +1235,8 @@ test.test("ad stats: a player who has never advertised shows no line", function(
     test.assertEqual(nil, world.addon.guildRecruit:StatsLine({ selfKey }))
 end)
 
--- A roster window that records what it was last told about Recruiters.
+-- A roster window that records what it was last told about Recruiters and
+-- Recent ads.
 local function recruitersWindow(world)
     local window = {}
     function window:IsShown()
@@ -1243,6 +1244,9 @@ local function recruitersWindow(world)
     end
     function window:SetRecruiters(rows)
         self.rows = rows
+    end
+    function window:SetRecentAds(rows)
+        self.ads = rows
     end
     world.addon.rosterController.window = window
     return window
@@ -1282,27 +1286,85 @@ test.test("recruiters: an officer's open view updates when new stats arrive, ran
     test.assertEqual(1, recruiters[2].total)
 end)
 
-test.test("recruiters: the view lists the channels this client knows were advertised in, newest first", function()
-    local world = login("Retail", { playerName = OFFICER })
+test.test("recent ads: every member sees the channels advertised in lately, newest first, and who posted", function()
+    local world = login("Retail", { playerName = MEMBER })
     local window = recruitersWindow(world)
     local recruit = world.addon.guildRecruit
 
-    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 12 * 60 }, MEMBER)
+    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 12 * 60 }, OFFICER)
     recruit:OnMessage({ v = 1, t = "channel-time", k = "general:map:2339", a = world.time - 65 * 60 + 30 },
-        MEMBER)
+        OFFICER)
     recruit:OnMessage({ v = 1, t = "advertised", k = "general:zone:Somewhere", n = "Somewhere General",
-        a = world.time }, MEMBER)
+        a = world.time }, "Wanderer-Stormrage")
 
+    -- A member gets no leaderboard, but does get the recent ads.
+    test.assertEqual(nil, window.rows)
+    test.assertEqual("Channel", window.ads[1].label)
+    test.assertEqual("Posted by", window.ads[1].by)
+    test.assertEqual("When", window.ads[1].recent)
     -- Times are kept past the user's own timer, as history.
-    local ads = rowsOfKind(window.rows, "ad")
+    local ads = rowsOfKind(window.ads, "ad")
     test.assertEqual(3, #ads)
     test.assertEqual("Somewhere General", ads[1].label)
     test.assertEqual("just now", ads[1].recent)
+    -- Someone the roster doesn't know goes by their own name.
+    test.assertEqual("Wanderer-Stormrage", ads[1].by)
     test.assertEqual("Trade", ads[2].label)
     test.assertEqual("12 min ago", ads[2].recent)
-    -- A zone known by its map is named from the map.
+    -- A roster player goes by their alias.
+    test.assertEqual("TheTool", ads[2].by)
+    -- A zone known by its map is named from the map; an answer without a
+    -- poster says the poster isn't known.
     test.assertEqual("Dornogal General", ads[3].label)
     test.assertEqual("1 h 4 min ago", ads[3].recent)
+    test.assertContains(ads[3].by, "not known")
+end)
+
+test.test("recent ads: the user's own post shows them as the poster", function()
+    local world = login("Retail", { playerName = OFFICER })
+    local window = recruitersWindow(world)
+    optIn(world)
+
+    world.handlers.post(world.shown[1].key)
+
+    local ads = rowsOfKind(window.ads, "ad")
+    test.assertEqual(1, #ads)
+    test.assertEqual("TheTool", ads[1].by)
+end)
+
+test.test("recent ads: an answer passes on who posted, and an answer naming them is believed", function()
+    local world = login("Retail", { playerName = OFFICER })
+    optIn(world)
+    world.handlers.post(world.shown[1].key)
+    local recruit = world.addon.guildRecruit
+
+    test.assertTrue(recruit:OnMessage({ v = 1, t = "ask-channel", k = "general:map:2339" }, MEMBER))
+    fixtures.runTimers(world, 10)
+    local answers = sentOfType(world, "channel-time")
+    test.assertEqual(1, #answers)
+    test.assertEqual(world.addon.rosterController:SelfKey(), answers[1].p)
+
+    -- A member hears that answer and shows the poster it names.
+    local member = login("Retail", { playerName = MEMBER })
+    local window = recruitersWindow(member)
+    member.addon.guildRecruit:OnMessage({ v = 1, t = "channel-time", k = "trade", a = member.time,
+        p = "toolbox-area52", pn = "Toolbox-Area52" }, OFFICER)
+    test.assertEqual("TheTool", rowsOfKind(window.ads, "ad")[1].by)
+end)
+
+test.test("recent ads: a newer time heard without a poster never shows the older ad's poster", function()
+    local world = login("Retail", { playerName = MEMBER })
+    local window = recruitersWindow(world)
+    local recruit = world.addon.guildRecruit
+
+    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 60 }, OFFICER)
+    test.assertEqual("TheTool", rowsOfKind(window.ads, "ad")[1].by)
+
+    recruit:OnMessage({ v = 1, t = "channel-time", k = "trade", a = world.time }, OFFICER)
+    test.assertContains(rowsOfKind(window.ads, "ad")[1].by, "not known")
+    -- An older time heard later changes nothing.
+    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 30 }, OFFICER)
+    test.assertContains(rowsOfKind(window.ads, "ad")[1].by, "not known")
 end)
 
 -- Gives the add-on a master frame that records the pages it shows and the

@@ -23,6 +23,7 @@ local MasterFrame = {
     ICONS = {
         roster = "Interface\\Icons\\INV_Misc_GroupNeedMore",
         recruitment = "Interface\\Icons\\INV_Scroll_03",
+        ads = "Interface\\Icons\\INV_Misc_PocketWatch_01",
         greetings = "Interface\\Icons\\INV_Letter_15",
         settings = "Interface\\Icons\\INV_Misc_Gear_01",
     },

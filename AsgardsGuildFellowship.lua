@@ -36,6 +36,7 @@ if clientProfile.supported then
     pages = addon.PageNavigator.Create()
     pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
+    pages:Add("ads", "Recent ads", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
     pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
     rosterController = addon.RosterController.Create({
@@ -111,6 +112,9 @@ if clientProfile.supported then
                 -- Modes that last only while the frame is open end with it.
                 onHide = function()
                     settings:Closed()
+                end,
+                onRecentAdsShown = function()
+                    rosterController:RefreshRecruiters()
                 end,
                 loadGeometry = function()
                     local store = rosterController:Store()

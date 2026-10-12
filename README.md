@@ -29,6 +29,7 @@ Everything the add-on does is in one window, with picture tabs down its right ed
 
 - **Roster**: the guild's players, mains and alts (see [Using the roster](#using-the-roster)).
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
+- **Recent ads**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
 - **Settings**: everything else (General and Chat Tags), and the version you're running.
 
@@ -253,7 +254,9 @@ Add-on users tell each other when and where they advertised, so nobody double-po
 
 Every post counts toward the player who made it, on all their characters together. The player panel shows **Advertised: N (M in last 30 days)**. The 30-day number falls as ads get older, even if they don't post again. Only ads posted through the add-on are counted.
 
-Officers also get the **Recruiters** leaderboard on the window's **Recruitment** tab (`/agf recruit`), below the settings. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Below that, **Recent ads** lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade") and how long ago, newest first. Ad times are kept for 4 hours, across reloads and logouts, so a relog never forgets where the guild just advertised. Both parts update as new ads arrive. Regular members don't see the leaderboard.
+Officers also get the **Recruiters** leaderboard on the window's **Recruitment** tab (`/agf recruit`), below the settings. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Regular members don't see the leaderboard.
+
+Everyone gets the window's **Recent ads** tab. It lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade"), who posted (by alias or main, like the leaderboard), and how long ago, newest first. When your add-on only heard the time from someone running an older version, the poster shows as "not known". Ad times and posters are kept for 4 hours, across reloads and logouts, so a relog never forgets where the guild just advertised. The list updates as new ads arrive.
 
 ## Supported clients
 

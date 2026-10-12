@@ -1020,6 +1020,20 @@ function Partition:GetRecruitLedger()
     return self.data.recruitLedger
 end
 
+-- Who posted the ad behind each ledger time, by channel key, as { a = the
+-- ad's time, k = the poster's character key, n = their name as the game
+-- gave it }, created on first use. Nil when an unusable value is stored
+-- there; it is then left alone.
+function Partition:GetRecruitPosters()
+    if self.data.recruitPosters == nil then
+        self.data.recruitPosters = {}
+    end
+    if type(self.data.recruitPosters) ~= "table" then
+        return nil
+    end
+    return self.data.recruitPosters
+end
+
 function Partition:SetForgeries(entries)
     if type(entries) ~= "table" then
         return false

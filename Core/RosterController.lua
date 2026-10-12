@@ -739,12 +739,10 @@ function Controller:Recruiters()
     })
 end
 
--- The Recruiters leaderboard's rows for an officer, or nil for anyone else: the
--- leaderboard, then the channels this client knows were advertised in
--- lately. Each part starts with a heading row ({ kind = "heading", label,
--- recent, total }: its column titles), and an empty part says so.
+-- The Recruiters leaderboard's rows for an officer, or nil for anyone else.
+-- It starts with a heading row ({ kind = "heading", label, recent, total }:
+-- its column titles), and says so when nobody has advertised.
 --   { kind = "recruiter", label, recent, total }
---   { kind = "ad", label, recent }        -- recent: how long ago
 --   { kind = "empty", label }
 function Controller:RecruitersView()
     local recruiters = self:Recruiters()
@@ -760,11 +758,49 @@ function Controller:RecruitersView()
     if recruiters[1] == nil then
         table.insert(rows, { kind = "empty", label = "Nobody has advertised yet." })
     end
-    table.insert(rows, { kind = "heading", label = "Recent ads", recent = "How long ago" })
+    return rows
+end
+
+-- Who posted an ad, as the Recruiters leaderboard names players: the alias,
+-- else the main's name. Someone the roster doesn't know goes by their own
+-- name. Nil when the poster isn't known.
+function Controller:PosterLabel(poster, partition, normalizer)
+    if type(poster) ~= "table" then
+        return nil
+    end
+    local character = type(poster.k) == "string" and partition:GetCharacter(poster.k) or nil
+    local player = character and partition:GetPlayer(character.player)
+    if player ~= nil then
+        if player.alias ~= nil then
+            return player.alias
+        end
+        local main = partition:GetCharacter(player.main)
+        return normalizer:Display(main and main.name or player.main)
+    end
+    local name = poster.n or poster.k
+    return name and normalizer:Display(name) or nil
+end
+
+-- The Recent ads page's rows, for every member: the channels this client
+-- knows were advertised in lately, newest first, with who posted and how
+-- long ago. It starts with a heading row ({ kind = "heading", label, by,
+-- recent }: its column titles), and says so when there are none.
+--   { kind = "ad", label, by, recent }    -- recent: how long ago
+--   { kind = "empty", label }
+function Controller:RecentAdsView()
+    local rows = { { kind = "heading", label = "Channel", by = "Posted by", recent = "When" } }
+    local guild, partition, normalizer = self:QuietContext()
     local ok, ads = pcall(self.recentAds or function() return {} end)
     ads = ok and type(ads) == "table" and ads or {}
+    local index
     for index = 1, #ads do
-        table.insert(rows, { kind = "ad", label = ads[index].label, recent = ads[index].ago })
+        local by = guild ~= nil and self:PosterLabel(ads[index].poster, partition, normalizer) or nil
+        table.insert(rows, {
+            kind = "ad",
+            label = ads[index].label,
+            by = by or "|cff9d9d9dnot known|r",
+            recent = ads[index].ago,
+        })
     end
     if ads[1] == nil then
         table.insert(rows, { kind = "empty", label = "No recent ads known." })
@@ -772,13 +808,19 @@ function Controller:RecruitersView()
     return rows
 end
 
--- Redraws the Recruiters leaderboard on the Recruitment page when the
--- window is open: officers get their rows, everyone else no leaderboard.
+-- Redraws the Recruiters leaderboard on the Recruitment page, and the
+-- Recent ads page, when the window is open: officers get their leaderboard
+-- rows, everyone else no leaderboard; everyone gets the recent ads.
 function Controller:RefreshRecruiters()
-    if self.window == nil or not self.window:IsShown() or type(self.window.SetRecruiters) ~= "function" then
+    if self.window == nil or not self.window:IsShown() then
         return
     end
-    self.window:SetRecruiters(self:RecruitersView())
+    if type(self.window.SetRecruiters) == "function" then
+        self.window:SetRecruiters(self:RecruitersView())
+    end
+    if type(self.window.SetRecentAds) == "function" then
+        self.window:SetRecentAds(self:RecentAdsView())
+    end
 end
 
 -- Selects the page `entry` opens (see PageNavigator:PageFor) and shows it

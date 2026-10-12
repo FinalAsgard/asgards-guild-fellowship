@@ -663,10 +663,95 @@ local function buildConflictPanel(framework, options, frameName)
     return { panel = panel, scroll = scroll, empty = empty, acceptAll = acceptAll, rejectAll = rejectAll }
 end
 
+-- A list of rows in columns, as the Recruiters leaderboard and the Recent
+-- ads page show them: a heading row in gold naming the columns, rows on
+-- faint stripes, and a grey line when the list is empty (see
+-- RosterController:RecruitersView and RecentAdsView).
+local function listLineCreator(columns)
+    return function(scroll, index)
+        local line = CreateFrame("Frame", nil, scroll)
+        line:SetHeight(RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
+        line.background = line:CreateTexture(nil, "BACKGROUND")
+        line.background:SetAllPoints(line)
+        line.cells = {}
+        local columnIndex
+        for columnIndex = 1, #columns do
+            local column = columns[columnIndex]
+            local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
+            cell:SetWidth(column.width)
+            cell:SetJustifyH("LEFT")
+            cell:SetWordWrap(false)
+            line.cells[column.field] = cell
+        end
+        return line
+    end
+end
+
+local function listLineRefresher(columns)
+    return function(scroll, rows, offset, totalLines)
+        local lineIndex
+        for lineIndex = 1, totalLines do
+            local dataIndex = lineIndex + offset
+            local row = rows[dataIndex]
+            if row ~= nil then
+                local line = scroll:GetLine(lineIndex)
+                local columnIndex
+                for columnIndex = 1, #columns do
+                    local field = columns[columnIndex].field
+                    local text = tostring(row[field] or "")
+                    if row.kind == "heading" then
+                        text = "|cffffd100" .. text .. "|r"
+                    elseif row.kind == "empty" then
+                        text = "|cff9d9d9d" .. text .. "|r"
+                    end
+                    line.cells[field]:SetText(text)
+                end
+                if row.kind == "heading" or row.kind == "empty" then
+                    setBackground(line, NO_BACKGROUND)
+                elseif dataIndex % 2 == 0 then
+                    setBackground(line, STRIPE_BACKGROUND)
+                else
+                    setBackground(line, NO_BACKGROUND)
+                end
+            end
+        end
+    end
+end
+
+-- Draws a titled list of `lines` rows in `columns`, `width` wide, into
+-- `parent`. Returns { holder, scroll }.
+local function buildList(framework, parent, scrollName, title, columns, width, lines)
+    local holder = CreateFrame("Frame", nil, parent)
+    holder:SetAllPoints(parent)
+    local heading = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    heading:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -4)
+    heading:SetText(title)
+    local height = lines * RosterWindow.LINE_HEIGHT
+    local createLine = listLineCreator(columns)
+    local scroll = framework:CreateScrollBox(
+        holder,
+        scrollName,
+        listLineRefresher(columns),
+        {},
+        width,
+        height,
+        lines,
+        RosterWindow.LINE_HEIGHT,
+        createLine,
+        true
+    )
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -30)
+    scroll:SetSize(width, height)
+    scroll:CreateLines(createLine, lines)
+    return { holder = holder, scroll = scroll }
+end
+
 -- The officers' Recruiters leaderboard on the Recruitment page: players
--- ranked by ads in the last 30 days, then all time, and then the channels
--- this client knows were advertised in lately. Each part starts with a
--- heading row naming its own columns (see RosterController:RecruitersView).
+-- ranked by ads in the last 30 days, then all time.
 local RECRUITER_COLUMNS = {
     { field = "label", x = 8, width = 200 },
     { field = "recent", x = 214, width = 110 },
@@ -677,83 +762,37 @@ local RECRUITER_LINES = 12
 -- The room the leaderboard takes below the Recruitment settings.
 RosterWindow.LEADERBOARD_HEIGHT = 30 + RECRUITER_LINES * RosterWindow.LINE_HEIGHT + 12
 
-local function createRecruiterLine(scroll, index)
-    local line = CreateFrame("Frame", nil, scroll)
-    line:SetHeight(RosterWindow.LINE_HEIGHT)
-    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
-    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
-    line.background = line:CreateTexture(nil, "BACKGROUND")
-    line.background:SetAllPoints(line)
-    line.cells = {}
-    local columnIndex
-    for columnIndex = 1, #RECRUITER_COLUMNS do
-        local column = RECRUITER_COLUMNS[columnIndex]
-        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
-        cell:SetWidth(column.width)
-        cell:SetJustifyH("LEFT")
-        cell:SetWordWrap(false)
-        line.cells[column.field] = cell
-    end
-    return line
-end
-
-local function refreshRecruiterLines(scroll, rows, offset, totalLines)
-    local lineIndex
-    for lineIndex = 1, totalLines do
-        local dataIndex = lineIndex + offset
-        local row = rows[dataIndex]
-        if row ~= nil then
-            local line = scroll:GetLine(lineIndex)
-            local columnIndex
-            for columnIndex = 1, #RECRUITER_COLUMNS do
-                local field = RECRUITER_COLUMNS[columnIndex].field
-                local text = tostring(row[field] or "")
-                if row.kind == "heading" then
-                    text = "|cffffd100" .. text .. "|r"
-                elseif row.kind == "empty" then
-                    text = "|cff9d9d9d" .. text .. "|r"
-                end
-                line.cells[field]:SetText(text)
-            end
-            if row.kind == "heading" or row.kind == "empty" then
-                setBackground(line, NO_BACKGROUND)
-            elseif dataIndex % 2 == 0 then
-                setBackground(line, STRIPE_BACKGROUND)
-            else
-                setBackground(line, NO_BACKGROUND)
-            end
-        end
-    end
-end
-
 -- Draws the leaderboard into `parent` (LEADERBOARD_HEIGHT tall), hidden
 -- until the controller hands over an officer's rows.
 local function buildLeaderboard(framework, parent, frameName)
-    local holder = CreateFrame("Frame", nil, parent)
-    holder:SetAllPoints(parent)
-    local title = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -4)
-    title:SetText("Recruiters")
-    local height = RECRUITER_LINES * RosterWindow.LINE_HEIGHT
-    local scroll = framework:CreateScrollBox(
-        holder,
-        frameName .. "RecruiterScroll",
-        refreshRecruiterLines,
-        {},
-        RECRUITERS_WIDTH,
-        height,
-        RECRUITER_LINES,
-        RosterWindow.LINE_HEIGHT,
-        createRecruiterLine,
-        true
-    )
-    scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -30)
-    scroll:SetSize(RECRUITERS_WIDTH, height)
-    scroll:CreateLines(createRecruiterLine, RECRUITER_LINES)
-    holder:Hide()
-    return { holder = holder, scroll = scroll }
+    local leaderboard = buildList(framework, parent, frameName .. "RecruiterScroll", "Recruiters",
+        RECRUITER_COLUMNS, RECRUITERS_WIDTH, RECRUITER_LINES)
+    leaderboard.holder:Hide()
+    return leaderboard
+end
+
+-- The Recent ads page, for every member: each channel advertised in lately,
+-- who posted, and how long ago.
+local AD_COLUMNS = {
+    { field = "label", x = 8, width = 240 },
+    { field = "by", x = 254, width = 200 },
+    { field = "recent", x = 460, width = 140 },
+}
+local ADS_WIDTH = 620
+
+-- Draws the Recent ads list onto its page, below the frame's title bar,
+-- with as many lines as the page holds; more lines are made as the frame
+-- grows.
+local function buildRecentAds(framework, page, frameName)
+    local holder = CreateFrame("Frame", nil, page)
+    holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
+    holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
+    local _, height = page:GetSize()
+    local lines = math.max(1, math.floor((height - 70) / RosterWindow.LINE_HEIGHT))
+    local ads = buildList(framework, holder, frameName .. "RecentAdsScroll", "Recent ads",
+        AD_COLUMNS, ADS_WIDTH, lines)
+    ads.scroll:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 16, 0)
+    return ads
 end
 
 local function build(framework, options)
@@ -781,6 +820,17 @@ local function build(framework, options)
                 local built, leaderboard = pcall(buildLeaderboard, framework, below, frameName)
                 recruiters = built and leaderboard or nil
             end
+        end
+    end
+    -- The Recent ads page, for everyone, when the frame has one.
+    local recentAds
+    local adsPage = host:Content("ads")
+    if adsPage ~= nil then
+        local built, ads = pcall(buildRecentAds, framework, adsPage, frameName)
+        recentAds = built and ads or nil
+        -- Showing the page brings "how long ago" up to date.
+        if options.onRecentAdsShown ~= nil then
+            adsPage:HookScript("OnShow", options.onRecentAdsShown)
         end
     end
     if options.onHide ~= nil then
@@ -982,7 +1032,7 @@ local function build(framework, options)
         playerPanel.panel:Hide()
     end)
 
-    return host, scroll, status, conflicts, playerPanel, recruiters
+    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds
 end
 
 -- options.navigator is the PageNavigator with the master frame's pages;
@@ -991,6 +1041,7 @@ end
 -- the Recruitment page's returns a frame LEADERBOARD_HEIGHT tall below its
 -- settings, where the officers' leaderboard is drawn;
 -- options.onHide() runs whenever the frame closes;
+-- options.onRecentAdsShown() runs whenever the Recent ads page shows;
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
 -- options.onToggleGroup(playerId) runs when a player header is clicked;
@@ -1012,7 +1063,7 @@ function RosterWindow.Create(client, options)
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, host, scroll, status, conflicts, playerPanel, recruiters = pcall(build, framework, options)
+    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds = pcall(build, framework, options)
     if not ok or host == nil then
         return nil, "the Details! Framework could not build the window"
     end
@@ -1024,6 +1075,7 @@ function RosterWindow.Create(client, options)
         conflicts = conflicts,
         playerPanel = playerPanel,
         recruiters = recruiters,
+        recentAds = recentAds,
     }, Window)
 end
 
@@ -1094,6 +1146,19 @@ function Window:SetRecruiters(rows)
         recruiters.holder:Show()
         recruiters.scroll:SetData(rows)
         recruiters.scroll:Refresh()
+    end))
+end
+
+-- Shows the Recent ads page's rows (see RosterController:RecentAdsView).
+-- False when the frame has no Recent ads page.
+function Window:SetRecentAds(rows)
+    local recentAds = self.recentAds
+    if recentAds == nil then
+        return false
+    end
+    return (pcall(function()
+        recentAds.scroll:SetData(rows or {})
+        recentAds.scroll:Refresh()
     end))
 end
 

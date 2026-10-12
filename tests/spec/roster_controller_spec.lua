@@ -32,6 +32,10 @@ local function newWindow()
         self.recruiters = rows or false
         return true
     end
+    function window:SetRecentAds(rows)
+        self.recentAds = rows
+        return true
+    end
     return window
 end
 
@@ -293,7 +297,7 @@ test.test("scan descriptions name what was found", function()
         describe({ newCharacters = 1, linked = 2, aliased = 2, conflicts = 3 }))
 end)
 
-test.test("the Recruiters view and its button are for officers only", function()
+test.test("the Recruiters leaderboard is for officers only, and recent ads for everyone", function()
     local officer = true
     local setup = build("Retail", {
         isOfficer = function()
@@ -318,15 +322,21 @@ test.test("the Recruiters view and its button are for officers only", function()
     test.assertEqual("recruiter", rows[2].kind)
     test.assertEqual("TheTool", rows[2].label)
     test.assertEqual(3, rows[2].total)
-    test.assertEqual("heading", rows[3].kind)
-    -- Without a source of recent ads, that part says there are none.
-    test.assertEqual("empty", rows[4].kind)
-    test.assertEqual("No recent ads known.", rows[4].label)
+    -- Recent ads have a page of their own now.
+    test.assertEqual(2, #rows)
+    -- Without a source of recent ads, that page says there are none.
+    local ads = setup.window.recentAds
+    test.assertEqual("heading", ads[1].kind)
+    test.assertEqual("Posted by", ads[1].by)
+    test.assertEqual("empty", ads[2].kind)
+    test.assertEqual("No recent ads known.", ads[2].label)
 
     officer = false
     test.assertEqual(nil, setup.controller:Recruiters())
+    setup.window.recentAds = nil
     setup.controller:RefreshRecruiters()
     test.assertFalse(setup.window.recruiters)
+    test.assertEqual("No recent ads known.", setup.window.recentAds[2].label)
 end)
 
 test.test("without a stats source, nobody gets the Recruiters view", function()
