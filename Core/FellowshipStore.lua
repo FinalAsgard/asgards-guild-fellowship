@@ -40,6 +40,30 @@ local function isText(value)
     return type(value) == "string" and value ~= ""
 end
 
+local ROLES = { tank = true, healer = true, dps = true }
+
+-- Whether `roles` is a list of distinct roles ("tank", "healer", "dps");
+-- an empty list means none.
+function FellowshipStore.IsRoleList(roles)
+    if type(roles) ~= "table" or #roles > 3 then
+        return false
+    end
+    local seen = {}
+    local index
+    for index = 1, #roles do
+        if not ROLES[roles[index]] or seen[roles[index]] then
+            return false
+        end
+        seen[roles[index]] = true
+    end
+    local count = 0
+    local _
+    for _ in pairs(roles) do
+        count = count + 1
+    end
+    return count == #roles
+end
+
 -- Returns nil when a character record can be used, or why it can't.
 local function characterProblem(character)
     if type(character) ~= "table" then
@@ -76,6 +100,17 @@ local function characterProblem(character)
     end
     if character.mainBy ~= nil and not isText(character.mainBy) then
         return "character main link author is invalid"
+    end
+    -- Player profile (schema 3): the roles this character is willing to
+    -- play, and when and by whom (always the character itself) they were set.
+    if character.roles ~= nil and not FellowshipStore.IsRoleList(character.roles) then
+        return "character role preferences are invalid"
+    end
+    if character.rolesAt ~= nil and not isWholeNumber(character.rolesAt) then
+        return "character role preferences time is invalid"
+    end
+    if character.rolesBy ~= nil and not isText(character.rolesBy) then
+        return "character role preferences author is invalid"
     end
     if character.rejected ~= nil then
         if type(character.rejected) ~= "table" then
@@ -1173,6 +1208,48 @@ function Partition:SetAliasStamp(key, at, by)
     end
     player.aliasAt = at
     player.aliasBy = by
+    return true
+end
+
+-- The roles `key` is willing to play, as a new list, or nil when never set
+-- (the class's roles then apply).
+function Partition:GetRoles(key)
+    local character = self.data.characters[key]
+    if character == nil or character.roles == nil then
+        return nil
+    end
+    local copy = {}
+    local index
+    for index = 1, #character.roles do
+        copy[index] = character.roles[index]
+    end
+    return copy
+end
+
+-- When `key`'s role preferences were last set, and by whom; never set is
+-- the oldest possible, at 0 with no author. Nil for an unknown character.
+function Partition:GetRolesStamp(key)
+    local character = self.data.characters[key]
+    if character == nil then
+        return nil
+    end
+    return character.rolesAt or 0, character.rolesBy
+end
+
+-- Sets `key`'s role preferences, stamped `at` by `by`.
+function Partition:SetRoles(key, roles, at, by)
+    local character = self.data.characters[key]
+    if character == nil or not FellowshipStore.IsRoleList(roles) or not isWholeNumber(at) or not isText(by) then
+        return false
+    end
+    local copy = {}
+    local index
+    for index = 1, #roles do
+        copy[index] = roles[index]
+    end
+    character.roles = copy
+    character.rolesAt = at
+    character.rolesBy = by
     return true
 end
 

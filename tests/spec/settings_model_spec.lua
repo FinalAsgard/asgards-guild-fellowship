@@ -275,9 +275,10 @@ test.test("the composed add-on puts each section on its page and the Open window
     local settings = addon.settings
 
     local onSettings = settings:SectionsOn("settings")
-    test.assertEqual(2, #onSettings)
+    test.assertEqual(3, #onSettings)
     test.assertEqual("general", onSettings[1].id)
     test.assertEqual("chatTags", onSettings[2].id)
+    test.assertEqual("groupFinder", onSettings[3].id)
     test.assertEqual("guildGreet", settings:SectionsOn("greetings")[1].id)
     test.assertEqual("recruitment", settings:SectionsOn("recruitment")[1].id)
     test.assertTrue(settings:Sections()[1].home)

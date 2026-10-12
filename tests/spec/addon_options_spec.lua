@@ -77,10 +77,10 @@ local function registerProfileTests(profile)
     test.test(profile .. " AddOns options: each feature has its own sub-page under the add-on's page", function()
         local _, addon, _, pages = withOptions(profile)
 
-        test.assertEqual(5, #pages)
+        test.assertEqual(6, #pages)
         test.assertEqual(addon.Identity.displayName, pages[1].name)
         test.assertEqual(nil, pages[1].parent)
-        local expected = { "General", "Chat Tags", "Guild Greet", "Recruitment" }
+        local expected = { "General", "Chat Tags", "Guild Greet", "Group Finder", "Recruitment" }
         local index
         for index = 1, #expected do
             local page = pages[index + 1]
@@ -90,7 +90,8 @@ local function registerProfileTests(profile)
         test.assertTrue(contains(pages[2].frame.texts, "Show the minimap button"))
         test.assertTrue(contains(pages[3].frame.texts, "Tag guild chat speakers with their alias or main"))
         test.assertTrue(contains(pages[4].frame.texts, "Offer to greet guild members as they come online"))
-        test.assertTrue(contains(pages[5].frame.texts, "My ad, posted exactly as written"))
+        test.assertTrue(contains(pages[5].frame.texts, "Willing to tank on this character"))
+        test.assertTrue(contains(pages[6].frame.texts, "My ad, posted exactly as written"))
         -- The add-on's own page holds the Open window button and the version,
         -- and no feature's settings.
         test.assertTrue(contains(pages[1].frame.texts, "Open window"))

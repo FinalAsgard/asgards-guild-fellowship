@@ -40,6 +40,18 @@ if clientProfile.supported then
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
     pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
+    -- Which roles each class can fill here, for role preferences and the
+    -- Group Finder.
+    local roleCatalog = addon.RoleCatalog.For(clientProfile.id)
+    -- The roles a character is willing to play: its own preferences, else
+    -- its class's roles. Nil outside a guild or for an unknown character.
+    local function rolesOf(key)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil or key == nil then
+            return nil
+        end
+        return roleCatalog:PreferencesOf(partition, key)
+    end
     rosterController = addon.RosterController.Create({
         pages = pages,
         client = client,
@@ -61,6 +73,10 @@ if clientProfile.supported then
         end,
         adStats = function(keys)
             return guildRecruit:StatsLine(keys)
+        end,
+        rolesOf = function(key)
+            local roles = rolesOf(key)
+            return roles and addon.RoleCatalog.Describe(roles) or nil
         end,
         recruitRecord = function(keys)
             return guildRecruit:RecordFor(keys)
@@ -459,6 +475,71 @@ if clientProfile.supported then
         end
         return true
     end
+    -- Role preferences: which roles the logged-in character is willing to
+    -- play, synced to the guild. Only the roles its class can fill are
+    -- offered.
+    settings:AddSection("groupFinder", "Group Finder")
+    local function selfClass()
+        local guild, partition = rosterController:QuietContext()
+        local key = rosterController:SelfKey()
+        local character = guild and key and partition:GetCharacter(key)
+        return character and character.class or nil
+    end
+    local function rolesAvailable()
+        if rosterController:SelfKey() == nil or rolesOf(rosterController:SelfKey()) == nil then
+            return false, "this character isn't in the guild roster yet"
+        end
+        return true
+    end
+    local ROLE_SETTING_LABELS = {
+        tank = "Willing to tank on this character",
+        healer = "Willing to heal on this character",
+        dps = "Willing to DPS on this character",
+    }
+    local roleIndex
+    for roleIndex = 1, #addon.RoleCatalog.ROLES do
+        local role = addon.RoleCatalog.ROLES[roleIndex]
+        settings:Add("groupFinder", {
+            id = "role_" .. role,
+            kind = "toggle",
+            label = ROLE_SETTING_LABELS[role],
+            enabled = rolesAvailable,
+            shown = function()
+                return roleCatalog:Can(selfClass(), role)
+            end,
+            get = function()
+                local roles = rolesOf(rosterController:SelfKey()) or {}
+                local index
+                for index = 1, #roles do
+                    if roles[index] == role then
+                        return true
+                    end
+                end
+                return false
+            end,
+            set = function(enabled)
+                local roles = rolesOf(rosterController:SelfKey())
+                if roles == nil then
+                    return nil, "this character isn't in the guild roster yet"
+                end
+                local changed = {}
+                local index
+                for index = 1, #roles do
+                    if roles[index] ~= role then
+                        table.insert(changed, roles[index])
+                    end
+                end
+                if enabled then
+                    table.insert(changed, role)
+                end
+                if syncSession:LocalRolesEdit(changed) == nil then
+                    return nil, "the server time isn't known yet"
+                end
+                rosterController:Invalidate()
+                return true
+            end,
+        })
+    end
     settings:AddSection("recruitment", "Recruitment", { page = "recruitment" })
     -- The user's own ad count, across all their characters.
     settings:Add("recruitment", {
@@ -700,7 +781,6 @@ if clientProfile.supported then
     -- from the game's Dungeon Finder where the client has one, read each
     -- time it opens; its place is saved account-wide. The group outlives
     -- the window and follows the party.
-    local roleCatalog = addon.RoleCatalog.For(clientProfile.id)
     groupSession = addon.GroupSession.Create(roleCatalog)
     syncParty = function()
         if groupSession:IsActive() then
@@ -818,6 +898,7 @@ if clientProfile.supported then
         onSynced = function()
             rosterController:UpdateStatus()
         end,
+        rolesOf = rolesOf,
     })
     router:Register("channels", "show the chat channels Guild Recruit sees here", function()
         local lines = client:ChannelReport()

@@ -12,8 +12,12 @@ local _, addon = ...
 -- dropping fields it doesn't know. Unstamped facts count as the oldest
 -- possible; an officer's unstamped manual edits are stamped later, once
 -- the roster shows they are an officer (SyncSession:UpgradeLegacy).
+--
+-- Schema 3 adds player profile data on character records: each
+-- character's role preferences, and when and by whom they were set. Like
+-- schema 2's, the fields are optional, so v2 data is already valid v3 data.
 local Persistence = {
-    SCHEMA_VERSION = 2,
+    SCHEMA_VERSION = 3,
 }
 addon.Persistence = Persistence
 

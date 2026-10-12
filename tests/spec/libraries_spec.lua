@@ -190,7 +190,7 @@ local function registerProfileTests(profile)
             "AceSerializer-3.0, AceComm-3.0.")
         test.assertContains(summary, "Missing: LibDataBroker-1.1, LibDBIcon-1.0.")
         -- Saved data is unaffected by missing libraries.
-        test.assertEqual(2, world.database.schemaVersion)
+        test.assertEqual(3, world.database.schemaVersion)
     end)
 
     test.test(profile .. " reports a half-loaded Details! Framework as missing", function()

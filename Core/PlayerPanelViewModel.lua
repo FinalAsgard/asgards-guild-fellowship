@@ -20,6 +20,11 @@ local REASONS = {
 
 local function characterEntry(inputs, key, isMain, altCount)
     local character = inputs.partition:GetCharacter(key)
+    local roles
+    if inputs.rolesOf ~= nil then
+        local ok, text = pcall(inputs.rolesOf, key)
+        roles = ok and type(text) == "string" and text or nil
+    end
     local live = inputs.members[key] or {}
     local inGuild = inputs.partition:IsInGuild(key)
     local status
@@ -39,6 +44,7 @@ local function characterEntry(inputs, key, isMain, altCount)
         inGuild = inGuild,
         status = status,
         source = SOURCES[character.source],
+        roles = roles,
         -- Actions, matching the right-click menu.
         canMakeMain = not isMain and inGuild,
         canDetach = altCount > 0,
@@ -59,7 +65,8 @@ end
 
 -- inputs: partition, playerId, members (live facts by key), normalizer,
 -- formatDate (function(timestamp) -> text), adStats (optional function(keys)
--- -> the player's ad count line, or nil).
+-- -> the player's ad count line, or nil), rolesOf (optional function(key)
+-- -> the character's role preferences as text, or nil).
 -- Returns nil when the player no longer exists, or:
 --   { id, label, alias, aliasSource, main, mainName, dontSync, rows }
 -- where `main` is the main's character key, `dontSync` whether guild sync
@@ -68,7 +75,7 @@ end
 --   { kind = "stat", text }  (the player's ad count, first, when there is one)
 --   { kind = "section", text }
 --   { kind = "character", key, name, level, isMain, inGuild, status, source,
---     canMakeMain, canDetach }
+--     roles, canMakeMain, canDetach }
 --   { kind = "history", name, role, dates, reason }
 --   { kind = "empty", text }
 function PlayerPanelViewModel.Build(inputs)

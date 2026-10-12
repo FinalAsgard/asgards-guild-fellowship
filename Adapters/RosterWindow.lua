@@ -463,7 +463,8 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                     text = row.text
                 elseif row.kind == "character" then
                     text = "  " .. row.name .. (row.level and ("  |cff9d9d9d" .. row.level .. "|r") or "") ..
-                        "  |cff9d9d9d" .. tostring(row.status) .. "|r"
+                        "  |cff9d9d9d" .. tostring(row.status) .. "|r" ..
+                        (row.roles and ("  |cff9d9d9dRoles: " .. row.roles .. "|r") or "")
                     if not row.inGuild then
                         text = "  |cff7f7f7f" .. row.name .. " (left)|r"
                     end

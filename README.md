@@ -272,6 +272,14 @@ Picking a dungeon starts your group and shows its five slots: 1 tank, 1 healer a
 - On Retail, each party member takes the slot for the role the game assigned them.
 - Anyone without an assigned role (everyone on WoW Forever) starts in the first open slot their class can fill: tank, then healer, then DPS. Under **Party roles**, use the **Tank**, **Healer** and **DPS** buttons beside each name (yours included) to put them where they belong. Only the roles their class can play have buttons.
 
+### Role preferences
+
+Each character has its own role preferences: the roles you're willing to play on it. They start as every role its class can fill. To turn one off (say, a paladin you never heal on), log into that character and untick it under **Group Finder** on the **Settings** tab, or in the **Group Finder** section of the AddOns options. Only the roles that character's class can fill are listed. The player panel shows each character's role preferences next to it, as **Roles: Tank, DPS**.
+
+Your role preferences reach the whole guild through [guild sync](#guild-sync), even while you're on another character or offline. Only the character itself can set them, not officers or anyone else. If your add-on sees a change in your character's name that you never made, it sends your real preferences back out to correct it, and warns you who passed it on.
+
+### When the group is full
+
 When all five slots are filled, the window shows **Group complete**. **Change dungeon** takes you back to the list to pick another dungeon, keeping everyone in their slots. **End group** ends the group, and so does leaving the party. Closing the window doesn't: open it again with `/agf group` and your group is still there.
 
 ## Supported clients
