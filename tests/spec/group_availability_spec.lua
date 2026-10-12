@@ -381,3 +381,43 @@ end
 
 registerProfileTests("Forever")
 registerProfileTests("Retail")
+
+test.test("group finder window: Refresh asks again who is online, and party slots show class colors", function()
+    local addon = test.newAddon("Core/DungeonCatalog.lua", "Core/RoleCatalog.lua", "Core/GroupSession.lua",
+        "Core/GroupCandidates.lua", "Adapters/GroupFinderWindow.lua")
+    local environment = fakeFrames.install({})
+    environment.UIParent = environment.CreateFrame("Frame", nil, nil)
+    environment.DetailsFramework = {
+        CreateSimplePanel = function()
+            local panel = environment.CreateFrame("Frame", nil, nil)
+            rawset(panel, "IsShown", function(self) return self.shown end)
+            return panel
+        end,
+    }
+    local refreshes = 0
+    local roles = addon.RoleCatalog.For("forever")
+    local session = addon.GroupSession.Create(roles)
+    local window = addon.GroupFinderWindow.Create({
+        environment = environment,
+        GetGlobal = function(_, name) return environment[name] end,
+    }, {
+        dungeons = function() return addon.DungeonCatalog.Create({ { id = "dm", name = "DM", minLevel = 17, maxLevel = 26 } }) end,
+        playerLevel = function() return 20 end,
+        session = session,
+        roles = roles,
+        syncParty = function()
+            if session:IsActive() then
+                session:UpdateParty({ { key = "p1", name = "Me", classToken = "WARRIOR", isPlayer = true, inGuild = true } }, false)
+            end
+        end,
+        classColor = function(class) return class == "WARRIOR" and "ffc69b6d" or nil end,
+        refresh = function() refreshes = refreshes + 1 end,
+    })
+    window:Toggle()
+
+    window.refreshButton.scripts.OnClick()
+    test.assertEqual(1, refreshes)
+
+    window:Pick("dm")
+    test.assertEqual("|cffc69b6dMe|r", window.slotRows[1].text.text)
+end)

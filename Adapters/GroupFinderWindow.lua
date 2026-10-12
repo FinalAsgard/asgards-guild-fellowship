@@ -59,8 +59,9 @@ function GroupFinderWindow.Label(dungeon)
     return dungeon.name .. " (" .. dungeon.minLevel .. "–" .. dungeon.maxLevel .. ")"
 end
 
--- "Hammer (42, not in guild)".
-function GroupFinderWindow.MemberLabel(member)
+-- "Hammer (42, not in guild)", the name in its class color when
+-- `colorOf(class)` gives one.
+function GroupFinderWindow.MemberLabel(member, colorOf)
     local details = {}
     if member.level ~= nil then
         table.insert(details, tostring(member.level))
@@ -68,10 +69,12 @@ function GroupFinderWindow.MemberLabel(member)
     if not member.inGuild then
         table.insert(details, "not in guild")
     end
+    local name = addon.GroupCandidates and addon.GroupCandidates.Colored(member.name, member.classToken, colorOf)
+        or member.name
     if #details == 0 then
-        return member.name
+        return name
     end
-    return member.name .. " (" .. table.concat(details, ", ") .. ")"
+    return name .. " (" .. table.concat(details, ", ") .. ")"
 end
 
 -- options:
@@ -91,6 +94,8 @@ end
 --   isOnline(key)       whether a guild character is online now
 --   invite(key)         sends the game's party invite to that character
 --   zone()              the zone the character is in, by name, or nil
+--   classColor(class)   a class's color as "ffrrggbb", or nil
+--   refresh()           asks the guild again who is online and available
 --   selfKey()           the logged-in character's key, or nil
 --   loadAnchor()        the saved position ({ point, x, y }), or nil
 --   saveAnchor(anchor)  saves a new one
@@ -127,6 +132,11 @@ function GroupFinderWindow.Create(client, options)
         zone = options.zone or function()
             return nil
         end,
+        classColor = options.classColor or function()
+            return nil
+        end,
+        refresh = options.refresh or function() end,
+        suggestionHovers = {},
         selfKey = options.selfKey or function()
             return nil
         end,
@@ -230,6 +240,29 @@ function Window:suggestionLine(index)
         line:SetWordWrap(false)
     end
     self.suggestionLines[index] = line
+    -- Hovering the line shows where the player is now.
+    local hover = self.environment.CreateFrame("Frame", nil, self.suggestionList)
+    hover:SetPoint("TOPLEFT", line, "TOPLEFT", 0, 0)
+    hover:SetPoint("BOTTOMRIGHT", line, "BOTTOMRIGHT", 0, 0)
+    hover:EnableMouse(true)
+    local hovering = { frame = hover }
+    hover:SetScript("OnEnter", function(frame)
+        local tooltip = self.environment.GameTooltip
+        if hovering.text ~= nil and tooltip ~= nil then
+            pcall(function()
+                tooltip:SetOwner(frame, "ANCHOR_RIGHT")
+                tooltip:SetText(hovering.text)
+                tooltip:Show()
+            end)
+        end
+    end)
+    hover:SetScript("OnLeave", function()
+        local tooltip = self.environment.GameTooltip
+        if tooltip ~= nil then
+            pcall(tooltip.Hide, tooltip)
+        end
+    end)
+    self.suggestionHovers[index] = hovering
     local button = self:button(self.suggestionList, "Request", GroupFinderWindow.REQUEST_WIDTH, function()
         local item = self.suggestionButtons[index].item
         if item == nil then
@@ -253,7 +286,7 @@ end
 -- its guildmates, or a line saying nobody fits. Each is { text, player }
 -- (player only on a guildmate's line). `requestOf(playerId)`, when given,
 -- adds the state of the player's newest request.
-function GroupFinderWindow.SuggestionItems(lists, requestOf)
+function GroupFinderWindow.SuggestionItems(lists, requestOf, colorOf)
     local items = {}
     if #lists == 0 then
         return { { text = "Every role is filled." } }
@@ -268,12 +301,12 @@ function GroupFinderWindow.SuggestionItems(lists, requestOf)
         local playerIndex
         for playerIndex = 1, #players do
             local player = players[playerIndex]
-            local text = "  " .. addon.GroupCandidates.Describe(player)
+            local text = "  " .. addon.GroupCandidates.Describe(player, colorOf)
             local request = requestOf and requestOf(player.id)
             if request ~= nil then
                 text = text .. " |cff9d9d9d[" .. (GroupFinderWindow.STATE_LABELS[request.state] or request.state) .. "]|r"
             end
-            table.insert(items, { text = text, player = player })
+            table.insert(items, { text = text, player = player, tooltip = addon.GroupCandidates.Location(player, colorOf) })
         end
     end
     return items
@@ -290,14 +323,14 @@ function GroupFinderWindow.SuggestionTexts(lists)
 end
 
 -- The Nearby lines: a heading naming the zone, then one line per player.
-function GroupFinderWindow.NearbyItems(entries, zone)
+function GroupFinderWindow.NearbyItems(entries, zone, colorOf)
     local items = { { text = "|cffffd100Nearby" .. (zone and (" in " .. zone) or "") .. "|r" } }
     if #entries == 0 then
         table.insert(items, { text = "  |cff9d9d9dNo guildmates nearby.|r" })
     end
     local index
     for index = 1, #entries do
-        table.insert(items, { text = "  " .. addon.GroupCandidates.DescribeNearby(entries[index]) })
+        table.insert(items, { text = "  " .. addon.GroupCandidates.DescribeNearby(entries[index], colorOf) })
     end
     return items
 end
@@ -310,13 +343,13 @@ function Window:drawSuggestions(candidates, dungeon, grouping)
         items = GroupFinderWindow.SuggestionItems(candidates:Suggestions(dungeon, self.session:OpenRoles()),
             function(playerId)
                 return self.session:RequestFor(playerId)
-            end)
+            end, self.classColor)
     end
     if candidates ~= nil then
         local okZone, zone = pcall(self.zone)
         zone = okZone and zone or nil
         local okSelf, selfKey = pcall(self.selfKey)
-        local nearby = GroupFinderWindow.NearbyItems(candidates:Nearby(zone, okSelf and selfKey or nil), zone)
+        local nearby = GroupFinderWindow.NearbyItems(candidates:Nearby(zone, okSelf and selfKey or nil), zone, self.classColor)
         local index
         for index = 1, #nearby do
             table.insert(items, nearby[index])
@@ -328,6 +361,12 @@ function Window:drawSuggestions(candidates, dungeon, grouping)
         local line = self:suggestionLine(index)
         line:SetText(items[index].text)
         line:Show()
+        self.suggestionHovers[index].text = items[index].tooltip
+        if items[index].tooltip ~= nil then
+            self.suggestionHovers[index].frame:Show()
+        else
+            self.suggestionHovers[index].frame:Hide()
+        end
         local slot = self.suggestionButtons[index]
         local player = items[index].player
         slot.item = items[index]
@@ -342,6 +381,8 @@ function Window:drawSuggestions(candidates, dungeon, grouping)
     end
     for index = #items + 1, #self.suggestionLines do
         self.suggestionLines[index]:Hide()
+        self.suggestionHovers[index].text = nil
+        self.suggestionHovers[index].frame:Hide()
         self.suggestionButtons[index].item = nil
         self.suggestionButtons[index].button:Hide()
     end
@@ -524,6 +565,13 @@ function Window:buildFooter()
     label:SetText("Do Not Disturb (no group requests, on every character)")
     self.dndButton = dnd
 
+    -- Asks again who is online and available: people come and go while
+    -- the window is open.
+    self.refreshButton = self:button(panel, "Refresh", 80, function()
+        pcall(self.refresh)
+        self:Refresh()
+    end)
+    self.refreshButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -padding, padding)
     self.repliesText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     self.repliesText:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", padding, padding + GroupFinderWindow.CHECK_SIZE + 4)
     self.repliesText:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
@@ -685,7 +733,7 @@ function Window:drawGroup()
         if state == "waiting" then
             row.text:SetText("Waiting for " .. slot.member.name .. " to log in")
         elseif slot ~= nil and slot.member ~= nil then
-            row.text:SetText(GroupFinderWindow.MemberLabel(slot.member))
+            row.text:SetText(GroupFinderWindow.MemberLabel(slot.member, self.classColor))
         else
             row.text:SetText("open")
         end
@@ -720,7 +768,7 @@ function Window:drawGroup()
             count = count + 1
             local row = self:partyRow(count)
             row.key = member.key
-            row.text:SetText(GroupFinderWindow.MemberLabel(member))
+            row.text:SetText(GroupFinderWindow.MemberLabel(member, self.classColor))
             local role, button
             for role, button in pairs(row.buttons) do
                 if self.roles:Can(member.classToken, role) then

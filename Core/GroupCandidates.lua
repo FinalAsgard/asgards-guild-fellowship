@@ -125,6 +125,7 @@ function Candidates:playerEntry(id, onlineKey)
         current = {
             key = onlineKey,
             name = self:nameOf(onlineKey),
+            class = partition:GetCharacter(onlineKey).class,
             zone = self.members[onlineKey] and self.members[onlineKey].zone,
         },
         addon = reply ~= nil,
@@ -227,7 +228,7 @@ function Candidates:Nearby(zone, selfKey)
                 byPlayer[character.player] = entry
                 table.insert(entries, entry)
             end
-            table.insert(entry.characters, { name = self:nameOf(key), level = self:levelOf(key) })
+            table.insert(entry.characters, { name = self:nameOf(key), level = self:levelOf(key), class = character.class })
         end
     end
     table.sort(entries, function(a, b)
@@ -245,32 +246,50 @@ function Candidates:Nearby(zone, selfKey)
     return entries
 end
 
--- "Thunderer — Bolt 22".
-function GroupCandidates.DescribeNearby(entry)
+-- A character's name in its class color, when `colorOf(class)` gives one
+-- ("ffrrggbb").
+local function colored(name, class, colorOf)
+    local color = colorOf and class and colorOf(class)
+    if type(color) ~= "string" then
+        return name
+    end
+    return "|c" .. color .. name .. "|r"
+end
+GroupCandidates.Colored = colored
+
+-- "Thunderer — Bolt 22", each character in its class color.
+function GroupCandidates.DescribeNearby(entry, colorOf)
     local characters = {}
     local index
     for index = 1, #entry.characters do
-        characters[index] = entry.characters[index].name .. " " .. tostring(entry.characters[index].level or "?")
+        local character = entry.characters[index]
+        characters[index] = colored(character.name, character.class, colorOf) .. " " .. tostring(character.level or "?")
     end
     return entry.label .. " — " .. table.concat(characters, ", ")
 end
 
--- "Thunderer — on Bolt, Ironforge: Hammer 34, Bolt 30", with "(no add-on)"
--- for a player whose add-on didn't reply.
-function GroupCandidates.Describe(entry)
-    local current = "on " .. entry.current.name
-    if entry.current.zone ~= nil then
-        current = current .. ", " .. entry.current.zone
-    end
+-- "Thunderer: Bolt 22, Hammer 24", each character in its class color, with
+-- "(no add-on)" for a player whose add-on didn't reply. Where they are now
+-- is Location's.
+function GroupCandidates.Describe(entry, colorOf)
     local characters = {}
     local index
     for index = 1, #entry.fitting do
         local character = entry.fitting[index]
-        characters[index] = character.name .. " " .. tostring(character.level)
+        characters[index] = colored(character.name, character.class, colorOf) .. " " .. tostring(character.level)
     end
-    local text = entry.label .. " — " .. current .. ": " .. table.concat(characters, ", ")
+    local text = entry.label .. ": " .. table.concat(characters, ", ")
     if not entry.addon then
         text = text .. " (no add-on)"
+    end
+    return text
+end
+
+-- "On Bolt, Ironforge": the character the player is on, and where.
+function GroupCandidates.Location(entry, colorOf)
+    local text = "On " .. colored(entry.current.name, entry.current.class, colorOf)
+    if entry.current.zone ~= nil then
+        text = text .. ", " .. entry.current.zone
     end
     return text
 end

@@ -283,9 +283,9 @@ When all five slots are filled, the window shows **Group complete**. **Change du
 
 Beside the slots, each role that's still open lists the guildmates online right now who could fill it, for example:
 
-**Thunderer — on Bolt, Ironforge: Bolt 22, Hammer 24**
+**Thunderer: Bolt 22, Hammer 24**
 
-Each player appears once, under their alias (or main), with the character they're on and where they are. After the colon comes every character of theirs that fits: its level is within the dungeon's range, its class can play the role, and the role is on in its [role preferences](#role-preferences). That includes offline alts, since they can log over. A role already filled lists nobody.
+Each player appears once, under their alias (or main). Hover over the line to see which character they're on and where they are. Character names are shown in their class colors, here and throughout the window. After the colon comes every character of theirs that fits: its level is within the dungeon's range, its class can play the role, and the role is on in its [role preferences](#role-preferences). That includes offline alts, since they can log over. A role already filled lists nobody.
 
 Guildmates whose add-on didn't answer (see [Who is around](#who-is-around)) are marked **(no add-on)**, and are suggested by what their class can do. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
 
@@ -307,7 +307,7 @@ To reach guildmates without the add-on, press **Ask in guild** (shown while any 
 
 ### Who is around
 
-Each time you open the Group Finder, your add-on asks the guild who else runs it. Every guildmate online with the add-on answers within a few seconds, and the bottom of the window lists them, for example **Add-on users online: Hammer, Wrench (unavailable)**. Guildmates without the add-on don't answer, so they aren't listed here.
+Each time you open the Group Finder, your add-on asks the guild who else runs it. Every guildmate online with the add-on answers within a few seconds, and the bottom of the window lists them, for example **Add-on users online: Hammer, Wrench (unavailable)**. Guildmates without the add-on don't answer, so they aren't listed here. People log on and off while the window is open: press **Refresh** at the bottom right to ask again and update everything.
 
 ### Nearby
 

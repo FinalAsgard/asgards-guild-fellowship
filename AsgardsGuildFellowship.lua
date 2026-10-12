@@ -1154,6 +1154,13 @@ if clientProfile.supported then
                 end,
                 request = sendRequest,
                 cancelRequest = cancelRequest,
+                classColor = function(classToken)
+                    return client:GetClassColor(classToken)
+                end,
+                refresh = function()
+                    syncParty()
+                    groupAvailability:Ask()
+                end,
                 zone = function()
                     local zone = client:GetZone()
                     return zone and zone.name or nil
