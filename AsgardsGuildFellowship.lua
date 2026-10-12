@@ -869,6 +869,9 @@ if clientProfile.supported then
                 replies = function()
                     return groupAvailability:Replies()
                 end,
+                postToGuild = function(text)
+                    return client:SendGuildMessage(text)
+                end,
                 -- The guild as it is now: the live roster, the replies to
                 -- the last ask, and who is left out (this character's
                 -- player and the party).

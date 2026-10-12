@@ -283,6 +283,10 @@ Each player appears once, under their alias (or main), with the character they'r
 
 Guildmates whose add-on didn't answer (see below) are marked **(no add-on)**, and are suggested by what their class can do. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
 
+### Ask in guild
+
+To reach guildmates without the add-on, press **Ask in guild** (shown while any role is open). The window shows the line it would post, for example **LF healer and 2 DPS for The Deadmines (17–26), whisper me!**, naming the open roles, the dungeon and its level range. **Post** sends that one line to guild chat; **Cancel** sends nothing.
+
 ### Who is around
 
 Each time you open the Group Finder, your add-on asks the guild who else runs it. Every guildmate online with the add-on answers within a few seconds, and the bottom of the window lists them, for example **Add-on users online: Hammer, Wrench (unavailable)**. Guildmates without the add-on don't answer, so they aren't listed here.

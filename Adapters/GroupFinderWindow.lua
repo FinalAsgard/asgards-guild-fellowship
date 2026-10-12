@@ -11,7 +11,8 @@ local _, addon = ...
 -- from the party, with Tank/Healer/DPS buttons for each party member the
 -- game hasn't assigned a role, "Group complete" once all five are filled,
 -- and Change dungeon and End group buttons. Closing the window keeps the
--- group.
+-- group. While any role is open, Ask in guild offers a ready-made line for
+-- guild chat, and posts it only once the organizer confirms.
 --
 -- Along the bottom, always: the guildmates whose add-on replied to the
 -- last ask, available or not, and a Do Not Disturb check box.
@@ -77,6 +78,7 @@ end
 --                       { sender, available } (GroupAvailability)
 --   dnd                 { get() -> boolean, set(boolean) }: Do Not Disturb
 --   candidates()        a GroupCandidates for the guild as it is now, or nil
+--   postToGuild(text)   posts a line to guild chat
 --   loadAnchor()        the saved position ({ point, x, y }), or nil
 --   saveAnchor(anchor)  saves a new one
 -- Returns nil and the reason when the framework is missing or can't build
@@ -102,6 +104,7 @@ function GroupFinderWindow.Create(client, options)
             return nil
         end,
         suggestionLines = {},
+        postToGuild = options.postToGuild or function() end,
         loadAnchor = options.loadAnchor or function() return nil end,
         saveAnchor = options.saveAnchor or function() end,
         showAll = false,
@@ -229,15 +232,7 @@ end
 function Window:drawSuggestions(candidates, dungeon)
     local texts = {}
     if candidates ~= nil and dungeon ~= nil then
-        local open = {}
-        local slots = self.session:Slots()
-        local index
-        for index = 1, #slots do
-            if slots[index].member == nil then
-                table.insert(open, slots[index].role)
-            end
-        end
-        texts = GroupFinderWindow.SuggestionTexts(candidates:Suggestions(dungeon, open))
+        texts = GroupFinderWindow.SuggestionTexts(candidates:Suggestions(dungeon, self.session:OpenRoles()))
     end
     local index
     for index = 1, #texts do
@@ -297,6 +292,7 @@ function Window:buildGroup()
     self.endButton = self:button(group, "End group", 90, function()
         self.session:End()
         self.choosing = false
+        self.asking = nil
         self:Refresh()
     end)
     self.endButton:SetPoint("TOPRIGHT", group, "TOPRIGHT", -padding, -54)
@@ -305,6 +301,11 @@ function Window:buildGroup()
         self:Refresh()
     end)
     self.changeButton:SetPoint("RIGHT", self.endButton, "LEFT", -4, 0)
+    self.askButton = self:button(group, "Ask in guild", 100, function()
+        self.asking = self.session:AskLine(self:Picked())
+        self:Refresh()
+    end)
+    self.askButton:SetPoint("RIGHT", self.changeButton, "LEFT", -4, 0)
 
     local index
     for index = 1, #addon.GroupSession.LAYOUT do
@@ -323,6 +324,32 @@ function Window:buildGroup()
     self.completeText = group:CreateFontString(nil, "OVERLAY", "GameFontGreen")
     self.completeText:SetPoint("TOPLEFT", group, "TOPLEFT", padding, below - 6)
     self.completeText:SetText("Group complete")
+
+    -- Ask in guild's confirmation, where Group complete would be (the two
+    -- never show together).
+    local confirm = self.environment.CreateFrame("Frame", nil, group)
+    confirm:SetPoint("TOPLEFT", group, "TOPLEFT", padding, below - 2)
+    confirm:SetPoint("RIGHT", group, "RIGHT", -padding, 0)
+    confirm:SetHeight(28)
+    self.confirmCancel = self:button(confirm, "Cancel", 64, function()
+        self.asking = nil
+        self:Refresh()
+    end)
+    self.confirmCancel:SetPoint("RIGHT", confirm, "RIGHT", 0, 0)
+    self.confirmPost = self:button(confirm, "Post", 52, function()
+        local line = self.asking
+        self.asking = nil
+        if line ~= nil then
+            pcall(self.postToGuild, line)
+        end
+        self:Refresh()
+    end)
+    self.confirmPost:SetPoint("RIGHT", self.confirmCancel, "LEFT", -4, 0)
+    self.confirmText = confirm:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self.confirmText:SetPoint("LEFT", confirm, "LEFT", 0, 0)
+    self.confirmText:SetPoint("RIGHT", self.confirmPost, "LEFT", -6, 0)
+    self.confirmText:SetJustifyH("LEFT")
+    self.confirm = confirm
 
     self.partyHeading = group:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.partyHeading:SetPoint("TOPLEFT", group, "TOPLEFT", padding, below - 32)
@@ -522,8 +549,17 @@ function Window:drawGroup()
     end
     if self.session:IsComplete() then
         self.completeText:Show()
+        self.askButton:Hide()
+        self.asking = nil
     else
         self.completeText:Hide()
+        self.askButton:Show()
+    end
+    if self.asking ~= nil then
+        self.confirmText:SetText("Post to guild chat? \"" .. self.asking .. "\"")
+        self.confirm:Show()
+    else
+        self.confirm:Hide()
     end
 
     -- Members the game assigned a role need no buttons.

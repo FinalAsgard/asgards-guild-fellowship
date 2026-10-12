@@ -200,6 +200,53 @@ function Session:Members()
     return self.members
 end
 
+-- The roles of the slots still open, in layout order (a role once per open
+-- slot).
+function Session:OpenRoles()
+    local open = {}
+    local slots = self:Slots()
+    local index
+    for index = 1, #slots do
+        if slots[index].member == nil then
+            table.insert(open, slots[index].role)
+        end
+    end
+    return open
+end
+
+-- The line Ask in guild posts, naming the open roles, the dungeon
+-- ({ name, minLevel, maxLevel }) and its range: "LF tank, healer and 2 DPS
+-- for The Deadmines (17–26), whisper me!". Nil when no role is open.
+function Session:AskLine(dungeon)
+    local open = self:OpenRoles()
+    if open[1] == nil or type(dungeon) ~= "table" then
+        return nil
+    end
+    local counts = { tank = 0, healer = 0, dps = 0 }
+    local index
+    for index = 1, #open do
+        counts[open[index]] = counts[open[index]] + 1
+    end
+    local wanted = {}
+    if counts.tank > 0 then
+        table.insert(wanted, "tank")
+    end
+    if counts.healer > 0 then
+        table.insert(wanted, "healer")
+    end
+    if counts.dps == 1 then
+        table.insert(wanted, "DPS")
+    elseif counts.dps > 1 then
+        table.insert(wanted, counts.dps .. " DPS")
+    end
+    local roles = wanted[1]
+    for index = 2, #wanted do
+        roles = roles .. (index == #wanted and " and " or ", ") .. wanted[index]
+    end
+    return "LF " .. roles .. " for " .. dungeon.name .. " (" .. dungeon.minLevel .. "–" .. dungeon.maxLevel
+        .. "), whisper me!"
+end
+
 -- Whether all five slots are filled.
 function Session:IsComplete()
     if not self.active or #self.slots == 0 then
