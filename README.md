@@ -264,6 +264,8 @@ Everyone gets the window's **Recent Guild Advertisements** tab. It lists each ch
 
 `/agf group` opens the **Group Finder** in a window of its own, separate from the add-on's main window, so you can keep it open while the main window is closed. Running it again, the close button or Escape closes it. Drag it anywhere; it stays where you drop it, across reloads and on every character.
 
+The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
+
 The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Next to each dungeon, **T 1 · H 2 · D 3** shows how many guildmates online right now could fill tank, healer and DPS there, so you can pick one the guild can fill. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
 
 On WoW Retail the list comes from the game's own Dungeon Finder, so it stays current without add-on updates. WoW Forever has no Dungeon Finder, so the add-on ships its dungeons (the Classic ones and Forever's new ones) with their fixed level ranges.
@@ -273,6 +275,10 @@ Picking a dungeon starts your group and shows its five slots: 1 tank, 1 healer a
 - On Retail, each party member takes the slot for the role the game assigned them.
 - Anyone without an assigned role (everyone on WoW Forever) starts in the first open slot their class can fill: tank, then healer, then DPS. Under **Party roles**, use the **Tank**, **Healer** and **DPS** buttons beside each name (yours included) to put them where they belong. Only the roles their class can play have buttons.
 
+### Changing or ending the group
+
+When all five slots are filled, the window shows **Group complete**. **Change dungeon** takes you back to the list to pick another dungeon, keeping everyone in their slots. **End group** ends the group, and so does leaving the party. Closing the window doesn't: open it again with `/agf group` and your group is still there.
+
 ### Who could join
 
 Beside the slots, each role that's still open lists the guildmates online right now who could fill it, for example:
@@ -281,11 +287,7 @@ Beside the slots, each role that's still open lists the guildmates online right 
 
 Each player appears once, under their alias (or main), with the character they're on and where they are. After the colon comes every character of theirs that fits: its level is within the dungeon's range, its class can play the role, and the role is on in its [role preferences](#role-preferences). That includes offline alts, since they can log over. A role already filled lists nobody.
 
-Guildmates whose add-on didn't answer (see below) are marked **(no add-on)**, and are suggested by what their class can do. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
-
-### Nearby
-
-The right side of the window always ends with **Nearby in <zone>**: the guildmates online in the same zone as you, at any level, one line per player under their alias (or main), with the characters they have there and their levels, for example **Thunderer — Bolt 22**. It's there before you pick a dungeon too, so you can see who you might quest with. It's worked out again each time the window opens or refreshes.
+Guildmates whose add-on didn't answer (see [Who is around](#who-is-around)) are marked **(no add-on)**, and are suggested by what their class can do. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
 
 ### Requesting a guildmate
 
@@ -307,6 +309,10 @@ To reach guildmates without the add-on, press **Ask in guild** (shown while any 
 
 Each time you open the Group Finder, your add-on asks the guild who else runs it. Every guildmate online with the add-on answers within a few seconds, and the bottom of the window lists them, for example **Add-on users online: Hammer, Wrench (unavailable)**. Guildmates without the add-on don't answer, so they aren't listed here.
 
+### Nearby
+
+The right side of the window always ends with **Nearby in <zone>**: the guildmates online in the same zone as you, at any level, one line per player under their alias (or main), with the characters they have there and their levels, for example **Thunderer — Bolt 22**. It's there before you pick a dungeon too, so you can see who you might quest with. It's worked out again each time the window opens or refreshes.
+
 ### Do Not Disturb
 
 Turn on **Do Not Disturb** when you don't want group requests. It's in three places that always agree: the check box at the bottom of the Group Finder, **Do Not Disturb** under **Group Finder** in the settings, and `/agf dnd`. It applies to every character on your account. While it's on, your add-on tells organizers you're unavailable.
@@ -324,10 +330,6 @@ Your role preferences reach the whole guild through [guild sync](#guild-sync), e
 Your add-on remembers, on your computer only, each party you've been in with guildmates: any party, not just ones from the Group Finder. It records when, which guild characters, and the dungeon when it knows it (the one you picked in the Group Finder, or the instance you're in). Guildmates joining later count as the same party, and so does reloading while in it. Your own alts never count. The history is never sent to anyone.
 
 A guildmate's player panel then shows **Grouped together 3 times, last on 2026-10-12**, counted across all their characters. Players you've never grouped with show nothing.
-
-### When the group is full
-
-When all five slots are filled, the window shows **Group complete**. **Change dungeon** takes you back to the list to pick another dungeon, keeping everyone in their slots. **End group** ends the group, and so does leaving the party. Closing the window doesn't: open it again with `/agf group` and your group is still there.
 
 ## Supported clients
 
