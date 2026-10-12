@@ -450,3 +450,36 @@ end
 
 registerProfileTests("Forever")
 registerProfileTests("Retail")
+
+test.test("guild sync: a correction for a forgery dated as far ahead as allowed waits until others accept it", function()
+    local addon = load()
+    local partition, normalizer = newPartition(addon)
+    local sent, waits = {}, {}
+    local session = addon.SyncSession.Create({
+        comm = { Broadcast = function(_, message) table.insert(sent, message) return true end },
+        context = function() return partition, normalizer end,
+        selfKey = function() return MEMBER end,
+        isOfficer = function() return false end,
+        now = function() return NOW end,
+        after = function(seconds, callback)
+            table.insert(waits, { seconds = seconds, callback = callback })
+            return true
+        end,
+        rolesOf = function(key) return addon.RoleCatalog.For("retail"):PreferencesOf(partition, key) end,
+    })
+    session.startedAt = NOW
+    local farthest = NOW + addon.SyncFacts.MAX_FUTURE_SECONDS
+
+    local kept = session:CatchProfileForgeries({ roles(farthest, MEMBER, MEMBER, { "dps" }) }, partition, MEMBER,
+        "wrench-area52", "Wrench-Area52")
+
+    test.assertEqual(0, #kept)
+    -- Stamped one second past the forgery: sent once that's no longer
+    -- too far ahead for others.
+    test.assertEqual(farthest + 1, (partition:GetRolesStamp(MEMBER)))
+    test.assertEqual(0, #sent)
+    test.assertEqual(1, waits[#waits].seconds)
+    waits[#waits].callback()
+    test.assertEqual(1, #sent)
+    test.assertEqual(farthest + 1, sent[1].facts[1].at)
+end)

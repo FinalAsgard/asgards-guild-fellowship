@@ -123,7 +123,11 @@ test.test("ask in guild: the button opens a pop-up with the line in a text box, 
     test.assertEqual(LINE, window.ask.box:GetText())
     -- The cursor waits at the end, ready to add to the line.
     test.assertEqual(string.len(LINE), window.ask.box.cursor)
-    test.assertEqual(string.len(LINE) .. "/255", window.ask.count.text)
+    -- Letters, not bytes: the range's dash is one letter.
+    test.assertEqual("58/255", window.ask.count.text)
+    local addon = load()
+    test.assertEqual(5, addon.GroupFinderWindow.Letters("Zélie"))
+    test.assertEqual(3, addon.GroupFinderWindow.Letters("1–2"))
     test.assertTrue(window.ask.canPost)
     test.assertEqual(0, #world.posted)
 end)

@@ -266,6 +266,27 @@ function Session:Later(seconds, callback)
     end
 end
 
+-- Sends `corrections`, made at `now`. A forgery dated as far ahead as
+-- others accept is corrected one second later still, which others would
+-- refuse as from the future until their clocks catch up, so the
+-- correction waits until then.
+function Session:SendCorrections(corrections, now)
+    local latest = 0
+    local index
+    for index = 1, #corrections do
+        latest = math.max(latest, corrections[index].at)
+    end
+    local wait = latest - (now + addon.SyncFacts.MAX_FUTURE_SECONDS)
+    local message = { t = SyncSession.TYPE_FACTS, facts = corrections }
+    if wait > 0 then
+        self:Later(wait, function()
+            self:Send(message)
+        end)
+        return
+    end
+    self:Send(message)
+end
+
 -- After this user changed main links by hand: stamps the main link of every
 -- character in `keys` (a set) as theirs, now, and broadcasts them when this
 -- user is an officer. A member suggests only the links that changed:
@@ -628,7 +649,7 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
     end
     if corrections[1] ~= nil then
         ledger:Record(corrections, now)
-        self:Send({ t = SyncSession.TYPE_FACTS, facts = corrections })
+        self:SendCorrections(corrections, now)
     end
     self.onForgery(forged, sender)
     return kept
@@ -673,7 +694,7 @@ function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
         return facts
     end
     if corrections[1] ~= nil then
-        self:Send({ t = SyncSession.TYPE_FACTS, facts = corrections })
+        self:SendCorrections(corrections, now)
     end
     self.onForgery(forged, sender)
     return kept

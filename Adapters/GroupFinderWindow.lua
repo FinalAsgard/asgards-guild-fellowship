@@ -800,6 +800,13 @@ end
 
 -- Ask in guild ----------------------------------------------------------------
 
+-- How many letters `text` holds, as the text box and guild chat count
+-- them: UTF-8 continuation bytes don't start a letter.
+function GroupFinderWindow.Letters(text)
+    local _, count = string.gsub(text, "[^\128-\191]", "")
+    return count
+end
+
 -- `text` as one guild chat line: line breaks become spaces, and the ends
 -- are trimmed. Nil when nothing is left.
 function GroupFinderWindow.ChatLine(text)
@@ -921,7 +928,7 @@ end
 function Window:updateAsk()
     local ask = self.ask
     local text = ask.box:GetText() or ""
-    ask.count:SetText(string.len(text) .. "/" .. GroupFinderWindow.GUILD_LINE_MAX)
+    ask.count:SetText(GroupFinderWindow.Letters(text) .. "/" .. GroupFinderWindow.GUILD_LINE_MAX)
     ask.canPost = GroupFinderWindow.ChatLine(text) ~= nil
     if ask.canPost then
         ask.post:Enable()
