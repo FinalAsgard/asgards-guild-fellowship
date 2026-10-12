@@ -82,8 +82,12 @@ test.test("dungeon catalog: WoW Forever uses the Classic dungeons with fixed ran
     test.assertEqual("The Deadmines", deadmines.name)
     test.assertEqual(17, deadmines.minLevel)
     test.assertEqual(26, deadmines.maxLevel)
-    test.assertEqual("Ragefire Chasm", catalog:All()[1].name)
     test.assertTrue(catalog:Fits("strat", 60))
+    -- Forever's own dungeons sit alongside the Classic ones.
+    test.assertEqual("Hall of Thanes", catalog:Get("thanes").name)
+    test.assertTrue(catalog:Fits("dalaran", 30))
+    local fitting = catalog:Split(15)
+    test.assertEqual("Hall of Thanes, Ragefire Chasm, Ruins of Lordaeron", names(fitting))
 end)
 
 -- The WoW adapter -------------------------------------------------------------

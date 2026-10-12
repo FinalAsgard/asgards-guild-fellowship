@@ -48,6 +48,17 @@ DungeonCatalog.STATIC = {
         dungeon("dmn", "Dire Maul: North", 57, 60),
         dungeon("scholo", "Scholomance", 58, 60),
         dungeon("strat", "Stratholme", 58, 60),
+        -- Forever's own dungeons, alongside the Classic ones. Ranges from
+        -- the beta, still provisional.
+        dungeon("thanes", "Hall of Thanes", 13, 18),
+        dungeon("lordaeron", "Ruins of Lordaeron", 15, 20),
+        dungeon("excavation", "Excavation Site: Wetlands", 26, 31),
+        dungeon("dalaran", "City of Dalaran", 28, 33),
+        dungeon("drowned", "The Drowned City", 35, 40),
+        dungeon("kroldok", "Krol'dok Stronghold", 40, 45),
+        dungeon("alcaz", "Alcaz Island Prison", 48, 53),
+        dungeon("blackmaw", "Blackmaw Hold", 55, 60),
+        dungeon("shapers", "Shaper's Terrace", 58, 60),
     },
     retail = {
         dungeon("windrunner", "Windrunner Spire", 80, 90),
