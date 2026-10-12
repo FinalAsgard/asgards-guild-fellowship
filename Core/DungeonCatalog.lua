@@ -19,7 +19,8 @@ end
 -- Per-client tables, by client profile id. WoW Forever has no Dungeon
 -- Finder, so its Classic dungeons and their fixed ranges live here; its
 -- ranges still need checking in game. Retail's table is only a fallback for
--- when the Dungeon Finder reports nothing.
+-- when the Dungeon Finder reports nothing: the current expansion's leveling
+-- dungeons, a best guess until checked in game.
 DungeonCatalog.STATIC = {
     forever = {
         dungeon("rfc", "Ragefire Chasm", 13, 18),
@@ -49,14 +50,14 @@ DungeonCatalog.STATIC = {
         dungeon("strat", "Stratholme", 58, 60),
     },
     retail = {
-        dungeon("cinderbrew", "Cinderbrew Meadery", 70, 80),
-        dungeon("darkflame", "Darkflame Cleft", 70, 80),
-        dungeon("rookery", "The Rookery", 70, 80),
-        dungeon("priory", "Priory of the Sacred Flame", 70, 80),
-        dungeon("stonevault", "The Stonevault", 70, 80),
-        dungeon("threads", "City of Threads", 70, 80),
-        dungeon("arakara", "Ara-Kara, City of Echoes", 70, 80),
-        dungeon("dawnbreaker", "The Dawnbreaker", 70, 80),
+        dungeon("windrunner", "Windrunner Spire", 80, 90),
+        dungeon("murderrow", "Murder Row", 80, 90),
+        dungeon("nalorakk", "Den of Nalorakk", 80, 90),
+        dungeon("maisara", "Maisara Caverns", 80, 90),
+        dungeon("blindingvale", "The Blinding Vale", 80, 90),
+        dungeon("magisters", "Magisters' Terrace", 80, 90),
+        dungeon("xenas", "Nexus-Point Xenas", 80, 90),
+        dungeon("voidscar", "Voidscar Arena", 80, 90),
     },
 }
 
