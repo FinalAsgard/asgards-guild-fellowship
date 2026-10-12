@@ -23,6 +23,8 @@ local RecruitPrompts = {
     -- screen's height, and the offset used when the height is unknown.
     DOWN_SHARE = 0.28,
     DEFAULT_OFFSET = 220,
+    -- The layer the window is drawn on: above the add-on's window.
+    STRATA = "DIALOG",
 }
 addon.RecruitPrompts = RecruitPrompts
 
@@ -96,7 +98,12 @@ function Prompts:window()
     local frame = createFrame("Frame", nil, parent)
     frame:SetWidth(RecruitPrompts.WIDTH)
     frame:SetHeight(RecruitPrompts.HEADER_HEIGHT + RecruitPrompts.ROW_HEIGHT)
-    frame:SetFrameStrata("HIGH")
+    -- A strata of its own, above the add-on's window (HIGH): sharing a
+    -- strata, the game layers frames by level, which put this window's
+    -- text and buttons above that window's background but its own
+    -- background below it. Its rows and buttons inherit this strata, so
+    -- the whole window stays together on top.
+    frame:SetFrameStrata(RecruitPrompts.STRATA)
     frame:SetClampedToScreen(true)
     self.frame = frame
     self:place(frame)

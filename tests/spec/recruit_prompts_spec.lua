@@ -19,6 +19,7 @@ local function newScreen()
         function frame:GetTop() return self.top end
         function frame:GetHeight() return self.height end
         function frame:SetMovable(movable) self.movable = movable end
+        function frame:SetFrameStrata(strata) self.strata = strata end
         function frame:RegisterForDrag(button) self.dragButton = button end
         function frame:StartMoving() self.moving = true end
         function frame:StopMovingOrSizing() self.moving = false end
@@ -138,4 +139,16 @@ test.test("recruit window position: saved account-wide, and an unusable one coun
     database.recruit = "corrupt"
     test.assertFalse(store:SetRecruitAnchor({ point = "TOPLEFT", x = 40, y = -120 }))
     test.assertEqual("corrupt", database.recruit)
+end)
+
+test.test("recruit prompts: the window has a layer of its own, above the add-on's window", function()
+    local world = newPrompts(nil)
+
+    world.prompts:Show(PROMPT, {})
+
+    -- Not HIGH, the add-on's window's layer: sharing it let this window's
+    -- text and buttons poke through that window while its background
+    -- stayed behind. Its rows set no layer of their own, so they go with it.
+    test.assertEqual("DIALOG", world.prompts.frame.strata)
+    test.assertEqual(nil, rawget(world.prompts.rows[1].frame, "strata"))
 end)
