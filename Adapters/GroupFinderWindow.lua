@@ -254,7 +254,7 @@ function GroupFinderWindow.SuggestionItems(lists, requestOf)
             local text = "  " .. addon.GroupCandidates.Describe(player)
             local request = requestOf and requestOf(player.id)
             if request ~= nil then
-                text = text .. " |cff9d9d9d[" .. request.state .. "]|r"
+                text = text .. " |cff9d9d9d[" .. (GroupFinderWindow.STATE_LABELS[request.state] or request.state) .. "]|r"
             end
             table.insert(items, { text = text, player = player })
         end
@@ -304,6 +304,11 @@ function Window:drawSuggestions(candidates, dungeon)
     end
     self.suggestionList:SetHeight(math.max(#items, 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
 end
+
+-- How each request state reads beside a guildmate.
+GroupFinderWindow.STATE_LABELS = {
+    ["joined-elsewhere"] = "joined another group",
+}
 
 -- "T 2 · H 0 · D 5": how many online guildmates could fill each role.
 function GroupFinderWindow.CountsText(counts)
@@ -542,6 +547,7 @@ function Window:partyRow(index)
             function()
                 if row.key ~= nil then
                     self.session:Assign(row.key, role)
+                    pcall(self.syncParty)
                     self:Refresh()
                 end
             end)

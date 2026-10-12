@@ -22,11 +22,18 @@ local GroupFinderProtocol = {
     -- asks an invitee to join.
     TYPE_REQUEST = "gf-request",
     -- { v, t, to, id, ok = accepted?, role, c = the character key chosen,
-    -- n = its name, l = its level }: the invitee's answer; role, c, n and l
-    -- only when accepted.
+    -- n = its name, l = its level, w = nothing left to fill? }: the
+    -- invitee's answer; role, c, n and l only when accepted, w only when
+    -- not (the prompt closed because no option was left).
     TYPE_ANSWER = "gf-answer",
     -- { v, t, to, id }: the organizer withdrew the request.
     TYPE_CANCEL = "gf-cancel",
+    -- { v, t, to, id, r }: the roles still open for that request changed.
+    TYPE_SLOTS = "gf-slots",
+    -- { v, t, to, id }: nothing is left to fill; the request is withdrawn.
+    TYPE_WITHDRAW = "gf-withdraw",
+    -- { v, t, to, id }: the invitee joined another organizer's group.
+    TYPE_JOINED_ELSEWHERE = "gf-joined-elsewhere",
 }
 addon.GroupFinderProtocol = GroupFinderProtocol
 
@@ -76,12 +83,18 @@ local CHECKS = {
         if not isTargeted(message) or type(message.ok) ~= "boolean" then
             return false
         end
+        if message.w ~= nil and (type(message.w) ~= "boolean" or message.ok) then
+            return false
+        end
         return not message.ok
             or (ROLES[message.role] == true and isText(message.c) and isText(message.n) and isLevel(message.l))
     end,
-    [GroupFinderProtocol.TYPE_CANCEL] = function(message)
-        return isTargeted(message)
+    [GroupFinderProtocol.TYPE_CANCEL] = isTargeted,
+    [GroupFinderProtocol.TYPE_SLOTS] = function(message)
+        return isTargeted(message) and isOpenRoles(message.r)
     end,
+    [GroupFinderProtocol.TYPE_WITHDRAW] = isTargeted,
+    [GroupFinderProtocol.TYPE_JOINED_ELSEWHERE] = isTargeted,
 }
 
 -- Every Group Finder message type, for routing.
@@ -114,10 +127,14 @@ function GroupFinderProtocol.Request(to, id, dungeon, openRoles)
 end
 
 -- Accepts request `id` from organizer `to` with `option` ({ role, key, name,
--- level }), or declines it when `option` is nil.
-function GroupFinderProtocol.Answer(to, id, option)
+-- level }), or declines it when `option` is nil; `nothingLeft` says the
+-- decline is because no option was left.
+function GroupFinderProtocol.Answer(to, id, option, nothingLeft)
     local message = { v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_ANSWER, to = to, id = id }
     message.ok = option ~= nil
+    if option == nil and nothingLeft then
+        message.w = true
+    end
     if option ~= nil then
         message.role = option.role
         message.c = option.key
@@ -127,8 +144,19 @@ function GroupFinderProtocol.Answer(to, id, option)
     return message
 end
 
-function GroupFinderProtocol.Cancel(to, id)
-    return { v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_CANCEL, to = to, id = id }
+local function targeted(kind)
+    return function(to, id)
+        return { v = GroupFinderProtocol.VERSION, t = kind, to = to, id = id }
+    end
+end
+
+GroupFinderProtocol.Cancel = targeted(GroupFinderProtocol.TYPE_CANCEL)
+GroupFinderProtocol.Withdraw = targeted(GroupFinderProtocol.TYPE_WITHDRAW)
+GroupFinderProtocol.JoinedElsewhere = targeted(GroupFinderProtocol.TYPE_JOINED_ELSEWHERE)
+
+-- Tells invitee `to` the roles still open for request `id`.
+function GroupFinderProtocol.Slots(to, id, openRoles)
+    return { v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_SLOTS, to = to, id = id, r = openRoles }
 end
 
 -- Whether `message` is a Group Finder message this version understands.

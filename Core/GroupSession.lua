@@ -13,6 +13,10 @@ local _, addon = ...
 -- pass (expired). Accepting locks the invitee into a slot for the role
 -- they chose, ahead of anyone without a role from the game or the
 -- organizer; an answer for a role no longer open withdraws the request.
+-- Each pending request remembers the roles it offered; when slots fill or
+-- free up, SlotChanges says which invitees need the new open roles, and
+-- withdraws the requests nothing is left for. An invitee who joined
+-- another organizer's group leaves the request "joined-elsewhere".
 local GroupSession = {
     -- Every party member fills a slot as accepted.
     ACCEPTED = "accepted",
@@ -23,6 +27,7 @@ local GroupSession = {
     EXPIRED = "expired",
     CANCELLED = "cancelled",
     WITHDRAWN = "withdrawn",
+    JOINED_ELSEWHERE = "joined-elsewhere",
 }
 addon.GroupSession = GroupSession
 
@@ -230,10 +235,11 @@ end
 -- Requests -------------------------------------------------------------------
 
 -- Asks the player `target` ({ playerId, key = the character they're on,
--- label }) to join, at `now`. Returns the new pending request
--- ({ id, playerId, to, label, state, at }), or nil when no group is going
--- or that player already has one pending.
-function Session:Request(target, now)
+-- label }) to join, at `now`. `owner` (the organizer's key) starts the
+-- request's id, so ids from different organizers never match. Returns the
+-- new pending request ({ id, playerId, to, label, state, at, roles }), or
+-- nil when no group is going or that player already has one pending.
+function Session:Request(target, now, owner)
     if not self.active or type(target) ~= "table" or target.key == nil or type(now) ~= "number" then
         return nil
     end
@@ -246,12 +252,13 @@ function Session:Request(target, now)
     end
     self.requestCount = self.requestCount + 1
     local request = {
-        id = tostring(now) .. "-" .. self.requestCount,
+        id = (owner and (owner .. ":") or "") .. tostring(now) .. "-" .. self.requestCount,
         playerId = target.playerId,
         to = target.key,
         label = target.label,
         state = GroupSession.PENDING,
         at = now,
+        roles = self:OpenRoleSet(),
     }
     table.insert(self.requests, request)
     return request
@@ -327,15 +334,16 @@ end
 
 -- The invitee `from` (the character asked) answered request `id`:
 -- `option` is nil for a decline, or { role, key, name, level } for the
--- slot and character they chose. Returns the request's new state, or nil
--- when the answer doesn't belong to a pending request.
-function Session:Answer(id, from, option)
+-- slot and character they chose. A decline because nothing was left for
+-- them (`nothingLeft`) withdraws the request. Returns the request's new
+-- state, or nil when the answer doesn't belong to a pending request.
+function Session:Answer(id, from, option, nothingLeft)
     local request = self:findRequest(id)
     if request == nil or request.state ~= GroupSession.PENDING or request.to ~= from then
         return nil
     end
     if option == nil then
-        request.state = GroupSession.DECLINED
+        request.state = nothingLeft and GroupSession.WITHDRAWN or GroupSession.DECLINED
         return request.state
     end
     local open = false
@@ -353,6 +361,69 @@ function Session:Answer(id, from, option)
     request.character = { key = option.key, name = option.name, level = option.level, inGuild = true, invitee = true }
     self:place()
     return request.state
+end
+
+-- The invitee `from` joined another group instead of answering request
+-- `id`. Returns whether that request was pending.
+function Session:JoinedElsewhere(id, from)
+    local request = self:findRequest(id)
+    if request == nil or request.state ~= GroupSession.PENDING or request.to ~= from then
+        return false
+    end
+    request.state = GroupSession.JOINED_ELSEWHERE
+    return true
+end
+
+local function sameRoles(a, b)
+    if #a ~= #b then
+        return false
+    end
+    local index
+    for index = 1, #a do
+        if a[index] ~= b[index] then
+            return false
+        end
+    end
+    return true
+end
+
+-- After slots filled or freed up: the pending requests whose open roles
+-- changed (`updates`, each now holding the new `roles`), and those nothing
+-- is left for (`withdrawals`, now withdrawn).
+function Session:SlotChanges()
+    local updates, withdrawals = {}, {}
+    local open = self:OpenRoleSet()
+    local index
+    for index = 1, #self.requests do
+        local request = self.requests[index]
+        if request.state == GroupSession.PENDING then
+            if open[1] == nil then
+                request.state = GroupSession.WITHDRAWN
+                table.insert(withdrawals, request)
+            elseif not sameRoles(open, request.roles or {}) then
+                request.roles = open
+                table.insert(updates, request)
+            end
+        end
+    end
+    return updates, withdrawals
+end
+
+-- The roles still open, each once, in role order.
+function Session:OpenRoleSet()
+    local open = {}
+    local roles = self:OpenRoles()
+    local index
+    for index = 1, #roles do
+        open[roles[index]] = true
+    end
+    local set = {}
+    for index = 1, #addon.RoleCatalog.ROLES do
+        if open[addon.RoleCatalog.ROLES[index]] then
+            table.insert(set, addon.RoleCatalog.ROLES[index])
+        end
+    end
+    return set
 end
 
 -- The roles of the slots still open, in layout order (a role once per open

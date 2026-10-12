@@ -8,7 +8,10 @@ local _, addon = ...
 -- an option or Decline answers the organizer. A request is refused at once
 -- while the player is unavailable (Do Not Disturb, in a group or an
 -- instance), or when nothing they have fits. A prompt closes when the
--- organizer cancels it or REQUEST_SECONDS pass.
+-- organizer cancels or withdraws it, or REQUEST_SECONDS pass. When the
+-- organizer's open roles change, its options are worked out again, and a
+-- prompt with none left closes. Prompts from several organizers stack;
+-- accepting one declines the rest.
 --
 -- Pure: the guild's facts are handed in.
 --   partition()  -> the Fellowship store partition, or nil
@@ -114,7 +117,12 @@ function Requests:OnRequest(message, organizer, sender, now)
         return "no fit"
     end
     -- A repeated request replaces the one it repeats.
-    self:Remove(message.id)
+    local index
+    for index = #self.pending, 1, -1 do
+        if self.pending[index].id == message.id and self.pending[index].organizer == organizer then
+            table.remove(self.pending, index)
+        end
+    end
     table.insert(self.pending, {
         id = message.id,
         organizer = organizer,
@@ -137,8 +145,29 @@ function Requests:Remove(id)
     return nil
 end
 
--- The organizer cancelled request `id`: closes its prompt when `organizer`
--- sent it. Returns whether one closed.
+-- The organizer's open roles for request `id` are now `roles`: its options
+-- are worked out again. Returns "updated", "closed" when no option is
+-- left (the prompt is gone), or nil when there's no such prompt from
+-- `organizer`.
+function Requests:OnSlots(id, organizer, roles)
+    local index
+    for index = 1, #self.pending do
+        local prompt = self.pending[index]
+        if prompt.id == id and prompt.organizer == organizer then
+            local options = self:OptionsFor({ r = roles, lo = prompt.dungeon.minLevel, hi = prompt.dungeon.maxLevel })
+            if options[1] == nil then
+                table.remove(self.pending, index)
+                return "closed"
+            end
+            prompt.options = options
+            return "updated"
+        end
+    end
+    return nil
+end
+
+-- The organizer cancelled or withdrew request `id`: closes its prompt when
+-- `organizer` sent it. Returns whether one closed.
 function Requests:OnCancel(id, organizer)
     local index
     for index = 1, #self.pending do
@@ -151,15 +180,18 @@ function Requests:OnCancel(id, organizer)
     return false
 end
 
--- Accepts prompt `id` with its option `choice` (an index). Returns the
--- prompt and the option, or nil.
+-- Accepts prompt `id` with its option `choice` (an index). Every other
+-- prompt closes, declined. Returns the prompt, the option and the other
+-- prompts, or nil.
 function Requests:Accept(id, choice)
     local index
     for index = 1, #self.pending do
         local prompt = self.pending[index]
         if prompt.id == id and prompt.options[choice] ~= nil then
             table.remove(self.pending, index)
-            return prompt, prompt.options[choice]
+            local others = self.pending
+            self.pending = {}
+            return prompt, prompt.options[choice], others
         end
     end
     return nil
