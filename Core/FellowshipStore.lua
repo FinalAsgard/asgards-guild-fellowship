@@ -601,6 +601,32 @@ function Store:GetRecruitState()
     return self.database.recruit
 end
 
+-- Where the Guild Recruit window sits ({ point, x, y }, measured from that
+-- point of the screen), shared by every character. Nil when none is saved
+-- or the saved one is unusable, so the window uses its default place.
+function Store:RecruitAnchor()
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local anchor = type(state) == "table" and state.anchor or nil
+    if not isAnchor(anchor) then
+        return nil
+    end
+    return { point = anchor.point, x = anchor.x, y = anchor.y }
+end
+
+-- Saves where the Guild Recruit window sits. As with greet prompts, an
+-- unusable saved position is replaced: the user just placed the window.
+function Store:SetRecruitAnchor(anchor)
+    if not isAnchor(anchor) then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    state.anchor = { point = anchor.point, x = anchor.x, y = anchor.y }
+    return true
+end
+
 -- The user's own ad, exactly as written. Empty when none is saved or the
 -- saved one is unusable.
 function Store:RecruitAd()

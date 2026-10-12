@@ -836,7 +836,20 @@ if clientProfile.supported then
         end,
         view = greetPrompts,
     })
-    recruitPrompts = addon.RecruitPrompts.Create(client)
+    -- The Guild Recruit window stays where it's dragged; the place is saved
+    -- account-wide.
+    recruitPrompts = addon.RecruitPrompts.Create(client, {
+        loadAnchor = function()
+            local store = rosterController:Store()
+            return store and store:RecruitAnchor()
+        end,
+        saveAnchor = function(anchor)
+            local store = rosterController:Store()
+            if store ~= nil then
+                store:SetRecruitAnchor(anchor)
+            end
+        end,
+    })
     -- Guild Recruit keeps its ad times with the current guild.
     guildRecruit = addon.GuildRecruit.Create({
         partition = function()

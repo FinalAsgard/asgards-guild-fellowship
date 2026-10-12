@@ -219,7 +219,7 @@ A category with no greetings shows no prompts, so emptying one is a way to turn 
 
 ## Guild Recruit
 
-Guild Recruit spreads the guild's recruitment ads out: every zone sees the guild now and then, and nobody spams a channel. When you're somewhere the guild hasn't advertised lately, a small **Guild Recruit** window (centered, about a quarter of the way down the screen, so it's never mistaken for a greet prompt) asks **Advertise in Elwynn Forest General?** or **Advertise in Trade?**. Press **Post** to send an ad there. Nothing is ever posted unless you press the button.
+Guild Recruit spreads the guild's recruitment ads out: every zone sees the guild now and then, and nobody spams a channel. When you're somewhere the guild hasn't advertised lately, a small **Guild Recruit** window (centered, about a quarter of the way down the screen, so it's never mistaken for a greet prompt) asks **Advertise in Elwynn Forest General?** or **Advertise in Trade?**. Press **Post** to send an ad there. Nothing is ever posted unless you press the button. Drag the window anywhere you like; it stays where you drop it, across reloads and on every character.
 
 ### Who gets prompts
 
