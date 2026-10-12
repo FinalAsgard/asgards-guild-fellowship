@@ -20,6 +20,8 @@ local _, addon = ...
 -- Beside the slots, for each role still open, the online guildmates who
 -- could fill it (GroupCandidates). The dungeon picker shows, for each
 -- dungeon, how many online guildmates could fill tank, healer and DPS.
+-- Add-on users get a Request button (Cancel while their request is
+-- pending), and their request's state beside their name.
 --
 -- Like the other adapters, it reaches the game only through the client's
 -- environment (CreateFrame, UIParent) and the framework, so specs can draw
@@ -28,7 +30,8 @@ local GroupFinderWindow = {
     WIDTH = 760,
     -- The picker and the slots take the left; suggestions the right.
     LEFT_WIDTH = 380,
-    SUGGESTION_HEIGHT = 16,
+    SUGGESTION_HEIGHT = 18,
+    REQUEST_WIDTH = 64,
     HEIGHT = 470,
     PADDING = 12,
     ROW_HEIGHT = 20,
@@ -79,6 +82,9 @@ end
 --   dnd                 { get() -> boolean, set(boolean) }: Do Not Disturb
 --   candidates()        a GroupCandidates for the guild as it is now, or nil
 --   postToGuild(text)   posts a line to guild chat
+--   request(entry)      asks a suggested player (a GroupCandidates entry)
+--                       to join
+--   cancelRequest(id)   withdraws a pending request
 --   loadAnchor()        the saved position ({ point, x, y }), or nil
 --   saveAnchor(anchor)  saves a new one
 -- Returns nil and the reason when the framework is missing or can't build
@@ -105,6 +111,9 @@ function GroupFinderWindow.Create(client, options)
         end,
         suggestionLines = {},
         postToGuild = options.postToGuild or function() end,
+        request = options.request or function() end,
+        cancelRequest = options.cancelRequest or function() end,
+        suggestionButtons = {},
         loadAnchor = options.loadAnchor or function() return nil end,
         saveAnchor = options.saveAnchor or function() end,
         showAll = false,
@@ -198,52 +207,102 @@ function Window:suggestionLine(index)
     end
     local line = self.suggestionList:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     line:SetPoint("TOPLEFT", self.suggestionList, "TOPLEFT", 0, -(index - 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
-    line:SetPoint("RIGHT", self.suggestionList, "RIGHT", 0, 0)
+    line:SetPoint("RIGHT", self.suggestionList, "RIGHT", -GroupFinderWindow.REQUEST_WIDTH - 4, 0)
     line:SetJustifyH("LEFT")
     if type(line.SetWordWrap) == "function" then
         line:SetWordWrap(false)
     end
     self.suggestionLines[index] = line
+    local button = self:button(self.suggestionList, "Request", GroupFinderWindow.REQUEST_WIDTH, function()
+        local item = self.suggestionButtons[index].item
+        if item == nil then
+            return
+        end
+        local request = self.session:RequestFor(item.player.id)
+        if request ~= nil and request.state == addon.GroupSession.PENDING then
+            pcall(self.cancelRequest, request.id)
+        else
+            pcall(self.request, item.player)
+        end
+        self:Refresh()
+    end)
+    button:SetHeight(GroupFinderWindow.SUGGESTION_HEIGHT)
+    button:SetPoint("TOPRIGHT", self.suggestionList, "TOPRIGHT", 0, -(index - 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
+    self.suggestionButtons[index] = { button = button }
     return line
 end
 
 -- The lines the suggestions column shows: each open role's heading, then
--- its guildmates, or a line saying nobody fits.
-function GroupFinderWindow.SuggestionTexts(lists)
-    local texts = {}
+-- its guildmates, or a line saying nobody fits. Each is { text, player }
+-- (player only on a guildmate's line). `requestOf(playerId)`, when given,
+-- adds the state of the player's newest request.
+function GroupFinderWindow.SuggestionItems(lists, requestOf)
+    local items = {}
     if #lists == 0 then
-        return { "Every role is filled." }
+        return { { text = "Every role is filled." } }
     end
     local index
     for index = 1, #lists do
-        table.insert(texts, "|cffffd100" .. addon.RoleCatalog.LABELS[lists[index].role] .. "|r")
+        table.insert(items, { text = "|cffffd100" .. addon.RoleCatalog.LABELS[lists[index].role] .. "|r" })
         local players = lists[index].players
         if #players == 0 then
-            table.insert(texts, "  |cff9d9d9dNo one online fits.|r")
+            table.insert(items, { text = "  |cff9d9d9dNo one online fits.|r" })
         end
         local playerIndex
         for playerIndex = 1, #players do
-            table.insert(texts, "  " .. addon.GroupCandidates.Describe(players[playerIndex]))
+            local player = players[playerIndex]
+            local text = "  " .. addon.GroupCandidates.Describe(player)
+            local request = requestOf and requestOf(player.id)
+            if request ~= nil then
+                text = text .. " |cff9d9d9d[" .. request.state .. "]|r"
+            end
+            table.insert(items, { text = text, player = player })
         end
+    end
+    return items
+end
+
+function GroupFinderWindow.SuggestionTexts(lists)
+    local items = GroupFinderWindow.SuggestionItems(lists)
+    local texts = {}
+    local index
+    for index = 1, #items do
+        texts[index] = items[index].text
     end
     return texts
 end
 
 function Window:drawSuggestions(candidates, dungeon)
-    local texts = {}
+    local items = {}
     if candidates ~= nil and dungeon ~= nil then
-        texts = GroupFinderWindow.SuggestionTexts(candidates:Suggestions(dungeon, self.session:OpenRoles()))
+        items = GroupFinderWindow.SuggestionItems(candidates:Suggestions(dungeon, self.session:OpenRoles()),
+            function(playerId)
+                return self.session:RequestFor(playerId)
+            end)
     end
     local index
-    for index = 1, #texts do
+    for index = 1, #items do
         local line = self:suggestionLine(index)
-        line:SetText(texts[index])
+        line:SetText(items[index].text)
         line:Show()
+        local slot = self.suggestionButtons[index]
+        local player = items[index].player
+        slot.item = items[index]
+        local request = player and self.session:RequestFor(player.id)
+        if player == nil or not player.addon or (request ~= nil and request.state == addon.GroupSession.ACCEPTED) then
+            slot.button:Hide()
+        else
+            local pending = request ~= nil and request.state == addon.GroupSession.PENDING
+            slot.button:SetText(pending and "Cancel" or "Request")
+            slot.button:Show()
+        end
     end
-    for index = #texts + 1, #self.suggestionLines do
+    for index = #items + 1, #self.suggestionLines do
         self.suggestionLines[index]:Hide()
+        self.suggestionButtons[index].item = nil
+        self.suggestionButtons[index].button:Hide()
     end
-    self.suggestionList:SetHeight(math.max(#texts, 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
+    self.suggestionList:SetHeight(math.max(#items, 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
 end
 
 -- "T 2 · H 0 · D 5": how many online guildmates could fill each role.
@@ -290,6 +349,11 @@ function Window:buildGroup()
     self.group = group
 
     self.endButton = self:button(group, "End group", 90, function()
+        local pending = self.session:PendingRequests()
+        local index
+        for index = 1, #pending do
+            pcall(self.cancelRequest, pending[index].id)
+        end
         self.session:End()
         self.choosing = false
         self.asking = nil

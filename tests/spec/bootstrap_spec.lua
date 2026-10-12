@@ -13,6 +13,7 @@ local MANIFEST_FILES = {
     "Adapters/GreetPrompts.lua",
     "Adapters/RecruitPrompts.lua",
     "Adapters/GroupFinderWindow.lua",
+    "Adapters/JoinPrompts.lua",
     "Adapters/GreetingsPage.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
@@ -53,6 +54,7 @@ local MANIFEST_FILES = {
     "Core/GroupFinderProtocol.lua",
     "Core/GroupAvailability.lua",
     "Core/GroupCandidates.lua",
+    "Core/JoinRequests.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }

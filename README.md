@@ -283,6 +283,12 @@ Each player appears once, under their alias (or main), with the character they'r
 
 Guildmates whose add-on didn't answer (see below) are marked **(no add-on)**, and are suggested by what their class can do. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
 
+### Requesting a guildmate
+
+Guildmates with the add-on have a **Request** button beside their suggestion. Pressing it sends them a request, and their line shows its state: **pending** until they answer, then **accepted**, **declined**, **expired** (after about 2 minutes with no answer) or **cancelled**. While it's pending the button reads **Cancel**, to withdraw it. **End group** withdraws every pending request.
+
+The guildmate gets a small **Group Finder** prompt: **Toolbox asks you to join The Deadmines (17–26)**, with a button for each way they could join, shown as **Healer — Hammer (24)**. Only roles you still need are offered, only roles that character's preferences allow, and only characters whose level fits the dungeon (alts included). Choosing one puts them in that slot in your window; **Decline** says no. A guildmate in Do Not Disturb, in a group or in an instance declines automatically, as does one with no character that fits. The prompt closes if you cancel or the request expires.
+
 ### Ask in guild
 
 To reach guildmates without the add-on, press **Ask in guild** (shown while any role is open). The window shows the line it would post, for example **LF healer and 2 DPS for The Deadmines (17–26), whisper me!**, naming the open roles, the dungeon and its level range. **Post** sends that one line to guild chat; **Cancel** sends nothing.

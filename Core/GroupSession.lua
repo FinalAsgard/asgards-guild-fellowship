@@ -7,9 +7,22 @@ local _, addon = ...
 -- (tank, then healer, then DPS). Party members outside the guild take slots
 -- too. The session lasts until End, or until the organizer leaves the party;
 -- closing the window doesn't end it. Pure: party facts are handed in.
+--
+-- Requests: the organizer asks a guildmate to join. A request is pending
+-- until the invitee answers, the organizer cancels it, or REQUEST_SECONDS
+-- pass (expired). Accepting locks the invitee into a slot for the role
+-- they chose, ahead of anyone without a role from the game or the
+-- organizer; an answer for a role no longer open withdraws the request.
 local GroupSession = {
     -- Every party member fills a slot as accepted.
     ACCEPTED = "accepted",
+    -- How long a request waits for an answer.
+    REQUEST_SECONDS = 120,
+    PENDING = "pending",
+    DECLINED = "declined",
+    EXPIRED = "expired",
+    CANCELLED = "cancelled",
+    WITHDRAWN = "withdrawn",
 }
 addon.GroupSession = GroupSession
 
@@ -39,6 +52,8 @@ function Session:clear()
     self.grouped = false
     self.slots = {}
     self.unplaced = {}
+    self.requests = {}
+    self.requestCount = 0
 end
 
 -- Starts a group for the dungeon with `dungeonId`. Starting again while one
@@ -127,11 +142,23 @@ local function openSlot(slots, role)
     return nil
 end
 
--- Fills the slots from the party: chosen roles first (the game's, then the
--- organizer's), so a default never takes a slot someone was put in.
+-- Fills the slots: accepted invitees first, then the party, chosen roles
+-- first (the game's, then the organizer's), so a default never takes a
+-- slot someone was put in.
 function Session:place()
     local slots, unplaced, defaults = emptySlots(), {}, {}
     local index
+    for index = 1, #self.requests do
+        local request = self.requests[index]
+        if request.state == GroupSession.ACCEPTED then
+            local slot = openSlot(slots, request.role)
+            if slot ~= nil then
+                slot.member = request.character
+                slot.state = GroupSession.ACCEPTED
+                slot.request = request.id
+            end
+        end
+    end
     for index = 1, #self.members do
         local member = self.members[index]
         local role = member.assignedRole
@@ -180,7 +207,7 @@ function Session:Slots()
     local index
     for index = 1, #self.slots do
         local slot = self.slots[index]
-        copy[index] = { id = slot.id, role = slot.role, member = slot.member, state = slot.state }
+        copy[index] = { id = slot.id, role = slot.role, member = slot.member, state = slot.state, request = slot.request }
     end
     return copy
 end
@@ -198,6 +225,134 @@ end
 -- The party as last handed in.
 function Session:Members()
     return self.members
+end
+
+-- Requests -------------------------------------------------------------------
+
+-- Asks the player `target` ({ playerId, key = the character they're on,
+-- label }) to join, at `now`. Returns the new pending request
+-- ({ id, playerId, to, label, state, at }), or nil when no group is going
+-- or that player already has one pending.
+function Session:Request(target, now)
+    if not self.active or type(target) ~= "table" or target.key == nil or type(now) ~= "number" then
+        return nil
+    end
+    local index
+    for index = 1, #self.requests do
+        local held = self.requests[index]
+        if held.playerId == target.playerId and held.state == GroupSession.PENDING then
+            return nil
+        end
+    end
+    self.requestCount = self.requestCount + 1
+    local request = {
+        id = tostring(now) .. "-" .. self.requestCount,
+        playerId = target.playerId,
+        to = target.key,
+        label = target.label,
+        state = GroupSession.PENDING,
+        at = now,
+    }
+    table.insert(self.requests, request)
+    return request
+end
+
+function Session:findRequest(id)
+    local index
+    for index = 1, #self.requests do
+        if self.requests[index].id == id then
+            return self.requests[index]
+        end
+    end
+    return nil
+end
+
+-- Every request of this group, oldest first.
+function Session:Requests()
+    local copy = {}
+    local index
+    for index = 1, #self.requests do
+        copy[index] = self.requests[index]
+    end
+    return copy
+end
+
+-- The newest request to player `playerId`, or nil.
+function Session:RequestFor(playerId)
+    local index
+    for index = #self.requests, 1, -1 do
+        if self.requests[index].playerId == playerId then
+            return self.requests[index]
+        end
+    end
+    return nil
+end
+
+-- The requests still waiting for an answer.
+function Session:PendingRequests()
+    local pending = {}
+    local index
+    for index = 1, #self.requests do
+        if self.requests[index].state == GroupSession.PENDING then
+            table.insert(pending, self.requests[index])
+        end
+    end
+    return pending
+end
+
+-- Withdraws pending request `id`. Returns it, or nil when it isn't pending.
+function Session:Cancel(id)
+    local request = self:findRequest(id)
+    if request == nil or request.state ~= GroupSession.PENDING then
+        return nil
+    end
+    request.state = GroupSession.CANCELLED
+    return request
+end
+
+-- Expires every request pending for REQUEST_SECONDS by `now`. Returns
+-- those that expired.
+function Session:Expire(now)
+    local expired = {}
+    local index
+    for index = 1, #self.requests do
+        local request = self.requests[index]
+        if request.state == GroupSession.PENDING and now - request.at >= GroupSession.REQUEST_SECONDS then
+            request.state = GroupSession.EXPIRED
+            table.insert(expired, request)
+        end
+    end
+    return expired
+end
+
+-- The invitee `from` (the character asked) answered request `id`:
+-- `option` is nil for a decline, or { role, key, name, level } for the
+-- slot and character they chose. Returns the request's new state, or nil
+-- when the answer doesn't belong to a pending request.
+function Session:Answer(id, from, option)
+    local request = self:findRequest(id)
+    if request == nil or request.state ~= GroupSession.PENDING or request.to ~= from then
+        return nil
+    end
+    if option == nil then
+        request.state = GroupSession.DECLINED
+        return request.state
+    end
+    local open = false
+    local roles = self:OpenRoles()
+    local index
+    for index = 1, #roles do
+        open = open or roles[index] == option.role
+    end
+    if not open then
+        request.state = GroupSession.WITHDRAWN
+        return request.state
+    end
+    request.state = GroupSession.ACCEPTED
+    request.role = option.role
+    request.character = { key = option.key, name = option.name, level = option.level, inGuild = true, invitee = true }
+    self:place()
+    return request.state
 end
 
 -- The roles of the slots still open, in layout order (a role once per open

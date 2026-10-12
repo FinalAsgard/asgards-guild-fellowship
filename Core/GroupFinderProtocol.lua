@@ -15,11 +15,49 @@ local GroupFinderProtocol = {
     -- { v, t, c = the replier's current character (key), a = whether they're
     -- available }: the reply to an ask.
     TYPE_AVAILABLE = "gf-available",
+    -- Targeted messages carry `to`, the recipient's character key; every
+    -- other client ignores them.
+    -- { v, t, to, id = the request's id, dn = the dungeon's name, lo, hi =
+    -- its level range, r = the roles still open (each once) }: an organizer
+    -- asks an invitee to join.
+    TYPE_REQUEST = "gf-request",
+    -- { v, t, to, id, ok = accepted?, role, c = the character key chosen,
+    -- n = its name, l = its level }: the invitee's answer; role, c, n and l
+    -- only when accepted.
+    TYPE_ANSWER = "gf-answer",
+    -- { v, t, to, id }: the organizer withdrew the request.
+    TYPE_CANCEL = "gf-cancel",
 }
 addon.GroupFinderProtocol = GroupFinderProtocol
 
 local function isText(value)
     return type(value) == "string" and value ~= ""
+end
+
+local ROLES = { tank = true, healer = true, dps = true }
+
+local function isLevel(value)
+    return type(value) == "number" and value >= 1 and value == math.floor(value)
+end
+
+-- A non-empty list of distinct roles.
+local function isOpenRoles(roles)
+    if type(roles) ~= "table" or #roles == 0 or #roles > 3 then
+        return false
+    end
+    local seen = {}
+    local index
+    for index = 1, #roles do
+        if not ROLES[roles[index]] or seen[roles[index]] then
+            return false
+        end
+        seen[roles[index]] = true
+    end
+    return true
+end
+
+local function isTargeted(message)
+    return isText(message.to) and isText(message.id)
 end
 
 -- Each type and the check its fields must pass.
@@ -29,6 +67,20 @@ local CHECKS = {
     end,
     [GroupFinderProtocol.TYPE_AVAILABLE] = function(message)
         return isText(message.c) and type(message.a) == "boolean"
+    end,
+    [GroupFinderProtocol.TYPE_REQUEST] = function(message)
+        return isTargeted(message) and isText(message.dn) and isLevel(message.lo) and isLevel(message.hi)
+            and message.lo <= message.hi and isOpenRoles(message.r)
+    end,
+    [GroupFinderProtocol.TYPE_ANSWER] = function(message)
+        if not isTargeted(message) or type(message.ok) ~= "boolean" then
+            return false
+        end
+        return not message.ok
+            or (ROLES[message.role] == true and isText(message.c) and isText(message.n) and isLevel(message.l))
+    end,
+    [GroupFinderProtocol.TYPE_CANCEL] = function(message)
+        return isTargeted(message)
     end,
 }
 
@@ -50,6 +102,33 @@ function GroupFinderProtocol.Available(character, available)
         c = character,
         a = available == true,
     }
+end
+
+-- Asks `to` to join: request `id` for `dungeon` ({ name, minLevel,
+-- maxLevel }), with `openRoles` still open.
+function GroupFinderProtocol.Request(to, id, dungeon, openRoles)
+    return {
+        v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_REQUEST, to = to, id = id,
+        dn = dungeon.name, lo = dungeon.minLevel, hi = dungeon.maxLevel, r = openRoles,
+    }
+end
+
+-- Accepts request `id` from organizer `to` with `option` ({ role, key, name,
+-- level }), or declines it when `option` is nil.
+function GroupFinderProtocol.Answer(to, id, option)
+    local message = { v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_ANSWER, to = to, id = id }
+    message.ok = option ~= nil
+    if option ~= nil then
+        message.role = option.role
+        message.c = option.key
+        message.n = option.name
+        message.l = option.level
+    end
+    return message
+end
+
+function GroupFinderProtocol.Cancel(to, id)
+    return { v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_CANCEL, to = to, id = id }
 end
 
 -- Whether `message` is a Group Finder message this version understands.

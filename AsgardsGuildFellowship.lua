@@ -28,7 +28,7 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
-local groupFinder, groupSession, syncParty, groupAvailability
+local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -838,6 +838,158 @@ if clientProfile.supported then
             end
         end,
     })
+    -- Join requests. Small interactive messages, heard within seconds.
+    local function sendGroupFinder(message)
+        return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+    end
+    local function keyOfSender(sender)
+        local guild, _, normalizer = rosterController:QuietContext()
+        return guild and normalizer:Key(sender) or nil
+    end
+    joinRequests = addon.JoinRequests.Create({
+        partition = function()
+            local guild, partition = rosterController:QuietContext()
+            return guild and partition or nil
+        end,
+        roles = roleCatalog,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        members = function()
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and rosterController:LiveMembers(normalizer) or {}
+        end,
+        available = function()
+            return groupAvailability:IsAvailable()
+        end,
+        display = function(name)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Display(name) or name
+        end,
+    })
+    joinPrompts = addon.JoinPrompts.Create(client)
+    local function refreshGroupFinder()
+        if groupFinder ~= nil then
+            groupFinder:Refresh()
+        end
+    end
+    local showJoinPrompts
+    -- The invitee answers by clicking, so an answer goes out even while busy.
+    showJoinPrompts = function()
+        joinPrompts:Show(joinRequests:Pending(), {
+            accept = function(id, choice)
+                local prompt, option = joinRequests:Accept(id, choice)
+                if prompt ~= nil then
+                    sendGroupFinder(addon.GroupFinderProtocol.Answer(prompt.organizer, id, option))
+                end
+                showJoinPrompts()
+            end,
+            decline = function(id)
+                local prompt = joinRequests:Decline(id)
+                if prompt ~= nil then
+                    sendGroupFinder(addon.GroupFinderProtocol.Answer(prompt.organizer, id, nil))
+                end
+                showJoinPrompts()
+            end,
+        })
+    end
+    -- Requests expire on both sides; while any wait, this checks every few
+    -- seconds.
+    local ticking = false
+    local function tick()
+        local now = client:Timestamp()
+        if now ~= nil then
+            if groupSession:Expire(now)[1] ~= nil then
+                refreshGroupFinder()
+            end
+            if joinRequests:Expire(now)[1] ~= nil then
+                showJoinPrompts()
+            end
+        end
+        if groupSession:PendingRequests()[1] == nil and joinRequests:Pending()[1] == nil then
+            ticking = false
+            return
+        end
+        if not client:After(5, tick) then
+            ticking = false
+        end
+    end
+    local function startTicking()
+        if not ticking then
+            ticking = client:After(5, tick)
+        end
+    end
+    local function sendRequest(entry)
+        local dungeon = groupFinder ~= nil and groupFinder:Picked() or nil
+        local now = client:Timestamp()
+        if dungeon == nil or now == nil then
+            return
+        end
+        if comm:IsBusy() then
+            rosterController:Print("Requests wait until you're out of combat.")
+            return
+        end
+        local open, seen = {}, {}
+        local roles = groupSession:OpenRoles()
+        local index
+        for index = 1, #roles do
+            if not seen[roles[index]] then
+                seen[roles[index]] = true
+                table.insert(open, roles[index])
+            end
+        end
+        local request = groupSession:Request({ playerId = entry.id, key = entry.current.key, label = entry.label }, now)
+        if request == nil or open[1] == nil then
+            return
+        end
+        sendGroupFinder(addon.GroupFinderProtocol.Request(request.to, request.id, dungeon, open))
+        startTicking()
+    end
+    local function cancelRequest(id)
+        local request = groupSession:Cancel(id)
+        if request ~= nil then
+            sendGroupFinder(addon.GroupFinderProtocol.Cancel(request.to, id))
+        end
+    end
+    -- Every Group Finder message: availability asks and replies, and
+    -- targeted messages, which only their recipient handles.
+    onGroupFinderMessage = function(message, sender)
+        local protocol = addon.GroupFinderProtocol
+        if message.t == protocol.TYPE_ASK or message.t == protocol.TYPE_AVAILABLE then
+            groupAvailability:OnMessage(message, sender)
+            return
+        end
+        local selfKey = rosterController:SelfKey()
+        local senderKey = keyOfSender(sender)
+        if not protocol.IsValid(message) or selfKey == nil or message.to ~= selfKey
+            or senderKey == nil or senderKey == selfKey
+        then
+            return
+        end
+        if message.t == protocol.TYPE_REQUEST then
+            local refused = joinRequests:OnRequest(message, senderKey, sender, client:Timestamp() or 0)
+            if refused ~= nil then
+                if not comm:IsBusy() then
+                    sendGroupFinder(protocol.Answer(senderKey, message.id, nil))
+                end
+                return
+            end
+            showJoinPrompts()
+            startTicking()
+        elseif message.t == protocol.TYPE_ANSWER then
+            local option
+            if message.ok then
+                option = { role = message.role, key = message.c, name = message.n, level = message.l }
+            end
+            if groupSession:Answer(message.id, senderKey, option) ~= nil then
+                refreshGroupFinder()
+            end
+        elseif message.t == protocol.TYPE_CANCEL then
+            if joinRequests:OnCancel(message.id, senderKey) then
+                showJoinPrompts()
+            end
+        end
+    end
     settings:OnChange(function(id)
         if id == "dnd" and groupFinder ~= nil then
             groupFinder:Refresh()
@@ -872,6 +1024,8 @@ if clientProfile.supported then
                 postToGuild = function(text)
                     return client:SendGuildMessage(text)
                 end,
+                request = sendRequest,
+                cancelRequest = cancelRequest,
                 -- The guild as it is now: the live roster, the replies to
                 -- the last ask, and who is left out (this character's
                 -- player and the party).
@@ -889,6 +1043,13 @@ if clientProfile.supported then
                     local selfKey = rosterController:SelfKey()
                     if selfKey ~= nil then
                         excluded[selfKey] = true
+                    end
+                    -- Invitees who accepted already have a slot.
+                    local requests = groupSession:Requests()
+                    for index = 1, #requests do
+                        if requests[index].state == addon.GroupSession.ACCEPTED then
+                            excluded[requests[index].to] = true
+                        end
                     end
                     local members = groupSession:IsActive() and groupSession:Members() or {}
                     for index = 1, #members do
@@ -1273,7 +1434,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         elseif addon.GuildRecruit.TYPES[message.t] ~= nil then
             guildRecruit:OnMessage(message, sender)
         elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
-            groupAvailability:OnMessage(message, sender)
+            onGroupFinderMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end
@@ -1332,6 +1493,8 @@ addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
 addon.groupSession = groupSession
 addon.groupAvailability = groupAvailability
+addon.joinRequests = joinRequests
+addon.joinPrompts = joinPrompts
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version
