@@ -79,7 +79,7 @@ local function isDungeon(entry)
         and entry.minLevel <= entry.maxLevel
 end
 
--- Lowest range first; ties by name, so the order never shifts.
+-- Lowest range first; ties by name, then id, so the order never shifts.
 local function byRange(a, b)
     if a.minLevel ~= b.minLevel then
         return a.minLevel < b.minLevel
@@ -87,7 +87,10 @@ local function byRange(a, b)
     if a.maxLevel ~= b.maxLevel then
         return a.maxLevel < b.maxLevel
     end
-    return a.name < b.name
+    if a.name ~= b.name then
+        return a.name < b.name
+    end
+    return tostring(a.id) < tostring(b.id)
 end
 
 -- A catalog of `entries`; unusable entries are left out.

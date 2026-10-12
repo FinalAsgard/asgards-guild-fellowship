@@ -41,9 +41,12 @@ local _, addon = ...
 -- Player profile: a character's own data (its role preferences) travels
 -- the same way, but only the character itself writes it. Changing it sends
 -- the new fact right away; catching up compares and passes on profile facts
--- with officer facts. When a facts message carries one in this character's
--- name that this client never wrote, it isn't applied: this client sends
--- its own data stamped newer, logs who relayed it, and warns the player.
+-- with officer facts. A character is logged in on one client at a time, so
+-- a fact in its name dated since this client started (less a margin for
+-- clocks) that this client never wrote is forged: it isn't applied, this
+-- client sends its own data stamped newer, logs who relayed it, and warns
+-- the player. An older one is a real edit from another computer (or from
+-- before saved data was reset) and is applied as usual.
 --
 -- Every message is a table { v = PROTOCOL, t = type, ... }. A message with
 -- another protocol version, or a type this version doesn't know, is ignored,
@@ -104,6 +107,9 @@ local SyncSession = {
     STEPS_WITHOUT_CLOCK = 50,
     -- While the player is busy, check again this often.
     PAUSE_SECONDS = 2,
+    -- How far before this client started a profile fact in the logged-in
+    -- character's name can be dated and still count as a forgery.
+    PROFILE_FORGERY_MARGIN = 120,
 }
 addon.SyncSession = SyncSession
 
@@ -111,7 +117,14 @@ local Session = {}
 Session.__index = Session
 
 function SyncSession.Create(options)
+    local startedAt
+    if type(options.now) == "function" then
+        startedAt = options.now()
+    end
     return setmetatable({
+        -- When this client started, for telling forged profile facts from
+        -- edits made elsewhere.
+        startedAt = startedAt,
         comm = options.comm,
         context = options.context,
         selfKey = options.selfKey,
@@ -622,11 +635,12 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
 end
 
 -- Of `facts` received from `relayer` (key, and `sender` as the game reports
--- it), returns the ones to apply. Only this client writes the profile facts
--- of the logged-in character (`owner`), and it holds the newest it wrote,
--- so a newer one in that character's name is forged: it's left out and
--- logged, this character's own data goes to the guild stamped newer, and
--- the player is warned.
+-- it), returns the ones to apply. While the logged-in character (`owner`)
+-- is on, only this client writes its profile facts, and it holds the
+-- newest it wrote, so a newer one in that character's name dated since
+-- this client started is forged: it's left out and logged, this
+-- character's own data goes to the guild stamped newer, and the player is
+-- warned.
 function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
     local now = self.now()
     if type(facts) ~= "table" or now == nil then
@@ -635,11 +649,13 @@ function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
     local own = self:Facts(partition)
     local kept, corrections = {}, {}
     local forged = 0
+    self.startedAt = self.startedAt or now
+    local since = self.startedAt - SyncSession.PROFILE_FORGERY_MARGIN
     local index
     for index = 1, #facts do
         local fact = facts[index]
         if addon.SyncFacts.IsValid(fact) and addon.SyncFacts.PROFILE_KINDS[fact.kind]
-            and fact.character == owner and own:Refusal(fact) == nil
+            and fact.character == owner and fact.at >= since and own:Refusal(fact) == nil
         then
             forged = forged + 1
             addon.SyncLedger.Create(partition):LogForgery(fact, relayer, now)

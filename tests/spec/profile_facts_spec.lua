@@ -343,6 +343,21 @@ test.test("guild sync: the owner's client corrects a forged roles fact in its na
     test.assertEqual(0, #forger.forgeries)
 end)
 
+test.test("guild sync: a roles fact from before this login is a real edit made elsewhere, and is applied", function()
+    local network = newNetwork()
+    local member = newClient(network, MEMBER, "Hammer-Area52")
+    local relay = newClient(network, "wrench-area52", "Wrench-Area52")
+
+    -- The player changed roles on another computer, ten minutes before
+    -- logging in here, where saved data never saw it.
+    relay.session:Send({ t = "facts", facts = { roles(NOW - 600, MEMBER, MEMBER, { "healer" }) } })
+    deliver(network)
+
+    test.assertEqual("healer", table.concat(member.partition:GetRoles(MEMBER), ","))
+    test.assertEqual(0, #member.forgeries)
+    test.assertEqual(0, #member.sent)
+end)
+
 test.test("guild sync: a forged roles fact for a character who never set any is corrected with the class's roles", function()
     local network = newNetwork()
     local member = newClient(network, MEMBER, "Hammer-Area52")

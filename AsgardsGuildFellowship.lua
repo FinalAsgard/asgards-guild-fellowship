@@ -822,7 +822,13 @@ if clientProfile.supported then
             for index = 1, #members do
                 members[index].rosterKey = guild and normalizer:Key(members[index].name) or nil
             end
-            groupSession:UpdateParty(members, client:IsInGroup())
+            -- Leaving the party ends the group: invitees still deciding
+            -- are told it's off.
+            local _, dropped = groupSession:UpdateParty(members, client:IsInGroup())
+            for index = 1, #(dropped or {}) do
+                comm:Broadcast(addon.GroupFinderProtocol.Cancel(dropped[index].to, dropped[index].id),
+                    addon.Comm.PRIORITY_NORMAL)
+            end
             if onSlotsChanged ~= nil then
                 onSlotsChanged()
             end

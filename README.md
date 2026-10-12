@@ -124,7 +124,7 @@ When an officer changes which characters belong together, or what a player goes 
 - When two officers change the same character or the same alias, the most recent edit wins everywhere.
 - A member's own edits apply in their roster right away and are sent to officers as suggestions (see [Suggestions](#suggestions)). Only officers' edits change everyone's roster directly.
 - Edits made before sync existed: they become official and are sent to the guild once you log in on an officer character with this version. Until then, and for members, they stay in your own roster only.
-- Only main and alt links and aliases are shared. Departures, purges, history, conflicts, and settings stay on your computer.
+- Only main and alt links, aliases, and each character's [role preferences](#role-preferences) are shared. Role preferences are set by the character itself, not by officers. Departures, purges, history (including your [group history](#group-history)), conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
 - The Roster tab's footer shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
 - Sync never gets in the way of play. It sends and processes nothing while you're in combat, or on Retail during a boss encounter or a keystone run, and picks up where it left off once that's over. Like scans, it works on data a little at a time, so even a large guild's full sync doesn't cause a hitch, and your roster redraws once per batch rather than once per change.

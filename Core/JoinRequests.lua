@@ -109,19 +109,19 @@ end
 -- Returns nil when it becomes a prompt, or "unavailable" / "no fit" when
 -- it's refused at once (the caller declines it).
 function Requests:OnRequest(message, organizer, sender, now)
+    -- A repeated request replaces the one it repeats, accepted or refused.
+    local index
+    for index = #self.pending, 1, -1 do
+        if self.pending[index].id == message.id and self.pending[index].organizer == organizer then
+            table.remove(self.pending, index)
+        end
+    end
     if not self.available() then
         return "unavailable"
     end
     local options = self:OptionsFor(message)
     if options[1] == nil then
         return "no fit"
-    end
-    -- A repeated request replaces the one it repeats.
-    local index
-    for index = #self.pending, 1, -1 do
-        if self.pending[index].id == message.id and self.pending[index].organizer == organizer then
-            table.remove(self.pending, index)
-        end
     end
     table.insert(self.pending, {
         id = message.id,

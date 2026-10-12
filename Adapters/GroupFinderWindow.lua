@@ -385,7 +385,7 @@ function Window:buildPicker()
     scroll:SetPoint("TOPLEFT", picker, "TOPLEFT", padding, -GroupFinderWindow.LIST_TOP)
     scroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -padding - 22, padding + GroupFinderWindow.FOOTER_HEIGHT)
     local list = createFrame("Frame", nil, scroll)
-    list:SetWidth(GroupFinderWindow.WIDTH - 2 * padding - 22)
+    list:SetWidth(GroupFinderWindow.LEFT_WIDTH - 2 * padding - 22)
     list:SetHeight(GroupFinderWindow.ROW_HEIGHT)
     scroll:SetScrollChild(list)
     self.list = list
@@ -427,16 +427,27 @@ function Window:buildGroup()
         role:SetText(addon.RoleCatalog.LABELS[addon.GroupSession.LAYOUT[index].role] .. ":")
         local text = group:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         text:SetPoint("TOPLEFT", group, "TOPLEFT", padding + 70, top)
-        text:SetPoint("RIGHT", group, "RIGHT", -padding - 64, 0)
+        text:SetPoint("RIGHT", group, "RIGHT", -padding - 114, 0)
         text:SetJustifyH("LEFT")
         local row = { role = role, text = text }
-        row.invite = self:button(group, "Invite", 60, function()
+        -- An accepted invitee who hasn't joined can be let go, opening the
+        -- slot again.
+        row.cancel = self:button(group, "Cancel", 56, function()
+            if row.requestId ~= nil then
+                pcall(self.cancelRequest, row.requestId)
+                pcall(self.syncParty)
+                self:Refresh()
+            end
+        end)
+        row.cancel:SetHeight(GroupFinderWindow.ROW_HEIGHT - 2)
+        row.cancel:SetPoint("TOPRIGHT", group, "TOPRIGHT", -padding, top + 1)
+        row.invite = self:button(group, "Invite", 52, function()
             if row.inviteKey ~= nil then
                 pcall(self.invite, row.inviteKey)
             end
         end)
         row.invite:SetHeight(GroupFinderWindow.ROW_HEIGHT - 2)
-        row.invite:SetPoint("TOPRIGHT", group, "TOPRIGHT", -padding, top + 1)
+        row.invite:SetPoint("RIGHT", row.cancel, "LEFT", -2, 0)
         self.slotRows[index] = row
     end
 
@@ -665,6 +676,12 @@ function Window:drawGroup()
         local row = self.slotRows[index]
         local state = self.session:InviteState(slot, self.isOnline)
         row.inviteKey = nil
+        row.requestId = state ~= nil and slot.request or nil
+        if row.requestId ~= nil then
+            row.cancel:Show()
+        else
+            row.cancel:Hide()
+        end
         if state == "waiting" then
             row.text:SetText("Waiting for " .. slot.member.name .. " to log in")
         elseif slot ~= nil and slot.member ~= nil then
@@ -767,6 +784,15 @@ function Window:Pick(id)
         return false
     end
     if self.session:IsActive() then
+        -- Requests still waiting were sent for the old dungeon; they're
+        -- cancelled, so the organizer asks again for this one.
+        if id ~= self.session:Dungeon() then
+            local pending = self.session:PendingRequests()
+            local index
+            for index = 1, #pending do
+                pcall(self.cancelRequest, pending[index].id)
+            end
+        end
         self.session:SetDungeon(id)
     else
         self.session:Start(id)

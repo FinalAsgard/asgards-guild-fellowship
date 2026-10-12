@@ -120,14 +120,21 @@ end
 -- assignedRole, inGuild, isPlayer, rosterKey? } each, the organizer
 -- included; rosterKey is the member's key in the guild roster) and
 -- whether the organizer is in a group. Leaving the party after being in
--- one ends the session. Returns false when that happened.
+-- one ends the session. Returns false when that happened, with the
+-- requests that were still waiting (now cancelled), so their invitees can
+-- be told.
 function Session:UpdateParty(members, inGroup)
     if not self.active then
         return false
     end
     if self.grouped and not inGroup then
+        local dropped = self:PendingRequests()
+        local index
+        for index = 1, #dropped do
+            dropped[index].state = GroupSession.CANCELLED
+        end
         self:End()
-        return false
+        return false, dropped
     end
     self.grouped = inGroup == true
     self.members = type(members) == "table" and members or {}
@@ -330,10 +337,20 @@ function Session:PendingRequests()
     return pending
 end
 
--- Withdraws pending request `id`. Returns it, or nil when it isn't pending.
+-- Withdraws request `id`: one still pending, or one accepted by an invitee
+-- who hasn't joined the party, whose slot then opens again. Returns it, or
+-- nil when it can't be withdrawn.
 function Session:Cancel(id)
     local request = self:findRequest(id)
-    if request == nil or request.state ~= GroupSession.PENDING then
+    if request == nil then
+        return nil
+    end
+    if request.state == GroupSession.ACCEPTED and not request.inParty then
+        request.state = GroupSession.CANCELLED
+        self:place()
+        return request
+    end
+    if request.state ~= GroupSession.PENDING then
         return nil
     end
     request.state = GroupSession.CANCELLED
