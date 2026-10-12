@@ -16,11 +16,18 @@ local _, addon = ...
 -- Along the bottom, always: the guildmates whose add-on replied to the
 -- last ask, available or not, and a Do Not Disturb check box.
 --
+-- Beside the slots, for each role still open, the online guildmates who
+-- could fill it (GroupCandidates). The dungeon picker shows, for each
+-- dungeon, how many online guildmates could fill tank, healer and DPS.
+--
 -- Like the other adapters, it reaches the game only through the client's
 -- environment (CreateFrame, UIParent) and the framework, so specs can draw
 -- it with fake frames.
 local GroupFinderWindow = {
-    WIDTH = 380,
+    WIDTH = 760,
+    -- The picker and the slots take the left; suggestions the right.
+    LEFT_WIDTH = 380,
+    SUGGESTION_HEIGHT = 16,
     HEIGHT = 470,
     PADDING = 12,
     ROW_HEIGHT = 20,
@@ -69,6 +76,7 @@ end
 --   replies()           the guildmates who replied to the last ask, each
 --                       { sender, available } (GroupAvailability)
 --   dnd                 { get() -> boolean, set(boolean) }: Do Not Disturb
+--   candidates()        a GroupCandidates for the guild as it is now, or nil
 --   loadAnchor()        the saved position ({ point, x, y }), or nil
 --   saveAnchor(anchor)  saves a new one
 -- Returns nil and the reason when the framework is missing or can't build
@@ -90,6 +98,10 @@ function GroupFinderWindow.Create(client, options)
             return {}
         end,
         dnd = options.dnd,
+        candidates = options.candidates or function()
+            return nil
+        end,
+        suggestionLines = {},
         loadAnchor = options.loadAnchor or function() return nil end,
         saveAnchor = options.saveAnchor or function() end,
         showAll = false,
@@ -146,11 +158,102 @@ function Window:button(parent, text, width, onClick)
     return made
 end
 
--- A frame covering the panel, holding one view.
+-- A frame down the panel's left, holding one view.
 function Window:view()
     local frame = self.environment.CreateFrame("Frame", nil, self.panel)
-    frame:SetAllPoints(self.panel)
+    frame:SetPoint("TOPLEFT", self.panel, "TOPLEFT", 0, 0)
+    frame:SetPoint("BOTTOMLEFT", self.panel, "BOTTOMLEFT", 0, 0)
+    frame:SetWidth(GroupFinderWindow.LEFT_WIDTH)
     return frame
+end
+
+-- The suggestions column, right of the slots.
+function Window:buildSuggestions()
+    local createFrame = self.environment.CreateFrame
+    local padding = GroupFinderWindow.PADDING
+    local column = createFrame("Frame", nil, self.panel)
+    column:SetPoint("TOPLEFT", self.panel, "TOPLEFT", GroupFinderWindow.LEFT_WIDTH, -60)
+    column:SetPoint("BOTTOMRIGHT", self.panel, "BOTTOMRIGHT", -padding, padding + GroupFinderWindow.FOOTER_HEIGHT)
+    self.suggestions = column
+    local heading = column:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    heading:SetPoint("TOPLEFT", column, "TOPLEFT", 0, 0)
+    heading:SetText("Guildmates who could join")
+    local scroll = createFrame("ScrollFrame", nil, column, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", column, "TOPLEFT", 0, -GroupFinderWindow.LIST_TOP + 60)
+    scroll:SetPoint("BOTTOMRIGHT", column, "BOTTOMRIGHT", -22, 0)
+    local list = createFrame("Frame", nil, scroll)
+    list:SetWidth(GroupFinderWindow.WIDTH - GroupFinderWindow.LEFT_WIDTH - padding - 22)
+    list:SetHeight(GroupFinderWindow.SUGGESTION_HEIGHT)
+    scroll:SetScrollChild(list)
+    self.suggestionList = list
+end
+
+-- The suggestions column's line `index`, made on first use.
+function Window:suggestionLine(index)
+    if self.suggestionLines[index] ~= nil then
+        return self.suggestionLines[index]
+    end
+    local line = self.suggestionList:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    line:SetPoint("TOPLEFT", self.suggestionList, "TOPLEFT", 0, -(index - 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
+    line:SetPoint("RIGHT", self.suggestionList, "RIGHT", 0, 0)
+    line:SetJustifyH("LEFT")
+    if type(line.SetWordWrap) == "function" then
+        line:SetWordWrap(false)
+    end
+    self.suggestionLines[index] = line
+    return line
+end
+
+-- The lines the suggestions column shows: each open role's heading, then
+-- its guildmates, or a line saying nobody fits.
+function GroupFinderWindow.SuggestionTexts(lists)
+    local texts = {}
+    if #lists == 0 then
+        return { "Every role is filled." }
+    end
+    local index
+    for index = 1, #lists do
+        table.insert(texts, "|cffffd100" .. addon.RoleCatalog.LABELS[lists[index].role] .. "|r")
+        local players = lists[index].players
+        if #players == 0 then
+            table.insert(texts, "  |cff9d9d9dNo one online fits.|r")
+        end
+        local playerIndex
+        for playerIndex = 1, #players do
+            table.insert(texts, "  " .. addon.GroupCandidates.Describe(players[playerIndex]))
+        end
+    end
+    return texts
+end
+
+function Window:drawSuggestions(candidates, dungeon)
+    local texts = {}
+    if candidates ~= nil and dungeon ~= nil then
+        local open = {}
+        local slots = self.session:Slots()
+        local index
+        for index = 1, #slots do
+            if slots[index].member == nil then
+                table.insert(open, slots[index].role)
+            end
+        end
+        texts = GroupFinderWindow.SuggestionTexts(candidates:Suggestions(dungeon, open))
+    end
+    local index
+    for index = 1, #texts do
+        local line = self:suggestionLine(index)
+        line:SetText(texts[index])
+        line:Show()
+    end
+    for index = #texts + 1, #self.suggestionLines do
+        self.suggestionLines[index]:Hide()
+    end
+    self.suggestionList:SetHeight(math.max(#texts, 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
+end
+
+-- "T 2 · H 0 · D 5": how many online guildmates could fill each role.
+function GroupFinderWindow.CountsText(counts)
+    return "T " .. counts.tank .. " · H " .. counts.healer .. " · D " .. counts.dps
 end
 
 function Window:buildPicker()
@@ -298,6 +401,7 @@ function Window:build()
 
     self:buildPicker()
     self:buildGroup()
+    self:buildSuggestions()
     self:buildFooter()
     panel:Hide()
 end
@@ -391,7 +495,11 @@ function Window:drawPicker()
     for index = 1, #shown do
         local row = self:row(index)
         row.dungeonId = shown[index].id
-        row.label:SetText(GroupFinderWindow.Label(shown[index]))
+        local label = GroupFinderWindow.Label(shown[index])
+        if self.candidatesNow ~= nil then
+            label = label .. "  |cff9d9d9d" .. GroupFinderWindow.CountsText(self.candidatesNow:Counts(shown[index])) .. "|r"
+        end
+        row.label:SetText(label)
         row.button:Show()
     end
     for index = #shown + 1, #self.rows do
@@ -460,12 +568,17 @@ function Window:draw()
     else
         self.dungeonText:SetText("Pick a dungeon")
     end
+    local ok, candidates = pcall(self.candidates)
+    self.candidatesNow = ok and candidates or nil
     if self.session:IsActive() and not self.choosing then
         self.picker:Hide()
         self:drawGroup()
         self.group:Show()
+        self:drawSuggestions(self.candidatesNow, picked)
+        self.suggestions:Show()
     else
         self.group:Hide()
+        self.suggestions:Hide()
         self:drawPicker()
         self.picker:Show()
     end

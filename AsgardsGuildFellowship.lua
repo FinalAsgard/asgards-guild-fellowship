@@ -869,6 +869,42 @@ if clientProfile.supported then
                 replies = function()
                     return groupAvailability:Replies()
                 end,
+                -- The guild as it is now: the live roster, the replies to
+                -- the last ask, and who is left out (this character's
+                -- player and the party).
+                candidates = function()
+                    local guild, partition, normalizer = rosterController:QuietContext()
+                    if guild == nil then
+                        return nil
+                    end
+                    local replies, excluded = {}, {}
+                    local list = groupAvailability:Replies()
+                    local index
+                    for index = 1, #list do
+                        replies[list[index].key] = list[index]
+                    end
+                    local selfKey = rosterController:SelfKey()
+                    if selfKey ~= nil then
+                        excluded[selfKey] = true
+                    end
+                    local members = groupSession:IsActive() and groupSession:Members() or {}
+                    for index = 1, #members do
+                        local key = normalizer:Key(members[index].name)
+                        if key ~= nil then
+                            excluded[key] = true
+                        end
+                    end
+                    return addon.GroupCandidates.Create({
+                        partition = partition,
+                        members = rosterController:LiveMembers(normalizer),
+                        roles = roleCatalog,
+                        replies = replies,
+                        excluded = excluded,
+                        display = function(name)
+                            return normalizer:Display(name)
+                        end,
+                    })
+                end,
                 dnd = {
                     get = function()
                         return settings:Get("dnd") == true

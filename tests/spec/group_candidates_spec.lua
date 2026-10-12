@@ -1,0 +1,288 @@
+local test = require("tests.test_helper")
+local fakeFrames = require("tests.fake_frames")
+
+local GUILD = { name = "Knights of Camelot", realm = "Camelot" }
+local NOW = 1790000000
+local DEADMINES = { id = "dm", name = "The Deadmines", minLevel = 17, maxLevel = 26 }
+
+local function load()
+    return test.newAddon("Core/FellowshipStore.lua", "Core/RoleCatalog.lua", "Core/GroupCandidates.lua",
+        "Core/DungeonCatalog.lua", "Core/GroupSession.lua", "Adapters/GroupFinderWindow.lua")
+end
+
+-- A guild:
+--   Thunderer (alias): Bolt, a shaman (22, online in Ironforge), with
+--     alts Hammer, a paladin (24, offline), and Oldbolt, a warrior (60)
+--   Cleric, a priest (20, online), no add-on
+--   Zap, a mage (22, online)
+--   Busy, a warrior (25, online), replied unavailable
+--   Sleepy, a druid (22, offline)
+--   Me, a warrior (24, online): the organizer
+--   Mate, a rogue (23, online): already in the party
+local function newGuild()
+    local addon = load()
+    local partition = addon.FellowshipStore.Create({ schemaVersion = 3, guilds = {} }):Partition(GUILD)
+    local function add(key, class, level)
+        partition:RecordCharacter(key, { name = key:gsub("^%l", string.upper), classToken = class, level = level })
+    end
+    add("bolt", "SHAMAN", 22)
+    add("hammer", "PALADIN", 24)
+    add("oldbolt", "WARRIOR", 60)
+    partition:JoinPlayerOf("hammer", "bolt", "manual")
+    partition:JoinPlayerOf("oldbolt", "bolt", "manual")
+    partition:SetAlias(partition:GetCharacter("bolt").player, "Thunderer", "manual")
+    add("cleric", "PRIEST", 20)
+    add("zap", "MAGE", 22)
+    add("busy", "WARRIOR", 25)
+    add("sleepy", "DRUID", 22)
+    add("me", "WARRIOR", 24)
+    add("mate", "ROGUE", 23)
+    local world = {
+        addon = addon,
+        partition = partition,
+        members = {
+            bolt = { online = true, zone = "Ironforge", level = 22, name = "Bolt" },
+            hammer = { online = false, name = "Hammer" },
+            oldbolt = { online = false, name = "Oldbolt" },
+            cleric = { online = true, zone = "Stormwind", level = 20, name = "Cleric" },
+            zap = { online = true, zone = "Westfall", level = 22, name = "Zap" },
+            busy = { online = true, zone = "Duskwood", level = 25, name = "Busy" },
+            sleepy = { online = false, name = "Sleepy" },
+            me = { online = true, zone = "Westfall", level = 24, name = "Me" },
+            mate = { online = true, zone = "Westfall", level = 23, name = "Mate" },
+        },
+        replies = {
+            bolt = { key = "bolt", available = true },
+            zap = { key = "zap", available = true },
+            busy = { key = "busy", available = false },
+        },
+        excluded = { me = true, mate = true },
+    }
+    function world.candidates()
+        return addon.GroupCandidates.Create({
+            partition = partition,
+            members = world.members,
+            roles = addon.RoleCatalog.For("forever"),
+            replies = world.replies,
+            excluded = world.excluded,
+        })
+    end
+    return world
+end
+
+local function labels(list)
+    local result = {}
+    local index
+    for index = 1, #list do
+        result[index] = list[index].label
+    end
+    return table.concat(result, ", ")
+end
+
+local function names(characters)
+    local result = {}
+    local index
+    for index = 1, #characters do
+        result[index] = characters[index].name .. " " .. characters[index].level
+    end
+    return table.concat(result, ", ")
+end
+
+test.test("group candidates: one entry per player, with alias, current character and zone", function()
+    local world = newGuild()
+
+    local healers = world.candidates():ForRole("healer", DEADMINES)
+
+    test.assertEqual("Thunderer, Cleric", labels(healers))
+    local thunderer = healers[1]
+    test.assertEqual("bolt", thunderer.current.key)
+    test.assertEqual("Bolt", thunderer.current.name)
+    test.assertEqual("Ironforge", thunderer.current.zone)
+    -- The offline alt is offered too: they can log over.
+    test.assertEqual("Bolt 22, Hammer 24", names(thunderer.fitting))
+end)
+
+test.test("group candidates: only characters whose level fits the dungeon are offered", function()
+    local world = newGuild()
+    local candidates = world.candidates()
+
+    -- Oldbolt (60) could tank, but not in the Deadmines; Hammer (24) can.
+    local tanks = candidates:ForRole("tank", DEADMINES)
+    test.assertEqual("Thunderer", labels(tanks))
+    test.assertEqual("Hammer 24", names(tanks[1].fitting))
+
+    local tanksForStrat = candidates:ForRole("tank", { minLevel = 58, maxLevel = 60 })
+    test.assertEqual("Oldbolt 60", names(tanksForStrat[1].fitting))
+    -- Nobody fits a dungeon far from everyone's level.
+    test.assertEqual(0, #candidates:ForRole("dps", { minLevel = 40, maxLevel = 45 }))
+end)
+
+test.test("group candidates: add-on users' role preferences leave out roles they turned off", function()
+    local world = newGuild()
+    world.partition:SetRoles("hammer", { "dps" }, NOW, "hammer")
+
+    local candidates = world.candidates()
+
+    test.assertEqual("Bolt 22", names(candidates:ForRole("healer", DEADMINES)[1].fitting))
+    test.assertEqual(0, #candidates:ForRole("tank", DEADMINES))
+    local dps = candidates:ForRole("dps", DEADMINES)
+    test.assertEqual("Thunderer, Zap, Cleric", labels(dps))
+    test.assertEqual("Bolt 22, Hammer 24", names(dps[1].fitting))
+end)
+
+test.test("group candidates: guildmates without the add-on are labeled and suggested by class alone", function()
+    local world = newGuild()
+    -- Even a stored preference is ignored for someone whose add-on didn't
+    -- reply: it may be stale.
+    world.partition:SetRoles("cleric", { "dps" }, NOW, "cleric")
+
+    local healers = world.candidates():ForRole("healer", DEADMINES)
+
+    test.assertTrue(healers[1].addon)
+    test.assertEqual("Cleric", healers[2].label)
+    test.assertFalse(healers[2].addon)
+    test.assertContains(world.addon.GroupCandidates.Describe(healers[2]), "(no add-on)")
+end)
+
+test.test("group candidates: only players online now, and never unavailable or excluded ones", function()
+    local world = newGuild()
+    local candidates = world.candidates()
+
+    local everyone = {}
+    local role
+    for _, role in ipairs({ "tank", "healer", "dps" }) do
+        local list = candidates:ForRole(role, DEADMINES)
+        local index
+        for index = 1, #list do
+            everyone[list[index].label] = true
+        end
+    end
+    -- Sleepy is offline; Busy replied unavailable; Me and Mate are the
+    -- organizer and the party.
+    test.assertEqual(nil, everyone.Sleepy)
+    test.assertEqual(nil, everyone.Busy)
+    test.assertEqual(nil, everyone.Me)
+    test.assertEqual(nil, everyone.Mate)
+    test.assertTrue(everyone.Thunderer)
+    test.assertTrue(everyone.Zap)
+
+    -- Busy comes back once available, Thunderer goes when they log off.
+    world.replies.busy.available = true
+    world.members.bolt.online = false
+    local tanks = world.candidates():ForRole("tank", DEADMINES)
+    test.assertEqual("Busy", labels(tanks))
+end)
+
+test.test("group candidates: filled roles get no suggestions", function()
+    local world = newGuild()
+
+    local lists = world.candidates():Suggestions(DEADMINES, { "dps", "healer", "dps" })
+
+    test.assertEqual(2, #lists)
+    test.assertEqual("healer", lists[1].role)
+    test.assertEqual("dps", lists[2].role)
+    test.assertEqual(0, #world.candidates():Suggestions(DEADMINES, {}))
+end)
+
+test.test("group candidates: counts how many online players could fill each role", function()
+    local world = newGuild()
+
+    local counts = world.candidates():Counts(DEADMINES)
+
+    test.assertEqual(1, counts.tank)
+    test.assertEqual(2, counts.healer)
+    test.assertEqual(3, counts.dps)
+end)
+
+test.test("group candidates: describes an entry with its fitting characters", function()
+    local world = newGuild()
+    local healers = world.candidates():ForRole("healer", DEADMINES)
+
+    test.assertEqual("Thunderer — on Bolt, Ironforge: Bolt 22, Hammer 24",
+        world.addon.GroupCandidates.Describe(healers[1]))
+    test.assertEqual("Cleric — on Cleric, Stormwind: Cleric 20 (no add-on)",
+        world.addon.GroupCandidates.Describe(healers[2]))
+end)
+
+-- The window's lists ----------------------------------------------------------
+
+local function newWindow(world)
+    local addon = world.addon
+    local environment = fakeFrames.install({})
+    environment.UIParent = environment.CreateFrame("Frame", nil, nil)
+    environment.DetailsFramework = {
+        CreateSimplePanel = function()
+            local panel = environment.CreateFrame("Frame", nil, nil)
+            rawset(panel, "IsShown", function(self) return self.shown end)
+            return panel
+        end,
+    }
+    local roles = addon.RoleCatalog.For("forever")
+    world.session = addon.GroupSession.Create(roles)
+    world.window = addon.GroupFinderWindow.Create({
+        environment = environment,
+        GetGlobal = function(_, name) return environment[name] end,
+    }, {
+        dungeons = function() return addon.DungeonCatalog.Create({ DEADMINES }) end,
+        playerLevel = function() return 24 end,
+        session = world.session,
+        roles = roles,
+        syncParty = function()
+            if world.session:IsActive() then
+                world.session:UpdateParty({
+                    { key = "me", name = "Me", classToken = "WARRIOR", inGuild = true, isPlayer = true },
+                }, false)
+            end
+        end,
+        candidates = world.candidates,
+    })
+    world.window:Toggle()
+    return world.window
+end
+
+local function shownLines(window)
+    local texts = {}
+    local index
+    for index = 1, #window.suggestionLines do
+        if window.suggestionLines[index].shown then
+            table.insert(texts, window.suggestionLines[index].text)
+        end
+    end
+    return texts
+end
+
+test.test("group finder window: the picker shows each dungeon's role counts", function()
+    local window = newWindow(newGuild())
+
+    test.assertContains(window.rows[1].label.text, "The Deadmines (17–26)")
+    test.assertContains(window.rows[1].label.text, "T 1 · H 2 · D 3")
+    test.assertFalse(window.suggestions.shown)
+end)
+
+test.test("group finder window: each open role lists who could fill it, and filled roles none", function()
+    local world = newGuild()
+    local window = newWindow(world)
+
+    window:Pick("dm")
+
+    test.assertTrue(window.suggestions.shown)
+    local lines = shownLines(window)
+    -- The organizer, a warrior, took the tank slot: no tank list.
+    test.assertEqual("|cffffd100Healer|r", lines[1])
+    test.assertEqual("  Thunderer — on Bolt, Ironforge: Bolt 22, Hammer 24", lines[2])
+    test.assertEqual("  Cleric — on Cleric, Stormwind: Cleric 20 (no add-on)", lines[3])
+    test.assertEqual("|cffffd100DPS|r", lines[4])
+    local index
+    for index = 1, #lines do
+        test.assertFalse(string.find(lines[index], "Tank", 1, true) ~= nil, lines[index])
+    end
+end)
+
+test.test("group finder window: a role nobody online fits says so", function()
+    local addon = load()
+    local texts = addon.GroupFinderWindow.SuggestionTexts({ { role = "tank", players = {} } })
+
+    test.assertEqual("|cffffd100Tank|r", texts[1])
+    test.assertContains(texts[2], "No one online fits.")
+    test.assertEqual("Every role is filled.", addon.GroupFinderWindow.SuggestionTexts({})[1])
+end)
