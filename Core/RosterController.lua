@@ -34,6 +34,8 @@ Controller.__index = Controller
 --                 the player panel, or nil
 --   rolesOf       optional function(key) -> a character's role preferences
 --                 for the player panel ("Tank, DPS"), or nil
+--   groupedWith   optional function(keys) -> how often this user grouped
+--                 with a player, for the player panel, or nil
 --   recruitRecord optional function(keys) -> a player's ad record (see
 --                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
@@ -45,6 +47,7 @@ function RosterController.Create(options)
         client = options.client,
         adStats = options.adStats,
         rolesOf = options.rolesOf,
+        groupedWith = options.groupedWith,
         recruitRecord = options.recruitRecord,
         recentAds = options.recentAds,
         isOfficer = options.isOfficer or function()
@@ -602,6 +605,7 @@ function Controller:RedrawPanel()
         end,
         adStats = self.adStats,
         rolesOf = self.rolesOf,
+        groupedWith = self.groupedWith,
     })
     if model == nil then
         self:ClosePanel()

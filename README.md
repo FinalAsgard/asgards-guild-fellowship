@@ -319,6 +319,12 @@ Each character has its own role preferences: the roles you're willing to play on
 
 Your role preferences reach the whole guild through [guild sync](#guild-sync), even while you're on another character or offline. Only the character itself can set them, not officers or anyone else. If your add-on sees a change in your character's name that you never made, it sends your real preferences back out to correct it, and warns you who passed it on.
 
+### Group history
+
+Your add-on remembers, on your computer only, each party you've been in with guildmates: any party, not just ones from the Group Finder. It records when, which guild characters, and the dungeon when it knows it (the one you picked in the Group Finder, or the instance you're in). Guildmates joining later count as the same party, and so does reloading while in it. Your own alts never count. The history is never sent to anyone.
+
+A guildmate's player panel then shows **Grouped together 3 times, last on 2026-10-12**, counted across all their characters. Players you've never grouped with show nothing.
+
 ### When the group is full
 
 When all five slots are filled, the window shows **Group complete**. **Change dungeon** takes you back to the list to pick another dungeon, keeping everyone in their slots. **End group** ends the group, and so does leaving the party. Closing the window doesn't: open it again with `/agf group` and your group is still there.

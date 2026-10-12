@@ -187,7 +187,7 @@ local function validatePartition(data)
     end
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
-        "recruitLedger", "recruitConfig", "recruitStats",
+        "recruitLedger", "recruitConfig", "recruitStats", "groupHistory",
     }
     local index
     for index = 1, #containers do
@@ -223,7 +223,7 @@ local function validatePartition(data)
     -- are only created when needed.
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
-        recruitStats = true,
+        recruitStats = true, groupHistory = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -1101,6 +1101,53 @@ end
 
 function Partition:GetForgeries()
     return self.data.forgeries
+end
+
+-- The most group history entries kept; the oldest go first.
+FellowshipStore.GROUP_HISTORY_MAX = 1000
+
+local function isHistoryEntry(entry)
+    if type(entry) ~= "table" or not isWholeNumber(entry.at) or type(entry.characters) ~= "table"
+        or (entry.dungeon ~= nil and not isText(entry.dungeon))
+    then
+        return false
+    end
+    local index
+    for index = 1, #entry.characters do
+        if not isText(entry.characters[index]) then
+            return false
+        end
+    end
+    return true
+end
+
+-- The parties this player was in with guildmates (GroupHistory), oldest
+-- first: local only, never synced. Unreadable entries are skipped.
+function Partition:GetGroupHistory()
+    local stored = self.data.groupHistory or {}
+    local entries = {}
+    local index
+    for index = 1, #stored do
+        if isHistoryEntry(stored[index]) then
+            table.insert(entries, stored[index])
+        end
+    end
+    return entries
+end
+
+-- Adds a group history entry, dropping the oldest past GROUP_HISTORY_MAX.
+function Partition:AddGroupHistory(entry)
+    if not isHistoryEntry(entry) then
+        return false
+    end
+    if self.data.groupHistory == nil then
+        self.data.groupHistory = {}
+    end
+    table.insert(self.data.groupHistory, entry)
+    while #self.data.groupHistory > FellowshipStore.GROUP_HISTORY_MAX do
+        table.remove(self.data.groupHistory, 1)
+    end
+    return true
 end
 
 -- Guild Recruit's ad counts heard from other add-on users, by character

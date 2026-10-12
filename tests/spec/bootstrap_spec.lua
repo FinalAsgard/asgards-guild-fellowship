@@ -55,6 +55,7 @@ local MANIFEST_FILES = {
     "Core/GroupAvailability.lua",
     "Core/GroupCandidates.lua",
     "Core/JoinRequests.lua",
+    "Core/GroupHistory.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }

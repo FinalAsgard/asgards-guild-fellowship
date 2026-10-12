@@ -793,7 +793,12 @@ function Client:GetPartyMembers()
         local unit = Compatibility.PARTY_UNITS[index]
         local existsOk, exists = callFunction(environment.UnitExists, unit)
         if unit == "player" or (existsOk and exists) then
-            local nameOk, name = callFunction(environment.UnitName, unit)
+            -- A member from another realm comes with that realm; the
+            -- name then carries it, as the guild roster spells it.
+            local nameOk, name, realm = callFunction(environment.UnitName, unit)
+            if nameOk and type(name) == "string" and name ~= "" and type(realm) == "string" and realm ~= "" then
+                name = name .. "-" .. realm
+            end
             if nameOk and type(name) == "string" and name ~= "" then
                 local _, guid = callFunction(environment.UnitGUID, unit)
                 local _, _, classToken = callFunction(environment.UnitClass, unit)

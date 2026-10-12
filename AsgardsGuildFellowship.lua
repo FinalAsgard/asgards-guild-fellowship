@@ -30,6 +30,9 @@ local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
 local onSlotsChanged
+-- Records the party in the local group history (set up with the Group
+-- Finder below).
+local recordParty = function() end
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -78,6 +81,15 @@ if clientProfile.supported then
         rolesOf = function(key)
             local roles = rolesOf(key)
             return roles and addon.RoleCatalog.Describe(roles) or nil
+        end,
+        groupedWith = function(keys)
+            local guild, partition = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return addon.GroupHistory.Create(partition):Line(keys, function(timestamp)
+                return client:FormatDate(timestamp)
+            end)
         end,
         recruitRecord = function(keys)
             return guildRecruit:RecordFor(keys)
@@ -1051,6 +1063,44 @@ if clientProfile.supported then
             groupFinder:Refresh()
         end
     end)
+    -- Group history: the guildmates in the party now (this player's own
+    -- characters left out), and the dungeon when known: the Group Finder's
+    -- pick, else the instance the player is in.
+    local groupHistory
+    recordParty = function()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local now = client:Timestamp()
+        if guild == nil or now == nil then
+            return
+        end
+        if groupHistory == nil or groupHistory.partition.key ~= partition.key then
+            groupHistory = addon.GroupHistory.Create(partition)
+        end
+        groupHistory.partition = partition
+        local selfKey = rosterController:SelfKey()
+        local own = selfKey and partition:GetCharacter(selfKey)
+        local keys = {}
+        if client:IsInGroup() then
+            local members = client:GetPartyMembers()
+            local index
+            for index = 1, #members do
+                local key = not members[index].isPlayer and normalizer:Key(members[index].name)
+                local character = key and partition:GetCharacter(key)
+                if character and partition:IsInGuild(key) and not (own and character.player == own.player) then
+                    table.insert(keys, key)
+                end
+            end
+        end
+        local dungeon = groupSession:IsActive()
+            and addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Get(groupSession:Dungeon()) or nil
+        local name = dungeon and dungeon.name or nil
+        if name == nil and client:IsInInstance() then
+            local zone = client:GetZone()
+            name = zone and zone.name or nil
+        end
+        groupHistory:OnParty(keys, now, name)
+        rosterController:Invalidate()
+    end
     router:Register("dnd", "turn Group Finder Do Not Disturb on or off", function()
         local enabled, reason = settings:Toggle("dnd")
         if enabled == nil then
@@ -1546,9 +1596,11 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         guildRecruit:Refresh()
     end)
     guildRecruit:Refresh()
-    -- The Group Finder's slots follow the party.
+    -- The Group Finder's slots follow the party, and every party with
+    -- guildmates goes into the local group history.
     client:ObserveParty(function()
         syncParty()
+        recordParty()
         if groupFinder ~= nil then
             groupFinder:Refresh()
         end
