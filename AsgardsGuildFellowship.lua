@@ -28,7 +28,7 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
-local groupFinder, groupSession, syncParty
+local groupFinder, groupSession, syncParty, groupAvailability
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -479,6 +479,23 @@ if clientProfile.supported then
     -- play, synced to the guild. Only the roles its class can fill are
     -- offered.
     settings:AddSection("groupFinder", "Group Finder")
+    -- Account-wide, so it applies on every character.
+    settings:Add("groupFinder", {
+        id = "dnd",
+        kind = "toggle",
+        label = "Do Not Disturb: no group requests, on every character",
+        get = function()
+            local store = rosterController:Store()
+            return store ~= nil and store:GroupFinderDnd()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil or not store:SetGroupFinderDnd(enabled) then
+                return nil, "saved data is unavailable"
+            end
+            return true
+        end,
+    })
     local function selfClass()
         local guild, partition = rosterController:QuietContext()
         local key = rosterController:SelfKey()
@@ -787,6 +804,55 @@ if clientProfile.supported then
             groupSession:UpdateParty(client:GetPartyMembers(), client:IsInGroup())
         end
     end
+    -- Who runs the add-on and is available, asked each time the Group
+    -- Finder opens.
+    groupAvailability = addon.GroupAvailability.Create({
+        send = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        keyOf = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(sender) or nil
+        end,
+        doNotDisturb = function()
+            return settings:Get("dnd") == true
+        end,
+        occupied = function()
+            return client:IsInGroup() or client:IsInInstance()
+        end,
+        busy = function()
+            return comm:IsBusy()
+        end,
+        onChanged = function()
+            if groupFinder ~= nil then
+                groupFinder:Refresh()
+            end
+        end,
+    })
+    settings:OnChange(function(id)
+        if id == "dnd" and groupFinder ~= nil then
+            groupFinder:Refresh()
+        end
+    end)
+    router:Register("dnd", "turn Group Finder Do Not Disturb on or off", function()
+        local enabled, reason = settings:Toggle("dnd")
+        if enabled == nil then
+            rosterController:Print("Do Not Disturb can't be changed: " .. tostring(reason) .. ".")
+        elseif enabled then
+            rosterController:Print("Do Not Disturb on: you won't get group requests, on any character.")
+        else
+            rosterController:Print("Do Not Disturb off.")
+        end
+    end)
     router:Register("group", "open or close the Group Finder", function()
         if groupFinder == nil then
             local reason
@@ -800,6 +866,17 @@ if clientProfile.supported then
                 session = groupSession,
                 roles = roleCatalog,
                 syncParty = syncParty,
+                replies = function()
+                    return groupAvailability:Replies()
+                end,
+                dnd = {
+                    get = function()
+                        return settings:Get("dnd") == true
+                    end,
+                    set = function(enabled)
+                        return settings:Set("dnd", enabled)
+                    end,
+                },
                 loadAnchor = function()
                     local store = rosterController:Store()
                     return store and store:GroupFinderAnchor()
@@ -816,7 +893,9 @@ if clientProfile.supported then
                 return
             end
         end
-        groupFinder:Toggle()
+        if groupFinder:Toggle() then
+            groupAvailability:Ask()
+        end
     end)
     router:SetDefault("roster")
     -- Guild sync: officers are ranks that can view officer notes, judged
@@ -1154,6 +1233,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildGreet:OnGreeted(message, sender)
         elseif addon.GuildRecruit.TYPES[message.t] ~= nil then
             guildRecruit:OnMessage(message, sender)
+        elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
+            groupAvailability:OnMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end
@@ -1211,6 +1292,7 @@ addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
 addon.groupSession = groupSession
+addon.groupAvailability = groupAvailability
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version

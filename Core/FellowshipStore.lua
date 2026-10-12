@@ -689,6 +689,28 @@ function Store:SetGroupFinderAnchor(anchor)
     return true
 end
 
+-- Whether Do Not Disturb is on for the Group Finder, on every character.
+function Store:GroupFinderDnd()
+    local state = type(self.database) == "table" and self.database.groupFinder or nil
+    return type(state) == "table" and state.dnd == true
+end
+
+-- Turns Do Not Disturb on or off. Refuses when an unusable value is stored
+-- for the Group Finder.
+function Store:SetGroupFinderDnd(enabled)
+    if type(self.database) ~= "table" then
+        return false
+    end
+    if self.database.groupFinder == nil then
+        self.database.groupFinder = {}
+    end
+    if type(self.database.groupFinder) ~= "table" then
+        return false
+    end
+    self.database.groupFinder.dnd = enabled == true or nil
+    return true
+end
+
 -- The user's own ad, exactly as written. Empty when none is saved or the
 -- saved one is unusable.
 function Store:RecruitAd()

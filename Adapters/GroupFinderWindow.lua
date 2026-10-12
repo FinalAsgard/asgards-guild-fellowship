@@ -13,18 +13,23 @@ local _, addon = ...
 -- and Change dungeon and End group buttons. Closing the window keeps the
 -- group.
 --
+-- Along the bottom, always: the guildmates whose add-on replied to the
+-- last ask, available or not, and a Do Not Disturb check box.
+--
 -- Like the other adapters, it reaches the game only through the client's
 -- environment (CreateFrame, UIParent) and the framework, so specs can draw
 -- it with fake frames.
 local GroupFinderWindow = {
     WIDTH = 380,
-    HEIGHT = 440,
+    HEIGHT = 470,
     PADDING = 12,
     ROW_HEIGHT = 20,
     PARTY_ROW_HEIGHT = 24,
     -- Where the dungeon list and the slots start, below the title bar and
     -- the dungeon's heading.
     LIST_TOP = 86,
+    -- Room along the bottom for the replies and Do Not Disturb.
+    FOOTER_HEIGHT = 64,
     CHECK_SIZE = 24,
     BUTTON_HEIGHT = 20,
     ROLE_BUTTON_WIDTH = 56,
@@ -61,6 +66,9 @@ end
 --   session             the GroupSession
 --   roles               the client's RoleCatalog
 --   syncParty()         hands the current party to the session
+--   replies()           the guildmates who replied to the last ask, each
+--                       { sender, available } (GroupAvailability)
+--   dnd                 { get() -> boolean, set(boolean) }: Do Not Disturb
 --   loadAnchor()        the saved position ({ point, x, y }), or nil
 --   saveAnchor(anchor)  saves a new one
 -- Returns nil and the reason when the framework is missing or can't build
@@ -78,6 +86,10 @@ function GroupFinderWindow.Create(client, options)
         session = options.session,
         roles = options.roles,
         syncParty = options.syncParty or function() end,
+        replies = options.replies or function()
+            return {}
+        end,
+        dnd = options.dnd,
         loadAnchor = options.loadAnchor or function() return nil end,
         saveAnchor = options.saveAnchor or function() end,
         showAll = false,
@@ -166,7 +178,7 @@ function Window:buildPicker()
 
     local scroll = createFrame("ScrollFrame", nil, picker, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", picker, "TOPLEFT", padding, -GroupFinderWindow.LIST_TOP)
-    scroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -padding - 22, padding)
+    scroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -padding - 22, padding + GroupFinderWindow.FOOTER_HEIGHT)
     local list = createFrame("Frame", nil, scroll)
     list:SetWidth(GroupFinderWindow.WIDTH - 2 * padding - 22)
     list:SetHeight(GroupFinderWindow.ROW_HEIGHT)
@@ -215,6 +227,57 @@ function Window:buildGroup()
     self.partyTop = below - 52
 end
 
+-- "Hammer, Wrench (unavailable)": a name as the game gave it, without the
+-- realm.
+function GroupFinderWindow.RepliesLine(replies)
+    if #replies == 0 then
+        return "No other add-on users have replied yet."
+    end
+    local names = {}
+    local index
+    for index = 1, #replies do
+        local name = string.match(replies[index].sender, "^([^%-]+)") or replies[index].sender
+        if not replies[index].available then
+            name = name .. " (unavailable)"
+        end
+        names[index] = name
+    end
+    return "Add-on users online: " .. table.concat(names, ", ")
+end
+
+function Window:buildFooter()
+    local padding = GroupFinderWindow.PADDING
+    local panel = self.panel
+    local dnd = self.environment.CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    dnd:SetWidth(GroupFinderWindow.CHECK_SIZE)
+    dnd:SetHeight(GroupFinderWindow.CHECK_SIZE)
+    dnd:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", padding, padding)
+    dnd:SetScript("OnClick", function(button)
+        if self.dnd ~= nil then
+            pcall(self.dnd.set, button:GetChecked() == true)
+        end
+        self:Refresh()
+    end)
+    local label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("LEFT", dnd, "RIGHT", 2, 0)
+    label:SetText("Do Not Disturb (no group requests, on every character)")
+    self.dndButton = dnd
+
+    self.repliesText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self.repliesText:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", padding, padding + GroupFinderWindow.CHECK_SIZE + 4)
+    self.repliesText:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
+    self.repliesText:SetJustifyH("LEFT")
+end
+
+function Window:drawFooter()
+    local ok, replies = pcall(self.replies)
+    self.repliesText:SetText(GroupFinderWindow.RepliesLine(ok and type(replies) == "table" and replies or {}))
+    if self.dnd ~= nil then
+        local got, enabled = pcall(self.dnd.get)
+        self.dndButton:SetChecked(got and enabled == true)
+    end
+end
+
 function Window:build()
     local panel = self.framework:CreateSimplePanel(self.environment.UIParent,
         GroupFinderWindow.WIDTH, GroupFinderWindow.HEIGHT, "Group Finder",
@@ -235,6 +298,7 @@ function Window:build()
 
     self:buildPicker()
     self:buildGroup()
+    self:buildFooter()
     panel:Hide()
 end
 
@@ -405,6 +469,7 @@ function Window:draw()
         self:drawPicker()
         self.picker:Show()
     end
+    self:drawFooter()
 end
 
 -- Redraws the window, when it has been opened.

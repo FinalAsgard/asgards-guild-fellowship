@@ -20,6 +20,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
 | `/agf group` | Opens the [Group Finder](#group-finder) window, or closes it. |
+| `/agf dnd` | Turns Group Finder [Do Not Disturb](#do-not-disturb) on, or back off. |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
@@ -271,6 +272,16 @@ Picking a dungeon starts your group and shows its five slots: 1 tank, 1 healer a
 
 - On Retail, each party member takes the slot for the role the game assigned them.
 - Anyone without an assigned role (everyone on WoW Forever) starts in the first open slot their class can fill: tank, then healer, then DPS. Under **Party roles**, use the **Tank**, **Healer** and **DPS** buttons beside each name (yours included) to put them where they belong. Only the roles their class can play have buttons.
+
+### Who is around
+
+Each time you open the Group Finder, your add-on asks the guild who else runs it. Every guildmate online with the add-on answers within a few seconds, and the bottom of the window lists them, for example **Add-on users online: Hammer, Wrench (unavailable)**. Guildmates without the add-on don't answer, so they aren't listed here.
+
+### Do Not Disturb
+
+Turn on **Do Not Disturb** when you don't want group requests. It's in three places that always agree: the check box at the bottom of the Group Finder, **Do Not Disturb** under **Group Finder** in the settings, and `/agf dnd`. It applies to every character on your account. While it's on, your add-on tells organizers you're unavailable.
+
+You're also unavailable automatically while you're in a group or inside an instance, with nothing to turn on.
 
 ### Role preferences
 
