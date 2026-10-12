@@ -3,7 +3,8 @@
 -- the page it belongs to, so a spec can read what each options page shows.
 -- Pages are the plain frames made with no parent; a frame made inside a page
 -- (a scroll area, a row) records into that same page. Check boxes keep
--- their checked state, frames their height, and scripts are kept by name.
+-- their checked state, frames their width and height, and scripts and
+-- hooked scripts are kept by name.
 local FakeFrames = {}
 
 -- Gives `environment` a CreateFrame drawing such frames, and
@@ -57,6 +58,15 @@ function FakeFrames.install(environment)
                     return function(self, name, handler)
                         rawset(self, "scripts", rawget(self, "scripts") or {})
                         self.scripts[name] = handler
+                    end
+                elseif method == "HookScript" then
+                    return function(self, name, handler)
+                        rawset(self, "hooks", rawget(self, "hooks") or {})
+                        self.hooks[name] = handler
+                    end
+                elseif method == "SetWidth" then
+                    return function(self, width)
+                        rawset(self, "width", width)
                     end
                 elseif method == "SetCursorPosition" then
                     return function(self, position)

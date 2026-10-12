@@ -12,8 +12,12 @@ local _, addon = ...
 -- the framework fails to build it, so the caller can print a message
 -- instead of raising Lua errors.
 local GreetingsPage = {
-    -- The narrowest it's drawn; on a wider page it takes the page's width.
-    WIDTH = 560,
+    -- The narrowest it's drawn, small enough to fit the master frame at its
+    -- narrowest; on a wider page it takes the page's width.
+    WIDTH = 480,
+    -- The widest a category button gets, and the gap between them.
+    TAB_WIDTH = 124,
+    TAB_GAP = 8,
     -- Room for the editor's heading above it.
     TITLE_HEIGHT = 30,
     HEIGHT = 530,
@@ -37,42 +41,57 @@ local function button(parent, text, width)
     return result
 end
 
+-- The editor's width on a page `pageWidth` wide: the page's, less a margin,
+-- never narrower than WIDTH.
+function GreetingsPage.WidthFor(pageWidth)
+    return math.max(GreetingsPage.WIDTH, type(pageWidth) == "number" and pageWidth - 16 or 0)
+end
+
+-- How wide each category button is in an editor `width` wide, and how far
+-- apart they start: as wide as TAB_WIDTH, narrower when all of them
+-- wouldn't fit side by side.
+function GreetingsPage.TabLayout(width, count)
+    local room = width - 24 - (count - 1) * GreetingsPage.TAB_GAP
+    local tabWidth = math.min(GreetingsPage.TAB_WIDTH, math.floor(room / count))
+    return tabWidth, tabWidth + GreetingsPage.TAB_GAP
+end
+
 local function build(page, framework, parent)
     local Library = addon.GreetingLibrary
     local lineHeight = GreetingsPage.LINE_HEIGHT
-    -- As wide as the page it's drawn on, never narrower than WIDTH.
-    local parentWidth = parent:GetWidth()
-    local width = math.max(GreetingsPage.WIDTH, type(parentWidth) == "number" and parentWidth - 16 or 0)
+    local width = GreetingsPage.WidthFor(parent:GetWidth())
     local top = GreetingsPage.TITLE_HEIGHT
+    page.top = top
+    page.listHeight = GreetingsPage.LINES * lineHeight
 
     -- A heading like the settings' own, over a thin gold line, sets the
     -- editor apart from the settings above it.
-    local rule = parent:CreateTexture(nil, "ARTWORK")
-    rule:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -2)
-    rule:SetWidth(width - 12)
-    rule:SetHeight(1)
-    rule:SetColorTexture(0.83, 0.69, 0.22, 0.6)
+    page.rule = parent:CreateTexture(nil, "ARTWORK")
+    page.rule:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -2)
+    page.rule:SetHeight(1)
+    page.rule:SetColorTexture(0.83, 0.69, 0.22, 0.6)
     local title = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -8)
     title:SetText("Greetings")
     local frameName = addon.Identity.addonName .. "Greetings"
 
-    -- One button per category; the open one is disabled.
+    -- One button per category; the open one is disabled. Fit places them.
     page.tabs = {}
+    page.tabOrder = {}
     local index
     for index = 1, #Library.CATEGORIES do
         local category = Library.CATEGORIES[index]
-        local tab = button(parent, category.label, 124)
-        tab:SetPoint("TOPLEFT", parent, "TOPLEFT", 12 + (index - 1) * 132, -top)
+        local tab = button(parent, category.label, GreetingsPage.TAB_WIDTH)
         tab:SetScript("OnClick", function()
             page:Select(category.id)
         end)
         page.tabs[category.id] = tab
+        page.tabOrder[index] = tab
     end
+    page.parent = parent
 
     page.when = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     page.when:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, -top - 30)
-    page.when:SetWidth(width - 28)
     page.when:SetJustifyH("LEFT")
 
     -- The category's greetings, each with Edit. The framework shows only the
@@ -117,12 +136,11 @@ local function build(page, framework, parent)
         end)
         return line
     end
-    local listHeight = GreetingsPage.LINES * lineHeight
+    local listHeight = page.listHeight
     local scroll = framework:CreateScrollBox(parent, frameName .. "Scroll", refreshLines, {},
         width - 24, listHeight, GreetingsPage.LINES, lineHeight, newLine, true)
     scroll:ClearAllPoints()
     scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -top - 50)
-    scroll:SetSize(width - 24, listHeight)
     scroll:CreateLines(newLine, GreetingsPage.LINES)
     page.scroll = scroll
 
@@ -133,7 +151,7 @@ local function build(page, framework, parent)
     -- The box for a new greeting, or the one being edited.
     local inputY = -top - 50 - listHeight - 14
     local input = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    input:SetSize(width - 264, 22)
+    input:SetHeight(22)
     input:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, inputY)
     input:SetAutoFocus(false)
     -- Chat's limit is in bytes, and a letter like é takes two; the cap
@@ -168,7 +186,6 @@ local function build(page, framework, parent)
 
     page.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     page.status:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, inputY - 28)
-    page.status:SetWidth(width - 28)
     page.status:SetJustifyH("LEFT")
 
     -- Restoring replaces greetings, so each button asks for a second click.
@@ -188,25 +205,54 @@ local function build(page, framework, parent)
     local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     header:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, keyY)
     header:SetText("Placeholders (upper or lower case both work)")
+    page.keyLines = {}
     for index = 1, #Library.PLACEHOLDERS do
         local placeholder = Library.PLACEHOLDERS[index]
         local line = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         line:SetPoint("TOPLEFT", parent, "TOPLEFT", 22, keyY - 4 - index * 15)
-        line:SetWidth(width - 36)
         line:SetJustifyH("LEFT")
         line:SetText("|cffffd100" .. placeholder[1] .. "|r  " .. placeholder[2])
+        table.insert(page.keyLines, line)
     end
     local note = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     note:SetPoint("TOPLEFT", parent, "TOPLEFT", 22, keyY - 4 - (#Library.PLACEHOLDERS + 1) * 15)
-    note:SetWidth(width - 36)
     note:SetJustifyH("LEFT")
     note:SetText(DIM_COLOR .. "First and last parts only differ on WoW Forever's two-part names." ..
         " On Retail they're the whole name.|r")
+    table.insert(page.keyLines, note)
 
-    -- Showing the page shows the saved greetings as they are now.
+    page:Fit(width)
+    -- Showing the page shows the saved greetings as they are now, and the
+    -- editor follows the page's width as the master frame is resized.
     parent:HookScript("OnShow", function()
         page:Redraw()
     end)
+    parent:HookScript("OnSizeChanged", function(_, pageWidth)
+        pcall(page.Fit, page, GreetingsPage.WidthFor(pageWidth))
+    end)
+end
+
+-- Sizes and places everything that depends on the editor's width, so it
+-- fits a page `width` wide (see WidthFor): the heading's rule, the
+-- category buttons, the list of greetings, the text box (its Save, Delete
+-- and Cancel buttons follow it), the status line and the placeholder key.
+function Page:Fit(width)
+    self.rule:SetWidth(width - 12)
+    local tabWidth, step = GreetingsPage.TabLayout(width, #self.tabOrder)
+    local index
+    for index = 1, #self.tabOrder do
+        local tab = self.tabOrder[index]
+        tab:SetWidth(tabWidth)
+        tab:ClearAllPoints()
+        tab:SetPoint("TOPLEFT", self.parent, "TOPLEFT", 12 + (index - 1) * step, -self.top)
+    end
+    self.when:SetWidth(width - 28)
+    self.scroll:SetSize(width - 24, self.listHeight)
+    self.input:SetWidth(width - 264)
+    self.status:SetWidth(width - 28)
+    for index = 1, #self.keyLines do
+        self.keyLines[index]:SetWidth(width - 36)
+    end
 end
 
 -- Draws the editor into `parent`. `options.library()` returns the

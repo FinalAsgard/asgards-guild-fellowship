@@ -683,6 +683,16 @@ function Panel:addEntry(content, entry)
     return row
 end
 
+-- The widths inside a scroll area `scrollWidth` wide (nil when it can't be
+-- read): the settings' content, as wide as the area but never narrower than
+-- a text box needs, and a footer, as wide as the area, so what's drawn
+-- below the settings always fits it.
+function SettingsPanel.AreaWidths(scrollWidth)
+    local room = type(scrollWidth) == "number" and scrollWidth - 8 or 0
+    local least = SettingsPanel.INPUT_WIDTH + 2 * SettingsPanel.LEFT + 40
+    return math.max(least, room), room > 0 and room or least
+end
+
 -- Draws `sections` onto `parent` inside a scroll area that fills it below
 -- `top` (an offset down from its top edge). Only this panel's host's
 -- entries are drawn. The area keeps its scroll position while it's open.
@@ -699,12 +709,10 @@ function Panel:Draw(parent, sections, top, footerHeight)
         parent, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -(top or 0))
     scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -SettingsPanel.SCROLL_BAR, 8)
-    -- As wide as the area beside the scroll bar, never narrower than a
-    -- text box needs.
     local content = createFrame("Frame", nil, scroll)
     local parentWidth = parent:GetWidth()
-    local width = math.max(SettingsPanel.INPUT_WIDTH + 2 * SettingsPanel.LEFT + 40,
-        type(parentWidth) == "number" and parentWidth - SettingsPanel.SCROLL_BAR - 8 or 0)
+    local width, footerWidth = SettingsPanel.AreaWidths(
+        type(parentWidth) == "number" and parentWidth - SettingsPanel.SCROLL_BAR or nil)
     content:SetWidth(width)
     content:SetHeight(1)
     scroll:SetScrollChild(content)
@@ -727,7 +735,7 @@ function Panel:Draw(parent, sections, top, footerHeight)
     end
     if footerHeight ~= nil then
         area.footer = createFrame("Frame", nil, content)
-        area.footer:SetWidth(width)
+        area.footer:SetWidth(footerWidth)
         area.footer:SetHeight(footerHeight)
         area.footerHeight = footerHeight
     end
@@ -735,6 +743,14 @@ function Panel:Draw(parent, sections, top, footerHeight)
     -- Leaving the page saves what's still being typed or dragged.
     scroll:SetScript("OnHide", function()
         self:commitAll()
+    end)
+    -- Resizing the page re-fits the content and the footer to it.
+    scroll:HookScript("OnSizeChanged", function(_, scrollWidth)
+        local newWidth, newFooterWidth = SettingsPanel.AreaWidths(scrollWidth)
+        content:SetWidth(newWidth)
+        if area.footer ~= nil then
+            area.footer:SetWidth(newFooterWidth)
+        end
     end)
     self:place(area)
     return scroll, area.footer

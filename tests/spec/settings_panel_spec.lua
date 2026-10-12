@@ -557,3 +557,42 @@ test.test("settings panel: a color that can't be read shows its entry's default,
     test.assertFalse(widget.swatches[1].selected.shown)
     test.assertTrue(widget.swatches[2].selected.shown)
 end)
+
+test.test("settings panel: a scroll area's content keeps a text box's width, and its footer follows the area", function()
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local Panel = addon.SettingsPanel
+    local least = Panel.INPUT_WIDTH + 2 * Panel.LEFT + 40
+
+    -- A wide page: both take its width.
+    local content, footer = Panel.AreaWidths(732)
+    test.assertEqual(724, content)
+    test.assertEqual(724, footer)
+    -- The master frame at its narrowest: the settings keep room for a text
+    -- box, but the footer fits the page.
+    content, footer = Panel.AreaWidths(532)
+    test.assertEqual(least, content)
+    test.assertEqual(524, footer)
+    -- A width that can't be read.
+    content, footer = Panel.AreaWidths(nil)
+    test.assertEqual(least, content)
+    test.assertEqual(least, footer)
+end)
+
+test.test("settings panel: resizing a page re-fits its scroll area's content and footer", function()
+    local environment = newEnvironment()
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local model = addon.SettingsModel.Create()
+    model:AddSection("guildGreet", "Guild Greet", { page = "greetings" })
+    model:Add("guildGreet", { id = "on", kind = "toggle", label = "On",
+        get = function() return true end, set = function() return true end })
+    local panel = addon.SettingsPanel.Create({ environment = environment }, model, "frame")
+    local page = environment.CreateFrame("Frame")
+    local scroll, footer = panel:Draw(page, model:SectionsOn("greetings"), 28, 100)
+
+    scroll.hooks.OnSizeChanged(scroll, 532)
+
+    test.assertEqual(524, footer.width)
+    scroll.hooks.OnSizeChanged(scroll, 900)
+    test.assertEqual(892, footer.width)
+    test.assertEqual(892, panel.areas[1].content.width)
+end)
