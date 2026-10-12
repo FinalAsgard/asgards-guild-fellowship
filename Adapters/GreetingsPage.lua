@@ -1,41 +1,38 @@
 local _, addon = ...
 
--- The Greetings window, built with the Details! Framework like the roster:
--- a button per Guild Greet category, that category's greetings each with
+-- The greetings editor on the master frame's Greetings page, below Guild
+-- Greet's settings, built with the Details! Framework like the roster: a
+-- button per Guild Greet category, that category's greetings each with
 -- Edit, a box to add a greeting or change (or delete) the one being edited,
--- Restore controls, and a key to the placeholders. Every change goes through the GreetingLibrary, which saves
--- it account-wide, so the next prompt uses it. It is not unit tested; the
--- in-game checklist covers it.
+-- Restore controls, and a key to the placeholders. Every change goes
+-- through the GreetingLibrary, which saves it account-wide, so the next
+-- prompt uses it. It is not unit tested; the in-game checklist covers it.
 --
--- Create() returns nil when the framework is missing or fails to build the
--- window, so the caller can print a message instead of raising Lua errors.
--- The window is created once, then hidden and shown.
-local GreetingsWindow = {
-    WIDTH = 560,
-    HEIGHT = 540,
+-- Create() draws it into a parent frame HEIGHT tall, and returns nil when
+-- the framework fails to build it, so the caller can print a message
+-- instead of raising Lua errors.
+local GreetingsPage = {
+    -- The narrowest it's drawn, small enough to fit the master frame at its
+    -- narrowest; on a wider page it takes the page's width.
+    WIDTH = 480,
+    -- The widest a category button gets, and the gap between them.
+    TAB_WIDTH = 124,
+    TAB_GAP = 8,
+    -- Room for the editor's heading above it.
+    TITLE_HEIGHT = 30,
+    HEIGHT = 530,
     LINE_HEIGHT = 24,
     LINES = 8,
     -- How long a Restore button waits for its confirming second click.
     CONFIRM_SECONDS = 5,
 }
-addon.GreetingsWindow = GreetingsWindow
+addon.GreetingsPage = GreetingsPage
 
-local Window = {}
-Window.__index = Window
+local Page = {}
+Page.__index = Page
 
 local ERROR_COLOR = "|cffff4040"
 local DIM_COLOR = "|cff9d9d9d"
-
-local function frameworkFrom(client)
-    local framework = client:GetGlobal("DetailsFramework")
-    if type(framework) ~= "table" or framework.FrameWorkVersion == nil
-        or type(framework.CreateSimplePanel) ~= "function"
-        or type(framework.CreateScrollBox) ~= "function"
-    then
-        return nil
-    end
-    return framework
-end
 
 local function button(parent, text, width)
     local result = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
@@ -44,31 +41,58 @@ local function button(parent, text, width)
     return result
 end
 
-local function build(window, framework)
-    local Library = addon.GreetingLibrary
-    local width, lineHeight = GreetingsWindow.WIDTH, GreetingsWindow.LINE_HEIGHT
-    local frameName = addon.Identity.addonName .. "Greetings"
-    local panel = framework:CreateSimplePanel(UIParent, width, GreetingsWindow.HEIGHT, "Greetings", frameName)
-    panel:SetFrameStrata("HIGH")
-    window.panel = panel
+-- The editor's width on a page `pageWidth` wide: the page's, less a margin,
+-- never narrower than WIDTH.
+function GreetingsPage.WidthFor(pageWidth)
+    return math.max(GreetingsPage.WIDTH, type(pageWidth) == "number" and pageWidth - 16 or 0)
+end
 
-    -- One button per category; the open one is disabled.
-    window.tabs = {}
+-- How wide each category button is in an editor `width` wide, and how far
+-- apart they start: as wide as TAB_WIDTH, narrower when all of them
+-- wouldn't fit side by side.
+function GreetingsPage.TabLayout(width, count)
+    local room = width - 24 - (count - 1) * GreetingsPage.TAB_GAP
+    local tabWidth = math.min(GreetingsPage.TAB_WIDTH, math.floor(room / count))
+    return tabWidth, tabWidth + GreetingsPage.TAB_GAP
+end
+
+local function build(page, framework, parent)
+    local Library = addon.GreetingLibrary
+    local lineHeight = GreetingsPage.LINE_HEIGHT
+    local width = GreetingsPage.WidthFor(parent:GetWidth())
+    local top = GreetingsPage.TITLE_HEIGHT
+    page.top = top
+    page.listHeight = GreetingsPage.LINES * lineHeight
+
+    -- A heading like the settings' own, over a thin gold line, sets the
+    -- editor apart from the settings above it.
+    page.rule = parent:CreateTexture(nil, "ARTWORK")
+    page.rule:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -2)
+    page.rule:SetHeight(1)
+    page.rule:SetColorTexture(0.83, 0.69, 0.22, 0.6)
+    local title = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -8)
+    title:SetText("Greetings")
+    local frameName = addon.Identity.addonName .. "Greetings"
+
+    -- One button per category; the open one is disabled. Fit places them.
+    page.tabs = {}
+    page.tabOrder = {}
     local index
     for index = 1, #Library.CATEGORIES do
         local category = Library.CATEGORIES[index]
-        local tab = button(panel, category.label, 124)
-        tab:SetPoint("TOPLEFT", panel, "TOPLEFT", 12 + (index - 1) * 132, -30)
+        local tab = button(parent, category.label, GreetingsPage.TAB_WIDTH)
         tab:SetScript("OnClick", function()
-            window:Select(category.id)
+            page:Select(category.id)
         end)
-        window.tabs[category.id] = tab
+        page.tabs[category.id] = tab
+        page.tabOrder[index] = tab
     end
+    page.parent = parent
 
-    window.when = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    window.when:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -60)
-    window.when:SetPoint("RIGHT", panel, "RIGHT", -14, 0)
-    window.when:SetJustifyH("LEFT")
+    page.when = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    page.when:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, -top - 30)
+    page.when:SetJustifyH("LEFT")
 
     -- The category's greetings, each with Edit. The framework shows only the
     -- lines fetched with GetLine during a refresh and hides the rest, so a
@@ -85,7 +109,7 @@ local function build(window, framework)
                 line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(lineIndex - 1) * lineHeight)
                 line.position = row.position
                 local text = row.text
-                if row.position == window.editing then
+                if row.position == page.editing then
                     text = "|cffffd100" .. text .. "|r"
                 end
                 line.text:SetText(text)
@@ -107,134 +131,155 @@ local function build(window, framework)
         line.text:SetWordWrap(false)
         line.edit:SetScript("OnClick", function()
             if line.position ~= nil then
-                window:StartEdit(line.position)
+                page:StartEdit(line.position)
             end
         end)
         return line
     end
-    local listHeight = GreetingsWindow.LINES * lineHeight
-    local scroll = framework:CreateScrollBox(panel, frameName .. "Scroll", refreshLines, {},
-        width - 24, listHeight, GreetingsWindow.LINES, lineHeight, newLine, true)
+    local listHeight = page.listHeight
+    local scroll = framework:CreateScrollBox(parent, frameName .. "Scroll", refreshLines, {},
+        width - 24, listHeight, GreetingsPage.LINES, lineHeight, newLine, true)
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -80)
-    scroll:SetSize(width - 24, listHeight)
-    scroll:CreateLines(newLine, GreetingsWindow.LINES)
-    window.scroll = scroll
+    scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -top - 50)
+    scroll:CreateLines(newLine, GreetingsPage.LINES)
+    page.scroll = scroll
 
-    window.empty = panel:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    window.empty:SetPoint("TOPLEFT", scroll, "TOPLEFT", 6, -6)
-    window.empty:SetText("No greetings, so this category shows no prompts.")
+    page.empty = parent:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    page.empty:SetPoint("TOPLEFT", scroll, "TOPLEFT", 6, -6)
+    page.empty:SetText("No greetings, so this category shows no prompts.")
 
     -- The box for a new greeting, or the one being edited.
-    local inputY = -80 - listHeight - 14
-    local input = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    input:SetSize(width - 264, 22)
-    input:SetPoint("TOPLEFT", panel, "TOPLEFT", 20, inputY)
+    local inputY = -top - 50 - listHeight - 14
+    local input = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    input:SetHeight(22)
+    input:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, inputY)
     input:SetAutoFocus(false)
     -- Chat's limit is in bytes, and a letter like é takes two; the cap
     -- counts the terminating byte too.
     input:SetMaxBytes(Library.MAX_LENGTH + 1)
-    window.input = input
-    window.save = button(panel, "Add", 70)
-    window.save:SetPoint("LEFT", input, "RIGHT", 8, 0)
-    window.save:SetScript("OnClick", function()
-        window:Save()
+    page.input = input
+    page.save = button(parent, "Add", 70)
+    page.save:SetPoint("LEFT", input, "RIGHT", 8, 0)
+    page.save:SetScript("OnClick", function()
+        page:Save()
     end)
     -- Delete sits with the editor and removes the greeting being edited.
-    window.delete = button(panel, "Delete", 70)
-    window.delete:SetPoint("LEFT", window.save, "RIGHT", 4, 0)
-    window.delete:SetScript("OnClick", function()
-        if window.editing ~= nil then
-            window:Delete(window.editing)
+    page.delete = button(parent, "Delete", 70)
+    page.delete:SetPoint("LEFT", page.save, "RIGHT", 4, 0)
+    page.delete:SetScript("OnClick", function()
+        if page.editing ~= nil then
+            page:Delete(page.editing)
         end
     end)
-    window.cancel = button(panel, "Cancel", 70)
-    window.cancel:SetPoint("LEFT", window.delete, "RIGHT", 4, 0)
-    window.cancel:SetScript("OnClick", function()
-        window:CancelEdit()
+    page.cancel = button(parent, "Cancel", 70)
+    page.cancel:SetPoint("LEFT", page.delete, "RIGHT", 4, 0)
+    page.cancel:SetScript("OnClick", function()
+        page:CancelEdit()
     end)
     input:SetScript("OnEnterPressed", function()
-        window:Save()
+        page:Save()
     end)
     input:SetScript("OnEscapePressed", function()
-        window:CancelEdit()
+        page:CancelEdit()
         input:ClearFocus()
     end)
 
-    window.status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    window.status:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, inputY - 28)
-    window.status:SetPoint("RIGHT", panel, "RIGHT", -14, 0)
-    window.status:SetJustifyH("LEFT")
+    page.status = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    page.status:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, inputY - 28)
+    page.status:SetJustifyH("LEFT")
 
     -- Restoring replaces greetings, so each button asks for a second click.
-    window.restoreOne = button(panel, "Restore starter greetings", 200)
-    window.restoreOne:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, inputY - 50)
-    window.restoreOne:SetScript("OnClick", function()
-        window:Restore(false)
+    page.restoreOne = button(parent, "Restore starter greetings", 200)
+    page.restoreOne:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, inputY - 50)
+    page.restoreOne:SetScript("OnClick", function()
+        page:Restore(false)
     end)
-    window.restoreAll = button(panel, "Restore all categories", 200)
-    window.restoreAll:SetPoint("LEFT", window.restoreOne, "RIGHT", 8, 0)
-    window.restoreAll:SetScript("OnClick", function()
-        window:Restore(true)
+    page.restoreAll = button(parent, "Restore all categories", 200)
+    page.restoreAll:SetPoint("LEFT", page.restoreOne, "RIGHT", 8, 0)
+    page.restoreAll:SetScript("OnClick", function()
+        page:Restore(true)
     end)
 
     -- The placeholder key.
     local keyY = inputY - 86
-    local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, keyY)
+    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    header:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, keyY)
     header:SetText("Placeholders (upper or lower case both work)")
+    page.keyLines = {}
     for index = 1, #Library.PLACEHOLDERS do
         local placeholder = Library.PLACEHOLDERS[index]
-        local line = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        line:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, keyY - 4 - index * 15)
-        line:SetPoint("RIGHT", panel, "RIGHT", -14, 0)
+        local line = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        line:SetPoint("TOPLEFT", parent, "TOPLEFT", 22, keyY - 4 - index * 15)
         line:SetJustifyH("LEFT")
         line:SetText("|cffffd100" .. placeholder[1] .. "|r  " .. placeholder[2])
+        table.insert(page.keyLines, line)
     end
-    local note = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    note:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, keyY - 4 - (#Library.PLACEHOLDERS + 1) * 15)
-    note:SetPoint("RIGHT", panel, "RIGHT", -14, 0)
+    local note = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    note:SetPoint("TOPLEFT", parent, "TOPLEFT", 22, keyY - 4 - (#Library.PLACEHOLDERS + 1) * 15)
     note:SetJustifyH("LEFT")
     note:SetText(DIM_COLOR .. "First and last parts only differ on WoW Forever's two-part names." ..
         " On Retail they're the whole name.|r")
+    table.insert(page.keyLines, note)
 
-    panel:Hide()
+    page:Fit(width)
+    -- Showing the page shows the saved greetings as they are now, and the
+    -- editor follows the page's width as the master frame is resized.
+    parent:HookScript("OnShow", function()
+        page:Redraw()
+    end)
+    parent:HookScript("OnSizeChanged", function(_, pageWidth)
+        pcall(page.Fit, page, GreetingsPage.WidthFor(pageWidth))
+    end)
 end
 
--- `options.library()` returns the GreetingLibrary to show and edit, fresh
--- each time so it follows the saved data. `options.after(seconds, callback)`
--- runs a timer.
-function GreetingsWindow.Create(client, options)
-    local framework = frameworkFrom(client)
-    if framework == nil then
-        return nil, "the Details! Framework is not available"
+-- Sizes and places everything that depends on the editor's width, so it
+-- fits a page `width` wide (see WidthFor): the heading's rule, the
+-- category buttons, the list of greetings, the text box (its Save, Delete
+-- and Cancel buttons follow it), the status line and the placeholder key.
+function Page:Fit(width)
+    self.rule:SetWidth(width - 12)
+    local tabWidth, step = GreetingsPage.TabLayout(width, #self.tabOrder)
+    local index
+    for index = 1, #self.tabOrder do
+        local tab = self.tabOrder[index]
+        tab:SetWidth(tabWidth)
+        tab:ClearAllPoints()
+        tab:SetPoint("TOPLEFT", self.parent, "TOPLEFT", 12 + (index - 1) * step, -self.top)
     end
-    local window = setmetatable({
+    self.when:SetWidth(width - 28)
+    self.scroll:SetSize(width - 24, self.listHeight)
+    self.input:SetWidth(width - 264)
+    self.status:SetWidth(width - 28)
+    for index = 1, #self.keyLines do
+        self.keyLines[index]:SetWidth(width - 36)
+    end
+end
+
+-- Draws the editor into `parent`. `options.library()` returns the
+-- GreetingLibrary to show and edit, fresh each time so it follows the saved
+-- data. `options.after(seconds, callback)` runs a timer. Returns the page,
+-- or nil and a reason.
+function GreetingsPage.Create(framework, parent, options)
+    local page = setmetatable({
         library = options.library,
         after = options.after,
         category = addon.GreetingLibrary.CATEGORIES[1].id,
-    }, Window)
-    local ok = pcall(build, window, framework)
-    if not ok or window.panel == nil then
-        return nil, "the Details! Framework could not build the window"
+    }, Page)
+    local ok = pcall(build, page, framework, parent)
+    if not ok then
+        return nil, "the Details! Framework could not build the greetings editor"
     end
-    return window
+    page:Redraw()
+    return page
 end
 
--- Shows the window on the open category.
-function Window:Open()
-    self:Redraw()
-    self.panel:Show()
-end
-
-
-function Window:setStatus(text, isError)
+function Page:setStatus(text, isError)
     self.status:SetText(text and ((isError and ERROR_COLOR or "") .. text .. (isError and "|r" or "")) or "")
 end
 
--- Fills the window from the library. Returns false instead of raising when
+-- Fills the editor from the library. Returns false instead of raising when
 -- the framework misbehaves.
-function Window:Redraw()
+function Page:Redraw()
     return (pcall(function()
         local Library = addon.GreetingLibrary
         local index
@@ -274,7 +319,7 @@ function Window:Redraw()
 end
 
 -- Opens another category, dropping any unfinished edit.
-function Window:Select(category)
+function Page:Select(category)
     self.category = category
     self.editing = nil
     self.confirming = nil
@@ -284,7 +329,7 @@ function Window:Select(category)
 end
 
 -- Puts the greeting at `position` in the box to be changed.
-function Window:StartEdit(position)
+function Page:StartEdit(position)
     local greetings = self.library():Greetings(self.category)
     if greetings[position] == nil then
         return
@@ -296,7 +341,7 @@ function Window:StartEdit(position)
     self:Redraw()
 end
 
-function Window:CancelEdit()
+function Page:CancelEdit()
     self.editing = nil
     self.input:SetText("")
     self:setStatus(nil)
@@ -304,7 +349,7 @@ function Window:CancelEdit()
 end
 
 -- Adds the box's text, or saves it over the greeting being edited.
-function Window:Save()
+function Page:Save()
     local library = self.library()
     local ok, reason
     if self.editing ~= nil then
@@ -323,7 +368,7 @@ function Window:Save()
     self:Redraw()
 end
 
-function Window:Delete(position)
+function Page:Delete(position)
     local ok, reason = self.library():Remove(self.category, position)
     if not ok then
         self:setStatus("Not deleted: " .. tostring(reason) .. ".", true)
@@ -339,13 +384,13 @@ end
 
 -- The first click arms the button and the second, within a few seconds,
 -- restores this category's starters (`all` false) or every category's.
-function Window:Restore(all)
+function Page:Restore(all)
     local which = all and "all" or "one"
     if self.confirming ~= which then
         self.confirming = which
         self:Redraw()
         if type(self.after) == "function" then
-            self.after(GreetingsWindow.CONFIRM_SECONDS, function()
+            self.after(GreetingsPage.CONFIRM_SECONDS, function()
                 if self.confirming == which then
                     self.confirming = nil
                     self:Redraw()

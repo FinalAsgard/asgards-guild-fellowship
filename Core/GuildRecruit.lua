@@ -643,7 +643,10 @@ function Recruit:Post(key)
     if not ok or sent ~= true then
         return nil
     end
-    self:Ledger():Record(key, now)
+    if self:Ledger():Record(key, now) then
+        local okSelf, selfKey = pcall(self.selfKey)
+        self:notePoster(key, now, { k = okSelf and selfKey or nil })
+    end
     -- The user's own record counts the ad, and goes with the message.
     local store = self.store()
     local record = store and store:RecruitOwnStats()
@@ -689,12 +692,53 @@ function Recruit:fromOthers(sender)
     return ok and own == false
 end
 
--- Records another add-on user's time for `key`. Refreshes when it was
--- newer, so a prompt for a channel that's now fresh closes. A time dated
--- more than a few minutes ahead of this client's clock is refused, as guild
--- sync refuses such edits: it would keep the channel fresh for everyone
--- indefinitely. Returns true when the time was kept.
-function Recruit:hear(key, at)
+-- The longest poster name or key kept from a message.
+local MAX_POSTER_LENGTH = 64
+
+local function posterText(value)
+    if type(value) == "string" and value ~= "" and string.len(value) <= MAX_POSTER_LENGTH then
+        return value
+    end
+    return nil
+end
+
+-- Keeps who posted the ad behind `key`'s time `at`: `poster` is { k = their
+-- character key, n = their name as the game gave it }, either one optional,
+-- or nil when the poster isn't known, which forgets any earlier poster, so
+-- a newer time never shows an older ad's poster.
+function Recruit:notePoster(key, at, poster)
+    local partition = self.partition()
+    local posters = partition and partition:GetRecruitPosters()
+    if posters == nil then
+        return
+    end
+    local k = poster and posterText(poster.k)
+    local n = poster and posterText(poster.n)
+    if k == nil and n == nil then
+        posters[key] = nil
+        return
+    end
+    posters[key] = { a = at, k = k, n = n }
+end
+
+-- Who posted the ad behind `key`'s time `at`, as { k, n }, or nil.
+function Recruit:PosterOf(key, at)
+    local partition = self.partition()
+    local posters = partition and partition:GetRecruitPosters()
+    local poster = posters and posters[key]
+    if type(poster) ~= "table" or poster.a ~= at then
+        return nil
+    end
+    return { k = posterText(poster.k), n = posterText(poster.n) }
+end
+
+-- Records another add-on user's time for `key`, and `poster` (see
+-- notePoster) with it. Refreshes when it was newer, so a prompt for a
+-- channel that's now fresh closes. A time dated more than a few minutes
+-- ahead of this client's clock is refused, as guild sync refuses such
+-- edits: it would keep the channel fresh for everyone indefinitely. Returns
+-- true when the time was kept.
+function Recruit:hear(key, at, poster)
     local now = self.now()
     if self.partition() == nil or type(now) ~= "number"
         or at > now + addon.RecruitLedger.MAX_FUTURE_SECONDS
@@ -703,6 +747,7 @@ function Recruit:hear(key, at)
     end
     local recorded = self:Ledger():Record(key, at)
     if recorded then
+        self:notePoster(key, at, poster)
         self:Refresh()
         pcall(self.onStatsChanged)
     end
@@ -728,7 +773,7 @@ function Recruit:OnAdvertised(message, sender)
             pcall(self.onStatsChanged)
         end
     end
-    return self:hear(message.k, message.a)
+    return self:hear(message.k, message.a, { k = okKey and senderKey or nil, n = sender })
 end
 
 -- Another add-on user's "ask-channel": when this add-on has a fresh time
@@ -758,8 +803,12 @@ function Recruit:OnAsk(message, sender)
         self.answering[key] = nil
         local current = self.now()
         if time ~= nil and type(current) == "number" and freshForGuild(current) then
+            -- Who posted goes along when it's known; older add-ons ignore it.
+            local at = self:Ledger():Time(key)
+            local poster = self:PosterOf(key, at)
             pcall(self.announce, {
-                v = GuildRecruit.PROTOCOL, t = GuildRecruit.TYPE_CHANNEL_TIME, k = key, a = self:Ledger():Time(key),
+                v = GuildRecruit.PROTOCOL, t = GuildRecruit.TYPE_CHANNEL_TIME, k = key, a = at,
+                p = poster and poster.k, pn = poster and poster.n,
             })
         end
     end
@@ -775,8 +824,10 @@ function Recruit:OnAsk(message, sender)
 end
 
 -- Another add-on user's "channel-time": recorded like an "advertised"
--- message, and it stops this add-on's own answer for that channel when it's
--- as new or newer. Returns true when the time was recorded.
+-- message, with the poster it names (`p`, their character key, and `pn`,
+-- their name) when it names one, and it stops this add-on's own answer for
+-- that channel when it's as new or newer. Returns true when the time was
+-- recorded.
 function Recruit:OnChannelTime(message, sender)
     if not isMessage(message, GuildRecruit.TYPE_CHANNEL_TIME, true) or not self:fromOthers(sender) then
         return false
@@ -785,7 +836,7 @@ function Recruit:OnChannelTime(message, sender)
     if pending ~= nil and message.a >= pending then
         self.answering[message.k] = nil
     end
-    return self:hear(message.k, message.a)
+    return self:hear(message.k, message.a, { k = message.p, n = message.pn })
 end
 
 -- The user pressed Not now on the prompt for `key`: hides that channel's
@@ -906,8 +957,10 @@ function Recruit:ChannelLabel(key)
 end
 
 -- The channels this add-on knows were advertised in lately, newest first,
--- as { key, label, at, ago }: `ago` reads like "12 min ago". Times are kept
--- for KEEP_SECONDS, across reloads and logouts.
+-- as { key, label, at, ago, poster }: `ago` reads like "12 min ago", and
+-- `poster` is who posted it ({ k, n }, see PosterOf), or nil when only the
+-- time was heard. Times are kept for KEEP_SECONDS, across reloads and
+-- logouts; a poster is forgotten with its time.
 function Recruit:KnownAds()
     local now = self.now()
     local ads = {}
@@ -917,8 +970,23 @@ function Recruit:KnownAds()
     end
     local ledger = self:Ledger()
     ledger:Prune(now, GuildRecruit.KEEP_SECONDS)
+    local times = partition:GetRecruitLedger()
+    local posters = partition:GetRecruitPosters()
+    if posters ~= nil then
+        local gone = {}
+        local key, poster
+        for key, poster in pairs(posters) do
+            if type(poster) ~= "table" or times[key] ~= poster.a then
+                table.insert(gone, key)
+            end
+        end
+        local index
+        for index = 1, #gone do
+            posters[gone[index]] = nil
+        end
+    end
     local key, at
-    for key, at in pairs(partition:GetRecruitLedger()) do
+    for key, at in pairs(times) do
         if type(key) == "string" and type(at) == "number" then
             local minutes = math.max(0, math.floor((now - at) / 60))
             table.insert(ads, {
@@ -926,6 +994,7 @@ function Recruit:KnownAds()
                 label = self:ChannelLabel(key),
                 at = at,
                 ago = minutes == 0 and "just now" or (GuildRecruit.FormatMinutes(minutes) .. " ago"),
+                poster = self:PosterOf(key, at),
             })
         end
     end

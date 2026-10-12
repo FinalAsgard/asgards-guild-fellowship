@@ -18,13 +18,14 @@ Libs/AceComm-3.0/AceComm-3.0.xml
 Core/Identity.lua
 Adapters/ClientProfile.lua
 Adapters/WoW.lua
+Adapters/MasterFrame.lua
 Adapters/RosterWindow.lua
 Adapters/EntryPoints.lua
 Adapters/Comm.lua
 Adapters/SettingsPanel.lua
 Adapters/GreetPrompts.lua
 Adapters/RecruitPrompts.lua
-Adapters/GreetingsWindow.lua
+Adapters/GreetingsPage.lua
 Core/Persistence.lua
 Core/NameNormalizer.lua
 Core/NoteParser.lua
@@ -42,9 +43,11 @@ Core/SuggestionService.lua
 Core/SyncLedger.lua
 Core/SyncSession.lua
 Core/ScanScheduler.lua
+Core/PageNavigator.lua
 Core/RosterController.lua
 Core/LibraryCheck.lua
 Core/CommandRouter.lua
+Core/SettingsLayout.lua
 Core/SettingsModel.lua
 Core/GreetPolicy.lua
 Core/GreetingLibrary.lua

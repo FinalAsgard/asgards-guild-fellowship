@@ -159,8 +159,10 @@ for index = 1, #fixtures.PROFILES do
         local world, addon = loggedIn(profile)
         local sections = addon.settings:Sections()
 
-        test.assertEqual("General", sections[1].label)
-        test.assertEqual("Chat Tags", sections[2].label)
+        -- After the add-on's own page in the AddOns options.
+        test.assertTrue(sections[1].home)
+        test.assertEqual("General", sections[2].label)
+        test.assertEqual("Chat Tags", sections[3].label)
         test.assertTrue(addon.settings:Get("minimap"))
         test.assertTrue(addon.settings:Get("chatTags"))
         test.assertContains(addon.settings:Get("version"), "Version ")
@@ -229,44 +231,69 @@ test.test("without a minimap button the setting explains why and keeps its value
     test.assertTrue(addon.settings:Get("minimap"))
 end)
 
-test.test("/agf options is listed in help and explains when there is no panel", function()
+test.test("each section names its master frame page, Settings unless it says otherwise", function()
+    local model = newModel()
+
+    test.assertTrue(model:AddSection("general", "General"))
+    test.assertTrue(model:AddSection("greet", "Guild Greet", { page = "greetings" }))
+    test.assertTrue(model:AddSection("chat", "Chat Tags", { page = "settings" }))
+    test.assertTrue(model:AddSection("recruit", "Recruitment", { page = "recruitment" }))
+    test.assertTrue(model:AddSection("about", "Asgard's Guild Fellowship", { home = true }))
+    test.assertFalse(model:AddSection("odd", "Odd", { page = "nowhere" }))
+
+    local onSettings = model:SectionsOn("settings")
+    test.assertEqual(2, #onSettings)
+    test.assertEqual("general", onSettings[1].id)
+    test.assertEqual("chat", onSettings[2].id)
+    test.assertEqual("greet", model:SectionsOn("greetings")[1].id)
+    test.assertEqual("recruit", model:SectionsOn("recruitment")[1].id)
+    test.assertEqual(0, #model:SectionsOn("nowhere"))
+    -- A home section belongs to the AddOns options' own page, on no tab.
+    local sections = model:Sections()
+    test.assertTrue(sections[5].home)
+    test.assertEqual(nil, sections[5].page)
+end)
+
+test.test("an entry kept to one host is drawn only there; others are drawn in both", function()
+    local model = newModel()
+    model:AddSection("general", "General")
+    local saved = {}
+    test.assertTrue(model:Add("general", toggle("minimap", saved)))
+    test.assertTrue(model:Add("general", { id = "openRoster", kind = "action", label = "Open Roster", host = "options",
+        run = function() end }))
+    test.assertFalse(model:Add("general", toggle("odd", saved, { host = "elsewhere" })))
+
+    test.assertTrue(model:InHost("minimap", "frame"))
+    test.assertTrue(model:InHost("minimap", "options"))
+    test.assertTrue(model:InHost("openRoster", "options"))
+    test.assertFalse(model:InHost("openRoster", "frame"))
+    test.assertFalse(model:InHost("missing", "options"))
+end)
+
+test.test("the composed add-on puts each section on its page and the Open window button on no tab", function()
+    local _, addon = loggedIn("Retail")
+    local settings = addon.settings
+
+    local onSettings = settings:SectionsOn("settings")
+    test.assertEqual(2, #onSettings)
+    test.assertEqual("general", onSettings[1].id)
+    test.assertEqual("chatTags", onSettings[2].id)
+    test.assertEqual("guildGreet", settings:SectionsOn("greetings")[1].id)
+    test.assertEqual("recruitment", settings:SectionsOn("recruitment")[1].id)
+    test.assertTrue(settings:Sections()[1].home)
+    test.assertEqual("openWindow", settings:Sections()[1].entries[1].id)
+    test.assertTrue(settings:InHost("version", "frame"))
+    test.assertTrue(settings:InHost("minimap", "frame"))
+end)
+
+test.test("/agf options is listed in help and explains when the window can't open", function()
     local world = loggedIn("Forever")
 
     fixtures.slash(world, "help")
-    test.assertContains(table.concat(world.messages, "\n"), "/agf options - open the settings panel")
+    test.assertContains(table.concat(world.messages, "\n"), "/agf options - open the add-on's settings")
 
     fixtures.slash(world, "options")
-    test.assertContains(lastMessage(world), "The settings panel isn't available on this client.")
-end)
-
-test.test("/agf greet and the panel's Edit Greetings button open the Greetings window", function()
-    local world, addon = loggedIn("Retail")
-
-    fixtures.slash(world, "help")
-    test.assertContains(table.concat(world.messages, "\n"), "/agf greet - edit your Guild Greet greetings")
-
-    local entry = addon.settings:Entry("editGreetings")
-    test.assertEqual("action", entry.kind)
-    test.assertEqual("Edit Greetings", entry.label)
-    local sections = addon.settings:Sections()
-    local guildGreet
-    local sectionIndex
-    for sectionIndex = 1, #sections do
-        if sections[sectionIndex].id == "guildGreet" then
-            guildGreet = sections[sectionIndex]
-        end
-    end
-    test.assertEqual("Guild Greet", guildGreet.label)
-    test.assertEqual("editGreetings", guildGreet.entries[#guildGreet.entries].id)
-
-    -- The fixtures' stand-in framework can't build windows, so both report
-    -- that instead of raising errors.
-    fixtures.slash(world, "greet")
-    test.assertContains(lastMessage(world), "The Greetings window can't open")
-    local before = #world.messages
-    test.assertTrue(addon.settings:Run("editGreetings"))
-    test.assertEqual(before + 1, #world.messages)
-    test.assertContains(lastMessage(world), "The Greetings window can't open")
+    test.assertContains(lastMessage(world), "can't open")
 end)
 
 test.test("the Guild Greet section can unlock the prompts, and refuses when they can't be drawn", function()
@@ -470,4 +497,74 @@ test.test("a setting's info text is read when asked, and a failing or missing on
     test.assertEqual(nil, model:Info("plain"))
     test.assertEqual(nil, model:Info("broken"))
     test.assertEqual(nil, model:Info("nothing"))
+end)
+
+test.test("a color setting takes only six hex digits, saved in lower case", function()
+    local model = newModel()
+    model:AddSection("chatTags", "Chat Tags")
+    local saved = {}
+    local swatches = { { label = "Gold", color = "ffd100" } }
+    test.assertFalse(model:Add("chatTags", { id = "bare", kind = "color", label = "Bare",
+        get = function() return "ffffff" end, set = function() return true end }))
+    test.assertTrue(model:Add("chatTags", { id = "aliasColor", kind = "color", label = "Alias tag color",
+        swatches = swatches,
+        get = function() return saved.color or "4a90ff" end,
+        set = function(color)
+            saved.color = color
+            return true
+        end }))
+
+    test.assertTrue(model:Set("aliasColor", "FFD100"))
+    test.assertEqual("ffd100", saved.color)
+    local changed, reason = model:Set("aliasColor", "gold")
+    test.assertEqual(nil, changed)
+    test.assertContains(reason, "six hex digits")
+    test.assertEqual(nil, (model:Set("aliasColor", "#ffd100")))
+    test.assertEqual(nil, (model:Set("aliasColor", 16766976)))
+    test.assertEqual("ffd100", model:Get("aliasColor"))
+end)
+
+local function registerTagColorTest(profile)
+    test.test(profile .. ": choosing a tag color in the settings recolors chat tags", function()
+        local world, addon = loggedIn(profile)
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local speaker = profile == "Forever" and "Hammer Smith" or "Hammer-Area52"
+        local before = addon.chatAnnotator:Annotate("CHAT_MSG_GUILD", "hi", speaker)
+        test.assertContains(before, "|cff4a90ff[")
+        test.assertEqual("4a90ff", addon.settings:Get("chatTagColor:alias"))
+
+        test.assertTrue(addon.settings:Set("chatTagColor:alias", "ffd100"))
+
+        test.assertContains(addon.chatAnnotator:Annotate("CHAT_MSG_GUILD", "hi", speaker), "|cffffd100[")
+        test.assertEqual("ffd100", world.database.chatTagColors.alias)
+        test.assertEqual("7fd4ff", addon.settings:Get("chatTagColor:main"))
+    end)
+end
+
+registerTagColorTest("Forever")
+registerTagColorTest("Retail")
+
+test.test("the Guild Greet settings open with the main switches, then headed groups for prompts and timing", function()
+    local _, addon = loggedIn("Retail")
+    local section = addon.settings:SectionsOn("greetings")[1]
+    local ids = {}
+    local index
+    for index = 1, #section.entries do
+        if addon.settings:InHost(section.entries[index].id, "frame") then
+            table.insert(ids, section.entries[index].id)
+        end
+    end
+
+    test.assertEqual("guildGreet", ids[1])
+    test.assertEqual("greetCharacter", ids[2])
+    test.assertEqual("greetUnlock", ids[3])
+    test.assertEqual("greetPromptsHeading", ids[4])
+    test.assertEqual("greetCategory:join", ids[5])
+    test.assertEqual("greetTimingHeading", ids[9])
+    test.assertEqual("welcomeBackMinutes", ids[10])
+    test.assertEqual("greetCap", ids[12])
+    test.assertEqual(12, #ids)
+    -- "This character" explains how it differs from the main switch.
+    test.assertContains(addon.settings:Info("greetCharacter"), "every character on this account")
 end)

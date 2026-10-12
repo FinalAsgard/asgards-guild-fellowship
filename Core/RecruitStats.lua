@@ -68,6 +68,17 @@ function RecruitStats.Line(record, now)
     return "Advertised: " .. record.n .. " (" .. RecruitStats.Recent(record, now) .. " in last 30 days)"
 end
 
+-- The user's own count as the Recruitment page shows it: "You've posted
+-- N guild ads (M in the last 30 days)." A record that's missing, unusable,
+-- or has no ads yet says so.
+function RecruitStats.OwnSummary(record, now)
+    if not RecruitStats.IsValid(record) or record.n == 0 or not isTime(now) then
+        return "You haven't posted a guild ad yet."
+    end
+    return "You've posted " .. record.n .. (record.n == 1 and " guild ad" or " guild ads") .. " (" ..
+        RecruitStats.Recent(record, now) .. " in the last 30 days)."
+end
+
 -- Counts one more ad at `now` in the user's own record (a table changed in
 -- place), dropping times older than 30 days. Returns a copy to send.
 function RecruitStats.AddOwn(record, now)

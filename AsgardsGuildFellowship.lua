@@ -25,12 +25,22 @@ if missingLibraries ~= nil then
     client:Print(missingLibraries)
 end
 
-local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel
-local guildGreet, greetingsWindow, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
+local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
+local frameSettings
+local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
+    -- The master frame's tabs, in order. The first is where the general
+    -- entry points open it.
+    pages = addon.PageNavigator.Create()
+    pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
+    pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
+    pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
+    pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
+    pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
     rosterController = addon.RosterController.Create({
+        pages = pages,
         client = client,
         nameRules = clientProfile.nameRules,
         onMainLinksChanged = function(keys, before)
@@ -65,14 +75,55 @@ if clientProfile.supported then
         end,
         createWindow = function()
             return addon.RosterWindow.Create(client, {
+                navigator = pages,
+                drawPages = {
+                    -- Below the frame's title bar.
+                    settings = function(content)
+                        frameSettings:Draw(content, settings:SectionsOn("settings"), 28)
+                        frameSettings:Refresh()
+                    end,
+                    -- The Recruitment settings, with room below them for the
+                    -- officers' leaderboard (drawn by the roster window).
+                    recruitment = function(content)
+                        local _, below = frameSettings:Draw(content, settings:SectionsOn("recruitment"), 28,
+                            addon.RosterWindow.LEADERBOARD_HEIGHT)
+                        frameSettings:Refresh()
+                        return below
+                    end,
+                    -- Guild Greet's settings, with the greetings editor below
+                    -- them on the same scrolling page.
+                    greetings = function(content, framework)
+                        local _, footer = frameSettings:Draw(content, settings:SectionsOn("greetings"), 28,
+                            addon.GreetingsPage.HEIGHT)
+                        frameSettings:Refresh()
+                        local editor, reason = addon.GreetingsPage.Create(framework, footer, {
+                            library = function()
+                                return guildGreet:Library()
+                            end,
+                            after = function(seconds, callback)
+                                return client:After(seconds, callback)
+                            end,
+                        })
+                        if editor == nil then
+                            rosterController:Print("The greetings editor can't be shown: " .. tostring(reason) .. ".")
+                        end
+                    end,
+                },
+                -- Modes that last only while the frame is open end with it.
+                onHide = function()
+                    settings:Closed()
+                end,
+                onRecentAdsShown = function()
+                    rosterController:RefreshRecruiters()
+                end,
                 loadGeometry = function()
                     local store = rosterController:Store()
-                    return store and store:GetWindowState()
+                    return store and store:GetFrameState()
                 end,
                 saveGeometry = function(state)
                     local store = rosterController:Store()
                     if store ~= nil then
-                        store:SetWindowState(state)
+                        store:SetFrameState(state)
                     end
                 end,
                 onToggleGroup = function(playerId)
@@ -159,6 +210,24 @@ if clientProfile.supported then
     -- Every setting, one section per feature. The panel and the slash
     -- commands both go through it.
     settings = addon.SettingsModel.Create()
+    -- The add-on's own page in the AddOns options; each feature's section
+    -- gets a sub-page under it.
+    settings:AddSection("about", addon.Identity.displayName, { home = true })
+    settings:Add("about", {
+        id = "openWindow",
+        kind = "action",
+        label = "Open window",
+        run = function()
+            rosterController:Open()
+        end,
+    })
+    settings:Add("about", {
+        id = "aboutVersion",
+        kind = "text",
+        get = function()
+            return "Version " .. version .. " on " .. clientProfile.label .. "."
+        end,
+    })
     settings:AddSection("general", "General")
     settings:Add("general", {
         id = "minimap",
@@ -169,14 +238,6 @@ if clientProfile.supported then
         end,
         set = function(shown)
             return entryPoints:SetMinimapShown(shown)
-        end,
-    })
-    settings:Add("general", {
-        id = "openRoster",
-        kind = "action",
-        label = "Open Roster",
-        run = function()
-            rosterController:Open()
         end,
     })
     settings:Add("general", {
@@ -206,7 +267,34 @@ if clientProfile.supported then
             return true
         end,
     })
-    settings:AddSection("guildGreet", "Guild Greet")
+    -- Each kind of tag's color, account-wide; unset, its default.
+    local function tagColor(kind, label, sample)
+        settings:Add("chatTags", {
+            id = "chatTagColor:" .. kind,
+            kind = "color",
+            label = label,
+            sample = sample,
+            default = addon.ChatAnnotator.COLORS[kind],
+            swatches = addon.ChatAnnotator.SWATCHES,
+            get = function()
+                local store = rosterController:Store()
+                return store and store:ChatTagColor(kind) or addon.ChatAnnotator.COLORS[kind]
+            end,
+            set = function(color)
+                local store = rosterController:Store()
+                if store == nil then
+                    return nil, "saved data is unavailable"
+                end
+                if not store:SetChatTagColor(kind, color) then
+                    return nil, "the saved colors are unreadable"
+                end
+                return true
+            end,
+        })
+    end
+    tagColor("alias", "Alias tag color", "[TheTool]")
+    tagColor("main", "Main's name tag color", "[Hammer]")
+    settings:AddSection("guildGreet", "Guild Greet", { page = "greetings" })
     settings:Add("guildGreet", {
         id = "guildGreet",
         kind = "toggle",
@@ -231,7 +319,12 @@ if clientProfile.supported then
     settings:Add("guildGreet", {
         id = "greetCharacter",
         kind = "toggle",
-        label = "Guild Greet on this character",
+        label = "Greet from this character",
+        info = function()
+            return "The setting above turns Guild Greet on or off for every character on this account. " ..
+                "This one only stops the prompts on the character you're playing now, for example an alt " ..
+                "in another guild, and leaves your other characters as they are."
+        end,
         get = function()
             local store, selfKey = rosterController:Store(), rosterController:SelfKey()
             return store == nil or selfKey == nil or store:GreetOnCharacter(selfKey)
@@ -249,6 +342,25 @@ if clientProfile.supported then
             end
             return true
         end,
+    })
+    -- Not saved, and only while the master frame or the options are open:
+    -- closing either, or a reload, locks the prompts again.
+    settings:Add("guildGreet", {
+        id = "greetUnlock",
+        kind = "toggle",
+        offOnClose = true,
+        label = "Unlock greet prompts to drag them somewhere else",
+        get = function()
+            return greetPrompts:IsUnlocked()
+        end,
+        set = function(unlocked)
+            return greetPrompts:SetUnlocked(unlocked)
+        end,
+    })
+    settings:Add("guildGreet", {
+        id = "greetPromptsHeading",
+        kind = "heading",
+        label = "Which arrivals to prompt for",
     })
     local categoryIndex
     for categoryIndex = 1, #addon.GreetingLibrary.CATEGORIES do
@@ -298,6 +410,11 @@ if clientProfile.supported then
             end,
         })
     end
+    settings:Add("guildGreet", {
+        id = "greetTimingHeading",
+        kind = "heading",
+        label = "Timing",
+    })
     greetNumber("welcomeBackMinutes", "Minutes away before coming back is a welcome back")
     greetNumber("longAbsenceDays", "Days away before a login is a long absence")
     settings:Add("guildGreet", {
@@ -321,44 +438,15 @@ if clientProfile.supported then
             return true
         end,
     })
-    -- Not saved, and only while the panel is open: closing the options, or
-    -- a reload, locks the prompts again.
-    settings:Add("guildGreet", {
-        id = "greetUnlock",
-        kind = "toggle",
-        offOnClose = true,
-        label = "Unlock greet prompts to drag them somewhere else",
-        get = function()
-            return greetPrompts:IsUnlocked()
-        end,
-        set = function(unlocked)
-            return greetPrompts:SetUnlocked(unlocked)
-        end,
-    })
-    -- The greetings themselves are edited in their own window, made on
-    -- first use.
+    -- The greetings are edited below these settings on the master frame's
+    -- Greetings tab; the AddOns options get a button to go there.
     local function openGreetings()
-        if greetingsWindow == nil then
-            local reason
-            greetingsWindow, reason = addon.GreetingsWindow.Create(client, {
-                library = function()
-                    return guildGreet:Library()
-                end,
-                after = function(seconds, callback)
-                    return client:After(seconds, callback)
-                end,
-            })
-            if greetingsWindow == nil then
-                rosterController:Print("The Greetings window can't open: " .. tostring(reason) ..
-                    ". Reinstall the add-on, or in a development checkout run tools/Fetch-Libraries.ps1.")
-                return
-            end
-        end
-        greetingsWindow:Open()
+        rosterController:Open("greetings")
     end
     settings:Add("guildGreet", {
         id = "editGreetings",
         kind = "action",
+        host = "options",
         label = "Edit Greetings",
         run = openGreetings,
     })
@@ -370,9 +458,27 @@ if clientProfile.supported then
         end
         return true
     end
-    -- Recruitment has a page of its own in the AddOns options, so the main
-    -- page fits.
-    settings:AddSection("recruitment", "Recruitment", { ownPage = true })
+    settings:AddSection("recruitment", "Recruitment", { page = "recruitment" })
+    -- The user's own ad count, across all their characters.
+    settings:Add("recruitment", {
+        id = "recruitMyCount",
+        kind = "text",
+        get = function()
+            local store = rosterController:Store()
+            return addon.RecruitStats.OwnSummary(store and store:RecruitOwnStats(), client:Timestamp())
+        end,
+    })
+    -- Says why the settings below are greyed out, only when they are.
+    settings:Add("recruitment", {
+        id = "recruitCantInvite",
+        kind = "text",
+        shown = function()
+            return not client:CanGuildInvite()
+        end,
+        get = function()
+            return "This character can't invite to the guild, so these settings can't be changed here."
+        end,
+    })
     -- Kept for the logged-in character.
     settings:Add("recruitment", {
         id = "recruitOptIn",
@@ -557,13 +663,18 @@ if clientProfile.supported then
             return guildRecruit:SetOfficerSetting("paused", paused)
         end,
     })
+    -- The same settings, drawn twice: in the game's AddOns options and on
+    -- the master frame's pages. Each refreshes on every change.
     settingsPanel = addon.SettingsPanel.Create(client, settings)
-    router:Register("options", "open the settings panel", function()
-        if not settingsPanel:Open() then
-            rosterController:Print("The settings panel isn't available on this client.")
-        end
+    frameSettings = addon.SettingsPanel.Create(client, settings, "frame")
+    frameSettings:Watch()
+    router:Register("options", "open the add-on's settings", function()
+        rosterController:Open("settings")
     end)
     router:Register("greet", "edit your Guild Greet greetings", openGreetings)
+    router:Register("recruit", "open your Guild Recruit settings", function()
+        rosterController:Open("recruitment")
+    end)
     router:Register("minimap", "show or hide the minimap button", function()
         local shown, reason = settings:Toggle("minimap")
         if shown == nil then
@@ -725,7 +836,20 @@ if clientProfile.supported then
         end,
         view = greetPrompts,
     })
-    recruitPrompts = addon.RecruitPrompts.Create(client)
+    -- The Guild Recruit window stays where it's dragged; the place is saved
+    -- account-wide.
+    recruitPrompts = addon.RecruitPrompts.Create(client, {
+        loadAnchor = function()
+            local store = rosterController:Store()
+            return store and store:RecruitAnchor()
+        end,
+        saveAnchor = function(anchor)
+            local store = rosterController:Store()
+            if store ~= nil then
+                store:SetRecruitAnchor(anchor)
+            end
+        end,
+    })
     -- Guild Recruit keeps its ad times with the current guild.
     guildRecruit = addon.GuildRecruit.Create({
         partition = function()
@@ -749,10 +873,18 @@ if clientProfile.supported then
             if zone == nil then
                 return nil
             end
+            -- Arriving somewhere, the client can put the player in the new
+            -- zone's General a moment before it reports the new zone. Until
+            -- the two agree there's no General here, so an ad is never sent
+            -- to one zone and counted for another.
+            local general = client:GetGeneralChannel()
+            if general ~= nil and not client:IsChannelOfZone(general, zone.name) then
+                general = nil
+            end
             return {
                 key = zone.key,
                 name = zone.name,
-                general = client:GetGeneralChannel(),
+                general = general,
                 trade = client:GetTradeChannel(),
             }
         end,
@@ -790,9 +922,12 @@ if clientProfile.supported then
         mapName = function(mapID)
             return client:GetMapName(mapID)
         end,
-        -- An open Recruiters view shows new counts and ad times at once.
+        -- The open leaderboard, recent ads, and the user's own count show
+        -- new counts and ad times at once.
         onStatsChanged = function()
             rosterController:RefreshRecruiters()
+            frameSettings:Refresh()
+            settingsPanel:Refresh()
         end,
         isOwn = function(sender)
             local guild, _, normalizer = rosterController:QuietContext()
@@ -843,6 +978,7 @@ if clientProfile.supported then
         -- change later can grant or take away invite permission.
         guildRecruit:OnRosterUpdate()
         settingsPanel:Refresh()
+        frameSettings:Refresh()
     end)
     -- Chat tags read the same guild context as the roster.
     chatAnnotator = addon.ChatAnnotator.Create({
@@ -859,6 +995,10 @@ if clientProfile.supported then
         enabled = function()
             local store = rosterController:Store()
             return store == nil or store:ChatTagsEnabled()
+        end,
+        colorFor = function(kind)
+            local store = rosterController:Store()
+            return store and store:ChatTagColor(kind)
         end,
     })
     entryPoints = addon.EntryPoints.Create({
@@ -930,11 +1070,13 @@ addon.libraryCheck = libraryCheck
 addon.lifecycle = lifecycle
 addon.persistence = persistence
 addon.rosterController = rosterController
+addon.pages = pages
 addon.entryPoints = entryPoints
 addon.chatAnnotator = chatAnnotator
 addon.comm = comm
 addon.settings = settings
 addon.settingsPanel = settingsPanel
+addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
 addon.syncSession = syncSession

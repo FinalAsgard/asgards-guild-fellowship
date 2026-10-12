@@ -172,18 +172,37 @@ test.test("the store reports unavailable saved data and guild identity", functio
     test.assertContains(reason, "guild identity is unavailable")
 end)
 
-test.test("window geometry is saved account-wide and an unusable value is kept", function()
+test.test("master frame geometry is saved account-wide and an unusable value is kept", function()
     local database = foundationRoot()
     local store = newStore(database)
 
-    test.assertEqual(nil, store:GetWindowState())
-    test.assertTrue(store:SetWindowState({ point = "CENTER", x = 1, y = 2, width = 500, height = 300 }))
-    test.assertEqual(500, store:GetWindowState().width)
+    test.assertEqual(nil, store:GetFrameState())
+    test.assertTrue(store:SetFrameState({ point = "CENTER", x = 1, y = 2, width = 800, height = 600 }))
+    test.assertEqual(800, store:GetFrameState().width)
 
-    database.window = "corrupt"
-    test.assertEqual(nil, store:GetWindowState())
-    test.assertFalse(store:SetWindowState({ width = 1 }))
-    test.assertEqual("corrupt", database.window)
+    database.frame = "corrupt"
+    test.assertEqual(nil, store:GetFrameState())
+    test.assertFalse(store:SetFrameState({ width = 1 }))
+    test.assertEqual("corrupt", database.frame)
+end)
+
+test.test("the master frame starts where the roster window was saved, at its own size", function()
+    local database = foundationRoot()
+    database.window = { point = "TOPLEFT", relativePoint = "TOPLEFT", x = 40, y = -60, width = 640, height = 440 }
+    local store = newStore(database)
+
+    local state = store:GetFrameState()
+
+    test.assertEqual("TOPLEFT", state.point)
+    test.assertEqual("TOPLEFT", state.relativePoint)
+    test.assertEqual(40, state.x)
+    test.assertEqual(-60, state.y)
+    test.assertEqual(nil, state.width)
+    test.assertEqual(nil, state.height)
+
+    -- Once the frame saves its own geometry, that wins.
+    store:SetFrameState({ point = "CENTER", relativePoint = "CENTER", x = 0, y = 0, width = 760, height = 560 })
+    test.assertEqual("CENTER", store:GetFrameState().point)
 end)
 
 test.test("chat tags are on by default and the choice is saved account-wide", function()

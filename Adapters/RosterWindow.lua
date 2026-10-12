@@ -1,22 +1,21 @@
 local _, addon = ...
 
--- The roster window, built with the Details! Framework. It lives in
--- Adapters/ because it uses game globals (CreateFrame, UIParent) and the
--- framework directly; Core never sees either. It is not unit tested; the
--- in-game checklist covers it.
+-- The master frame with the roster on its Roster page, built with the
+-- Details! Framework. It lives in Adapters/ because it uses game globals
+-- (CreateFrame, UIParent) and the framework directly; Core never sees
+-- either. It is not unit tested; the in-game checklist covers it.
 --
 -- Create() returns nil when the framework is missing or fails to build the
--- window (its behavior on WoW Forever is unconfirmed), so the caller can
--- print a message instead of raising Lua errors. The window is created once,
+-- frame (its behavior on WoW Forever is unconfirmed), so the caller can
+-- print a message instead of raising Lua errors. The frame is created once,
 -- then hidden and shown; it is never destroyed.
 local RosterWindow = {
-    DEFAULT_WIDTH = 640,
-    DEFAULT_HEIGHT = 440,
-    MIN_WIDTH = 480,
-    MIN_HEIGHT = 240,
     LINE_HEIGHT = 22,
     -- How far an alt's name sits in from its player's header.
     INDENT = 18,
+    -- Room on the right of a page's list for its scroll bar, which the
+    -- framework draws just outside the list.
+    SCROLL_BAR_ROOM = 34,
 }
 addon.RosterWindow = RosterWindow
 
@@ -173,46 +172,6 @@ local function refreshLines(scroll, rows, offset, totalLines)
             end
         end
     end
-end
-
-local function setResizeBounds(frame)
-    frame:SetResizable(true)
-    if type(frame.SetResizeBounds) == "function" then
-        frame:SetResizeBounds(RosterWindow.MIN_WIDTH, RosterWindow.MIN_HEIGHT)
-    elseif type(frame.SetMinResize) == "function" then
-        frame:SetMinResize(RosterWindow.MIN_WIDTH, RosterWindow.MIN_HEIGHT)
-    end
-end
-
-local function restoreGeometry(frame, state, parent)
-    if type(state) ~= "table" then
-        return
-    end
-    if type(state.width) == "number" and type(state.height) == "number" then
-        frame:SetSize(
-            math.max(state.width, RosterWindow.MIN_WIDTH),
-            math.max(state.height, RosterWindow.MIN_HEIGHT)
-        )
-    end
-    if type(state.point) == "string" and type(state.relativePoint) == "string"
-        and type(state.x) == "number" and type(state.y) == "number"
-    then
-        frame:ClearAllPoints()
-        frame:SetPoint(state.point, parent, state.relativePoint, state.x, state.y)
-    end
-end
-
-local function readGeometry(frame)
-    local point, _, relativePoint, x, y = frame:GetPoint(1)
-    local width, height = frame:GetSize()
-    return {
-        point = point,
-        relativePoint = relativePoint,
-        x = x,
-        y = y,
-        width = width,
-        height = height,
-    }
 end
 
 -- Organize menu, alias dialog, and "Set main…" picker ---------------------
@@ -410,7 +369,7 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
     panel:SetFrameStrata("HIGH")
     panel:ClearAllPoints()
-    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
+    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
     local edit = { panel = panel }
 
     -- The alias, and the same Set alias… and Set main… dialogs as the
@@ -707,113 +666,178 @@ local function buildConflictPanel(framework, options, frameName)
     return { panel = panel, scroll = scroll, empty = empty, acceptAll = acceptAll, rejectAll = rejectAll }
 end
 
--- The officers' Recruiters view: players ranked by ads in the last 30 days,
--- then all time, and then the channels this client knows were advertised in
--- lately. Each part starts with a heading row naming its own columns (see
--- RosterController:RecruitersView).
+-- A list of rows in columns, as the Recruiters leaderboard and the Recent
+-- ads page show them: a heading row in gold naming the columns, rows on
+-- faint stripes, and a grey line when the list is empty (see
+-- RosterController:RecruitersView and RecentAdsView).
+local function listLineCreator(columns)
+    return function(scroll, index)
+        local line = CreateFrame("Frame", nil, scroll)
+        line:SetHeight(RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
+        line.background = line:CreateTexture(nil, "BACKGROUND")
+        line.background:SetAllPoints(line)
+        line.cells = {}
+        local columnIndex
+        for columnIndex = 1, #columns do
+            local column = columns[columnIndex]
+            local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
+            cell:SetWidth(column.width)
+            cell:SetJustifyH("LEFT")
+            cell:SetWordWrap(false)
+            line.cells[column.field] = cell
+        end
+        return line
+    end
+end
+
+local function listLineRefresher(columns)
+    return function(scroll, rows, offset, totalLines)
+        local lineIndex
+        for lineIndex = 1, totalLines do
+            local dataIndex = lineIndex + offset
+            local row = rows[dataIndex]
+            if row ~= nil then
+                local line = scroll:GetLine(lineIndex)
+                local columnIndex
+                for columnIndex = 1, #columns do
+                    local field = columns[columnIndex].field
+                    local text = tostring(row[field] or "")
+                    if row.kind == "heading" then
+                        text = "|cffffd100" .. text .. "|r"
+                    elseif row.kind == "empty" then
+                        text = "|cff9d9d9d" .. text .. "|r"
+                    end
+                    line.cells[field]:SetText(text)
+                end
+                if row.kind == "heading" or row.kind == "empty" then
+                    setBackground(line, NO_BACKGROUND)
+                elseif dataIndex % 2 == 0 then
+                    setBackground(line, STRIPE_BACKGROUND)
+                else
+                    setBackground(line, NO_BACKGROUND)
+                end
+            end
+        end
+    end
+end
+
+-- Draws a titled list of `lines` rows in `columns`, `width` wide, into
+-- `parent`. Returns { holder, scroll }.
+local function buildList(framework, parent, scrollName, title, columns, width, lines)
+    local holder = CreateFrame("Frame", nil, parent)
+    holder:SetAllPoints(parent)
+    local heading = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    heading:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -4)
+    heading:SetText(title)
+    local height = lines * RosterWindow.LINE_HEIGHT
+    local createLine = listLineCreator(columns)
+    local scroll = framework:CreateScrollBox(
+        holder,
+        scrollName,
+        listLineRefresher(columns),
+        {},
+        width,
+        height,
+        lines,
+        RosterWindow.LINE_HEIGHT,
+        createLine,
+        true
+    )
+    scroll:ClearAllPoints()
+    scroll:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -30)
+    scroll:SetSize(width, height)
+    scroll:CreateLines(createLine, lines)
+    return { holder = holder, scroll = scroll }
+end
+
+-- The officers' Recruiters leaderboard on the Recruitment page: players
+-- ranked by ads in the last 30 days, then all time.
 local RECRUITER_COLUMNS = {
     { field = "label", x = 8, width = 200 },
     { field = "recent", x = 214, width = 110 },
     { field = "total", x = 330, width = 60 },
 }
 local RECRUITERS_WIDTH = 420
-local RECRUITERS_HEIGHT = 360
+local RECRUITER_LINES = 12
+-- The room the leaderboard takes below the Recruitment settings.
+RosterWindow.LEADERBOARD_HEIGHT = 30 + RECRUITER_LINES * RosterWindow.LINE_HEIGHT + 12
 
-local function createRecruiterLine(scroll, index)
-    local line = CreateFrame("Frame", nil, scroll)
-    line:SetHeight(RosterWindow.LINE_HEIGHT)
-    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
-    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
-    line.background = line:CreateTexture(nil, "BACKGROUND")
-    line.background:SetAllPoints(line)
-    line.cells = {}
-    local columnIndex
-    for columnIndex = 1, #RECRUITER_COLUMNS do
-        local column = RECRUITER_COLUMNS[columnIndex]
-        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
-        cell:SetWidth(column.width)
-        cell:SetJustifyH("LEFT")
-        cell:SetWordWrap(false)
-        line.cells[column.field] = cell
-    end
-    return line
+-- Draws the leaderboard into `parent` (LEADERBOARD_HEIGHT tall), hidden
+-- until the controller hands over an officer's rows.
+local function buildLeaderboard(framework, parent, frameName)
+    local leaderboard = buildList(framework, parent, frameName .. "RecruiterScroll", "Recruiters",
+        RECRUITER_COLUMNS, RECRUITERS_WIDTH, RECRUITER_LINES)
+    leaderboard.holder:Hide()
+    return leaderboard
 end
 
-local function refreshRecruiterLines(scroll, rows, offset, totalLines)
-    local lineIndex
-    for lineIndex = 1, totalLines do
-        local dataIndex = lineIndex + offset
-        local row = rows[dataIndex]
-        if row ~= nil then
-            local line = scroll:GetLine(lineIndex)
-            local columnIndex
-            for columnIndex = 1, #RECRUITER_COLUMNS do
-                local field = RECRUITER_COLUMNS[columnIndex].field
-                local text = tostring(row[field] or "")
-                if row.kind == "heading" then
-                    text = "|cffffd100" .. text .. "|r"
-                elseif row.kind == "empty" then
-                    text = "|cff9d9d9d" .. text .. "|r"
-                end
-                line.cells[field]:SetText(text)
-            end
-            if row.kind == "heading" or row.kind == "empty" then
-                setBackground(line, NO_BACKGROUND)
-            elseif dataIndex % 2 == 0 then
-                setBackground(line, STRIPE_BACKGROUND)
-            else
-                setBackground(line, NO_BACKGROUND)
-            end
-        end
-    end
-end
+-- The Recent Guild Advertisements page, for every member: each channel
+-- advertised in lately, who posted, and how long ago.
+local AD_COLUMNS = {
+    { field = "label", x = 8, width = 270 },
+    { field = "by", x = 284, width = 230 },
+    { field = "recent", x = 520, width = 140 },
+}
 
-local function buildRecruitersPanel(framework, frameName)
-    local panel = framework:CreateSimplePanel(
-        UIParent,
-        RECRUITERS_WIDTH,
-        RECRUITERS_HEIGHT,
-        addon.Identity.displayName .. " - Recruiters",
-        frameName .. "Recruiters"
-    )
-    panel:SetFrameStrata("DIALOG")
-    local lineAmount = math.floor((RECRUITERS_HEIGHT - 54) / RosterWindow.LINE_HEIGHT)
-    local scroll = framework:CreateScrollBox(
-        panel,
-        frameName .. "RecruiterScroll",
-        refreshRecruiterLines,
-        {},
-        RECRUITERS_WIDTH - 20,
-        RECRUITERS_HEIGHT - 54,
-        lineAmount,
-        RosterWindow.LINE_HEIGHT,
-        createRecruiterLine,
-        true
-    )
-    scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -32)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 12)
-    scroll:CreateLines(createRecruiterLine, lineAmount)
-    panel:Hide()
-    return { panel = panel, scroll = scroll }
+-- Draws the Recent Guild Advertisements list onto its page, below the
+-- frame's title bar, filling the page (clear of the scroll bar) with as
+-- many lines as it holds; more lines are made as the frame grows.
+local function buildRecentAds(framework, page, frameName)
+    local holder = CreateFrame("Frame", nil, page)
+    holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
+    holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
+    local width, height = page:GetSize()
+    local lines = math.max(1, math.floor((height - 70) / RosterWindow.LINE_HEIGHT))
+    local ads = buildList(framework, holder, frameName .. "RecentAdsScroll", "Recent Guild Advertisements",
+        AD_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines)
+    ads.scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 0)
+    return ads
 end
 
 local function build(framework, options)
-    local parent = UIParent
     local frameName = addon.Identity.addonName .. "RosterWindow"
-    -- The simple panel is movable, has a close button, and joins
-    -- UISpecialFrames, so Escape closes it.
-    local panel = framework:CreateSimplePanel(
-        parent,
-        RosterWindow.DEFAULT_WIDTH,
-        RosterWindow.DEFAULT_HEIGHT,
-        addon.Identity.displayName,
-        frameName
-    )
-    panel:SetFrameStrata("HIGH")
-    setResizeBounds(panel)
-    restoreGeometry(panel, options.loadGeometry(), parent)
+    local host = addon.MasterFrame.Build(framework, {
+        navigator = options.navigator,
+        frameName = frameName,
+        loadGeometry = options.loadGeometry,
+        saveGeometry = options.saveGeometry,
+    })
+    -- The roster's controls, list, and footer are drawn on the Roster page;
+    -- the pop-out panels stay beside the master frame.
+    local frame = host.panel
+    local panel = host:Content("roster")
+    -- The other pages draw themselves; one that fails is left empty rather
+    -- than taking the roster down with it. The Recruitment page hands back
+    -- room below its settings for the officers' leaderboard.
+    local recruiters
+    local pageId, draw
+    for pageId, draw in pairs(options.drawPages or {}) do
+        local content = host:Content(pageId)
+        if content ~= nil then
+            local drawn, below = pcall(draw, content, framework)
+            if drawn and pageId == "recruitment" and below ~= nil then
+                local built, leaderboard = pcall(buildLeaderboard, framework, below, frameName)
+                recruiters = built and leaderboard or nil
+            end
+        end
+    end
+    -- The Recent ads page, for everyone, when the frame has one.
+    local recentAds
+    local adsPage = host:Content("ads")
+    if adsPage ~= nil then
+        local built, ads = pcall(buildRecentAds, framework, adsPage, frameName)
+        recentAds = built and ads or nil
+        -- Showing the page brings "how long ago" up to date.
+        if options.onRecentAdsShown ~= nil then
+            adsPage:HookScript("OnShow", options.onRecentAdsShown)
+        end
+    end
+    if options.onHide ~= nil then
+        frame:HookScript("OnHide", options.onHide)
+    end
 
     -- Controls: search, online only, expand and collapse all.
     local search = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
@@ -872,7 +896,9 @@ local function build(framework, options)
         header:SetText(column.header)
     end
 
-    local lineAmount = math.floor((RosterWindow.DEFAULT_HEIGHT - 120) / RosterWindow.LINE_HEIGHT)
+    -- Enough lines for the frame's restored height.
+    local width, height = frame:GetSize()
+    local lineAmount = math.floor((height - 120) / RosterWindow.LINE_HEIGHT)
     local picker = buildPicker(framework, frameName)
     -- "Set main…": links `key` (named `name`) as an alt of the picked player.
     local function openSetMain(key, name)
@@ -936,8 +962,8 @@ local function build(framework, options)
         frameName .. "Scroll",
         refreshLines,
         {},
-        RosterWindow.DEFAULT_WIDTH - 20,
-        RosterWindow.DEFAULT_HEIGHT - 120,
+        width - 20,
+        height - 120,
         lineAmount,
         RosterWindow.LINE_HEIGHT,
         newLine,
@@ -945,7 +971,10 @@ local function build(framework, options)
     )
     scroll:ClearAllPoints()
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -74)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 40)
+    -- The scroll bar is drawn just outside the list's right edge, so the
+    -- list stops short of the frame's edge to keep the bar inside it, clear
+    -- of the tabs.
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 40)
     scroll:CreateLines(newLine, lineAmount)
 
     -- Footer: a Rescan button and what the last scan found.
@@ -960,12 +989,6 @@ local function build(framework, options)
     conflictsButton:SetSize(110, 22)
     conflictsButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -36, 10)
     conflictsButton:SetText("Conflicts (0)")
-    -- Officers only: shown once the controller hands over Recruiters rows.
-    local recruitersButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    recruitersButton:SetSize(90, 22)
-    recruitersButton:SetPoint("RIGHT", conflictsButton, "LEFT", -6, 0)
-    recruitersButton:SetText("Recruiters")
-    recruitersButton:Hide()
 
     -- Departed characters are hidden unless this is checked.
     local departed = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
@@ -992,24 +1015,12 @@ local function build(framework, options)
 
     local status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     status:SetPoint("LEFT", purgeAll, "RIGHT", 10, 0)
-    status:SetPoint("RIGHT", recruitersButton, "LEFT", -10, 0)
+    status:SetPoint("RIGHT", conflictsButton, "LEFT", -10, 0)
     status:SetJustifyH("LEFT")
     status:SetWordWrap(false)
 
-    local function save()
-        options.saveGeometry(readGeometry(panel))
-    end
-    panel:HookScript("OnMouseUp", save)
-    if type(framework.CreateResizeGrips) == "function" then
-        local leftGrip, rightGrip = framework:CreateResizeGrips(panel)
-        leftGrip:HookScript("OnMouseUp", save)
-        rightGrip:HookScript("OnMouseUp", save)
-    end
-    panel:HookScript("OnHide", save)
-    panel:Hide()
-
     local conflicts = buildConflictPanel(framework, options, frameName)
-    local playerPanel = buildPlayerPanel(framework, options, frameName, panel, {
+    local playerPanel = buildPlayerPanel(framework, options, frameName, frame, {
         openSetAlias = openSetAlias,
         openSetMain = openSetMain,
     })
@@ -1021,24 +1032,21 @@ local function build(framework, options)
         end
     end)
     conflicts.button = conflictsButton
-    local recruiters = buildRecruitersPanel(framework, frameName)
-    recruiters.button = recruitersButton
-    recruitersButton:SetScript("OnClick", function()
-        if recruiters.panel:IsShown() then
-            recruiters.panel:Hide()
-        else
-            recruiters.panel:Show()
-        end
-    end)
-    panel:HookScript("OnHide", function()
+    frame:HookScript("OnHide", function()
         conflicts.panel:Hide()
-        recruiters.panel:Hide()
         playerPanel.panel:Hide()
     end)
 
-    return panel, scroll, status, conflicts, playerPanel, recruiters
+    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds
 end
 
+-- options.navigator is the PageNavigator with the master frame's pages;
+-- options.drawPages maps a page id to function(content, framework) that
+-- draws that page into its content frame (the Roster page is drawn here);
+-- the Recruitment page's returns a frame LEADERBOARD_HEIGHT tall below its
+-- settings, where the officers' leaderboard is drawn;
+-- options.onHide() runs whenever the frame closes;
+-- options.onRecentAdsShown() runs whenever the Recent ads page shows;
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
 -- options.onToggleGroup(playerId) runs when a player header is clicked;
@@ -1060,17 +1068,19 @@ function RosterWindow.Create(client, options)
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, panel, scroll, status, conflicts, playerPanel, recruiters = pcall(build, framework, options)
-    if not ok or panel == nil then
+    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds = pcall(build, framework, options)
+    if not ok or host == nil then
         return nil, "the Details! Framework could not build the window"
     end
     return setmetatable({
-        panel = panel,
+        host = host,
+        panel = host.panel,
         scroll = scroll,
         status = status,
         conflicts = conflicts,
         playerPanel = playerPanel,
         recruiters = recruiters,
+        recentAds = recentAds,
     }, Window)
 end
 
@@ -1084,6 +1094,13 @@ end
 
 function Window:Hide()
     self.panel:Hide()
+end
+
+-- Shows the page `id` on the master frame (see MasterFrame).
+function Window:ShowPage(id)
+    return (pcall(function()
+        self.host:ShowPage(id)
+    end))
 end
 
 function Window:SetTitle(title)
@@ -1118,20 +1135,35 @@ function Window:SetConflicts(rows)
     end))
 end
 
--- Shows the officers' Recruiters view (see
--- RosterController:RecruitersView), or, for nil, hides the view and its
--- footer button.
+-- Shows the officers' Recruiters leaderboard on the Recruitment page (see
+-- RosterController:RecruitersView), or, for nil, hides it. False when the
+-- page has no leaderboard.
 function Window:SetRecruiters(rows)
+    local recruiters = self.recruiters
+    if recruiters == nil then
+        return false
+    end
     return (pcall(function()
-        local recruiters = self.recruiters
         if rows == nil then
-            recruiters.button:Hide()
-            recruiters.panel:Hide()
+            recruiters.holder:Hide()
             return
         end
-        recruiters.button:Show()
+        recruiters.holder:Show()
         recruiters.scroll:SetData(rows)
         recruiters.scroll:Refresh()
+    end))
+end
+
+-- Shows the Recent ads page's rows (see RosterController:RecentAdsView).
+-- False when the frame has no Recent ads page.
+function Window:SetRecentAds(rows)
+    local recentAds = self.recentAds
+    if recentAds == nil then
+        return false
+    end
+    return (pcall(function()
+        recentAds.scroll:SetData(rows or {})
+        recentAds.scroll:Refresh()
     end))
 end
 

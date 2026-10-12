@@ -119,6 +119,58 @@ for index = 1, #fixtures.PROFILES do
     end)
 end
 
+for index = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[index]
+    local zones = ZONES[profile]
+
+    -- Arriving by boat, the client can move the player into the new zone's
+    -- General while it still reports the old zone. Post then must not send
+    -- an ad to the new zone's General and count it for the old one.
+    test.test(profile .. ": Post sends nothing while General is another zone's than the one being counted", function()
+        local world = login(profile)
+        optIn(world)
+        local key = world.shown[1].key
+
+        -- Still reported in the first zone, but General is the next zone's.
+        world.channels = { [1] = "General - " .. zones.there[2] }
+        test.assertEqual(nil, world.addon.guildRecruit:Post(key))
+        test.assertEqual(0, #world.chat)
+        local partition = select(2, world.addon.rosterController:QuietContext())
+        test.assertEqual(nil, next(partition:GetRecruitLedger()))
+        test.assertEqual(0, #world.shown)
+
+        -- The client catches up: the next zone is prompted for, and posting
+        -- there counts for it.
+        world.zone = { mapID = zones.there[1], name = zones.there[2] }
+        fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+        fixtures.runTimers(world, 60)
+        test.assertEqual(1, #world.shown)
+        test.assertEqual("Advertise in " .. zones.there[2] .. " General?", world.shown[1].text)
+        world.handlers.post(world.shown[1].key)
+        test.assertEqual(1, #world.chat)
+
+        -- A minute later nothing asks again, and the recent ads name the zone
+        -- the ad went to.
+        fixtures.runTimers(world, 60)
+        test.assertEqual(0, #world.shown)
+        local ads = world.addon.guildRecruit:KnownAds()
+        test.assertEqual(zones.there[2] .. " General", ads[1].label)
+    end)
+
+    test.test(profile .. ": a prompt never shows for a zone before its map is known", function()
+        local world = login(profile)
+        optIn(world)
+        world.handlers.post(world.shown[1].key)
+
+        world.zone = { name = zones.there[2] }
+        world.channels = { [1] = "General - " .. zones.there[2] }
+        fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+        fixtures.runTimers(world, 60)
+
+        test.assertEqual(0, #world.shown)
+    end)
+end
+
 test.test("guild recruit: a failed send records nothing and keeps the prompt", function()
     local world = login("Retail")
     optIn(world)
@@ -203,8 +255,13 @@ test.test("recruitment settings: a fresh install has opt-in off and no ad", func
     end
 
     test.assertEqual("Recruitment", section.label)
-    test.assertEqual("recruitOptIn", section.entries[1].id)
-    test.assertEqual("recruitAd", section.entries[2].id)
+    -- After the user's own count, and the line explaining greyed-out
+    -- settings to a character that can't invite.
+    test.assertEqual("recruitMyCount", section.entries[1].id)
+    test.assertEqual("recruitCantInvite", section.entries[2].id)
+    test.assertEqual("recruitOptIn", section.entries[3].id)
+    test.assertEqual("recruitAd", section.entries[4].id)
+    test.assertEqual("You haven't posted a guild ad yet.", world.addon.settings:Get("recruitMyCount"))
     test.assertFalse(world.addon.settings:Get("recruitOptIn"))
     test.assertEqual("", world.addon.settings:Get("recruitAd"))
 end)
@@ -236,12 +293,16 @@ test.test("recruitment settings: an ad longer than 255 characters is refused", f
     test.assertTrue(world.addon.settings:Set("recruitAd", string.rep("x", 255)))
 end)
 
-test.test("recruitment settings: both are disabled while the character can't invite", function()
+test.test("recruitment settings: both are disabled while the character can't invite, and a line says why", function()
     local world = login("Retail")
+    test.assertFalse(world.addon.settings:IsShown("recruitCantInvite"))
     world.canInvite = false
 
     test.assertFalse(world.addon.settings:IsEnabled("recruitOptIn"))
     test.assertFalse(world.addon.settings:IsEnabled("recruitAd"))
+    test.assertFalse(world.addon.settings:IsEnabled("recruitUseOfficerAd"))
+    test.assertTrue(world.addon.settings:IsShown("recruitCantInvite"))
+    test.assertContains(world.addon.settings:Get("recruitCantInvite"), "can't invite to the guild")
     local changed, reason = world.addon.settings:Set("recruitAd", AD)
     test.assertEqual(nil, changed)
     test.assertEqual("this character can't invite to the guild", reason)
@@ -1176,7 +1237,8 @@ test.test("ad stats: a player who has never advertised shows no line", function(
     test.assertEqual(nil, world.addon.guildRecruit:StatsLine({ selfKey }))
 end)
 
--- A roster window that records what it was last told about Recruiters.
+-- A roster window that records what it was last told about Recruiters and
+-- Recent ads.
 local function recruitersWindow(world)
     local window = {}
     function window:IsShown()
@@ -1184,6 +1246,9 @@ local function recruitersWindow(world)
     end
     function window:SetRecruiters(rows)
         self.rows = rows
+    end
+    function window:SetRecentAds(rows)
+        self.ads = rows
     end
     world.addon.rosterController.window = window
     return window
@@ -1223,27 +1288,150 @@ test.test("recruiters: an officer's open view updates when new stats arrive, ran
     test.assertEqual(1, recruiters[2].total)
 end)
 
-test.test("recruiters: the view lists the channels this client knows were advertised in, newest first", function()
-    local world = login("Retail", { playerName = OFFICER })
+test.test("recent ads: every member sees the channels advertised in lately, newest first, and who posted", function()
+    local world = login("Retail", { playerName = MEMBER })
     local window = recruitersWindow(world)
     local recruit = world.addon.guildRecruit
 
-    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 12 * 60 }, MEMBER)
+    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 12 * 60 }, OFFICER)
     recruit:OnMessage({ v = 1, t = "channel-time", k = "general:map:2339", a = world.time - 65 * 60 + 30 },
-        MEMBER)
+        OFFICER)
     recruit:OnMessage({ v = 1, t = "advertised", k = "general:zone:Somewhere", n = "Somewhere General",
-        a = world.time }, MEMBER)
+        a = world.time }, "Wanderer-Stormrage")
 
+    -- A member gets no leaderboard, but does get the recent ads.
+    test.assertEqual(nil, window.rows)
+    test.assertEqual("Channel", window.ads[1].label)
+    test.assertEqual("Posted by", window.ads[1].by)
+    test.assertEqual("When", window.ads[1].recent)
     -- Times are kept past the user's own timer, as history.
-    local ads = rowsOfKind(window.rows, "ad")
+    local ads = rowsOfKind(window.ads, "ad")
     test.assertEqual(3, #ads)
     test.assertEqual("Somewhere General", ads[1].label)
     test.assertEqual("just now", ads[1].recent)
+    -- Someone the roster doesn't know goes by their own name.
+    test.assertEqual("Wanderer-Stormrage", ads[1].by)
     test.assertEqual("Trade", ads[2].label)
     test.assertEqual("12 min ago", ads[2].recent)
-    -- A zone known by its map is named from the map.
+    -- A roster player goes by their alias.
+    test.assertEqual("TheTool", ads[2].by)
+    -- A zone known by its map is named from the map; an answer without a
+    -- poster says the poster isn't known.
     test.assertEqual("Dornogal General", ads[3].label)
     test.assertEqual("1 h 4 min ago", ads[3].recent)
+    test.assertContains(ads[3].by, "not known")
+end)
+
+test.test("recent ads: the user's own post shows them as the poster", function()
+    local world = login("Retail", { playerName = OFFICER })
+    local window = recruitersWindow(world)
+    optIn(world)
+
+    world.handlers.post(world.shown[1].key)
+
+    local ads = rowsOfKind(window.ads, "ad")
+    test.assertEqual(1, #ads)
+    test.assertEqual("TheTool", ads[1].by)
+end)
+
+test.test("recent ads: an answer passes on who posted, and an answer naming them is believed", function()
+    local world = login("Retail", { playerName = OFFICER })
+    optIn(world)
+    world.handlers.post(world.shown[1].key)
+    local recruit = world.addon.guildRecruit
+
+    test.assertTrue(recruit:OnMessage({ v = 1, t = "ask-channel", k = "general:map:2339" }, MEMBER))
+    fixtures.runTimers(world, 10)
+    local answers = sentOfType(world, "channel-time")
+    test.assertEqual(1, #answers)
+    test.assertEqual(world.addon.rosterController:SelfKey(), answers[1].p)
+
+    -- A member hears that answer and shows the poster it names.
+    local member = login("Retail", { playerName = MEMBER })
+    local window = recruitersWindow(member)
+    member.addon.guildRecruit:OnMessage({ v = 1, t = "channel-time", k = "trade", a = member.time,
+        p = "toolbox-area52", pn = "Toolbox-Area52" }, OFFICER)
+    test.assertEqual("TheTool", rowsOfKind(window.ads, "ad")[1].by)
+end)
+
+test.test("recent ads: a newer time heard without a poster never shows the older ad's poster", function()
+    local world = login("Retail", { playerName = MEMBER })
+    local window = recruitersWindow(world)
+    local recruit = world.addon.guildRecruit
+
+    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 60 }, OFFICER)
+    test.assertEqual("TheTool", rowsOfKind(window.ads, "ad")[1].by)
+
+    recruit:OnMessage({ v = 1, t = "channel-time", k = "trade", a = world.time }, OFFICER)
+    test.assertContains(rowsOfKind(window.ads, "ad")[1].by, "not known")
+    -- An older time heard later changes nothing.
+    recruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time - 30 }, OFFICER)
+    test.assertContains(rowsOfKind(window.ads, "ad")[1].by, "not known")
+end)
+
+-- Gives the add-on a master frame that records the pages it shows and the
+-- leaderboard rows it's given, then opens it with `/agf recruit`.
+local function openRecruitment(world)
+    local frame = { shown = false, pages = {}, given = 0 }
+    function frame:IsShown() return self.shown end
+    function frame:Show() self.shown = true end
+    function frame:Hide() self.shown = false end
+    function frame:SetTitle() end
+    function frame:SetStatus() end
+    function frame:SetRows() return true end
+    function frame:SetConflicts() return true end
+    function frame:ShowPage(id) table.insert(self.pages, id) end
+    function frame:SetRecruiters(rows)
+        self.given = self.given + 1
+        self.rows = rows
+        return true
+    end
+    world.addon.RosterWindow.Create = function(_, options)
+        frame.options = options
+        return frame
+    end
+    fixtures.slash(world, "recruit")
+    return frame
+end
+
+test.test("recruitment tab: /agf recruit opens the frame on the Recruitment tab and is listed in help", function()
+    local world = login("Forever")
+    fixtures.slash(world, "help")
+    test.assertContains(table.concat(world.messages, "\n"), "/agf recruit - open your Guild Recruit settings")
+
+    local frame = openRecruitment(world)
+
+    test.assertTrue(frame.shown)
+    test.assertEqual("recruitment", frame.pages[#frame.pages])
+    test.assertTrue(type(frame.options.drawPages.recruitment) == "function")
+end)
+
+test.test("recruitment tab: an officer gets the leaderboard there, and it redraws as counts arrive", function()
+    local world = login("Retail", { playerName = OFFICER })
+    local frame = openRecruitment(world)
+
+    test.assertEqual("Player", frame.rows[1].label)
+    test.assertEqual(0, #rowsOfKind(frame.rows, "recruiter"))
+    local given = frame.given
+
+    world.addon.guildRecruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time,
+        r = { n = 3, t = { world.time, world.time, world.time } } }, MEMBER)
+
+    test.assertTrue(frame.given > given)
+    local recruiters = rowsOfKind(frame.rows, "recruiter")
+    test.assertEqual(1, #recruiters)
+    test.assertEqual(3, recruiters[1].recent)
+end)
+
+test.test("recruitment tab: a regular member gets no leaderboard", function()
+    local world = login("Retail", { playerName = MEMBER })
+    local frame = openRecruitment(world)
+
+    test.assertEqual("recruitment", frame.pages[#frame.pages])
+    test.assertEqual(nil, frame.rows)
+    world.addon.guildRecruit:OnMessage({ v = 1, t = "advertised", k = "trade", n = "Trade", a = world.time,
+        r = { n = 1, t = { world.time } } }, OFFICER)
+    test.assertEqual(nil, frame.rows)
 end)
 
 test.test("recruiters: a regular member can't open the view", function()
@@ -1443,4 +1631,20 @@ test.test("officer guild ad: an officer who isn't recruiting still asks for the 
 
     local member = login("Retail", { playerName = MEMBER })
     test.assertEqual(0, #sentOfType(member, "ask-config"))
+end)
+
+test.test("recruitment settings: the user's own count goes up with each post, and the pages refresh", function()
+    local world = login("Retail")
+    optIn(world)
+    local refreshes = 0
+    local refresh = world.addon.frameSettings.Refresh
+    world.addon.frameSettings.Refresh = function(panel)
+        refreshes = refreshes + 1
+        return refresh(panel)
+    end
+
+    world.handlers.post(world.shown[1].key)
+
+    test.assertEqual("You've posted 1 guild ad (1 in the last 30 days).", world.addon.settings:Get("recruitMyCount"))
+    test.assertTrue(refreshes > 0)
 end)

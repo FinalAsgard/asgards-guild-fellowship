@@ -163,3 +163,17 @@ test.test("recruit stats: a report can't claim more recent ads than its total, o
     test.assertEqual("Advertised: 3 (2 in last 30 days)",
         addon.RecruitStats.Line(stats:Best({ "anvil-area52" }), START + 120))
 end)
+
+test.test("recruit stats: the user's own summary counts all ads and those of the last 30 days", function()
+    local stats = load().RecruitStats
+    local now = 1790000000
+    local day = 24 * 60 * 60
+
+    test.assertEqual("You haven't posted a guild ad yet.", stats.OwnSummary(nil, now))
+    test.assertEqual("You haven't posted a guild ad yet.", stats.OwnSummary({ n = 0, t = {} }, now))
+    test.assertEqual("You haven't posted a guild ad yet.", stats.OwnSummary({ n = "lots", t = {} }, now))
+    test.assertEqual("You've posted 1 guild ad (1 in the last 30 days).",
+        stats.OwnSummary({ n = 1, t = { now - day } }, now))
+    test.assertEqual("You've posted 12 guild ads (2 in the last 30 days).",
+        stats.OwnSummary({ n = 12, t = { now - 40 * day, now - 2 * day, now } }, now))
+end)

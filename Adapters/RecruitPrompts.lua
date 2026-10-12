@@ -5,9 +5,10 @@ local _, addon = ...
 -- Guild Greet's prompts on the left. It has a "Guild Recruit" heading over
 -- a deep blue panel with a blue edge, so it's never mistaken for a greet
 -- prompt, and one row per prompt with its question and Post, Not now and
--- Off here buttons. The
--- frame is made on first use and reused. Like the other adapters, a failing
--- frame call hides the prompts rather than raising an error.
+-- Off here buttons. It can always be dragged somewhere else, and it stays
+-- where it's dropped, across reloads and on every character. The frame is
+-- made on first use and reused. Like the other adapters, a failing frame
+-- call hides the prompts rather than raising an error.
 local RecruitPrompts = {
     WIDTH = 460,
     HEADER_HEIGHT = 30,
@@ -22,18 +23,57 @@ local RecruitPrompts = {
     -- screen's height, and the offset used when the height is unknown.
     DOWN_SHARE = 0.28,
     DEFAULT_OFFSET = 220,
+    -- The layer the window is drawn on: above the add-on's window.
+    STRATA = "DIALOG",
 }
 addon.RecruitPrompts = RecruitPrompts
 
 local Prompts = {}
 Prompts.__index = Prompts
 
-function RecruitPrompts.Create(client)
+-- `options.loadAnchor()` returns the saved position ({ point, x, y }) or
+-- nil; `options.saveAnchor(anchor)` saves a new one.
+function RecruitPrompts.Create(client, options)
+    options = options or {}
     return setmetatable({
         environment = client.environment,
+        loadAnchor = options.loadAnchor or function() return nil end,
+        saveAnchor = options.saveAnchor or function() end,
         rows = {},
         prompts = {},
     }, Prompts)
+end
+
+-- Puts the window where it was last dropped, else at its default place.
+function Prompts:place(frame)
+    local parent = self.environment.UIParent
+    local ok, saved = pcall(self.loadAnchor)
+    frame:ClearAllPoints()
+    if ok and type(saved) == "table"
+        and pcall(frame.SetPoint, frame, saved.point, parent, saved.point, saved.x, saved.y)
+    then
+        return
+    end
+    frame:ClearAllPoints()
+    frame:SetPoint("TOP", parent, "TOP", 0, -self:offset())
+end
+
+-- Saves where the window was dropped, as its top-left corner's offset from
+-- the screen's top-left, and pins it there, so it grows downward from that
+-- corner as prompts come and go.
+function Prompts:saveCurrent()
+    pcall(function()
+        local parent = self.environment.UIParent
+        local left, top = self.frame:GetLeft(), self.frame:GetTop()
+        local parentTop = parent:GetTop()
+        if left == nil or top == nil or parentTop == nil then
+            return
+        end
+        local position = { point = "TOPLEFT", x = left, y = top - parentTop }
+        self.frame:ClearAllPoints()
+        self.frame:SetPoint(position.point, parent, position.point, position.x, position.y)
+        self.saveAnchor(position)
+    end)
 end
 
 -- How far below the screen's top edge the window sits.
@@ -58,9 +98,26 @@ function Prompts:window()
     local frame = createFrame("Frame", nil, parent)
     frame:SetWidth(RecruitPrompts.WIDTH)
     frame:SetHeight(RecruitPrompts.HEADER_HEIGHT + RecruitPrompts.ROW_HEIGHT)
-    frame:SetPoint("TOP", parent, "TOP", 0, -self:offset())
-    frame:SetFrameStrata("HIGH")
+    -- A strata of its own, above the add-on's window (HIGH): sharing a
+    -- strata, the game layers frames by level, which put this window's
+    -- text and buttons above that window's background but its own
+    -- background below it. Its rows and buttons inherit this strata, so
+    -- the whole window stays together on top.
+    frame:SetFrameStrata(RecruitPrompts.STRATA)
     frame:SetClampedToScreen(true)
+    self.frame = frame
+    self:place(frame)
+    -- Dragging anywhere but its buttons moves it.
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", function()
+        frame:StartMoving()
+    end)
+    frame:SetScript("OnDragStop", function()
+        frame:StopMovingOrSizing()
+        self:saveCurrent()
+    end)
 
     local edge = frame:CreateTexture(nil, "BACKGROUND")
     edge:SetAllPoints(frame)
@@ -75,7 +132,6 @@ function Prompts:window()
     heading:SetText("Guild Recruit")
 
     frame:Hide()
-    self.frame = frame
     return frame
 end
 

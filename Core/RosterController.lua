@@ -17,6 +17,8 @@ Controller.__index = Controller
 --   nameRules     the client profile's name rules
 --   getDatabase   function() -> the SavedVariables root, or nil
 --   createWindow  function() -> window or nil, reason
+--   pages         optional PageNavigator: the window's pages, chosen by
+--                 the entry point that opens it
 --   onMainLinksChanged  optional function(keys, before): after a manual
 --                 change to main links, with the set of every character
 --                 key whose player was involved, and each one's main before
@@ -31,9 +33,9 @@ Controller.__index = Controller
 --   adStats       optional function(keys) -> a player's ad count line for
 --                 the player panel, or nil
 --   recruitRecord optional function(keys) -> a player's ad record (see
---                 RecruitStats), for the officers' Recruiters view
+--                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
---                 is an officer; only officers get the Recruiters view
+--                 is an officer; only officers get the Recruiters leaderboard
 --   recentAds     optional function() -> the channels advertised in lately,
 --                 newest first, as { label, ago } (see GuildRecruit:KnownAds)
 function RosterController.Create(options)
@@ -53,6 +55,7 @@ function RosterController.Create(options)
         collapsed = {},
         showDeparted = false,
         createWindow = options.createWindow,
+        pages = options.pages,
         getDatabase = options.getDatabase,
         nameRules = options.nameRules or {},
     }, Controller)
@@ -736,12 +739,10 @@ function Controller:Recruiters()
     })
 end
 
--- The Recruiters view's rows for an officer, or nil for anyone else: the
--- leaderboard, then the channels this client knows were advertised in
--- lately. Each part starts with a heading row ({ kind = "heading", label,
--- recent, total }: its column titles), and an empty part says so.
+-- The Recruiters leaderboard's rows for an officer, or nil for anyone else.
+-- It starts with a heading row ({ kind = "heading", label, recent, total }:
+-- its column titles), and says so when nobody has advertised.
 --   { kind = "recruiter", label, recent, total }
---   { kind = "ad", label, recent }        -- recent: how long ago
 --   { kind = "empty", label }
 function Controller:RecruitersView()
     local recruiters = self:Recruiters()
@@ -757,11 +758,49 @@ function Controller:RecruitersView()
     if recruiters[1] == nil then
         table.insert(rows, { kind = "empty", label = "Nobody has advertised yet." })
     end
-    table.insert(rows, { kind = "heading", label = "Recent ads", recent = "How long ago" })
+    return rows
+end
+
+-- Who posted an ad, as the Recruiters leaderboard names players: the alias,
+-- else the main's name. Someone the roster doesn't know goes by their own
+-- name. Nil when the poster isn't known.
+function Controller:PosterLabel(poster, partition, normalizer)
+    if type(poster) ~= "table" then
+        return nil
+    end
+    local character = type(poster.k) == "string" and partition:GetCharacter(poster.k) or nil
+    local player = character and partition:GetPlayer(character.player)
+    if player ~= nil then
+        if player.alias ~= nil then
+            return player.alias
+        end
+        local main = partition:GetCharacter(player.main)
+        return normalizer:Display(main and main.name or player.main)
+    end
+    local name = poster.n or poster.k
+    return name and normalizer:Display(name) or nil
+end
+
+-- The Recent ads page's rows, for every member: the channels this client
+-- knows were advertised in lately, newest first, with who posted and how
+-- long ago. It starts with a heading row ({ kind = "heading", label, by,
+-- recent }: its column titles), and says so when there are none.
+--   { kind = "ad", label, by, recent }    -- recent: how long ago
+--   { kind = "empty", label }
+function Controller:RecentAdsView()
+    local rows = { { kind = "heading", label = "Channel", by = "Posted by", recent = "When" } }
+    local guild, partition, normalizer = self:QuietContext()
     local ok, ads = pcall(self.recentAds or function() return {} end)
     ads = ok and type(ads) == "table" and ads or {}
+    local index
     for index = 1, #ads do
-        table.insert(rows, { kind = "ad", label = ads[index].label, recent = ads[index].ago })
+        local by = guild ~= nil and self:PosterLabel(ads[index].poster, partition, normalizer) or nil
+        table.insert(rows, {
+            kind = "ad",
+            label = ads[index].label,
+            by = by or "|cff9d9d9dnot known|r",
+            recent = ads[index].ago,
+        })
     end
     if ads[1] == nil then
         table.insert(rows, { kind = "empty", label = "No recent ads known." })
@@ -769,18 +808,43 @@ function Controller:RecruitersView()
     return rows
 end
 
--- Redraws the Recruiters view when the window is open: officers get their
--- rows, everyone else neither the view nor its button.
+-- Redraws the Recruiters leaderboard on the Recruitment page, and the
+-- Recent ads page, when the window is open: officers get their leaderboard
+-- rows, everyone else no leaderboard; everyone gets the recent ads.
 function Controller:RefreshRecruiters()
-    if self.window == nil or not self.window:IsShown() or type(self.window.SetRecruiters) ~= "function" then
+    if self.window == nil or not self.window:IsShown() then
         return
     end
-    self.window:SetRecruiters(self:RecruitersView())
+    if type(self.window.SetRecruiters) == "function" then
+        self.window:SetRecruiters(self:RecruitersView())
+    end
+    if type(self.window.SetRecentAds) == "function" then
+        self.window:SetRecentAds(self:RecentAdsView())
+    end
 end
 
--- `/agf`: shows or hides the roster window. Never scans.
-function Controller:Toggle()
+-- Selects the page `entry` opens (see PageNavigator:PageFor) and shows it
+-- in the window.
+function Controller:ShowPage(entry)
+    if self.pages == nil then
+        return
+    end
+    self.pages:Select(self.pages:PageFor(entry))
+    if type(self.window.ShowPage) == "function" then
+        self.window:ShowPage(self.pages:Current())
+    end
+end
+
+-- `/agf` and the other entry points: opens the window on the page `entry`
+-- opens (the Roster page unless it names another), whatever page showed
+-- last. When the window is already showing that page, it closes instead.
+-- Never scans.
+function Controller:Toggle(entry)
     if self.window ~= nil and self.window:IsShown() then
+        if self.pages ~= nil and self.pages:Current() ~= self.pages:PageFor(entry) then
+            self:ShowPage(entry)
+            return true
+        end
         self.window:Hide()
         return true
     end
@@ -802,16 +866,18 @@ function Controller:Toggle()
     -- Reopening with nothing changed reuses the last build.
     self.current = { guild = guild, partition = partition }
     self:Redraw()
+    self:ShowPage(entry)
     self.window:Show()
     self:RefreshRecruiters()
     return true
 end
 
--- The settings panel's Open Roster button: shows the roster, leaving it open
--- when it already is.
-function Controller:Open()
+-- The AddOns options' Open window button: shows the window on the page
+-- `entry` opens, leaving it open when it already is.
+function Controller:Open(entry)
     if self.window ~= nil and self.window:IsShown() then
+        self:ShowPage(entry)
         return true
     end
-    return self:Toggle()
+    return self:Toggle(entry)
 end

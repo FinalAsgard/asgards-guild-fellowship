@@ -7,7 +7,7 @@ local _, addon = ...
 --
 -- Entry kinds:
 --   toggle   get() -> boolean; set(boolean) -> true, or nil and a reason
---   action   run() performs it (a button, e.g. "Open Roster")
+--   action   run() performs it (a button, e.g. "Open window")
 --   text     get() -> a line of text shown as is (e.g. the version)
 --   number   get() -> a whole number from `min` to `max`; set(number) ->
 --            true, or nil and a reason. With `step`, the value goes in
@@ -18,6 +18,10 @@ local _, addon = ...
 --            characters; set(text) -> true, or nil and a reason
 --   heading  a title within a section that sets the entries after it apart
 --            (e.g. officer-only settings); it holds no value
+--   color    get() -> a color as "rrggbb"; set(color) -> true, or nil and a
+--            reason. `swatches` lists the colors offered to click, each
+--            { label, color }; `sample` is text shown in the chosen color;
+--            `default` is the color shown when the setting can't be read
 -- `get`, `set` and `run` are called protected, so a failing feature never
 -- breaks the panel or a slash command. A toggle marked `offOnClose` is a
 -- mode that only lasts while the panel is open (see Model:Closed). An entry
@@ -25,8 +29,15 @@ local _, addon = ...
 -- answers true again. An entry with `shown() -> false` is left off the panel
 -- (e.g. officer-only settings for other members). An entry with `info() ->
 -- text` gets an info icon on the panel that shows the text on mouseover.
+--
+-- Settings are drawn in two hosts: the master frame's pages ("frame") and
+-- the game's AddOns options ("options"). Each section names the master
+-- frame page it belongs on. An entry with `host` set is drawn only in that
+-- host (e.g. a button that opens the frame, which the frame doesn't need).
 local SettingsModel = {
-    KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true },
+    KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true, color = true },
+    HOSTS = { frame = true, options = true },
+    PAGES = { settings = true, greetings = true, recruitment = true },
 }
 addon.SettingsModel = SettingsModel
 
@@ -46,17 +57,43 @@ local function isText(value)
     return type(value) == "string" and value ~= ""
 end
 
--- Adds a section, shown in the order sections are added. `options.ownPage`
--- puts it on a page of its own in the AddOns options instead of the main
--- page. False when the id is unusable or already taken.
+-- Adds a section, shown in the order sections are added. `options.page`
+-- names the master frame page it belongs on (see SettingsModel.PAGES; the
+-- Settings page unless given); in the AddOns options each section gets a
+-- sub-page of its own. A section with `options.home` is instead drawn on
+-- the add-on's own page in the AddOns options, and on no master frame page.
+-- False when the id is unusable or already taken, or the page is unknown.
 function Model:AddSection(id, label, options)
-    if not isText(id) or not isText(label) or self.sectionsById[id] ~= nil then
+    options = type(options) == "table" and options or {}
+    local home = options.home == true
+    local page = not home and (options.page or "settings") or nil
+    if not isText(id) or not isText(label) or self.sectionsById[id] ~= nil
+        or (not home and not SettingsModel.PAGES[page])
+    then
         return false
     end
-    local section = { id = id, label = label, entries = {}, ownPage = type(options) == "table" and options.ownPage == true }
+    local section = { id = id, label = label, entries = {}, page = page, home = home }
     self.sectionsById[id] = section
     table.insert(self.sections, section)
     return true
+end
+
+-- The sections on the master frame page `page`, in order.
+function Model:SectionsOn(page)
+    local found = {}
+    local index
+    for index = 1, #self.sections do
+        if self.sections[index].page == page then
+            table.insert(found, self.sections[index])
+        end
+    end
+    return found
+end
+
+-- Whether the entry is drawn in `host` ("frame" or "options").
+function Model:InHost(id, host)
+    local entry = self.entries[id]
+    return entry ~= nil and (entry.host == nil or entry.host == host)
 end
 
 -- Returns nil when `entry` can be added, or why not.
@@ -70,6 +107,9 @@ local function entryProblem(entry)
     if not isText(entry.label) and entry.kind ~= "text" then
         return "entry has no label"
     end
+    if entry.host ~= nil and not SettingsModel.HOSTS[entry.host] then
+        return "entry's host is unknown"
+    end
     if entry.kind == "action" then
         return type(entry.run) ~= "function" and "action has no run function" or nil
     end
@@ -82,8 +122,13 @@ local function entryProblem(entry)
     if type(entry.get) ~= "function" then
         return "entry has no get function"
     end
-    if (entry.kind == "toggle" or entry.kind == "number" or entry.kind == "input") and type(entry.set) ~= "function" then
+    if (entry.kind == "toggle" or entry.kind == "number" or entry.kind == "input" or entry.kind == "color")
+        and type(entry.set) ~= "function"
+    then
         return "entry has no set function"
+    end
+    if entry.kind == "color" and (type(entry.swatches) ~= "table" or entry.swatches[1] == nil) then
+        return "color has no swatches"
     end
     if entry.kind == "input" and (type(entry.maxLength) ~= "number" or entry.maxLength < 1) then
         return "input has no length limit"
@@ -219,6 +264,11 @@ function Model:Set(id, value)
         if string.len(value) > entry.maxLength then
             return nil, "it can be at most " .. entry.maxLength .. " characters"
         end
+    elseif entry.kind == "color" then
+        if type(value) ~= "string" or string.find(value, "^%x%x%x%x%x%x$") == nil then
+            return nil, "it must be a color, six hex digits like 4a90ff"
+        end
+        value = string.lower(value)
     elseif entry.kind ~= "toggle" then
         return nil, "it can't be changed"
     elseif type(value) ~= "boolean" then

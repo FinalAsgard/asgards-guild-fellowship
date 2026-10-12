@@ -10,11 +10,25 @@ local _, addon = ...
 local ChatAnnotator = {
     -- The chat events that get tags.
     EVENTS = { "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER", "CHAT_MSG_GUILD_ACHIEVEMENT" },
-    -- Tag colors by kind: an alias is medium blue, a main's name light blue, so a
-    -- nickname and a character name are told apart at a glance.
+    -- Default tag colors by kind, as "rrggbb": an alias is medium blue, a
+    -- main's name light blue, so a nickname and a character name are told
+    -- apart at a glance. A member can choose others (see `colorFor`).
     COLORS = {
-        alias = "ff4a90ff",
-        main = "ff7fd4ff",
+        alias = "4a90ff",
+        main = "7fd4ff",
+    },
+    -- The colors offered for a tag, all easy to read on guild chat's green
+    -- and officer chat's darker green; both defaults are among them.
+    SWATCHES = {
+        { label = "Blue", color = "4a90ff" },
+        { label = "Light blue", color = "7fd4ff" },
+        { label = "Purple", color = "b48cff" },
+        { label = "Pink", color = "ff7fbf" },
+        { label = "Red", color = "ff5050" },
+        { label = "Orange", color = "ff9933" },
+        { label = "Gold", color = "ffd100" },
+        { label = "White", color = "ffffff" },
+        { label = "Grey", color = "a0a0a0" },
     },
 }
 addon.ChatAnnotator = ChatAnnotator
@@ -36,9 +50,14 @@ Annotator.__index = Annotator
 -- without it nothing is secret.
 -- options.enabled: function() -> false when the player turned tags off.
 -- Optional; without it tags are on.
+-- options.colorFor: function(kind) -> the chosen "rrggbb" color for a kind
+-- of tag, or nil for the default. Optional.
 function ChatAnnotator.Create(options)
     return setmetatable({
         context = options.context,
+        colorFor = options.colorFor or function()
+            return nil
+        end,
         enabled = options.enabled or function()
             return true
         end,
@@ -101,19 +120,24 @@ function Annotator:Annotate(event, message, sender)
     if not ok or tag == nil then
         return nil
     end
+    local colorOk, color = pcall(self.colorFor, tag.kind)
+    local formatted = ChatAnnotator.Format(tag, colorOk and color or nil)
     if nameEnd ~= nil then
         -- The chat frame formats the template, so a "%" in the tag is
         -- doubled to stay literal.
-        local formatted = string.gsub(ChatAnnotator.Format(tag), "%%", "%%%%")
+        formatted = string.gsub(formatted, "%%", "%%%%")
         return string.sub(message, 1, nameEnd) .. " " .. formatted .. string.sub(message, nameEnd + 1)
     end
-    return ChatAnnotator.Format(tag) .. " " .. message
+    return formatted .. " " .. message
 end
 
--- A tag as chat shows it: "[TheTool]" in its kind's color. A "|" in the text
--- is doubled so the chat frame shows it literally instead of reading it as
--- an escape code.
-function ChatAnnotator.Format(tag)
+-- A tag as chat shows it: "[TheTool]" in `color` ("rrggbb"), or its kind's
+-- default color when `color` isn't one. A "|" in the text is doubled so the
+-- chat frame shows it literally instead of reading it as an escape code.
+function ChatAnnotator.Format(tag, color)
+    if type(color) ~= "string" or string.find(color, "^%x%x%x%x%x%x$") == nil then
+        color = ChatAnnotator.COLORS[tag.kind]
+    end
     local text = string.gsub(tag.text, "|", "||")
-    return "|c" .. ChatAnnotator.COLORS[tag.kind] .. "[" .. text .. "]|r"
+    return "|cff" .. color .. "[" .. text .. "]|r"
 end

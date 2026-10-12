@@ -272,25 +272,35 @@ function Store:Partition(guild)
     return partition
 end
 
--- Saved window geometry, shared by every guild. Returns nil when absent or
--- unusable.
-function Store:GetWindowState()
-    local window = type(self.database) == "table" and self.database.window or nil
-    if type(window) ~= "table" then
+-- The master frame's saved geometry, shared by every guild, or nil when
+-- absent or unusable. Until the frame saves its own, the old roster
+-- window's saved position is its starting point; that window's size is
+-- left behind, so the frame opens at its larger default size.
+function Store:GetFrameState()
+    if type(self.database) ~= "table" then
         return nil
     end
-    return window
+    local frame = self.database.frame
+    if type(frame) == "table" then
+        return frame
+    end
+    local window = self.database.window
+    if frame ~= nil or type(window) ~= "table" then
+        return nil
+    end
+    return { point = window.point, relativePoint = window.relativePoint, x = window.x, y = window.y }
 end
 
--- Replaces the saved geometry. An unusable existing value is left alone.
-function Store:SetWindowState(state)
+-- Replaces the master frame's saved geometry. An unusable existing value is
+-- left alone.
+function Store:SetFrameState(state)
     if type(self.database) ~= "table" or type(state) ~= "table" then
         return false
     end
-    if self.database.window ~= nil and type(self.database.window) ~= "table" then
+    if self.database.frame ~= nil and type(self.database.frame) ~= "table" then
         return false
     end
-    self.database.window = state
+    self.database.frame = state
     return true
 end
 
@@ -325,6 +335,42 @@ function Store:SetChatTagsEnabled(enabled)
         return false
     end
     self.database.chatTags = enabled
+    return true
+end
+
+-- The kinds of chat tag whose color can be chosen (see ChatAnnotator).
+local CHAT_TAG_KINDS = { alias = true, main = true }
+
+-- Whether `color` is a color as saved: six hex digits, "rrggbb".
+function FellowshipStore.IsColor(color)
+    return type(color) == "string" and string.find(color, "^%x%x%x%x%x%x$") ~= nil
+end
+
+-- The color chosen for a kind of chat tag ("alias" or "main"), shared by
+-- every guild, as "rrggbb" in lower case; nil when none was chosen or the
+-- saved value is unusable.
+function Store:ChatTagColor(kind)
+    local colors = type(self.database) == "table" and self.database.chatTagColors or nil
+    if type(colors) ~= "table" or not FellowshipStore.IsColor(colors[kind]) then
+        return nil
+    end
+    return string.lower(colors[kind])
+end
+
+-- Saves the color for a kind of chat tag. False for an unknown kind or
+-- anything that isn't a color; an unusable existing value is left alone.
+function Store:SetChatTagColor(kind, color)
+    if type(self.database) ~= "table" or not CHAT_TAG_KINDS[kind] or not FellowshipStore.IsColor(color) then
+        return false
+    end
+    local colors = self.database.chatTagColors
+    if colors == nil then
+        colors = {}
+        self.database.chatTagColors = colors
+    elseif type(colors) ~= "table" then
+        return false
+    end
+    colors[kind] = string.lower(color)
     return true
 end
 
@@ -553,6 +599,32 @@ function Store:GetRecruitState()
         return nil
     end
     return self.database.recruit
+end
+
+-- Where the Guild Recruit window sits ({ point, x, y }, measured from that
+-- point of the screen), shared by every character. Nil when none is saved
+-- or the saved one is unusable, so the window uses its default place.
+function Store:RecruitAnchor()
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local anchor = type(state) == "table" and state.anchor or nil
+    if not isAnchor(anchor) then
+        return nil
+    end
+    return { point = anchor.point, x = anchor.x, y = anchor.y }
+end
+
+-- Saves where the Guild Recruit window sits. As with greet prompts, an
+-- unusable saved position is replaced: the user just placed the window.
+function Store:SetRecruitAnchor(anchor)
+    if not isAnchor(anchor) then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    state.anchor = { point = anchor.point, x = anchor.x, y = anchor.y }
+    return true
 end
 
 -- The user's own ad, exactly as written. Empty when none is saved or the
@@ -972,6 +1044,20 @@ function Partition:GetRecruitLedger()
         self.data.recruitLedger = {}
     end
     return self.data.recruitLedger
+end
+
+-- Who posted the ad behind each ledger time, by channel key, as { a = the
+-- ad's time, k = the poster's character key, n = their name as the game
+-- gave it }, created on first use. Nil when an unusable value is stored
+-- there; it is then left alone.
+function Partition:GetRecruitPosters()
+    if self.data.recruitPosters == nil then
+        self.data.recruitPosters = {}
+    end
+    if type(self.data.recruitPosters) ~= "table" then
+        return nil
+    end
+    return self.data.recruitPosters
 end
 
 function Partition:SetForgeries(entries)
