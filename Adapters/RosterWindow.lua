@@ -13,6 +13,9 @@ local RosterWindow = {
     LINE_HEIGHT = 22,
     -- How far an alt's name sits in from its player's header.
     INDENT = 18,
+    -- Room on the right of a page's list for its scroll bar, which the
+    -- framework draws just outside the list.
+    SCROLL_BAR_ROOM = 34,
 }
 addon.RosterWindow = RosterWindow
 
@@ -771,27 +774,26 @@ local function buildLeaderboard(framework, parent, frameName)
     return leaderboard
 end
 
--- The Recent ads page, for every member: each channel advertised in lately,
--- who posted, and how long ago.
+-- The Recent Guild Advertisements page, for every member: each channel
+-- advertised in lately, who posted, and how long ago.
 local AD_COLUMNS = {
-    { field = "label", x = 8, width = 240 },
-    { field = "by", x = 254, width = 200 },
-    { field = "recent", x = 460, width = 140 },
+    { field = "label", x = 8, width = 270 },
+    { field = "by", x = 284, width = 230 },
+    { field = "recent", x = 520, width = 140 },
 }
-local ADS_WIDTH = 620
 
--- Draws the Recent ads list onto its page, below the frame's title bar,
--- with as many lines as the page holds; more lines are made as the frame
--- grows.
+-- Draws the Recent Guild Advertisements list onto its page, below the
+-- frame's title bar, filling the page (clear of the scroll bar) with as
+-- many lines as it holds; more lines are made as the frame grows.
 local function buildRecentAds(framework, page, frameName)
     local holder = CreateFrame("Frame", nil, page)
     holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
     holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
-    local _, height = page:GetSize()
+    local width, height = page:GetSize()
     local lines = math.max(1, math.floor((height - 70) / RosterWindow.LINE_HEIGHT))
-    local ads = buildList(framework, holder, frameName .. "RecentAdsScroll", "Recent ads",
-        AD_COLUMNS, ADS_WIDTH, lines)
-    ads.scroll:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 16, 0)
+    local ads = buildList(framework, holder, frameName .. "RecentAdsScroll", "Recent Guild Advertisements",
+        AD_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines)
+    ads.scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 0)
     return ads
 end
 
@@ -969,7 +971,10 @@ local function build(framework, options)
     )
     scroll:ClearAllPoints()
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -74)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 40)
+    -- The scroll bar is drawn just outside the list's right edge, so the
+    -- list stops short of the frame's edge to keep the bar inside it, clear
+    -- of the tabs.
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 40)
     scroll:CreateLines(newLine, lineAmount)
 
     -- Footer: a Rescan button and what the last scan found.

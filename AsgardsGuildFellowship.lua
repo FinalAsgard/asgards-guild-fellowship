@@ -36,7 +36,7 @@ if clientProfile.supported then
     pages = addon.PageNavigator.Create()
     pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
-    pages:Add("ads", "Recent ads", addon.MasterFrame.ICONS.ads)
+    pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
     pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
     rosterController = addon.RosterController.Create({
@@ -319,7 +319,12 @@ if clientProfile.supported then
     settings:Add("guildGreet", {
         id = "greetCharacter",
         kind = "toggle",
-        label = "Guild Greet on this character",
+        label = "Greet from this character",
+        info = function()
+            return "The setting above turns Guild Greet on or off for every character on this account. " ..
+                "This one only stops the prompts on the character you're playing now, for example an alt " ..
+                "in another guild, and leaves your other characters as they are."
+        end,
         get = function()
             local store, selfKey = rosterController:Store(), rosterController:SelfKey()
             return store == nil or selfKey == nil or store:GreetOnCharacter(selfKey)
@@ -337,6 +342,25 @@ if clientProfile.supported then
             end
             return true
         end,
+    })
+    -- Not saved, and only while the master frame or the options are open:
+    -- closing either, or a reload, locks the prompts again.
+    settings:Add("guildGreet", {
+        id = "greetUnlock",
+        kind = "toggle",
+        offOnClose = true,
+        label = "Unlock greet prompts to drag them somewhere else",
+        get = function()
+            return greetPrompts:IsUnlocked()
+        end,
+        set = function(unlocked)
+            return greetPrompts:SetUnlocked(unlocked)
+        end,
+    })
+    settings:Add("guildGreet", {
+        id = "greetPromptsHeading",
+        kind = "heading",
+        label = "Which arrivals to prompt for",
     })
     local categoryIndex
     for categoryIndex = 1, #addon.GreetingLibrary.CATEGORIES do
@@ -386,6 +410,11 @@ if clientProfile.supported then
             end,
         })
     end
+    settings:Add("guildGreet", {
+        id = "greetTimingHeading",
+        kind = "heading",
+        label = "Timing",
+    })
     greetNumber("welcomeBackMinutes", "Minutes away before coming back is a welcome back")
     greetNumber("longAbsenceDays", "Days away before a login is a long absence")
     settings:Add("guildGreet", {
@@ -409,20 +438,6 @@ if clientProfile.supported then
             return true
         end,
     })
-    -- Not saved, and only while the master frame or the options are open:
-    -- closing either, or a reload, locks the prompts again.
-    settings:Add("guildGreet", {
-        id = "greetUnlock",
-        kind = "toggle",
-        offOnClose = true,
-        label = "Unlock greet prompts to drag them somewhere else",
-        get = function()
-            return greetPrompts:IsUnlocked()
-        end,
-        set = function(unlocked)
-            return greetPrompts:SetUnlocked(unlocked)
-        end,
-    })
     -- The greetings are edited below these settings on the master frame's
     -- Greetings tab; the AddOns options get a button to go there.
     local function openGreetings()
@@ -444,6 +459,15 @@ if clientProfile.supported then
         return true
     end
     settings:AddSection("recruitment", "Recruitment", { page = "recruitment" })
+    -- The user's own ad count, across all their characters.
+    settings:Add("recruitment", {
+        id = "recruitMyCount",
+        kind = "text",
+        get = function()
+            local store = rosterController:Store()
+            return addon.RecruitStats.OwnSummary(store and store:RecruitOwnStats(), client:Timestamp())
+        end,
+    })
     -- Says why the settings below are greyed out, only when they are.
     settings:Add("recruitment", {
         id = "recruitCantInvite",
@@ -885,10 +909,12 @@ if clientProfile.supported then
         mapName = function(mapID)
             return client:GetMapName(mapID)
         end,
-        -- An open Recruitment leaderboard shows new counts and ad times at
-        -- once.
+        -- The open leaderboard, recent ads, and the user's own count show
+        -- new counts and ad times at once.
         onStatsChanged = function()
             rosterController:RefreshRecruiters()
+            frameSettings:Refresh()
+            settingsPanel:Refresh()
         end,
         isOwn = function(sender)
             local guild, _, normalizer = rosterController:QuietContext()

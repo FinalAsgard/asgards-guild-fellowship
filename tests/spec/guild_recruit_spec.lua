@@ -255,11 +255,13 @@ test.test("recruitment settings: a fresh install has opt-in off and no ad", func
     end
 
     test.assertEqual("Recruitment", section.label)
-    -- After the line explaining greyed-out settings to a character that
-    -- can't invite.
-    test.assertEqual("recruitCantInvite", section.entries[1].id)
-    test.assertEqual("recruitOptIn", section.entries[2].id)
-    test.assertEqual("recruitAd", section.entries[3].id)
+    -- After the user's own count, and the line explaining greyed-out
+    -- settings to a character that can't invite.
+    test.assertEqual("recruitMyCount", section.entries[1].id)
+    test.assertEqual("recruitCantInvite", section.entries[2].id)
+    test.assertEqual("recruitOptIn", section.entries[3].id)
+    test.assertEqual("recruitAd", section.entries[4].id)
+    test.assertEqual("You haven't posted a guild ad yet.", world.addon.settings:Get("recruitMyCount"))
     test.assertFalse(world.addon.settings:Get("recruitOptIn"))
     test.assertEqual("", world.addon.settings:Get("recruitAd"))
 end)
@@ -1629,4 +1631,20 @@ test.test("officer guild ad: an officer who isn't recruiting still asks for the 
 
     local member = login("Retail", { playerName = MEMBER })
     test.assertEqual(0, #sentOfType(member, "ask-config"))
+end)
+
+test.test("recruitment settings: the user's own count goes up with each post, and the pages refresh", function()
+    local world = login("Retail")
+    optIn(world)
+    local refreshes = 0
+    local refresh = world.addon.frameSettings.Refresh
+    world.addon.frameSettings.Refresh = function(panel)
+        refreshes = refreshes + 1
+        return refresh(panel)
+    end
+
+    world.handlers.post(world.shown[1].key)
+
+    test.assertEqual("You've posted 1 guild ad (1 in the last 30 days).", world.addon.settings:Get("recruitMyCount"))
+    test.assertTrue(refreshes > 0)
 end)

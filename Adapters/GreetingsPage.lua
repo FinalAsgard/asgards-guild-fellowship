@@ -12,8 +12,11 @@ local _, addon = ...
 -- the framework fails to build it, so the caller can print a message
 -- instead of raising Lua errors.
 local GreetingsPage = {
+    -- The narrowest it's drawn; on a wider page it takes the page's width.
     WIDTH = 560,
-    HEIGHT = 500,
+    -- Room for the editor's heading above it.
+    TITLE_HEIGHT = 30,
+    HEIGHT = 530,
     LINE_HEIGHT = 24,
     LINES = 8,
     -- How long a Restore button waits for its confirming second click.
@@ -36,7 +39,22 @@ end
 
 local function build(page, framework, parent)
     local Library = addon.GreetingLibrary
-    local width, lineHeight = GreetingsPage.WIDTH, GreetingsPage.LINE_HEIGHT
+    local lineHeight = GreetingsPage.LINE_HEIGHT
+    -- As wide as the page it's drawn on, never narrower than WIDTH.
+    local parentWidth = parent:GetWidth()
+    local width = math.max(GreetingsPage.WIDTH, type(parentWidth) == "number" and parentWidth - 16 or 0)
+    local top = GreetingsPage.TITLE_HEIGHT
+
+    -- A heading like the settings' own, over a thin gold line, sets the
+    -- editor apart from the settings above it.
+    local rule = parent:CreateTexture(nil, "ARTWORK")
+    rule:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -2)
+    rule:SetWidth(width - 12)
+    rule:SetHeight(1)
+    rule:SetColorTexture(0.83, 0.69, 0.22, 0.6)
+    local title = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, -8)
+    title:SetText("Greetings")
     local frameName = addon.Identity.addonName .. "Greetings"
 
     -- One button per category; the open one is disabled.
@@ -45,7 +63,7 @@ local function build(page, framework, parent)
     for index = 1, #Library.CATEGORIES do
         local category = Library.CATEGORIES[index]
         local tab = button(parent, category.label, 124)
-        tab:SetPoint("TOPLEFT", parent, "TOPLEFT", 12 + (index - 1) * 132, 0)
+        tab:SetPoint("TOPLEFT", parent, "TOPLEFT", 12 + (index - 1) * 132, -top)
         tab:SetScript("OnClick", function()
             page:Select(category.id)
         end)
@@ -53,7 +71,7 @@ local function build(page, framework, parent)
     end
 
     page.when = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    page.when:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, -30)
+    page.when:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, -top - 30)
     page.when:SetWidth(width - 28)
     page.when:SetJustifyH("LEFT")
 
@@ -103,7 +121,7 @@ local function build(page, framework, parent)
     local scroll = framework:CreateScrollBox(parent, frameName .. "Scroll", refreshLines, {},
         width - 24, listHeight, GreetingsPage.LINES, lineHeight, newLine, true)
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -50)
+    scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -top - 50)
     scroll:SetSize(width - 24, listHeight)
     scroll:CreateLines(newLine, GreetingsPage.LINES)
     page.scroll = scroll
@@ -113,7 +131,7 @@ local function build(page, framework, parent)
     page.empty:SetText("No greetings, so this category shows no prompts.")
 
     -- The box for a new greeting, or the one being edited.
-    local inputY = -50 - listHeight - 14
+    local inputY = -top - 50 - listHeight - 14
     local input = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
     input:SetSize(width - 264, 22)
     input:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, inputY)

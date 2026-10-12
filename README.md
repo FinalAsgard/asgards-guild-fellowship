@@ -29,7 +29,7 @@ Everything the add-on does is in one window, with picture tabs down its right ed
 
 - **Roster**: the guild's players, mains and alts (see [Using the roster](#using-the-roster)).
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
-- **Recent ads**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
+- **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
 - **Settings**: everything else (General and Chat Tags), and the version you're running.
 
@@ -41,8 +41,8 @@ The settings are in two places that always agree: the window's tabs, and **Esc â
 
 - **General**: show or hide the minimap button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off, and choose the colors of the alias tag and the main's-name tag (see [Chat tags](#chat-tags)).
-- **Guild Greet**: turn Guild Greet on or off (everywhere, or just on the character you're playing), turn each category's prompts on or off, set the welcome-back minutes and long-absence days, set how many greetings close your prompt, and unlock the prompts to move them. In the AddOns options it also has an **Edit Greetings** button that opens the window's Greetings tab.
-- **Recruitment**: turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, choose whether you also post the officers' guild ad (hover the info icon beside it to read the guild ad), and set your own timers (sliders) for how long General and Trade go without a guild ad before you're asked. On a character that can't invite to the guild these are greyed out, with a line saying why. Officers also get the guild ad, the guild's floor under everyone's timers for General and for Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild. Regular members don't see the officer settings.
+- **Guild Greet**: at the top, turn Guild Greet on or off (everywhere, or just on the character you're playing) and unlock the prompts to move them; under **Which arrivals to prompt for**, turn each category's prompts on or off; under **Timing**, set the welcome-back minutes and long-absence days and how many greetings close your prompt. On the window's Greetings tab the greetings editor follows, under its own **Greetings** heading. In the AddOns options it also has an **Edit Greetings** button that opens the window's Greetings tab.
+- **Recruitment**: how many guild ads you've posted (all your characters together, and in the last 30 days), then turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, choose whether you also post the officers' guild ad (hover the info icon beside it to read the guild ad), and set your own timers (sliders) for how long General and Trade go without a guild ad before you're asked. On a character that can't invite to the guild these are greyed out, with a line saying why. Officers also get the guild ad, the guild's floor under everyone's timers for General and for Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild. Regular members don't see the officer settings.
 
 A change made in the window, the AddOns options or a slash command shows up in the other places at once. Settings are saved for every character on this game install. The development build's options are labeled "(Dev)".
 
@@ -205,7 +205,7 @@ Greetings can use these placeholders, in any capitalization:
 | `{character}` | The character that just logged in. |
 | `{characterFirst}`, `{characterLast}` | The first or last part of that character's name. |
 
-First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** settings. Greetings and settings are shared by every character on this game install, and **Guild Greet on this character** turns it off on just the one you're playing, say an alt in another guild.
+First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** settings. Greetings and settings are shared by every character on this game install, and **Greet from this character** turns it off on just the one you're playing, say an alt in another guild (hover its info icon for a reminder).
 
 ### Greeting together
 
@@ -256,7 +256,7 @@ Every post counts toward the player who made it, on all their characters togethe
 
 Officers also get the **Recruiters** leaderboard on the window's **Recruitment** tab (`/agf recruit`), below the settings. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Regular members don't see the leaderboard.
 
-Everyone gets the window's **Recent ads** tab. It lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade"), who posted (by alias or main, like the leaderboard), and how long ago, newest first. When your add-on only heard the time from someone running an older version, the poster shows as "not known". Ad times and posters are kept for 4 hours, across reloads and logouts, so a relog never forgets where the guild just advertised. The list updates as new ads arrive.
+Everyone gets the window's **Recent Guild Advertisements** tab. It lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade"), who posted (by alias or main, like the leaderboard), and how long ago, newest first. When your add-on only heard the time from someone running an older version, the poster shows as "not known". Ad times and posters are kept for 4 hours, across reloads and logouts, so a relog never forgets where the guild just advertised. The list updates as new ads arrive.
 
 ## Supported clients
 

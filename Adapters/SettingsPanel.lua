@@ -699,8 +699,13 @@ function Panel:Draw(parent, sections, top, footerHeight)
         parent, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -(top or 0))
     scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -SettingsPanel.SCROLL_BAR, 8)
+    -- As wide as the area beside the scroll bar, never narrower than a
+    -- text box needs.
     local content = createFrame("Frame", nil, scroll)
-    content:SetWidth(SettingsPanel.INPUT_WIDTH + 2 * SettingsPanel.LEFT + 40)
+    local parentWidth = parent:GetWidth()
+    local width = math.max(SettingsPanel.INPUT_WIDTH + 2 * SettingsPanel.LEFT + 40,
+        type(parentWidth) == "number" and parentWidth - SettingsPanel.SCROLL_BAR - 8 or 0)
+    content:SetWidth(width)
     content:SetHeight(1)
     scroll:SetScrollChild(content)
     local area = { content = content, sections = {}, headers = {}, rows = {} }
@@ -722,7 +727,7 @@ function Panel:Draw(parent, sections, top, footerHeight)
     end
     if footerHeight ~= nil then
         area.footer = createFrame("Frame", nil, content)
-        area.footer:SetWidth(SettingsPanel.INPUT_WIDTH + 2 * SettingsPanel.LEFT + 40)
+        area.footer:SetWidth(width)
         area.footer:SetHeight(footerHeight)
         area.footerHeight = footerHeight
     end

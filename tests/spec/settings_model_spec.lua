@@ -544,3 +544,27 @@ end
 
 registerTagColorTest("Forever")
 registerTagColorTest("Retail")
+
+test.test("the Guild Greet settings open with the main switches, then headed groups for prompts and timing", function()
+    local _, addon = loggedIn("Retail")
+    local section = addon.settings:SectionsOn("greetings")[1]
+    local ids = {}
+    local index
+    for index = 1, #section.entries do
+        if addon.settings:InHost(section.entries[index].id, "frame") then
+            table.insert(ids, section.entries[index].id)
+        end
+    end
+
+    test.assertEqual("guildGreet", ids[1])
+    test.assertEqual("greetCharacter", ids[2])
+    test.assertEqual("greetUnlock", ids[3])
+    test.assertEqual("greetPromptsHeading", ids[4])
+    test.assertEqual("greetCategory:join", ids[5])
+    test.assertEqual("greetTimingHeading", ids[9])
+    test.assertEqual("welcomeBackMinutes", ids[10])
+    test.assertEqual("greetCap", ids[12])
+    test.assertEqual(12, #ids)
+    -- "This character" explains how it differs from the main switch.
+    test.assertContains(addon.settings:Info("greetCharacter"), "every character on this account")
+end)
