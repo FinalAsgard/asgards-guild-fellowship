@@ -303,7 +303,7 @@ Asked by two organizers at once, a guildmate sees both prompts stacked. Acceptin
 
 ### Ask in guild
 
-To reach guildmates without the add-on, press **Ask in guild** (shown while any role is open). The window shows the line it would post, for example **LF healer and 2 DPS for The Deadmines (17–26), whisper me!**, naming the open roles, the dungeon and its level range. **Post** sends that one line to guild chat; **Cancel** sends nothing.
+To reach guildmates without the add-on, press **Ask in guild** (shown while any role is open). A small pop-up opens with a ready-made line in a text box, for example **LF healer and 2 DPS for The Deadmines (17–26), whisper me!**, naming the open roles, the dungeon and its level range. Change it however you like: a counter shows how close you are to guild chat's 255-character limit. **Post** (or Enter) sends that one line to guild chat; **Cancel** (or Escape) sends nothing. The pop-up closes on its own if the group fills up, ends, or you close the Group Finder.
 
 ### Who is around
 

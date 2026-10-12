@@ -11,8 +11,9 @@ local _, addon = ...
 -- from the party, with Tank/Healer/DPS buttons for each party member the
 -- game hasn't assigned a role, "Group complete" once all five are filled,
 -- and Change dungeon and End group buttons. Closing the window keeps the
--- group. While any role is open, Ask in guild offers a ready-made line for
--- guild chat, and posts it only once the organizer confirms.
+-- group. While any role is open, Ask in guild opens a pop-up with a
+-- ready-made line for guild chat in a text box, to edit as the organizer
+-- likes; only Post sends it.
 --
 -- Along the bottom, always: the guildmates whose add-on replied to the
 -- last ask, available or not, and a Do Not Disturb check box.
@@ -46,6 +47,14 @@ local GroupFinderWindow = {
     FOOTER_HEIGHT = 64,
     CHECK_SIZE = 24,
     BUTTON_HEIGHT = 20,
+    -- The Ask in guild pop-up: its size, the text box's height in lines,
+    -- and the longest line guild chat takes.
+    ASK_WIDTH = 440,
+    ASK_HEIGHT = 168,
+    ASK_LINES = 3,
+    ASK_LINE_HEIGHT = 14,
+    GUILD_LINE_MAX = 255,
+    ASK_STRATA = "DIALOG",
     ROLE_BUTTON_WIDTH = 56,
     STRATA = "HIGH",
 }
@@ -445,7 +454,7 @@ function Window:buildGroup()
         end
         self.session:End()
         self.choosing = false
-        self.asking = nil
+        self:CloseAsk()
         self:Refresh()
     end)
     self.endButton:SetPoint("TOPRIGHT", group, "TOPRIGHT", -padding, -54)
@@ -455,8 +464,7 @@ function Window:buildGroup()
     end)
     self.changeButton:SetPoint("RIGHT", self.endButton, "LEFT", -4, 0)
     self.askButton = self:button(group, "Ask in guild", 100, function()
-        self.asking = self.session:AskLine(self:Picked())
-        self:Refresh()
+        self:OpenAsk()
     end)
     self.askButton:SetPoint("RIGHT", self.changeButton, "LEFT", -4, 0)
 
@@ -496,32 +504,6 @@ function Window:buildGroup()
     self.completeText = group:CreateFontString(nil, "OVERLAY", "GameFontGreen")
     self.completeText:SetPoint("TOPLEFT", group, "TOPLEFT", padding, below - 6)
     self.completeText:SetText("Group complete")
-
-    -- Ask in guild's confirmation, where Group complete would be (the two
-    -- never show together).
-    local confirm = self.environment.CreateFrame("Frame", nil, group)
-    confirm:SetPoint("TOPLEFT", group, "TOPLEFT", padding, below - 2)
-    confirm:SetPoint("RIGHT", group, "RIGHT", -padding, 0)
-    confirm:SetHeight(28)
-    self.confirmCancel = self:button(confirm, "Cancel", 64, function()
-        self.asking = nil
-        self:Refresh()
-    end)
-    self.confirmCancel:SetPoint("RIGHT", confirm, "RIGHT", 0, 0)
-    self.confirmPost = self:button(confirm, "Post", 52, function()
-        local line = self.asking
-        self.asking = nil
-        if line ~= nil then
-            pcall(self.postToGuild, line)
-        end
-        self:Refresh()
-    end)
-    self.confirmPost:SetPoint("RIGHT", self.confirmCancel, "LEFT", -4, 0)
-    self.confirmText = confirm:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    self.confirmText:SetPoint("LEFT", confirm, "LEFT", 0, 0)
-    self.confirmText:SetPoint("RIGHT", self.confirmPost, "LEFT", -6, 0)
-    self.confirmText:SetJustifyH("LEFT")
-    self.confirm = confirm
 
     self.partyHeading = group:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     self.partyHeading:SetPoint("TOPLEFT", group, "TOPLEFT", padding, below - 32)
@@ -598,6 +580,9 @@ function Window:build()
     -- The panel moves itself while the mouse is held; letting go saves.
     panel:HookScript("OnMouseUp", function()
         self:saveCurrent()
+    end)
+    panel:HookScript("OnHide", function()
+        self:CloseAsk()
     end)
 
     self.dungeonText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -747,16 +732,11 @@ function Window:drawGroup()
     if self.session:IsComplete() then
         self.completeText:Show()
         self.askButton:Hide()
-        self.asking = nil
+        -- Nothing left to ask for.
+        self:CloseAsk()
     else
         self.completeText:Hide()
         self.askButton:Show()
-    end
-    if self.asking ~= nil then
-        self.confirmText:SetText("Post to guild chat? \"" .. self.asking .. "\"")
-        self.confirm:Show()
-    else
-        self.confirm:Hide()
     end
 
     -- Members the game assigned a role need no buttons.
@@ -816,6 +796,186 @@ function Window:draw()
     end
     self.suggestions:Show()
     self:drawFooter()
+end
+
+-- Ask in guild ----------------------------------------------------------------
+
+-- `text` as one guild chat line: line breaks become spaces, and the ends
+-- are trimmed. Nil when nothing is left.
+function GroupFinderWindow.ChatLine(text)
+    if type(text) ~= "string" then
+        return nil
+    end
+    text = string.gsub(text, "[\r\n]+", " ")
+    text = string.match(text, "^%s*(.-)%s*$")
+    if text == "" then
+        return nil
+    end
+    return text
+end
+
+-- The Ask in guild pop-up, made on first use: a title, a hint, a text box
+-- holding the line (wrapping over a few lines), a count of characters
+-- against guild chat's limit, and Post and Cancel. Enter posts and Escape
+-- cancels. It sits over the Group Finder, above it, and can be dragged.
+function Window:askDialog()
+    if self.ask ~= nil then
+        return self.ask
+    end
+    local createFrame = self.environment.CreateFrame
+    local padding = GroupFinderWindow.PADDING
+    local dialog = createFrame("Frame", nil, self.environment.UIParent)
+    dialog:SetWidth(GroupFinderWindow.ASK_WIDTH)
+    dialog:SetHeight(GroupFinderWindow.ASK_HEIGHT)
+    dialog:SetFrameStrata(GroupFinderWindow.ASK_STRATA)
+    dialog:SetClampedToScreen(true)
+    dialog:SetPoint("CENTER", self.panel, "CENTER", 0, 0)
+    -- Clicks on it never fall through to the window below; dragging it
+    -- anywhere but its controls moves it.
+    dialog:EnableMouse(true)
+    dialog:SetMovable(true)
+    dialog:RegisterForDrag("LeftButton")
+    dialog:SetScript("OnDragStart", function()
+        dialog:StartMoving()
+    end)
+    dialog:SetScript("OnDragStop", function()
+        dialog:StopMovingOrSizing()
+    end)
+
+    local edge = dialog:CreateTexture(nil, "BACKGROUND")
+    edge:SetAllPoints(dialog)
+    edge:SetColorTexture(0.83, 0.69, 0.22, 0.95)
+    local background = dialog:CreateTexture(nil, "BORDER")
+    background:SetPoint("TOPLEFT", dialog, "TOPLEFT", 2, -2)
+    background:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -2, 2)
+    background:SetColorTexture(0.06, 0.06, 0.08, 0.96)
+
+    local title = dialog:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOP", dialog, "TOP", 0, -10)
+    title:SetText("Ask in guild")
+    local hint = dialog:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    hint:SetPoint("TOPLEFT", dialog, "TOPLEFT", padding, -34)
+    hint:SetPoint("RIGHT", dialog, "RIGHT", -padding, 0)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("Change the line if you like, then Post it to guild chat.")
+
+    -- A dark box with a thin edge, the text wrapping inside it.
+    local inset = 6
+    local holder = createFrame("Frame", nil, dialog)
+    holder:SetPoint("TOPLEFT", dialog, "TOPLEFT", padding, -52)
+    holder:SetPoint("RIGHT", dialog, "RIGHT", -padding, 0)
+    holder:SetHeight(GroupFinderWindow.ASK_LINES * GroupFinderWindow.ASK_LINE_HEIGHT + 2 * inset)
+    local boxEdge = holder:CreateTexture(nil, "BACKGROUND")
+    boxEdge:SetAllPoints(holder)
+    boxEdge:SetColorTexture(0.5, 0.5, 0.5, 0.8)
+    local boxFill = holder:CreateTexture(nil, "BORDER")
+    boxFill:SetPoint("TOPLEFT", holder, "TOPLEFT", 1, -1)
+    boxFill:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -1, 1)
+    boxFill:SetColorTexture(0, 0, 0, 0.75)
+    local box = createFrame("EditBox", nil, holder)
+    box:SetMultiLine(true)
+    box:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+    box:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", 0, 0)
+    box:SetFontObject("ChatFontNormal")
+    box:SetTextInsets(inset, inset, inset, inset)
+    box:SetAutoFocus(false)
+    box:SetMaxLetters(GroupFinderWindow.GUILD_LINE_MAX)
+
+    local count = dialog:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    count:SetPoint("TOPRIGHT", holder, "BOTTOMRIGHT", 0, -4)
+
+    local ask = { frame = dialog, box = box, count = count }
+    ask.cancel = self:button(dialog, "Cancel", 72, function()
+        self:CloseAsk()
+    end)
+    ask.cancel:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -padding, padding)
+    ask.post = self:button(dialog, "Post", 72, function()
+        self:PostAsk()
+    end)
+    ask.post:SetPoint("RIGHT", ask.cancel, "LEFT", -4, 0)
+
+    -- Enter posts (a line break is never part of a chat line); Escape
+    -- cancels. Typing keeps the count and Post up to date.
+    box:SetScript("OnEnterPressed", function()
+        self:PostAsk()
+    end)
+    box:SetScript("OnEscapePressed", function()
+        self:CloseAsk()
+    end)
+    box:SetScript("OnTextChanged", function()
+        local text = box:GetText()
+        if type(text) == "string" and string.find(text, "[\r\n]") then
+            -- A pasted line break: Enter is handled above.
+            box:SetText((string.gsub(text, "[\r\n]+", " ")))
+            return
+        end
+        self:updateAsk()
+    end)
+
+    dialog:Hide()
+    self.ask = ask
+    return ask
+end
+
+-- Keeps the character count and Post in step with the text box.
+function Window:updateAsk()
+    local ask = self.ask
+    local text = ask.box:GetText() or ""
+    ask.count:SetText(string.len(text) .. "/" .. GroupFinderWindow.GUILD_LINE_MAX)
+    ask.canPost = GroupFinderWindow.ChatLine(text) ~= nil
+    if ask.canPost then
+        ask.post:Enable()
+    else
+        ask.post:Disable()
+    end
+end
+
+-- Opens the pop-up with a fresh line for the roles still open. Returns
+-- false when there's nothing to ask for.
+function Window:OpenAsk()
+    local line = self.session:AskLine(self:Picked())
+    if line == nil then
+        return false
+    end
+    local ask = self:askDialog()
+    ask.box:SetText(line)
+    ask.box:SetCursorPosition(string.len(line))
+    self:updateAsk()
+    ask.open = true
+    ask.frame:Show()
+    ask.box:SetFocus()
+    return true
+end
+
+-- Whether the pop-up is open.
+function Window:IsAsking()
+    return self.ask ~= nil and self.ask.open == true
+end
+
+-- Closes the pop-up without posting.
+function Window:CloseAsk()
+    if self.ask == nil then
+        return
+    end
+    self.ask.open = false
+    self.ask.box:ClearFocus()
+    self.ask.frame:Hide()
+end
+
+-- Posts the text box's line to guild chat and closes the pop-up. Returns
+-- false when the pop-up isn't open, or (leaving it open) when the box is
+-- empty.
+function Window:PostAsk()
+    if not self:IsAsking() then
+        return false
+    end
+    local line = GroupFinderWindow.ChatLine(self.ask.box:GetText())
+    if line == nil then
+        return false
+    end
+    self:CloseAsk()
+    pcall(self.postToGuild, line)
+    return true
 end
 
 -- Redraws the window while it's showing; a closed window is drawn when it

@@ -67,7 +67,7 @@ test.test("ask in guild: no line once every role is filled", function()
     test.assertEqual(0, #full:OpenRoles())
 end)
 
--- Confirm, then post ------------------------------------------------------------
+-- The pop-up ---------------------------------------------------------------------
 
 local function newWindow(party)
     local addon = load()
@@ -104,39 +104,128 @@ local function newWindow(party)
     world.window:Pick("dm")
     return world
 end
+local LINE = "LF healer and 3 DPS for The Deadmines (17–26), whisper me!"
 
-test.test("ask in guild: the button asks first, and Post sends the one line", function()
-    local world = newWindow({ member("Me", "WARRIOR", { isPlayer = true }) })
+local function solo()
+    return newWindow({ member("Me", "WARRIOR", { isPlayer = true }) })
+end
+
+test.test("ask in guild: the button opens a pop-up with the line in a text box, and posts nothing yet", function()
+    local world = solo()
     local window = world.window
     test.assertTrue(window.askButton.shown)
-    test.assertFalse(window.confirm.shown)
+    test.assertFalse(window:IsAsking())
 
     window.askButton.scripts.OnClick()
 
+    test.assertTrue(window:IsAsking())
+    test.assertTrue(window.ask.frame.shown)
+    test.assertEqual(LINE, window.ask.box:GetText())
+    -- The cursor waits at the end, ready to add to the line.
+    test.assertEqual(string.len(LINE), window.ask.box.cursor)
+    test.assertEqual(string.len(LINE) .. "/255", window.ask.count.text)
+    test.assertTrue(window.ask.canPost)
     test.assertEqual(0, #world.posted)
-    test.assertTrue(window.confirm.shown)
-    test.assertContains(window.confirmText.text, "LF healer and 3 DPS for The Deadmines (17–26), whisper me!")
+end)
 
-    window.confirmPost.scripts.OnClick()
+test.test("ask in guild: Post sends the line as edited, once", function()
+    local world = solo()
+    local window = world.window
+    window.askButton.scripts.OnClick()
+
+    window.ask.box:SetText("LF healer for Deadmines, ask Toolbox!")
+    window.ask.box.scripts.OnTextChanged()
+    test.assertEqual("37/255", window.ask.count.text)
+    window.ask.post.scripts.OnClick()
 
     test.assertEqual(1, #world.posted)
-    test.assertEqual("LF healer and 3 DPS for The Deadmines (17–26), whisper me!", world.posted[1])
-    test.assertFalse(window.confirm.shown)
-    -- Posting again needs another confirmation.
-    window.confirmPost.scripts.OnClick()
+    test.assertEqual("LF healer for Deadmines, ask Toolbox!", world.posted[1])
+    test.assertFalse(window:IsAsking())
+    test.assertFalse(window.ask.frame.shown)
+    -- Posting again needs the pop-up again.
+    test.assertFalse(window:PostAsk())
+    window.ask.box.scripts.OnEnterPressed()
     test.assertEqual(1, #world.posted)
+end)
+
+test.test("ask in guild: Enter posts and Escape cancels", function()
+    local world = solo()
+    local window = world.window
+
+    window.askButton.scripts.OnClick()
+    window.ask.box.scripts.OnEscapePressed()
+    test.assertFalse(window:IsAsking())
+    test.assertEqual(0, #world.posted)
+
+    window.askButton.scripts.OnClick()
+    window.ask.box.scripts.OnEnterPressed()
+    test.assertEqual(LINE, world.posted[1])
+    test.assertFalse(window:IsAsking())
 end)
 
 test.test("ask in guild: Cancel posts nothing", function()
-    local world = newWindow({ member("Me", "WARRIOR", { isPlayer = true }) })
+    local world = solo()
     local window = world.window
 
     window.askButton.scripts.OnClick()
-    window.confirmCancel.scripts.OnClick()
+    window.ask.cancel.scripts.OnClick()
 
     test.assertEqual(0, #world.posted)
-    test.assertFalse(window.confirm.shown)
+    test.assertFalse(window:IsAsking())
+    test.assertFalse(window.ask.frame.shown)
 end)
+
+test.test("ask in guild: an empty line can't be posted, and line breaks become spaces", function()
+    local world = solo()
+    local window = world.window
+    window.askButton.scripts.OnClick()
+
+    window.ask.box:SetText("   ")
+    window.ask.box.scripts.OnTextChanged()
+    test.assertFalse(window.ask.canPost)
+    test.assertFalse(window:PostAsk())
+    test.assertTrue(window:IsAsking())
+    test.assertEqual(0, #world.posted)
+
+    -- A pasted line break is taken out as the text changes.
+    window.ask.box:SetText("LF tank\nfor Deadmines")
+    window.ask.box.scripts.OnTextChanged()
+    test.assertEqual("LF tank for Deadmines", window.ask.box:GetText())
+    window.ask.post.scripts.OnClick()
+    test.assertEqual("LF tank for Deadmines", world.posted[1])
+
+    local addon = load()
+    test.assertEqual("a b", addon.GroupFinderWindow.ChatLine("  a\r\n\nb  "))
+    test.assertEqual(nil, addon.GroupFinderWindow.ChatLine("\n \n"))
+end)
+
+test.test("ask in guild: each opening starts from a fresh line", function()
+    local world = solo()
+    local window = world.window
+    window.askButton.scripts.OnClick()
+    window.ask.box:SetText("something else")
+    window.ask.cancel.scripts.OnClick()
+
+    window.askButton.scripts.OnClick()
+
+    test.assertEqual(LINE, window.ask.box:GetText())
+end)
+
+test.test("ask in guild: the pop-up closes when the group ends or the window closes", function()
+    local world = solo()
+    local window = world.window
+
+    window.askButton.scripts.OnClick()
+    window.endButton.scripts.OnClick()
+    test.assertFalse(window:IsAsking())
+
+    window:Pick("dm")
+    window.askButton.scripts.OnClick()
+    window.panel.hooks.OnHide()
+    test.assertFalse(window:IsAsking())
+    test.assertEqual(0, #world.posted)
+end)
+
 
 test.test("ask in guild: no button once the group is complete", function()
     local world = newWindow({
