@@ -198,8 +198,8 @@ test.test("group candidates: describes an entry with its fitting characters", fu
     local world = newGuild()
     local healers = world.candidates():ForRole("healer", DEADMINES)
 
-    test.assertEqual("Thunderer: Bolt 22, Hammer 24", world.addon.GroupCandidates.Describe(healers[1]))
-    test.assertEqual("Cleric: Cleric 20 (no add-on)", world.addon.GroupCandidates.Describe(healers[2]))
+    test.assertEqual("Bolt 22, Hammer 24", world.addon.GroupCandidates.Describe(healers[1]))
+    test.assertEqual("Cleric 20 (no add-on)", world.addon.GroupCandidates.Describe(healers[2]))
     -- Where they are now goes in the mouseover.
     test.assertEqual("On Bolt, Ironforge", world.addon.GroupCandidates.Location(healers[1]))
 end)
@@ -212,11 +212,10 @@ test.test("group candidates: character names in their class colors", function()
         return colors[class]
     end
 
-    test.assertEqual("Thunderer: |cff0070ddBolt|r 22, |cfff58cbaHammer|r 24",
-        world.addon.GroupCandidates.Describe(healers[1], colorOf))
+    test.assertEqual("|cff0070ddBolt|r 22, |cfff58cbaHammer|r 24", world.addon.GroupCandidates.Describe(healers[1], colorOf))
     test.assertEqual("On |cff0070ddBolt|r, Ironforge", world.addon.GroupCandidates.Location(healers[1], colorOf))
     -- A class with no color stays plain.
-    test.assertEqual("Cleric: Cleric 20 (no add-on)", world.addon.GroupCandidates.Describe(healers[2], colorOf))
+    test.assertEqual("Cleric 20 (no add-on)", world.addon.GroupCandidates.Describe(healers[2], colorOf))
     local nearby = world.candidates():Nearby("Ironforge", "me")
     test.assertEqual("Thunderer — |cff0070ddBolt|r 22", world.addon.GroupCandidates.DescribeNearby(nearby[1], colorOf))
 end)
@@ -288,8 +287,8 @@ test.test("group finder window: each open role lists who could fill it, and fill
     local lines = shownLines(window)
     -- The organizer, a warrior, took the tank slot: no tank list.
     test.assertEqual("|cffffd100Healer|r", lines[1])
-    test.assertEqual("  Thunderer: Bolt 22, Hammer 24", lines[2])
-    test.assertEqual("  Cleric: Cleric 20 (no add-on)", lines[3])
+    test.assertEqual("  Bolt 22, Hammer 24", lines[2])
+    test.assertEqual("  Cleric 20 (no add-on)", lines[3])
     -- Hovering a guildmate's line shows where they are; headings have none.
     test.assertEqual("On Bolt, Ironforge", window.suggestionHovers[2].text)
     test.assertTrue(window.suggestionHovers[2].frame.shown)
