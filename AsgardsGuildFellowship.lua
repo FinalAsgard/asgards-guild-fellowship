@@ -802,7 +802,15 @@ if clientProfile.supported then
     groupSession = addon.GroupSession.Create(roleCatalog)
     syncParty = function()
         if groupSession:IsActive() then
-            groupSession:UpdateParty(client:GetPartyMembers(), client:IsInGroup())
+            -- Each member's guild roster key, so an invitee who joined is
+            -- recognized.
+            local members = client:GetPartyMembers()
+            local guild, _, normalizer = rosterController:QuietContext()
+            local index
+            for index = 1, #members do
+                members[index].rosterKey = guild and normalizer:Key(members[index].name) or nil
+            end
+            groupSession:UpdateParty(members, client:IsInGroup())
             if onSlotsChanged ~= nil then
                 onSlotsChanged()
             end
@@ -887,6 +895,11 @@ if clientProfile.supported then
                 local prompt, option, others = joinRequests:Accept(id, choice)
                 if prompt ~= nil then
                     sendGroupFinder(addon.GroupFinderProtocol.Answer(prompt.organizer, id, option))
+                    if option.key ~= rosterController:SelfKey() then
+                        local organizer = string.match(prompt.sender or "", "^([^%-]+)") or prompt.sender
+                        rosterController:Print("Log over to " .. option.name .. " to join " .. tostring(organizer) ..
+                            "'s group for " .. prompt.dungeon.name .. ". They'll invite you once you're on.")
+                    end
                     local index
                     for index = 1, #others do
                         sendGroupFinder(addon.GroupFinderProtocol.JoinedElsewhere(others[index].organizer,
@@ -1069,6 +1082,22 @@ if clientProfile.supported then
                 end,
                 request = sendRequest,
                 cancelRequest = cancelRequest,
+                isOnline = function(key)
+                    local guild, _, normalizer = rosterController:QuietContext()
+                    local live = guild and rosterController:LiveMembers(normalizer)[key]
+                    return live ~= nil and live.online == true
+                end,
+                -- Only ever from the organizer's click on Invite.
+                invite = function(key)
+                    local guild, partition, normalizer = rosterController:QuietContext()
+                    if guild == nil then
+                        return false
+                    end
+                    local live = rosterController:LiveMembers(normalizer)[key]
+                    local character = partition:GetCharacter(key)
+                    local name = (live and live.name) or (character and character.name)
+                    return name ~= nil and client:InviteToParty(name)
+                end,
                 -- The guild as it is now: the live roster, the replies to
                 -- the last ask, and who is left out (this character's
                 -- player and the party).
@@ -1403,6 +1432,10 @@ if clientProfile.supported then
     end)
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
+        -- Who is online decides the Group Finder's Invite buttons.
+        if groupFinder ~= nil then
+            groupFinder:Refresh()
+        end
         -- The first loaded roster tells Guild Greet who was already online
         -- and how long everyone else has been away.
         guildGreet:OnRosterUpdate(function()

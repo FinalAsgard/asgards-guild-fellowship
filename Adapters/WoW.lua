@@ -815,6 +815,20 @@ function Client:GetPartyMembers()
     return members
 end
 
+-- Sends the game's party invite to the character `name`. Retail keeps it
+-- in C_PartyInfo; older clients have it as a global. Returns true when the
+-- client accepted the call. Only ever called from the organizer's click.
+function Client:InviteToParty(name)
+    if type(name) ~= "string" or name == "" then
+        return false
+    end
+    local partyInfo = self.environment.C_PartyInfo
+    if type(partyInfo) == "table" and type(partyInfo.InviteUnit) == "function" then
+        return (callFunction(partyInfo.InviteUnit, name))
+    end
+    return (callFunction(self.environment.InviteUnit, name))
+end
+
 -- Calls onChange() whenever the party or its assigned roles change.
 -- Returns false when the client can't deliver the events.
 function Client:ObserveParty(onChange)

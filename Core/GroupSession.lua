@@ -17,6 +17,12 @@ local _, addon = ...
 -- free up, SlotChanges says which invitees need the new open roles, and
 -- withdraws the requests nothing is left for. An invitee who joined
 -- another organizer's group leaves the request "joined-elsewhere".
+--
+-- Getting an accepted invitee into the party is the organizer's click:
+-- InviteState says whether their chosen character is online to invite
+-- ("ready") or not yet ("waiting"). Once that character is in the party
+-- (matched by `rosterKey`, its key in the guild roster), it takes the
+-- invitee's slot as a party member.
 local GroupSession = {
     -- Every party member fills a slot as accepted.
     ACCEPTED = "accepted",
@@ -111,7 +117,8 @@ function Session:Assign(key, role)
 end
 
 -- The party as it is now: `members` ({ key, name, classToken, level,
--- assignedRole, inGuild, isPlayer } each, the organizer included) and
+-- assignedRole, inGuild, isPlayer, rosterKey? } each, the organizer
+-- included; rosterKey is the member's key in the guild roster) and
 -- whether the organizer is in a group. Leaving the party after being in
 -- one ends the session. Returns false when that happened.
 function Session:UpdateParty(members, inGroup)
@@ -152,10 +159,26 @@ end
 -- slot someone was put in.
 function Session:place()
     local slots, unplaced, defaults = emptySlots(), {}, {}
+    -- An invitee who joined the party keeps the role they chose.
+    local joinedRole = {}
     local index
     for index = 1, #self.requests do
         local request = self.requests[index]
+        request.inParty = false
         if request.state == GroupSession.ACCEPTED then
+            local memberIndex
+            for memberIndex = 1, #self.members do
+                local member = self.members[memberIndex]
+                if member.rosterKey ~= nil and member.rosterKey == request.character.key then
+                    request.inParty = true
+                    joinedRole[member.key] = request.role
+                end
+            end
+        end
+    end
+    for index = 1, #self.requests do
+        local request = self.requests[index]
+        if request.state == GroupSession.ACCEPTED and not request.inParty then
             local slot = openSlot(slots, request.role)
             if slot ~= nil then
                 slot.member = request.character
@@ -168,7 +191,7 @@ function Session:place()
         local member = self.members[index]
         local role = member.assignedRole
         if not addon.RoleCatalog.IsRole(role) then
-            role = self.assignments[member.key]
+            role = joinedRole[member.key] or self.assignments[member.key]
         end
         if role ~= nil then
             local slot = openSlot(slots, role)
@@ -361,6 +384,21 @@ function Session:Answer(id, from, option, nothingLeft)
     request.character = { key = option.key, name = option.name, level = option.level, inGuild = true, invitee = true }
     self:place()
     return request.state
+end
+
+-- Where getting the invitee in slot `slot` (from Slots) stands: "ready"
+-- when their chosen character is online to invite (`isOnline(key)`),
+-- "waiting" when it isn't yet, or nil for a slot without an invitee who
+-- has yet to join.
+function Session:InviteState(slot, isOnline)
+    if slot == nil or slot.request == nil or slot.member == nil then
+        return nil
+    end
+    local ok, online = pcall(isOnline, slot.member.key)
+    if ok and online then
+        return "ready"
+    end
+    return "waiting"
 end
 
 -- The invitee `from` joined another group instead of answering request

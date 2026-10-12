@@ -289,6 +289,8 @@ Guildmates with the add-on have a **Request** button beside their suggestion. Pr
 
 The guildmate gets a small **Group Finder** prompt: **Toolbox asks you to join The Deadmines (17–26)**, with a button for each way they could join, shown as **Healer — Hammer (24)**. Only roles you still need are offered, only roles that character's preferences allow, and only characters whose level fits the dungeon (alts included). Choosing one puts them in that slot in your window; **Decline** says no. A guildmate in Do Not Disturb, in a group or in an instance declines automatically, as does one with no character that fits. The prompt closes if you cancel or the request expires.
 
+Once someone accepts, getting them into your party is up to you; the add-on never invites anyone on its own. If they're already on the character they chose, its slot has an **Invite** button that sends the game's party invite. If they chose another character, the slot reads **Waiting for Bolt to log in**, and they're reminded in chat to log over to it. The **Invite** button appears as soon as that character is online. When the character joins your party, it fills the slot like any other party member, in the role they chose.
+
 Prompts keep up with your group. When a slot fills, whether someone accepted or joined your party, everyone you've asked loses the options for that role. Anyone left with no option has their prompt closed, and their line in your window shows **withdrawn**. Once every role is filled, the remaining requests are withdrawn too.
 
 Asked by two organizers at once, a guildmate sees both prompts stacked. Accepting one declines the others, and those organizers see **joined another group**.

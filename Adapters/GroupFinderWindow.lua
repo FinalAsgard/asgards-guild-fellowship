@@ -21,7 +21,10 @@ local _, addon = ...
 -- could fill it (GroupCandidates). The dungeon picker shows, for each
 -- dungeon, how many online guildmates could fill tank, healer and DPS.
 -- Add-on users get a Request button (Cancel while their request is
--- pending), and their request's state beside their name.
+-- pending), and their request's state beside their name. An accepted
+-- invitee's slot reads "Waiting for <character> to log in" until that
+-- character is online, then shows an Invite button; nothing is invited
+-- without that click.
 --
 -- Like the other adapters, it reaches the game only through the client's
 -- environment (CreateFrame, UIParent) and the framework, so specs can draw
@@ -85,6 +88,8 @@ end
 --   request(entry)      asks a suggested player (a GroupCandidates entry)
 --                       to join
 --   cancelRequest(id)   withdraws a pending request
+--   isOnline(key)       whether a guild character is online now
+--   invite(key)         sends the game's party invite to that character
 --   loadAnchor()        the saved position ({ point, x, y }), or nil
 --   saveAnchor(anchor)  saves a new one
 -- Returns nil and the reason when the framework is missing or can't build
@@ -113,6 +118,10 @@ function GroupFinderWindow.Create(client, options)
         postToGuild = options.postToGuild or function() end,
         request = options.request or function() end,
         cancelRequest = options.cancelRequest or function() end,
+        isOnline = options.isOnline or function()
+            return false
+        end,
+        invite = options.invite or function() end,
         suggestionButtons = {},
         loadAnchor = options.loadAnchor or function() return nil end,
         saveAnchor = options.saveAnchor or function() end,
@@ -384,9 +393,17 @@ function Window:buildGroup()
         role:SetText(addon.RoleCatalog.LABELS[addon.GroupSession.LAYOUT[index].role] .. ":")
         local text = group:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         text:SetPoint("TOPLEFT", group, "TOPLEFT", padding + 70, top)
-        text:SetPoint("RIGHT", group, "RIGHT", -padding, 0)
+        text:SetPoint("RIGHT", group, "RIGHT", -padding - 64, 0)
         text:SetJustifyH("LEFT")
-        self.slotRows[index] = { role = role, text = text }
+        local row = { role = role, text = text }
+        row.invite = self:button(group, "Invite", 60, function()
+            if row.inviteKey ~= nil then
+                pcall(self.invite, row.inviteKey)
+            end
+        end)
+        row.invite:SetHeight(GroupFinderWindow.ROW_HEIGHT - 2)
+        row.invite:SetPoint("TOPRIGHT", group, "TOPRIGHT", -padding, top + 1)
+        self.slotRows[index] = row
     end
 
     local below = -GroupFinderWindow.LIST_TOP - #addon.GroupSession.LAYOUT * GroupFinderWindow.ROW_HEIGHT
@@ -611,10 +628,21 @@ function Window:drawGroup()
     local index
     for index = 1, #self.slotRows do
         local slot = slots[index]
-        if slot ~= nil and slot.member ~= nil then
-            self.slotRows[index].text:SetText(GroupFinderWindow.MemberLabel(slot.member))
+        local row = self.slotRows[index]
+        local state = self.session:InviteState(slot, self.isOnline)
+        row.inviteKey = nil
+        if state == "waiting" then
+            row.text:SetText("Waiting for " .. slot.member.name .. " to log in")
+        elseif slot ~= nil and slot.member ~= nil then
+            row.text:SetText(GroupFinderWindow.MemberLabel(slot.member))
         else
-            self.slotRows[index].text:SetText("open")
+            row.text:SetText("open")
+        end
+        if state == "ready" then
+            row.inviteKey = slot.member.key
+            row.invite:Show()
+        else
+            row.invite:Hide()
         end
     end
     if self.session:IsComplete() then
