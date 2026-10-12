@@ -1,4 +1,10 @@
 local test = require("tests.test_helper")
+
+-- Every dungeon of `catalog`, lowest range first: with no level, none fits.
+local function everyDungeon(catalog)
+    local _, all = catalog:Split(nil)
+    return all
+end
 local fixtures = require("tests.client_fixtures")
 local fakeFrames = require("tests.fake_frames")
 
@@ -31,7 +37,7 @@ test.test("dungeon catalog: the dungeons a level fits come first, lowest range f
 
     test.assertEqual("Wailing Caverns, The Deadmines, Shadowfang Keep", names(fitting))
     test.assertEqual("Stratholme", names(others))
-    test.assertEqual("Wailing Caverns, The Deadmines, Shadowfang Keep, Stratholme", names(catalog:All()))
+    test.assertEqual("Wailing Caverns, The Deadmines, Shadowfang Keep, Stratholme", names(everyDungeon(catalog)))
 end)
 
 test.test("dungeon catalog: answers whether a level fits a dungeon, ends included", function()
@@ -59,7 +65,7 @@ test.test("dungeon catalog: unusable and repeated entries are left out", functio
         "not a dungeon",
     })
 
-    test.assertEqual("The Deadmines", names(catalog:All()))
+    test.assertEqual("The Deadmines", names(everyDungeon(catalog)))
     test.assertEqual("The Deadmines", catalog:Get("dm").name)
 end)
 
@@ -67,12 +73,12 @@ test.test("dungeon catalog: the Dungeon Finder's list wins, else the client's st
     local DungeonCatalog = newCatalogModule()
 
     local supplied = DungeonCatalog.For("retail", { { id = 1, name = "Finder Dungeon", minLevel = 80, maxLevel = 90 } })
-    test.assertEqual("Finder Dungeon", names(supplied:All()))
+    test.assertEqual("Finder Dungeon", names(everyDungeon(supplied)))
 
     -- Nothing from the Dungeon Finder: Retail's own table.
     local retail = DungeonCatalog.For("retail", nil)
-    test.assertTrue(#retail:All() > 0)
-    test.assertEqual(#DungeonCatalog.STATIC.retail, #DungeonCatalog.For("retail", {}):All())
+    test.assertTrue(#everyDungeon(retail) > 0)
+    test.assertEqual(#DungeonCatalog.STATIC.retail, #everyDungeon(DungeonCatalog.For("retail", {})))
 end)
 
 test.test("dungeon catalog: WoW Forever uses the Classic dungeons with fixed ranges", function()
@@ -453,9 +459,9 @@ test.test("Retail /agf group lists the Dungeon Finder's dungeons, and the static
     end)
     fixtures.slash(world, "group")
 
-    test.assertEqual("Windrunner Spire", names(window.options.dungeons():All()))
+    test.assertEqual("Windrunner Spire", names(everyDungeon(window.options.dungeons())))
 
     -- The list is read again on every open.
     entries[1] = nil
-    test.assertEqual(#addon.DungeonCatalog.STATIC.retail, #window.options.dungeons():All())
+    test.assertEqual(#addon.DungeonCatalog.STATIC.retail, #everyDungeon(window.options.dungeons()))
 end)

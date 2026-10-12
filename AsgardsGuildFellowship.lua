@@ -812,6 +812,29 @@ if clientProfile.supported then
     -- time it opens; its place is saved account-wide. The group outlives
     -- the window and follows the party.
     groupSession = addon.GroupSession.Create(roleCatalog)
+    -- Group Finder messages the player didn't click to send wait until
+    -- they're out of combat (or an encounter or keystone run), in order.
+    local waitingToSend = {}
+    local function flushWhenFree()
+        if comm:IsBusy() then
+            if not client:After(2, flushWhenFree) then
+                waitingToSend = {}
+            end
+            return
+        end
+        local queued = waitingToSend
+        waitingToSend = {}
+        local index
+        for index = 1, #queued do
+            comm:Broadcast(queued[index], addon.Comm.PRIORITY_NORMAL)
+        end
+    end
+    local function sendWhenFree(message)
+        table.insert(waitingToSend, message)
+        if #waitingToSend == 1 then
+            flushWhenFree()
+        end
+    end
     syncParty = function()
         if groupSession:IsActive() then
             -- Each member's guild roster key, so an invitee who joined is
@@ -826,8 +849,7 @@ if clientProfile.supported then
             -- are told it's off.
             local _, dropped = groupSession:UpdateParty(members, client:IsInGroup())
             for index = 1, #(dropped or {}) do
-                comm:Broadcast(addon.GroupFinderProtocol.Cancel(dropped[index].to, dropped[index].id),
-                    addon.Comm.PRIORITY_NORMAL)
+                sendWhenFree(addon.GroupFinderProtocol.Cancel(dropped[index].to, dropped[index].id))
             end
             if onSlotsChanged ~= nil then
                 onSlotsChanged()
@@ -971,18 +993,14 @@ if clientProfile.supported then
             rosterController:Print("Requests wait until you're out of combat.")
             return
         end
-        local open, seen = {}, {}
-        local roles = groupSession:OpenRoles()
-        local index
-        for index = 1, #roles do
-            if not seen[roles[index]] then
-                seen[roles[index]] = true
-                table.insert(open, roles[index])
-            end
+        -- Nothing open, nothing to ask for: no request is made.
+        local open = groupSession:OpenRoleSet()
+        if open[1] == nil then
+            return
         end
         local request = groupSession:Request({ playerId = entry.id, key = entry.current.key, label = entry.label }, now,
             rosterController:SelfKey())
-        if request == nil or open[1] == nil then
+        if request == nil then
             return
         end
         sendGroupFinder(addon.GroupFinderProtocol.Request(request.to, request.id, dungeon, open))
@@ -994,10 +1012,10 @@ if clientProfile.supported then
         local updates, withdrawals = groupSession:SlotChanges()
         local index
         for index = 1, #updates do
-            sendGroupFinder(addon.GroupFinderProtocol.Slots(updates[index].to, updates[index].id, updates[index].roles))
+            sendWhenFree(addon.GroupFinderProtocol.Slots(updates[index].to, updates[index].id, updates[index].roles))
         end
         for index = 1, #withdrawals do
-            sendGroupFinder(addon.GroupFinderProtocol.Withdraw(withdrawals[index].to, withdrawals[index].id))
+            sendWhenFree(addon.GroupFinderProtocol.Withdraw(withdrawals[index].to, withdrawals[index].id))
         end
         if updates[1] ~= nil or withdrawals[1] ~= nil then
             refreshGroupFinder()
@@ -1027,9 +1045,7 @@ if clientProfile.supported then
         if message.t == protocol.TYPE_REQUEST then
             local refused = joinRequests:OnRequest(message, senderKey, sender, client:Timestamp() or 0)
             if refused ~= nil then
-                if not comm:IsBusy() then
-                    sendGroupFinder(protocol.Answer(senderKey, message.id, nil))
-                end
+                sendWhenFree(protocol.Answer(senderKey, message.id, nil))
                 return
             end
             showJoinPrompts()
@@ -1053,7 +1069,7 @@ if clientProfile.supported then
         elseif message.t == protocol.TYPE_SLOTS then
             local result = joinRequests:OnSlots(message.id, senderKey, message.r)
             if result == "closed" then
-                sendGroupFinder(protocol.Answer(senderKey, message.id, nil, true))
+                sendWhenFree(protocol.Answer(senderKey, message.id, nil, true))
             end
             if result ~= nil then
                 showJoinPrompts()

@@ -154,7 +154,7 @@ test.test("group session: party members outside the guild take slots too", funct
     test.assertFalse(healer.inGuild)
 end)
 
-test.test("group session: a member with no slot left is listed as unplaced", function()
+test.test("group session: a member with no slot left for their role stays out of the slots", function()
     local session = newSession()
     session:Start("dm")
 
@@ -166,7 +166,11 @@ test.test("group session: a member with no slot left is listed as unplaced", fun
     session:Assign("Me", "healer")
 
     test.assertEqual("healer=Me", "healer=" .. session:Slots()[2].member.key)
-    test.assertEqual("Cleric", session:Unplaced()[1].key)
+    local index
+    for index = 1, #session:Slots() do
+        local member = session:Slots()[index].member
+        test.assertFalse(member ~= nil and member.key == "Cleric", "Cleric has no slot")
+    end
 end)
 
 test.test("group session: Group complete once all five slots are filled", function()

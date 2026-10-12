@@ -1,4 +1,10 @@
 local test = require("tests.test_helper")
+
+-- Every dungeon of `catalog`, lowest range first: with no level, none fits.
+local function everyDungeon(catalog)
+    local _, all = catalog:Split(nil)
+    return all
+end
 local fixtures = require("tests.client_fixtures")
 local fakeFrames = require("tests.fake_frames")
 
@@ -58,7 +64,7 @@ test.test("dungeon catalog: identical dungeons keep one order, by id", function(
         { id = "b", name = "Same", minLevel = 10, maxLevel = 20 },
     })
 
-    local all = catalog:All()
+    local all = everyDungeon(catalog)
     test.assertEqual("12,3,b", tostring(all[1].id) .. "," .. tostring(all[2].id) .. "," .. tostring(all[3].id))
 end)
 
@@ -266,4 +272,91 @@ test.test("composed: an organizer leaving the party closes the prompts still wai
 
     test.assertFalse(organizer.addon.groupSession:IsActive())
     test.assertEqual(0, #invitee.shown)
+end)
+
+-- Adversarial review ----------------------------------------------------------------
+
+local function countDraws(window)
+    local draws = 0
+    local original = window.draw
+    window.draw = function(self)
+        draws = draws + 1
+        return original(self)
+    end
+    return function()
+        return draws
+    end
+end
+
+test.test("group finder window: a closed window isn't redrawn until it opens", function()
+    local addon = load()
+    local window = newWindow(addon, newSession(addon), {})
+    local draws = countDraws(window)
+
+    window:Toggle()
+    window:Refresh()
+    test.assertEqual(0, draws())
+
+    window:Toggle()
+    test.assertEqual(1, draws())
+    window:Refresh()
+    test.assertEqual(2, draws())
+end)
+
+test.test("composed: with every role filled, Request makes no request", function()
+    local channel = fixtures.newChannel()
+    local organizer = login(channel, "Toolbox-Area52")
+    fixtures.slash(organizer, "group")
+    local session = organizer.addon.groupSession
+    session:Start("test")
+    -- Five party members fill every slot.
+    session:UpdateParty({
+        { key = "p1", name = "Me", classToken = "WARRIOR", isPlayer = true, inGuild = true },
+        { key = "p2", name = "Cleric", classToken = "PRIEST", inGuild = true },
+        { key = "p3", name = "Zap", classToken = "MAGE", inGuild = true },
+        { key = "p4", name = "Stab", classToken = "ROGUE", inGuild = true },
+        { key = "p5", name = "Shot", classToken = "HUNTER", inGuild = true },
+    }, true)
+    organizer.sentMessages = {}
+
+    organizer.window.options.request({ id = 2, label = "Hammer", current = { key = "hammer-area52", name = "Hammer" } })
+
+    test.assertEqual(0, #session:Requests())
+    test.assertEqual(0, #organizer.sentMessages)
+end)
+
+test.test("composed: slot updates wait until the organizer is out of combat", function()
+    local channel = fixtures.newChannel()
+    local organizer = login(channel, "Toolbox-Area52")
+    local invitee = login(channel, "Hammer-Area52")
+    fixtures.deliver(channel)
+    fixtures.slash(organizer, "group")
+    organizer.addon.groupSession:Start("test")
+    organizer.window.options.request({ id = 2, label = "Hammer", current = { key = "hammer-area52", name = "Hammer" } })
+    fixtures.deliver(channel)
+    test.assertEqual(3, #invitee.shown[1].options)
+
+    -- In combat, the organizer (a warrior) is seen in a party: the tank
+    -- slot fills.
+    organizer.environment.UnitName = function(unit)
+        return unit == "player" and "Toolbox" or nil
+    end
+    organizer.environment.UnitClass = function(unit)
+        return "Warrior", unit == "player" and "WARRIOR" or nil
+    end
+    organizer.grouped = true
+    organizer.inCombat = true
+    organizer.sentMessages = {}
+    fixtures.fire(organizer, "GROUP_ROSTER_UPDATE")
+    fixtures.deliver(channel)
+
+    test.assertEqual("Toolbox", organizer.addon.groupSession:Slots()[1].member.name)
+    test.assertEqual(0, #organizer.sentMessages)
+    test.assertEqual(3, #invitee.shown[1].options)
+
+    -- Out of combat, the update goes out.
+    organizer.inCombat = false
+    fixtures.runTimers(organizer, 3)
+    fixtures.deliver(channel)
+    test.assertEqual(2, #invitee.shown[1].options)
 end)

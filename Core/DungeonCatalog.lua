@@ -119,16 +119,6 @@ function DungeonCatalog.For(clientId, supplied)
     return DungeonCatalog.Create(DungeonCatalog.STATIC[clientId])
 end
 
--- Every dungeon, lowest range first.
-function Catalog:All()
-    local list = {}
-    local index
-    for index = 1, #self.dungeons do
-        list[index] = self.dungeons[index]
-    end
-    return list
-end
-
 function Catalog:Get(id)
     return self.byId[id]
 end

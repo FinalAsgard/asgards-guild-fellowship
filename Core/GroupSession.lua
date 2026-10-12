@@ -62,7 +62,6 @@ function Session:clear()
     self.members = {}
     self.grouped = false
     self.slots = {}
-    self.unplaced = {}
     self.requests = {}
     self.requestCount = 0
 end
@@ -165,7 +164,7 @@ end
 -- first (the game's, then the organizer's), so a default never takes a
 -- slot someone was put in.
 function Session:place()
-    local slots, unplaced, defaults = emptySlots(), {}, {}
+    local slots, defaults = emptySlots(), {}
     -- An invitee who joined the party keeps the role they chose.
     local joinedRole = {}
     local index
@@ -205,8 +204,6 @@ function Session:place()
             if slot ~= nil then
                 slot.member = member
                 slot.state = GroupSession.ACCEPTED
-            else
-                table.insert(unplaced, member)
             end
         else
             table.insert(defaults, member)
@@ -225,12 +222,9 @@ function Session:place()
         if slot ~= nil then
             slot.member = member
             slot.state = GroupSession.ACCEPTED
-        else
-            table.insert(unplaced, member)
         end
     end
     self.slots = slots
-    self.unplaced = unplaced
 end
 
 -- The five slots in layout order, each { id, role, member?, state? }.
@@ -243,16 +237,6 @@ function Session:Slots()
     for index = 1, #self.slots do
         local slot = self.slots[index]
         copy[index] = { id = slot.id, role = slot.role, member = slot.member, state = slot.state, request = slot.request }
-    end
-    return copy
-end
-
--- Party members with no slot left for them.
-function Session:Unplaced()
-    local copy = {}
-    local index
-    for index = 1, #self.unplaced do
-        copy[index] = self.unplaced[index]
     end
     return copy
 end

@@ -770,9 +770,10 @@ function Window:draw()
     self:drawFooter()
 end
 
--- Redraws the window, when it has been opened.
+-- Redraws the window while it's showing; a closed window is drawn when it
+-- opens.
 function Window:Refresh()
-    if self.catalog ~= nil then
+    if self.catalog ~= nil and self:IsShown() then
         pcall(self.draw, self)
     end
 end
@@ -824,7 +825,7 @@ function Window:Toggle()
     self.level = self.playerLevel()
     self.showAllButton:SetChecked(self.showAll)
     self.syncParty()
-    self:Refresh()
     self.panel:Show()
+    self:Refresh()
     return true
 end
