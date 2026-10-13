@@ -363,6 +363,8 @@ Below the heading are the same edits as the roster's right-click menu, for your 
 
 These follow the same rules as the roster. An officer's edits are official at once and reach the whole guild. A member's apply in their own roster at once and are sent to officers as [suggestions](#suggestions). The page shows each change straight away.
 
+Below your characters, **Your other characters on this computer** lists the characters you've logged in on with this game install, in this guild, that aren't linked to your player yet. Each has **Add as alt**, which works like **Add alt…**, and **Dismiss**, which stops offering it on this computer for good. Nothing is ever linked by itself, so on a shared or family computer someone else's characters never end up as yours. The list of characters you've logged in on stays on your computer and is never sent to anyone.
+
 ### About me
 
 Below the alias are your **Discord** username (up to 32 characters), **Location** (up to 40, for example "Ohio, evenings") and a **Bio** (up to 200). Each box shows how many characters you've used. Type in one and press Enter (or click elsewhere) to save it; Escape puts back what was saved. Empty a box and save to stop sharing it.

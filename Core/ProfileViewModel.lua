@@ -17,6 +17,8 @@ ProfileViewModel.ABOUT = {
 }
 addon.ProfileViewModel = ProfileViewModel
 
+local candidateEntry
+
 local function coloredName(name, color)
     if type(color) ~= "string" then
         return name
@@ -76,13 +78,17 @@ end
 --   classColor   function(classToken) -> "ffrrggbb" or nil (optional)
 --   dnd          whether Do Not Disturb is on
 -- Returns { message, dnd } when there's no player to show, or:
---   { label, alias, aliasMax, main, mainName, about, characters, dnd }
+--   { label, alias, aliasMax, main, mainName, about, characters, suggested,
+--     dnd }
 -- where `alias` is "" without one, `aliasMax` its longest length and `main`
 -- the main's key, and
 -- `about` lists the player's Discord, location and bio, each
 -- { kind, label, text, max } (`text` is "" when not set, `max` the most
 -- bytes it may have), and
--- `characters` lists the main first, then the alts still in the
+-- `suggested` lists the other characters this install has logged in on
+-- (partition:OwnCharacters) that are in the guild, outside this player and
+-- not dismissed, each as AltCandidates describes them; and `characters`
+-- lists the main first, then the alts still in the
 -- guild, each:
 --   { key, name, coloredName, level, isMain, isSelf, roles, rolesText,
 --     editable, hint, canMakeMain, canRemove }
@@ -128,7 +134,19 @@ function ProfileViewModel.Build(inputs)
             max = addon.FellowshipStore.PROFILE_FIELDS[field.kind],
         })
     end
+    local suggested = {}
+    local ownKeys = partition:OwnCharacters()
+    for index = 1, #ownKeys do
+        local key = ownKeys[index]
+        local character = partition:GetCharacter(key)
+        if character ~= nil and character.player ~= own.player and partition:IsInGuild(key)
+            and not partition:IsOwnCharacterDismissed(key)
+        then
+            table.insert(suggested, candidateEntry(inputs, inputs.members, inputs.classColor, key, character))
+        end
+    end
     return {
+        suggested = suggested,
         about = about,
         label = player.alias and (player.alias .. " (" .. main.name .. ")") or main.name,
         alias = player.alias or "",
@@ -138,6 +156,28 @@ function ProfileViewModel.Build(inputs)
         characters = characters,
         dnd = dnd,
     }
+end
+
+-- A character the player could add as an alt: its name, level and class
+-- color, and who it belongs to now when that's another player with more to
+-- it (other characters, or an alias).
+candidateEntry = function(inputs, members, classColor, key, character)
+    local partition = inputs.partition
+    local live = members[key] or {}
+    local name = inputs.normalizer:Display(live.name or character.name) or key
+    local player = partition:GetPlayer(character.player)
+    local entry = {
+        key = key,
+        name = name,
+        coloredName = coloredName(name, classColor(live.classToken or character.class)),
+        level = live.level or character.level,
+    }
+    if player ~= nil and (partition:CharactersOf(character.player)[2] ~= nil or player.alias ~= nil) then
+        local main = partition:GetCharacter(player.main)
+        entry.owner = player.alias or inputs.normalizer:Display(main and main.name or player.main)
+        entry.warning = name .. " belongs to " .. entry.owner .. ". Adding it moves it from that player to yours."
+    end
+    return entry
 end
 
 -- The guild characters the logged-in character's player could add as alts:
@@ -165,26 +205,12 @@ function ProfileViewModel.AltCandidates(inputs, query, limit)
         if character.player == own.player or not partition:IsInGuild(key) then
             return
         end
-        local live = members[key] or {}
-        local name = inputs.normalizer:Display(live.name or character.name) or key
+        local entry = candidateEntry(inputs, members, classColor, key, character)
         local player = partition:GetPlayer(character.player)
-        local searchable = string.lower(name .. " " .. (player and player.alias or ""))
-        if wanted ~= "" and string.find(searchable, wanted, 1, true) == nil then
-            return
+        local searchable = string.lower(entry.name .. " " .. (player and player.alias or ""))
+        if wanted == "" or string.find(searchable, wanted, 1, true) ~= nil then
+            table.insert(found, entry)
         end
-        local entry = {
-            key = key,
-            name = name,
-            coloredName = coloredName(name, classColor(live.classToken or character.class)),
-            level = live.level or character.level,
-        }
-        if player ~= nil and (partition:CharactersOf(character.player)[2] ~= nil or player.alias ~= nil) then
-            local main = partition:GetCharacter(player.main)
-            entry.owner = player.alias or inputs.normalizer:Display(main and main.name or player.main)
-            entry.warning = name .. " belongs to " .. entry.owner ..
-                ". Adding it moves it from that player to yours."
-        end
-        table.insert(found, entry)
     end)
     table.sort(found, function(first, second)
         return string.lower(first.name) < string.lower(second.name)

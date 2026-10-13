@@ -10,7 +10,10 @@ local _, addon = ...
 -- leaving the box) saves a change, Escape undoes it. Each alt has Make main
 -- and Remove (split off as its own player); Add alt… opens a picker of the
 -- guild's other characters, warning when the one picked belongs to another
--- player. A Do Not Disturb check box sits along the bottom. Out of a guild,
+-- player. Below the characters, "Your other characters on this computer"
+-- offers the characters this install has logged in on that aren't linked
+-- yet, each with Add as alt and Dismiss; nothing is ever linked without that
+-- click. A Do Not Disturb check box sits along the bottom. Out of a guild,
 -- or before the roster knows the character, the tab shows a short message
 -- instead.
 --
@@ -29,6 +32,8 @@ local ProfilePage = {
     -- The Add alt picker: how many matches it lists.
     PICKER_ROWS = 8,
     PICKER_ROW_HEIGHT = 18,
+    -- One suggested own character, and the heading above them.
+    SUGGEST_HEIGHT = 24,
     LIST_WIDTH = 520,
     -- One character: its name, then its roles.
     ROW_HEIGHT = 48,
@@ -71,6 +76,7 @@ end
 --   candidates(query)     -> characters the player could add as alts (see
 --                         ProfileViewModel.AltCandidates)
 --   addAlt(key)           adds that character to the player as an alt
+--   dismiss(key)          stops suggesting that own character
 -- `host` is the master frame's content frame for the tab. Returns nil and
 -- the reason when there's none, or the tab can't be drawn.
 function ProfilePage.Create(client, host, options)
@@ -90,7 +96,9 @@ function ProfilePage.Create(client, host, options)
             return {}
         end,
         addAlt = options.addAlt or function() end,
+        dismiss = options.dismiss or function() end,
         rows = {},
+        suggestRows = {},
         aboutRows = {},
     }, Page)
     local ok, reason = pcall(page.build, page)
@@ -413,6 +421,77 @@ function Page:row(index)
     return row
 end
 
+-- The suggested own characters' row `index`, made on first use: its name
+-- and level (and owner), with Add as alt and Dismiss.
+function Page:suggestRow(index)
+    if self.suggestRows[index] ~= nil then
+        return self.suggestRows[index]
+    end
+    local frame = self.environment.CreateFrame("Frame", nil, self.list)
+    frame:SetHeight(ProfilePage.SUGGEST_HEIGHT)
+    frame:SetPoint("RIGHT", self.list, "RIGHT", 0, 0)
+    local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    text:SetPoint("LEFT", frame, "LEFT", 8, 0)
+    text:SetJustifyH("LEFT")
+    local row = { frame = frame, text = text }
+    row.dismiss = self:button(frame, "Dismiss", 70, function()
+        if row.key ~= nil then
+            pcall(self.dismiss, row.key)
+            self:Refresh()
+        end
+    end)
+    row.dismiss:SetPoint("RIGHT", frame, "RIGHT", -4, 0)
+    row.add = self:button(frame, "Add as alt", 84, function()
+        if row.key ~= nil then
+            pcall(self.addAlt, row.key)
+            self:Refresh()
+        end
+    end)
+    row.add:SetPoint("RIGHT", row.dismiss, "LEFT", -4, 0)
+    self.suggestRows[index] = row
+    return row
+end
+
+-- Draws the suggested own characters below `top` (pixels down the list);
+-- returns how far down the list now reaches.
+function Page:drawSuggested(suggested, top)
+    if self.suggestHeading == nil then
+        self.suggestHeading = self.list:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    end
+    local index
+    if suggested[1] == nil then
+        self.suggestHeading:Hide()
+        for index = 1, #self.suggestRows do
+            self.suggestRows[index].frame:Hide()
+        end
+        return top
+    end
+    self.suggestHeading:ClearAllPoints()
+    self.suggestHeading:SetPoint("TOPLEFT", self.list, "TOPLEFT", 0, -top - 6)
+    self.suggestHeading:SetText("Your other characters on this computer")
+    self.suggestHeading:Show()
+    top = top + ProfilePage.SUGGEST_HEIGHT
+    for index = 1, #suggested do
+        local row = self:suggestRow(index)
+        local candidate = suggested[index]
+        row.key = candidate.key
+        local text = candidate.coloredName .. (candidate.level and ("  |cff9d9d9d" .. candidate.level .. "|r") or "")
+        if candidate.owner ~= nil then
+            text = text .. "  |cffff9900(belongs to " .. candidate.owner .. ")|r"
+        end
+        row.text:SetText(text)
+        row.frame:ClearAllPoints()
+        row.frame:SetPoint("TOPLEFT", self.list, "TOPLEFT", 0, -top)
+        row.frame:SetPoint("RIGHT", self.list, "RIGHT", 0, 0)
+        row.frame:Show()
+        top = top + ProfilePage.SUGGEST_HEIGHT
+    end
+    for index = #suggested + 1, #self.suggestRows do
+        self.suggestRows[index].frame:Hide()
+    end
+    return top
+end
+
 function Page:drawRow(row, character)
     row.frame:Show()
     row.key = character.key
@@ -487,7 +566,8 @@ function Page:draw()
     for index = #characters + 1, #self.rows do
         self.rows[index].frame:Hide()
     end
-    self.list:SetHeight(math.max(1, #characters) * ProfilePage.ROW_HEIGHT)
+    local bottom = self:drawSuggested(model.suggested or {}, #characters * ProfilePage.ROW_HEIGHT)
+    self.list:SetHeight(math.max(ProfilePage.ROW_HEIGHT, bottom))
 end
 
 -- Redraws the tab while it's showing; a closed tab is drawn when it opens.

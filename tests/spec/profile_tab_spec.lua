@@ -427,13 +427,92 @@ test.test("profile tab: Make main and Remove on alts, and Add alt picks with a w
     PLAYER.characters[2].canRemove = nil
 end)
 
+test.test("own characters store: logins are kept per guild, dismissals for good, unreadable entries skipped", function()
+    local world = setup()
+    local partition = world.partition
+
+    test.assertEqual(0, #partition:OwnCharacters())
+    test.assertTrue(partition:RecordOwnCharacter("wrench-area52", START))
+    test.assertTrue(partition:RecordOwnCharacter("hammer-area52", START + 5))
+    test.assertTrue(partition:RecordOwnCharacter("hammer-area52", START + 9))
+    test.assertFalse(partition:RecordOwnCharacter("", START))
+    partition.data.ownCharacters["bad-area52"] = "yesterday"
+    test.assertEqual("hammer-area52,wrench-area52", table.concat(partition:OwnCharacters(), ","))
+
+    test.assertFalse(partition:IsOwnCharacterDismissed("wrench-area52"))
+    test.assertTrue(partition:DismissOwnCharacter("wrench-area52"))
+    test.assertTrue(partition:IsOwnCharacterDismissed("wrench-area52"))
+end)
+
+test.test("profile view model: suggests this install's other characters that aren't on the player yet", function()
+    local world = setup()
+    local partition = world.partition
+    partition:RecordCharacter("visitor-stormrage", { name = "Visitor-Stormrage", classToken = "MAGE", level = 80 })
+    partition:RecordCharacter("bolt-area52", { name = "Bolt-Area52", classToken = "SHAMAN", level = 40 })
+    partition:RecordCharacter("spark-area52", { name = "Spark-Area52", classToken = "MAGE", level = 30 })
+    partition:JoinPlayerOf("spark-area52", "bolt-area52", "manual")
+    -- Toolbox and Hammer are this player's; Wrench left the guild.
+    local keys = { "toolbox-area52", "hammer-area52", "wrench-area52", "visitor-stormrage", "spark-area52",
+        "bolt-area52" }
+    local index
+    for index = 1, #keys do
+        partition:RecordOwnCharacter(keys[index], START)
+    end
+    partition:DismissOwnCharacter("bolt-area52")
+
+    local suggested = world.build().suggested
+
+    test.assertEqual(2, #suggested)
+    test.assertEqual("spark-area52", suggested[1].key)
+    test.assertEqual("Bolt", suggested[1].owner)
+    test.assertContains(suggested[1].warning, "Spark belongs to Bolt")
+    test.assertEqual("visitor-stormrage", suggested[2].key)
+    test.assertEqual("Visitor-Stormrage", suggested[2].name)
+    test.assertEqual(nil, suggested[2].owner)
+    -- Nothing is linked by suggesting it.
+    test.assertTrue(partition:GetCharacter("visitor-stormrage").player
+        ~= partition:GetCharacter("toolbox-area52").player)
+end)
+
+test.test("profile tab: lists suggested own characters with Add as alt and Dismiss", function()
+    local model = {}
+    local key, value
+    for key, value in pairs(PLAYER) do
+        model[key] = value
+    end
+    model.suggested = {
+        { key = "visitor", name = "Visitor", coloredName = "Visitor", level = 80 },
+        { key = "spark", name = "Spark", coloredName = "Spark", level = 30, owner = "Bolt" },
+    }
+    local world = newPage(model)
+    world.actions = {}
+    local page = world.page
+    page.addAlt = function(target) table.insert(world.actions, "add " .. target) end
+    page.dismiss = function(target) table.insert(world.actions, "dismiss " .. target) end
+    page.panel.hooks.OnShow()
+
+    test.assertEqual("Your other characters on this computer", page.suggestHeading.text)
+    test.assertTrue(page.suggestHeading.shown)
+    test.assertEqual("Visitor  |cff9d9d9d80|r", page.suggestRows[1].text.text)
+    test.assertContains(page.suggestRows[2].text.text, "(belongs to Bolt)")
+    page.suggestRows[1].add.scripts.OnClick()
+    page.suggestRows[2].dismiss.scripts.OnClick()
+    test.assertEqual("add visitor,dismiss spark", table.concat(world.actions, ","))
+
+    -- None left: the section goes away.
+    world.model = PLAYER
+    page:Refresh()
+    test.assertFalse(page.suggestHeading.shown)
+    test.assertFalse(page.suggestRows[1].frame.shown)
+end)
+
 -- /agf profile in the composed add-on ------------------------------------------
 
 -- The add-on logged in, with a master frame recording its page. On its
 -- first build My Profile is drawn on a fake tab: `world.profileTab`, with
 -- the page drawn on it in `world.profilePage`.
-local function loggedIn(profile, playerName)
-    local world = fixtures.newEnvironment(profile, { playerName = playerName })
+local function loggedIn(profile, playerName, database)
+    local world = fixtures.newEnvironment(profile, { playerName = playerName, database = database })
     local addon = fixtures.loadAddon(world)
     fakeFrames.install(world.environment)
     local frame = { shown = false }
@@ -644,6 +723,48 @@ local function registerProfileTests(profile)
 
         test.assertEqual(selfKey, partition:GetPlayer(partition:GetCharacter(selfKey).player).main)
         test.assertTrue(#addon.syncSession:Suggestions(partition):Pending() > 0)
+    end)
+
+    test.test(profile .. " My Profile suggests another character this install logged in on, linked only when asked", function()
+        local loner = profile == "Forever" and "Zélie Rune" or "Visitor-Stormrage"
+        local first = loggedIn(profile, loner)
+        -- The same game install (saved data), now on the first member.
+        local world, addon = loggedIn(profile, nil, first.database)
+        local page = openProfile(world)
+        local _, partition = addon.rosterController:QuietContext()
+        local selfKey = addon.rosterController:SelfKey()
+        local lonerKey = page.suggestRows[1].key
+
+        test.assertEqual("Your other characters on this computer", page.suggestHeading.text)
+        test.assertTrue(partition:GetCharacter(lonerKey).player ~= partition:GetCharacter(selfKey).player)
+        -- Logins are never synced.
+        local sent = table.concat((function()
+            local texts = {}
+            local index
+            for index = 1, #world.sentMessages do
+                texts[index] = world.sentMessages[index].text
+            end
+            return texts
+        end)(), "\n")
+        test.assertEqual(nil, string.find(sent, "ownCharacters", 1, true))
+
+        page.suggestRows[1].add.scripts.OnClick()
+        test.assertEqual(partition:GetCharacter(selfKey).player, partition:GetCharacter(lonerKey).player)
+        -- Linked now, so no longer suggested.
+        test.assertFalse(page.suggestRows[1].frame.shown)
+    end)
+
+    test.test(profile .. " a dismissed own character stays hidden on this install", function()
+        local loner = profile == "Forever" and "Zélie Rune" or "Visitor-Stormrage"
+        local first = loggedIn(profile, loner)
+        local world = loggedIn(profile, nil, first.database)
+        local page = openProfile(world)
+
+        page.suggestRows[1].dismiss.scripts.OnClick()
+        test.assertFalse(page.suggestHeading.shown)
+
+        local again = loggedIn(profile, nil, world.database)
+        test.assertFalse(openProfile(again).suggestHeading.shown)
     end)
 
     test.test(profile .. " out of a guild, My Profile says it needs one", function()

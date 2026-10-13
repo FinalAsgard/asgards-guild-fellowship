@@ -74,6 +74,15 @@ if clientProfile.supported then
         end,
         onScanFinished = function()
             syncSession:UpgradeLegacy()
+            -- This install has logged in on this character: My Profile can
+            -- offer it to the player's other characters as an alt. Local
+            -- only, never synced, never linked by itself.
+            local guild, partition = rosterController:QuietContext()
+            local selfKey = rosterController:SelfKey()
+            local now = client:Timestamp()
+            if guild ~= nil and selfKey ~= nil and now ~= nil and partition:GetCharacter(selfKey) ~= nil then
+                partition:RecordOwnCharacter(selfKey, now)
+            end
         end,
         onSyncResumed = function(key)
             syncSession:Rejoin(key)
@@ -1347,6 +1356,12 @@ if clientProfile.supported then
                 local own = guild and partition:GetCharacter(rosterController:SelfKey() or "")
                 if own then
                     rosterController:SetMainPlayer(key, own.player)
+                end
+            end,
+            dismiss = function(key)
+                local guild, partition = rosterController:QuietContext()
+                if guild ~= nil then
+                    partition:DismissOwnCharacter(key)
                 end
             end,
         })

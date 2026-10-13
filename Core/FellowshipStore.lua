@@ -206,7 +206,7 @@ local function validatePartition(data)
     end
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
-        "recruitLedger", "recruitConfig", "recruitStats", "groupHistory",
+        "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn",
     }
     local index
     for index = 1, #containers do
@@ -242,7 +242,7 @@ local function validatePartition(data)
     -- are only created when needed.
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
-        recruitStats = true, groupHistory = true,
+        recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -1111,6 +1111,48 @@ local function isHistoryEntry(entry)
         end
     end
     return true
+end
+
+-- Own characters on this install (schema 4): every character this game
+-- install has logged in on in this guild, with when it last did, and the
+-- ones the player dismissed as suggestions. Local only, never synced.
+
+-- Records that character `key` logged in at `at`.
+function Partition:RecordOwnCharacter(key, at)
+    if not isText(key) or not isWholeNumber(at) then
+        return false
+    end
+    self.data.ownCharacters = self.data.ownCharacters or {}
+    self.data.ownCharacters[key] = at
+    return true
+end
+
+-- The keys of the characters this install has logged in on, sorted.
+-- Unreadable entries are skipped.
+function Partition:OwnCharacters()
+    local keys = {}
+    local key, at
+    for key, at in pairs(self.data.ownCharacters or {}) do
+        if isText(key) and isWholeNumber(at) then
+            table.insert(keys, key)
+        end
+    end
+    table.sort(keys)
+    return keys
+end
+
+-- Stops offering character `key` as one of the player's own, for good.
+function Partition:DismissOwnCharacter(key)
+    if not isText(key) then
+        return false
+    end
+    self.data.dismissedOwn = self.data.dismissedOwn or {}
+    self.data.dismissedOwn[key] = true
+    return true
+end
+
+function Partition:IsOwnCharacterDismissed(key)
+    return self.data.dismissedOwn ~= nil and self.data.dismissedOwn[key] == true
 end
 
 -- The parties this player was in with guildmates (GroupHistory), oldest
