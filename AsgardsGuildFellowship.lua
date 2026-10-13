@@ -32,6 +32,8 @@ local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joi
 local onSlotsChanged
 -- Draws the Group Finder on its tab (set up with the Group Finder below).
 local drawGroupFinder
+-- Draws My Profile on its tab (set up with My Profile below).
+local drawProfile
 -- Records the party in the local group history (set up with the Group
 -- Finder below).
 local recordParty = function() end
@@ -43,6 +45,7 @@ if clientProfile.supported then
     pages = addon.PageNavigator.Create()
     pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
     pages:Add("group", "Group Finder", addon.MasterFrame.ICONS.group)
+    pages:Add("profile", "My Profile", addon.MasterFrame.ICONS.profile)
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
@@ -113,6 +116,11 @@ if clientProfile.supported then
                     group = function(content)
                         if drawGroupFinder ~= nil then
                             drawGroupFinder(content)
+                        end
+                    end,
+                    profile = function(content)
+                        if drawProfile ~= nil then
+                            drawProfile(content)
                         end
                     end,
                     -- Below the frame's title bar.
@@ -1256,6 +1264,55 @@ if clientProfile.supported then
     -- that tab is already showing.
     router:Register("group", "open or close the Group Finder", function()
         rosterController:Toggle("group")
+    end)
+    -- My Profile's tab, drawn when the master frame is first built. Its
+    -- roles and Do Not Disturb are the settings above, so a change on any of
+    -- them shows everywhere.
+    local profilePage
+    drawProfile = function(content)
+        local reason
+        profilePage, reason = addon.ProfilePage.Create(client, content, {
+            model = function()
+                local guild, partition, normalizer = rosterController:QuietContext()
+                return addon.ProfileViewModel.Build({
+                    inGuild = client:IsInGuild(),
+                    partition = guild and partition or nil,
+                    selfKey = rosterController:SelfKey(),
+                    members = guild and rosterController:LiveMembers(normalizer) or {},
+                    normalizer = normalizer,
+                    roles = roleCatalog,
+                    classColor = function(classToken)
+                        return client:GetClassColor(classToken)
+                    end,
+                    dnd = settings:Get("dnd") == true,
+                })
+            end,
+            setRole = function(role, enabled)
+                local changed, why = settings:Set("role_" .. role, enabled)
+                if changed == nil then
+                    rosterController:Print("Role preferences can't be changed: " .. tostring(why) .. ".")
+                end
+            end,
+            setDnd = function(enabled)
+                local changed, why = settings:Set("dnd", enabled)
+                if changed == nil then
+                    rosterController:Print("Do Not Disturb can't be changed: " .. tostring(why) .. ".")
+                end
+            end,
+        })
+        if profilePage == nil then
+            rosterController:Print("My Profile can't be shown: " .. tostring(reason) .. ".")
+        end
+    end
+    settings:OnChange(function(id)
+        if profilePage ~= nil and (id == "dnd" or string.find(id, "^role_") ~= nil) then
+            profilePage:Refresh()
+        end
+    end)
+    -- Opens the master frame on My Profile, or closes it when that tab is
+    -- already showing.
+    router:Register("profile", "open or close My Profile", function()
+        rosterController:Toggle("profile")
     end)
     router:SetDefault("roster")
     -- Guild sync: officers are ranks that can view officer notes, judged
