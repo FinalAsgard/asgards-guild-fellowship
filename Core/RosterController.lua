@@ -141,7 +141,7 @@ function Controller:SelfKey()
     end
     local key = normalizer:Key(fullName)
     if key == nil or partition:GetCharacter(key) == nil then
-        key = self:FindSelfInRoster(normalizer, fullName, guid)
+        key = self:FindInRoster(normalizer, fullName, guid)
         if key == nil then
             -- Not in the roster yet: Name-Realm is the best guess, except
             -- where it can't be right (only the first name).
@@ -152,7 +152,24 @@ function Controller:SelfKey()
     return key
 end
 
-function Controller:FindSelfInRoster(normalizer, fullName, guid)
+-- Another character's key in the current guild's roster (a party member,
+-- say), by the same rules as SelfKey: the stored character named
+-- "Name-Realm", otherwise the roster member with that GUID, otherwise (with
+-- two-part names) the only roster member with that first name. Nil when
+-- they aren't in the guild, or the first name is shared.
+function Controller:RosterKeyFor(name, guid)
+    local guild, partition, normalizer = self:QuietContext()
+    if guild == nil then
+        return nil
+    end
+    local key = normalizer:Key(name)
+    if key ~= nil and partition:GetCharacter(key) ~= nil then
+        return key
+    end
+    return self:FindInRoster(normalizer, name, guid)
+end
+
+function Controller:FindInRoster(normalizer, fullName, guid)
     local firstName = normalizer:FirstName(fullName)
     local byName
     local count = self.client:GetGuildRosterCount() or 0

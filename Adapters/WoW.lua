@@ -799,8 +799,8 @@ Compatibility.ASSIGNED_ROLES = { TANK = "tank", HEALER = "healer", DAMAGER = "dp
 Compatibility.PARTY_UNITS = { "player", "party1", "party2", "party3", "party4" }
 
 -- The player and their party members, each { key, name, classToken, level,
--- assignedRole, inGuild, isPlayer }. `key` is the GUID where the client
--- gives one. `assignedRole` is nil where the client assigns none.
+-- guid, assignedRole, inGuild, isPlayer }. `key` is the GUID where the
+-- client gives one, else the name. `assignedRole` is nil where the client assigns none.
 function Client:GetPartyMembers()
     local environment = self.environment
     local members = {}
@@ -824,6 +824,7 @@ function Client:GetPartyMembers()
                 table.insert(members, {
                     key = type(guid) == "string" and guid ~= "" and guid or name,
                     name = name,
+                    guid = type(guid) == "string" and guid ~= "" and guid or nil,
                     classToken = type(classToken) == "string" and classToken or nil,
                     level = type(level) == "number" and level > 0 and level or nil,
                     assignedRole = Compatibility.ASSIGNED_ROLES[role],
