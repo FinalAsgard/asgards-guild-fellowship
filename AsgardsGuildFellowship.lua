@@ -1301,13 +1301,53 @@ if clientProfile.supported then
             end,
             -- The player's own Discord, location and bio: saved and sent to
             -- the guild at once, with no officer involved.
+            -- The alias goes through the roster, like Set alias…: official
+            -- at once for an officer, a suggestion for a member.
             setText = function(kind, text)
+                if kind == "alias" then
+                    local selfKey = rosterController:SelfKey()
+                    if selfKey ~= nil then
+                        rosterController:SetAlias(selfKey, text)
+                    end
+                    return
+                end
                 if syncSession:LocalProfileEdit(kind, text) == nil then
                     rosterController:Print("That wasn't saved: this character isn't in the guild roster yet," ..
                         " or the server time isn't known yet.")
                     return
                 end
                 rosterController:Invalidate()
+            end,
+            -- Main and alts go through the roster's own actions (Make this
+            -- the main, Split off as own player, Link as alt of…), so the
+            -- officer and member rules are the same as there.
+            makeMain = function(key)
+                rosterController:MakeMain(key)
+            end,
+            removeAlt = function(key)
+                rosterController:Detach(key)
+            end,
+            candidates = function(query)
+                local guild, partition, normalizer = rosterController:QuietContext()
+                if guild == nil then
+                    return {}
+                end
+                return addon.ProfileViewModel.AltCandidates({
+                    partition = partition,
+                    selfKey = rosterController:SelfKey(),
+                    members = rosterController:LiveMembers(normalizer),
+                    normalizer = normalizer,
+                    classColor = function(classToken)
+                        return client:GetClassColor(classToken)
+                    end,
+                }, query, addon.ProfilePage.PICKER_ROWS)
+            end,
+            addAlt = function(key)
+                local guild, partition = rosterController:QuietContext()
+                local own = guild and partition:GetCharacter(rosterController:SelfKey() or "")
+                if own then
+                    rosterController:SetMainPlayer(key, own.player)
+                end
             end,
         })
         if profilePage == nil then

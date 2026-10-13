@@ -352,9 +352,20 @@ A guildmate's player panel then shows **Grouped together 3 times, last on 2026-1
 
 It shows the player of the character you're logged in on: its alias and main at the top, for example **TheTool (Toolbox)**, then the main and each alt still in the guild, in its class color with its level. The character you're logged in on is marked **logged in**.
 
+### Alias, main and alts
+
+Below the heading are the same edits as the roster's right-click menu, for your own player:
+
+- **Alias**: type an alias (up to 48 characters) and press Enter to set it, or empty the box to clear it.
+- **Make main** on an alt makes it your player's main.
+- **Remove** on an alt splits it off as a player of its own (**Split off as own player**).
+- **Add alt…** opens a search of the guild's other characters. Pick one and press **Add** to link it as your alt. If it already belongs to another player, a warning names that player first, because adding it moves it away from them.
+
+These follow the same rules as the roster. An officer's edits are official at once and reach the whole guild. A member's apply in their own roster at once and are sent to officers as [suggestions](#suggestions). The page shows each change straight away.
+
 ### About me
 
-At the top are your **Discord** username (up to 32 characters), **Location** (up to 40, for example "Ohio, evenings") and a **Bio** (up to 200). Each box shows how many characters you've used. Type in one and press Enter (or click elsewhere) to save it; Escape puts back what was saved. Empty a box and save to stop sharing it.
+Below the alias are your **Discord** username (up to 32 characters), **Location** (up to 40, for example "Ohio, evenings") and a **Bio** (up to 200). Each box shows how many characters you've used. Type in one and press Enter (or click elsewhere) to save it; Escape puts back what was saved. Empty a box and save to stop sharing it.
 
 These belong to your player, not to one character: whichever of your characters you're on, you see and edit the same values, and the newest edit wins. They're yours alone. They're saved and sent to the guild at once, with no officer approving them, and only your own characters can change them; officers can't edit or clear them. If someone's add-on passes on a change in your name that you never made, yours sends your real values back out, and you're warned who passed it on, as for role preferences. Guildmates see them under **About** in your player panel.
 

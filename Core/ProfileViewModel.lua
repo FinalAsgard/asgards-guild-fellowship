@@ -59,6 +59,10 @@ local function characterEntry(inputs, key, isMain)
         -- Role preferences change only on the character they belong to.
         editable = isSelf,
         hint = not isSelf and ("Log in on " .. name .. " to change its roles.") or nil,
+        -- Identity actions, as on the roster: any alt can become the main,
+        -- or be removed (split off as its own player).
+        canMakeMain = not isMain,
+        canRemove = not isMain,
     }
 end
 
@@ -72,14 +76,16 @@ end
 --   classColor   function(classToken) -> "ffrrggbb" or nil (optional)
 --   dnd          whether Do Not Disturb is on
 -- Returns { message, dnd } when there's no player to show, or:
---   { label, alias, mainName, about, characters, dnd }
--- where `about` lists the player's Discord, location and bio, each
+--   { label, alias, aliasMax, main, mainName, about, characters, dnd }
+-- where `alias` is "" without one, `aliasMax` its longest length and `main`
+-- the main's key, and
+-- `about` lists the player's Discord, location and bio, each
 -- { kind, label, text, max } (`text` is "" when not set, `max` the most
 -- bytes it may have), and
 -- `characters` lists the main first, then the alts still in the
 -- guild, each:
 --   { key, name, coloredName, level, isMain, isSelf, roles, rolesText,
---     editable, hint }
+--     editable, hint, canMakeMain, canRemove }
 -- `roles` lists the roles the character's class can fill, each
 -- { role, label, checked }; `editable` is true only for the logged-in
 -- character, and the others carry a `hint` saying how to change theirs.
@@ -125,9 +131,68 @@ function ProfileViewModel.Build(inputs)
     return {
         about = about,
         label = player.alias and (player.alias .. " (" .. main.name .. ")") or main.name,
-        alias = player.alias,
+        alias = player.alias or "",
+        aliasMax = addon.PlayerService.MAX_ALIAS_LENGTH,
+        main = player.main,
         mainName = main.name,
         characters = characters,
         dnd = dnd,
     }
+end
+
+-- The guild characters the logged-in character's player could add as alts:
+-- every character still in the guild outside that player whose name, or
+-- whose player's alias, contains `query` (any case; an empty query lists
+-- them all), sorted by name, at most `limit` (default 50). `inputs` as for
+-- Build. Each:
+--   { key, name, coloredName, level, owner, warning }
+-- `owner` names the player it belongs to now (its alias, else its main)
+-- when that player has other characters, and `warning` says adding it
+-- moves it away from them; both are nil for a character on its own.
+function ProfileViewModel.AltCandidates(inputs, query, limit)
+    local partition = inputs.partition
+    local own = partition and inputs.selfKey and partition:GetCharacter(inputs.selfKey)
+    if not own then
+        return {}
+    end
+    local members = inputs.members or {}
+    local classColor = inputs.classColor or function()
+        return nil
+    end
+    local wanted = string.lower(query or "")
+    local found = {}
+    partition:EachCharacter(function(key, character)
+        if character.player == own.player or not partition:IsInGuild(key) then
+            return
+        end
+        local live = members[key] or {}
+        local name = inputs.normalizer:Display(live.name or character.name) or key
+        local player = partition:GetPlayer(character.player)
+        local searchable = string.lower(name .. " " .. (player and player.alias or ""))
+        if wanted ~= "" and string.find(searchable, wanted, 1, true) == nil then
+            return
+        end
+        local entry = {
+            key = key,
+            name = name,
+            coloredName = coloredName(name, classColor(live.classToken or character.class)),
+            level = live.level or character.level,
+        }
+        if player ~= nil and (partition:CharactersOf(character.player)[2] ~= nil or player.alias ~= nil) then
+            local main = partition:GetCharacter(player.main)
+            entry.owner = player.alias or inputs.normalizer:Display(main and main.name or player.main)
+            entry.warning = name .. " belongs to " .. entry.owner ..
+                ". Adding it moves it from that player to yours."
+        end
+        table.insert(found, entry)
+    end)
+    table.sort(found, function(first, second)
+        return string.lower(first.name) < string.lower(second.name)
+    end)
+    local results = {}
+    local index
+    for index = 1, math.min(#found, limit or 50) do
+        results[index] = found[index]
+    end
+    return results
 end

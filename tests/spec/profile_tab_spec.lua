@@ -307,7 +307,7 @@ test.test("profile tab: About me fields show the player's text with a count, and
     local page = world.page
     page.panel.hooks.OnShow()
 
-    local discord, location = page.aboutRows[1], page.aboutRows[2]
+    local discord, location = page.aboutRows[2], page.aboutRows[3]
     test.assertEqual("Discord", discord.label.text)
     test.assertEqual("hammer#1", discord.box.text)
     test.assertEqual("8/32", discord.counter.text)
@@ -330,13 +330,110 @@ test.test("profile tab: About me fields show the player's text with a count, and
     test.assertEqual(1, #world.texts)
 end)
 
+test.test("profile view model: alts can be made main or removed; the main can't", function()
+    local world = setup()
+
+    local main, alt = world.build().characters[1], world.build().characters[2]
+
+    test.assertFalse(main.canMakeMain)
+    test.assertFalse(main.canRemove)
+    test.assertTrue(alt.canMakeMain)
+    test.assertTrue(alt.canRemove)
+    local model = world.build()
+    test.assertEqual("toolbox-area52", model.main)
+    test.assertEqual(48, model.aliasMax)
+end)
+
+test.test("profile view model: alt candidates are the guild's other characters, with a warning for another player's", function()
+    local world = setup()
+    local addon = world.addon
+    local normalizer = addon.NameNormalizer.Create(RULES)
+    local partition = world.partition
+    -- Bolt and Spark are Thunderer's; Visitor is on its own; Wrench left.
+    partition:RecordCharacter("bolt-area52", { name = "Bolt-Area52", classToken = "SHAMAN", level = 40 })
+    partition:RecordCharacter("spark-area52", { name = "Spark-Area52", classToken = "MAGE", level = 30 })
+    partition:RecordCharacter("visitor-stormrage", { name = "Visitor-Stormrage", classToken = "MAGE", level = 80 })
+    partition:JoinPlayerOf("spark-area52", "bolt-area52", "manual")
+    partition:SetAlias(partition:GetCharacter("bolt-area52").player, "Thunderer", "manual")
+    local function candidates(query)
+        local found = addon.ProfileViewModel.AltCandidates({
+            partition = partition, selfKey = "toolbox-area52", normalizer = normalizer,
+        }, query)
+        local names = {}
+        local index
+        for index = 1, #found do
+            names[index] = found[index].name .. (found[index].owner and ("<" .. found[index].owner .. ">") or "")
+        end
+        return table.concat(names, ","), found
+    end
+
+    test.assertEqual("Bolt<Thunderer>,Spark<Thunderer>,Visitor-Stormrage", (candidates("")))
+    -- By name, or by the player's alias, in any case.
+    test.assertEqual("Visitor-Stormrage", (candidates("VIS")))
+    test.assertEqual("Bolt<Thunderer>,Spark<Thunderer>", (candidates("thunder")))
+    local _, found = candidates("spark")
+    test.assertEqual("Spark belongs to Thunderer. Adding it moves it from that player to yours.", found[1].warning)
+    _, found = candidates("visitor")
+    test.assertEqual(nil, found[1].warning)
+    -- No logged-in character known: nothing to add to.
+    test.assertEqual(0, #addon.ProfileViewModel.AltCandidates({ partition = partition, normalizer = normalizer }, ""))
+end)
+
+test.test("profile tab: Make main and Remove on alts, and Add alt picks with a warning", function()
+    local world = newPage(PLAYER)
+    world.actions = {}
+    local page = world.page
+    page.makeMain = function(key) table.insert(world.actions, "main " .. key) end
+    page.removeAlt = function(key) table.insert(world.actions, "remove " .. key) end
+    page.addAlt = function(key) table.insert(world.actions, "add " .. key) end
+    PLAYER.characters[2].canMakeMain = true
+    PLAYER.characters[2].canRemove = true
+    page.candidates = function(query)
+        local all = {
+            { key = "bolt", name = "Bolt", coloredName = "Bolt", level = 40, owner = "Thunderer",
+                warning = "Bolt belongs to Thunderer. Adding it moves it from that player to yours." },
+            { key = "visitor", name = "Visitor", coloredName = "Visitor", level = 80 },
+        }
+        if query == "vis" then
+            return { all[2] }
+        end
+        return all
+    end
+    page.panel.hooks.OnShow()
+
+    test.assertFalse(page.rows[1].makeMain.shown)
+    test.assertFalse(page.rows[1].remove.shown)
+    test.assertTrue(page.rows[2].makeMain.shown)
+    page.rows[2].makeMain.scripts.OnClick()
+    page.rows[2].remove.scripts.OnClick()
+    test.assertEqual("main hammer,remove hammer", table.concat(world.actions, ","))
+
+    page.addAltButton.scripts.OnClick()
+    test.assertTrue(page.picker.frame.shown)
+    test.assertEqual("Bolt  |cff9d9d9d40|r  |cff9d9d9d(Thunderer)|r", page.picker.results[1].text.text)
+    test.assertEqual("Pick a character to add.", page.picker.warning.text)
+    page.picker.results[1].button.scripts.OnClick()
+    test.assertContains(page.picker.warning.text, "Bolt belongs to Thunderer")
+    page.picker.search:SetText("vis")
+    page.picker.search.scripts.OnTextChanged(page.picker.search)
+    test.assertFalse(page.picker.results[2].button.shown)
+    page.picker.results[1].button.scripts.OnClick()
+    test.assertEqual("Add Visitor as an alt.", page.picker.warning.text)
+    page.picker.add.scripts.OnClick()
+
+    test.assertEqual("add visitor", world.actions[3])
+    test.assertFalse(page.picker.frame.shown)
+    PLAYER.characters[2].canMakeMain = nil
+    PLAYER.characters[2].canRemove = nil
+end)
+
 -- /agf profile in the composed add-on ------------------------------------------
 
 -- The add-on logged in, with a master frame recording its page. On its
 -- first build My Profile is drawn on a fake tab: `world.profileTab`, with
 -- the page drawn on it in `world.profilePage`.
-local function loggedIn(profile)
-    local world = fixtures.newEnvironment(profile)
+local function loggedIn(profile, playerName)
+    local world = fixtures.newEnvironment(profile, { playerName = playerName })
     local addon = fixtures.loadAddon(world)
     fakeFrames.install(world.environment)
     local frame = { shown = false }
@@ -470,17 +567,83 @@ local function registerProfileTests(profile)
         local selfKey = addon.rosterController:SelfKey()
         world.sentMessages = {}
 
-        local bio = page.aboutRows[3]
+        local bio = page.aboutRows[4]
         bio.box:SetText("Raids on Fridays")
         bio.box.scripts.OnEnterPressed(bio.box)
 
         local _, partition = addon.rosterController:QuietContext()
         test.assertEqual("Raids on Fridays", partition:GetProfileText(selfKey, "bio"))
-        test.assertEqual("Raids on Fridays", page.aboutRows[3].box.text)
+        test.assertEqual("Raids on Fridays", page.aboutRows[4].box.text)
         local sent = world.sentMessages[#world.sentMessages]
         local _, message = world.environment.LibStub.libs["AceSerializer-3.0"]:Deserialize(sent.text)
         test.assertEqual("bio", message.facts[1].kind)
         test.assertEqual(selfKey, message.facts[1].by)
+    end)
+
+    test.test(profile .. " an officer's identity edits on My Profile are official at once", function()
+        local world, addon = loggedIn(profile)
+        local page = openProfile(world)
+        local selfKey = addon.rosterController:SelfKey()
+        local _, partition = addon.rosterController:QuietContext()
+        local alt = page.rows[2].key
+        local function playerOf(key)
+            return partition:GetPlayer(partition:GetCharacter(key).player)
+        end
+
+        page.rows[2].makeMain.scripts.OnClick()
+        test.assertEqual(alt, playerOf(selfKey).main)
+        -- The page shows it at once: the alt is now first.
+        test.assertEqual(alt, page.rows[1].key)
+
+        local alias = page.aboutRows[1]
+        alias.box:SetText("Tools")
+        alias.box.scripts.OnEnterPressed(alias.box)
+        test.assertEqual("Tools", playerOf(selfKey).alias)
+        test.assertContains(page.heading.text, "Tools (")
+
+        -- The third guild member joins, then the first alt is removed.
+        page.addAltButton.scripts.OnClick()
+        page.picker.results[1].button.scripts.OnClick()
+        local added = page.picker.results[1].candidate.key
+        page.picker.add.scripts.OnClick()
+        test.assertEqual(playerOf(selfKey), playerOf(added))
+        test.assertEqual(3, #partition:CharactersOf(partition:GetCharacter(selfKey).player))
+
+        -- An alt other than the logged-in character.
+        local row
+        local index
+        for index = 2, #page.rows do
+            if page.rows[index].frame.shown and page.rows[index].key ~= selfKey then
+                row = page.rows[index]
+            end
+        end
+        local removed = row.key
+        row.remove.scripts.OnClick()
+        test.assertTrue(playerOf(removed) ~= playerOf(selfKey))
+        -- None of it waits for anyone.
+        test.assertEqual(0, #addon.syncSession:Suggestions(partition):Pending())
+    end)
+
+    test.test(profile .. " a member's identity edits on My Profile apply here and wait as suggestions", function()
+        local member = profile == "Forever" and "Hammer Smith" or "Hammer-Area52"
+        local world, addon = loggedIn(profile, member)
+        local page = openProfile(world)
+        local selfKey = addon.rosterController:SelfKey()
+        local _, partition = addon.rosterController:QuietContext()
+
+        -- Hammer is Toolbox's alt: it makes itself the main.
+        test.assertTrue(page.rows[1].key ~= selfKey)
+        local self
+        local index
+        for index = 1, #page.rows do
+            if page.rows[index].key == selfKey then
+                self = page.rows[index]
+            end
+        end
+        self.makeMain.scripts.OnClick()
+
+        test.assertEqual(selfKey, partition:GetPlayer(partition:GetCharacter(selfKey).player).main)
+        test.assertTrue(#addon.syncSession:Suggestions(partition):Pending() > 0)
     end)
 
     test.test(profile .. " out of a guild, My Profile says it needs one", function()

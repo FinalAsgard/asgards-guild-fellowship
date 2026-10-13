@@ -5,10 +5,12 @@ local _, addon = ...
 -- Each character shows in its class color with its level. The logged-in
 -- character gets a check box for each role its class can fill; the others
 -- show their roles read-only, with a hint to log in on them to change
--- them. Above the characters, the player's Discord, location and bio can
--- be edited, each with a count of characters used; Enter (or leaving the
--- box) saves a change, Escape undoes it. A Do Not Disturb check box sits
--- along the bottom. Out of a guild,
+-- them. Above the characters, the player's alias, Discord, location and
+-- bio can be edited, each with a count of characters used; Enter (or
+-- leaving the box) saves a change, Escape undoes it. Each alt has Make main
+-- and Remove (split off as its own player); Add alt… opens a picker of the
+-- guild's other characters, warning when the one picked belongs to another
+-- player. A Do Not Disturb check box sits along the bottom. Out of a guild,
 -- or before the roster knows the character, the tab shows a short message
 -- instead.
 --
@@ -21,8 +23,12 @@ local ProfilePage = {
     ABOUT_HEIGHT = 26,
     ABOUT_LABEL_WIDTH = 70,
     ABOUT_COUNTER_WIDTH = 60,
-    -- Where the character list starts, below the About me fields.
-    LIST_TOP = 60 + 3 * 26 + 8,
+    -- Where the character list starts, below the alias and About me fields.
+    LIST_TOP = 60 + 4 * 26 + 8,
+    BUTTON_HEIGHT = 20,
+    -- The Add alt picker: how many matches it lists.
+    PICKER_ROWS = 8,
+    PICKER_ROW_HEIGHT = 18,
     LIST_WIDTH = 520,
     -- One character: its name, then its roles.
     ROW_HEIGHT = 48,
@@ -58,7 +64,13 @@ end
 --   setRole(role, on)     sets whether the logged-in character is willing to
 --                         play `role`
 --   setDnd(on)            turns Do Not Disturb on or off
---   setText(kind, text)   saves the player's "discord", "location" or "bio"
+--   setText(kind, text)   saves the player's "alias", "discord", "location"
+--                         or "bio"
+--   makeMain(key)         makes that character the player's main
+--   removeAlt(key)        splits that alt off as its own player
+--   candidates(query)     -> characters the player could add as alts (see
+--                         ProfileViewModel.AltCandidates)
+--   addAlt(key)           adds that character to the player as an alt
 -- `host` is the master frame's content frame for the tab. Returns nil and
 -- the reason when there's none, or the tab can't be drawn.
 function ProfilePage.Create(client, host, options)
@@ -72,6 +84,12 @@ function ProfilePage.Create(client, host, options)
         setRole = options.setRole or function() end,
         setDnd = options.setDnd or function() end,
         setText = options.setText or function() end,
+        makeMain = options.makeMain or function() end,
+        removeAlt = options.removeAlt or function() end,
+        candidates = options.candidates or function()
+            return {}
+        end,
+        addAlt = options.addAlt or function() end,
         rows = {},
         aboutRows = {},
     }, Page)
@@ -113,10 +131,17 @@ function Page:build()
     self.scroll = scroll
     self.list = list
 
+    -- The alias, then the About me fields.
     local index
-    for index = 1, #addon.ProfileViewModel.ABOUT do
+    for index = 1, #addon.ProfileViewModel.ABOUT + 1 do
         self.aboutRows[index] = self:aboutRow(index)
     end
+
+    self.addAltButton = self:button(panel, "Add alt...", 90, function()
+        self:OpenPicker()
+    end)
+    self.addAltButton:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -padding - 8, -32)
+    self:buildPicker()
 
     local dnd = createFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
     dnd:SetWidth(ProfilePage.CHECK_SIZE)
@@ -130,6 +155,131 @@ function Page:build()
     label:SetPoint("LEFT", dnd, "RIGHT", 2, 0)
     label:SetText("Do Not Disturb (no group requests, on every character)")
     self.dndButton = dnd
+end
+
+function Page:button(parent, text, width, onClick)
+    local made = self.environment.CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    made:SetWidth(width)
+    made:SetHeight(ProfilePage.BUTTON_HEIGHT)
+    made:SetText(text)
+    made:SetScript("OnClick", onClick)
+    return made
+end
+
+-- The Add alt picker, over the character list: a search box, the matching
+-- characters, a warning about the one picked, and Add and Cancel.
+function Page:buildPicker()
+    local createFrame = self.environment.CreateFrame
+    local padding = ProfilePage.PADDING
+    local panel = self.panel
+    local picker = createFrame("Frame", nil, panel)
+    picker:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -ProfilePage.LIST_TOP)
+    picker:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -padding, ProfilePage.FOOTER_BOTTOM + ProfilePage.CHECK_SIZE + 8)
+    picker:SetFrameLevel((panel:GetFrameLevel() or 0) + 10)
+    local background = picker:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(picker)
+    background:SetColorTexture(0, 0, 0, 0.9)
+    local prompt = picker:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    prompt:SetPoint("TOPLEFT", picker, "TOPLEFT", 6, -6)
+    prompt:SetText("Add an alt: search the guild's characters")
+    local search = createFrame("EditBox", nil, picker, "InputBoxTemplate")
+    search:SetHeight(20)
+    search:SetWidth(220)
+    search:SetPoint("TOPLEFT", picker, "TOPLEFT", 12, -26)
+    search:SetAutoFocus(false)
+    search:SetScript("OnTextChanged", function()
+        self:DrawPicker()
+    end)
+    search:SetScript("OnEscapePressed", function()
+        self:ClosePicker()
+    end)
+    local results = {}
+    local index
+    for index = 1, ProfilePage.PICKER_ROWS do
+        local line = createFrame("Button", nil, picker)
+        line:SetHeight(ProfilePage.PICKER_ROW_HEIGHT)
+        line:SetPoint("TOPLEFT", picker, "TOPLEFT", 8, -52 - (index - 1) * ProfilePage.PICKER_ROW_HEIGHT)
+        line:SetPoint("RIGHT", picker, "RIGHT", -8, 0)
+        line:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+        local text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        text:SetPoint("LEFT", line, "LEFT", 4, 0)
+        text:SetJustifyH("LEFT")
+        local result = { button = line, text = text }
+        line:SetScript("OnClick", function()
+            if result.candidate ~= nil then
+                self.picked = result.candidate
+                self:DrawPicker()
+            end
+        end)
+        results[index] = result
+    end
+    local warning = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    warning:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", 8, 34)
+    warning:SetPoint("RIGHT", picker, "RIGHT", -8, 0)
+    warning:SetJustifyH("LEFT")
+    local add = self:button(picker, "Add", 80, function()
+        if self.picked ~= nil then
+            local key = self.picked.key
+            self:ClosePicker()
+            pcall(self.addAlt, key)
+            self:Refresh()
+        end
+    end)
+    add:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", 8, 8)
+    local cancel = self:button(picker, "Cancel", 80, function()
+        self:ClosePicker()
+    end)
+    cancel:SetPoint("LEFT", add, "RIGHT", 6, 0)
+    picker:Hide()
+    self.picker = { frame = picker, search = search, results = results, warning = warning, add = add }
+end
+
+-- Opens the Add alt picker with an empty search.
+function Page:OpenPicker()
+    self.picked = nil
+    self.picker.search:SetText("")
+    self.picker.frame:Show()
+    self:DrawPicker()
+end
+
+function Page:ClosePicker()
+    self.picked = nil
+    self.picker.frame:Hide()
+end
+
+-- Lists the characters matching the search, marks the one picked, and
+-- says what adding it would do.
+function Page:DrawPicker()
+    local picker = self.picker
+    local ok, found = pcall(self.candidates, picker.search:GetText() or "")
+    found = ok and type(found) == "table" and found or {}
+    local index
+    for index = 1, #picker.results do
+        local result = picker.results[index]
+        local candidate = found[index]
+        result.candidate = candidate
+        if candidate == nil then
+            result.button:Hide()
+        else
+            local text = candidate.coloredName .. (candidate.level and ("  |cff9d9d9d" .. candidate.level .. "|r") or "")
+            if candidate.owner ~= nil then
+                text = text .. "  |cff9d9d9d(" .. candidate.owner .. ")|r"
+            end
+            if self.picked ~= nil and self.picked.key == candidate.key then
+                text = "> " .. text
+            end
+            result.text:SetText(text)
+            result.button:Show()
+        end
+    end
+    if self.picked == nil then
+        picker.warning:SetText(found[1] == nil and "No characters match." or "Pick a character to add.")
+        picker.add:Disable()
+    else
+        picker.warning:SetText(self.picked.warning and ("|cffff9900" .. self.picked.warning .. "|r")
+            or ("Add " .. self.picked.name .. " as an alt."))
+        picker.add:Enable()
+    end
 end
 
 -- An About me field's row: its label, a text box, and how many characters
@@ -228,6 +378,20 @@ function Page:row(index)
     rolesText:SetPoint("RIGHT", frame, "RIGHT", 0, 0)
     rolesText:SetJustifyH("LEFT")
     local row = { frame = frame, name = name, rolesText = rolesText, checks = {} }
+    row.remove = self:button(frame, "Remove", 70, function()
+        if row.key ~= nil then
+            pcall(self.removeAlt, row.key)
+            self:Refresh()
+        end
+    end)
+    row.remove:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, 0)
+    row.makeMain = self:button(frame, "Make main", 80, function()
+        if row.key ~= nil then
+            pcall(self.makeMain, row.key)
+            self:Refresh()
+        end
+    end)
+    row.makeMain:SetPoint("RIGHT", row.remove, "LEFT", -4, 0)
     local roleIndex
     for roleIndex = 1, #addon.RoleCatalog.ROLES do
         local check = createFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
@@ -251,6 +415,17 @@ end
 
 function Page:drawRow(row, character)
     row.frame:Show()
+    row.key = character.key
+    if character.canMakeMain then
+        row.makeMain:Show()
+    else
+        row.makeMain:Hide()
+    end
+    if character.canRemove then
+        row.remove:Show()
+    else
+        row.remove:Hide()
+    end
     row.name:SetText(ProfilePage.CharacterLine(character))
     local index
     for index = 1, #row.checks do
@@ -279,17 +454,31 @@ function Page:draw()
         model = { message = addon.ProfileViewModel.NOT_READY }
     end
     self.dndButton:SetChecked(model.dnd == true)
-    self:drawAbout(model.about)
+    local fields = {}
+    if model.message == nil then
+        fields[1] = { kind = "alias", label = "Alias", text = model.alias or "", max = model.aliasMax or 48 }
+        local index
+        for index = 1, #(model.about or {}) do
+            table.insert(fields, model.about[index])
+        end
+    end
+    self:drawAbout(fields)
     local characters = model.characters or {}
     if model.message ~= nil then
         self.heading:SetText("My Profile")
         self.messageText:SetText(model.message)
         self.messageText:Show()
         self.scroll:Hide()
+        self.addAltButton:Hide()
+        self:ClosePicker()
     else
         self.heading:SetText(model.label)
         self.messageText:Hide()
         self.scroll:Show()
+        self.addAltButton:Show()
+        if self.picker.frame:IsShown() then
+            self:DrawPicker()
+        end
     end
     local index
     for index = 1, #characters do
