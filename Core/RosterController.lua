@@ -141,7 +141,7 @@ function Controller:SelfKey()
     end
     local key = normalizer:Key(fullName)
     if key == nil or partition:GetCharacter(key) == nil then
-        key = self:FindSelfInRoster(normalizer, fullName, guid)
+        key = self:FindInRoster(normalizer, fullName, guid)
         if key == nil then
             -- Not in the roster yet: Name-Realm is the best guess, except
             -- where it can't be right (only the first name).
@@ -152,7 +152,25 @@ function Controller:SelfKey()
     return key
 end
 
-function Controller:FindSelfInRoster(normalizer, fullName, guid)
+-- Another character's key in the current guild's roster (a party member,
+-- say), by the same rules as SelfKey: the stored character named
+-- "Name-Realm", otherwise the roster member with that GUID, otherwise (with
+-- two-part names) the only roster member with that first name and no
+-- other GUID. Nil when they aren't in the guild, or the first name is
+-- shared.
+function Controller:RosterKeyFor(name, guid)
+    local guild, partition, normalizer = self:QuietContext()
+    if guild == nil then
+        return nil
+    end
+    local key = normalizer:Key(name)
+    if key ~= nil and partition:GetCharacter(key) ~= nil then
+        return key
+    end
+    return self:FindInRoster(normalizer, name, guid)
+end
+
+function Controller:FindInRoster(normalizer, fullName, guid)
     local firstName = normalizer:FirstName(fullName)
     local byName
     local count = self.client:GetGuildRosterCount() or 0
@@ -163,7 +181,10 @@ function Controller:FindSelfInRoster(normalizer, fullName, guid)
             if guid ~= nil and member.guid == guid then
                 return normalizer:Key(member.name)
             end
-            if firstName ~= nil and normalizer:FirstName(member.name) == firstName then
+            -- A member whose GUID differs is someone else with that first
+            -- name (an outsider in the party, say).
+            if firstName ~= nil and normalizer:FirstName(member.name) == firstName
+                and (guid == nil or member.guid == nil or member.guid == guid) then
                 -- Two members sharing the first name: can't tell which.
                 byName = byName == nil and normalizer:Key(member.name) or false
             end

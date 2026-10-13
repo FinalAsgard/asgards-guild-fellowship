@@ -354,3 +354,116 @@ test.test("composed: slot updates wait until the organizer is out of combat", fu
     fixtures.deliver(channel)
     test.assertEqual(2, #invitee.shown[1].options)
 end)
+
+-- WoW Forever gives party members only their first name, while the roster
+-- has "First Last": a guildmate in the party is found by GUID, or else by
+-- an unshared first name.
+local function foreverGuild()
+    return {
+        name = "Knights of Camelot",
+        realm = "Camelot",
+        members = {
+            { name = "Tool Box", class = "WARRIOR", level = 60, rank = 1, rankName = "Officer",
+                online = true, zone = "Ironforge" },
+            { name = "Zap Arcane", class = "MAGE", level = 60, rank = 3, rankName = "Member",
+                online = true, zone = "Ironforge" },
+            { name = "Spark Arcane", class = "MAGE", level = 60, rank = 3, rankName = "Member",
+                online = false, lastOnline = { 0, 0, 1, 0 }, note = ">Zap Arcane" },
+            { name = "Hammer Smith", class = "PALADIN", level = 60, rank = 3, rankName = "Member",
+                online = true, zone = "Ironforge" },
+        },
+    }
+end
+
+local function loginForever(channel, playerName)
+    local world = fixtures.newEnvironment("Forever", { guild = foreverGuild(), playerName = playerName })
+    fixtures.joinChannel(channel, world)
+    world.grouped = false
+    world.environment.IsInGroup = function() return world.grouped end
+    fixtures.loadAddon(world)
+    fixtures.fire(world, "ADDON_LOADED", world.addonName)
+    world.loggedIn = true
+    fixtures.fire(world, "PLAYER_LOGIN")
+    fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world)
+    return world
+end
+
+-- Puts `units` (unit -> { name, guid, class }) in the organizer's party, as
+-- the Forever client reports it, and tells the add-on.
+local function joinParty(world, units)
+    local environment = world.environment
+    environment.UnitExists = function(unit) return units[unit] ~= nil end
+    environment.UnitName = function(unit) return units[unit] and units[unit].name end
+    environment.UnitGUID = function(unit) return units[unit] and units[unit].guid end
+    environment.UnitClass = function(unit)
+        return "Localized", units[unit] and units[unit].class, 1
+    end
+    environment.UnitIsInMyGuild = function(unit) return units[unit] ~= nil end
+    world.grouped = true
+    fixtures.fire(world, "GROUP_ROSTER_UPDATE")
+end
+
+local function candidateKeys(world)
+    local keys = {}
+    local players = world.groupFinderOptions.candidates().players
+    local index
+    for index = 1, #players do
+        local characters = players[index].characters
+        local inner
+        for inner = 1, #characters do
+            keys[characters[inner].key] = true
+        end
+        keys[players[index].current.key] = true
+    end
+    return keys
+end
+
+test.test("composed: on Forever, a guildmate without the add-on who joins the party leaves the candidates", function()
+    local channel = fixtures.newChannel()
+    local organizer = loginForever(channel, "Tool Box")
+    fixtures.openGroupFinder(organizer)
+    organizer.addon.groupSession:Start("sfk")
+    test.assertTrue(candidateKeys(organizer)["zap arcane-camelot"])
+
+    joinParty(organizer, {
+        player = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        party1 = { name = "Zap", guid = "Player-1-Zap Arcane", class = "MAGE" },
+    })
+
+    local keys = candidateKeys(organizer)
+    test.assertEqual(nil, keys["zap arcane-camelot"])
+    test.assertEqual(nil, keys["spark arcane-camelot"])
+    test.assertTrue(keys["hammer smith-camelot"])
+end)
+
+test.test("composed: on Forever, a party member with no GUID is found by an unshared first name", function()
+    local channel = fixtures.newChannel()
+    local organizer = loginForever(channel, "Tool Box")
+    fixtures.openGroupFinder(organizer)
+    organizer.addon.groupSession:Start("sfk")
+
+    joinParty(organizer, {
+        player = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        party1 = { name = "Hammer", class = "PALADIN" },
+    })
+
+    local keys = candidateKeys(organizer)
+    test.assertEqual(nil, keys["hammer smith-camelot"])
+    test.assertTrue(keys["zap arcane-camelot"])
+end)
+
+test.test("composed: on Forever, an outsider sharing a guildmate's first name doesn't take them off the candidates", function()
+    local channel = fixtures.newChannel()
+    local organizer = loginForever(channel, "Tool Box")
+    fixtures.openGroupFinder(organizer)
+    organizer.addon.groupSession:Start("sfk")
+
+    joinParty(organizer, {
+        player = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        party1 = { name = "Zap", guid = "Player-2-Stranger", class = "MAGE" },
+    })
+
+    test.assertTrue(candidateKeys(organizer)["zap arcane-camelot"])
+end)

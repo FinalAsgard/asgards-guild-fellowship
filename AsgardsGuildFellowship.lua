@@ -846,12 +846,12 @@ if clientProfile.supported then
     syncParty = function()
         if groupSession:IsActive() then
             -- Each member's guild roster key, so an invitee who joined is
-            -- recognized.
+            -- recognized. Forever gives party members only their first
+            -- name, so the roster decides, as for the player's own key.
             local members = client:GetPartyMembers()
-            local guild, _, normalizer = rosterController:QuietContext()
             local index
             for index = 1, #members do
-                members[index].rosterKey = guild and normalizer:Key(members[index].name) or nil
+                members[index].rosterKey = rosterController:RosterKeyFor(members[index].name, members[index].guid)
             end
             -- Leaving the party ends the group: invitees still deciding
             -- are told it's off.
@@ -1098,7 +1098,7 @@ if clientProfile.supported then
     -- pick, else the instance the player is in.
     local groupHistory
     recordParty = function()
-        local guild, partition, normalizer = rosterController:QuietContext()
+        local guild, partition = rosterController:QuietContext()
         local now = client:Timestamp()
         if guild == nil or now == nil then
             return
@@ -1114,7 +1114,8 @@ if clientProfile.supported then
             local members = client:GetPartyMembers()
             local index
             for index = 1, #members do
-                local key = not members[index].isPlayer and normalizer:Key(members[index].name)
+                local key = not members[index].isPlayer
+                    and rosterController:RosterKeyFor(members[index].name, members[index].guid)
                 local character = key and partition:GetCharacter(key)
                 if character and partition:IsInGuild(key) and not (own and character.player == own.player) then
                     table.insert(keys, key)
@@ -1220,9 +1221,8 @@ if clientProfile.supported then
                 end
                 local members = groupSession:IsActive() and groupSession:Members() or {}
                 for index = 1, #members do
-                    local key = normalizer:Key(members[index].name)
-                    if key ~= nil then
-                        excluded[key] = true
+                    if members[index].rosterKey ~= nil then
+                        excluded[members[index].rosterKey] = true
                     end
                 end
                 return addon.GroupCandidates.Create({
