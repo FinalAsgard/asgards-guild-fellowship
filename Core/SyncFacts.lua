@@ -9,19 +9,32 @@ local _, addon = ...
 --
 -- "character's main is main"; a character that is its own main says so with
 -- main == character. "character's player goes by alias"; an empty alias
--- clears it. Player ids are local counters, so facts only ever name
+-- clears it.
+--
+-- Player profile facts are a character's own data, not officers':
+--
+--   { kind = "roles", character = key, roles = { role, ... }, at = seconds, by = key }
+--
+-- "character is willing to play roles" (tank, healer, dps; empty for
+-- none). Only the character itself can write one: a profile fact is
+-- accepted only when `by` is `character`, whatever the author's rank, and
+-- is never a suggestion. Newest wins, as for officer facts. Later profile
+-- fields are new kinds on the same rule (PROFILE_KINDS). Player ids are local counters, so facts only ever name
 -- characters, and each client rebuilds its own players from them.
 --
 -- Pure: works on a FellowshipStore partition and never touches the game.
 local SyncFacts = {
     KIND_MAIN = "main",
     KIND_ALIAS = "alias",
+    KIND_ROLES = "roles",
     -- The same limit "Set alias…" enforces.
     MAX_ALIAS_LENGTH = 48,
     -- How far ahead of server time a fact may be dated: enough for clocks
     -- that disagree a little.
     MAX_FUTURE_SECONDS = 300,
 }
+-- Kinds only the character they describe may write.
+SyncFacts.PROFILE_KINDS = { [SyncFacts.KIND_ROLES] = true }
 addon.SyncFacts = SyncFacts
 
 local Facts = {}
@@ -35,13 +48,16 @@ local function isTimestamp(value)
     return type(value) == "number" and value > 0 and value == math.floor(value)
 end
 
--- True when `fact` has the shape of a main-link or alias fact.
+-- True when `fact` has the shape of a main-link, alias or roles fact.
 function SyncFacts.IsValid(fact)
     if type(fact) ~= "table" or not isText(fact.character) or not isTimestamp(fact.at) or not isText(fact.by) then
         return false
     end
     if fact.kind == SyncFacts.KIND_MAIN then
         return isText(fact.main)
+    end
+    if fact.kind == SyncFacts.KIND_ROLES then
+        return addon.FellowshipStore.IsRoleList(fact.roles)
     end
     return fact.kind == SyncFacts.KIND_ALIAS
         and type(fact.alias) == "string"
@@ -154,9 +170,36 @@ function Facts:StampLegacy(author, at)
     return facts
 end
 
+-- The roles fact for `key` as this client holds it, or nil when its role
+-- preferences were never set.
+function Facts:RolesFactOf(key)
+    local roles = self.partition:GetRoles(key)
+    if roles == nil then
+        return nil
+    end
+    local at, by = self.partition:GetRolesStamp(key)
+    return { kind = SyncFacts.KIND_ROLES, character = key, roles = roles, at = at, by = by }
+end
+
+-- Sets `key`'s role preferences to `roles`, written by the character
+-- itself at `at` (always newer than the stamp it replaces), and returns its
+-- fact, or nil for an unknown character or unusable roles.
+function Facts:StampRoles(key, roles, at)
+    local heldAt = self.partition:GetRolesStamp(key)
+    if heldAt == nil
+        or not self.partition:SetRoles(key, addon.RoleCatalog.Ordered(roles), math.max(at, heldAt + 1), key)
+    then
+        return nil
+    end
+    return self:RolesFactOf(key)
+end
+
 -- When the thing `fact` is about was last set, and by whom, or nil when the
 -- character is unknown.
 function Facts:HeldStamp(fact)
+    if fact.kind == SyncFacts.KIND_ROLES then
+        return self.partition:GetRolesStamp(fact.character)
+    end
     if fact.kind == SyncFacts.KIND_ALIAS then
         return self.partition:GetAliasStamp(fact.character)
     end
@@ -196,6 +239,9 @@ function Facts:Refusal(fact)
     if not SyncFacts.IsValid(fact) then
         return "malformed"
     end
+    if SyncFacts.PROFILE_KINDS[fact.kind] then
+        return self:ProfileRefusal(fact)
+    end
     if not self.isOfficer(fact.by) then
         return "not an officer"
     end
@@ -212,6 +258,26 @@ function Facts:Refusal(fact)
     -- characters out, another in, or renaming it.
     if self:IsPinned(fact.character) or (fact.kind == SyncFacts.KIND_MAIN and self:IsPinned(fact.main)) then
         return "don't sync"
+    end
+    local heldAt, heldBy = self:HeldStamp(fact)
+    if not SyncFacts.IsNewer(fact.at, fact.by, heldAt, heldBy) then
+        return "not newer"
+    end
+    return nil
+end
+
+-- Refusal for a valid profile fact: only the character itself may write
+-- one. "Don't sync" is about officers' data, so it doesn't apply.
+function Facts:ProfileRefusal(fact)
+    if fact.by ~= fact.character then
+        return "not the character's own"
+    end
+    local now = self.now()
+    if now > 0 and fact.at > now + SyncFacts.MAX_FUTURE_SECONDS then
+        return "from the future"
+    end
+    if self.partition:GetCharacter(fact.character) == nil then
+        return "unknown character"
     end
     local heldAt, heldBy = self:HeldStamp(fact)
     if not SyncFacts.IsNewer(fact.at, fact.by, heldAt, heldBy) then
@@ -261,6 +327,10 @@ end
 -- Makes the roster agree with one accepted fact. Officer data beats guild
 -- notes.
 function Facts:Change(fact)
+    if fact.kind == SyncFacts.KIND_ROLES then
+        self.partition:SetRoles(fact.character, fact.roles, fact.at, fact.by)
+        return
+    end
     self:Reshape(fact, addon.FellowshipStore.SOURCE_SYNC)
     if fact.kind == SyncFacts.KIND_ALIAS then
         self.partition:SetAliasStamp(fact.character, fact.at, fact.by)
@@ -339,6 +409,39 @@ function Facts:OfficerFacts(checkpoint)
     for index = 1, #aliases do
         table.insert(facts, self:AliasFactOf(aliases[index]))
         checkpoint()
+    end
+    return facts
+end
+
+-- Every profile fact this client holds, which it can pass on to others:
+-- each character's own role preferences, sorted by character. `checkpoint`
+-- as for OfficerFacts.
+function Facts:ProfileFacts(checkpoint)
+    checkpoint = checkpoint or function() end
+    local keys = {}
+    self.partition:EachCharacter(function(key, character)
+        if character.rolesAt ~= nil and character.rolesBy == key and character.roles ~= nil then
+            table.insert(keys, key)
+        end
+    end)
+    table.sort(keys)
+    local facts = {}
+    local index
+    for index = 1, #keys do
+        table.insert(facts, self:RolesFactOf(keys[index]))
+        checkpoint()
+    end
+    return facts
+end
+
+-- Everything guild sync compares and passes on: officer facts, then
+-- profile facts.
+function Facts:SharedFacts(checkpoint)
+    local facts = self:OfficerFacts(checkpoint)
+    local profile = self:ProfileFacts(checkpoint)
+    local index
+    for index = 1, #profile do
+        table.insert(facts, profile[index])
     end
     return facts
 end

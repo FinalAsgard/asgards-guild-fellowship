@@ -19,6 +19,8 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf options` | Opens the window on the **Settings** tab. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
+| `/agf group` | Opens the window on the **Group Finder** tab (see [Group Finder](#group-finder)), or closes it. |
+| `/agf dnd` | Turns Group Finder [Do Not Disturb](#do-not-disturb) on, or back off. |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
@@ -28,12 +30,13 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 Everything the add-on does is in one window, with picture tabs down its right edge. Hover a tab to see its name, and click it to show its page; the tab you're on looks selected. Every page scrolls when it's taller than the window.
 
 - **Roster**: the guild's players, mains and alts (see [Using the roster](#using-the-roster)).
+- **Group Finder**: build a dungeon group from the guild (see [Group Finder](#group-finder)).
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
-- **Settings**: everything else (General and Chat Tags), and the version you're running.
+- **Settings**: everything else (General, Chat Tags, and the Group Finder's Do Not Disturb and role preferences), and the version you're running.
 
-The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
+The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf group`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
 
 ## Settings
 
@@ -122,7 +125,7 @@ When an officer changes which characters belong together, or what a player goes 
 - When two officers change the same character or the same alias, the most recent edit wins everywhere.
 - A member's own edits apply in their roster right away and are sent to officers as suggestions (see [Suggestions](#suggestions)). Only officers' edits change everyone's roster directly.
 - Edits made before sync existed: they become official and are sent to the guild once you log in on an officer character with this version. Until then, and for members, they stay in your own roster only.
-- Only main and alt links and aliases are shared. Departures, purges, history, conflicts, and settings stay on your computer.
+- Only main and alt links, aliases, and each character's [role preferences](#role-preferences) are shared. Role preferences are set by the character itself, not by officers. Departures, purges, history (including your [group history](#group-history)), conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
 - The Roster tab's footer shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
 - Sync never gets in the way of play. It sends and processes nothing while you're in combat, or on Retail during a boss encounter or a keystone run, and picks up where it left off once that's over. Like scans, it works on data a little at a time, so even a large guild's full sync doesn't cause a hitch, and your roster redraws once per batch rather than once per change.
@@ -257,6 +260,77 @@ Every post counts toward the player who made it, on all their characters togethe
 Officers also get the **Recruiters** leaderboard on the window's **Recruitment** tab (`/agf recruit`), below the settings. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Regular members don't see the leaderboard.
 
 Everyone gets the window's **Recent Guild Advertisements** tab. It lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade"), who posted (by alias or main, like the leaderboard), and how long ago, newest first. When your add-on only heard the time from someone running an older version, the poster shows as "not known". Ad times and posters are kept for 4 hours, across reloads and logouts, so a relog never forgets where the guild just advertised. The list updates as new ads arrive.
+
+## Group Finder
+
+The **Group Finder** is a tab of the add-on's window, right below **Roster**. Click its tab, or type `/agf group` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it checks your level and party again and asks the guild who is around.
+
+The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
+
+The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Next to each dungeon, **T 1 · H 2 · D 3** shows how many guildmates online right now could fill tank, healer and DPS there, so you can pick one the guild can fill. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
+
+On WoW Retail the list comes from the game's own Dungeon Finder, so it stays current without add-on updates. WoW Forever has no Dungeon Finder, so the add-on ships its dungeons (the Classic ones and Forever's new ones) with their fixed level ranges.
+
+Picking a dungeon starts your group and shows its five slots: 1 tank, 1 healer and 3 DPS. Everyone already in your party, guild members or not, fills a slot, and the slots update as people join or leave:
+
+- On Retail, each party member takes the slot for the role the game assigned them.
+- Anyone without an assigned role (everyone on WoW Forever) starts in the first open slot their class can fill: tank, then healer, then DPS. Under **Party roles**, use the **Tank**, **Healer** and **DPS** buttons beside each name (yours included) to put them where they belong. Only the roles their class can play have buttons.
+
+### Changing or ending the group
+
+When all five slots are filled, the window shows **Group complete**. **Change dungeon** takes you back to the list to pick another dungeon, keeping everyone in their slots. **End group** ends the group, and so does leaving the party. Switching to another tab or closing the window doesn't: come back to the Group Finder tab and your group is still there.
+
+### Who could join
+
+Beside the slots, each role that's still open lists the guildmates online right now who could fill it, for example:
+
+**Bolt 22, Hammer 24**
+
+Each player gets one line, listing every character of theirs that fits, each name in its class color (as throughout the window). Hover over the line to see which character they're on and where they are. A character fits when its level is within the dungeon's range, its class can play the role, and the role is on in its [role preferences](#role-preferences). That includes offline alts, since they can log over. A role already filled lists nobody.
+
+Guildmates whose add-on didn't answer (see [Who is around](#who-is-around)) are marked **(no add-on)**, and are suggested by what their class can do. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
+
+### Requesting a guildmate
+
+Guildmates with the add-on have a **Request** button beside their suggestion. Pressing it sends them a request, and their line shows its state: **pending** until they answer, then **accepted**, **declined**, **expired** (after about 2 minutes with no answer) or **cancelled**. While it's pending the button reads **Cancel**, to withdraw it. **End group** withdraws every pending request.
+
+The guildmate gets a small **Group Finder** prompt: **Toolbox asks you to join The Deadmines (17–26)**, with a button for each way they could join, shown as **Healer — Hammer (24)**. Only roles you still need are offered, only roles that character's preferences allow, and only characters whose level fits the dungeon (alts included). Choosing one puts them in that slot in your window; **Decline** says no. A guildmate in Do Not Disturb, in a group or in an instance declines automatically, as does one with no character that fits. The prompt closes if you cancel or the request expires.
+
+Once someone accepts, getting them into your party is up to you; the add-on never invites anyone on its own. If they're already on the character they chose, its slot has an **Invite** button that sends the game's party invite. If they chose another character, the slot reads **Waiting for Bolt to log in**, and they're reminded in chat to log over to it. The **Invite** button appears as soon as that character is online. When the character joins your party, it fills the slot like any other party member, in the role they chose.
+
+Prompts keep up with your group. When a slot fills, whether someone accepted or joined your party, everyone you've asked loses the options for that role. Anyone left with no option has their prompt closed, and their line in your window shows **withdrawn**. Once every role is filled, the remaining requests are withdrawn too.
+
+Asked by two organizers at once, a guildmate sees both prompts stacked. Accepting one declines the others, and those organizers see **joined another group**.
+
+### Ask in guild
+
+To reach guildmates without the add-on, press **Ask in guild** (shown while any role is open). Your chat box opens on guild chat with a ready-made line already typed, for example **LF healer and 2 DPS for The Deadmines (17–26), whisper me!**, naming the open roles, the dungeon and its level range. Change it however you like and press Enter to send it, or Escape to send nothing. The add-on never posts it for you.
+
+### Who is around
+
+Each time the Group Finder tab comes into view, your add-on asks the guild who else runs it. Every guildmate online with the add-on answers within a few seconds, and the bottom of the tab lists them, for example **Add-on users online: Hammer, Wrench (unavailable)**. Guildmates without the add-on don't answer, so they aren't listed here. People log on and off while you have it open: press **Refresh** at the bottom right to ask again and update everything.
+
+### Nearby
+
+The right side of the window always ends with **Nearby in <zone>**: the guildmates online in the same zone as you, at any level, one line per player under their alias (or main), with the characters they have there and their levels, for example **Thunderer — Bolt 22**. It's there before you pick a dungeon too, so you can see who you might quest with. It's worked out again each time the window opens or refreshes.
+
+### Do Not Disturb
+
+Turn on **Do Not Disturb** when you don't want group requests. It's in three places that always agree: the check box at the bottom of the Group Finder, **Do Not Disturb** under **Group Finder** in the settings, and `/agf dnd`. It applies to every character on your account. While it's on, your add-on tells organizers you're unavailable.
+
+You're also unavailable automatically while you're in a group or inside an instance, with nothing to turn on.
+
+### Role preferences
+
+Each character has its own role preferences: the roles you're willing to play on it. They start as every role its class can fill. To turn one off (say, a paladin you never heal on), log into that character and untick it under **Group Finder** on the **Settings** tab, or in the **Group Finder** section of the AddOns options. Only the roles that character's class can fill are listed. The player panel shows each character's role preferences next to it, as **Roles: Tank, DPS**.
+
+Your role preferences reach the whole guild through [guild sync](#guild-sync), even while you're on another character or offline. Only the character itself can set them, not officers or anyone else. If your add-on sees a change in your character's name that you never made, it sends your real preferences back out to correct it, and warns you who passed it on.
+
+### Group history
+
+Your add-on remembers, on your computer only, each party you've been in with guildmates: any party, not just ones from the Group Finder. It records when, which guild characters, and the dungeon when it knows it (the one you picked in the Group Finder, or the instance you're in). Guildmates joining later count as the same party, and so does reloading while in it. Your own alts never count. The history is never sent to anyone.
+
+A guildmate's player panel then shows **Grouped together 3 times, last on 2026-10-12**, counted across all their characters. Players you've never grouped with show nothing.
 
 ## Supported clients
 

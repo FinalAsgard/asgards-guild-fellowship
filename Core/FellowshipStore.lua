@@ -40,6 +40,30 @@ local function isText(value)
     return type(value) == "string" and value ~= ""
 end
 
+local ROLES = { tank = true, healer = true, dps = true }
+
+-- Whether `roles` is a list of distinct roles ("tank", "healer", "dps");
+-- an empty list means none.
+function FellowshipStore.IsRoleList(roles)
+    if type(roles) ~= "table" or #roles > 3 then
+        return false
+    end
+    local seen = {}
+    local index
+    for index = 1, #roles do
+        if not ROLES[roles[index]] or seen[roles[index]] then
+            return false
+        end
+        seen[roles[index]] = true
+    end
+    local count = 0
+    local _
+    for _ in pairs(roles) do
+        count = count + 1
+    end
+    return count == #roles
+end
+
 -- Returns nil when a character record can be used, or why it can't.
 local function characterProblem(character)
     if type(character) ~= "table" then
@@ -76,6 +100,17 @@ local function characterProblem(character)
     end
     if character.mainBy ~= nil and not isText(character.mainBy) then
         return "character main link author is invalid"
+    end
+    -- Player profile (schema 3): the roles this character is willing to
+    -- play, and when and by whom (always the character itself) they were set.
+    if character.roles ~= nil and not FellowshipStore.IsRoleList(character.roles) then
+        return "character role preferences are invalid"
+    end
+    if character.rolesAt ~= nil and not isWholeNumber(character.rolesAt) then
+        return "character role preferences time is invalid"
+    end
+    if character.rolesBy ~= nil and not isText(character.rolesBy) then
+        return "character role preferences author is invalid"
     end
     if character.rejected ~= nil then
         if type(character.rejected) ~= "table" then
@@ -152,7 +187,7 @@ local function validatePartition(data)
     end
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
-        "recruitLedger", "recruitConfig", "recruitStats",
+        "recruitLedger", "recruitConfig", "recruitStats", "groupHistory",
     }
     local index
     for index = 1, #containers do
@@ -188,7 +223,7 @@ local function validatePartition(data)
     -- are only created when needed.
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
-        recruitStats = true,
+        recruitStats = true, groupHistory = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -627,6 +662,28 @@ function Store:SetRecruitAnchor(anchor)
     return true
 end
 
+-- Whether Do Not Disturb is on for the Group Finder, on every character.
+function Store:GroupFinderDnd()
+    local state = type(self.database) == "table" and self.database.groupFinder or nil
+    return type(state) == "table" and state.dnd == true
+end
+
+-- Turns Do Not Disturb on or off. Refuses when an unusable value is stored
+-- for the Group Finder.
+function Store:SetGroupFinderDnd(enabled)
+    if type(self.database) ~= "table" then
+        return false
+    end
+    if self.database.groupFinder == nil then
+        self.database.groupFinder = {}
+    end
+    if type(self.database.groupFinder) ~= "table" then
+        return false
+    end
+    self.database.groupFinder.dnd = enabled == true or nil
+    return true
+end
+
 -- The user's own ad, exactly as written. Empty when none is saved or the
 -- saved one is unusable.
 function Store:RecruitAd()
@@ -1019,6 +1076,53 @@ function Partition:GetForgeries()
     return self.data.forgeries
 end
 
+-- The most group history entries kept; the oldest go first.
+FellowshipStore.GROUP_HISTORY_MAX = 1000
+
+local function isHistoryEntry(entry)
+    if type(entry) ~= "table" or not isWholeNumber(entry.at) or type(entry.characters) ~= "table"
+        or (entry.dungeon ~= nil and not isText(entry.dungeon))
+    then
+        return false
+    end
+    local index
+    for index = 1, #entry.characters do
+        if not isText(entry.characters[index]) then
+            return false
+        end
+    end
+    return true
+end
+
+-- The parties this player was in with guildmates (GroupHistory), oldest
+-- first: local only, never synced. Unreadable entries are skipped.
+function Partition:GetGroupHistory()
+    local stored = self.data.groupHistory or {}
+    local entries = {}
+    local index
+    for index = 1, #stored do
+        if isHistoryEntry(stored[index]) then
+            table.insert(entries, stored[index])
+        end
+    end
+    return entries
+end
+
+-- Adds a group history entry, dropping the oldest past GROUP_HISTORY_MAX.
+function Partition:AddGroupHistory(entry)
+    if not isHistoryEntry(entry) then
+        return false
+    end
+    if self.data.groupHistory == nil then
+        self.data.groupHistory = {}
+    end
+    table.insert(self.data.groupHistory, entry)
+    while #self.data.groupHistory > FellowshipStore.GROUP_HISTORY_MAX do
+        table.remove(self.data.groupHistory, 1)
+    end
+    return true
+end
+
 -- Guild Recruit's ad counts heard from other add-on users, by character
 -- (see RecruitStats), created on first use.
 function Partition:GetRecruitStats()
@@ -1146,6 +1250,48 @@ function Partition:SetAliasStamp(key, at, by)
     end
     player.aliasAt = at
     player.aliasBy = by
+    return true
+end
+
+-- The roles `key` is willing to play, as a new list, or nil when never set
+-- (the class's roles then apply).
+function Partition:GetRoles(key)
+    local character = self.data.characters[key]
+    if character == nil or character.roles == nil then
+        return nil
+    end
+    local copy = {}
+    local index
+    for index = 1, #character.roles do
+        copy[index] = character.roles[index]
+    end
+    return copy
+end
+
+-- When `key`'s role preferences were last set, and by whom; never set is
+-- the oldest possible, at 0 with no author. Nil for an unknown character.
+function Partition:GetRolesStamp(key)
+    local character = self.data.characters[key]
+    if character == nil then
+        return nil
+    end
+    return character.rolesAt or 0, character.rolesBy
+end
+
+-- Sets `key`'s role preferences, stamped `at` by `by`.
+function Partition:SetRoles(key, roles, at, by)
+    local character = self.data.characters[key]
+    if character == nil or not FellowshipStore.IsRoleList(roles) or not isWholeNumber(at) or not isText(by) then
+        return false
+    end
+    local copy = {}
+    local index
+    for index = 1, #roles do
+        copy[index] = roles[index]
+    end
+    character.roles = copy
+    character.rolesAt = at
+    character.rolesBy = by
     return true
 end
 

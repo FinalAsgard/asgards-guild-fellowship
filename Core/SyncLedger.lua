@@ -96,6 +96,7 @@ function Ledger:LogForgery(fact, relayedBy, now)
         character = fact.character,
         main = fact.main,
         alias = fact.alias,
+        roles = fact.roles,
         at = fact.at,
         relayedBy = relayedBy,
         seen = now,

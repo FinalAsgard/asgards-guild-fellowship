@@ -28,6 +28,13 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
+local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
+local onSlotsChanged
+-- Draws the Group Finder on its tab (set up with the Group Finder below).
+local drawGroupFinder
+-- Records the party in the local group history (set up with the Group
+-- Finder below).
+local recordParty = function() end
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -35,10 +42,23 @@ if clientProfile.supported then
     -- entry points open it.
     pages = addon.PageNavigator.Create()
     pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
+    pages:Add("group", "Group Finder", addon.MasterFrame.ICONS.group)
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
     pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
+    -- Which roles each class can fill here, for role preferences and the
+    -- Group Finder.
+    local roleCatalog = addon.RoleCatalog.For(clientProfile.id)
+    -- The roles a character is willing to play: its own preferences, else
+    -- its class's roles. Nil outside a guild or for an unknown character.
+    local function rolesOf(key)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil or key == nil then
+            return nil
+        end
+        return roleCatalog:PreferencesOf(partition, key)
+    end
     rosterController = addon.RosterController.Create({
         pages = pages,
         client = client,
@@ -61,6 +81,19 @@ if clientProfile.supported then
         adStats = function(keys)
             return guildRecruit:StatsLine(keys)
         end,
+        rolesOf = function(key)
+            local roles = rolesOf(key)
+            return roles and addon.RoleCatalog.Describe(roles) or nil
+        end,
+        groupedWith = function(keys)
+            local guild, partition = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return addon.GroupHistory.Create(partition):Line(keys, function(timestamp)
+                return client:FormatDate(timestamp)
+            end)
+        end,
         recruitRecord = function(keys)
             return guildRecruit:RecordFor(keys)
         end,
@@ -77,6 +110,11 @@ if clientProfile.supported then
             return addon.RosterWindow.Create(client, {
                 navigator = pages,
                 drawPages = {
+                    group = function(content)
+                        if drawGroupFinder ~= nil then
+                            drawGroupFinder(content)
+                        end
+                    end,
                     -- Below the frame's title bar.
                     settings = function(content)
                         frameSettings:Draw(content, settings:SectionsOn("settings"), 28)
@@ -458,6 +496,88 @@ if clientProfile.supported then
         end
         return true
     end
+    -- Role preferences: which roles the logged-in character is willing to
+    -- play, synced to the guild. Only the roles its class can fill are
+    -- offered.
+    settings:AddSection("groupFinder", "Group Finder")
+    -- Account-wide, so it applies on every character.
+    settings:Add("groupFinder", {
+        id = "dnd",
+        kind = "toggle",
+        label = "Do Not Disturb: no group requests, on every character",
+        get = function()
+            local store = rosterController:Store()
+            return store ~= nil and store:GroupFinderDnd()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil or not store:SetGroupFinderDnd(enabled) then
+                return nil, "saved data is unavailable"
+            end
+            return true
+        end,
+    })
+    local function selfClass()
+        local guild, partition = rosterController:QuietContext()
+        local key = rosterController:SelfKey()
+        local character = guild and key and partition:GetCharacter(key)
+        return character and character.class or nil
+    end
+    local function rolesAvailable()
+        if rosterController:SelfKey() == nil or rolesOf(rosterController:SelfKey()) == nil then
+            return false, "this character isn't in the guild roster yet"
+        end
+        return true
+    end
+    local ROLE_SETTING_LABELS = {
+        tank = "Willing to tank on this character",
+        healer = "Willing to heal on this character",
+        dps = "Willing to DPS on this character",
+    }
+    local roleIndex
+    for roleIndex = 1, #addon.RoleCatalog.ROLES do
+        local role = addon.RoleCatalog.ROLES[roleIndex]
+        settings:Add("groupFinder", {
+            id = "role_" .. role,
+            kind = "toggle",
+            label = ROLE_SETTING_LABELS[role],
+            enabled = rolesAvailable,
+            shown = function()
+                return roleCatalog:Can(selfClass(), role)
+            end,
+            get = function()
+                local roles = rolesOf(rosterController:SelfKey()) or {}
+                local index
+                for index = 1, #roles do
+                    if roles[index] == role then
+                        return true
+                    end
+                end
+                return false
+            end,
+            set = function(enabled)
+                local roles = rolesOf(rosterController:SelfKey())
+                if roles == nil then
+                    return nil, "this character isn't in the guild roster yet"
+                end
+                local changed = {}
+                local index
+                for index = 1, #roles do
+                    if roles[index] ~= role then
+                        table.insert(changed, roles[index])
+                    end
+                end
+                if enabled then
+                    table.insert(changed, role)
+                end
+                if syncSession:LocalRolesEdit(changed) == nil then
+                    return nil, "the server time isn't known yet"
+                end
+                rosterController:Invalidate()
+                return true
+            end,
+        })
+    end
     settings:AddSection("recruitment", "Recruitment", { page = "recruitment" })
     -- The user's own ad count, across all their characters.
     settings:Add("recruitment", {
@@ -695,6 +815,448 @@ if clientProfile.supported then
             rosterController:Print("Chat tags off.")
         end
     end)
+    -- The Group Finder's own window, made on first use. Its dungeons come
+    -- from the game's Dungeon Finder where the client has one, read each
+    -- time it opens; its place is saved account-wide. The group outlives
+    -- the window and follows the party.
+    groupSession = addon.GroupSession.Create(roleCatalog)
+    -- Group Finder messages the player didn't click to send wait until
+    -- they're out of combat (or an encounter or keystone run), in order.
+    local waitingToSend = {}
+    local function flushWhenFree()
+        if comm:IsBusy() then
+            if not client:After(2, flushWhenFree) then
+                waitingToSend = {}
+            end
+            return
+        end
+        local queued = waitingToSend
+        waitingToSend = {}
+        local index
+        for index = 1, #queued do
+            comm:Broadcast(queued[index], addon.Comm.PRIORITY_NORMAL)
+        end
+    end
+    local function sendWhenFree(message)
+        table.insert(waitingToSend, message)
+        if #waitingToSend == 1 then
+            flushWhenFree()
+        end
+    end
+    syncParty = function()
+        if groupSession:IsActive() then
+            -- Each member's guild roster key, so an invitee who joined is
+            -- recognized.
+            local members = client:GetPartyMembers()
+            local guild, _, normalizer = rosterController:QuietContext()
+            local index
+            for index = 1, #members do
+                members[index].rosterKey = guild and normalizer:Key(members[index].name) or nil
+            end
+            -- Leaving the party ends the group: invitees still deciding
+            -- are told it's off.
+            local _, dropped = groupSession:UpdateParty(members, client:IsInGroup())
+            for index = 1, #(dropped or {}) do
+                sendWhenFree(addon.GroupFinderProtocol.Cancel(dropped[index].to, dropped[index].id))
+            end
+            if onSlotsChanged ~= nil then
+                onSlotsChanged()
+            end
+        end
+    end
+    -- Who runs the add-on and is available, asked each time the Group
+    -- Finder opens.
+    groupAvailability = addon.GroupAvailability.Create({
+        send = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        keyOf = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(sender) or nil
+        end,
+        doNotDisturb = function()
+            return settings:Get("dnd") == true
+        end,
+        occupied = function()
+            return client:IsInGroup() or client:IsInInstance()
+        end,
+        busy = function()
+            return comm:IsBusy()
+        end,
+        onChanged = function()
+            if groupFinder ~= nil then
+                groupFinder:Refresh()
+            end
+        end,
+    })
+    -- Join requests. Small interactive messages, heard within seconds.
+    local function sendGroupFinder(message)
+        return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+    end
+    local function keyOfSender(sender)
+        local guild, _, normalizer = rosterController:QuietContext()
+        return guild and normalizer:Key(sender) or nil
+    end
+    joinRequests = addon.JoinRequests.Create({
+        partition = function()
+            local guild, partition = rosterController:QuietContext()
+            return guild and partition or nil
+        end,
+        roles = roleCatalog,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        members = function()
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and rosterController:LiveMembers(normalizer) or {}
+        end,
+        available = function()
+            return groupAvailability:IsAvailable()
+        end,
+        display = function(name)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Display(name) or name
+        end,
+    })
+    joinPrompts = addon.JoinPrompts.Create(client)
+    local function refreshGroupFinder()
+        if groupFinder ~= nil then
+            groupFinder:Refresh()
+        end
+    end
+    local showJoinPrompts
+    -- The invitee answers by clicking, so an answer goes out even while busy.
+    showJoinPrompts = function()
+        joinPrompts:Show(joinRequests:Pending(), {
+            -- Accepting one declines the rest: those organizers hear the
+            -- invitee joined another group.
+            accept = function(id, choice)
+                local prompt, option, others = joinRequests:Accept(id, choice)
+                if prompt ~= nil then
+                    sendGroupFinder(addon.GroupFinderProtocol.Answer(prompt.organizer, id, option))
+                    if option.key ~= rosterController:SelfKey() then
+                        local organizer = string.match(prompt.sender or "", "^([^%-]+)") or prompt.sender
+                        rosterController:Print("Log over to " .. option.name .. " to join " .. tostring(organizer) ..
+                            "'s group for " .. prompt.dungeon.name .. ". They'll invite you once you're on.")
+                    end
+                    local index
+                    for index = 1, #others do
+                        sendGroupFinder(addon.GroupFinderProtocol.JoinedElsewhere(others[index].organizer,
+                            others[index].id))
+                    end
+                end
+                showJoinPrompts()
+            end,
+            decline = function(id)
+                local prompt = joinRequests:Decline(id)
+                if prompt ~= nil then
+                    sendGroupFinder(addon.GroupFinderProtocol.Answer(prompt.organizer, id, nil))
+                end
+                showJoinPrompts()
+            end,
+        })
+    end
+    -- Requests expire on both sides; while any wait, this checks every few
+    -- seconds.
+    local ticking = false
+    local function tick()
+        local now = client:Timestamp()
+        if now ~= nil then
+            if groupSession:Expire(now)[1] ~= nil then
+                refreshGroupFinder()
+            end
+            if joinRequests:Expire(now)[1] ~= nil then
+                showJoinPrompts()
+            end
+        end
+        if groupSession:PendingRequests()[1] == nil and joinRequests:Pending()[1] == nil then
+            ticking = false
+            return
+        end
+        if not client:After(5, tick) then
+            ticking = false
+        end
+    end
+    local function startTicking()
+        if not ticking then
+            ticking = client:After(5, tick)
+        end
+    end
+    local function sendRequest(entry)
+        local dungeon = groupFinder ~= nil and groupFinder:Picked() or nil
+        local now = client:Timestamp()
+        if dungeon == nil or now == nil then
+            return
+        end
+        if comm:IsBusy() then
+            rosterController:Print("Requests wait until you're out of combat.")
+            return
+        end
+        -- Nothing open, nothing to ask for: no request is made.
+        local open = groupSession:OpenRoleSet()
+        if open[1] == nil then
+            return
+        end
+        local request = groupSession:Request({ playerId = entry.id, key = entry.current.key, label = entry.label }, now,
+            rosterController:SelfKey())
+        if request == nil then
+            return
+        end
+        sendGroupFinder(addon.GroupFinderProtocol.Request(request.to, request.id, dungeon, open))
+        startTicking()
+    end
+    -- After slots filled or freed up: invitees with open requests hear the
+    -- roles still open, or that nothing is left.
+    onSlotsChanged = function()
+        local updates, withdrawals = groupSession:SlotChanges()
+        local index
+        for index = 1, #updates do
+            sendWhenFree(addon.GroupFinderProtocol.Slots(updates[index].to, updates[index].id, updates[index].roles))
+        end
+        for index = 1, #withdrawals do
+            sendWhenFree(addon.GroupFinderProtocol.Withdraw(withdrawals[index].to, withdrawals[index].id))
+        end
+        if updates[1] ~= nil or withdrawals[1] ~= nil then
+            refreshGroupFinder()
+        end
+    end
+    local function cancelRequest(id)
+        local request = groupSession:Cancel(id)
+        if request ~= nil then
+            sendGroupFinder(addon.GroupFinderProtocol.Cancel(request.to, id))
+        end
+    end
+    -- Every Group Finder message: availability asks and replies, and
+    -- targeted messages, which only their recipient handles.
+    onGroupFinderMessage = function(message, sender)
+        local protocol = addon.GroupFinderProtocol
+        if message.t == protocol.TYPE_ASK or message.t == protocol.TYPE_AVAILABLE then
+            groupAvailability:OnMessage(message, sender)
+            return
+        end
+        local selfKey = rosterController:SelfKey()
+        local senderKey = keyOfSender(sender)
+        if not protocol.IsValid(message) or selfKey == nil or message.to ~= selfKey
+            or senderKey == nil or senderKey == selfKey
+        then
+            return
+        end
+        if message.t == protocol.TYPE_REQUEST then
+            local refused = joinRequests:OnRequest(message, senderKey, sender, client:Timestamp() or 0)
+            if refused ~= nil then
+                sendWhenFree(protocol.Answer(senderKey, message.id, nil))
+                return
+            end
+            showJoinPrompts()
+            startTicking()
+        elseif message.t == protocol.TYPE_ANSWER then
+            local option
+            if message.ok then
+                option = { role = message.role, key = message.c, name = message.n, level = message.l }
+            end
+            local state = groupSession:Answer(message.id, senderKey, option, message.w == true)
+            if state == addon.GroupSession.ACCEPTED then
+                onSlotsChanged()
+            end
+            if state ~= nil then
+                refreshGroupFinder()
+            end
+        elseif message.t == protocol.TYPE_CANCEL or message.t == protocol.TYPE_WITHDRAW then
+            if joinRequests:OnCancel(message.id, senderKey) then
+                showJoinPrompts()
+            end
+        elseif message.t == protocol.TYPE_SLOTS then
+            local result = joinRequests:OnSlots(message.id, senderKey, message.r)
+            if result == "closed" then
+                sendWhenFree(protocol.Answer(senderKey, message.id, nil, true))
+            end
+            if result ~= nil then
+                showJoinPrompts()
+            end
+        elseif message.t == protocol.TYPE_JOINED_ELSEWHERE then
+            if groupSession:JoinedElsewhere(message.id, senderKey) then
+                refreshGroupFinder()
+            end
+        end
+    end
+    settings:OnChange(function(id)
+        if id == "dnd" and groupFinder ~= nil then
+            groupFinder:Refresh()
+        end
+    end)
+    -- Group history: the guildmates in the party now (this player's own
+    -- characters left out), and the dungeon when known: the Group Finder's
+    -- pick, else the instance the player is in.
+    local groupHistory
+    recordParty = function()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local now = client:Timestamp()
+        if guild == nil or now == nil then
+            return
+        end
+        if groupHistory == nil or groupHistory.partition.key ~= partition.key then
+            groupHistory = addon.GroupHistory.Create(partition)
+        end
+        groupHistory.partition = partition
+        local selfKey = rosterController:SelfKey()
+        local own = selfKey and partition:GetCharacter(selfKey)
+        local keys = {}
+        if client:IsInGroup() then
+            local members = client:GetPartyMembers()
+            local index
+            for index = 1, #members do
+                local key = not members[index].isPlayer and normalizer:Key(members[index].name)
+                local character = key and partition:GetCharacter(key)
+                if character and partition:IsInGuild(key) and not (own and character.player == own.player) then
+                    table.insert(keys, key)
+                end
+            end
+        end
+        local dungeon = groupSession:IsActive()
+            and addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Get(groupSession:Dungeon()) or nil
+        local name = dungeon and dungeon.name or nil
+        if name == nil and client:IsInInstance() then
+            local zone = client:GetZone()
+            name = zone and zone.name or nil
+        end
+        groupHistory:OnParty(keys, now, name)
+        rosterController:Invalidate()
+    end
+    router:Register("dnd", "turn Group Finder Do Not Disturb on or off", function()
+        local enabled, reason = settings:Toggle("dnd")
+        if enabled == nil then
+            rosterController:Print("Do Not Disturb can't be changed: " .. tostring(reason) .. ".")
+        elseif enabled then
+            rosterController:Print("Do Not Disturb on: you won't get group requests, on any character.")
+        else
+            rosterController:Print("Do Not Disturb off.")
+        end
+    end)
+    -- The Group Finder's tab, drawn when the master frame is first built.
+    -- Each time the tab comes into view it asks the guild who is around.
+    drawGroupFinder = function(content)
+        local reason
+        groupFinder, reason = addon.GroupFinderWindow.Create(client, content, {
+            dungeons = function()
+                return addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList())
+            end,
+            playerLevel = function()
+                return client:GetPlayerLevel()
+            end,
+            session = groupSession,
+            roles = roleCatalog,
+            syncParty = syncParty,
+            replies = function()
+                return groupAvailability:Replies()
+            end,
+            openGuildChat = function(text)
+                return client:OpenGuildChat(text)
+            end,
+            request = sendRequest,
+            cancelRequest = cancelRequest,
+            classColor = function(classToken)
+                return client:GetClassColor(classToken)
+            end,
+            refresh = function()
+                syncParty()
+                groupAvailability:Ask()
+            end,
+            zone = function()
+                local zone = client:GetZone()
+                return zone and zone.name or nil
+            end,
+            selfKey = function()
+                return rosterController:SelfKey()
+            end,
+            isOnline = function(key)
+                local guild, _, normalizer = rosterController:QuietContext()
+                local live = guild and rosterController:LiveMembers(normalizer)[key]
+                return live ~= nil and live.online == true
+            end,
+            -- Only ever from the organizer's click on Invite.
+            invite = function(key)
+                local guild, partition, normalizer = rosterController:QuietContext()
+                if guild == nil then
+                    return false
+                end
+                local live = rosterController:LiveMembers(normalizer)[key]
+                local character = partition:GetCharacter(key)
+                local name = (live and live.name) or (character and character.name)
+                return name ~= nil and client:InviteToParty(name)
+            end,
+            -- The guild as it is now: the live roster, the replies to
+            -- the last ask, and who is left out (this character's
+            -- player and the party).
+            candidates = function()
+                local guild, partition, normalizer = rosterController:QuietContext()
+                if guild == nil then
+                    return nil
+                end
+                local replies, excluded = {}, {}
+                local list = groupAvailability:Replies()
+                local index
+                for index = 1, #list do
+                    replies[list[index].key] = list[index]
+                end
+                local selfKey = rosterController:SelfKey()
+                if selfKey ~= nil then
+                    excluded[selfKey] = true
+                end
+                -- Invitees who accepted already have a slot.
+                local requests = groupSession:Requests()
+                for index = 1, #requests do
+                    if requests[index].state == addon.GroupSession.ACCEPTED then
+                        excluded[requests[index].to] = true
+                    end
+                end
+                local members = groupSession:IsActive() and groupSession:Members() or {}
+                for index = 1, #members do
+                    local key = normalizer:Key(members[index].name)
+                    if key ~= nil then
+                        excluded[key] = true
+                    end
+                end
+                return addon.GroupCandidates.Create({
+                    partition = partition,
+                    members = rosterController:LiveMembers(normalizer),
+                    roles = roleCatalog,
+                    replies = replies,
+                    excluded = excluded,
+                    display = function(name)
+                        return normalizer:Display(name)
+                    end,
+                })
+            end,
+            dnd = {
+                get = function()
+                    return settings:Get("dnd") == true
+                end,
+                set = function(enabled)
+                    return settings:Set("dnd", enabled)
+                end,
+            },
+            onShown = function()
+                groupAvailability:Ask()
+            end,
+        })
+        if groupFinder == nil then
+            rosterController:Print("The Group Finder can't be shown: " .. tostring(reason) .. ".")
+        end
+    end
+    -- Opens the master frame on the Group Finder's tab, or closes it when
+    -- that tab is already showing.
+    router:Register("group", "open or close the Group Finder", function()
+        rosterController:Toggle("group")
+    end)
     router:SetDefault("roster")
     -- Guild sync: officers are ranks that can view officer notes, judged
     -- from the stored roster (current members only).
@@ -775,6 +1337,7 @@ if clientProfile.supported then
         onSynced = function()
             rosterController:UpdateStatus()
         end,
+        rolesOf = rolesOf,
     })
     router:Register("channels", "show the chat channels Guild Recruit sees here", function()
         local lines = client:ChannelReport()
@@ -957,6 +1520,10 @@ if clientProfile.supported then
     end)
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
+        -- Who is online decides the Group Finder's Invite buttons.
+        if groupFinder ~= nil then
+            groupFinder:Refresh()
+        end
         -- The first loaded roster tells Guild Greet who was already online
         -- and how long everyone else has been away.
         guildGreet:OnRosterUpdate(function()
@@ -1030,6 +1597,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildGreet:OnGreeted(message, sender)
         elseif addon.GuildRecruit.TYPES[message.t] ~= nil then
             guildRecruit:OnMessage(message, sender)
+        elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
+            onGroupFinderMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end
@@ -1058,6 +1627,15 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         guildRecruit:Refresh()
     end)
     guildRecruit:Refresh()
+    -- The Group Finder's slots follow the party, and every party with
+    -- guildmates goes into the local group history.
+    client:ObserveParty(function()
+        syncParty()
+        recordParty()
+        if groupFinder ~= nil then
+            groupFinder:Refresh()
+        end
+    end)
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)
@@ -1079,6 +1657,10 @@ addon.settingsPanel = settingsPanel
 addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
+addon.groupSession = groupSession
+addon.groupAvailability = groupAvailability
+addon.joinRequests = joinRequests
+addon.joinPrompts = joinPrompts
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version

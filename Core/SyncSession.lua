@@ -38,6 +38,16 @@ local _, addon = ...
 -- officer's value for that thing (and its officer fact, when an officer set
 -- it), and the member's edit reverts to it.
 --
+-- Player profile: a character's own data (its role preferences) travels
+-- the same way, but only the character itself writes it. Changing it sends
+-- the new fact right away; catching up compares and passes on profile facts
+-- with officer facts. A character is logged in on one client at a time, so
+-- a fact in its name dated since this client started (less a margin for
+-- clocks) that this client never wrote is forged: it isn't applied, this
+-- client sends its own data stamped newer, logs who relayed it, and warns
+-- the player. An older one is a real edit from another computer (or from
+-- before saved data was reset) and is applied as usual.
+--
 -- Every message is a table { v = PROTOCOL, t = type, ... }. A message with
 -- another protocol version, or a type this version doesn't know, is ignored,
 -- so mixed add-on versions in one guild never break each other.
@@ -69,6 +79,8 @@ local _, addon = ...
 --   onError(problem) called when background work failed (raises by default)
 --   onSynced()   called after another add-on user's data was compared with
 --                or applied to this client's (the time is kept per guild)
+--   rolesOf(key) -> the roles `key` is willing to play now (its own
+--                preferences, or its class's roles), or nil
 local SyncSession = {
     PROTOCOL = 1,
     TYPE_FACTS = "facts",
@@ -95,6 +107,9 @@ local SyncSession = {
     STEPS_WITHOUT_CLOCK = 50,
     -- While the player is busy, check again this often.
     PAUSE_SECONDS = 2,
+    -- How far before this client started a profile fact in the logged-in
+    -- character's name can be dated and still count as a forgery.
+    PROFILE_FORGERY_MARGIN = 120,
 }
 addon.SyncSession = SyncSession
 
@@ -102,7 +117,14 @@ local Session = {}
 Session.__index = Session
 
 function SyncSession.Create(options)
+    local startedAt
+    if type(options.now) == "function" then
+        startedAt = options.now()
+    end
     return setmetatable({
+        -- When this client started, for telling forged profile facts from
+        -- edits made elsewhere.
+        startedAt = startedAt,
         comm = options.comm,
         context = options.context,
         selfKey = options.selfKey,
@@ -129,6 +151,9 @@ function SyncSession.Create(options)
             error(problem, 0)
         end,
         onSynced = options.onSynced or function() end,
+        rolesOf = options.rolesOf or function()
+            return nil
+        end,
         -- Announcer key -> a reply this client is waiting to send.
         replies = {},
         -- Background work waiting its turn, oldest first.
@@ -241,6 +266,50 @@ function Session:Later(seconds, callback)
     end
 end
 
+-- Sends this client's own `facts`, stamped at or after `now`. A stamp
+-- further ahead than others accept (a correction one second after a
+-- forgery dated at the limit, or an edit made right after one) would be
+-- refused as from the future, so those wait until their clocks catch up.
+-- What goes out then is this client's data as it is by that time, so an
+-- edit made while waiting is never overwritten by what it replaced.
+function Session:SendWhenAcceptable(facts, now)
+    local latest = 0
+    local index
+    for index = 1, #facts do
+        latest = math.max(latest, facts[index].at)
+    end
+    local wait = latest - (now + addon.SyncFacts.MAX_FUTURE_SECONDS)
+    if wait <= 0 then
+        self:Send({ t = SyncSession.TYPE_FACTS, facts = facts })
+        return
+    end
+    self:Later(wait, function()
+        local partition = self.context()
+        if partition == nil then
+            return
+        end
+        local own = self:Facts(partition)
+        local current = {}
+        for index = 1, #facts do
+            local fact = facts[index]
+            local held
+            if fact.kind == addon.SyncFacts.KIND_ROLES then
+                held = own:RolesFactOf(fact.character)
+            elseif fact.kind == addon.SyncFacts.KIND_ALIAS then
+                held = own:AliasFactOf(fact.character)
+            else
+                held = own:FactOf(fact.character)
+            end
+            if held ~= nil then
+                table.insert(current, held)
+            end
+        end
+        if current[1] ~= nil then
+            self:Send({ t = SyncSession.TYPE_FACTS, facts = current })
+        end
+    end)
+end
+
 -- After this user changed main links by hand: stamps the main link of every
 -- character in `keys` (a set) as theirs, now, and broadcasts them when this
 -- user is an officer. A member suggests only the links that changed:
@@ -312,6 +381,24 @@ function Session:StampAndSend(stamp, changed)
     addon.SyncLedger.Create(partition):Record(facts, now)
     self:Send({ t = SyncSession.TYPE_FACTS, facts = facts })
     return facts
+end
+
+-- After this user changed the logged-in character's role preferences:
+-- stores `roles` as written by the character now, and sends the fact to
+-- the guild. Returns the fact sent, or nil when nothing could be.
+function Session:LocalRolesEdit(roles)
+    local partition = self.context()
+    local key = self.selfKey()
+    local now = self.now()
+    if partition == nil or key == nil or now == nil then
+        return nil
+    end
+    local fact = self:Facts(partition):StampRoles(key, roles, now)
+    if fact == nil then
+        return nil
+    end
+    self:SendWhenAcceptable({ fact }, now)
+    return fact
 end
 
 -- Suggestions -----------------------------------------------------------------
@@ -442,7 +529,7 @@ function Session:SendDigest()
     local checkpoint = function()
         self:Checkpoint()
     end
-    local facts = self:Facts(partition):OfficerFacts(checkpoint)
+    local facts = self:Facts(partition):SharedFacts(checkpoint)
     self:Send({ t = SyncSession.TYPE_DIGEST, digest = addon.SyncDigest.Of(facts, checkpoint) })
     if not self.isOfficer(self.selfKey()) and self.officerOnline() then
         self:SendSuggestions(partition)
@@ -471,7 +558,7 @@ function Session:OnDigest(digest, announcer, partition)
     local checkpoint = function()
         self:Checkpoint()
     end
-    local mine = digests.Of(self:Facts(partition):OfficerFacts(checkpoint), checkpoint)
+    local mine = digests.Of(self:Facts(partition):SharedFacts(checkpoint), checkpoint)
     local buckets = digests.Differing(mine, digest)
     if buckets[1] == nil then
         return
@@ -499,7 +586,7 @@ function Session:OnDigest(digest, announcer, partition)
                 return
             end
             partition = current
-            local facts = digests.FactsIn(self:Facts(partition):OfficerFacts(checkpoint), buckets, checkpoint)
+            local facts = digests.FactsIn(self:Facts(partition):SharedFacts(checkpoint), buckets, checkpoint)
             self:Send({ t = SyncSession.TYPE_FACTS, re = announcer, buckets = buckets, facts = facts })
         end)
     end)
@@ -524,7 +611,7 @@ function Session:FollowUp(reply, partition)
     local checkpoint = function()
         self:Checkpoint()
     end
-    local mine = digests.FactsIn(self:Facts(partition):OfficerFacts(checkpoint), reply.buckets, checkpoint)
+    local mine = digests.FactsIn(self:Facts(partition):SharedFacts(checkpoint), reply.buckets, checkpoint)
     for index = 1, #mine do
         local fact = mine[index]
         local held = theirs[fact.kind .. "\31" .. fact.character]
@@ -559,6 +646,7 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
         -- One dated too far ahead is refused like any other, so its date
         -- never reaches a correction.
         if addon.SyncFacts.IsValid(fact) and fact.by == officer
+            and not addon.SyncFacts.PROFILE_KINDS[fact.kind]
             and not (now > 0 and fact.at > now + addon.SyncFacts.MAX_FUTURE_SECONDS)
             and ledger:IsForged(fact, now)
         then
@@ -584,7 +672,52 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
     end
     if corrections[1] ~= nil then
         ledger:Record(corrections, now)
-        self:Send({ t = SyncSession.TYPE_FACTS, facts = corrections })
+        self:SendWhenAcceptable(corrections, now)
+    end
+    self.onForgery(forged, sender)
+    return kept
+end
+
+-- Of `facts` received from `relayer` (key, and `sender` as the game reports
+-- it), returns the ones to apply. While the logged-in character (`owner`)
+-- is on, only this client writes its profile facts, and it holds the
+-- newest it wrote, so a newer one in that character's name dated since
+-- this client started is forged: it's left out and logged, this
+-- character's own data goes to the guild stamped newer, and the player is
+-- warned.
+function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
+    local now = self.now()
+    if type(facts) ~= "table" or now == nil then
+        return facts
+    end
+    local own = self:Facts(partition)
+    local kept, corrections = {}, {}
+    local forged = 0
+    self.startedAt = self.startedAt or now
+    local since = self.startedAt - SyncSession.PROFILE_FORGERY_MARGIN
+    local index
+    for index = 1, #facts do
+        local fact = facts[index]
+        if addon.SyncFacts.IsValid(fact) and addon.SyncFacts.PROFILE_KINDS[fact.kind]
+            and fact.character == owner and fact.at >= since and own:Refusal(fact) == nil
+        then
+            forged = forged + 1
+            addon.SyncLedger.Create(partition):LogForgery(fact, relayer, now)
+            local roles = self.rolesOf(owner)
+            local correction = roles and own:StampRoles(owner, roles, math.max(now, fact.at + 1))
+            if correction then
+                table.insert(corrections, correction)
+            end
+        else
+            table.insert(kept, fact)
+        end
+        self:Checkpoint()
+    end
+    if forged == 0 then
+        return facts
+    end
+    if corrections[1] ~= nil then
+        self:SendWhenAcceptable(corrections, now)
     end
     self.onForgery(forged, sender)
     return kept
@@ -650,6 +783,9 @@ function Session:Process(message, sender)
     local incoming = message.facts
     if selfIsOfficer then
         incoming = self:CatchForgeries(incoming, partition, selfKey, senderKey, sender)
+    end
+    if selfKey ~= nil then
+        incoming = self:CatchProfileForgeries(incoming, partition, selfKey, senderKey, sender)
     end
     local applied = self:Facts(partition):ApplyAll(incoming, function()
         self:Checkpoint()

@@ -327,6 +327,15 @@ local function installGuild(world, environment, profile)
         local fullName = playerRosterName()
         return fullName and ("Player-1-" .. fullName) or nil
     end
+    -- The logged-in character's level: `world.playerLevel`, else the
+    -- first member's roster level.
+    environment.UnitLevel = function(unit)
+        test.assertEqual("player", unit)
+        if world.playerLevel ~= nil then
+            return world.playerLevel
+        end
+        return world.guild and world.guild.members[1].level or 0
+    end
     -- A fake clock: `world.time` is wall-clock seconds, `world.precise` the
     -- millisecond profiler clock, and C_Timer callbacks wait in
     -- `world.timers` until Fixtures.runTimers delivers them.
@@ -621,6 +630,48 @@ function Fixtures.deliver(channel)
         end
     end
     return delivered
+end
+
+-- Opens the Group Finder's tab with `/agf group`, as a player would. The
+-- master frame is a stand-in recording whether it's shown and which page;
+-- on its first build the Group Finder's tab is drawn on a stand-in content
+-- frame, and whenever the tab ends up in view its `onShown` runs, as the
+-- real tab coming into view does. The Group Finder's options are kept in
+-- `world.groupFinderOptions`.
+function Fixtures.openGroupFinder(world)
+    local addon = world.addon
+    if world.masterFrame == nil then
+        local frame = { shown = false }
+        function frame:IsShown() return self.shown end
+        function frame:Show() self.shown = true end
+        function frame:Hide() self.shown = false end
+        function frame:ShowPage(id)
+            self.page = id
+            return true
+        end
+        function frame:SetTitle() end
+        function frame:SetStatus() end
+        function frame:SetRows() return true end
+        function frame:SetConflicts() return true end
+        function frame:SetRecruiters() return true end
+        function frame:SetRecentAds() return true end
+        local create = addon.GroupFinderWindow.Create
+        addon.GroupFinderWindow.Create = function(client, host, options)
+            world.groupFinderOptions = options
+            return create(client, host, options)
+        end
+        addon.RosterWindow.Create = function(_, options)
+            frame.options = options
+            options.drawPages.group({})
+            return frame
+        end
+        world.masterFrame = frame
+    end
+    Fixtures.slash(world, "group")
+    local frame = world.masterFrame
+    if frame.shown and frame.page == "group" and world.groupFinderOptions ~= nil then
+        world.groupFinderOptions.onShown()
+    end
 end
 
 -- Runs the build's slash command as a player typing it would.

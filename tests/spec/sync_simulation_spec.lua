@@ -603,7 +603,7 @@ test.test("an upgraded officer's edits from before sync reach members", function
     local officer = login(channel, "Toolbox-Area52", { database = legacyDatabase() })
     fixtures.deliver(channel)
 
-    test.assertEqual(2, officer.database.schemaVersion)
+    test.assertEqual(3, officer.database.schemaVersion)
     test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
     test.assertEqual("Tools", aliasOf(member, "hammer-area52"))
     local at, by = partitionOf(officer):GetMainStamp("hammer-area52")
@@ -634,11 +634,11 @@ end)
 test.test("saved data from a newer add-on is never upgraded or sent", function()
     local channel = fixtures.newChannel()
     local database = legacyDatabase()
-    database.schemaVersion = 3
+    database.schemaVersion = 4
     local officer = login(channel, "Toolbox-Area52", { database = database, openRoster = false })
 
     test.assertEqual(0, #officer.sentMessages)
-    test.assertEqual(3, officer.database.schemaVersion)
+    test.assertEqual(4, officer.database.schemaVersion)
     test.assertEqual(nil, officer.database.guilds["Knights of Camelot-Area52"].characters["hammer-area52"].mainAt)
 end)
 

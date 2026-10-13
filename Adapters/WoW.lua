@@ -437,6 +437,22 @@ end
 
 -- Posts `text` to guild chat. Retail keeps the call in C_ChatInfo; older
 -- clients have it as a global. Returns true when the client accepted it.
+-- Opens the game's chat box on guild chat with `text` typed in, for the
+-- player to edit and send with Enter: the game sends it, so nothing an
+-- add-on can't do is involved. Retail keeps the call in ChatFrameUtil;
+-- older clients have it as a global. Returns true when it opened.
+function Client:OpenGuildChat(text)
+    if type(text) ~= "string" or text == "" then
+        return false
+    end
+    local line = "/g " .. text
+    local util = self.environment.ChatFrameUtil
+    if type(util) == "table" and type(util.OpenChat) == "function" then
+        return (callFunction(util.OpenChat, line))
+    end
+    return (callFunction(self.environment.ChatFrame_OpenChat, line))
+end
+
 function Client:SendGuildMessage(text)
     if type(text) ~= "string" or text == "" then
         return false
@@ -752,6 +768,138 @@ function Client:IsSecretValue(value)
     end
     local ok, secret = pcall(isSecret, value)
     return not ok or (secret ~= nil and secret ~= false)
+end
+
+-- The logged-in character's level, or nil while the client can't say.
+function Client:GetPlayerLevel()
+    local ok, level = callFunction(self.environment.UnitLevel, "player")
+    if not ok or type(level) ~= "number" or level < 1 then
+        return nil
+    end
+    return level
+end
+
+-- Whether the player is in a party or raid. False when the client can't say.
+function Client:IsInGroup()
+    local environment = self.environment
+    local ok, grouped = callFunction(environment.IsInGroup)
+    if ok then
+        return grouped ~= nil and grouped ~= false
+    end
+    local count
+    ok, count = callFunction(environment.GetNumGroupMembers)
+    if not ok then
+        ok, count = callFunction(environment.GetNumPartyMembers)
+    end
+    return ok and type(count) == "number" and count > 0
+end
+
+-- The game's assigned roles, as the Group Finder names them.
+Compatibility.ASSIGNED_ROLES = { TANK = "tank", HEALER = "healer", DAMAGER = "dps" }
+Compatibility.PARTY_UNITS = { "player", "party1", "party2", "party3", "party4" }
+
+-- The player and their party members, each { key, name, classToken, level,
+-- assignedRole, inGuild, isPlayer }. `key` is the GUID where the client
+-- gives one. `assignedRole` is nil where the client assigns none.
+function Client:GetPartyMembers()
+    local environment = self.environment
+    local members = {}
+    local index
+    for index = 1, #Compatibility.PARTY_UNITS do
+        local unit = Compatibility.PARTY_UNITS[index]
+        local existsOk, exists = callFunction(environment.UnitExists, unit)
+        if unit == "player" or (existsOk and exists) then
+            -- A member from another realm comes with that realm; the
+            -- name then carries it, as the guild roster spells it.
+            local nameOk, name, realm = callFunction(environment.UnitName, unit)
+            if nameOk and type(name) == "string" and name ~= "" and type(realm) == "string" and realm ~= "" then
+                name = name .. "-" .. realm
+            end
+            if nameOk and type(name) == "string" and name ~= "" then
+                local _, guid = callFunction(environment.UnitGUID, unit)
+                local _, _, classToken = callFunction(environment.UnitClass, unit)
+                local _, level = callFunction(environment.UnitLevel, unit)
+                local _, role = callFunction(environment.UnitGroupRolesAssigned, unit)
+                local _, inGuild = callFunction(environment.UnitIsInMyGuild, unit)
+                table.insert(members, {
+                    key = type(guid) == "string" and guid ~= "" and guid or name,
+                    name = name,
+                    classToken = type(classToken) == "string" and classToken or nil,
+                    level = type(level) == "number" and level > 0 and level or nil,
+                    assignedRole = Compatibility.ASSIGNED_ROLES[role],
+                    inGuild = unit == "player" or (inGuild ~= nil and inGuild ~= false),
+                    isPlayer = unit == "player",
+                })
+            end
+        end
+    end
+    return members
+end
+
+-- Sends the game's party invite to the character `name`. Retail keeps it
+-- in C_PartyInfo; older clients have it as a global. Returns true when the
+-- client accepted the call. Only ever called from the organizer's click.
+function Client:InviteToParty(name)
+    if type(name) ~= "string" or name == "" then
+        return false
+    end
+    local partyInfo = self.environment.C_PartyInfo
+    if type(partyInfo) == "table" and type(partyInfo.InviteUnit) == "function" then
+        return (callFunction(partyInfo.InviteUnit, name))
+    end
+    return (callFunction(self.environment.InviteUnit, name))
+end
+
+-- Calls onChange() whenever the party or its assigned roles change.
+-- Returns false when the client can't deliver the events.
+function Client:ObserveParty(onChange)
+    if type(onChange) ~= "function" then
+        return false
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil or not self:SetEventHandler(frame, function()
+        pcall(onChange)
+    end) then
+        return false
+    end
+    -- Retail and newer clients send GROUP_ROSTER_UPDATE; older ones the
+    -- party events. Each client registers whichever it knows.
+    local registered = self:RegisterEvent(frame, "GROUP_ROSTER_UPDATE")
+    registered = self:RegisterEvent(frame, "PARTY_MEMBERS_CHANGED") or registered
+    self:RegisterEvent(frame, "PLAYER_ROLES_ASSIGNED")
+    self.partyFrame = frame
+    return registered
+end
+
+-- The game's Dungeon Finder classifies each entry; the Group Finder lists
+-- only regular dungeons at normal difficulty, not random queues or heroics.
+Compatibility.LFG_TYPE_RANDOM = 6
+Compatibility.LFG_SUBTYPE_DUNGEON = 1
+
+-- The Dungeon Finder's dungeons as { id, name, minLevel, maxLevel }, or nil
+-- on a client without one (WoW Forever) or when it lists none.
+function Client:GetDungeonList()
+    local environment = self.environment
+    local ok, order = callFunction(environment.GetLFDChoiceOrder, {})
+    if not ok or type(order) ~= "table" or type(environment.GetLFGDungeonInfo) ~= "function" then
+        return nil
+    end
+    local dungeons = {}
+    local index
+    for index = 1, #order do
+        local id = order[index]
+        local infoOk, name, typeId, subtypeId, minLevel, maxLevel = callFunction(environment.GetLFGDungeonInfo, id)
+        if infoOk and type(name) == "string" and name ~= ""
+            and typeId ~= Compatibility.LFG_TYPE_RANDOM and subtypeId == Compatibility.LFG_SUBTYPE_DUNGEON
+            and type(minLevel) == "number" and type(maxLevel) == "number"
+        then
+            table.insert(dungeons, { id = id, name = name, minLevel = minLevel, maxLevel = maxLevel })
+        end
+    end
+    if #dungeons == 0 then
+        return nil
+    end
+    return dungeons
 end
 
 -- Wall-clock seconds for saved records, or nil.

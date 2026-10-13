@@ -229,7 +229,7 @@ local function registerProfileTests(profile, addonName)
         test.assertEqual(identity.slashCommand, world.environment["SLASH_" .. identity.slashKey .. "1"])
         test.assertEqual(identity.slashAlias, world.environment["SLASH_" .. identity.slashKey .. "2"])
         test.assertEqual(0, #world.messages)
-        test.assertEqual(2, world.database.schemaVersion)
+        test.assertEqual(3, world.database.schemaVersion)
         test.assertEqual("table", type(world.database.guilds))
 
         fixtures.slash(world, "help")

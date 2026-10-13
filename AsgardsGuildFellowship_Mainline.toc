@@ -25,6 +25,8 @@ Adapters/Comm.lua
 Adapters/SettingsPanel.lua
 Adapters/GreetPrompts.lua
 Adapters/RecruitPrompts.lua
+Adapters/GroupFinderWindow.lua
+Adapters/JoinPrompts.lua
 Adapters/GreetingsPage.lua
 Core/Persistence.lua
 Core/NameNormalizer.lua
@@ -59,5 +61,13 @@ Core/RecruitPolicy.lua
 Core/RecruitConfig.lua
 Core/RecruitStats.lua
 Core/GuildRecruit.lua
+Core/DungeonCatalog.lua
+Core/RoleCatalog.lua
+Core/GroupSession.lua
+Core/GroupFinderProtocol.lua
+Core/GroupAvailability.lua
+Core/GroupCandidates.lua
+Core/JoinRequests.lua
+Core/GroupHistory.lua
 Core/Lifecycle.lua
 AsgardsGuildFellowship.lua

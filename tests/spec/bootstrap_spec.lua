@@ -12,6 +12,8 @@ local MANIFEST_FILES = {
     "Adapters/SettingsPanel.lua",
     "Adapters/GreetPrompts.lua",
     "Adapters/RecruitPrompts.lua",
+    "Adapters/GroupFinderWindow.lua",
+    "Adapters/JoinPrompts.lua",
     "Adapters/GreetingsPage.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
@@ -46,6 +48,14 @@ local MANIFEST_FILES = {
     "Core/RecruitConfig.lua",
     "Core/RecruitStats.lua",
     "Core/GuildRecruit.lua",
+    "Core/DungeonCatalog.lua",
+    "Core/RoleCatalog.lua",
+    "Core/GroupSession.lua",
+    "Core/GroupFinderProtocol.lua",
+    "Core/GroupAvailability.lua",
+    "Core/GroupCandidates.lua",
+    "Core/JoinRequests.lua",
+    "Core/GroupHistory.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }
@@ -138,7 +148,7 @@ local function registerBootstrapTest(variant)
         world.loggedIn = true
         fixtures.fire(world, "PLAYER_LOGIN")
 
-        test.assertEqual(2, world.database.schemaVersion)
+        test.assertEqual(3, world.database.schemaVersion)
         test.assertEqual("table", type(world.database.guilds))
 
         test.assertEqual(variant.slashCommand, environment["SLASH_" .. variant.slashKey .. "1"])
