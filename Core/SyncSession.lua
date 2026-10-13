@@ -266,25 +266,48 @@ function Session:Later(seconds, callback)
     end
 end
 
--- Sends `corrections`, made at `now`. A forgery dated as far ahead as
--- others accept is corrected one second later still, which others would
--- refuse as from the future until their clocks catch up, so the
--- correction waits until then.
-function Session:SendCorrections(corrections, now)
+-- Sends this client's own `facts`, stamped at or after `now`. A stamp
+-- further ahead than others accept (a correction one second after a
+-- forgery dated at the limit, or an edit made right after one) would be
+-- refused as from the future, so those wait until their clocks catch up.
+-- What goes out then is this client's data as it is by that time, so an
+-- edit made while waiting is never overwritten by what it replaced.
+function Session:SendWhenAcceptable(facts, now)
     local latest = 0
     local index
-    for index = 1, #corrections do
-        latest = math.max(latest, corrections[index].at)
+    for index = 1, #facts do
+        latest = math.max(latest, facts[index].at)
     end
     local wait = latest - (now + addon.SyncFacts.MAX_FUTURE_SECONDS)
-    local message = { t = SyncSession.TYPE_FACTS, facts = corrections }
-    if wait > 0 then
-        self:Later(wait, function()
-            self:Send(message)
-        end)
+    if wait <= 0 then
+        self:Send({ t = SyncSession.TYPE_FACTS, facts = facts })
         return
     end
-    self:Send(message)
+    self:Later(wait, function()
+        local partition = self.context()
+        if partition == nil then
+            return
+        end
+        local own = self:Facts(partition)
+        local current = {}
+        for index = 1, #facts do
+            local fact = facts[index]
+            local held
+            if fact.kind == addon.SyncFacts.KIND_ROLES then
+                held = own:RolesFactOf(fact.character)
+            elseif fact.kind == addon.SyncFacts.KIND_ALIAS then
+                held = own:AliasFactOf(fact.character)
+            else
+                held = own:FactOf(fact.character)
+            end
+            if held ~= nil then
+                table.insert(current, held)
+            end
+        end
+        if current[1] ~= nil then
+            self:Send({ t = SyncSession.TYPE_FACTS, facts = current })
+        end
+    end)
 end
 
 -- After this user changed main links by hand: stamps the main link of every
@@ -374,7 +397,7 @@ function Session:LocalRolesEdit(roles)
     if fact == nil then
         return nil
     end
-    self:Send({ t = SyncSession.TYPE_FACTS, facts = { fact } })
+    self:SendWhenAcceptable({ fact }, now)
     return fact
 end
 
@@ -649,7 +672,7 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
     end
     if corrections[1] ~= nil then
         ledger:Record(corrections, now)
-        self:SendCorrections(corrections, now)
+        self:SendWhenAcceptable(corrections, now)
     end
     self.onForgery(forged, sender)
     return kept
@@ -694,7 +717,7 @@ function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
         return facts
     end
     if corrections[1] ~= nil then
-        self:SendCorrections(corrections, now)
+        self:SendWhenAcceptable(corrections, now)
     end
     self.onForgery(forged, sender)
     return kept

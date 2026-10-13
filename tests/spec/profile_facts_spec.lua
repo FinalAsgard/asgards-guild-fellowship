@@ -483,3 +483,52 @@ test.test("guild sync: a correction for a forgery dated as far ahead as allowed 
     test.assertEqual(1, #sent)
     test.assertEqual(farthest + 1, sent[1].facts[1].at)
 end)
+
+test.test("guild sync: a role change made while a correction waits goes out with it, never overwritten", function()
+    local addon = load()
+    local partition, normalizer = newPartition(addon)
+    local sent, waits = {}, {}
+    local session = addon.SyncSession.Create({
+        comm = { Broadcast = function(_, message) table.insert(sent, message) return true end },
+        context = function() return partition, normalizer end,
+        selfKey = function() return MEMBER end,
+        isOfficer = function() return false end,
+        now = function() return NOW end,
+        after = function(seconds, callback)
+            table.insert(waits, { seconds = seconds, callback = callback })
+            return true
+        end,
+        rolesOf = function(key) return addon.RoleCatalog.For("retail"):PreferencesOf(partition, key) end,
+    })
+    session.startedAt = NOW
+    local farthest = NOW + addon.SyncFacts.MAX_FUTURE_SECONDS
+    session:CatchProfileForgeries({ roles(farthest, MEMBER, MEMBER, { "dps" }) }, partition, MEMBER,
+        "wrench-area52", "Wrench-Area52")
+
+    -- The player turns healing off before the correction goes out.
+    local edit = session:LocalRolesEdit({ "tank", "dps" })
+
+    -- The edit is stamped after the correction, so it waits too.
+    test.assertEqual(farthest + 2, edit.at)
+    test.assertEqual(0, #sent)
+    test.assertEqual(2, #waits)
+    test.assertEqual(2, waits[2].seconds)
+    -- Whichever goes out first carries the edit, not what it replaced.
+    waits[1].callback()
+    waits[2].callback()
+    test.assertEqual(2, #sent)
+    local index
+    for index = 1, #sent do
+        test.assertEqual("tank,dps", table.concat(sent[index].facts[1].roles, ","))
+        test.assertEqual(farthest + 2, sent[index].facts[1].at)
+    end
+end)
+
+test.test("guild sync: an ordinary role change goes out at once", function()
+    local network = newNetwork()
+    local member = newClient(network, MEMBER, "Hammer-Area52")
+
+    member.session:LocalRolesEdit({ "healer" })
+
+    test.assertEqual(1, #member.sent)
+end)
