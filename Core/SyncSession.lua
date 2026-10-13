@@ -38,7 +38,8 @@ local _, addon = ...
 -- officer's value for that thing (and its officer fact, when an officer set
 -- it), and the member's edit reverts to it.
 --
--- Player profile: a character's own data (its role preferences) travels
+-- Player profile: a character's own data (its role preferences, and the
+-- Discord, location and bio it set for its player) travels
 -- the same way, but only the character itself writes it. Changing it sends
 -- the new fact right away; catching up compares and passes on profile facts
 -- with officer facts. A character is logged in on one client at a time, so
@@ -298,8 +299,8 @@ function Session:SendWhenAcceptable(facts, now)
         for index = 1, #facts do
             local fact = facts[index]
             local held
-            if fact.kind == addon.SyncFacts.KIND_ROLES then
-                held = own:RolesFactOf(fact.character)
+            if addon.SyncFacts.PROFILE_KINDS[fact.kind] then
+                held = own:ProfileFactOf(fact.character, fact.kind)
             elseif fact.kind == addon.SyncFacts.KIND_ALIAS then
                 held = own:AliasFactOf(fact.character)
             else
@@ -413,6 +414,25 @@ function Session:LocalRolesEdit(roles)
         return nil
     end
     local fact = self:Facts(partition):StampRoles(key, roles, now)
+    if fact == nil then
+        return nil
+    end
+    self:SendWhenAcceptable({ fact }, now)
+    return fact
+end
+
+-- After this user changed their player's profile text of `kind`
+-- ("discord", "location" or "bio") to `text` ("" clears it): stores it as
+-- written by the logged-in character now, and sends the fact to the guild.
+-- Returns the fact sent, or nil when nothing could be.
+function Session:LocalProfileEdit(kind, text)
+    local partition = self.context()
+    local key = self.selfKey()
+    local now = self.now()
+    if partition == nil or key == nil or now == nil then
+        return nil
+    end
+    local fact = self:Facts(partition):StampText(key, kind, text, now)
     if fact == nil then
         return nil
     end
@@ -736,8 +756,16 @@ function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
         then
             forged = forged + 1
             addon.SyncLedger.Create(partition):LogForgery(fact, relayer, now)
-            local roles = self.rolesOf(owner)
-            local correction = roles and own:StampRoles(owner, roles, math.max(now, fact.at + 1))
+            local at = math.max(now, fact.at + 1)
+            local correction
+            if fact.kind == addon.SyncFacts.KIND_ROLES then
+                local roles = self.rolesOf(owner)
+                correction = roles and own:StampRoles(owner, roles, at)
+            else
+                -- This character's own text as it was, or cleared when it
+                -- never set one.
+                correction = own:StampText(owner, fact.kind, partition:GetProfileText(owner, fact.kind) or "", at)
+            end
             if correction then
                 table.insert(corrections, correction)
             end

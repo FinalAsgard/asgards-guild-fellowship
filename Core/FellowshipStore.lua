@@ -24,6 +24,10 @@ local FellowshipStore = {
     -- The longest recruitment ad: one chat message.
     RECRUIT_AD_MAX = 255,
 }
+-- Player profile text fields (schema 4), each with its longest value. A
+-- character's own: stored on the character that wrote it, as `<field>`,
+-- `<field>At` and `<field>By`.
+FellowshipStore.PROFILE_FIELDS = { discord = 32, location = 40, bio = 200 }
 addon.FellowshipStore = FellowshipStore
 
 local Store = {}
@@ -111,6 +115,21 @@ local function characterProblem(character)
     end
     if character.rolesBy ~= nil and not isText(character.rolesBy) then
         return "character role preferences author is invalid"
+    end
+    -- Player profile text (schema 4): Discord, location and bio, each with
+    -- when and by whom it was set. An empty value was cleared.
+    local field, longest
+    for field, longest in pairs(FellowshipStore.PROFILE_FIELDS) do
+        local value = character[field]
+        if value ~= nil and (type(value) ~= "string" or #value > longest) then
+            return "character " .. field .. " is invalid"
+        end
+        if character[field .. "At"] ~= nil and not isWholeNumber(character[field .. "At"]) then
+            return "character " .. field .. " time is invalid"
+        end
+        if character[field .. "By"] ~= nil and not isText(character[field .. "By"]) then
+            return "character " .. field .. " author is invalid"
+        end
     end
     if character.rejected ~= nil then
         if type(character.rejected) ~= "table" then
@@ -1293,6 +1312,67 @@ function Partition:SetRoles(key, roles, at, by)
     character.rolesAt = at
     character.rolesBy = by
     return true
+end
+
+-- Whether `text` can be a value of profile field `field`: text no longer
+-- than the field allows ("" clears it).
+function FellowshipStore.IsProfileText(field, text)
+    local longest = FellowshipStore.PROFILE_FIELDS[field]
+    return longest ~= nil and type(text) == "string" and #text <= longest
+end
+
+-- `key`'s own value of profile field `field` ("discord", "location" or
+-- "bio"): text, "" when it was cleared, or nil when never set.
+function Partition:GetProfileText(key, field)
+    local character = self.data.characters[key]
+    if character == nil or FellowshipStore.PROFILE_FIELDS[field] == nil then
+        return nil
+    end
+    return character[field]
+end
+
+-- When `key` last set profile field `field`, and by whom; never set is the
+-- oldest possible, at 0 with no author. Nil for an unknown character.
+function Partition:GetProfileStamp(key, field)
+    local character = self.data.characters[key]
+    if character == nil or FellowshipStore.PROFILE_FIELDS[field] == nil then
+        return nil
+    end
+    return character[field .. "At"] or 0, character[field .. "By"]
+end
+
+-- Sets `key`'s profile field `field` to `text` ("" clears it), stamped `at`
+-- by `by`.
+function Partition:SetProfileText(key, field, text, at, by)
+    local character = self.data.characters[key]
+    if character == nil or not FellowshipStore.IsProfileText(field, text) or not isWholeNumber(at)
+        or not isText(by)
+    then
+        return false
+    end
+    character[field] = text
+    character[field .. "At"] = at
+    character[field .. "By"] = by
+    return true
+end
+
+-- The player's value of profile field `field`: the newest any of its
+-- characters set, or nil when none set one or the newest cleared it. Also
+-- returns that value's stamp (at, by), or 0 when none was ever set.
+function Partition:PlayerProfileText(playerId, field)
+    local keys = self:CharactersOf(playerId)
+    local value, newestAt, newestBy = nil, 0, nil
+    local index
+    for index = 1, #keys do
+        local at, by = self:GetProfileStamp(keys[index], field)
+        if at ~= nil and at > 0 and (newestBy == nil or at > newestAt or (at == newestAt and by > newestBy)) then
+            value, newestAt, newestBy = self:GetProfileText(keys[index], field), at, by
+        end
+    end
+    if value == "" then
+        value = nil
+    end
+    return value, newestAt, newestBy
 end
 
 -- Forgets when and by whom `key`'s main link was set, making it the oldest

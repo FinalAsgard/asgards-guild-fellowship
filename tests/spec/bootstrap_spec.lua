@@ -153,7 +153,7 @@ local function registerBootstrapTest(variant)
         world.loggedIn = true
         fixtures.fire(world, "PLAYER_LOGIN")
 
-        test.assertEqual(3, world.database.schemaVersion)
+        test.assertEqual(4, world.database.schemaVersion)
         test.assertEqual("table", type(world.database.guilds))
 
         test.assertEqual(variant.slashCommand, environment["SLASH_" .. variant.slashKey .. "1"])

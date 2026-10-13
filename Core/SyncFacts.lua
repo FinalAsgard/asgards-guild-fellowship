@@ -15,18 +15,27 @@ local _, addon = ...
 --
 --   { kind = "roles", character = key, roles = { role, ... }, at = seconds, by = key }
 --
+--   { kind = "discord"|"location"|"bio", character = key, text = text, at = seconds, by = key }
+--
 -- "character is willing to play roles" (tank, healer, dps; empty for
--- none). Only the character itself can write one: a profile fact is
--- accepted only when `by` is `character`, whatever the author's rank, and
--- is never a suggestion. Newest wins, as for officer facts. Later profile
--- fields are new kinds on the same rule (PROFILE_KINDS). Player ids are local counters, so facts only ever name
--- characters, and each client rebuilds its own players from them.
+-- none), and the player's Discord username, location and bio as that
+-- character last set them ("" clears one). Only the character itself can
+-- write one: a profile fact is accepted only when `by` is `character`,
+-- whatever the author's rank, and is never a suggestion. Newest wins, as
+-- for officer facts. A text field is stored on the character that wrote
+-- it; the player's value is the newest across its characters. Older
+-- clients see these kinds as malformed and ignore them. Player ids are
+-- local counters, so facts only ever name characters, and each client
+-- rebuilds its own players from them.
 --
 -- Pure: works on a FellowshipStore partition and never touches the game.
 local SyncFacts = {
     KIND_MAIN = "main",
     KIND_ALIAS = "alias",
     KIND_ROLES = "roles",
+    KIND_DISCORD = "discord",
+    KIND_LOCATION = "location",
+    KIND_BIO = "bio",
     -- The same limit "Set alias…" enforces.
     MAX_ALIAS_LENGTH = 48,
     -- How far ahead of server time a fact may be dated: enough for clocks
@@ -34,7 +43,15 @@ local SyncFacts = {
     MAX_FUTURE_SECONDS = 300,
 }
 -- Kinds only the character they describe may write.
-SyncFacts.PROFILE_KINDS = { [SyncFacts.KIND_ROLES] = true }
+SyncFacts.PROFILE_KINDS = {
+    [SyncFacts.KIND_ROLES] = true,
+    [SyncFacts.KIND_DISCORD] = true,
+    [SyncFacts.KIND_LOCATION] = true,
+    [SyncFacts.KIND_BIO] = true,
+}
+-- The profile kinds that carry text, each a FellowshipStore profile field
+-- of the same name, in the order they're shown.
+SyncFacts.TEXT_KINDS = { SyncFacts.KIND_DISCORD, SyncFacts.KIND_LOCATION, SyncFacts.KIND_BIO }
 addon.SyncFacts = SyncFacts
 
 local Facts = {}
@@ -58,6 +75,9 @@ function SyncFacts.IsValid(fact)
     end
     if fact.kind == SyncFacts.KIND_ROLES then
         return addon.FellowshipStore.IsRoleList(fact.roles)
+    end
+    if addon.FellowshipStore.PROFILE_FIELDS[fact.kind] ~= nil then
+        return addon.FellowshipStore.IsProfileText(fact.kind, fact.text)
     end
     return fact.kind == SyncFacts.KIND_ALIAS
         and type(fact.alias) == "string"
@@ -194,11 +214,50 @@ function Facts:StampRoles(key, roles, at)
     return self:RolesFactOf(key)
 end
 
+-- The `kind` text fact ("discord", "location" or "bio") for `key` as this
+-- client holds it, or nil when that character never set it.
+function Facts:TextFactOf(key, kind)
+    local text = self.partition:GetProfileText(key, kind)
+    if text == nil then
+        return nil
+    end
+    local at, by = self.partition:GetProfileStamp(key, kind)
+    return { kind = kind, character = key, text = text, at = at, by = by }
+end
+
+-- The profile fact of `kind` for `key` as this client holds it, or nil.
+function Facts:ProfileFactOf(key, kind)
+    if kind == SyncFacts.KIND_ROLES then
+        return self:RolesFactOf(key)
+    end
+    return self:TextFactOf(key, kind)
+end
+
+-- Sets `key`'s `kind` text to `text` ("" clears it), written by the
+-- character itself at `at`, and returns its fact, or nil for an unknown
+-- character or unusable text. The stamp is newer than any of the player's
+-- characters' for that field, so the player's value becomes this one.
+function Facts:StampText(key, kind, text, at)
+    local character = self.partition:GetCharacter(key)
+    if character == nil then
+        return nil
+    end
+    local _, newestAt = self.partition:PlayerProfileText(character.player, kind)
+    local heldAt = self.partition:GetProfileStamp(key, kind) or 0
+    if not self.partition:SetProfileText(key, kind, text, math.max(at, heldAt + 1, (newestAt or 0) + 1), key) then
+        return nil
+    end
+    return self:TextFactOf(key, kind)
+end
+
 -- When the thing `fact` is about was last set, and by whom, or nil when the
 -- character is unknown.
 function Facts:HeldStamp(fact)
     if fact.kind == SyncFacts.KIND_ROLES then
         return self.partition:GetRolesStamp(fact.character)
+    end
+    if addon.FellowshipStore.PROFILE_FIELDS[fact.kind] ~= nil then
+        return self.partition:GetProfileStamp(fact.character, fact.kind)
     end
     if fact.kind == SyncFacts.KIND_ALIAS then
         return self.partition:GetAliasStamp(fact.character)
@@ -331,6 +390,10 @@ function Facts:Change(fact)
         self.partition:SetRoles(fact.character, fact.roles, fact.at, fact.by)
         return
     end
+    if addon.FellowshipStore.PROFILE_FIELDS[fact.kind] ~= nil then
+        self.partition:SetProfileText(fact.character, fact.kind, fact.text, fact.at, fact.by)
+        return
+    end
     self:Reshape(fact, addon.FellowshipStore.SOURCE_SYNC)
     if fact.kind == SyncFacts.KIND_ALIAS then
         self.partition:SetAliasStamp(fact.character, fact.at, fact.by)
@@ -414,21 +477,30 @@ function Facts:OfficerFacts(checkpoint)
 end
 
 -- Every profile fact this client holds, which it can pass on to others:
--- each character's own role preferences, sorted by character. `checkpoint`
--- as for OfficerFacts.
+-- each character's own role preferences and profile text, sorted by
+-- character (roles, then Discord, location and bio). `checkpoint` as for
+-- OfficerFacts.
 function Facts:ProfileFacts(checkpoint)
     checkpoint = checkpoint or function() end
     local keys = {}
-    self.partition:EachCharacter(function(key, character)
-        if character.rolesAt ~= nil and character.rolesBy == key and character.roles ~= nil then
-            table.insert(keys, key)
-        end
+    self.partition:EachCharacter(function(key)
+        table.insert(keys, key)
     end)
     table.sort(keys)
     local facts = {}
-    local index
+    local index, kindIndex
     for index = 1, #keys do
-        table.insert(facts, self:RolesFactOf(keys[index]))
+        local key = keys[index]
+        local character = self.partition:GetCharacter(key)
+        if character.rolesAt ~= nil and character.rolesBy == key and character.roles ~= nil then
+            table.insert(facts, self:RolesFactOf(key))
+        end
+        for kindIndex = 1, #SyncFacts.TEXT_KINDS do
+            local kind = SyncFacts.TEXT_KINDS[kindIndex]
+            if character[kind] ~= nil and character[kind .. "At"] ~= nil and character[kind .. "By"] == key then
+                table.insert(facts, self:TextFactOf(key, kind))
+            end
+        end
         checkpoint()
     end
     return facts

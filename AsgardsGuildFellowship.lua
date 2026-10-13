@@ -1299,6 +1299,16 @@ if clientProfile.supported then
                     rosterController:Print("Do Not Disturb can't be changed: " .. tostring(why) .. ".")
                 end
             end,
+            -- The player's own Discord, location and bio: saved and sent to
+            -- the guild at once, with no officer involved.
+            setText = function(kind, text)
+                if syncSession:LocalProfileEdit(kind, text) == nil then
+                    rosterController:Print("That wasn't saved: this character isn't in the guild roster yet," ..
+                        " or the server time isn't known yet.")
+                    return
+                end
+                rosterController:Invalidate()
+            end,
         })
         if profilePage == nil then
             rosterController:Print("My Profile can't be shown: " .. tostring(reason) .. ".")

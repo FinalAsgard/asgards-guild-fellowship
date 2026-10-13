@@ -51,6 +51,65 @@ local function characterEntry(inputs, key, isMain, altCount)
     }
 end
 
+-- How wide a line of the bio is, in characters, so it fits the panel.
+PlayerPanelViewModel.BIO_LINE = 48
+
+-- `text` broken into lines of at most `width` bytes, at spaces where it
+-- can be (a word longer than a line is split).
+function PlayerPanelViewModel.Wrap(text, width)
+    local lines = {}
+    local current = ""
+    local word
+    for word in string.gmatch(text, "%S+") do
+        while #word > width do
+            if current ~= "" then
+                table.insert(lines, current)
+                current = ""
+            end
+            table.insert(lines, string.sub(word, 1, width))
+            word = string.sub(word, width + 1)
+        end
+        if current == "" then
+            current = word
+        elseif #current + 1 + #word <= width then
+            current = current .. " " .. word
+        else
+            table.insert(lines, current)
+            current = word
+        end
+    end
+    if current ~= "" then
+        table.insert(lines, current)
+    end
+    return lines
+end
+
+-- The player's Discord, location and bio, as "about" rows under an About
+-- heading; nothing when none is set.
+local function aboutRows(partition, playerId)
+    local discord = partition:PlayerProfileText(playerId, "discord")
+    local location = partition:PlayerProfileText(playerId, "location")
+    local bio = partition:PlayerProfileText(playerId, "bio")
+    if discord == nil and location == nil and bio == nil then
+        return {}
+    end
+    local rows = { { kind = "section", text = "About" } }
+    if discord ~= nil then
+        table.insert(rows, { kind = "about", text = "Discord: " .. discord })
+    end
+    if location ~= nil then
+        table.insert(rows, { kind = "about", text = "Location: " .. location })
+    end
+    if bio ~= nil then
+        local lines = PlayerPanelViewModel.Wrap(bio, PlayerPanelViewModel.BIO_LINE)
+        local index
+        for index = 1, #lines do
+            table.insert(rows, { kind = "about", text = lines[index] })
+        end
+    end
+    return rows
+end
+
 -- A history entry's dates: "since 2026-10-01", "until 2026-10-05", or both.
 local function datesText(entry, formatDate)
     local parts = {}
@@ -77,6 +136,9 @@ end
 --   { kind = "stat", text }  (the player's ad count, then how often you
 --                             grouped with them, first, when there are any)
 --   { kind = "section", text }
+--   { kind = "about", text }  (under an About heading: "Discord: name",
+--                              "Location: text", then the bio's lines;
+--                              only what the player set)
 --   { kind = "character", key, name, level, isMain, inGuild, status, source,
 --     roles, canMakeMain, canDetach }
 --   { kind = "history", name, role, dates, reason }
@@ -94,6 +156,7 @@ function PlayerPanelViewModel.Build(inputs)
     local keys = partition:CharactersOf(inputs.playerId)
     local altCount = #keys - 1
     local rows = {}
+    local index
 
     if inputs.adStats ~= nil then
         local ok, line = pcall(inputs.adStats, keys)
@@ -107,12 +170,15 @@ function PlayerPanelViewModel.Build(inputs)
             table.insert(rows, { kind = "stat", text = line })
         end
     end
+    local about = aboutRows(partition, inputs.playerId)
+    for index = 1, #about do
+        table.insert(rows, about[index])
+    end
     table.insert(rows, { kind = "section", text = "Main" })
     local mainRow = characterEntry(inputs, player.main, true, altCount)
     table.insert(rows, mainRow)
 
     table.insert(rows, { kind = "section", text = "Alts" })
-    local index
     for index = 1, #keys do
         if keys[index] ~= player.main then
             table.insert(rows, characterEntry(inputs, keys[index], false, altCount))

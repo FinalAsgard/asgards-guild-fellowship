@@ -271,6 +271,65 @@ test.test("profile tab: a tab out of view isn't redrawn, and without a tab it is
 end)
 
 
+test.test("profile view model: lists the player's Discord, location and bio, newest across its characters", function()
+    local world = setup()
+    world.partition:SetProfileText("hammer-area52", "discord", "hammer#1", START, "hammer-area52")
+    world.partition:SetProfileText("toolbox-area52", "bio", "Hi", START, "toolbox-area52")
+
+    local about = world.build().about
+
+    test.assertEqual("discord,location,bio", about[1].kind .. "," .. about[2].kind .. "," .. about[3].kind)
+    test.assertEqual("Discord", about[1].label)
+    test.assertEqual("hammer#1", about[1].text)
+    test.assertEqual(32, about[1].max)
+    test.assertEqual("", about[2].text)
+    test.assertEqual(40, about[2].max)
+    test.assertEqual("Hi", about[3].text)
+    test.assertEqual(200, about[3].max)
+end)
+
+test.test("profile tab: About me fields show the player's text with a count, and save on Enter", function()
+    local model = {}
+    local key, value
+    for key, value in pairs(PLAYER) do
+        model[key] = value
+    end
+    model.about = {
+        { kind = "discord", label = "Discord", text = "hammer#1", max = 32 },
+        { kind = "location", label = "Location", text = "", max = 40 },
+        { kind = "bio", label = "Bio", text = "", max = 200 },
+    }
+    local world = newPage(model)
+    world.texts = {}
+    world.page.setText = function(kind, text)
+        table.insert(world.texts, kind .. "=" .. text)
+    end
+    local page = world.page
+    page.panel.hooks.OnShow()
+
+    local discord, location = page.aboutRows[1], page.aboutRows[2]
+    test.assertEqual("Discord", discord.label.text)
+    test.assertEqual("hammer#1", discord.box.text)
+    test.assertEqual("8/32", discord.counter.text)
+    test.assertEqual("0/40", location.counter.text)
+
+    -- Typed and saved with Enter, trimmed.
+    location.box:SetText("  Ohio, evenings ")
+    location.box.scripts.OnTextChanged(location.box)
+    test.assertEqual("17/40", location.counter.text)
+    location.box.scripts.OnEnterPressed(location.box)
+    test.assertEqual("location=Ohio, evenings", table.concat(world.texts, ","))
+    -- Leaving the box again with nothing new saves nothing more.
+    location.box.scripts.OnEditFocusLost(location.box)
+    test.assertEqual(1, #world.texts)
+
+    -- Escape puts the saved text back.
+    discord.box:SetText("oops")
+    discord.box.scripts.OnEscapePressed(discord.box)
+    test.assertEqual("hammer#1", discord.box.text)
+    test.assertEqual(1, #world.texts)
+end)
+
 -- /agf profile in the composed add-on ------------------------------------------
 
 -- The add-on logged in, with a master frame recording its page. On its
@@ -403,6 +462,25 @@ local function registerProfileTests(profile)
         test.assertFalse(page.dndButton:GetChecked())
         test.assertTrue(addon.settings:Set("dnd", true))
         test.assertTrue(page.dndButton:GetChecked())
+    end)
+
+    test.test(profile .. " My Profile's About me saves to the player and goes to the guild", function()
+        local world, addon = loggedIn(profile)
+        local page = openProfile(world)
+        local selfKey = addon.rosterController:SelfKey()
+        world.sentMessages = {}
+
+        local bio = page.aboutRows[3]
+        bio.box:SetText("Raids on Fridays")
+        bio.box.scripts.OnEnterPressed(bio.box)
+
+        local _, partition = addon.rosterController:QuietContext()
+        test.assertEqual("Raids on Fridays", partition:GetProfileText(selfKey, "bio"))
+        test.assertEqual("Raids on Fridays", page.aboutRows[3].box.text)
+        local sent = world.sentMessages[#world.sentMessages]
+        local _, message = world.environment.LibStub.libs["AceSerializer-3.0"]:Deserialize(sent.text)
+        test.assertEqual("bio", message.facts[1].kind)
+        test.assertEqual(selfKey, message.facts[1].by)
     end)
 
     test.test(profile .. " out of a guild, My Profile says it needs one", function()

@@ -5,7 +5,10 @@ local _, addon = ...
 -- Each character shows in its class color with its level. The logged-in
 -- character gets a check box for each role its class can fill; the others
 -- show their roles read-only, with a hint to log in on them to change
--- them. A Do Not Disturb check box sits along the bottom. Out of a guild,
+-- them. Above the characters, the player's Discord, location and bio can
+-- be edited, each with a count of characters used; Enter (or leaving the
+-- box) saves a change, Escape undoes it. A Do Not Disturb check box sits
+-- along the bottom. Out of a guild,
 -- or before the roster knows the character, the tab shows a short message
 -- instead.
 --
@@ -13,8 +16,13 @@ local _, addon = ...
 -- environment (CreateFrame), so specs can draw it with fake frames.
 local ProfilePage = {
     PADDING = 12,
-    -- Where the character list starts, below the title bar and heading.
-    LIST_TOP = 60,
+    -- Where the About me fields start, below the title bar and heading.
+    ABOUT_TOP = 60,
+    ABOUT_HEIGHT = 26,
+    ABOUT_LABEL_WIDTH = 70,
+    ABOUT_COUNTER_WIDTH = 60,
+    -- Where the character list starts, below the About me fields.
+    LIST_TOP = 60 + 3 * 26 + 8,
     LIST_WIDTH = 520,
     -- One character: its name, then its roles.
     ROW_HEIGHT = 48,
@@ -50,6 +58,7 @@ end
 --   setRole(role, on)     sets whether the logged-in character is willing to
 --                         play `role`
 --   setDnd(on)            turns Do Not Disturb on or off
+--   setText(kind, text)   saves the player's "discord", "location" or "bio"
 -- `host` is the master frame's content frame for the tab. Returns nil and
 -- the reason when there's none, or the tab can't be drawn.
 function ProfilePage.Create(client, host, options)
@@ -62,7 +71,9 @@ function ProfilePage.Create(client, host, options)
         model = options.model,
         setRole = options.setRole or function() end,
         setDnd = options.setDnd or function() end,
+        setText = options.setText or function() end,
         rows = {},
+        aboutRows = {},
     }, Page)
     local ok, reason = pcall(page.build, page)
     if not ok then
@@ -87,7 +98,7 @@ function Page:build()
     self.heading:SetJustifyH("LEFT")
 
     self.messageText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    self.messageText:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -ProfilePage.LIST_TOP)
+    self.messageText:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -ProfilePage.ABOUT_TOP)
     self.messageText:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
     self.messageText:SetJustifyH("LEFT")
 
@@ -102,6 +113,11 @@ function Page:build()
     self.scroll = scroll
     self.list = list
 
+    local index
+    for index = 1, #addon.ProfileViewModel.ABOUT do
+        self.aboutRows[index] = self:aboutRow(index)
+    end
+
     local dnd = createFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
     dnd:SetWidth(ProfilePage.CHECK_SIZE)
     dnd:SetHeight(ProfilePage.CHECK_SIZE)
@@ -114,6 +130,82 @@ function Page:build()
     label:SetPoint("LEFT", dnd, "RIGHT", 2, 0)
     label:SetText("Do Not Disturb (no group requests, on every character)")
     self.dndButton = dnd
+end
+
+-- An About me field's row: its label, a text box, and how many characters
+-- are used of how many.
+function Page:aboutRow(index)
+    local createFrame = self.environment.CreateFrame
+    local padding = ProfilePage.PADDING
+    local panel = self.panel
+    local top = -ProfilePage.ABOUT_TOP - (index - 1) * ProfilePage.ABOUT_HEIGHT
+    local row = {}
+    row.label = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    row.label:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, top - 4)
+    row.label:SetWidth(ProfilePage.ABOUT_LABEL_WIDTH)
+    row.label:SetJustifyH("LEFT")
+    row.box = createFrame("EditBox", nil, panel, "InputBoxTemplate")
+    row.box:SetHeight(20)
+    row.box:SetPoint("TOPLEFT", panel, "TOPLEFT", padding + ProfilePage.ABOUT_LABEL_WIDTH + 6, top)
+    row.box:SetPoint("RIGHT", panel, "RIGHT", -padding - ProfilePage.ABOUT_COUNTER_WIDTH, 0)
+    row.box:SetAutoFocus(false)
+    row.counter = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    row.counter:SetPoint("LEFT", row.box, "RIGHT", 6, 0)
+    row.counter:SetWidth(ProfilePage.ABOUT_COUNTER_WIDTH - 6)
+    row.counter:SetJustifyH("LEFT")
+    local function count()
+        row.counter:SetText(#(row.box:GetText() or "") .. "/" .. tostring(row.max or 0))
+    end
+    local function save()
+        local text = string.gsub(row.box:GetText() or "", "^%s*(.-)%s*$", "%1")
+        if row.kind ~= nil and text ~= row.saved then
+            row.saved = text
+            pcall(self.setText, row.kind, text)
+        end
+        self:Refresh()
+    end
+    row.box:SetScript("OnTextChanged", count)
+    row.box:SetScript("OnEnterPressed", function(box)
+        box:ClearFocus()
+        save()
+    end)
+    row.box:SetScript("OnEditFocusLost", save)
+    row.box:SetScript("OnEscapePressed", function(box)
+        box:SetText(row.saved or "")
+        count()
+        box:ClearFocus()
+    end)
+    row.count = count
+    return row
+end
+
+function Page:drawAbout(about)
+    local index
+    for index = 1, #self.aboutRows do
+        local row = self.aboutRows[index]
+        local field = about and about[index]
+        if field == nil then
+            row.kind = nil
+            row.label:Hide()
+            row.box:Hide()
+            row.counter:Hide()
+        else
+            row.kind = field.kind
+            row.max = field.max
+            row.saved = field.text
+            row.label:SetText(field.label)
+            -- At most `max` bytes (the game counts the end of the text too).
+            row.box:SetMaxBytes(field.max + 1)
+            -- Text being typed isn't replaced underneath the player.
+            if not row.box:HasFocus() then
+                row.box:SetText(field.text)
+            end
+            row.count()
+            row.label:Show()
+            row.box:Show()
+            row.counter:Show()
+        end
+    end
 end
 
 -- The character list's row `index`, made on first use: the character's
@@ -187,6 +279,7 @@ function Page:draw()
         model = { message = addon.ProfileViewModel.NOT_READY }
     end
     self.dndButton:SetChecked(model.dnd == true)
+    self:drawAbout(model.about)
     local characters = model.characters or {}
     if model.message ~= nil then
         self.heading:SetText("My Profile")

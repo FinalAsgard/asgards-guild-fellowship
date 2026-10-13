@@ -9,6 +9,12 @@ local ProfileViewModel = {
     NOT_READY = "Guild information isn't available yet. Try again in a moment.",
     NOT_IN_ROSTER = "This character isn't in the guild roster yet. Try again after the next roster scan.",
 }
+-- The player's own profile text, in the order it's shown.
+ProfileViewModel.ABOUT = {
+    { kind = "discord", label = "Discord" },
+    { kind = "location", label = "Location" },
+    { kind = "bio", label = "Bio" },
+}
 addon.ProfileViewModel = ProfileViewModel
 
 local function coloredName(name, color)
@@ -66,8 +72,11 @@ end
 --   classColor   function(classToken) -> "ffrrggbb" or nil (optional)
 --   dnd          whether Do Not Disturb is on
 -- Returns { message, dnd } when there's no player to show, or:
---   { label, alias, mainName, characters, dnd }
--- where `characters` lists the main first, then the alts still in the
+--   { label, alias, mainName, about, characters, dnd }
+-- where `about` lists the player's Discord, location and bio, each
+-- { kind, label, text, max } (`text` is "" when not set, `max` the most
+-- bytes it may have), and
+-- `characters` lists the main first, then the alts still in the
 -- guild, each:
 --   { key, name, coloredName, level, isMain, isSelf, roles, rolesText,
 --     editable, hint }
@@ -103,7 +112,18 @@ function ProfileViewModel.Build(inputs)
             table.insert(characters, characterEntry(inputs, key, false))
         end
     end
+    local about = {}
+    for index = 1, #ProfileViewModel.ABOUT do
+        local field = ProfileViewModel.ABOUT[index]
+        table.insert(about, {
+            kind = field.kind,
+            label = field.label,
+            text = partition:PlayerProfileText(own.player, field.kind) or "",
+            max = addon.FellowshipStore.PROFILE_FIELDS[field.kind],
+        })
+    end
     return {
+        about = about,
         label = player.alias and (player.alias .. " (" .. main.name .. ")") or main.name,
         alias = player.alias,
         mainName = main.name,

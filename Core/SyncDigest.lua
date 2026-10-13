@@ -41,6 +41,8 @@ local function factHash(fact)
         value = fact.alias
     elseif fact.kind == addon.SyncFacts.KIND_ROLES then
         value = table.concat(fact.roles, ",")
+    elseif fact.text ~= nil then
+        value = fact.text
     end
     return hash(table.concat({
         tostring(fact.kind), tostring(fact.character), tostring(value), tostring(fact.at), tostring(fact.by),
