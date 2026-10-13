@@ -155,8 +155,9 @@ end
 -- Another character's key in the current guild's roster (a party member,
 -- say), by the same rules as SelfKey: the stored character named
 -- "Name-Realm", otherwise the roster member with that GUID, otherwise (with
--- two-part names) the only roster member with that first name. Nil when
--- they aren't in the guild, or the first name is shared.
+-- two-part names) the only roster member with that first name and no
+-- other GUID. Nil when they aren't in the guild, or the first name is
+-- shared.
 function Controller:RosterKeyFor(name, guid)
     local guild, partition, normalizer = self:QuietContext()
     if guild == nil then
@@ -180,7 +181,10 @@ function Controller:FindInRoster(normalizer, fullName, guid)
             if guid ~= nil and member.guid == guid then
                 return normalizer:Key(member.name)
             end
-            if firstName ~= nil and normalizer:FirstName(member.name) == firstName then
+            -- A member whose GUID differs is someone else with that first
+            -- name (an outsider in the party, say).
+            if firstName ~= nil and normalizer:FirstName(member.name) == firstName
+                and (guid == nil or member.guid == nil or member.guid == guid) then
                 -- Two members sharing the first name: can't tell which.
                 byName = byName == nil and normalizer:Key(member.name) or false
             end

@@ -453,3 +453,17 @@ test.test("composed: on Forever, a party member with no GUID is found by an unsh
     test.assertEqual(nil, keys["hammer smith-camelot"])
     test.assertTrue(keys["zap arcane-camelot"])
 end)
+
+test.test("composed: on Forever, an outsider sharing a guildmate's first name doesn't take them off the candidates", function()
+    local channel = fixtures.newChannel()
+    local organizer = loginForever(channel, "Tool Box")
+    fixtures.openGroupFinder(organizer)
+    organizer.addon.groupSession:Start("sfk")
+
+    joinParty(organizer, {
+        player = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        party1 = { name = "Zap", guid = "Player-2-Stranger", class = "MAGE" },
+    })
+
+    test.assertTrue(candidateKeys(organizer)["zap arcane-camelot"])
+end)
