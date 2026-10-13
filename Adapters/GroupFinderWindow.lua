@@ -1,19 +1,19 @@
 local _, addon = ...
 
--- The Group Finder's own window, separate from the master frame, built with
--- the Details! Framework's simple panel (draggable, with a close button, and
--- Escape closes it). It remembers where it was dropped, across reloads and
--- on every character.
+-- The Group Finder, drawn on its own tab of the master frame (the frame
+-- moves, resizes and remembers its place). Each time the tab comes into
+-- view, it reads the dungeons and the character's level again, hands the
+-- party to the session, and asks who is around (`onShown`).
 --
 -- With no group going, it shows the dungeon picker: the dungeons that fit
 -- the character's level first, and the rest behind "Show all". Picking one
 -- starts the group and shows its slots (1 tank, 1 healer, 3 DPS) filled
 -- from the party, with Tank/Healer/DPS buttons for each party member the
 -- game hasn't assigned a role, "Group complete" once all five are filled,
--- and Change dungeon and End group buttons. Closing the window keeps the
--- group. While any role is open, Ask in guild opens a pop-up with a
--- ready-made line for guild chat in a text box, to edit as the organizer
--- likes; only Post sends it.
+-- and Change dungeon and End group buttons. Leaving the tab, or closing the
+-- frame, keeps the group. While any role is open, Ask in guild opens a
+-- pop-up with a ready-made line for guild chat in a text box, to edit as
+-- the organizer likes; only Post sends it.
 --
 -- Along the bottom, always: the guildmates whose add-on replied to the
 -- last ask, available or not, and a Do Not Disturb check box.
@@ -28,23 +28,25 @@ local _, addon = ...
 -- without that click.
 --
 -- Like the other adapters, it reaches the game only through the client's
--- environment (CreateFrame, UIParent) and the framework, so specs can draw
--- it with fake frames.
+-- environment (CreateFrame, UIParent, GameTooltip), so specs can draw it
+-- with fake frames.
 local GroupFinderWindow = {
-    WIDTH = 760,
     -- The picker and the slots take the left; suggestions the right.
     LEFT_WIDTH = 380,
     SUGGESTION_HEIGHT = 18,
     REQUEST_WIDTH = 64,
-    HEIGHT = 470,
     PADDING = 12,
     ROW_HEIGHT = 20,
     PARTY_ROW_HEIGHT = 24,
     -- Where the dungeon list and the slots start, below the title bar and
     -- the dungeon's heading.
     LIST_TOP = 86,
-    -- Room along the bottom for the replies and Do Not Disturb.
+    -- Room along the bottom for the replies and Do Not Disturb, kept clear
+    -- of the frame's resize grips in its corners.
     FOOTER_HEIGHT = 64,
+    FOOTER_BOTTOM = 18,
+    -- The suggestions list's width before the tab has a size of its own.
+    SUGGESTION_WIDTH = 334,
     CHECK_SIZE = 24,
     BUTTON_HEIGHT = 20,
     -- The Ask in guild pop-up: its size, the text box's height in lines,
@@ -56,7 +58,6 @@ local GroupFinderWindow = {
     GUILD_LINE_MAX = 255,
     ASK_STRATA = "DIALOG",
     ROLE_BUTTON_WIDTH = 56,
-    STRATA = "HIGH",
 }
 addon.GroupFinderWindow = GroupFinderWindow
 
@@ -106,18 +107,17 @@ end
 --   classColor(class)   a class's color as "ffrrggbb", or nil
 --   refresh()           asks the guild again who is online and available
 --   selfKey()           the logged-in character's key, or nil
---   loadAnchor()        the saved position ({ point, x, y }), or nil
---   saveAnchor(anchor)  saves a new one
--- Returns nil and the reason when the framework is missing or can't build
--- the window.
-function GroupFinderWindow.Create(client, options)
-    local framework = client:GetGlobal("DetailsFramework")
-    if type(framework) ~= "table" or type(framework.CreateSimplePanel) ~= "function" then
-        return nil, "the Details! Framework isn't loaded"
+--   onShown()           called each time the tab comes into view
+-- `host` is the master frame's content frame for the tab. Returns nil and
+-- the reason when there's none, or the tab can't be drawn.
+function GroupFinderWindow.Create(client, host, options)
+    if host == nil then
+        return nil, "there's no tab to draw it on"
     end
     local window = setmetatable({
         environment = client.environment,
-        framework = framework,
+        panel = host,
+        onShown = options.onShown or function() end,
         dungeons = options.dungeons,
         playerLevel = options.playerLevel,
         session = options.session,
@@ -150,8 +150,6 @@ function GroupFinderWindow.Create(client, options)
             return nil
         end,
         suggestionButtons = {},
-        loadAnchor = options.loadAnchor or function() return nil end,
-        saveAnchor = options.saveAnchor or function() end,
         showAll = false,
         choosing = false,
         rows = {},
@@ -163,38 +161,6 @@ function GroupFinderWindow.Create(client, options)
         return nil, tostring(reason)
     end
     return window
-end
-
--- Puts the window where it was last dropped, else in the middle of the
--- screen.
-function Window:place()
-    local panel, parent = self.panel, self.environment.UIParent
-    local ok, saved = pcall(self.loadAnchor)
-    panel:ClearAllPoints()
-    if ok and type(saved) == "table"
-        and pcall(panel.SetPoint, panel, saved.point, parent, saved.point, saved.x, saved.y)
-    then
-        return
-    end
-    panel:ClearAllPoints()
-    panel:SetPoint("CENTER", parent, "CENTER", 0, 0)
-end
-
--- Saves where the window was dropped, as its top-left corner's offset from
--- the screen's top-left.
-function Window:saveCurrent()
-    pcall(function()
-        local parent = self.environment.UIParent
-        local left, top = self.panel:GetLeft(), self.panel:GetTop()
-        local parentTop = parent:GetTop()
-        if type(left) ~= "number" or type(top) ~= "number" or type(parentTop) ~= "number" then
-            return
-        end
-        local position = { point = "TOPLEFT", x = left, y = top - parentTop }
-        self.panel:ClearAllPoints()
-        self.panel:SetPoint(position.point, parent, position.point, position.x, position.y)
-        self.saveAnchor(position)
-    end)
 end
 
 function Window:button(parent, text, width, onClick)
@@ -230,7 +196,7 @@ function Window:buildSuggestions()
     scroll:SetPoint("TOPLEFT", column, "TOPLEFT", 0, -GroupFinderWindow.LIST_TOP + 60)
     scroll:SetPoint("BOTTOMRIGHT", column, "BOTTOMRIGHT", -22, 0)
     local list = createFrame("Frame", nil, scroll)
-    list:SetWidth(GroupFinderWindow.WIDTH - GroupFinderWindow.LEFT_WIDTH - padding - 22)
+    list:SetWidth(GroupFinderWindow.SUGGESTION_WIDTH)
     list:SetHeight(GroupFinderWindow.SUGGESTION_HEIGHT)
     scroll:SetScrollChild(list)
     self.suggestionList = list
@@ -365,6 +331,11 @@ function Window:drawSuggestions(candidates, dungeon, grouping)
         end
     end
     self.columnHeading:SetText(grouping and "Guildmates who could join" or "Guildmates")
+    -- The list follows the column's width as the frame is resized.
+    local okWidth, width = pcall(self.suggestions.GetWidth, self.suggestions)
+    if okWidth and type(width) == "number" and width > 60 then
+        self.suggestionList:SetWidth(width - 22)
+    end
     local index
     for index = 1, #items do
         local line = self:suggestionLine(index)
@@ -535,7 +506,7 @@ function Window:buildFooter()
     local dnd = self.environment.CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
     dnd:SetWidth(GroupFinderWindow.CHECK_SIZE)
     dnd:SetHeight(GroupFinderWindow.CHECK_SIZE)
-    dnd:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", padding, padding)
+    dnd:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", padding, GroupFinderWindow.FOOTER_BOTTOM)
     dnd:SetScript("OnClick", function(button)
         if self.dnd ~= nil then
             pcall(self.dnd.set, button:GetChecked() == true)
@@ -553,9 +524,10 @@ function Window:buildFooter()
         pcall(self.refresh)
         self:Refresh()
     end)
-    self.refreshButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -padding, padding)
+    self.refreshButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -padding - 8, GroupFinderWindow.FOOTER_BOTTOM)
     self.repliesText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    self.repliesText:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", padding, padding + GroupFinderWindow.CHECK_SIZE + 4)
+    self.repliesText:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", padding,
+        GroupFinderWindow.FOOTER_BOTTOM + GroupFinderWindow.CHECK_SIZE + 4)
     self.repliesText:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
     self.repliesText:SetJustifyH("LEFT")
 end
@@ -570,16 +542,11 @@ function Window:drawFooter()
 end
 
 function Window:build()
-    local panel = self.framework:CreateSimplePanel(self.environment.UIParent,
-        GroupFinderWindow.WIDTH, GroupFinderWindow.HEIGHT, "Group Finder",
-        addon.Identity.addonName .. "GroupFinder")
-    self.panel = panel
-    panel:SetFrameStrata(GroupFinderWindow.STRATA)
-    panel:SetClampedToScreen(true)
-    self:place()
-    -- The panel moves itself while the mouse is held; letting go saves.
-    panel:HookScript("OnMouseUp", function()
-        self:saveCurrent()
+    local panel = self.panel
+    -- Coming into view (the tab picked, or the frame opened on it) brings
+    -- everything up to date; leaving it closes the Ask in guild pop-up.
+    panel:HookScript("OnShow", function()
+        self:Opened()
     end)
     panel:HookScript("OnHide", function()
         self:CloseAsk()
@@ -594,7 +561,6 @@ function Window:build()
     self:buildGroup()
     self:buildSuggestions()
     self:buildFooter()
-    panel:Hide()
 end
 
 -- The dungeon list's row `index`, made on first use: a button showing one
@@ -1024,23 +990,24 @@ function Window:Picked()
     return self.catalog ~= nil and self.catalog:Get(self.session:Dungeon()) or nil
 end
 
+-- Whether the tab is in view: picked, with the frame open.
 function Window:IsShown()
-    local ok, shown = pcall(self.panel.IsShown, self.panel)
+    local ok, visible = pcall(self.panel.IsVisible, self.panel)
+    if ok and type(visible) == "boolean" then
+        return visible
+    end
+    local shown
+    ok, shown = pcall(self.panel.IsShown, self.panel)
     return ok and shown == true
 end
 
--- Opens the window with the current dungeons, level and party, or closes
--- it. Returns whether it's now open.
-function Window:Toggle()
-    if self:IsShown() then
-        self.panel:Hide()
-        return false
-    end
+-- The tab came into view: reads the dungeons and level again, hands the
+-- party to the session, draws, and lets the caller ask who is around.
+function Window:Opened()
     self.catalog = self.dungeons()
     self.level = self.playerLevel()
     self.showAllButton:SetChecked(self.showAll)
     self.syncParty()
-    self.panel:Show()
     self:Refresh()
-    return true
+    pcall(self.onShown)
 end

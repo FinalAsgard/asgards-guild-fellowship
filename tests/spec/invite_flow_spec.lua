@@ -89,19 +89,12 @@ local function newWindow(online)
     local addon = load()
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    environment.DetailsFramework = {
-        CreateSimplePanel = function()
-            local panel = environment.CreateFrame("Frame", nil, nil)
-            rawset(panel, "IsShown", function(self) return self.shown end)
-            return panel
-        end,
-    }
     local world = { invited = {}, online = online }
     world.session = accepted(addon)
     world.window = addon.GroupFinderWindow.Create({
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
-    }, {
+    }, fakeFrames.host(environment), {
         dungeons = function() return addon.DungeonCatalog.Create({ DEADMINES }) end,
         playerLevel = function() return 24 end,
         session = world.session,
@@ -109,7 +102,7 @@ local function newWindow(online)
         isOnline = function(key) return world.online[key] == true end,
         invite = function(key) table.insert(world.invited, key) end,
     })
-    world.window:Toggle()
+    world.window:Opened()
     return world
 end
 
@@ -163,13 +156,13 @@ local function login(channel, playerName)
     fixtures.joinChannel(channel, world)
     local addon = fixtures.loadAddon(world)
     world.window = { open = false }
-    function world.window:Toggle()
+    function world.window:Opened()
         self.open = not self.open
         return self.open
     end
     function world.window:Refresh() end
     function world.window:Picked() return TEST_DUNGEON end
-    addon.GroupFinderWindow.Create = function(_, options)
+    addon.GroupFinderWindow.Create = function(_, _, options)
         world.window.options = options
         return world.window
     end
@@ -197,7 +190,7 @@ test.test("composed: accepting on an alt reminds the invitee, and the organizer 
     local organizer = login(channel, "Toolbox-Area52")
     local invitee = login(channel, "Hammer-Area52")
     fixtures.deliver(channel)
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
     organizer.addon.groupSession:Start("test")
     organizer.window.options.request({ id = 2, label = "Hammer", current = { key = "hammer-area52", name = "Hammer" } })
     fixtures.deliver(channel)

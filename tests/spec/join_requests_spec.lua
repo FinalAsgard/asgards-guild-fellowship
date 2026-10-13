@@ -264,13 +264,6 @@ test.test("group finder window: add-on users get Request, then Cancel while it's
     local addon = load()
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    environment.DetailsFramework = {
-        CreateSimplePanel = function()
-            local panel = environment.CreateFrame("Frame", nil, nil)
-            rawset(panel, "IsShown", function(self) return self.shown end)
-            return panel
-        end,
-    }
     local session = newSession(addon)
     local players = {
         { id = 2, label = "Thunderer", addon = true, current = { key = "hammer", name = "Hammer" },
@@ -287,7 +280,7 @@ test.test("group finder window: add-on users get Request, then Cancel while it's
     local window = addon.GroupFinderWindow.Create({
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
-    }, {
+    }, fakeFrames.host(environment), {
         dungeons = function() return addon.DungeonCatalog.Create({ DEADMINES }) end,
         playerLevel = function() return 24 end,
         session = session,
@@ -302,7 +295,7 @@ test.test("group finder window: add-on users get Request, then Cancel while it's
             session:Cancel(id)
         end,
     })
-    window:Toggle()
+    window:Opened()
 
     -- Line 1 is the role heading; Thunderer is line 2, Cleric (no add-on) 3.
     test.assertFalse(window.suggestionButtons[1].button.shown)
@@ -345,13 +338,13 @@ local function login(channel, playerName)
     fixtures.joinChannel(channel, world)
     local addon = fixtures.loadAddon(world)
     world.window = { open = false }
-    function world.window:Toggle()
+    function world.window:Opened()
         self.open = not self.open
         return self.open
     end
     function world.window:Refresh() end
     function world.window:Picked() return TEST_DUNGEON end
-    addon.GroupFinderWindow.Create = function(_, options)
+    addon.GroupFinderWindow.Create = function(_, _, options)
         world.window.options = options
         return world.window
     end
@@ -379,7 +372,7 @@ local function organize()
     local invitee = login(channel, "Hammer-Area52")
     local bystander = login(channel, "Wrench-Area52")
     fixtures.deliver(channel)
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
     organizer.addon.groupSession:Start("test")
     organizer.window.options.request({
         id = 99, label = "Hammer", current = { key = "hammer-area52", name = "Hammer" },
@@ -452,7 +445,7 @@ test.test("join requests: an unavailable invitee declines automatically", functi
     local invitee = login(channel, "Hammer-Area52")
     fixtures.deliver(channel)
     fixtures.slash(invitee, "dnd")
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
     organizer.addon.groupSession:Start("test")
 
     organizer.window.options.request({ id = 99, label = "Hammer", current = { key = "hammer-area52", name = "Hammer" } })

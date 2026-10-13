@@ -326,14 +326,6 @@ local SAMPLE = {
 local function newScreen()
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    local framework = { FrameWorkVersion = "746" }
-    function framework:CreateSimplePanel(_, _, _, title, name)
-        local panel = environment.CreateFrame("Frame", name, nil)
-        rawset(panel, "title", title)
-        rawset(panel, "IsShown", function(self) return self.shown end)
-        return panel
-    end
-    environment.DetailsFramework = framework
     return environment
 end
 
@@ -347,7 +339,7 @@ local function newWindow(party, inGroup)
     world.window = addon.GroupFinderWindow.Create({
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
-    }, {
+    }, fakeFrames.host(environment), {
         dungeons = function() return addon.DungeonCatalog.Create(SAMPLE) end,
         playerLevel = function() return 20 end,
         session = world.session,
@@ -358,7 +350,7 @@ local function newWindow(party, inGroup)
             end
         end,
     })
-    world.window:Toggle()
+    world.window:Opened()
     return world
 end
 
@@ -441,9 +433,9 @@ test.test("group finder window: Change dungeon keeps the slots; End group goes b
     test.assertEqual("Me | open | open | open | open", slotTexts(window))
 
     -- Closing the window keeps the group.
-    window:Toggle()
+    window:Opened()
     test.assertTrue(world.session:IsActive())
-    window:Toggle()
+    window:Opened()
     test.assertTrue(window.group.shown)
 
     window.endButton.scripts.OnClick()
@@ -464,20 +456,22 @@ test.test("Forever party changes refill the Group Finder's slots, and leaving th
     world.environment.IsInGroup = function() return grouped end
     local addon = fixtures.loadAddon(world)
     local window = { refreshes = 0 }
-    function window:Toggle() end
+    function window:Opened() end
     function window:Refresh() self.refreshes = self.refreshes + 1 end
-    addon.GroupFinderWindow.Create = function(_, options)
+    addon.GroupFinderWindow.Create = function(_, _, options)
         window.options = options
         return window
     end
     fixtures.fire(world, "ADDON_LOADED", world.addonName)
     world.loggedIn = true
     fixtures.fire(world, "PLAYER_LOGIN")
-    fixtures.slash(world, "group")
+    fixtures.openGroupFinder(world)
     local session = addon.groupSession
     session:Start("dm")
     window.options.syncParty()
     test.assertEqual("Player-1", session:Slots()[1].member.key)
+    -- Count only what the party change redraws.
+    window.refreshes = 0
 
     units.party1 = { name = "Cleric", guid = "Player-2", class = "PRIEST", level = 58, guild = false }
     grouped = true

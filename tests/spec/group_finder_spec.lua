@@ -171,26 +171,9 @@ end)
 
 -- The window, drawn with fake frames ------------------------------------------
 
--- A Details! Framework whose simple panel is a fake page that knows whether
--- it's shown and where its top-left corner is. The screen is 1000 high with
--- its top-left at (0, 1000).
 local function newScreen()
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    rawset(environment.UIParent, "GetTop", function() return 1000 end)
-    local framework = { FrameWorkVersion = "746" }
-    function framework:CreateSimplePanel(parent, width, height, title, name)
-        local panel = environment.CreateFrame("Frame", name, nil)
-        rawset(panel, "title", title)
-        rawset(panel, "SetPoint", function(self, point, relativeTo, relativePoint, x, y)
-            rawset(self, "point", { point = point, relativeTo = relativeTo, x = x, y = y })
-        end)
-        rawset(panel, "IsShown", function(self) return self.shown end)
-        rawset(panel, "GetLeft", function(self) return rawget(self, "left") end)
-        rawset(panel, "GetTop", function(self) return rawget(self, "top") end)
-        return panel
-    end
-    environment.DetailsFramework = framework
     return environment
 end
 
@@ -201,8 +184,7 @@ local function newWindow(options)
     local environment = newScreen()
     local world = {
         level = options.level,
-        saved = options.saved,
-        saves = 0,
+        shown = 0,
         environment = environment,
         -- The party the session is handed: `world.party` and `world.inGroup`.
         party = options.party or {},
@@ -214,7 +196,7 @@ local function newWindow(options)
     }
     local roles = addon.RoleCatalog.For(options.client or "forever")
     world.session = addon.GroupSession.Create(roles)
-    world.window = addon.GroupFinderWindow.Create(client, {
+    world.window = addon.GroupFinderWindow.Create(client, fakeFrames.host(environment), {
         dungeons = function()
             return addon.DungeonCatalog.Create(SAMPLE)
         end,
@@ -228,12 +210,8 @@ local function newWindow(options)
                 world.session:UpdateParty(world.party, world.inGroup)
             end
         end,
-        loadAnchor = function()
-            return world.saved
-        end,
-        saveAnchor = function(anchor)
-            world.saves = world.saves + 1
-            world.saved = anchor
+        onShown = function()
+            world.shown = world.shown + 1
         end,
     })
     return world
@@ -252,22 +230,26 @@ local function shownRows(window)
     return table.concat(labels, ", ")
 end
 
-test.test("group finder window: opens and closes, separate from the master frame", function()
+test.test("group finder window: draws on its tab, and brings it up to date each time it comes into view", function()
     local world = newWindow({ level = 23 })
     local window = world.window
+    -- Drawn on the tab it was given, and nothing shows before it opens.
+    test.assertEqual(nil, window.catalog)
 
-    test.assertEqual("Group Finder", window.panel.title)
-    test.assertFalse(window:IsShown())
-    test.assertTrue(window:Toggle())
-    test.assertTrue(window:IsShown())
-    test.assertFalse(window:Toggle())
-    test.assertFalse(window:IsShown())
+    window.panel.hooks.OnShow()
+    test.assertEqual(1, world.shown)
+    test.assertEqual("Wailing Caverns (17–24), The Deadmines (17–26), Shadowfang Keep (22–30)", shownRows(window))
+
+    -- Each time the tab comes back into view, the level is read again.
+    world.level = 40
+    window.panel.hooks.OnShow()
+    test.assertEqual(2, world.shown)
+    test.assertContains(window.hintText.text, "No dungeons fit level 40")
 end)
-
 test.test("group finder window: lists dungeons that fit the level, and Show all reveals the rest", function()
     local world = newWindow({ level = 23 })
     local window = world.window
-    window:Toggle()
+    window:Opened()
 
     test.assertEqual("Wailing Caverns (17–24), The Deadmines (17–26), Shadowfang Keep (22–30)", shownRows(window))
     test.assertEqual("Pick a dungeon", window.dungeonText.text)
@@ -286,21 +268,21 @@ end)
 test.test("group finder window: with nothing fitting the level, it says so until Show all", function()
     local world = newWindow({ level = 40 })
     local window = world.window
-    window:Toggle()
+    window:Opened()
 
     test.assertEqual("", shownRows(window))
     test.assertContains(window.hintText.text, "No dungeons fit level 40")
 
     -- Without a level, every dungeon is listed.
     local unknown = newWindow({ level = nil }).window
-    unknown:Toggle()
+    unknown:Opened()
     test.assertEqual(4, #unknown.rows)
 end)
 
 test.test("group finder window: picking a dungeon shows it and its range as the group's dungeon", function()
     local world = newWindow({ level = 23 })
     local window = world.window
-    window:Toggle()
+    window:Opened()
 
     -- The Deadmines is the second row.
     window.rows[2].button.scripts.OnClick()
@@ -311,66 +293,31 @@ test.test("group finder window: picking a dungeon shows it and its range as the 
     test.assertEqual("dm", window:Picked().id)
 end)
 
-test.test("group finder window: can be dragged, saves where it's dropped, and opens there", function()
+test.test("group finder window: a tab out of view isn't redrawn", function()
     local world = newWindow({ level = 23 })
-    local panel = world.window.panel
-    test.assertEqual("CENTER", panel.point.point)
+    local window = world.window
+    window:Opened()
+    window.panel:Hide()
+    window.rows[1].label.text = "untouched"
 
-    -- The panel moves itself while held; letting go at (300, 700) saves.
-    rawset(panel, "left", 300)
-    rawset(panel, "top", 700)
-    panel.hooks.OnMouseUp()
+    window:Refresh()
 
-    test.assertEqual(1, world.saves)
-    test.assertEqual("TOPLEFT", world.saved.point)
-    test.assertEqual(300, world.saved.x)
-    test.assertEqual(-300, world.saved.y)
-
-    local reopened = newWindow({ level = 23, saved = world.saved })
-    test.assertEqual("TOPLEFT", reopened.window.panel.point.point)
-    test.assertEqual(300, reopened.window.panel.point.x)
-    test.assertEqual(-300, reopened.window.panel.point.y)
+    test.assertEqual("untouched", window.rows[1].label.text)
+    test.assertFalse(window:IsShown())
 end)
-
-test.test("group finder window: without the framework it isn't made, and says why", function()
+test.test("group finder window: without a tab it isn't made, and says why", function()
     local addon = test.newAddon("Core/DungeonCatalog.lua", "Adapters/GroupFinderWindow.lua")
-    local client = { environment = {}, GetGlobal = function() return { FrameWorkVersion = "746" } end }
 
-    local window, reason = addon.GroupFinderWindow.Create(client, {})
+    local window, reason = addon.GroupFinderWindow.Create({ environment = {} }, nil, {})
 
     test.assertEqual(nil, window)
-    test.assertContains(reason, "Details! Framework")
+    test.assertContains(reason, "no tab")
 end)
-
-test.test("group finder position: saved account-wide, and an unusable one counts as none", function()
-    local addon = test.newAddon("Core/FellowshipStore.lua")
-    local database = { schemaVersion = 2, guilds = {} }
-    local store = addon.FellowshipStore.Create(database)
-
-    test.assertEqual(nil, store:GroupFinderAnchor())
-    test.assertTrue(store:SetGroupFinderAnchor({ point = "TOPLEFT", x = 300, y = -300 }))
-    test.assertEqual(300, addon.FellowshipStore.Create(database):GroupFinderAnchor().x)
-
-    database.groupFinder.anchor = { point = "SIDEWAYS", x = 1, y = 1 }
-    test.assertEqual(nil, store:GroupFinderAnchor())
-    test.assertFalse(store:SetGroupFinderAnchor({ point = "TOPLEFT", x = "1", y = 1 }))
-
-    database.groupFinder = "corrupt"
-    test.assertFalse(store:SetGroupFinderAnchor({ point = "TOPLEFT", x = 40, y = -120 }))
-    test.assertEqual("corrupt", database.groupFinder)
-end)
-
 -- /agf group in the composed add-on -------------------------------------------
 
--- A window that records how often it was toggled.
+-- A Group Finder that records its options; the tab is the fixtures'.
 local function newRecordingWindow()
-    local window = { open = false, toggles = 0 }
-    function window:Toggle()
-        self.toggles = self.toggles + 1
-        self.open = not self.open
-        return self.open
-    end
-    return window
+    return { Refresh = function() end, Picked = function() return nil end }
 end
 
 local function loggedIn(profile, setup)
@@ -381,7 +328,7 @@ local function loggedIn(profile, setup)
     local addon = fixtures.loadAddon(world)
     local window = newRecordingWindow()
     window.creates = 0
-    addon.GroupFinderWindow.Create = function(_, options)
+    addon.GroupFinderWindow.Create = function(_, _, options)
         window.creates = window.creates + 1
         window.options = options
         return window
@@ -393,16 +340,32 @@ local function loggedIn(profile, setup)
 end
 
 local function registerProfileTests(profile)
-    test.test(profile .. " /agf group opens the Group Finder, and again closes it", function()
-        local world, _, window = loggedIn(profile)
+    test.test(profile .. " /agf group opens the master frame on the Group Finder tab, and again closes it", function()
+        local world, addon, window = loggedIn(profile)
 
-        fixtures.slash(world, "group")
-        test.assertTrue(window.open)
-        fixtures.slash(world, "group")
-        test.assertFalse(window.open)
-        -- The window is made once and reused.
+        fixtures.openGroupFinder(world)
+        test.assertTrue(world.masterFrame.shown)
+        test.assertEqual("group", world.masterFrame.page)
+        fixtures.openGroupFinder(world)
+        test.assertFalse(world.masterFrame.shown)
+        -- Drawn once, with the frame.
         test.assertEqual(1, window.creates)
-        test.assertEqual(2, window.toggles)
+        -- The tab sits right after the Roster.
+        local tabs = addon.pages:Tabs()
+        test.assertEqual("roster", tabs[1].id)
+        test.assertEqual("group", tabs[2].id)
+        test.assertEqual("Group Finder", tabs[2].label)
+    end)
+
+    test.test(profile .. " /agf group switches to the Group Finder tab when another tab is showing", function()
+        local world, addon = loggedIn(profile)
+        fixtures.openGroupFinder(world)
+        addon.rosterController:ShowPage("roster")
+
+        fixtures.openGroupFinder(world)
+
+        test.assertTrue(world.masterFrame.shown)
+        test.assertEqual("group", world.masterFrame.page)
     end)
 
     test.test(profile .. " /agf help lists /agf group", function()
@@ -413,25 +376,21 @@ local function registerProfileTests(profile)
         test.assertContains(table.concat(world.messages, "\n"), "/agf group - open or close the Group Finder")
     end)
 
-    test.test(profile .. " the Group Finder reads the character's level and saves its place", function()
+    test.test(profile .. " the Group Finder reads the character's level", function()
         local world, _, window = loggedIn(profile)
         world.playerLevel = 23
-        fixtures.slash(world, "group")
+        fixtures.openGroupFinder(world)
 
         test.assertEqual(23, window.options.playerLevel())
-        test.assertEqual(nil, window.options.loadAnchor())
-        window.options.saveAnchor({ point = "TOPLEFT", x = 10, y = -20 })
-        test.assertEqual(10, window.options.loadAnchor().x)
-        test.assertEqual(10, world.database.groupFinder.anchor.x)
     end)
 
-    test.test(profile .. " /agf group says why when the window can't be made", function()
+    test.test(profile .. " /agf group says why when the tab can't be drawn", function()
         local world, addon = loggedIn(profile)
         addon.GroupFinderWindow.Create = function()
             return nil, "the Details! Framework isn't loaded"
         end
 
-        fixtures.slash(world, "group")
+        fixtures.openGroupFinder(world)
 
         test.assertContains(world.messages[#world.messages],
             "The Group Finder can't be shown: the Details! Framework isn't loaded.")
@@ -443,7 +402,7 @@ registerProfileTests("Retail")
 
 test.test("Forever /agf group lists the static Classic dungeons", function()
     local world, _, window = loggedIn("Forever")
-    fixtures.slash(world, "group")
+    fixtures.openGroupFinder(world)
 
     local catalog = window.options.dungeons()
 
@@ -457,7 +416,7 @@ test.test("Retail /agf group lists the Dungeon Finder's dungeons, and the static
     local world, addon, window = loggedIn("Retail", function(world)
         installDungeonFinder(world.environment, entries)
     end)
-    fixtures.slash(world, "group")
+    fixtures.openGroupFinder(world)
 
     test.assertEqual("Windrunner Spire", names(everyDungeon(window.options.dungeons())))
 

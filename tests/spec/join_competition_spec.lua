@@ -187,13 +187,13 @@ local function login(channel, playerName)
     fixtures.joinChannel(channel, world)
     local addon = fixtures.loadAddon(world)
     world.window = { open = false }
-    function world.window:Toggle()
+    function world.window:Opened()
         self.open = not self.open
         return self.open
     end
     function world.window:Refresh() end
     function world.window:Picked() return TEST_DUNGEON end
-    addon.GroupFinderWindow.Create = function(_, options)
+    addon.GroupFinderWindow.Create = function(_, _, options)
         world.window.options = options
         return world.window
     end
@@ -213,7 +213,7 @@ local function login(channel, playerName)
 end
 
 local function startGroup(organizer)
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
     organizer.addon.groupSession:Start("test")
 end
 

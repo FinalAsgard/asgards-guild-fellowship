@@ -120,6 +120,16 @@ function FakeFrames.install(environment)
     return environment
 end
 
+-- A master frame tab's content frame, as the Group Finder draws on: a page
+-- that knows whether it's shown (IsShown), with its hooked scripts kept.
+function FakeFrames.host(environment)
+    local host = environment.CreateFrame("Frame", nil, nil)
+    rawset(host, "IsShown", function(self)
+        return self.shown
+    end)
+    return host
+end
+
 -- Whether `list` holds `value`.
 function FakeFrames.contains(list, value)
     local index

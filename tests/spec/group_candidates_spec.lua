@@ -226,19 +226,12 @@ local function newWindow(world)
     local addon = world.addon
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    environment.DetailsFramework = {
-        CreateSimplePanel = function()
-            local panel = environment.CreateFrame("Frame", nil, nil)
-            rawset(panel, "IsShown", function(self) return self.shown end)
-            return panel
-        end,
-    }
     local roles = addon.RoleCatalog.For("forever")
     world.session = addon.GroupSession.Create(roles)
     world.window = addon.GroupFinderWindow.Create({
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
-    }, {
+    }, fakeFrames.host(environment), {
         dungeons = function() return addon.DungeonCatalog.Create({ DEADMINES }) end,
         playerLevel = function() return 24 end,
         session = world.session,
@@ -252,7 +245,7 @@ local function newWindow(world)
         end,
         candidates = world.candidates,
     })
-    world.window:Toggle()
+    world.window:Opened()
     return world.window
 end
 
@@ -354,19 +347,12 @@ test.test("group finder window: Nearby shows before a dungeon is picked, and und
     local addon = world.addon
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    environment.DetailsFramework = {
-        CreateSimplePanel = function()
-            local panel = environment.CreateFrame("Frame", nil, nil)
-            rawset(panel, "IsShown", function(self) return self.shown end)
-            return panel
-        end,
-    }
     local roles = addon.RoleCatalog.For("forever")
     local session = addon.GroupSession.Create(roles)
     local window = addon.GroupFinderWindow.Create({
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
-    }, {
+    }, fakeFrames.host(environment), {
         dungeons = function() return addon.DungeonCatalog.Create({ DEADMINES }) end,
         playerLevel = function() return 24 end,
         session = session,
@@ -375,7 +361,7 @@ test.test("group finder window: Nearby shows before a dungeon is picked, and und
         zone = function() return "Westfall" end,
         selfKey = function() return "me" end,
     })
-    window:Toggle()
+    window:Opened()
 
     local lines = shownLines(window)
     test.assertEqual("|cffffd100Nearby in Westfall|r", lines[1])

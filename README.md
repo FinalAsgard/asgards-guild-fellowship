@@ -19,7 +19,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf options` | Opens the window on the **Settings** tab. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
-| `/agf group` | Opens the [Group Finder](#group-finder) window, or closes it. |
+| `/agf group` | Opens the window on the **Group Finder** tab (see [Group Finder](#group-finder)), or closes it. |
 | `/agf dnd` | Turns Group Finder [Do Not Disturb](#do-not-disturb) on, or back off. |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
@@ -30,12 +30,13 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 Everything the add-on does is in one window, with picture tabs down its right edge. Hover a tab to see its name, and click it to show its page; the tab you're on looks selected. Every page scrolls when it's taller than the window.
 
 - **Roster**: the guild's players, mains and alts (see [Using the roster](#using-the-roster)).
+- **Group Finder**: build a dungeon group from the guild (see [Group Finder](#group-finder)).
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
-- **Settings**: everything else (General and Chat Tags), and the version you're running.
+- **Settings**: everything else (General, Chat Tags, and the Group Finder's Do Not Disturb and role preferences), and the version you're running.
 
-The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
+The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf group`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
 
 ## Settings
 
@@ -262,7 +263,7 @@ Everyone gets the window's **Recent Guild Advertisements** tab. It lists each ch
 
 ## Group Finder
 
-`/agf group` opens the **Group Finder** in a window of its own, separate from the add-on's main window, so you can keep it open while the main window is closed. Running it again, the close button or Escape closes it. Drag it anywhere; it stays where you drop it, across reloads and on every character.
+The **Group Finder** is a tab of the add-on's window, right below **Roster**. Click its tab, or type `/agf group` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it checks your level and party again and asks the guild who is around.
 
 The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
 
@@ -277,7 +278,7 @@ Picking a dungeon starts your group and shows its five slots: 1 tank, 1 healer a
 
 ### Changing or ending the group
 
-When all five slots are filled, the window shows **Group complete**. **Change dungeon** takes you back to the list to pick another dungeon, keeping everyone in their slots. **End group** ends the group, and so does leaving the party. Closing the window doesn't: open it again with `/agf group` and your group is still there.
+When all five slots are filled, the window shows **Group complete**. **Change dungeon** takes you back to the list to pick another dungeon, keeping everyone in their slots. **End group** ends the group, and so does leaving the party. Switching to another tab or closing the window doesn't: come back to the Group Finder tab and your group is still there.
 
 ### Who could join
 
@@ -303,11 +304,11 @@ Asked by two organizers at once, a guildmate sees both prompts stacked. Acceptin
 
 ### Ask in guild
 
-To reach guildmates without the add-on, press **Ask in guild** (shown while any role is open). A small pop-up opens with a ready-made line in a text box, for example **LF healer and 2 DPS for The Deadmines (17–26), whisper me!**, naming the open roles, the dungeon and its level range. Change it however you like: a counter shows how close you are to guild chat's 255-character limit. **Post** (or Enter) sends that one line to guild chat; **Cancel** (or Escape) sends nothing. The pop-up closes on its own if the group fills up, ends, or you close the Group Finder.
+To reach guildmates without the add-on, press **Ask in guild** (shown while any role is open). A small pop-up opens with a ready-made line in a text box, for example **LF healer and 2 DPS for The Deadmines (17–26), whisper me!**, naming the open roles, the dungeon and its level range. Change it however you like: a counter shows how close you are to guild chat's 255-character limit. **Post** (or Enter) sends that one line to guild chat; **Cancel** (or Escape) sends nothing. The pop-up closes on its own if the group fills up or ends, or you leave the Group Finder tab or close the window.
 
 ### Who is around
 
-Each time you open the Group Finder, your add-on asks the guild who else runs it. Every guildmate online with the add-on answers within a few seconds, and the bottom of the window lists them, for example **Add-on users online: Hammer, Wrench (unavailable)**. Guildmates without the add-on don't answer, so they aren't listed here. People log on and off while the window is open: press **Refresh** at the bottom right to ask again and update everything.
+Each time the Group Finder tab comes into view, your add-on asks the guild who else runs it. Every guildmate online with the add-on answers within a few seconds, and the bottom of the tab lists them, for example **Add-on users online: Hammer, Wrench (unavailable)**. Guildmates without the add-on don't answer, so they aren't listed here. People log on and off while you have it open: press **Refresh** at the bottom right to ask again and update everything.
 
 ### Nearby
 

@@ -137,17 +137,10 @@ end)
 local function newWindow(addon, session, calls)
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    environment.DetailsFramework = {
-        CreateSimplePanel = function()
-            local panel = environment.CreateFrame("Frame", nil, nil)
-            rawset(panel, "IsShown", function(self) return self.shown end)
-            return panel
-        end,
-    }
     local window = addon.GroupFinderWindow.Create({
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
-    }, {
+    }, fakeFrames.host(environment), {
         dungeons = function() return addon.DungeonCatalog.Create({ DEADMINES, SFK }) end,
         playerLevel = function() return 24 end,
         session = session,
@@ -157,7 +150,7 @@ local function newWindow(addon, session, calls)
             session:Cancel(id)
         end,
     })
-    window:Toggle()
+    window:Opened()
     return window
 end
 
@@ -228,13 +221,13 @@ local function login(channel, playerName)
     world.environment.IsInGroup = function() return world.grouped end
     local addon = fixtures.loadAddon(world)
     world.window = { open = false }
-    function world.window:Toggle()
+    function world.window:Opened()
         self.open = not self.open
         return self.open
     end
     function world.window:Refresh() end
     function world.window:Picked() return TEST_DUNGEON end
-    addon.GroupFinderWindow.Create = function(_, options)
+    addon.GroupFinderWindow.Create = function(_, _, options)
         world.window.options = options
         return world.window
     end
@@ -258,7 +251,7 @@ test.test("composed: an organizer leaving the party closes the prompts still wai
     local organizer = login(channel, "Toolbox-Area52")
     local invitee = login(channel, "Hammer-Area52")
     fixtures.deliver(channel)
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
     organizer.addon.groupSession:Start("test")
     organizer.grouped = true
     fixtures.fire(organizer, "GROUP_ROSTER_UPDATE")
@@ -288,16 +281,18 @@ local function countDraws(window)
     end
 end
 
-test.test("group finder window: a closed window isn't redrawn until it opens", function()
+test.test("group finder window: the tab isn't redrawn while it's out of view", function()
     local addon = load()
     local window = newWindow(addon, newSession(addon), {})
     local draws = countDraws(window)
 
-    window:Toggle()
+    window.panel:Hide()
+    window.panel.hooks.OnHide()
     window:Refresh()
     test.assertEqual(0, draws())
 
-    window:Toggle()
+    window.panel:Show()
+    window:Opened()
     test.assertEqual(1, draws())
     window:Refresh()
     test.assertEqual(2, draws())
@@ -306,7 +301,7 @@ end)
 test.test("composed: with every role filled, Request makes no request", function()
     local channel = fixtures.newChannel()
     local organizer = login(channel, "Toolbox-Area52")
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
     local session = organizer.addon.groupSession
     session:Start("test")
     -- Five party members fill every slot.
@@ -330,7 +325,7 @@ test.test("composed: slot updates wait until the organizer is out of combat", fu
     local organizer = login(channel, "Toolbox-Area52")
     local invitee = login(channel, "Hammer-Area52")
     fixtures.deliver(channel)
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
     organizer.addon.groupSession:Start("test")
     organizer.window.options.request({ id = 2, label = "Hammer", current = { key = "hammer-area52", name = "Hammer" } })
     fixtures.deliver(channel)

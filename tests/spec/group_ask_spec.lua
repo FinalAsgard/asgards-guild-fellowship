@@ -73,20 +73,13 @@ local function newWindow(party)
     local addon = load()
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    environment.DetailsFramework = {
-        CreateSimplePanel = function()
-            local panel = environment.CreateFrame("Frame", nil, nil)
-            rawset(panel, "IsShown", function(self) return self.shown end)
-            return panel
-        end,
-    }
     local world = { posted = {} }
     local roles = addon.RoleCatalog.For("forever")
     world.session = addon.GroupSession.Create(roles)
     world.window = addon.GroupFinderWindow.Create({
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
-    }, {
+    }, fakeFrames.host(environment), {
         dungeons = function() return addon.DungeonCatalog.Create({ DEADMINES }) end,
         playerLevel = function() return 20 end,
         session = world.session,
@@ -100,7 +93,7 @@ local function newWindow(party)
             table.insert(world.posted, text)
         end,
     })
-    world.window:Toggle()
+    world.window:Opened()
     world.window:Pick("dm")
     return world
 end
@@ -248,14 +241,14 @@ test.test("ask in guild: the composed add-on posts the line to guild chat", func
     local world = fixtures.newEnvironment("Forever")
     local addon = fixtures.loadAddon(world)
     local options
-    addon.GroupFinderWindow.Create = function(_, given)
+    addon.GroupFinderWindow.Create = function(_, _, given)
         options = given
         return { Toggle = function() return true end, Refresh = function() end }
     end
     fixtures.fire(world, "ADDON_LOADED", world.addonName)
     world.loggedIn = true
     fixtures.fire(world, "PLAYER_LOGIN")
-    fixtures.slash(world, "group")
+    fixtures.openGroupFinder(world)
 
     options.postToGuild("LF healer for The Deadmines (17–26), whisper me!")
 

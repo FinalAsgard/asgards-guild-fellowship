@@ -205,19 +205,12 @@ test.test("group finder window: lists who replied, and its Do Not Disturb box fo
         "Adapters/GroupFinderWindow.lua")
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    environment.DetailsFramework = {
-        CreateSimplePanel = function()
-            local panel = environment.CreateFrame("Frame", nil, nil)
-            rawset(panel, "IsShown", function(self) return self.shown end)
-            return panel
-        end,
-    }
     local state = { dnd = false, replies = {} }
     local roles = addon.RoleCatalog.For("forever")
     local window = addon.GroupFinderWindow.Create({
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
-    }, {
+    }, fakeFrames.host(environment), {
         dungeons = function() return addon.DungeonCatalog.Create({}) end,
         playerLevel = function() return 20 end,
         session = addon.GroupSession.Create(roles),
@@ -228,7 +221,7 @@ test.test("group finder window: lists who replied, and its Do Not Disturb box fo
             set = function(enabled) state.dnd = enabled end,
         },
     })
-    window:Toggle()
+    window:Opened()
     test.assertEqual("No other add-on users have replied yet.", window.repliesText.text)
     test.assertFalse(window.dndButton:GetChecked())
 
@@ -270,14 +263,14 @@ local function login(channel, playerName, profile)
     local addon = fixtures.loadAddon(world)
     -- A window that only records being opened and refreshed.
     world.window = { open = false, refreshes = 0 }
-    function world.window:Toggle()
+    function world.window:Opened()
         self.open = not self.open
         return self.open
     end
     function world.window:Refresh()
         self.refreshes = self.refreshes + 1
     end
-    addon.GroupFinderWindow.Create = function(_, options)
+    addon.GroupFinderWindow.Create = function(_, _, options)
         world.window.options = options
         return world.window
     end
@@ -302,7 +295,7 @@ test.test("opening the Group Finder asks the guild, and add-on users' replies sh
     fixtures.deliver(channel)
     organizer.sentMessages = {}
 
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
 
     test.assertEqual(1, #organizer.sentMessages)
     test.assertEqual("gf-ask", decode(organizer, organizer.sentMessages[1]).t)
@@ -318,7 +311,7 @@ test.test("opening the Group Finder asks the guild, and add-on users' replies sh
     test.assertTrue(organizer.window.refreshes > 0)
     -- Closing it sends nothing.
     organizer.sentMessages = {}
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
     test.assertEqual(0, #organizer.sentMessages)
 end)
 
@@ -329,7 +322,7 @@ test.test("a guildmate in Do Not Disturb, or in a group, replies as unavailable"
     fixtures.deliver(channel)
     fixtures.slash(member, "dnd")
 
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
     fixtures.deliver(channel)
     fixtures.runTimers(member, 5)
     fixtures.deliver(channel)
@@ -337,8 +330,8 @@ test.test("a guildmate in Do Not Disturb, or in a group, replies as unavailable"
 
     fixtures.slash(member, "dnd")
     member.environment.IsInGroup = function() return true end
-    fixtures.slash(organizer, "group")
-    fixtures.slash(organizer, "group")
+    fixtures.openGroupFinder(organizer)
+    fixtures.openGroupFinder(organizer)
     fixtures.deliver(channel)
     fixtures.runTimers(member, 5)
     fixtures.deliver(channel)
@@ -349,7 +342,7 @@ local function registerProfileTests(profile)
     test.test(profile .. " /agf dnd, the setting and the window agree, on every character", function()
         local world = login(nil, nil, profile)
         local settings = world.addon.settings
-        fixtures.slash(world, "group")
+        fixtures.openGroupFinder(world)
         local dnd = world.window.options.dnd
 
         fixtures.slash(world, "dnd")
@@ -387,20 +380,13 @@ test.test("group finder window: Refresh asks again who is online, and party slot
         "Core/GroupCandidates.lua", "Adapters/GroupFinderWindow.lua")
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    environment.DetailsFramework = {
-        CreateSimplePanel = function()
-            local panel = environment.CreateFrame("Frame", nil, nil)
-            rawset(panel, "IsShown", function(self) return self.shown end)
-            return panel
-        end,
-    }
     local refreshes = 0
     local roles = addon.RoleCatalog.For("forever")
     local session = addon.GroupSession.Create(roles)
     local window = addon.GroupFinderWindow.Create({
         environment = environment,
         GetGlobal = function(_, name) return environment[name] end,
-    }, {
+    }, fakeFrames.host(environment), {
         dungeons = function() return addon.DungeonCatalog.Create({ { id = "dm", name = "DM", minLevel = 17, maxLevel = 26 } }) end,
         playerLevel = function() return 20 end,
         session = session,
@@ -413,7 +399,7 @@ test.test("group finder window: Refresh asks again who is online, and party slot
         classColor = function(class) return class == "WARRIOR" and "ffc69b6d" or nil end,
         refresh = function() refreshes = refreshes + 1 end,
     })
-    window:Toggle()
+    window:Opened()
 
     window.refreshButton.scripts.OnClick()
     test.assertEqual(1, refreshes)
