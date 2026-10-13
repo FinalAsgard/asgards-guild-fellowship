@@ -174,7 +174,7 @@ local function refreshLines(scroll, rows, offset, totalLines)
     end
 end
 
--- Organize menu, alias dialog, and "Set main…" picker ---------------------
+-- Organize menu, alias dialog, and player picker ---------------------------
 
 -- Shows a context menu with the client's menu system: MenuUtil on newer
 -- clients, UIDropDownMenu otherwise. Returns false when neither exists.
@@ -279,9 +279,10 @@ end
 local PICKER_WIDTH = 360
 local PICKER_HEIGHT = 380
 
--- The "Set main…" picker: a search box and the matching players.
+-- The player picker ("Link as alt of…" and "Merge into player…"): a search
+-- box and the matching players.
 local function buildPicker(framework, frameName)
-    local panel = framework:CreateSimplePanel(UIParent, PICKER_WIDTH, PICKER_HEIGHT, "Set main", frameName .. "Picker")
+    local panel = framework:CreateSimplePanel(UIParent, PICKER_WIDTH, PICKER_HEIGHT, "Link as alt of", frameName .. "Picker")
     panel:SetFrameStrata("DIALOG")
     local prompt = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     prompt:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
@@ -343,6 +344,13 @@ local function buildPicker(framework, frameName)
     scroll:CreateLines(newLine, lineAmount)
     picker.scroll = scroll
 
+    function picker.setTitle(title)
+        if type(panel.SetTitle) == "function" then
+            panel:SetTitle(title)
+        elseif panel.Title ~= nil then
+            panel.Title:SetText(title)
+        end
+    end
     function picker.update()
         local results = picker.search_fn and picker.search_fn(search:GetText()) or {}
         scroll:SetData(results)
@@ -363,8 +371,9 @@ end
 local PANEL_WIDTH = 380
 local PANEL_HEIGHT = 440
 
--- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name)`
--- open the dialogs the right-click menu uses.
+-- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
+-- merge)` open the dialogs the right-click menu uses (`merge` titles the
+-- picker "Merge into player").
 local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
     panel:SetFrameStrata("HIGH")
@@ -372,17 +381,17 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
     local edit = { panel = panel }
 
-    -- The alias, and the same Set alias… and Set main… dialogs as the
-    -- right-click menu.
+    -- The alias, with Set alias… and Merge into player… buttons that open
+    -- the same dialogs as the right-click menu.
     local aliasText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     aliasText:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -32)
-    aliasText:SetPoint("RIGHT", panel, "RIGHT", -190, 0)
+    aliasText:SetPoint("RIGHT", panel, "RIGHT", -230, 0)
     aliasText:SetJustifyH("LEFT")
     aliasText:SetWordWrap(false)
     local setMain = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    setMain:SetSize(84, 20)
+    setMain:SetSize(124, 20)
     setMain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -28)
-    setMain:SetText("Set main...")
+    setMain:SetText("Merge into player...")
     local setAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     setAlias:SetSize(84, 20)
     setAlias:SetPoint("RIGHT", setMain, "LEFT", -4, 0)
@@ -396,7 +405,7 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     end)
     setMain:SetScript("OnClick", function()
         if edit.model ~= nil then
-            actions.openSetMain(edit.model.main, edit.model.mainName)
+            actions.openSetMain(edit.model.main, edit.model.mainName, true)
         end
     end)
     edit.aliasText = aliasText
@@ -901,9 +910,17 @@ local function build(framework, options)
     local width, height = frame:GetSize()
     local lineAmount = math.floor((height - 120) / RosterWindow.LINE_HEIGHT)
     local picker = buildPicker(framework, frameName)
-    -- "Set main…": links `key` (named `name`) as an alt of the picked player.
-    local function openSetMain(key, name)
-        picker.prompt:SetText("Make " .. tostring(name) .. " an alt of:")
+    -- "Link as alt of…" links `key` (named `name`) as an alt of the picked
+    -- player. From the player panel it's "Merge into player…": the same link,
+    -- made for the player's main.
+    local function openSetMain(key, name, merge)
+        if merge then
+            picker.setTitle("Merge into player")
+            picker.prompt:SetText("Merge " .. tostring(name) .. " into player:")
+        else
+            picker.setTitle("Link as alt of")
+            picker.prompt:SetText("Link " .. tostring(name) .. " as an alt of:")
+        end
         picker.search_fn = function(query)
             return options.searchPlayers(key, query)
         end

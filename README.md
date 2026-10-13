@@ -105,7 +105,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 
 ### Organizing by hand
 
-Right-click a character for **Set main…**, **Make this the main**, **Set alias…**, **Detach as own player**, and **View player…**. Clicking a character also opens the player panel. It shows the alias, main, alts, and history, and has **Set alias…** and **Set main…** buttons that open the same dialogs as the menu. History lists characters that left the player: ones that left the guild, were detached, or were moved to another player.
+Right-click a character for **Link as alt of…** (makes it an alt of another player), **Make this the main**, **Set alias…**, **Split off as own player** (takes it out of its player into one of its own), and **View player…**. Clicking a character also opens the player panel. It shows the alias, main, alts, and history, and has **Set alias…** and **Merge into player…** buttons: **Merge into player…** links the player's main as an alt of another player, the same as **Link as alt of…** on the main. History lists characters that left the player: ones that left the guild, were split off, or were moved to another player.
 
 For a player who has posted recruitment ads, the player panel also shows **Advertised: N (M in last 30 days)** (see [Ad counts](#ad-counts)).
 
@@ -121,7 +121,7 @@ Changes show up right away and are recorded as manual. An officer's changes then
 
 ## Guild sync
 
-When an officer changes which characters belong together, or what a player goes by, the change reaches everyone in the guild who runs the add-on and is online. This covers **Set main…**, **Make this the main**, **Detach as own player**, and **Set alias…**, including clearing an alias. Officers' edits update your roster and chat tags without a rescan.
+When an officer changes which characters belong together, or what a player goes by, the change reaches everyone in the guild who runs the add-on and is online. This covers **Link as alt of…**, **Merge into player…**, **Make this the main**, **Split off as own player**, and **Set alias…**, including clearing an alias. Officers' edits update your roster and chat tags without a rescan.
 
 - An officer is anyone whose guild rank can view officer notes. The guild master always counts. Nothing needs to be set up: promoting or demoting someone changes what their edits do.
 - When two officers change the same character or the same alias, the most recent edit wins everywhere.
@@ -136,7 +136,7 @@ When an officer changes which characters belong together, or what a player goes 
 
 Members know their own alts best, so a member's edits become suggestions for the officers:
 
-- When you're not an officer, **Set main…**, **Make this the main**, **Detach as own player**, and **Set alias…** still change your roster at once. Each change is also kept as a suggestion.
+- When you're not an officer, **Link as alt of…**, **Merge into player…**, **Make this the main**, **Split off as own player**, and **Set alias…** still change your roster at once. Each change is also kept as a suggestion.
 - Suggestions go to the guild as soon as an officer is online. If none is, they wait, and are sent when an officer logs in.
 - Officers find them in their conflict queue, marked "Suggested by" and the member's name. **Accept** and **Reject** work as for any other entry, and so do Accept all and Reject all.
 - The first officer to decide settles the suggestion for every officer, and it disappears from the other officers' queues. Accepting makes it an official edit under that officer's name, which reaches everyone.

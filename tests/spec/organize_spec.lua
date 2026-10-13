@@ -296,6 +296,16 @@ test.test("the right-click menu offers the actions that apply to the row", funct
     test.assertTrue(single.setMain and single.alias)
     test.assertEqual(nil, single.detach)
 
+    -- Each label says what it does.
+    local labels = {}
+    local entries = controller:MenuFor(rowFor(window, "Hammer"))
+    local index
+    for index = 1, #entries do
+        labels[index] = entries[index].text
+    end
+    test.assertEqual("Link as alt of..., Make this the main, Set alias..., View player..., Split off as own player",
+        table.concat(labels, ", "))
+
     local header = actions(controller:MenuFor(rowFor(window, "TheTool (Toolbox)")))
     test.assertTrue(header.alias and header.view)
     test.assertEqual(nil, header.detach)

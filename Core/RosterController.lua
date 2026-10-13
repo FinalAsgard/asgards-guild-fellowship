@@ -421,7 +421,7 @@ function Controller:MenuFor(row)
     local player = partition:GetPlayer(character.player)
     local entries = {}
     if partition:IsInGuild(row.key) then
-        table.insert(entries, { text = "Set main...", action = "setMain", key = row.key })
+        table.insert(entries, { text = "Link as alt of...", action = "setMain", key = row.key })
         if player ~= nil and player.main ~= row.key then
             table.insert(entries, { text = "Make this the main", action = "makeMain", key = row.key })
         end
@@ -429,7 +429,7 @@ function Controller:MenuFor(row)
     table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
     table.insert(entries, { text = "View player...", action = "view", key = row.key })
     if partition:CharactersOf(character.player)[2] ~= nil then
-        table.insert(entries, { text = "Detach as own player", action = "detach", key = row.key })
+        table.insert(entries, { text = "Split off as own player", action = "detach", key = row.key })
     end
     return entries
 end
@@ -475,7 +475,7 @@ function Controller:Organize(operation, key, ...)
     local involved, before
     if MAIN_LINK_OPERATIONS[operation] then
         involved = self:AddPlayerKeys({}, key)
-        -- "Set main…" also involves the player the character joins.
+        -- "Link as alt of…" also involves the player the character joins.
         local target = operation == "SetMainPlayer" and select(1, ...) or nil
         local joined = target ~= nil and self.current.partition:GetPlayer(target)
         if joined then
@@ -527,7 +527,7 @@ function Controller:SetDontSync(key, enabled)
     return ok == true
 end
 
--- Results for the "Set main…" picker, without `key`'s own player.
+-- Results for the "Link as alt of…" picker, without `key`'s own player.
 function Controller:SearchPlayers(key, query)
     if self.current == nil then
         return {}

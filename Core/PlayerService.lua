@@ -257,7 +257,7 @@ end
 
 -- Manual organizing (the right-click menu) ---------------------------------
 
--- "Set main…": links `key` as an alt of `playerId`.
+-- "Link as alt of…": links `key` as an alt of `playerId`.
 function Service:SetMainPlayer(key, playerId)
     local character = self.partition:GetCharacter(key)
     local player = self.partition:GetPlayer(playerId)
@@ -308,7 +308,7 @@ function Service:SetAlias(key, alias)
     return true
 end
 
--- "Detach as own player": moves `key` into a new single-character player.
+-- "Split off as own player": moves `key` into a new single-character player.
 function Service:Detach(key)
     local character = self.partition:GetCharacter(key)
     if character == nil then
@@ -412,7 +412,7 @@ function Service:ChatTag(key)
 end
 
 -- Players matching `query` by alias or any in-guild character's name,
--- case-insensitively, for the "Set main…" picker. An empty query lists
+-- case-insensitively, for the "Link as alt of…" picker. An empty query lists
 -- everyone. Each result: { id, label, matched } where `matched` names the
 -- character that matched, when it wasn't the alias. Sorted by label.
 function Service:SearchPlayers(query, limit)

@@ -108,7 +108,7 @@ local function playerIdOf(world, key)
 end
 
 -- `world` links `alt` as an alt of `main`'s player, through the roster's
--- "Set main..." action.
+-- "Link as alt of..." action.
 local function linkAlt(world, alt, main)
     test.assertTrue(world.addon.rosterController:SetMainPlayer(alt, playerIdOf(world, main)))
 end
