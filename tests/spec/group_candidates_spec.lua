@@ -287,14 +287,26 @@ test.test("group finder window: each open role lists who could fill it, and fill
     test.assertTrue(window.suggestionHovers[2].frame.shown)
     test.assertFalse(window.suggestionHovers[1].frame.shown)
     local tooltip = { shown = false }
-    function tooltip:SetOwner() end
+    function tooltip:SetOwner(owner, anchor) self.anchor = anchor end
+    function tooltip:ClearAllPoints() self.point = nil end
+    function tooltip:SetPoint(point, relativeTo, relativePoint, x, y)
+        self.point = { point = point, relativePoint = relativePoint, x = x, y = y }
+    end
     function tooltip:SetText(text) self.text = text end
     function tooltip:Show() self.shown = true end
     function tooltip:Hide() self.shown = false end
     window.environment.GameTooltip = tooltip
+    -- The cursor at (400, 300) screen pixels, with the UI at scale 2.
+    window.environment.GetCursorPosition = function() return 400, 300 end
+    rawset(window.environment.UIParent, "GetEffectiveScale", function() return 2 end)
     window.suggestionHovers[2].frame.scripts.OnEnter(window.suggestionHovers[2].frame)
     test.assertEqual("On Bolt, Ironforge", tooltip.text)
     test.assertTrue(tooltip.shown)
+    -- Just above the cursor and a little to its right.
+    test.assertEqual("ANCHOR_NONE", tooltip.anchor)
+    test.assertEqual("BOTTOMLEFT", tooltip.point.point)
+    test.assertEqual(200 + 12, tooltip.point.x)
+    test.assertEqual(150 + 12, tooltip.point.y)
     window.suggestionHovers[2].frame.scripts.OnLeave()
     test.assertFalse(tooltip.shown)
     test.assertEqual("|cffffd100DPS|r", lines[4])

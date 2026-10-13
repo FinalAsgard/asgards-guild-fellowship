@@ -58,6 +58,10 @@ local GroupFinderWindow = {
     GUILD_LINE_MAX = 255,
     ASK_STRATA = "DIALOG",
     ROLE_BUTTON_WIDTH = 56,
+    -- Where a suggestion's tooltip sits from the mouse cursor: a little
+    -- right of it and just above it.
+    TOOLTIP_OFFSET_X = 12,
+    TOOLTIP_OFFSET_Y = 12,
 }
 addon.GroupFinderWindow = GroupFinderWindow
 
@@ -222,13 +226,8 @@ function Window:suggestionLine(index)
     hover:EnableMouse(true)
     local hovering = { frame = hover }
     hover:SetScript("OnEnter", function(frame)
-        local tooltip = self.environment.GameTooltip
-        if hovering.text ~= nil and tooltip ~= nil then
-            pcall(function()
-                tooltip:SetOwner(frame, "ANCHOR_RIGHT")
-                tooltip:SetText(hovering.text)
-                tooltip:Show()
-            end)
+        if hovering.text ~= nil then
+            self:showTooltip(frame, hovering.text)
         end
     end)
     hover:SetScript("OnLeave", function()
@@ -255,6 +254,27 @@ function Window:suggestionLine(index)
     button:SetPoint("TOPRIGHT", self.suggestionList, "TOPRIGHT", 0, -(index - 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
     self.suggestionButtons[index] = { button = button }
     return line
+end
+
+-- Shows `text` in the game's tooltip just above the mouse cursor and a
+-- little to its right. The cursor's position is in screen pixels, so it's
+-- divided by UIParent's scale to place the tooltip in UI units.
+function Window:showTooltip(owner, text)
+    local tooltip = self.environment.GameTooltip
+    if tooltip == nil then
+        return
+    end
+    pcall(function()
+        tooltip:SetOwner(owner, "ANCHOR_NONE")
+        tooltip:ClearAllPoints()
+        local parent = self.environment.UIParent
+        local x, y = self.environment.GetCursorPosition()
+        local scale = parent:GetEffectiveScale()
+        tooltip:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT",
+            x / scale + GroupFinderWindow.TOOLTIP_OFFSET_X, y / scale + GroupFinderWindow.TOOLTIP_OFFSET_Y)
+        tooltip:SetText(text)
+        tooltip:Show()
+    end)
 end
 
 -- The lines the suggestions column shows: each open role's heading, then
