@@ -1158,8 +1158,8 @@ if clientProfile.supported then
             replies = function()
                 return groupAvailability:Replies()
             end,
-            postToGuild = function(text)
-                return client:SendGuildMessage(text)
+            openGuildChat = function(text)
+                return client:OpenGuildChat(text)
             end,
             request = sendRequest,
             cancelRequest = cancelRequest,

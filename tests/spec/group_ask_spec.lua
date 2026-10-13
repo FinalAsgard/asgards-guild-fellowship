@@ -67,13 +67,13 @@ test.test("ask in guild: no line once every role is filled", function()
     test.assertEqual(0, #full:OpenRoles())
 end)
 
--- The pop-up ---------------------------------------------------------------------
+-- The chat box ------------------------------------------------------------------
 
 local function newWindow(party)
     local addon = load()
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
-    local world = { posted = {} }
+    local world = { opened = {} }
     local roles = addon.RoleCatalog.For("forever")
     world.session = addon.GroupSession.Create(roles)
     world.window = addon.GroupFinderWindow.Create({
@@ -89,8 +89,8 @@ local function newWindow(party)
                 world.session:UpdateParty(party, #party > 1)
             end
         end,
-        postToGuild = function(text)
-            table.insert(world.posted, text)
+        openGuildChat = function(text)
+            table.insert(world.opened, text)
         end,
     })
     world.window:Opened()
@@ -103,126 +103,29 @@ local function solo()
     return newWindow({ member("Me", "WARRIOR", { isPlayer = true }) })
 end
 
-test.test("ask in guild: the button opens a pop-up with the line in a text box, and posts nothing yet", function()
+test.test("ask in guild: the button opens guild chat with the line typed in, and sends nothing itself", function()
     local world = solo()
     local window = world.window
     test.assertTrue(window.askButton.shown)
-    test.assertFalse(window:IsAsking())
 
     window.askButton.scripts.OnClick()
 
-    test.assertTrue(window:IsAsking())
-    test.assertTrue(window.ask.frame.shown)
-    test.assertEqual(LINE, window.ask.box:GetText())
-    -- The cursor waits at the end, ready to add to the line.
-    test.assertEqual(string.len(LINE), window.ask.box.cursor)
-    -- Letters, not bytes: the range's dash is one letter.
-    test.assertEqual("58/255", window.ask.count.text)
-    local addon = load()
-    test.assertEqual(5, addon.GroupFinderWindow.Letters("Zélie"))
-    test.assertEqual(3, addon.GroupFinderWindow.Letters("1–2"))
-    test.assertTrue(window.ask.canPost)
-    test.assertEqual(0, #world.posted)
+    test.assertEqual(1, #world.opened)
+    test.assertEqual(LINE, world.opened[1])
 end)
 
-test.test("ask in guild: Post sends the line as edited, once", function()
-    local world = solo()
-    local window = world.window
-    window.askButton.scripts.OnClick()
+test.test("ask in guild: each press offers the line for the roles still open", function()
+    local world = newWindow({
+        member("Me", "WARRIOR", { isPlayer = true }),
+        member("Zap", "MAGE"),
+        member("Stab", "ROGUE"),
+        member("Shot", "HUNTER"),
+    })
 
-    window.ask.box:SetText("LF healer for Deadmines, ask Toolbox!")
-    window.ask.box.scripts.OnTextChanged()
-    test.assertEqual("37/255", window.ask.count.text)
-    window.ask.post.scripts.OnClick()
+    world.window.askButton.scripts.OnClick()
 
-    test.assertEqual(1, #world.posted)
-    test.assertEqual("LF healer for Deadmines, ask Toolbox!", world.posted[1])
-    test.assertFalse(window:IsAsking())
-    test.assertFalse(window.ask.frame.shown)
-    -- Posting again needs the pop-up again.
-    test.assertFalse(window:PostAsk())
-    window.ask.box.scripts.OnEnterPressed()
-    test.assertEqual(1, #world.posted)
+    test.assertEqual("LF healer for The Deadmines (17–26), whisper me!", world.opened[1])
 end)
-
-test.test("ask in guild: Enter posts and Escape cancels", function()
-    local world = solo()
-    local window = world.window
-
-    window.askButton.scripts.OnClick()
-    window.ask.box.scripts.OnEscapePressed()
-    test.assertFalse(window:IsAsking())
-    test.assertEqual(0, #world.posted)
-
-    window.askButton.scripts.OnClick()
-    window.ask.box.scripts.OnEnterPressed()
-    test.assertEqual(LINE, world.posted[1])
-    test.assertFalse(window:IsAsking())
-end)
-
-test.test("ask in guild: Cancel posts nothing", function()
-    local world = solo()
-    local window = world.window
-
-    window.askButton.scripts.OnClick()
-    window.ask.cancel.scripts.OnClick()
-
-    test.assertEqual(0, #world.posted)
-    test.assertFalse(window:IsAsking())
-    test.assertFalse(window.ask.frame.shown)
-end)
-
-test.test("ask in guild: an empty line can't be posted, and line breaks become spaces", function()
-    local world = solo()
-    local window = world.window
-    window.askButton.scripts.OnClick()
-
-    window.ask.box:SetText("   ")
-    window.ask.box.scripts.OnTextChanged()
-    test.assertFalse(window.ask.canPost)
-    test.assertFalse(window:PostAsk())
-    test.assertTrue(window:IsAsking())
-    test.assertEqual(0, #world.posted)
-
-    -- A pasted line break is taken out as the text changes.
-    window.ask.box:SetText("LF tank\nfor Deadmines")
-    window.ask.box.scripts.OnTextChanged()
-    test.assertEqual("LF tank for Deadmines", window.ask.box:GetText())
-    window.ask.post.scripts.OnClick()
-    test.assertEqual("LF tank for Deadmines", world.posted[1])
-
-    local addon = load()
-    test.assertEqual("a b", addon.GroupFinderWindow.ChatLine("  a\r\n\nb  "))
-    test.assertEqual(nil, addon.GroupFinderWindow.ChatLine("\n \n"))
-end)
-
-test.test("ask in guild: each opening starts from a fresh line", function()
-    local world = solo()
-    local window = world.window
-    window.askButton.scripts.OnClick()
-    window.ask.box:SetText("something else")
-    window.ask.cancel.scripts.OnClick()
-
-    window.askButton.scripts.OnClick()
-
-    test.assertEqual(LINE, window.ask.box:GetText())
-end)
-
-test.test("ask in guild: the pop-up closes when the group ends or the window closes", function()
-    local world = solo()
-    local window = world.window
-
-    window.askButton.scripts.OnClick()
-    window.endButton.scripts.OnClick()
-    test.assertFalse(window:IsAsking())
-
-    window:Pick("dm")
-    window.askButton.scripts.OnClick()
-    window.panel.hooks.OnHide()
-    test.assertFalse(window:IsAsking())
-    test.assertEqual(0, #world.posted)
-end)
-
 
 test.test("ask in guild: no button once the group is complete", function()
     local world = newWindow({
@@ -237,21 +140,45 @@ test.test("ask in guild: no button once the group is complete", function()
     test.assertTrue(world.window.completeText.shown)
 end)
 
-test.test("ask in guild: the composed add-on posts the line to guild chat", function()
+test.test("ask in guild: the composed add-on opens the game's chat box on guild chat, and sends nothing", function()
     local world = fixtures.newEnvironment("Forever")
+    local opened = {}
+    world.environment.ChatFrame_OpenChat = function(text)
+        table.insert(opened, text)
+    end
     local addon = fixtures.loadAddon(world)
     local options
     addon.GroupFinderWindow.Create = function(_, _, given)
         options = given
-        return { Toggle = function() return true end, Refresh = function() end }
+        return { Refresh = function() end }
     end
     fixtures.fire(world, "ADDON_LOADED", world.addonName)
     world.loggedIn = true
     fixtures.fire(world, "PLAYER_LOGIN")
     fixtures.openGroupFinder(world)
 
-    options.postToGuild("LF healer for The Deadmines (17–26), whisper me!")
+    options.openGuildChat("LF healer for The Deadmines (17–26), whisper me!")
 
-    test.assertEqual("LF healer for The Deadmines (17–26), whisper me!", world.chat[1].text)
-    test.assertEqual("GUILD", world.chat[1].chatType)
+    test.assertEqual("/g LF healer for The Deadmines (17–26), whisper me!", opened[1])
+    -- The player sends it from the chat box; the add-on posts nothing.
+    test.assertEqual(0, #world.chat)
+end)
+
+test.test("adapter: guild chat opens through the client's chat box call", function()
+    local addon = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua")
+    local opened = {}
+    local retail = addon.Compatibility.Create({
+        ChatFrameUtil = { OpenChat = function(text) table.insert(opened, "util " .. text) end },
+        ChatFrame_OpenChat = function(text) table.insert(opened, "global " .. text) end,
+    })
+    local older = addon.Compatibility.Create({
+        ChatFrame_OpenChat = function(text) table.insert(opened, "global " .. text) end,
+    })
+
+    test.assertTrue(retail:OpenGuildChat("LF tank"))
+    test.assertTrue(older:OpenGuildChat("LF tank"))
+    test.assertEqual("util /g LF tank", opened[1])
+    test.assertEqual("global /g LF tank", opened[2])
+    test.assertFalse(older:OpenGuildChat(""))
+    test.assertFalse(addon.Compatibility.Create({}):OpenGuildChat("LF tank"))
 end)

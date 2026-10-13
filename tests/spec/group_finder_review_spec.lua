@@ -287,7 +287,6 @@ test.test("group finder window: the tab isn't redrawn while it's out of view", f
     local draws = countDraws(window)
 
     window.panel:Hide()
-    window.panel.hooks.OnHide()
     window:Refresh()
     test.assertEqual(0, draws())
 

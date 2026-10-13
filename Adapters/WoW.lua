@@ -437,6 +437,22 @@ end
 
 -- Posts `text` to guild chat. Retail keeps the call in C_ChatInfo; older
 -- clients have it as a global. Returns true when the client accepted it.
+-- Opens the game's chat box on guild chat with `text` typed in, for the
+-- player to edit and send with Enter: the game sends it, so nothing an
+-- add-on can't do is involved. Retail keeps the call in ChatFrameUtil;
+-- older clients have it as a global. Returns true when it opened.
+function Client:OpenGuildChat(text)
+    if type(text) ~= "string" or text == "" then
+        return false
+    end
+    local line = "/g " .. text
+    local util = self.environment.ChatFrameUtil
+    if type(util) == "table" and type(util.OpenChat) == "function" then
+        return (callFunction(util.OpenChat, line))
+    end
+    return (callFunction(self.environment.ChatFrame_OpenChat, line))
+end
+
 function Client:SendGuildMessage(text)
     if type(text) ~= "string" or text == "" then
         return false
