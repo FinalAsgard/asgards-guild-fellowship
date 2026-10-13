@@ -81,6 +81,10 @@ local _, addon = ...
 --                or applied to this client's (the time is kept per guild)
 --   rolesOf(key) -> the roles `key` is willing to play now (its own
 --                preferences, or its class's roles), or nil
+--   onOfficial(keys) called after this officer's own add-on made a main or
+--                alias change official (their own edit, or their approval
+--                of a suggestion), with the set of characters it involved.
+--                Changes received from other add-ons never call it.
 local SyncSession = {
     PROTOCOL = 1,
     TYPE_FACTS = "facts",
@@ -154,6 +158,7 @@ function SyncSession.Create(options)
         rolesOf = options.rolesOf or function()
             return nil
         end,
+        onOfficial = options.onOfficial or function() end,
         -- Announcer key -> a reply this client is waiting to send.
         replies = {},
         -- Background work waiting its turn, oldest first.
@@ -316,19 +321,33 @@ end
 -- `before` maps each key to its player's main before the edit. Returns the
 -- facts sent, or nil when nothing was sent.
 function Session:LocalEdit(keys, before)
-    return self:StampAndSend(function(facts, author, now)
+    return self:Official(self:StampAndSend(function(facts, author, now)
         return facts:Stamp(keys, author, now)
     end, function(fact)
         return before == nil or before[fact.character] ~= fact.main
-    end)
+    end))
 end
 
 -- After this user set or cleared the alias of `key`'s player by hand: the
 -- same, for that player's alias.
 function Session:LocalAliasEdit(key)
-    return self:StampAndSend(function(facts, author, now)
+    return self:Official(self:StampAndSend(function(facts, author, now)
         return { facts:StampAlias(key, author, now) }
-    end)
+    end))
+end
+
+-- Reports the characters `facts` (this officer's own, just made official)
+-- are about to onOfficial, and returns `facts`.
+function Session:Official(facts)
+    if facts ~= nil then
+        local keys = {}
+        local index
+        for index = 1, #facts do
+            keys[facts[index].character] = true
+        end
+        pcall(self.onOfficial, keys)
+    end
+    return facts
 end
 
 -- Once the roster is known (after a scan): when this user is an officer,
@@ -447,11 +466,25 @@ function Session:Decide(character, kind, approved)
             return false, "the server time isn't known"
         end
         local fact = suggestions:FactFor(entry, officer, now)
+        -- The characters of the players involved, before and after: the
+        -- one the character leaves may get a new main.
+        local involved = {}
+        local function addPlayerOf(key)
+            local character = partition:GetCharacter(key)
+            local members = character and partition:CharactersOf(character.player) or {}
+            local index
+            for index = 1, #members do
+                involved[members[index]] = true
+            end
+        end
+        addPlayerOf(fact.character)
         if self:Facts(partition):ApplyAll({ fact }) == 0 then
             return false, "it can't be applied here (is the player marked Don't sync?)"
         end
+        addPlayerOf(fact.character)
         addon.SyncLedger.Create(partition):Record({ fact }, now)
         facts = { fact }
+        pcall(self.onOfficial, involved)
     else
         facts = { suggestions:OfficialFact(entry) }
     end

@@ -255,6 +255,21 @@ function Client:GetGuildMember(index)
     return member
 end
 
+-- Whether this character's rank can edit public notes. Both clients are
+-- assumed to have CanEditPublicNote(), as Classic and Retail do; to be
+-- confirmed in game (#144). A client without it answers false.
+function Client:CanEditPublicNote()
+    local ok, allowed = callFunction(self.environment.CanEditPublicNote)
+    return ok and (allowed == true or allowed == 1)
+end
+
+-- Writes the public note of roster member `index`. The add-on only writes
+-- public notes this way, never officer notes. GuildRosterSetPublicNote is
+-- assumed on both clients (#144). True when the call went through.
+function Client:SetGuildPublicNote(index, note)
+    return callFunction(self.environment.GuildRosterSetPublicNote, index, note) == true
+end
+
 -- Asks the client to refresh the guild roster. GUILD_ROSTER_UPDATE follows.
 function Client:RequestGuildRoster()
     local guildInfo = self.environment.C_GuildInfo
