@@ -84,6 +84,26 @@ test.test("invite flow: a joined invitee whose party name carries a realm still 
     test.assertEqual("Bolt", addon.GroupFinderWindow.MemberLabel(slots[3].member))
 end)
 
+test.test("invite flow: the invitee's own roster key wins over a same-named character from another realm", function()
+    local addon = load()
+    local session, request = accepted(addon)
+
+    -- Another Bolt, from another realm, is in the party before the real
+    -- one in the list: the real Bolt, by roster key, takes the slot.
+    session:UpdateParty({
+        ME,
+        { key = "Player-7", name = "Bolt-Stormrage", classToken = "MAGE", inGuild = false,
+            rosterKey = "bolt-stormrage" },
+        { key = "Player-9", name = "Bolt", classToken = "SHAMAN", inGuild = true, rosterKey = "bolt" },
+    }, true)
+
+    test.assertTrue(request.inParty)
+    local slots = session:Slots()
+    test.assertEqual("Player-9", slots[3].member.key)
+    -- The other Bolt is placed by class, as any party member.
+    test.assertEqual("Player-7", slots[4].member.key)
+end)
+
 test.test("invite flow: a different party member never takes an invitee's slot", function()
     local addon = load()
     local session, request = accepted(addon)

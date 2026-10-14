@@ -169,19 +169,29 @@ local function bareName(name)
     return string.lower(string.match(name, "^([^%-]+)") or name)
 end
 
--- Whether party `member` is the character an accepted `request`'s invitee
--- chose: by guild roster key, or, when the party gave a name that didn't
--- resolve to that key (a realm spelled differently, say), by the name
--- without its realm.
-local function joined(member, request)
-    if member.isPlayer then
-        return false
+-- The party member who is the character an accepted `request`'s invitee
+-- chose, or nil. Matched by guild roster key; only when no member has that
+-- key, by the name without its realm (the party gave a name that didn't
+-- resolve to that key, a realm spelled differently, say), and then only a
+-- member not already matched by key to another request (`byKey`).
+local function joinedMember(members, request, byKey)
+    local fallback
+    local index
+    for index = 1, #members do
+        local member = members[index]
+        if not member.isPlayer then
+            if member.rosterKey ~= nil and member.rosterKey == request.character.key then
+                return member
+            end
+            local name = bareName(member.name)
+            if fallback == nil and not byKey[member.key] and name ~= nil
+                and name == bareName(request.character.name)
+            then
+                fallback = member
+            end
+        end
     end
-    if member.rosterKey ~= nil and member.rosterKey == request.character.key then
-        return true
-    end
-    local name = bareName(member.name)
-    return name ~= nil and name == bareName(request.character.name)
+    return fallback
 end
 
 -- Fills the slots: accepted invitees first, then the party, chosen roles
@@ -191,18 +201,30 @@ function Session:place()
     local slots, defaults = emptySlots(), {}
     -- An invitee who joined the party keeps the role they chose.
     local joinedRole = {}
+    -- Members whose roster key is an accepted invitee's: never taken by a
+    -- name match for another request.
+    local byKey = {}
     local index
+    for index = 1, #self.requests do
+        local request = self.requests[index]
+        local memberIndex
+        for memberIndex = 1, #self.members do
+            local member = self.members[memberIndex]
+            if request.state == GroupSession.ACCEPTED and member.rosterKey ~= nil
+                and member.rosterKey == request.character.key
+            then
+                byKey[member.key] = true
+            end
+        end
+    end
     for index = 1, #self.requests do
         local request = self.requests[index]
         request.inParty = false
         if request.state == GroupSession.ACCEPTED then
-            local memberIndex
-            for memberIndex = 1, #self.members do
-                local member = self.members[memberIndex]
-                if joined(member, request) then
-                    request.inParty = true
-                    joinedRole[member.key] = request.role
-                end
+            local member = joinedMember(self.members, request, byKey)
+            if member ~= nil then
+                request.inParty = true
+                joinedRole[member.key] = request.role
             end
         end
     end
