@@ -116,6 +116,17 @@ local function characterProblem(character)
     if character.rolesBy ~= nil and not isText(character.rolesBy) then
         return "character role preferences author is invalid"
     end
+    -- Declared main (schema 4): the player deliberately says this character
+    -- is its main, and when and by whom that was set (officer data).
+    if character.declared ~= nil and type(character.declared) ~= "boolean" then
+        return "character declared main is invalid"
+    end
+    if character.declaredAt ~= nil and not isWholeNumber(character.declaredAt) then
+        return "character declared main time is invalid"
+    end
+    if character.declaredBy ~= nil and not isText(character.declaredBy) then
+        return "character declared main author is invalid"
+    end
     -- Player profile text (schema 4): Discord, location and bio, each with
     -- when and by whom it was set. An empty value was cleared.
     local field, longest
@@ -1304,6 +1315,58 @@ function Partition:SetMainStamp(key, at, by)
     character.mainAt = at
     character.mainBy = by
     return true
+end
+
+-- Declared main: whether `key` is declared its player's main (a player
+-- saying "this is really my main", even with no alts). Only a player's main
+-- counts as declared.
+function Partition:IsDeclared(key)
+    local character = self.data.characters[key]
+    return character ~= nil and character.declared == true
+end
+
+-- Whether the player `playerId` has declared its main.
+function Partition:IsPlayerDeclared(playerId)
+    local player = self.data.players[playerId]
+    return player ~= nil and self:IsDeclared(player.main)
+end
+
+-- Sets whether `key` is declared a main, leaving its stamp alone.
+function Partition:SetDeclared(key, declared)
+    local character = self.data.characters[key]
+    if character == nil or type(declared) ~= "boolean" then
+        return false
+    end
+    character.declared = declared or nil
+    return true
+end
+
+-- When `key`'s declared main was last set or cleared, and by whom; like main
+-- links, never set is at 0 with no author.
+function Partition:GetDeclaredStamp(key)
+    local character = self.data.characters[key]
+    if character == nil then
+        return nil
+    end
+    return character.declaredAt or 0, character.declaredBy
+end
+
+function Partition:SetDeclaredStamp(key, at, by)
+    local character = self.data.characters[key]
+    if character == nil or not isWholeNumber(at) or not isText(by) then
+        return false
+    end
+    character.declaredAt = at
+    character.declaredBy = by
+    return true
+end
+
+function Partition:ClearDeclaredStamp(key)
+    local character = self.data.characters[key]
+    if character ~= nil then
+        character.declaredAt = nil
+        character.declaredBy = nil
+    end
 end
 
 -- When the alias of `key`'s player was last set or cleared, and by whom;

@@ -72,6 +72,9 @@ if clientProfile.supported then
         onAliasChanged = function(key, before)
             syncSession:LocalAliasEdit(key, before)
         end,
+        onDeclaredChanged = function(key, before)
+            syncSession:LocalDeclaredEdit(key, before)
+        end,
         onScanFinished = function()
             syncSession:UpgradeLegacy()
             -- This install has logged in on this character: My Profile can
@@ -1374,6 +1377,11 @@ if clientProfile.supported then
                 if not undone then
                     rosterController:Print("That change can't be undone: " .. tostring(why) .. ".")
                 end
+            end,
+            -- Officer data, like the other identity edits: official at
+            -- once for an officer, a suggestion for a member.
+            declare = function(key)
+                rosterController:SetDeclared(key, true)
             end,
             dismiss = function(key)
                 local guild, partition = rosterController:QuietContext()

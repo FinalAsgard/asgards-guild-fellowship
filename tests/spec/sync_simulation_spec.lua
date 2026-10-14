@@ -1186,3 +1186,42 @@ test.test("deny all rolls back every change in the bundle on the member's side, 
     test.assertEqual(0, #pendingOf(hammer))
     test.assertEqual(0, #bundleRows(officer))
 end)
+
+-- Declared mains ------------------------------------------------------------------
+
+test.test("an officer's declared main reaches everyone; a member's waits in their bundle for review", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+
+    test.assertTrue(officer.addon.rosterController:SetDeclared("toolbox-area52", true))
+    fixtures.deliver(channel)
+    test.assertTrue(partitionOf(hammer):IsDeclared("toolbox-area52"))
+
+    -- Not the main: refused.
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertFalse(hammer.addon.rosterController:SetDeclared("wrench-area52", true))
+    test.assertTrue(hammer.addon.rosterController:SetDeclared("hammer-area52", true))
+    fixtures.deliver(channel)
+    test.assertTrue(partitionOf(hammer):IsDeclared("hammer-area52"))
+    test.assertFalse(partitionOf(officer):IsDeclared("hammer-area52"))
+
+    local group = bundleRows(officer)[1].group
+    officer.addon.rosterController:ReviewBundle(group)
+    local review = officer.addon.rosterController.window.review
+    test.assertEqual("Main: Hammer (declared)", review.suggested[1])
+    local found
+    local index
+    for index = 1, #review.items do
+        if review.items[index].kind == "suggested declared" then
+            found = review.items[index].text
+        end
+    end
+    test.assertEqual("Hammer: Not declared → Declared main", found)
+
+    officer.addon.rosterController:DecideBundle(group, true)
+    fixtures.deliver(channel)
+    test.assertTrue(partitionOf(officer):IsDeclared("hammer-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+    test.assertContains(messagesOf(hammer), "Hammer declared as main")
+end)

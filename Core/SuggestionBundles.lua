@@ -13,8 +13,13 @@ local function nameOf(partition, normalizer, key)
 end
 
 -- What a suggestion fact asks for: "Wrench as an alt of Hammer", "Hammer
--- as main", "Alias: Tools", or "Clear the alias".
+-- as main", "Alias: Tools", "Clear the alias", "Hammer declared as main",
+-- or "Hammer no longer declared".
 function SuggestionBundles.Describe(partition, normalizer, fact)
+    if fact.kind == addon.SyncFacts.KIND_DECLARED then
+        local name = nameOf(partition, normalizer, fact.character)
+        return fact.declared and (name .. " declared as main") or (name .. " no longer declared")
+    end
     if fact.kind == addon.SyncFacts.KIND_ALIAS then
         if fact.alias == "" then
             return "Clear the alias"

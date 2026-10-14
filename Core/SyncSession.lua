@@ -306,6 +306,8 @@ function Session:SendWhenAcceptable(facts, now)
                 held = own:ProfileFactOf(fact.character, fact.kind)
             elseif fact.kind == addon.SyncFacts.KIND_ALIAS then
                 held = own:AliasFactOf(fact.character)
+            elseif fact.kind == addon.SyncFacts.KIND_DECLARED then
+                held = own:DeclaredFactOf(fact.character)
             else
                 held = own:FactOf(fact.character)
             end
@@ -344,6 +346,18 @@ function Session:LocalAliasEdit(key, before)
         return before == nil or fact.alias ~= before
     end, function()
         return before ~= nil and { alias = before } or nil
+    end))
+end
+
+-- After this user declared `key` their player's main, or took it back: the
+-- same, for that declaration. `before` is whether it was declared before.
+function Session:LocalDeclaredEdit(key, before)
+    return self:Official(self:StampAndSend(function(facts, author, now)
+        return { facts:StampDeclared(key, author, now) }
+    end, function(fact)
+        return before == nil or fact.declared ~= before
+    end, function()
+        return before ~= nil and { declared = before } or nil
     end))
 end
 
@@ -742,6 +756,8 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
             if partition:GetCharacter(fact.character) ~= nil and not own:IsPinned(fact.character) then
                 if fact.kind == addon.SyncFacts.KIND_ALIAS then
                     table.insert(corrections, own:StampAlias(fact.character, officer, at))
+                elseif fact.kind == addon.SyncFacts.KIND_DECLARED then
+                    table.insert(corrections, own:StampDeclared(fact.character, officer, at))
                 else
                     local stamped = own:Stamp({ [fact.character] = true }, officer, at)
                     table.insert(corrections, stamped[1])

@@ -54,7 +54,9 @@ function ProfilePage.CharacterLine(character)
     if character.level ~= nil then
         table.insert(details, tostring(character.level))
     end
-    if character.isMain then
+    if character.declared then
+        table.insert(details, "declared main")
+    elseif character.isMain then
         table.insert(details, "main")
     end
     if character.isSelf then
@@ -79,6 +81,8 @@ end
 --                         ProfileViewModel.AltCandidates)
 --   addAlt(key)           adds that character to the player as an alt
 --   dismiss(key)          stops suggesting that own character
+--   declare(key)          declares that character, the player's main, as
+--                         the main on purpose
 --   undo(character, kind) takes back a change waiting for an officer
 -- `host` is the master frame's content frame for the tab. Returns nil and
 -- the reason when there's none, or the tab can't be drawn.
@@ -100,6 +104,7 @@ function ProfilePage.Create(client, host, options)
         end,
         addAlt = options.addAlt or function() end,
         dismiss = options.dismiss or function() end,
+        declare = options.declare or function() end,
         undo = options.undo or function() end,
         rows = {},
         suggestRows = {},
@@ -154,6 +159,14 @@ function Page:build()
         self:OpenPicker()
     end)
     self.addAltButton:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -padding - 8, -32)
+    -- Says the main is the player's main on purpose, even with no alts.
+    self.declareButton = self:button(panel, "Declare as my main", 130, function()
+        if self.mainKey ~= nil then
+            pcall(self.declare, self.mainKey)
+        end
+        self:Refresh()
+    end)
+    self.declareButton:SetPoint("RIGHT", self.addAltButton, "LEFT", -4, 0)
     self:buildPicker()
 
     local dnd = createFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
@@ -619,12 +632,20 @@ function Page:draw()
         self.messageText:Show()
         self.scroll:Hide()
         self.addAltButton:Hide()
+        self.declareButton:Hide()
+        self.mainKey = nil
         self:ClosePicker()
     else
         self.heading:SetText(model.label)
         self.messageText:Hide()
         self.scroll:Show()
         self.addAltButton:Show()
+        self.mainKey = model.main
+        if model.declared then
+            self.declareButton:Hide()
+        else
+            self.declareButton:Show()
+        end
         if self.picker.frame:IsShown() then
             self:DrawPicker()
         end

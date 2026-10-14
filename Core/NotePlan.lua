@@ -6,8 +6,9 @@ local _, addon = ...
 --
 -- An alt's note gets `>Main`. The main's note gets `@Alias` when the player
 -- has one (an alias of several words can't be read back from a note, so it
--- gets none). A character on its own, as a split-off one is, gets no main
--- marker, which removes its old one.
+-- gets none). A declared main also gets a main marker naming itself,
+-- `>ItsOwnName`, which reads back as declared. A character on its own, as a
+-- split-off one is, gets no main marker, which removes its old one.
 local NotePlan = {}
 addon.NotePlan = NotePlan
 
@@ -45,6 +46,9 @@ function NotePlan.Build(partition, keys, normalizer)
                 markers.main = normalizer:Display(main and main.name or player.main)
             else
                 markers.alias = noteAlias(player.alias)
+                if partition:IsDeclared(key) then
+                    markers.main = normalizer:Display(character.name or key)
+                end
             end
             table.insert(plan, {
                 key = key,

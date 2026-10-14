@@ -153,7 +153,9 @@ test.test("each unusable marker kind becomes a conflict in full and incremental 
         kinds[state.conflicts()[index].character] = state.conflicts()[index].kind
     end
     test.assertEqual("unresolved", kinds["hammer-area52"])
-    test.assertEqual("self reference", kinds["visitor-area52"])
+    -- Naming itself as main declares Visitor its own main instead.
+    test.assertEqual(nil, kinds["visitor-area52"])
+    test.assertTrue(state.partition:IsDeclared("visitor-area52"))
     test.assertEqual("cycle", kinds["loop1-area52"])
     test.assertEqual("cycle", kinds["loop2-area52"])
 end)
@@ -210,13 +212,14 @@ end)
 
 test.test("unusable markers can't be accepted, only dismissed", function()
     local state = seeded()
+    -- Hammer is Toolbox's alt, but its note names itself as main.
     state.scan({
         { "Toolbox-Area52", "@TheTool" },
-        { "Hammer-Area52", ">Toolbox" },
-        { "Visitor-Area52", ">Visitor" },
+        { "Hammer-Area52", ">Hammer" },
+        { "Visitor-Area52", "" },
     })
 
-    local accepted, reason = state.service():AcceptConflict("visitor-area52", "self reference")
+    local accepted, reason = state.service():AcceptConflict("hammer-area52", "self reference")
 
     test.assertFalse(accepted)
     test.assertContains(reason, "dismiss")
@@ -283,11 +286,21 @@ end)
 
 test.test("accept all applies every suggestion and dismisses the rest", function()
     local state = seeded()
+    -- Visitor, an alt now, names itself as main: nothing to apply.
+    state.partition:JoinPlayerOf("visitor-area52", "toolbox-area52", "manual")
     state.scan({
         { "Toolbox-Area52", "@Toolman" },
-        { "Hammer-Area52", ">Visitor" },
+        { "Hammer-Area52", "" },
         { "Visitor-Area52", ">Visitor" },
+        { "Wrench-Area52", "" },
     })
+    state.partition:JoinPlayerOf("hammer-area52", "wrench-area52", "manual")
+    state.scan({
+        { "Toolbox-Area52", "@Toolman" },
+        { "Hammer-Area52", ">Toolbox" },
+        { "Visitor-Area52", ">Visitor" },
+        { "Wrench-Area52", "" },
+    }, "full", true)
     test.assertEqual(3, #state.conflicts())
 
     local accepted, dismissed = state.service():AcceptAll()
@@ -295,7 +308,7 @@ test.test("accept all applies every suggestion and dismisses the rest", function
     test.assertEqual(2, accepted)
     test.assertEqual(1, dismissed)
     test.assertEqual(0, #state.conflicts())
-    test.assertEqual(state.playerOf("visitor-area52"), state.playerOf("hammer-area52"))
+    test.assertEqual(state.playerOf("toolbox-area52"), state.playerOf("hammer-area52"))
     test.assertEqual("Toolman", state.playerOf("toolbox-area52").alias)
 end)
 

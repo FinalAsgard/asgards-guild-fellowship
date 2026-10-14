@@ -115,6 +115,8 @@ local function characterRow(inputs, key, character, playerId, isMain)
         key = key,
         player = playerId,
         isMain = isMain,
+        -- A main the player deliberately declared.
+        declared = isMain and inputs.partition:IsDeclared(key),
         name = name,
         coloredName = coloredName(name, inputs.classColor(classToken)),
         classToken = classToken,
@@ -151,9 +153,10 @@ end
 -- where `label` is "Alias (Main)", or the main's name without an alias, and
 -- `onlineAs` names the online character (the main if it is online),
 -- followed (unless collapsed) by its character rows:
---   { kind = "character", key, player, isMain, name, coloredName,
+--   { kind = "character", key, player, isMain, declared, name, coloredName,
 --     classToken, level, rank, online, departed, location }
--- where `location` is the zone when online, the last-online text, or when
+-- where `declared` marks a main the player declared on purpose, and
+-- `location` is the zone when online, the last-online text, or when
 -- the character left. Departed characters are hidden unless showDeparted;
 -- a player with no visible characters is left out.
 -- A single-character player is just its character row, marked

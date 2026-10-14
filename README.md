@@ -71,6 +71,7 @@ Two markers in a character's **public** note seed the database:
 
 - `Main: Toolbox` or the shorter `>Toolbox` means "this character is an alt of Toolbox".
 - `Alias: TheTool` or the shorter `@TheTool` means "this player goes by TheTool".
+- A main marker naming the character itself (`>Toolbox` on Toolbox's own note) means "this is my main, on purpose": a **declared main**, even with no alts. On a character the roster has as someone's alt, it disagrees with the roster and goes to the conflict queue instead.
 
 A marker can sit anywhere in the note (for example `Tank, Main: Toolbox, Alias: TheTool`, `Tank >Toolbox` or `@TheTool raid lead`), and both kinds can appear in one note. Only the first main marker and the first alias marker count. The `Main:` and `Alias:` labels can be any case (`main:` works too), the space after the colon is optional, and a label only counts as a word of its own (`Domain:` isn't a main marker). Matching ignores case.
 
@@ -87,6 +88,7 @@ Only the characters the change involved are touched:
 
 - An alt's note gets `>Main`, for example `>Toolbox` (on WoW Forever, the full first and last name: `>Tool Box`; on Retail, the realm only for a main from another realm).
 - The main's note gets `@Alias` when the player has a one-word alias. Aliases of several words can't be read back from a note, so they aren't written.
+- A declared main's note also gets a main marker naming itself, for example `>Toolbox @TheTool`, so it reads back as declared.
 - A character split off on its own loses its main marker.
 
 Any old `Main:`, `>`, `Alias:` or `@` marker is removed first, the new markers go at the front, and the rest of the note (professions, roles, anything else) follows. When the note's length limit doesn't leave room for it all, that text is cut. A note that already says the right thing is left alone. The next scan reads a written note back to the same data, so it never makes a conflict.
@@ -116,6 +118,8 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 - **Purge** removes one departed character. **Purge all departed** removes them all.
 
 ### Organizing by hand
+
+The roster marks a **declared main** (a player who said "this is my main" on purpose) as **(declared main)**, so confirmed players stand apart from characters nobody has organized yet. Players declare their main on [My Profile](#my-profile), or with a note marker naming the character itself (see [The guild note convention](#the-guild-note-convention)). Like the other organizing changes, an officer's declaration is official at once and a member's goes to officers as a [suggestion](#suggestions).
 
 Right-click a character for **Link as alt of…** (makes it an alt of another player), **Make this the main**, **Set alias…**, **Split off as own player** (takes it out of its player into one of its own), and **View player…**. Clicking a character also opens the player panel. It shows the alias, the player's Discord, location and bio under **About** (when they set any; see [About me](#about-me)), main, alts, and history, and has **Set alias…** and **Merge into player…** buttons: **Merge into player…** links the player's main as an alt of another player, the same as **Link as alt of…** on the main. History lists characters that left the player: ones that left the guild, were split off, or were moved to another player.
 
@@ -364,6 +368,7 @@ Below the heading are the same edits as the roster's right-click menu, for your 
 - **Alias**: type an alias (up to 48 characters) and press Enter to set it, or empty the box to clear it.
 - **Make main** on an alt makes it your player's main.
 - **Remove** on an alt splits it off as a player of its own (**Split off as own player**).
+- **Declare as my main** says your main is your main on purpose, even if you have no alts. Your main then shows as **declared main**, here and in the roster.
 - **Add alt…** opens a search of the guild's other characters. Pick one and press **Add** to link it as your alt. If it already belongs to another player, a warning names that player first, because adding it moves it away from them.
 
 These follow the same rules as the roster. An officer's edits are official at once and reach the whole guild. A member's apply in their own roster at once and are sent to officers as [suggestions](#suggestions). The page shows each change straight away.

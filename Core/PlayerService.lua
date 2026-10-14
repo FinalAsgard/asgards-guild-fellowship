@@ -308,6 +308,22 @@ function Service:SetAlias(key, alias)
     return true
 end
 
+-- "Declare as my main": says `key`, its player's main, is that player's main
+-- on purpose (or, with `declared` false, takes that back). Works for a
+-- player with no alts too.
+function Service:SetDeclared(key, declared)
+    local character = self.partition:GetCharacter(key)
+    local player = character and self.partition:GetPlayer(character.player)
+    if player == nil then
+        return false, "that character is not known"
+    end
+    if player.main ~= key then
+        return false, "only a player's main can be declared; make it the main first"
+    end
+    self.partition:SetDeclared(key, declared == true)
+    return true
+end
+
 -- "Split off as own player": moves `key` into a new single-character player.
 function Service:Detach(key)
     local character = self.partition:GetCharacter(key)

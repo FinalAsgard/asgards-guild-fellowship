@@ -14,6 +14,8 @@ local _, addon = ...
 --     from = member key, at = when the member made the edit }
 --   { character, kind = "suggested alias", suggestion = { alias = text },
 --     from, at }
+--   { character, kind = "suggested declared", suggestion = { declared = boolean },
+--     from, at }
 -- An alias suggestion names the player by its main; an empty alias clears it.
 --
 -- A pending suggestion also remembers `was`: the value it replaced ({ main =
@@ -30,6 +32,7 @@ local _, addon = ...
 local SuggestionService = {
     KIND_MAIN = "suggested main",
     KIND_ALIAS = "suggested alias",
+    KIND_DECLARED = "suggested declared",
     -- How long a withdrawal is kept for officers who weren't online.
     WITHDRAWAL_SECONDS = 14 * 86400,
 }
@@ -39,6 +42,7 @@ addon.SuggestionService = SuggestionService
 SuggestionService.KINDS = {
     [SuggestionService.KIND_MAIN] = true,
     [SuggestionService.KIND_ALIAS] = true,
+    [SuggestionService.KIND_DECLARED] = true,
 }
 
 local Service = {}
@@ -75,6 +79,7 @@ local function copy(fact)
         character = fact.character,
         main = fact.main,
         alias = fact.alias,
+        declared = fact.declared,
         at = fact.at,
         by = fact.by,
     }
@@ -88,6 +93,9 @@ local function isValue(fact, was)
     if fact.kind == addon.SyncFacts.KIND_ALIAS then
         return fact.alias == (was.alias or "")
     end
+    if fact.kind == addon.SyncFacts.KIND_DECLARED then
+        return fact.declared == (was.declared == true)
+    end
     return fact.main == was.main
 end
 
@@ -96,12 +104,18 @@ local function queueKind(factKind)
     if factKind == addon.SyncFacts.KIND_ALIAS then
         return SuggestionService.KIND_ALIAS
     end
+    if factKind == addon.SyncFacts.KIND_DECLARED then
+        return SuggestionService.KIND_DECLARED
+    end
     return SuggestionService.KIND_MAIN
 end
 
 local function factKind(kind)
     if kind == SuggestionService.KIND_ALIAS then
         return addon.SyncFacts.KIND_ALIAS
+    end
+    if kind == SuggestionService.KIND_DECLARED then
+        return addon.SyncFacts.KIND_DECLARED
     end
     return addon.SyncFacts.KIND_MAIN
 end
@@ -158,10 +172,20 @@ end
 -- had set it, and keeps the member's fact equal to it, stamped `at`, to
 -- withdraw the suggestion from officers' queues.
 function Service:Withdraw(fact, was, at)
-    self.facts:Restore({ kind = fact.kind, character = fact.character, main = was.main, alias = was.alias })
+    self.facts:Restore({
+        kind = fact.kind,
+        character = fact.character,
+        main = was.main,
+        alias = was.alias,
+        declared = was.declared == true,
+    })
     local withdrawal = copy(fact)
     withdrawal.main = fact.kind == addon.SyncFacts.KIND_MAIN and was.main or nil
     withdrawal.alias = fact.kind == addon.SyncFacts.KIND_ALIAS and (was.alias or "") or nil
+    withdrawal.declared = nil
+    if fact.kind == addon.SyncFacts.KIND_DECLARED then
+        withdrawal.declared = was.declared == true
+    end
     withdrawal.at = at
     withdrawal.kept = self.now()
     local withdrawals = self.partition:GetWithdrawals()
@@ -299,6 +323,7 @@ function Service:Revert(decided)
             character = fact.character,
             main = decided.official.main,
             alias = decided.official.alias,
+            declared = decided.official.declared == true,
         }) then
             reverted = reverted + 1
         end
@@ -317,6 +342,9 @@ function Service:Differs(fact)
     end
     if fact.kind == addon.SyncFacts.KIND_ALIAS then
         return (player.alias or "") ~= fact.alias
+    end
+    if fact.kind == addon.SyncFacts.KIND_DECLARED then
+        return self.partition:IsDeclared(fact.character) ~= fact.declared
     end
     -- "character's main is main": the same player, led by that main.
     local main = self.partition:GetCharacter(fact.main)
@@ -381,6 +409,8 @@ function Service:Queue(facts, from)
             local suggestion = { main = fact.main }
             if fact.kind == addon.SyncFacts.KIND_ALIAS then
                 suggestion = { alias = fact.alias }
+            elseif fact.kind == addon.SyncFacts.KIND_DECLARED then
+                suggestion = { declared = fact.declared }
             end
             table.insert(conflicts, {
                 character = fact.character,
@@ -422,7 +452,7 @@ function Service:Decision(entry, approved)
     }
     if not decided.approved then
         local held = self:Held(entry) or {}
-        decided.official = { main = held.main, alias = held.alias }
+        decided.official = { main = held.main, alias = held.alias, declared = held.declared }
     end
     return decided
 end
@@ -431,6 +461,9 @@ end
 function Service:Held(entry)
     if entry.kind == SuggestionService.KIND_ALIAS then
         return self.facts:AliasFactOf(entry.character)
+    end
+    if entry.kind == SuggestionService.KIND_DECLARED then
+        return self.facts:DeclaredFactOf(entry.character)
     end
     return self.facts:FactOf(entry.character)
 end
@@ -455,6 +488,8 @@ function Service:FactFor(entry, officer, now)
     }
     if fact.kind == addon.SyncFacts.KIND_ALIAS then
         fact.alias = entry.suggestion.alias
+    elseif fact.kind == addon.SyncFacts.KIND_DECLARED then
+        fact.declared = entry.suggestion.declared == true
     else
         fact.main = entry.suggestion.main
     end

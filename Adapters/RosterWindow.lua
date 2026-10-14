@@ -113,7 +113,11 @@ local function cellText(row, field)
     if field == "name" then
         local text
         if row.standalone then
-            text = row.coloredLabel
+            -- A declared main on its own is a confirmed player, unlike a
+            -- character nobody has organized.
+            text = row.coloredLabel .. (row.declared and "  |cff9d9d9d(declared main)|r" or "")
+        elseif row.declared then
+            text = row.coloredName .. "  |cff9d9d9d(declared main)|r"
         else
             text = row.coloredName .. (row.isMain and "  |cff9d9d9d(main)|r" or "")
         end

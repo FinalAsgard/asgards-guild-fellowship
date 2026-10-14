@@ -41,6 +41,9 @@ local function currentText(inputs, key, kind)
     if kind == "promotion" then
         return "Main of its player"
     end
+    if kind == "suggested declared" then
+        return inputs.partition:IsDeclared(key) and "Declared main" or "Not declared"
+    end
     if player.main == key then
         local count = #inputs.partition:CharactersOf(character.player)
         if count > 1 then
@@ -66,6 +69,9 @@ end
 
 -- What a member's suggestion about `key` asks for.
 local function suggestionText(inputs, key, kind, suggestion)
+    if kind == "suggested declared" then
+        return suggestion.declared and "Declared main" or "Not declared"
+    end
     if kind == "suggested main" then
         if suggestion.main == key then
             return "Main of its own player"
@@ -147,7 +153,7 @@ function ConflictViewModel.Build(inputs)
         local key = conflict.character
         local suggests
         local fromMember = conflict.from ~= nil and type(conflict.suggestion) == "table"
-        if fromMember and (conflict.kind == "suggested main" or conflict.kind == "suggested alias") then
+        if fromMember and addon.SuggestionService.KINDS[conflict.kind] then
             suggests = suggestionText(inputs, key, conflict.kind, conflict.suggestion)
         elseif conflict.kind == "main" and conflict.suggestion then
             suggests = "Alt of " .. displayName(inputs, conflict.suggestion.main)
@@ -212,12 +218,14 @@ function ConflictViewModel.Build(inputs)
         local kind = "suggested main"
         if type(fact) == "table" and fact.kind == "alias" then
             kind = "suggested alias"
+        elseif type(fact) == "table" and fact.kind == "declared" then
+            kind = "suggested declared"
         end
         -- Suggestions about characters this client no longer knows are
         -- left out.
         if type(fact) == "table" and type(fact.character) == "string"
             and inputs.partition:GetCharacter(fact.character) ~= nil
-            and (kind == "suggested alias" or type(fact.main) == "string")
+            and (kind ~= "suggested main" or type(fact.main) == "string")
         then
             local live = inputs.members[fact.character]
             table.insert(rows, {

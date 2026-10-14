@@ -23,6 +23,9 @@ Controller.__index = Controller
 --                 change to main links, with the set of every character
 --                 key whose player was involved, and each one's main before
 --                 the change (for guild sync)
+--   onDeclaredChanged optional function(key, before): after `key` was
+--                 declared its player's main by hand, or that was taken back,
+--                 with whether it was declared before (for guild sync)
 --   onAliasChanged  optional function(key, before): after a manual alias
 --                 change to the player of `key`, with the alias before it
 --                 ("" for none) (for guild sync)
@@ -57,6 +60,7 @@ function RosterController.Create(options)
         onDecideSuggestion = options.onDecideSuggestion,
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
+        onDeclaredChanged = options.onDeclaredChanged,
         onScanFinished = options.onScanFinished,
         onSyncResumed = options.onSyncResumed,
         collapsed = {},
@@ -550,6 +554,7 @@ function Controller:Organize(operation, key, ...)
     local service = self:Service()
     local involved, before
     local aliasBefore = operation == "SetAlias" and self:AliasOf(key) or nil
+    local declaredBefore = operation == "SetDeclared" and self.current.partition:IsDeclared(key) or nil
     if MAIN_LINK_OPERATIONS[operation] then
         involved = self:AddPlayerKeys({}, key)
         -- "Link as alt of…" also involves the player the character joins.
@@ -567,6 +572,8 @@ function Controller:Organize(operation, key, ...)
         self.onMainLinksChanged(self:AddPlayerKeys(involved, key), before)
     elseif operation == "SetAlias" and self.onAliasChanged ~= nil then
         self.onAliasChanged(key, aliasBefore)
+    elseif operation == "SetDeclared" and self.onDeclaredChanged ~= nil then
+        self.onDeclaredChanged(key, declaredBefore == true)
     end
     self:Refresh()
     return ok == true
@@ -586,6 +593,11 @@ end
 
 function Controller:Detach(key)
     return self:Organize("Detach", key)
+end
+
+-- "Declare as my main": `key` must be its player's main.
+function Controller:SetDeclared(key, declared)
+    return self:Organize("SetDeclared", key, declared)
 end
 
 -- Turns "Don't sync" on or off for `key`'s player. Turning it off reports

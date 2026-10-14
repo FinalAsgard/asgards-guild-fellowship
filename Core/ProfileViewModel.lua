@@ -55,6 +55,8 @@ local function characterEntry(inputs, key, isMain)
         coloredName = coloredName(name, inputs.classColor(classToken)),
         level = live.level or character.level,
         isMain = isMain,
+        -- A main the player declared on purpose.
+        declared = isMain and inputs.partition:IsDeclared(key),
         isSelf = isSelf,
         roles = roles,
         rolesText = addon.RoleCatalog.Describe(preferences),
@@ -80,9 +82,10 @@ end
 --   pending      this member's pending suggestions (SuggestionService:Pending),
 --                optional
 -- Returns { message, dnd } when there's no player to show, or:
---   { label, alias, aliasMax, main, mainName, about, characters, suggested,
---     waiting, dnd }
--- where `waiting` lists what this player asked officers for and is still
+--   { label, alias, aliasMax, main, mainName, declared, about, characters,
+--     suggested, waiting, dnd }
+-- where `declared` is whether the player declared its main, and
+-- `waiting` lists what this player asked officers for and is still
 -- pending (SuggestionBundles.MemberItems), and
 -- `alias` is "" without one, `aliasMax` its longest length and `main`
 -- the main's key, and
@@ -94,8 +97,8 @@ end
 -- not dismissed, each as AltCandidates describes them; and `characters`
 -- lists the main first, then the alts still in the
 -- guild, each:
---   { key, name, coloredName, level, isMain, isSelf, roles, rolesText,
---     editable, hint, canMakeMain, canRemove }
+--   { key, name, coloredName, level, isMain, declared, isSelf, roles,
+--     rolesText, editable, hint, canMakeMain, canRemove }
 -- `roles` lists the roles the character's class can fill, each
 -- { role, label, checked }; `editable` is true only for the logged-in
 -- character, and the others carry a `hint` saying how to change theirs.
@@ -158,6 +161,7 @@ function ProfileViewModel.Build(inputs)
         aliasMax = addon.PlayerService.MAX_ALIAS_LENGTH,
         main = player.main,
         mainName = main.name,
+        declared = main.declared == true,
         characters = characters,
         dnd = dnd,
     }

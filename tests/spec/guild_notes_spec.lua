@@ -521,3 +521,16 @@ test.test("composed Forever: markers use the first and last name", function()
     test.assertEqual(0, #partition:GetConflicts())
     test.assertEqual(keys["Tool Box"], partition:GetPlayer(partition:GetCharacter(keys["Zélie Rune"]).player).main)
 end)
+
+test.test("composed: an officer declaring their main writes >OwnName, read back as declared", function()
+    local officer = login(nil, "Toolbox-Area52")
+
+    test.assertTrue(officer.addon.rosterController:SetDeclared("toolbox-area52", true))
+    fixtures.runTimers(officer)
+
+    test.assertEqual(">Toolbox @TheTool raid lead", noteOf(officer, "Toolbox-Area52"))
+    rescan(officer)
+    local partition = partitionOf(officer)
+    test.assertEqual(0, #partition:GetConflicts())
+    test.assertTrue(partition:IsDeclared("toolbox-area52"))
+end)

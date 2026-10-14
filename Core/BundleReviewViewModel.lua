@@ -23,9 +23,9 @@ local function currentMain(partition, key)
     return player and player.main or key
 end
 
--- "Main: Hammer", "Alts: Toolbox, Wrench" (or "none"), "Alias: Tools" (or
--- "none").
-local function picture(inputs, main, alts, alias)
+-- "Main: Hammer" (with "(declared)" when it is), "Alts: Toolbox, Wrench"
+-- (or "none"), "Alias: Tools" (or "none").
+local function picture(inputs, main, alts, alias, declared)
     local names = {}
     local index
     for index = 1, #alts do
@@ -33,7 +33,7 @@ local function picture(inputs, main, alts, alias)
     end
     table.sort(names)
     return {
-        "Main: " .. nameOf(inputs, main),
+        "Main: " .. nameOf(inputs, main) .. (declared and " (declared)" or ""),
         "Alts: " .. (names[1] and table.concat(names, ", ") or "none"),
         "Alias: " .. ((alias ~= nil and alias ~= "") and alias or "none"),
     }
@@ -70,11 +70,26 @@ function BundleReviewViewModel.Build(inputs)
     end
     local alias = player and player.alias or nil
     local suggestedAlias = alias
+    -- Declared mains as suggested; any other is as it is now.
+    local suggestedDeclared = {}
+    local function isDeclared(key)
+        if suggestedDeclared[key] ~= nil then
+            return suggestedDeclared[key]
+        end
+        return partition:IsDeclared(key)
+    end
     local lines = {}
     for index = 1, #items do
         local item = items[index]
         involve(item.character)
-        if item.kind == addon.SuggestionService.KIND_ALIAS then
+        if item.kind == addon.SuggestionService.KIND_DECLARED then
+            suggestedDeclared[item.character] = item.suggestion and item.suggestion.declared == true
+            table.insert(lines, {
+                character = item.character,
+                kind = item.kind,
+                text = item.name .. ": " .. item.current .. " → " .. item.suggests,
+            })
+        elseif item.kind == addon.SuggestionService.KIND_ALIAS then
             suggestedAlias = item.suggestion and item.suggestion.alias or suggestedAlias
             table.insert(lines, {
                 character = item.character,
@@ -100,7 +115,7 @@ function BundleReviewViewModel.Build(inputs)
                 table.insert(alts, keys[index])
             end
         end
-        before = picture(inputs, player.main, alts, alias)
+        before = picture(inputs, player.main, alts, alias, partition:IsDeclared(player.main))
     end
 
     -- With every suggestion approved: each character follows its suggested
@@ -111,7 +126,7 @@ function BundleReviewViewModel.Build(inputs)
     end
     for index = 1, #items do
         local item = items[index]
-        if item.kind ~= addon.SuggestionService.KIND_ALIAS and item.suggestion and item.suggestion.main then
+        if item.kind == addon.SuggestionService.KIND_MAIN and item.suggestion and item.suggestion.main then
             suggestedMains[item.character] = item.suggestion.main
         end
     end
@@ -133,7 +148,7 @@ function BundleReviewViewModel.Build(inputs)
                 table.insert(alts, key)
             end
         end
-        suggested = picture(inputs, main, alts, suggestedAlias)
+        suggested = picture(inputs, main, alts, suggestedAlias, isDeclared(main))
     end
 
     return {

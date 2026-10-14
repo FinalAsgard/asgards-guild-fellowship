@@ -18,7 +18,8 @@ local _, addon = ...
 -- schema 2's, the fields are optional, so v2 data is already valid v3 data.
 --
 -- Schema 4 adds the player profile's text fields on character records:
--- Discord, location and bio, each with when and by whom it was set; and, per
+-- Discord, location and bio, each with when and by whom it was set; a
+-- declared-main flag with its stamp (officer data); and, per
 -- guild, the characters this install has logged in on and the ones the
 -- player dismissed as suggestions (local only). Optional again, so v3 data
 -- is already valid v4 data.

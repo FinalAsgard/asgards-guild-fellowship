@@ -6,10 +6,13 @@ local _, addon = ...
 --
 --   { kind = "main", character = key, main = key, at = seconds, by = key }
 --   { kind = "alias", character = key, alias = text, at = seconds, by = key }
+--   { kind = "declared", character = key, declared = boolean, at = seconds, by = key }
 --
 -- "character's main is main"; a character that is its own main says so with
 -- main == character. "character's player goes by alias"; an empty alias
--- clears it.
+-- clears it. "character is (or isn't) declared its player's main": the
+-- player deliberately says it's their main, even with no alts. Older
+-- clients see the declared kind as malformed and ignore it.
 --
 -- Player profile facts are a character's own data, not officers':
 --
@@ -32,6 +35,7 @@ local _, addon = ...
 local SyncFacts = {
     KIND_MAIN = "main",
     KIND_ALIAS = "alias",
+    KIND_DECLARED = "declared",
     KIND_ROLES = "roles",
     KIND_DISCORD = "discord",
     KIND_LOCATION = "location",
@@ -75,6 +79,9 @@ function SyncFacts.IsValid(fact)
     end
     if fact.kind == SyncFacts.KIND_ROLES then
         return addon.FellowshipStore.IsRoleList(fact.roles)
+    end
+    if fact.kind == SyncFacts.KIND_DECLARED then
+        return type(fact.declared) == "boolean"
     end
     if addon.FellowshipStore.PROFILE_FIELDS[fact.kind] ~= nil then
         return addon.FellowshipStore.IsProfileText(fact.kind, fact.text)
@@ -141,6 +148,34 @@ function Facts:AliasFactOf(key)
         at = at,
         by = by,
     }
+end
+
+-- The declared-main fact for `key` as this client holds it, or nil for an
+-- unknown character.
+function Facts:DeclaredFactOf(key)
+    local at, by = self.partition:GetDeclaredStamp(key)
+    if at == nil then
+        return nil
+    end
+    return {
+        kind = SyncFacts.KIND_DECLARED,
+        character = key,
+        declared = self.partition:IsDeclared(key),
+        at = at,
+        by = by,
+    }
+end
+
+-- Stamps whether `key` is declared a main as set by `author` at `at`
+-- (always newer than the stamp it replaces), and returns its fact, or nil
+-- for an unknown character.
+function Facts:StampDeclared(key, author, at)
+    local heldAt = self.partition:GetDeclaredStamp(key)
+    if heldAt == nil then
+        return nil
+    end
+    self.partition:SetDeclaredStamp(key, math.max(at, heldAt + 1), author)
+    return self:DeclaredFactOf(key)
 end
 
 -- Stamps the current alias of `key`'s player as set by `author` at `at`
@@ -261,6 +296,9 @@ function Facts:HeldStamp(fact)
     end
     if fact.kind == SyncFacts.KIND_ALIAS then
         return self.partition:GetAliasStamp(fact.character)
+    end
+    if fact.kind == SyncFacts.KIND_DECLARED then
+        return self.partition:GetDeclaredStamp(fact.character)
     end
     return self.partition:GetMainStamp(fact.character)
 end
@@ -394,6 +432,12 @@ function Facts:Change(fact)
         self.partition:SetProfileText(fact.character, fact.kind, fact.text, fact.at, fact.by)
         return
     end
+    if fact.kind == SyncFacts.KIND_DECLARED then
+        self.partition:SetDeclared(fact.character, fact.declared)
+        self.partition:SetDeclaredStamp(fact.character, fact.at, fact.by)
+        self.partition:ForgetNoteFingerprint(fact.character)
+        return
+    end
     self:Reshape(fact, addon.FellowshipStore.SOURCE_SYNC)
     if fact.kind == SyncFacts.KIND_ALIAS then
         self.partition:SetAliasStamp(fact.character, fact.at, fact.by)
@@ -412,6 +456,7 @@ function Facts:Restore(value)
         character = type(value) == "table" and value.character,
         main = type(value) == "table" and value.main,
         alias = type(value) == "table" and value.alias,
+        declared = type(value) == "table" and value.declared,
         at = 1,
         by = "?",
     }
@@ -422,6 +467,11 @@ function Facts:Restore(value)
         return false
     end
     local store = addon.FellowshipStore
+    if fact.kind == SyncFacts.KIND_DECLARED then
+        self.partition:SetDeclared(fact.character, fact.declared)
+        self.partition:ClearDeclaredStamp(fact.character)
+        return true
+    end
     if fact.kind == SyncFacts.KIND_ALIAS then
         self:Reshape(fact, store.SOURCE_NOTE)
         self.partition:ClearAliasStamp(fact.character)
@@ -440,7 +490,8 @@ function Facts:IsPinned(key)
 end
 
 -- Every officer fact this client holds, which it can pass on to others:
--- main links, sorted by character, then aliases, sorted by main. Facts
+-- main links, sorted by character, then aliases, sorted by main, then
+-- declared mains, sorted by character. Facts
 -- nobody stamped, and edits by authors who aren't officers now, aren't
 -- officer data, and "Don't sync" players are this client's own business.
 -- `checkpoint`, when given, is called after each character and player so a
@@ -448,12 +499,17 @@ end
 function Facts:OfficerFacts(checkpoint)
     checkpoint = checkpoint or function() end
     local partition = self.partition
-    local links, aliases = {}, {}
+    local links, aliases, declared = {}, {}, {}
     partition:EachCharacter(function(key, character)
         if character.mainAt ~= nil and self.isOfficer(character.mainBy)
             and not partition:IsNoSync(character.player)
         then
             table.insert(links, key)
+        end
+        if character.declaredAt ~= nil and self.isOfficer(character.declaredBy)
+            and not partition:IsNoSync(character.player)
+        then
+            table.insert(declared, key)
         end
     end)
     partition:EachPlayer(function(id, player)
@@ -463,6 +519,7 @@ function Facts:OfficerFacts(checkpoint)
     end)
     table.sort(links)
     table.sort(aliases)
+    table.sort(declared)
     local facts = {}
     local index
     for index = 1, #links do
@@ -471,6 +528,10 @@ function Facts:OfficerFacts(checkpoint)
     end
     for index = 1, #aliases do
         table.insert(facts, self:AliasFactOf(aliases[index]))
+        checkpoint()
+    end
+    for index = 1, #declared do
+        table.insert(facts, self:DeclaredFactOf(declared[index]))
         checkpoint()
     end
     return facts
@@ -538,6 +599,12 @@ function Facts:Rejoin(key)
     local _, aliasBy = partition:GetAliasStamp(key)
     if aliasBy ~= nil and not self.isOfficer(aliasBy) then
         partition:ClearAliasStamp(key)
+    end
+    for index = 1, #keys do
+        local _, declaredBy = partition:GetDeclaredStamp(keys[index])
+        if declaredBy ~= nil and not self.isOfficer(declaredBy) then
+            partition:ClearDeclaredStamp(keys[index])
+        end
     end
 end
 

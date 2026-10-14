@@ -769,6 +769,20 @@ local function registerProfileTests(profile)
         test.assertFalse(openProfile(again).suggestHeading.shown)
     end)
 
+    test.test(profile .. " Declare as my main declares the player's main and then goes away", function()
+        local world, addon = loggedIn(profile)
+        local page = openProfile(world)
+        local _, partition = addon.rosterController:QuietContext()
+        local main = page.rows[1].key
+        test.assertTrue(page.declareButton.shown)
+
+        page.declareButton.scripts.OnClick()
+
+        test.assertTrue(partition:IsDeclared(main))
+        test.assertFalse(page.declareButton.shown)
+        test.assertContains(page.rows[1].name.text, "declared main")
+    end)
+
     test.test(profile .. " out of a guild, My Profile says it needs one", function()
         local world, addon = loggedIn(profile)
         local page = openProfile(world)
