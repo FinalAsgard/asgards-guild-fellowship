@@ -65,9 +65,10 @@ function GroupFinderWindow.Label(dungeon)
     return dungeon.name .. " (" .. dungeon.minLevel .. "–" .. dungeon.maxLevel .. ")"
 end
 
--- "Hammer (42, not in guild)", the name in its class color when
--- `colorOf(class)` gives one.
+-- "Hammer (42, not in guild)", the name without its realm, in its class
+-- color when `colorOf(class)` gives one.
 function GroupFinderWindow.MemberLabel(member, colorOf)
+    local bare = string.match(member.name, "^([^%-]+)") or member.name
     local details = {}
     if member.level ~= nil then
         table.insert(details, tostring(member.level))
@@ -75,8 +76,8 @@ function GroupFinderWindow.MemberLabel(member, colorOf)
     if not member.inGuild then
         table.insert(details, "not in guild")
     end
-    local name = addon.GroupCandidates and addon.GroupCandidates.Colored(member.name, member.classToken, colorOf)
-        or member.name
+    local name = addon.GroupCandidates and addon.GroupCandidates.Colored(bare, member.classToken, colorOf)
+        or bare
     if #details == 0 then
         return name
     end

@@ -62,6 +62,41 @@ test.test("invite flow: once the character joins, it takes the slot as a party m
     test.assertEqual(nil, session:InviteState(slots[3], function() return true end))
 end)
 
+test.test("invite flow: a joined invitee whose party name carries a realm still takes their own slot", function()
+    local addon = load()
+    local session, request = accepted(addon)
+
+    -- The party gives "Bolt-Stormrage", which didn't resolve to Bolt's
+    -- roster key: matched by the name without its realm.
+    session:UpdateParty({
+        ME,
+        { key = "Player-9", name = "Bolt-Stormrage", classToken = "SHAMAN", inGuild = true },
+    }, true)
+
+    local slots = session:Slots()
+    test.assertTrue(request.inParty)
+    test.assertEqual("Player-9", slots[3].member.key)
+    -- Not counted twice, and no Invite button left on the slot.
+    test.assertEqual(nil, slots[2].member)
+    test.assertEqual(nil, slots[4].member)
+    test.assertEqual(nil, session:InviteState(slots[3], function() return true end))
+    -- Shown without the realm.
+    test.assertEqual("Bolt", addon.GroupFinderWindow.MemberLabel(slots[3].member))
+end)
+
+test.test("invite flow: a different party member never takes an invitee's slot", function()
+    local addon = load()
+    local session, request = accepted(addon)
+
+    session:UpdateParty({
+        ME,
+        { key = "Player-8", name = "Zap", classToken = "MAGE", inGuild = true, rosterKey = "zap" },
+    }, true)
+
+    test.assertFalse(request.inParty)
+    test.assertEqual("Bolt", session:Slots()[3].member.name)
+end)
+
 -- The WoW adapter -------------------------------------------------------------
 
 local function newClient(environment)

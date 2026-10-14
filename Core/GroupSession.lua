@@ -160,6 +160,30 @@ local function openSlot(slots, role)
     return nil
 end
 
+-- A character name without its realm, lowercased: "Zelwindran-Area52"
+-- and "zelwindran" are the same.
+local function bareName(name)
+    if type(name) ~= "string" then
+        return nil
+    end
+    return string.lower(string.match(name, "^([^%-]+)") or name)
+end
+
+-- Whether party `member` is the character an accepted `request`'s invitee
+-- chose: by guild roster key, or, when the party gave a name that didn't
+-- resolve to that key (a realm spelled differently, say), by the name
+-- without its realm.
+local function joined(member, request)
+    if member.isPlayer then
+        return false
+    end
+    if member.rosterKey ~= nil and member.rosterKey == request.character.key then
+        return true
+    end
+    local name = bareName(member.name)
+    return name ~= nil and name == bareName(request.character.name)
+end
+
 -- Fills the slots: accepted invitees first, then the party, chosen roles
 -- first (the game's, then the organizer's), so a default never takes a
 -- slot someone was put in.
@@ -175,7 +199,7 @@ function Session:place()
             local memberIndex
             for memberIndex = 1, #self.members do
                 local member = self.members[memberIndex]
-                if member.rosterKey ~= nil and member.rosterKey == request.character.key then
+                if joined(member, request) then
                     request.inParty = true
                     joinedRole[member.key] = request.role
                 end
