@@ -205,6 +205,19 @@ function Window:buildSuggestions()
     list:SetHeight(GroupFinderWindow.SUGGESTION_HEIGHT)
     scroll:SetScrollChild(list)
     self.suggestionList = list
+    -- The list follows the column as the frame is resized, so the Request
+    -- buttons on its right edge stay in view.
+    column:SetScript("OnSizeChanged", function(_, width)
+        self:fitSuggestions(width)
+    end)
+end
+
+-- Sizes the suggestions list to the column's `width`, less the scroll
+-- bar, never narrower than a Request button and a little of the name.
+function Window:fitSuggestions(width)
+    if type(width) == "number" and width > 0 then
+        self.suggestionList:SetWidth(math.max(width - 22, GroupFinderWindow.REQUEST_WIDTH + 40))
+    end
 end
 
 -- The suggestions column's line `index`, made on first use.
@@ -350,10 +363,9 @@ function Window:drawSuggestions(candidates, dungeon, grouping)
         end
     end
     self.columnHeading:SetText(grouping and "Guildmates who could join" or "Guildmates")
-    -- The list follows the column's width as the frame is resized.
     local okWidth, width = pcall(self.suggestions.GetWidth, self.suggestions)
-    if okWidth and type(width) == "number" and width > 60 then
-        self.suggestionList:SetWidth(width - 22)
+    if okWidth then
+        self:fitSuggestions(width)
     end
     local index
     for index = 1, #items do

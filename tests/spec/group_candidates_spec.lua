@@ -250,6 +250,17 @@ local function shownLines(window)
     return texts
 end
 
+test.test("group finder window: resizing the frame keeps the suggestions, and their Request buttons, in view", function()
+    local window = newWindow(newGuild())
+
+    -- Made smaller: the list shrinks with its column (less the scroll bar).
+    window.suggestions.scripts.OnSizeChanged(window.suggestions, 168, 300)
+    test.assertEqual(146, window.suggestionList.width)
+    -- Never narrower than a Request button and a little of the name.
+    window.suggestions.scripts.OnSizeChanged(window.suggestions, 40, 300)
+    test.assertEqual(104, window.suggestionList.width)
+end)
+
 test.test("group finder window: the picker shows each dungeon with its range and no role counts", function()
     local window = newWindow(newGuild())
 
