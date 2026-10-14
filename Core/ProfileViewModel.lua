@@ -97,10 +97,10 @@ end
 -- lists the main first, then the alts still in the
 -- guild, each:
 --   { key, name, coloredName, level, isMain, declared, isSelf, roles,
---     rolesText, editable, hint, canMakeMain, canRemove }
+--     rolesText, editable, canMakeMain, canRemove }
 -- `roles` lists the roles the character's class can fill, each
 -- { role, label, checked }; `editable` is true only for the logged-in
--- character, and the others carry a `hint` saying how to change theirs.
+-- character.
 function ProfileViewModel.Build(inputs)
     local dnd = inputs.dnd == true
     if not inputs.inGuild then
