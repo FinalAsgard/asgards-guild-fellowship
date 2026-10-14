@@ -62,7 +62,6 @@ local function characterEntry(inputs, key, isMain)
         rolesText = addon.RoleCatalog.Describe(preferences),
         -- Role preferences change only on the character they belong to.
         editable = isSelf,
-        hint = not isSelf and ("Log in on " .. name .. " to change its roles.") or nil,
         -- Identity actions, as on the roster: any alt can become the main,
         -- or be removed (split off as its own player).
         canMakeMain = not isMain,

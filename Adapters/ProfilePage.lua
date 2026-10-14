@@ -4,10 +4,9 @@ local _, addon = ...
 -- character (ProfileViewModel), drawn each time the tab comes into view.
 -- Each character shows in its class color with its level. The logged-in
 -- character gets a check box for each role its class can fill; the others
--- show their roles read-only, with a hint to log in on them to change
--- them. Above the characters, the player's alias, Discord, location and
--- bio can be edited, each with a count of characters used; Enter (or
--- leaving the box) saves a change, Escape undoes it. Each alt has Make main
+-- show their roles read-only. Above the characters, the player's alias,
+-- Discord, location and bio can be edited, each with a count of characters
+-- used; Enter (or leaving the box) saves a change, Escape undoes it. Each alt has Make main
 -- and Remove (split off as its own player); Add alt… opens a picker of the
 -- guild's other characters (ProfileViewModel.AltCandidates): characters on
 -- their own, and, for a character on its own, other players' characters,
@@ -467,7 +466,7 @@ end
 
 -- The character list's row `index`, made on first use: the character's
 -- name, a check box per role (for the logged-in character), and its roles
--- as text with a hint (for the others).
+-- as text (for the others).
 function Page:row(index)
     if self.rows[index] ~= nil then
         return self.rows[index]
@@ -686,7 +685,7 @@ function Page:drawRow(row, character)
     if character.editable then
         row.rolesText:Hide()
     else
-        row.rolesText:SetText("Roles: " .. character.rolesText .. "  |cff9d9d9d" .. tostring(character.hint) .. "|r")
+        row.rolesText:SetText("Roles: " .. character.rolesText)
         row.rolesText:Show()
     end
 end

@@ -127,13 +127,12 @@ test.test("profile view model: only the logged-in character's roles are editable
     test.assertFalse(alt.editable)
     -- Never set: every role the paladin's class can fill.
     test.assertEqual("Tank, Healer, DPS", alt.rolesText)
-    test.assertEqual("Log in on Hammer to change its roles.", alt.hint)
+    test.assertEqual(nil, alt.hint)
 
     -- Logged in on Hammer instead, Hammer's are the editable ones.
     model = world.build({ selfKey = "hammer-area52" })
     test.assertFalse(model.characters[1].editable)
     test.assertEqual("DPS", model.characters[1].rolesText)
-    test.assertEqual("Log in on Toolbox to change its roles.", model.characters[1].hint)
     test.assertTrue(model.characters[2].editable)
     test.assertEqual("Tank+ Healer+ DPS+", roleList(model.characters[2]))
 end)
@@ -195,7 +194,6 @@ local PLAYER = {
         {
             key = "hammer", name = "Hammer", coloredName = "Hammer", level = 70,
             isMain = false, isSelf = false, editable = false, rolesText = "Tank, Healer, DPS",
-            hint = "Log in on Hammer to change its roles.",
             roles = {},
         },
     },
@@ -223,8 +221,8 @@ test.test("profile tab: draws the player, check boxes for the logged-in characte
     test.assertEqual("Hammer  |cff9d9d9d(70)|r", alt.name.text)
     test.assertFalse(alt.checks[1].button.shown)
     test.assertTrue(alt.rolesText.shown)
-    test.assertContains(alt.rolesText.text, "Tank, Healer, DPS")
-    test.assertContains(alt.rolesText.text, "Log in on Hammer to change its roles.")
+    -- Just the roles: no hint to log in on it.
+    test.assertEqual("Roles: Tank, Healer, DPS", alt.rolesText.text)
 end)
 
 test.test("profile tab: its check boxes change roles and Do Not Disturb", function()
@@ -649,7 +647,7 @@ local function registerProfileTests(profile)
         test.assertEqual("Tank", main.checks[1].label.text)
         test.assertEqual("DPS", main.checks[2].label.text)
         test.assertFalse(main.checks[3].button.shown)
-        test.assertContains(page.rows[2].rolesText.text, "to change its roles.")
+        test.assertEqual("Roles: Tank, Healer, DPS", page.rows[2].rolesText.text)
     end)
 
     test.test(profile .. " My Profile's roles are the Settings' roles, both ways", function()
