@@ -320,7 +320,9 @@ function Service:SetDeclared(key, declared)
     if player.main ~= key then
         return false, "only a player's main can be declared; make it the main first"
     end
-    self.partition:SetDeclared(key, declared == true)
+    -- Marked as set by hand, so a note never overrides it, even before (or
+    -- without) guild sync stamping it.
+    self.partition:SetDeclared(key, declared == true, addon.FellowshipStore.SOURCE_MANUAL)
     return true
 end
 

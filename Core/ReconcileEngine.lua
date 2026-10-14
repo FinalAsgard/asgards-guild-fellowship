@@ -283,7 +283,7 @@ function ReconcileEngine.Plan(inputs)
                 local character = partition:GetCharacter(key)
                 local player = character and partition:GetPlayer(character.player)
                 if seedable[key] or (player ~= nil and player.main == key) then
-                    if not partition:IsDeclared(key) and (partition:GetDeclaredStamp(key) or 0) == 0 then
+                    if not partition:IsDeclared(key) and (character == nil or partition:DeclaredUntouched(key)) then
                         plan.declared[key] = true
                     end
                 else
@@ -467,8 +467,8 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
     for declaredKey in pairs(plan.declared) do
         local character = partition:GetCharacter(declaredKey)
         local player = character and partition:GetPlayer(character.player)
-        if player ~= nil and player.main == declaredKey and (partition:GetDeclaredStamp(declaredKey) or 0) == 0
-            and partition:SetDeclared(declaredKey, true)
+        if player ~= nil and player.main == declaredKey and partition:DeclaredUntouched(declaredKey)
+            and partition:SetDeclared(declaredKey, true, addon.FellowshipStore.SOURCE_NOTE)
         then
             declared = declared + 1
         end

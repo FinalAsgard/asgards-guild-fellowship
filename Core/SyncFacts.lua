@@ -433,7 +433,7 @@ function Facts:Change(fact)
         return
     end
     if fact.kind == SyncFacts.KIND_DECLARED then
-        self.partition:SetDeclared(fact.character, fact.declared)
+        self.partition:SetDeclared(fact.character, fact.declared, addon.FellowshipStore.SOURCE_SYNC)
         self.partition:SetDeclaredStamp(fact.character, fact.at, fact.by)
         self.partition:ForgetNoteFingerprint(fact.character)
         return
@@ -468,7 +468,7 @@ function Facts:Restore(value)
     end
     local store = addon.FellowshipStore
     if fact.kind == SyncFacts.KIND_DECLARED then
-        self.partition:SetDeclared(fact.character, fact.declared)
+        self.partition:SetDeclared(fact.character, fact.declared, store.SOURCE_NOTE)
         self.partition:ClearDeclaredStamp(fact.character)
         return true
     end

@@ -224,3 +224,25 @@ test.test("the roster marks declared mains, apart from characters nobody organiz
     test.assertTrue(declared["toolbox-area52"])
     test.assertFalse(declared["wrench-area52"])
 end)
+
+test.test("a declaration set by hand, even without guild sync stamping it, is never overridden by a note", function()
+    local world = scanned({
+        { "Toolbox-Area52", "" },
+        { "Hammer-Area52", ">Toolbox" },
+    })
+    local service = world.addon.PlayerService.Create(world.partition)
+
+    -- Taken back by hand, with no stamp: the self marker doesn't bring it back.
+    test.assertTrue(service:SetDeclared("toolbox-area52", false))
+    test.assertEqual(0, (world.partition:GetDeclaredStamp("toolbox-area52")))
+    world.scan({
+        { "Toolbox-Area52", ">Toolbox" },
+        { "Hammer-Area52", ">Toolbox" },
+    }, "full")
+    test.assertFalse(world.partition:IsDeclared("toolbox-area52"))
+
+    -- Only a player's main can be declared.
+    local ok, reason = service:SetDeclared("hammer-area52", true)
+    test.assertFalse(ok)
+    test.assertContains(reason, "make it the main first")
+end)

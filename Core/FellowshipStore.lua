@@ -127,6 +127,9 @@ local function characterProblem(character)
     if character.declaredBy ~= nil and not isText(character.declaredBy) then
         return "character declared main author is invalid"
     end
+    if character.declaredSource ~= nil and not isText(character.declaredSource) then
+        return "character declared main source is invalid"
+    end
     -- Player profile text (schema 4): Discord, location and bio, each with
     -- when and by whom it was set. An empty value was cleared.
     local field, longest
@@ -1331,14 +1334,29 @@ function Partition:IsPlayerDeclared(playerId)
     return player ~= nil and self:IsDeclared(player.main)
 end
 
--- Sets whether `key` is declared a main, leaving its stamp alone.
-function Partition:SetDeclared(key, declared)
+-- Sets whether `key` is declared a main, and where that came from (a
+-- FellowshipStore source: by hand, from a note, or through sync), leaving
+-- its stamp alone.
+function Partition:SetDeclared(key, declared, source)
     local character = self.data.characters[key]
-    if character == nil or type(declared) ~= "boolean" then
+    if character == nil or type(declared) ~= "boolean" or (source ~= nil and not isText(source)) then
         return false
     end
     character.declared = declared or nil
+    character.declaredSource = source
     return true
+end
+
+-- Whether a note may still decide `key`'s declaration: nobody declared it,
+-- or took that back, by hand or through sync.
+function Partition:DeclaredUntouched(key)
+    local character = self.data.characters[key]
+    if character == nil then
+        return false
+    end
+    local source = character.declaredSource
+    return (character.declaredAt or 0) == 0
+        and source ~= FellowshipStore.SOURCE_MANUAL and source ~= FellowshipStore.SOURCE_SYNC
 end
 
 -- When `key`'s declared main was last set or cleared, and by whom; like main
