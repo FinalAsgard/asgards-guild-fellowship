@@ -104,6 +104,33 @@ test.test("invite flow: the invitee's own roster key wins over a same-named char
     test.assertEqual("Player-7", slots[4].member.key)
 end)
 
+test.test("invite flow: one joined character matched by name counts for only one invitee", function()
+    local addon = load()
+    local session, request = accepted(addon)
+    -- A second invitee also chose a Bolt, from another realm.
+    local other = session:Request({ playerId = 3, key = "zap", label = "Zap" }, NOW, "me")
+    session:Answer(other.id, "zap", { role = "dps", key = "bolt-stormrage", name = "Bolt-Stormrage", level = 23 })
+
+    -- One Bolt joins, with a name that didn't resolve to either roster key.
+    session:UpdateParty({
+        ME,
+        { key = "Player-9", name = "Bolt-Area52", classToken = "SHAMAN", inGuild = true },
+    }, true)
+
+    test.assertTrue(request.inParty)
+    -- The other invitee keeps their slot, still waiting to be invited.
+    test.assertFalse(other.inParty)
+    local waiting
+    local slot
+    for _, slot in ipairs(session:Slots()) do
+        if slot.member ~= nil and slot.member.name == "Bolt-Stormrage" then
+            waiting = slot
+        end
+    end
+    test.assertTrue(waiting ~= nil)
+    test.assertEqual("waiting", session:InviteState(waiting, function() return false end))
+end)
+
 test.test("invite flow: a different party member never takes an invitee's slot", function()
     local addon = load()
     local session, request = accepted(addon)

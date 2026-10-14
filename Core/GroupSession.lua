@@ -173,8 +173,8 @@ end
 -- chose, or nil. Matched by guild roster key; only when no member has that
 -- key, by the name without its realm (the party gave a name that didn't
 -- resolve to that key, a realm spelled differently, say), and then only a
--- member not already matched by key to another request (`byKey`).
-local function joinedMember(members, request, byKey)
+-- member not already matched to another request (`claimed`).
+local function joinedMember(members, request, claimed)
     local fallback
     local index
     for index = 1, #members do
@@ -184,7 +184,7 @@ local function joinedMember(members, request, byKey)
                 return member
             end
             local name = bareName(member.name)
-            if fallback == nil and not byKey[member.key] and name ~= nil
+            if fallback == nil and not claimed[member.key] and name ~= nil
                 and name == bareName(request.character.name)
             then
                 fallback = member
@@ -201,9 +201,9 @@ function Session:place()
     local slots, defaults = emptySlots(), {}
     -- An invitee who joined the party keeps the role they chose.
     local joinedRole = {}
-    -- Members whose roster key is an accepted invitee's: never taken by a
-    -- name match for another request.
-    local byKey = {}
+    -- Members already matched to a request, first those whose roster key is
+    -- an accepted invitee's: never taken by a name match for another.
+    local claimed = {}
     local index
     for index = 1, #self.requests do
         local request = self.requests[index]
@@ -213,7 +213,7 @@ function Session:place()
             if request.state == GroupSession.ACCEPTED and member.rosterKey ~= nil
                 and member.rosterKey == request.character.key
             then
-                byKey[member.key] = true
+                claimed[member.key] = true
             end
         end
     end
@@ -221,10 +221,11 @@ function Session:place()
         local request = self.requests[index]
         request.inParty = false
         if request.state == GroupSession.ACCEPTED then
-            local member = joinedMember(self.members, request, byKey)
+            local member = joinedMember(self.members, request, claimed)
             if member ~= nil then
                 request.inParty = true
                 joinedRole[member.key] = request.role
+                claimed[member.key] = true
             end
         end
     end
