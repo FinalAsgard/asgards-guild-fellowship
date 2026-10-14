@@ -20,7 +20,8 @@ local _, addon = ...
 -- last ask, available or not, and a Do Not Disturb check box.
 --
 -- Beside the slots, for each role still open, the online guildmates who
--- could fill it (GroupCandidates). Add-on users get a Request button (Cancel while their request is
+-- could fill it (GroupCandidates); clicking one opens a whisper to the
+-- character they're on now. Add-on users get a Request button (Cancel while their request is
 -- pending), and their request's state beside their name. An accepted
 -- invitee's slot reads "Waiting for <character> to log in" until that
 -- character is online, then shows an Invite button; nothing is invited
@@ -99,6 +100,7 @@ end
 --   cancelRequest(id)   withdraws a pending request
 --   isOnline(key)       whether a guild character is online now
 --   invite(key)         sends the game's party invite to that character
+--   whisper(key)        opens the chat box on a whisper to that character
 --   zone()              the zone the character is in, by name, or nil
 --   classColor(class)   a class's color as "ffrrggbb", or nil
 --   refresh()           asks the guild again who is online and available
@@ -134,6 +136,7 @@ function GroupFinderWindow.Create(client, host, options)
             return false
         end,
         invite = options.invite or function() end,
+        whisper = options.whisper or function() end,
         zone = options.zone or function()
             return nil
         end,
@@ -246,6 +249,14 @@ function Window:suggestionLine(index)
         local tooltip = self.environment.GameTooltip
         if tooltip ~= nil then
             pcall(tooltip.Hide, tooltip)
+        end
+    end)
+    -- Clicking the line opens a whisper to the character they're on now.
+    hover:SetScript("OnMouseUp", function()
+        local item = self.suggestionButtons[index].item
+        local current = item and item.player and item.player.current
+        if current ~= nil and current.key ~= nil then
+            pcall(self.whisper, current.key)
         end
     end)
     self.suggestionHovers[index] = hovering

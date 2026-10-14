@@ -309,7 +309,7 @@ Beside the slots, each role that's still open lists the guildmates online right 
 
 **Bolt 22, Hammer 24**
 
-Each player gets one line, listing every character of theirs that fits, each name in its class color (as throughout the window). Hover over the line to see which character they're on and where they are. A character fits when its level is within the dungeon's range, its class can play the role, and the role is on in its [role preferences](#role-preferences). That includes offline alts, since they can log over. A role already filled lists nobody.
+Each player gets one line, listing every character of theirs that fits, each name in its class color (as throughout the window). Hover over the line to see which character they're on and where they are, and click it to whisper that character. A character fits when its level is within the dungeon's range, its class can play the role, and the role is on in its [role preferences](#role-preferences). That includes offline alts, since they can log over. A role already filled lists nobody.
 
 Guildmates whose add-on didn't answer (see [Who is around](#who-is-around)) are marked **(no add-on)**, and are suggested by what their class can do. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
 

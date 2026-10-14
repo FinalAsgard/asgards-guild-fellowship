@@ -1236,6 +1236,17 @@ if clientProfile.supported then
                 local name = (live and live.name) or (character and character.name)
                 return name ~= nil and client:InviteToParty(name)
             end,
+            -- From a click on a guildmate's name.
+            whisper = function(key)
+                local guild, partition, normalizer = rosterController:QuietContext()
+                if guild == nil then
+                    return false
+                end
+                local live = rosterController:LiveMembers(normalizer)[key]
+                local character = partition:GetCharacter(key)
+                local name = (live and live.name) or (character and character.name)
+                return name ~= nil and client:OpenWhisper(name)
+            end,
             -- The guild as it is now: the live roster, the replies to
             -- the last ask, and who is left out (this character's
             -- player and the party).

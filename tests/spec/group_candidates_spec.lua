@@ -234,6 +234,10 @@ local function newWindow(world)
             end
         end,
         candidates = world.candidates,
+        whisper = function(key)
+            world.whispered = world.whispered or {}
+            table.insert(world.whispered, key)
+        end,
     })
     world.window:Opened()
     return world.window
@@ -259,6 +263,19 @@ test.test("group finder window: resizing the frame keeps the suggestions, and th
     -- Never narrower than a Request button and a little of the name.
     window.suggestions.scripts.OnSizeChanged(window.suggestions, 40, 300)
     test.assertEqual(104, window.suggestionList.width)
+end)
+
+test.test("group finder window: clicking a guildmate's name opens a whisper to the character they're on", function()
+    local world = newGuild()
+    local window = newWindow(world)
+    window:Pick("dm")
+
+    -- Line 2 is Thunderer, online on Bolt (not their offline alt Hammer).
+    window.suggestionHovers[2].frame.scripts.OnMouseUp()
+    test.assertEqual("bolt", world.whispered[1])
+    -- A heading opens nothing.
+    window.suggestionHovers[1].frame.scripts.OnMouseUp()
+    test.assertEqual(1, #world.whispered)
 end)
 
 test.test("group finder window: the picker shows each dungeon with its range and no role counts", function()

@@ -468,6 +468,24 @@ function Client:OpenGuildChat(text)
     return (callFunction(self.environment.ChatFrame_OpenChat, line))
 end
 
+-- Opens the game's chat box on a whisper to the character `name`, for the
+-- player to type and send. The game's own "send tell" call is used where
+-- there is one (it copes with names that have spaces); otherwise the chat
+-- box opens with "/w name ". Returns true when it opened.
+function Client:OpenWhisper(name)
+    if type(name) ~= "string" or name == "" then
+        return false
+    end
+    local util = self.environment.ChatFrameUtil
+    if type(util) == "table" and type(util.SendTell) == "function" then
+        return (callFunction(util.SendTell, name))
+    end
+    if type(self.environment.ChatFrame_SendTell) == "function" then
+        return (callFunction(self.environment.ChatFrame_SendTell, name))
+    end
+    return (callFunction(self.environment.ChatFrame_OpenChat, "/w " .. name .. " "))
+end
+
 function Client:SendGuildMessage(text)
     if type(text) ~= "string" or text == "" then
         return false

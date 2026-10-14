@@ -182,3 +182,27 @@ test.test("adapter: guild chat opens through the client's chat box call", functi
     test.assertFalse(older:OpenGuildChat(""))
     test.assertFalse(addon.Compatibility.Create({}):OpenGuildChat("LF tank"))
 end)
+
+test.test("adapter: a whisper opens through the client's send-tell call, or the chat box", function()
+    local addon = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua")
+    local opened = {}
+    local retail = addon.Compatibility.Create({
+        ChatFrameUtil = { SendTell = function(name) table.insert(opened, "util " .. name) end },
+        ChatFrame_SendTell = function(name) table.insert(opened, "global " .. name) end,
+    })
+    local older = addon.Compatibility.Create({
+        ChatFrame_SendTell = function(name) table.insert(opened, "global " .. name) end,
+    })
+    local bare = addon.Compatibility.Create({
+        ChatFrame_OpenChat = function(text) table.insert(opened, "chat " .. text) end,
+    })
+
+    test.assertTrue(retail:OpenWhisper("Bolt-Area52"))
+    test.assertTrue(older:OpenWhisper("Tool Box"))
+    test.assertTrue(bare:OpenWhisper("Bolt"))
+    test.assertEqual("util Bolt-Area52", opened[1])
+    test.assertEqual("global Tool Box", opened[2])
+    test.assertEqual("chat /w Bolt ", opened[3])
+    test.assertFalse(older:OpenWhisper(""))
+    test.assertFalse(addon.Compatibility.Create({}):OpenWhisper("Bolt"))
+end)
