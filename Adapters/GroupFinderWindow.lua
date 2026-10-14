@@ -20,9 +20,7 @@ local _, addon = ...
 -- last ask, available or not, and a Do Not Disturb check box.
 --
 -- Beside the slots, for each role still open, the online guildmates who
--- could fill it (GroupCandidates). The dungeon picker shows, for each
--- dungeon, how many online guildmates could fill tank, healer and DPS.
--- Add-on users get a Request button (Cancel while their request is
+-- could fill it (GroupCandidates). Add-on users get a Request button (Cancel while their request is
 -- pending), and their request's state beside their name. An accepted
 -- invitee's slot reads "Waiting for <character> to log in" until that
 -- character is online, then shows an Invite button; nothing is invited
@@ -388,11 +386,6 @@ GroupFinderWindow.STATE_LABELS = {
     ["joined-elsewhere"] = "joined another group",
 }
 
--- "T 2 · H 0 · D 5": how many online guildmates could fill each role.
-function GroupFinderWindow.CountsText(counts)
-    return "T " .. counts.tank .. " · H " .. counts.healer .. " · D " .. counts.dps
-end
-
 function Window:buildPicker()
     local createFrame = self.environment.CreateFrame
     local padding = GroupFinderWindow.PADDING
@@ -663,11 +656,7 @@ function Window:drawPicker()
     for index = 1, #shown do
         local row = self:row(index)
         row.dungeonId = shown[index].id
-        local label = GroupFinderWindow.Label(shown[index])
-        if self.candidatesNow ~= nil then
-            label = label .. "  |cff9d9d9d" .. GroupFinderWindow.CountsText(self.candidatesNow:Counts(shown[index])) .. "|r"
-        end
-        row.label:SetText(label)
+        row.label:SetText(GroupFinderWindow.Label(shown[index]))
         row.button:Show()
     end
     for index = #shown + 1, #self.rows do

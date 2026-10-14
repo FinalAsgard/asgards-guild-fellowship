@@ -290,7 +290,7 @@ The **Group Finder** is a tab of the add-on's window, right below **Roster**. Cl
 
 The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
 
-The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Next to each dungeon, **T 1 · H 2 · D 3** shows how many guildmates online right now could fill tank, healer and DPS there, so you can pick one the guild can fill. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
+The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
 
 On WoW Retail the list comes from the game's own Dungeon Finder, so it stays current without add-on updates. WoW Forever has no Dungeon Finder, so the add-on ships its dungeons (the Classic ones and Forever's new ones) with their fixed level ranges.
 

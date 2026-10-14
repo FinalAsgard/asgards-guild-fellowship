@@ -199,16 +199,6 @@ function Candidates:Suggestions(dungeon, openRoles)
     return lists
 end
 
--- How many online players could fill each role in `dungeon`:
--- { tank, healer, dps }.
-function Candidates:Counts(dungeon)
-    return {
-        tank = #self:ForRole("tank", dungeon),
-        healer = #self:ForRole("healer", dungeon),
-        dps = #self:ForRole("dps", dungeon),
-    }
-end
-
 -- Nearby: guildmates online in `zone` (a zone name), at any level and
 -- whatever their availability, one entry per player, sorted by label:
 -- { id, label, characters = { { name, level } } } with the characters of

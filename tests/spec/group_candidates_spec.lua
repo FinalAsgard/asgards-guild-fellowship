@@ -184,16 +184,6 @@ test.test("group candidates: filled roles get no suggestions", function()
     test.assertEqual(0, #world.candidates():Suggestions(DEADMINES, {}))
 end)
 
-test.test("group candidates: counts how many online players could fill each role", function()
-    local world = newGuild()
-
-    local counts = world.candidates():Counts(DEADMINES)
-
-    test.assertEqual(1, counts.tank)
-    test.assertEqual(2, counts.healer)
-    test.assertEqual(3, counts.dps)
-end)
-
 test.test("group candidates: describes an entry with its fitting characters", function()
     local world = newGuild()
     local healers = world.candidates():ForRole("healer", DEADMINES)
@@ -260,11 +250,10 @@ local function shownLines(window)
     return texts
 end
 
-test.test("group finder window: the picker shows each dungeon's role counts", function()
+test.test("group finder window: the picker shows each dungeon with its range and no role counts", function()
     local window = newWindow(newGuild())
 
-    test.assertContains(window.rows[1].label.text, "The Deadmines (17–26)")
-    test.assertContains(window.rows[1].label.text, "T 1 · H 2 · D 3")
+    test.assertEqual("The Deadmines (17–26)", window.rows[1].label.text)
     -- Before a dungeon is picked, the column holds only Nearby.
     test.assertTrue(window.suggestions.shown)
     test.assertContains(window.suggestionLines[1].text, "Nearby")
