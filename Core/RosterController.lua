@@ -203,13 +203,14 @@ function Controller:Context()
     return guild, partition, normalizer
 end
 
--- Pending conflicts for the current guild, for the minimap tooltip.
+-- Pending conflicts for the current guild, for the minimap tooltip: each
+-- note conflict, and each player's suggestions once.
 function Controller:PendingConflictCount()
     local guild, partition = self:QuietContext()
     if guild == nil then
         return 0
     end
-    return #(partition:GetConflicts() or {})
+    return addon.ConflictViewModel.CountQueue(partition)
 end
 
 -- Saved data is ready (after login): let the scheduler run its daily check.
@@ -373,6 +374,79 @@ function Controller:ResolveConflicts(action, character, kind)
     end
     self:Refresh()
     return ok == true
+end
+
+-- Members' suggestions are reviewed one player's bundle at a time (see
+-- ConflictViewModel.GroupOf): opens the review of bundle `group`.
+function Controller:ReviewBundle(group)
+    if self.current == nil then
+        return false
+    end
+    self.reviewing = group
+    self:Refresh()
+    return true
+end
+
+-- Redraws the bundle under review from `rows` (ConflictViewModel rows), or
+-- closes the review once that bundle is all decided.
+function Controller:RedrawReview(rows, normalizer)
+    if self.reviewing == nil or type(self.window.ShowReview) ~= "function" then
+        return
+    end
+    local index
+    for index = 1, #rows do
+        if rows[index].kind == "bundle" and rows[index].group == self.reviewing then
+            self.window:ShowReview(addon.BundleReviewViewModel.Build({
+                partition = self.current.partition,
+                normalizer = normalizer,
+                bundle = rows[index],
+            }))
+            return
+        end
+    end
+    self.reviewing = nil
+    if type(self.window.HideReview) == "function" then
+        self.window:HideReview()
+    end
+end
+
+-- The review closed.
+function Controller:CloseReview()
+    self.reviewing = nil
+end
+
+-- Approve all or Deny all for bundle `group`: decides each of that player's
+-- suggestions, as Accept and Reject do one at a time.
+function Controller:DecideBundle(group, approved)
+    if self.current == nil then
+        return 0
+    end
+    local partition = self.current.partition
+    local entries = {}
+    local conflicts = partition:GetConflicts() or {}
+    local index
+    for index = 1, #conflicts do
+        local entry = conflicts[index]
+        if entry.from ~= nil and addon.ConflictViewModel.GroupOf(partition, entry.from) == group then
+            table.insert(entries, { character = entry.character, kind = entry.kind })
+        end
+    end
+    local decided, reason = 0, nil
+    for index = 1, #entries do
+        local ok, why = false, "guild sync is not available"
+        if self.onDecideSuggestion ~= nil then
+            ok, why = self.onDecideSuggestion(entries[index].character, entries[index].kind, approved)
+        end
+        if ok then
+            decided = decided + 1
+        else
+            reason = why
+        end
+    end
+    self:Print((approved and "Approved " or "Denied ") .. plural(decided, "change") .. ".")
+    self:PrintUndecided(#entries - decided, reason)
+    self:Refresh()
+    return decided
 end
 
 function Controller:AcceptConflict(character, kind)
@@ -743,12 +817,14 @@ function Controller:Redraw()
         }, stamp)
         self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
         self.window:SetRows(rows)
-        self.window:SetConflicts(addon.ConflictViewModel.Build({
+        local conflictRows = addon.ConflictViewModel.Build({
             partition = self.current.partition,
             members = members,
             normalizer = normalizer,
             pending = self.current.partition:GetSuggestions(),
-        }))
+        })
+        self.window:SetConflicts(conflictRows)
+        self:RedrawReview(conflictRows, normalizer)
         self:RedrawPanel()
     end
     self:RefreshRecruiters()

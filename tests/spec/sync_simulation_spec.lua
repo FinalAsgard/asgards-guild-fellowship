@@ -46,6 +46,13 @@ local function newWindow()
         return true
     end
     function window:ShowPlayer() end
+    function window:ShowReview(model)
+        self.review = model
+        return true
+    end
+    function window:HideReview()
+        self.review = nil
+    end
     function window:HidePlayer() end
     return window
 end
@@ -690,12 +697,20 @@ local function queuedSuggestion(world, character, kind)
     return nil
 end
 
+-- The conflict window's row about `character` of `kind`; members'
+-- suggestions are found inside their player's bundle.
 local function conflictRow(world, character, kind)
     local rows = world.addon.rosterController.window.conflicts or {}
-    local index
+    local index, itemIndex
     for index = 1, #rows do
-        if rows[index].character == character and rows[index].kind == kind then
-            return rows[index]
+        local row = rows[index]
+        if row.character == character and row.kind == kind then
+            return row
+        end
+        for itemIndex = 1, #(row.items or {}) do
+            if row.items[itemIndex].character == character and row.items[itemIndex].kind == kind then
+                return row.items[itemIndex]
+            end
         end
     end
     return nil
@@ -1092,4 +1107,82 @@ test.test("a member hears each decision; a denial rolls back only that change", 
     test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
     test.assertEqual("Hammers", aliasOf(hammer, "hammer-area52"))
     test.assertEqual(0, #pendingOf(hammer))
+end)
+
+-- Bundles: the officer's side --------------------------------------------------
+
+local function bundleRows(world)
+    local rows = world.addon.rosterController.window.conflicts or {}
+    local bundles = {}
+    local index
+    for index = 1, #rows do
+        if rows[index].kind == "bundle" then
+            table.insert(bundles, rows[index])
+        end
+    end
+    return bundles
+end
+
+test.test("an officer sees one bundle per member's player, reviews it, and approves it all at once", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammers"))
+    test.assertTrue(wrench.addon.rosterController:SetAlias("wrench-area52", "Wrenches"))
+    fixtures.deliver(channel)
+
+    local bundles = bundleRows(officer)
+    test.assertEqual(2, #bundles)
+    local hammers = bundles[1].name == "Hammer" and bundles[1] or bundles[2]
+    test.assertEqual(2, hammers.count)
+    test.assertEqual("2 changes", hammers.suggests)
+    -- A bundle counts once, for the button and the minimap tooltip.
+    test.assertEqual(2, officer.addon.rosterController:PendingConflictCount())
+
+    test.assertTrue(officer.addon.rosterController:ReviewBundle(hammers.group))
+    local review = officer.addon.rosterController.window.review
+    test.assertEqual("Review: Hammer", review.title)
+    test.assertEqual("Alts: none", review.before[2])
+    test.assertEqual("Alts: Wrench", review.suggested[2])
+    test.assertEqual("Alias: Hammers", review.suggested[3])
+    test.assertEqual(2, #review.items)
+
+    test.assertEqual(2, officer.addon.rosterController:DecideBundle(hammers.group, true))
+    fixtures.deliver(channel)
+
+    test.assertEqual("hammer-area52", mainOf(officer, "wrench-area52"))
+    test.assertEqual("Hammers", aliasOf(officer, "hammer-area52"))
+    test.assertEqual("hammer-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+    -- Wrench is Hammer's now, so Wrench's own change joins Hammer's bundle,
+    -- which stays under review with just that left.
+    test.assertEqual(1, #bundleRows(officer))
+    test.assertEqual(hammers.group, bundleRows(officer)[1].group)
+    review = officer.addon.rosterController.window.review
+    test.assertEqual(1, #review.items)
+    test.assertContains(review.items[1].text, "Wrenches")
+    test.assertEqual(1, officer.addon.rosterController:DecideBundle(hammers.group, false))
+    fixtures.deliver(channel)
+    test.assertEqual(nil, officer.addon.rosterController.window.review)
+    test.assertEqual(0, #bundleRows(officer))
+end)
+
+test.test("deny all rolls back every change in the bundle on the member's side, and nothing else", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammers"))
+    fixtures.deliver(channel)
+
+    local group = bundleRows(officer)[1].group
+    test.assertEqual(2, officer.addon.rosterController:DecideBundle(group, false))
+    fixtures.deliver(channel)
+
+    test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual(nil, aliasOf(hammer, "hammer-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+    test.assertEqual(0, #bundleRows(officer))
 end)

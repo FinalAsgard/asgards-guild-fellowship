@@ -199,6 +199,15 @@ if clientProfile.supported then
                 onRejectAll = function()
                     rosterController:RejectAllConflicts()
                 end,
+                onReviewBundle = function(group)
+                    rosterController:ReviewBundle(group)
+                end,
+                onDecideBundle = function(group, approved)
+                    rosterController:DecideBundle(group, approved)
+                end,
+                onCloseReview = function()
+                    rosterController:CloseReview()
+                end,
                 onToggleDeparted = function()
                     return rosterController:ToggleDeparted()
                 end,
