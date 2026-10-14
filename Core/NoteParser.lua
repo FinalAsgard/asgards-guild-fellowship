@@ -18,11 +18,9 @@ addon.NoteParser = NoteParser
 -- letters (including accented ones), a space on Forever, and a realm
 -- suffix after "-".
 local NAME_WORD = "^([^%s,;:!%?%(%)%[%]{}\"<>@/|]+)"
-NoteParser.NAME_WORD = NAME_WORD
 -- An alias is one word of letters (including accented), digits, and a small
 -- set of punctuation. Multi-word aliases can only be set in the UI.
 local ALIAS_WORD = "^([%w\128-\255_'%-]+)"
-NoteParser.ALIAS_WORD = ALIAS_WORD
 
 -- Up to `count` name words starting at `text`, without trailing periods.
 local function nameWords(text, count)
@@ -82,7 +80,6 @@ local function findLabel(note, word)
         init = first + 1
     end
 end
-NoteParser.FindLabel = findLabel
 
 -- Where the text after the first marker starts, or nil. A marker is either
 -- the `symbol` or the `<word>:` label; whichever comes first counts. A label

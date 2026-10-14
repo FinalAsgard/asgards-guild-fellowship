@@ -80,20 +80,7 @@ A marker can sit anywhere in the note (for example `Tank, Main: Toolbox, Alias: 
 
 An alias from a note is one word: letters (accented ones too), digits, `_`, `'`, and `-`. Longer aliases can be set in the window, up to 48 characters.
 
-### Guild notes written by officers
-
-The add-on writes public notes only for an officer, and only to match a change that officer just made official: their own **Link as alt of…**, **Merge into player…**, **Make this the main**, **Split off as own player** or **Set alias…**, or their approval of a member's [suggestion](#suggestions). Only that officer's add-on writes; other officers who receive the change through [guild sync](#guild-sync) don't, and members never do. Officer notes are never written.
-
-Only the characters the change involved are touched:
-
-- An alt's note gets `>Main`, for example `>Toolbox` (on WoW Forever, the full first and last name: `>Tool Box`; on Retail, the realm only for a main from another realm).
-- The main's note gets `@Alias` when the player has a one-word alias. Aliases of several words can't be read back from a note, so they aren't written.
-- A declared main's note also gets a main marker naming itself, for example `>Toolbox @TheTool`, so it reads back as declared.
-- A character split off on its own loses its main marker.
-
-Any old `Main:`, `>`, `Alias:` or `@` marker is removed first, the new markers go at the front, and the rest of the note (professions, roles, anything else) follows. When the note's length limit doesn't leave room for it all, that text is cut. A note that already says the right thing is left alone. The next scan reads a written note back to the same data, so it never makes a conflict.
-
-Notes are written a few at a time, and never in combat, during a boss encounter or during a keystone run. Afterwards you get one line in chat, for example **Guild notes: 3 updated. Cut to fit: Hammer.**, also naming any note that couldn't be written and why. If your rank can't edit public notes, your change still goes through as usual, and chat says the notes weren't updated.
+The add-on never writes to guild notes.
 
 ### Scanning
 

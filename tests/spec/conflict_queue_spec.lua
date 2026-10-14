@@ -545,11 +545,9 @@ test.test("markers saved as unapplied by an earlier build load as conflicts", fu
     test.assertEqual(nil, database.guilds["Knights-Area52"].unapplied)
 end)
 
-test.test("the add-on never writes officer notes, and only the WoW adapter writes public notes", function()
-    local forbidden = { "GuildRosterSetOfficerNote", "SetOfficerNote", "C_GuildInfo.SetNote" }
-    -- Public notes are written (for officers' official changes) through the
-    -- adapter alone.
-    local adapterOnly = { "GuildRosterSetPublicNote" }
+test.test("the add-on never writes guild notes", function()
+    local forbidden = { "GuildRosterSetPublicNote", "GuildRosterSetOfficerNote", "SetPublicNote",
+        "SetOfficerNote", "C_GuildInfo.SetNote" }
     local listing = io.popen("ls Core Adapters")
     local files = { "AsgardsGuildFellowship.lua" }
     local directory
@@ -572,12 +570,6 @@ test.test("the add-on never writes officer notes, and only the WoW adapter write
         for termIndex = 1, #forbidden do
             test.assertEqual(nil, string.find(source, forbidden[termIndex], 1, true),
                 files[index] .. " uses " .. forbidden[termIndex])
-        end
-        if files[index] ~= "Adapters/WoW.lua" then
-            for termIndex = 1, #adapterOnly do
-                test.assertEqual(nil, string.find(source, adapterOnly[termIndex], 1, true),
-                    files[index] .. " uses " .. adapterOnly[termIndex])
-            end
         end
     end
 end)

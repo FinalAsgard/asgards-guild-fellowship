@@ -1748,58 +1748,7 @@ if clientProfile.supported then
             return comm:RankCanViewOfficerNotes(rank)
         end,
     })
-    -- Guild notes: when this officer's own add-on makes a main or alias
-    -- change official, the notes of the characters involved are rewritten
-    -- to match, a few at a time and never while busy.
-    local guildNotes = addon.GuildNotes.Create({
-        canEdit = function()
-            return client:CanEditPublicNote()
-        end,
-        find = function(key)
-            local guild, _, normalizer = rosterController:QuietContext()
-            local count = client:GetGuildRosterCount()
-            if guild == nil or count == nil then
-                return nil
-            end
-            local index
-            for index = 1, count do
-                local member = client:GetGuildMember(index)
-                if member ~= nil and normalizer:Key(member.name) == key then
-                    return index, member.note
-                end
-            end
-            return nil
-        end,
-        write = function(index, note)
-            return client:SetGuildPublicNote(index, note)
-        end,
-        rules = function()
-            local guild, partition, normalizer = rosterController:QuietContext()
-            return {
-                twoPartNames = clientProfile.nameRules.twoPartNames == true,
-                isName = function(text)
-                    local key = guild and normalizer:Key(text)
-                    return key ~= nil and partition:GetCharacter(key) ~= nil
-                end,
-            }
-        end,
-        busy = function()
-            return comm:IsBusy()
-        end,
-        after = function(seconds, callback)
-            return client:After(seconds, callback)
-        end,
-        print = function(message)
-            rosterController:Print(message)
-        end,
-    })
     syncSession = addon.SyncSession.Create({
-        onOfficial = function(keys)
-            local guild, partition, normalizer = rosterController:QuietContext()
-            if guild ~= nil then
-                guildNotes:Write(addon.NotePlan.Build(partition, keys, normalizer))
-            end
-        end,
         comm = comm,
         context = function()
             local guild, partition, normalizer = rosterController:QuietContext()

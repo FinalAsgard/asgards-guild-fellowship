@@ -1,7 +1,7 @@
 local test = require("tests.test_helper")
 
 -- Declared mains: a player saying "this is really my main", even with no
--- alts. Officer data, read from notes, synced, and written to notes.
+-- alts. Officer data, read from notes and synced.
 local RULES = { twoPartNames = false, homeRealm = "Area52" }
 local NOW = 1790000000
 local OFFICER = "toolbox-area52"
@@ -10,8 +10,6 @@ local function load()
     return test.newAddon(
         "Core/NameNormalizer.lua",
         "Core/NoteParser.lua",
-        "Core/NoteWriter.lua",
-        "Core/NotePlan.lua",
         "Core/FellowshipStore.lua",
         "Core/ReconcileEngine.lua",
         "Core/PlayerService.lua",
@@ -118,22 +116,9 @@ test.test("on a character the roster has as an alt, a self marker is still a con
     test.assertFalse(world.partition:IsDeclared("hammer-area52"))
 end)
 
-test.test("a declared main's note gets a marker naming itself, read back as declared", function()
-    local world = scanned({
-        { "Toolbox-Area52", "@TheTool" },
-        { "Hammer-Area52", ">Toolbox" },
-    })
-    world.partition:SetDeclared("toolbox-area52", true)
-
-    local plan = world.addon.NotePlan.Build(world.partition, { ["toolbox-area52"] = true }, world.normalizer)
-    test.assertEqual("Toolbox", plan[1].markers.main)
-    test.assertEqual("TheTool", plan[1].markers.alias)
-    local note = world.addon.NoteWriter.Write("@TheTool raid lead", plan[1].markers, RULES)
-    test.assertEqual(">Toolbox @TheTool raid lead", note)
-
-    -- Read back on a fresh install: still declared, still TheTool, no conflict.
+test.test("a main's note naming itself next to an alias reads as declared, with the alias", function()
     local fresh = scanned({
-        { "Toolbox-Area52", note },
+        { "Toolbox-Area52", ">Toolbox @TheTool raid lead" },
         { "Hammer-Area52", ">Toolbox" },
     })
     test.assertTrue(fresh.partition:IsDeclared("toolbox-area52"))
