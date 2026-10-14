@@ -36,7 +36,7 @@ Everything the add-on does is in one window, with picture tabs down its right ed
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
-- **Settings**: everything else (General, Chat Tags, and the Group Finder's Do Not Disturb and role preferences), and the version you're running.
+- **Settings**: everything else (General, Chat Tags, and the Group Finder's Do Not Disturb), and the version you're running.
 
 The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf group`, `/agf profile`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
 
@@ -362,7 +362,7 @@ You're also unavailable automatically while you're in a group or inside an insta
 
 ### Role preferences
 
-Each character has its own role preferences: the roles you're willing to play on it. They start as every role its class can fill. To turn one off (say, a paladin you never heal on), log into that character and untick it on the [My Profile](#my-profile) tab, under **Group Finder** on the **Settings** tab, or in the **Group Finder** section of the AddOns options. All three change the same preferences. Only the roles that character's class can fill are listed. The player panel shows each character's role preferences next to it, as **Roles: Tank, DPS**.
+Each character has its own role preferences: the roles you're willing to play on it. They start as every role its class can fill. To turn one off (say, a paladin you never heal on), log into that character and untick it on the [My Profile](#my-profile) tab. Only the roles that character's class can fill are listed. The player panel shows each character's role preferences next to it, as **Roles: Tank, DPS**.
 
 Your role preferences reach the whole guild through [guild sync](#guild-sync), even while you're on another character or offline. Only the character itself can set them, not officers or anyone else. If your add-on sees a change in your character's name that you never made, it sends your real preferences back out to correct it, and warns you who passed it on.
 
@@ -400,7 +400,7 @@ These belong to your player, not to one character: whichever of your characters 
 
 ### Characters and roles
 
-Under each character are its [role preferences](#role-preferences). The character you're logged in on has a check box for each role its class can fill; these are the same preferences as in the settings, so ticking one here changes it there too, and the guild hears about it through [guild sync](#guild-sync). Your other characters' roles are shown but can't be changed here: log in on that character to change them.
+Under each character are its [role preferences](#role-preferences). The character you're logged in on has a check box for each role its class can fill. Ticking one changes it, and the guild hears about it through [guild sync](#guild-sync). Your other characters' roles are shown but can't be changed here: log in on that character to change them.
 
 Along the bottom is the **Do Not Disturb** check box, the same setting as in the Group Finder, the settings and `/agf dnd` (see [Do Not Disturb](#do-not-disturb)).
 

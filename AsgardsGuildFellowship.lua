@@ -538,9 +538,6 @@ if clientProfile.supported then
         end
         return true
     end
-    -- Role preferences: which roles the logged-in character is willing to
-    -- play, synced to the guild. Only the roles its class can fill are
-    -- offered.
     settings:AddSection("groupFinder", "Group Finder")
     -- Account-wide, so it applies on every character.
     settings:Add("groupFinder", {
@@ -559,12 +556,9 @@ if clientProfile.supported then
             return true
         end,
     })
-    local function selfClass()
-        local guild, partition = rosterController:QuietContext()
-        local key = rosterController:SelfKey()
-        local character = guild and key and partition:GetCharacter(key)
-        return character and character.class or nil
-    end
+    -- Role preferences: which roles the logged-in character is willing to
+    -- play, synced to the guild. My Profile changes them through these
+    -- settings, offering only the roles the character's class can fill.
     local function rolesAvailable()
         if rosterController:SelfKey() == nil or rolesOf(rosterController:SelfKey()) == nil then
             return false, "this character isn't in the guild roster yet"
@@ -584,8 +578,9 @@ if clientProfile.supported then
             kind = "toggle",
             label = ROLE_SETTING_LABELS[role],
             enabled = rolesAvailable,
+            -- Changed on the My Profile tab only, never on a settings panel.
             shown = function()
-                return roleCatalog:Can(selfClass(), role)
+                return false
             end,
             get = function()
                 local roles = rolesOf(rosterController:SelfKey()) or {}

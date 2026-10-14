@@ -417,13 +417,14 @@ local function loggedIn(profile)
 end
 
 local function registerProfileTests(profile)
-    test.test(profile .. " settings: the logged-in character's roles default to its class and can be turned off", function()
+    test.test(profile .. " role preferences: the logged-in character's default to its class and can be turned off", function()
         local world, addon = loggedIn(profile)
         local settings = addon.settings
         -- The first member is a warrior: tank and DPS, never healer.
-        test.assertTrue(settings:IsShown("role_tank"))
+        -- Changed on My Profile only: no settings panel shows them.
+        test.assertFalse(settings:IsShown("role_tank"))
         test.assertFalse(settings:IsShown("role_healer"))
-        test.assertTrue(settings:IsShown("role_dps"))
+        test.assertFalse(settings:IsShown("role_dps"))
         test.assertTrue(settings:Get("role_tank"))
         test.assertTrue(settings:Get("role_dps"))
 
