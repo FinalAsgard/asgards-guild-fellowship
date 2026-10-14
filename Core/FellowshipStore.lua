@@ -1328,12 +1328,6 @@ function Partition:IsDeclared(key)
     return character ~= nil and character.declared == true
 end
 
--- Whether the player `playerId` has declared its main.
-function Partition:IsPlayerDeclared(playerId)
-    local player = self.data.players[playerId]
-    return player ~= nil and self:IsDeclared(player.main)
-end
-
 -- Sets whether `key` is declared a main, and where that came from (a
 -- FellowshipStore source: by hand, from a note, or through sync), leaving
 -- its stamp alone.

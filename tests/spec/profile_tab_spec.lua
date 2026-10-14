@@ -756,6 +756,18 @@ local function registerProfileTests(profile)
         test.assertFalse(page.suggestRows[1].frame.shown)
     end)
 
+    test.test(profile .. " a second login on this install is recorded even when no scan runs", function()
+        local alt = profile == "Forever" and "Hammer Smith" or "Hammer-Area52"
+        local first = loggedIn(profile)
+        -- Same install, soon after: the daily scan doesn't run again, and
+        -- the roster has nobody new, so no scan finishes.
+        local _, addon = loggedIn(profile, alt, first.database)
+        local _, partition = addon.rosterController:QuietContext()
+
+        test.assertContains(table.concat(partition:OwnCharacters(), ","), addon.rosterController:SelfKey())
+        test.assertEqual(2, #partition:OwnCharacters())
+    end)
+
     test.test(profile .. " a dismissed own character stays hidden on this install", function()
         local loner = profile == "Forever" and "Zélie Rune" or "Visitor-Stormrage"
         local first = loggedIn(profile, loner)

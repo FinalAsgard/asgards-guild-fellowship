@@ -37,6 +37,9 @@ local drawProfile
 -- Records the party in the local group history (set up with the Group
 -- Finder below).
 local recordParty = function() end
+-- Remembers that this install logged in on the current character (set up
+-- with the roster below).
+local recordOwnCharacter = function() end
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
     comm = addon.Comm.Create(client, addon.Identity.commPrefix)
@@ -50,6 +53,24 @@ if clientProfile.supported then
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
     pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
+    -- This install has logged in on this character: My Profile can offer it
+    -- to the player's other characters as an alt. Recorded once per session
+    -- as soon as the roster knows the character (on a roster update or after
+    -- a scan), not only after a scan that found something. Local only,
+    -- never synced, never linked by itself.
+    local recordedOwn
+    recordOwnCharacter = function()
+        local guild, partition = rosterController:QuietContext()
+        local selfKey = rosterController:SelfKey()
+        local now = client:Timestamp()
+        if guild == nil or selfKey == nil or now == nil or partition:GetCharacter(selfKey) == nil then
+            return
+        end
+        local recorded = partition.key .. "#" .. selfKey
+        if recordedOwn ~= recorded and partition:RecordOwnCharacter(selfKey, now) then
+            recordedOwn = recorded
+        end
+    end
     -- Which roles each class can fill here, for role preferences and the
     -- Group Finder.
     local roleCatalog = addon.RoleCatalog.For(clientProfile.id)
@@ -77,15 +98,7 @@ if clientProfile.supported then
         end,
         onScanFinished = function()
             syncSession:UpgradeLegacy()
-            -- This install has logged in on this character: My Profile can
-            -- offer it to the player's other characters as an alt. Local
-            -- only, never synced, never linked by itself.
-            local guild, partition = rosterController:QuietContext()
-            local selfKey = rosterController:SelfKey()
-            local now = client:Timestamp()
-            if guild ~= nil and selfKey ~= nil and now ~= nil and partition:GetCharacter(selfKey) ~= nil then
-                partition:RecordOwnCharacter(selfKey, now)
-            end
+            recordOwnCharacter()
         end,
         onSyncResumed = function(key)
             syncSession:Rejoin(key)
@@ -1739,6 +1752,7 @@ if clientProfile.supported then
     end)
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
+        recordOwnCharacter()
         -- Who is online decides the Group Finder's Invite buttons.
         if groupFinder ~= nil then
             groupFinder:Refresh()
