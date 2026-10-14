@@ -288,7 +288,7 @@ Everyone gets the window's **Recent Guild Advertisements** tab. It lists each ch
 
 The **Group Finder** is a tab of the add-on's window, right below **Roster**. Click its tab, or type `/agf group` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it checks your level and party again and asks the guild who is around.
 
-The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
+The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the groups other guildmates are forming, the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
 
 The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
 
@@ -324,6 +324,23 @@ Once someone accepts, getting them into your party is up to you; the add-on neve
 Prompts keep up with your group. When a slot fills, whether someone accepted or joined your party, everyone you've asked loses the options for that role. Anyone left with no option has their prompt closed, and their line in your window shows **withdrawn**. Once every role is filled, the remaining requests are withdrawn too.
 
 Asked by two organizers at once, a guildmate sees both prompts stacked. Accepting one declines the others, and those organizers see **joined another group**.
+
+### Groups being formed
+
+Until you start a group of your own, the right side of the window opens with **Groups forming**: every group a guildmate with the add-on is forming right now, one line each, for example **Toolbox: The Deadmines (17–26), 3/5**. Groups whose range is within 2 levels of your character's level come first; the rest are listed in grey. A group drops off the list when its organizer ends it, or a few minutes after their add-on was last heard from.
+
+Click a group to see its slots in place of the dungeon picker: who's in each one, with **(coming)** beside anyone the organizer is still waiting on, and **open** for the rest. An open slot you could fill has a **Fill Slot** button: your character's level must fit the dungeon, its class must play the role, and the role must be on in its [role preferences](#role-preferences). If the character you're on can't, the button offers one of your alts that can, for example **Fill as Bolt**. **Back** returns to the dungeon picker.
+
+**Fill Slot** doesn't put you in the group. It sends the organizer a prompt, **Hammer offers to fill your Healer slot**, with **Accept** and **Decline**. Under the slots you see where your offer stands, and the add-on tells you in chat when the organizer answers. An offer the organizer accepts works like an accepted request: the slot is held for you until they invite you. An offer goes unanswered after about 2 minutes, and closes if that role fills in the meantime.
+
+### In someone else's group
+
+Once you're in the party of a guildmate who is forming a group with the add-on, the Group Finder shows you their group, as it fills, instead of the dungeon picker. You can't invite or request anyone from it, but two things are yours to change:
+
+- **Your role:** the **Tank**, **Healer** and **DPS** buttons ask the organizer to move you to another open role your class can play. The organizer's add-on moves you as soon as it hears.
+- **Join as an alt:** one button for each of your alts that could come instead, for example **DPS — Bolt (23)**. Choosing one tells the organizer you're coming on that alt: it takes your slot, and their window shows **Waiting for Bolt to log in**, then **Invite** once Bolt is online. Log over to the alt and wait for the invite.
+
+You can also just log over to an alt without telling the organizer, as before.
 
 ### Ask in guild
 

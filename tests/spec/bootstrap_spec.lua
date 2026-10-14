@@ -59,6 +59,7 @@ local MANIFEST_FILES = {
     "Core/RoleCatalog.lua",
     "Core/GroupSession.lua",
     "Core/GroupFinderProtocol.lua",
+    "Core/GroupBoard.lua",
     "Core/GroupAvailability.lua",
     "Core/GroupCandidates.lua",
     "Core/JoinRequests.lua",

@@ -27,6 +27,14 @@ local _, addon = ...
 -- character is online, then shows an Invite button; nothing is invited
 -- without that click.
 --
+-- Without a group of its own, the column starts with the groups other
+-- guildmates are forming, grey when far from the character's level.
+-- Clicking one shows its slots in place of the picker, with Fill Slot on
+-- each open slot the player could fill, which offers the organizer that
+-- character. A player in a party whose organizer is forming a group sees
+-- that group instead, without Fill Slot: they can change their own role,
+-- or come as one of their alts.
+--
 -- Like the other adapters, it reaches the game only through the client's
 -- environment (CreateFrame, UIParent, GameTooltip), so specs can draw it
 -- with fake frames.
@@ -50,6 +58,11 @@ local GroupFinderWindow = {
     CHECK_SIZE = 24,
     BUTTON_HEIGHT = 20,
     ROLE_BUTTON_WIDTH = 56,
+    -- Another organizer's group: Fill Slot beside each open slot, and up
+    -- to ALT_BUTTONS alts to come as, two to a row.
+    FILL_WIDTH = 110,
+    ALT_BUTTONS = 4,
+    ALT_WIDTH = 170,
     -- Where a suggestion's tooltip sits from the mouse cursor: a little
     -- right of it and just above it.
     TOOLTIP_OFFSET_X = 12,
@@ -107,6 +120,23 @@ end
 --   refresh()           asks the guild again who is online and available
 --   selfKey()           the logged-in character's key, or nil
 --   onShown()           called each time the tab comes into view
+--   changed()           called whenever the window may have changed the
+--                       group, so the guild can hear of it
+--   groups()            the groups other organizers are forming
+--                       (GroupBoard:Groups), for the column
+--   boardGroup(id)      organizer `id`'s group, or nil once it's gone
+--   partyGroup()        the group being formed by an organizer in the
+--                       player's party, or nil
+--   fillOptions(group, role)  the characters the player could fill an
+--                       open `role` slot with ({ role, key, name, level }
+--                       each, as JoinRequests:OptionsFor)
+--   offer(group, option)      offers the organizer that character
+--   offerFor(group)     the player's offer to that group (GroupBoard
+--                       offer, with its state), or nil
+--   setRole(group, role)      asks the organizer to put the player in role
+--   altOptions(group)   the player's other characters that could come
+--                       instead, as fillOptions
+--   joinAsAlt(group, option)  tells the organizer they'll come as that alt
 -- `host` is the master frame's content frame for the tab. Returns nil and
 -- the reason when there's none, or the tab can't be drawn.
 function GroupFinderWindow.Create(client, host, options)
@@ -150,11 +180,36 @@ function GroupFinderWindow.Create(client, host, options)
             return nil
         end,
         suggestionButtons = {},
+        changed = options.changed or function() end,
+        groups = options.groups or function()
+            return {}
+        end,
+        boardGroup = options.boardGroup or function()
+            return nil
+        end,
+        partyGroup = options.partyGroup or function()
+            return nil
+        end,
+        fillOptions = options.fillOptions or function()
+            return {}
+        end,
+        offer = options.offer or function() end,
+        offerFor = options.offerFor or function()
+            return nil
+        end,
+        setRole = options.setRole or function() end,
+        altOptions = options.altOptions or function()
+            return {}
+        end,
+        joinAsAlt = options.joinAsAlt or function() end,
         showAll = false,
         choosing = false,
         rows = {},
         slotRows = {},
         partyRows = {},
+        boardRows = {},
+        roleButtons = {},
+        altButtons = {},
     }, Window)
     local ok, reason = pcall(window.build, window)
     if not ok then
@@ -252,9 +307,14 @@ function Window:suggestionLine(index)
             pcall(tooltip.Hide, tooltip)
         end
     end)
-    -- Clicking the line opens a whisper to the character they're on now.
+    -- Clicking a group's line shows that group; clicking a guildmate's
+    -- opens a whisper to the character they're on now.
     hover:SetScript("OnMouseUp", function()
         local item = self.suggestionButtons[index].item
+        if item ~= nil and item.group ~= nil then
+            self:ViewGroup(item.group.id)
+            return
+        end
         local current = item and item.player and item.player.current
         if current ~= nil and current.key ~= nil then
             pcall(self.whisper, current.key)
@@ -356,8 +416,34 @@ end
 
 -- The right column: with a group going, who could join each open role;
 -- always, the guildmates nearby.
+-- The groups being formed (GroupBoard:Groups), for the column: a heading,
+-- then one line per group, "Toolbox: The Deadmines (17–26), 3/5", grey
+-- when it's far from `level`. Clicking a line shows that group.
+function GroupFinderWindow.GroupItems(groups, level)
+    local items = {}
+    if type(groups) ~= "table" or #groups == 0 then
+        return items
+    end
+    table.insert(items, { text = "|cffffd100Groups forming|r" })
+    local index
+    for index = 1, #groups do
+        local group = groups[index]
+        local text = group.label .. ": " .. GroupFinderWindow.Label(group.dungeon) .. ", "
+            .. addon.GroupBoard.Filled(group) .. "/" .. #group.slots
+        if not addon.GroupBoard.Near(group, level) then
+            text = "|cff808080" .. text .. "|r"
+        end
+        table.insert(items, { text = text, tooltip = "Click to see who's going", group = group })
+    end
+    return items
+end
+
 function Window:drawSuggestions(candidates, dungeon, grouping)
     local items = {}
+    if not grouping then
+        local ok, groups = pcall(self.groups)
+        items = GroupFinderWindow.GroupItems(ok and groups or nil, self.level)
+    end
     if grouping and candidates ~= nil and dungeon ~= nil then
         items = GroupFinderWindow.SuggestionItems(candidates:Suggestions(dungeon, self.session:OpenRoles()),
             function(playerId)
@@ -520,6 +606,236 @@ function Window:buildGroup()
     self.partyTop = below - 52
 end
 
+-- Another organizer's group, as the guild hears it: its slots, with Fill
+-- Slot on each open slot the player could fill, and Back. For a group the
+-- player is in, no Fill Slot or Back: buttons to change their own role,
+-- and to come as one of their alts instead.
+function Window:buildBoard()
+    local padding = GroupFinderWindow.PADDING
+    local board = self:view()
+    self.board = board
+
+    self.boardOwner = board:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    self.boardOwner:SetPoint("TOPLEFT", board, "TOPLEFT", padding, -60)
+    self.boardOwner:SetJustifyH("LEFT")
+    self.backButton = self:button(board, "Back", 70, function()
+        self.viewing = nil
+        self:Refresh()
+    end)
+    self.backButton:SetPoint("TOPRIGHT", board, "TOPRIGHT", -padding, -54)
+
+    local index
+    for index = 1, #addon.GroupSession.LAYOUT do
+        local top = -GroupFinderWindow.LIST_TOP - (index - 1) * GroupFinderWindow.ROW_HEIGHT
+        local row = {}
+        row.role = board:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        row.role:SetPoint("TOPLEFT", board, "TOPLEFT", padding, top)
+        row.text = board:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        row.text:SetPoint("TOPLEFT", board, "TOPLEFT", padding + 70, top)
+        row.text:SetPoint("RIGHT", board, "RIGHT", -padding - GroupFinderWindow.FILL_WIDTH - 4, 0)
+        row.text:SetJustifyH("LEFT")
+        singleLine(row.text)
+        row.fill = self:button(board, "Fill Slot", GroupFinderWindow.FILL_WIDTH, function()
+            if row.group ~= nil and row.option ~= nil then
+                pcall(self.offer, row.group, row.option)
+                self:Refresh()
+            end
+        end)
+        row.fill:SetHeight(GroupFinderWindow.ROW_HEIGHT - 2)
+        row.fill:SetPoint("TOPRIGHT", board, "TOPRIGHT", -padding, top + 1)
+        self.boardRows[index] = row
+    end
+
+    local below = -GroupFinderWindow.LIST_TOP - #addon.GroupSession.LAYOUT * GroupFinderWindow.ROW_HEIGHT
+    self.offerText = board:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self.offerText:SetPoint("TOPLEFT", board, "TOPLEFT", padding, below - 6)
+    self.offerText:SetPoint("RIGHT", board, "RIGHT", -padding, 0)
+    self.offerText:SetJustifyH("LEFT")
+
+    self.roleLabel = board:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.roleLabel:SetPoint("TOPLEFT", board, "TOPLEFT", padding, below - 32)
+    self.roleLabel:SetText("Your role:")
+    local roleIndex
+    for roleIndex = 1, #addon.RoleCatalog.ROLES do
+        local role = addon.RoleCatalog.ROLES[roleIndex]
+        local button = self:button(board, addon.RoleCatalog.LABELS[role], GroupFinderWindow.ROLE_BUTTON_WIDTH,
+            function()
+                if self.shown ~= nil then
+                    pcall(self.setRole, self.shown, role)
+                    self:Refresh()
+                end
+            end)
+        button:SetPoint("TOPLEFT", board, "TOPLEFT",
+            padding + 80 + (roleIndex - 1) * (GroupFinderWindow.ROLE_BUTTON_WIDTH + 2), below - 28)
+        self.roleButtons[role] = button
+    end
+
+    self.altLabel = board:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.altLabel:SetPoint("TOPLEFT", board, "TOPLEFT", padding, below - 60)
+    self.altLabel:SetText("Join as an alt:")
+    for index = 1, GroupFinderWindow.ALT_BUTTONS do
+        local slot = {}
+        slot.button = self:button(board, "", GroupFinderWindow.ALT_WIDTH, function()
+            if self.shown ~= nil and slot.option ~= nil then
+                pcall(self.joinAsAlt, self.shown, slot.option)
+                self:Refresh()
+            end
+        end)
+        slot.button:SetPoint("TOPLEFT", board, "TOPLEFT",
+            padding + ((index - 1) % 2) * (GroupFinderWindow.ALT_WIDTH + 4),
+            below - 78 - math.floor((index - 1) / 2) * (GroupFinderWindow.BUTTON_HEIGHT + 4))
+        self.altButtons[index] = slot
+    end
+end
+
+-- How the player's offer to a group reads, by its state.
+function GroupFinderWindow.OfferLine(group, offer)
+    if offer == nil then
+        return ""
+    end
+    local state = offer.state
+    if state == addon.GroupBoard.SENT then
+        return "Offer sent to " .. group.label .. ". Waiting for their answer."
+    elseif state == addon.GroupBoard.ACCEPTED then
+        return group.label .. " accepted. They'll invite " .. offer.name .. " once it's online."
+    elseif state == addon.GroupBoard.DECLINED then
+        return group.label .. " turned down your offer."
+    end
+    return group.label .. " didn't answer your offer."
+end
+
+-- The one of `options` to offer: the character the player is on when it
+-- can, else their first other one.
+local function preferred(options, selfKey)
+    local index
+    for index = 1, #options do
+        if options[index].key == selfKey then
+            return options[index]
+        end
+    end
+    return options[1]
+end
+
+function Window:drawBoard(group, member)
+    self.shown = group
+    local okSelf, selfKey = pcall(self.selfKey)
+    selfKey = okSelf and selfKey or nil
+    self.boardOwner:SetText(member and (group.label .. "'s group, which you're in") or (group.label .. "'s group"))
+    if member then
+        self.backButton:Hide()
+    else
+        self.backButton:Show()
+    end
+    local okOffer, offer = pcall(self.offerFor, group)
+    offer = okOffer and offer or nil
+    local offering = offer ~= nil
+        and (offer.state == addon.GroupBoard.SENT or offer.state == addon.GroupBoard.ACCEPTED)
+    local open = {}
+    local mine
+    local index
+    for index = 1, #self.boardRows do
+        local row = self.boardRows[index]
+        local slot = group.slots[index]
+        row.group = group
+        row.option = nil
+        if slot == nil then
+            row.role:SetText("")
+            row.text:SetText("")
+        else
+            row.role:SetText(addon.RoleCatalog.LABELS[slot.role] .. ":")
+            if slot.name ~= nil then
+                local label = GroupFinderWindow.MemberLabel({
+                    name = slot.name, level = slot.level, classToken = slot.classToken, inGuild = true,
+                }, self.classColor)
+                row.text:SetText(slot.coming and (label .. " (coming)") or label)
+                if slot.key ~= nil and slot.key == selfKey then
+                    mine = slot
+                end
+            else
+                row.text:SetText("open")
+                open[slot.role] = true
+                if not member and not offering then
+                    local okOptions, options = pcall(self.fillOptions, group, slot.role)
+                    row.option = okOptions and type(options) == "table" and preferred(options, selfKey) or nil
+                end
+            end
+        end
+        if row.option ~= nil then
+            row.fill:SetText(row.option.key == selfKey and "Fill Slot" or ("Fill as " .. row.option.name))
+            row.fill:Show()
+        else
+            row.fill:Hide()
+        end
+    end
+    self.offerText:SetText(member and "" or GroupFinderWindow.OfferLine(group, offer))
+
+    -- A party member's own controls.
+    local anyRole = false
+    local role, button
+    for role, button in pairs(self.roleButtons) do
+        if member and mine ~= nil and self.roles:Can(mine.classToken, role) and (open[role] or mine.role == role) then
+            anyRole = true
+            button:Show()
+            if mine.role == role then
+                button:Disable()
+            else
+                button:Enable()
+            end
+        else
+            button:Hide()
+        end
+    end
+    if anyRole then
+        self.roleLabel:Show()
+    else
+        self.roleLabel:Hide()
+    end
+    local alts = {}
+    if member then
+        local okAlts, options = pcall(self.altOptions, group)
+        alts = okAlts and type(options) == "table" and options or {}
+    end
+    for index = 1, #self.altButtons do
+        local slot = self.altButtons[index]
+        slot.option = alts[index]
+        if slot.option ~= nil then
+            slot.button:SetText(addon.JoinRequests.OptionLabel(slot.option))
+            slot.button:Show()
+        else
+            slot.button:Hide()
+        end
+    end
+    if alts[1] ~= nil then
+        self.altLabel:Show()
+    else
+        self.altLabel:Hide()
+    end
+end
+
+-- The group the left side shows instead of the picker, and whether the
+-- player is in it: the group of an organizer in their party, else the one
+-- they clicked in the column, while it lasts.
+function Window:shownGroup()
+    local ok, party = pcall(self.partyGroup)
+    if ok and party ~= nil then
+        return party, true
+    end
+    if self.viewing ~= nil then
+        local okGet, group = pcall(self.boardGroup, self.viewing)
+        if okGet and group ~= nil then
+            return group, false
+        end
+        self.viewing = nil
+    end
+    return nil, false
+end
+
+-- Shows organizer `id`'s group in place of the picker.
+function Window:ViewGroup(id)
+    self.viewing = id
+    self:Refresh()
+end
+
 -- "Hammer, Wrench (unavailable)": a name as the game gave it, without the
 -- realm.
 function GroupFinderWindow.RepliesLine(replies)
@@ -594,6 +910,7 @@ function Window:build()
 
     self:buildPicker()
     self:buildGroup()
+    self:buildBoard()
     self:buildSuggestions()
     self:buildFooter()
 end
@@ -779,13 +1096,27 @@ function Window:draw()
     end
     local ok, candidates = pcall(self.candidates)
     self.candidatesNow = ok and candidates or nil
+    local shown, member
+    if not self.session:IsActive() then
+        shown, member = self:shownGroup()
+    end
     if self.session:IsActive() and not self.choosing then
         self.picker:Hide()
+        self.board:Hide()
         self:drawGroup()
         self.group:Show()
         self:drawSuggestions(self.candidatesNow, picked, true)
-    else
+    elseif shown ~= nil then
+        self.dungeonText:SetText("Dungeon: " .. GroupFinderWindow.Label(shown.dungeon))
         self.group:Hide()
+        self.picker:Hide()
+        self:drawBoard(shown, member)
+        self.board:Show()
+        self:drawSuggestions(self.candidatesNow, nil, false)
+    else
+        self.shown = nil
+        self.group:Hide()
+        self.board:Hide()
         self:drawPicker()
         self.picker:Show()
         self:drawSuggestions(self.candidatesNow, picked, false)
@@ -809,6 +1140,7 @@ end
 -- Redraws the window while it's showing; a closed window is drawn when it
 -- opens.
 function Window:Refresh()
+    pcall(self.changed)
     if self.catalog ~= nil and self:IsShown() then
         pcall(self.draw, self)
     end

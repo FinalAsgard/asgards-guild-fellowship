@@ -23,6 +23,13 @@ local _, addon = ...
 -- ("ready") or not yet ("waiting"). Once that character is in the party
 -- (matched by `rosterKey`, its key in the guild roster), it takes the
 -- invitee's slot as a party member.
+--
+-- The other way round, a guildmate who saw the group being formed can
+-- offer to fill an open slot; an offer the organizer accepts becomes an
+-- accepted invitee, as above. A party member can ask for another open role
+-- their class fills, or come as one of their alts instead: the alt then
+-- holds their slot as an accepted invitee, and they take none. Summary is
+-- the group as the guild hears it.
 local GroupSession = {
     -- Every party member fills a slot as accepted.
     ACCEPTED = "accepted",
@@ -64,6 +71,7 @@ function Session:clear()
     self.slots = {}
     self.requests = {}
     self.requestCount = 0
+    self.offers = {}
 end
 
 -- Starts a group for the dungeon with `dungeonId`. Starting again while one
@@ -204,9 +212,14 @@ function Session:place()
     -- Members already matched to a request, first those whose roster key is
     -- an accepted invitee's: never taken by a name match for another.
     local claimed = {}
+    -- Party members coming back as an alt: their alt takes their slot.
+    local replaced = {}
     local index
     for index = 1, #self.requests do
         local request = self.requests[index]
+        if request.state == GroupSession.ACCEPTED and request.replaces ~= nil then
+            replaced[request.replaces] = true
+        end
         local memberIndex
         for memberIndex = 1, #self.members do
             local member = self.members[memberIndex]
@@ -246,14 +259,18 @@ function Session:place()
         if not addon.RoleCatalog.IsRole(role) then
             role = joinedRole[member.key] or self.assignments[member.key]
         end
-        if role ~= nil then
-            local slot = openSlot(slots, role)
-            if slot ~= nil then
-                slot.member = member
-                slot.state = GroupSession.ACCEPTED
+        -- A member coming back as an alt takes no slot: the alt's request
+        -- holds their place.
+        if not replaced[member.key] then
+            if role ~= nil then
+                local slot = openSlot(slots, role)
+                if slot ~= nil then
+                    slot.member = member
+                    slot.state = GroupSession.ACCEPTED
+                end
+            else
+                table.insert(defaults, member)
             end
-        else
-            table.insert(defaults, member)
         end
     end
     for index = 1, #defaults do
@@ -458,6 +475,187 @@ function Session:JoinedElsewhere(id, from)
     end
     request.state = GroupSession.JOINED_ELSEWHERE
     return true
+end
+
+-- Whether a slot for `role` is open, counting the slot of party member
+-- `replaces` (their key) as open when given.
+function Session:roleOpen(role, replaces)
+    local slots = self:Slots()
+    local index
+    for index = 1, #slots do
+        local slot = slots[index]
+        if slot.role == role and (slot.member == nil or (replaces ~= nil and slot.member.key == replaces)) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Takes guildmate `target` ({ playerId?, key = the character they're on,
+-- label }) straight into a slot as `option` ({ role, key, name, level }),
+-- without asking them: an offer the organizer accepted, or a party member
+-- coming as an alt instead, whose own slot (`replaces`, their party member
+-- key) the alt then holds. Returns the accepted request, or nil when no
+-- group is going or no slot for that role is open.
+function Session:Accept(target, option, now, owner, replaces)
+    if not self.active or type(target) ~= "table" or target.key == nil or type(option) ~= "table"
+        or option.key == nil or not addon.RoleCatalog.IsRole(option.role)
+        or not self:roleOpen(option.role, replaces)
+    then
+        return nil
+    end
+    self.requestCount = self.requestCount + 1
+    local request = {
+        id = (owner and (owner .. ":") or "") .. tostring(now) .. "-" .. self.requestCount,
+        playerId = target.playerId,
+        to = target.key,
+        label = target.label,
+        state = GroupSession.ACCEPTED,
+        at = now,
+        role = option.role,
+        character = { key = option.key, name = option.name, level = option.level, inGuild = true, invitee = true },
+        replaces = replaces,
+    }
+    table.insert(self.requests, request)
+    self:place()
+    return request
+end
+
+-- The party member with roster key `key`, or nil.
+function Session:MemberByRosterKey(key)
+    local index
+    for index = 1, #self.members do
+        if key ~= nil and self.members[index].rosterKey == key then
+            return self.members[index]
+        end
+    end
+    return nil
+end
+
+-- Party member `key` asks for `role`: granted when the game hasn't
+-- assigned them one, their class can fill it, and they're in that role's
+-- slot already or one is open. Returns whether they're in it now.
+function Session:ChangeRole(key, role)
+    local member
+    local index
+    for index = 1, #self.members do
+        if self.members[index].key == key then
+            member = self.members[index]
+        end
+    end
+    if not self.active or member == nil or addon.RoleCatalog.IsRole(member.assignedRole)
+        or not addon.RoleCatalog.IsRole(role) or not self.roles:Can(member.classToken, role)
+    then
+        return false
+    end
+    local slots = self:Slots()
+    for index = 1, #slots do
+        if slots[index].member == member and slots[index].role == role then
+            return true
+        end
+    end
+    if not self:roleOpen(role) then
+        return false
+    end
+    return self:Assign(key, role)
+end
+
+-- The slots as the guild hears them (GroupFinderProtocol.Group): each
+-- { r = role } and, when filled, n = name, l = level, k = the character's
+-- guild key, c = its class, w = true for an invitee not in the party yet.
+function Session:Summary()
+    local summary = {}
+    local slots = self:Slots()
+    local index
+    for index = 1, #slots do
+        local slot = slots[index]
+        local entry = { r = slot.role }
+        local member = slot.member
+        if member ~= nil and type(member.name) == "string" and member.name ~= "" then
+            entry.n = member.name
+            entry.l = type(member.level) == "number" and member.level or nil
+            entry.k = member.rosterKey or (member.invitee and member.key) or nil
+            entry.c = member.classToken
+            entry.w = slot.request ~= nil or nil
+        end
+        summary[index] = entry
+    end
+    return summary
+end
+
+-- Offers ---------------------------------------------------------------------
+
+-- A guildmate offered to fill a slot (`offer`: { id, from = the character
+-- they're on, sender, role, character = { key, name, level } }) at `now`.
+-- Kept while that role is open; a repeated id replaces the one it repeats.
+-- Returns the offer, or nil when it's refused at once.
+function Session:Offer(offer, now)
+    if not self.active or type(offer) ~= "table" or offer.id == nil or offer.from == nil
+        or type(offer.character) ~= "table" or not self:roleOpen(offer.role)
+    then
+        return nil
+    end
+    local index
+    for index = #self.offers, 1, -1 do
+        if self.offers[index].id == offer.id and self.offers[index].from == offer.from then
+            table.remove(self.offers, index)
+        end
+    end
+    offer.at = now
+    table.insert(self.offers, offer)
+    return offer
+end
+
+-- The offers waiting for the organizer, oldest first.
+function Session:Offers()
+    local copy = {}
+    local index
+    for index = 1, #self.offers do
+        copy[index] = self.offers[index]
+    end
+    return copy
+end
+
+function Session:takeOffer(id)
+    local index
+    for index = 1, #self.offers do
+        if self.offers[index].id == id then
+            return table.remove(self.offers, index)
+        end
+    end
+    return nil
+end
+
+-- The organizer accepts offer `id`: its character takes the slot as an
+-- accepted invitee. Returns the offer and the request, or the offer alone
+-- when the role filled in the meantime, or nil for no such offer.
+function Session:AcceptOffer(id, now, owner, playerId)
+    local offer = self:takeOffer(id)
+    if offer == nil then
+        return nil
+    end
+    local option = { role = offer.role, key = offer.character.key, name = offer.character.name,
+        level = offer.character.level }
+    return offer, self:Accept({ playerId = playerId, key = offer.from, label = offer.sender }, option, now, owner)
+end
+
+-- The organizer turns offer `id` down. Returns it, or nil.
+function Session:DeclineOffer(id)
+    return self:takeOffer(id)
+end
+
+-- Drops the offers waiting REQUEST_SECONDS by `now`, or whose role
+-- filled. Returns those dropped.
+function Session:ExpireOffers(now)
+    local dropped = {}
+    local index
+    for index = #self.offers, 1, -1 do
+        local offer = self.offers[index]
+        if now - offer.at >= GroupSession.REQUEST_SECONDS or not self:roleOpen(offer.role) then
+            table.insert(dropped, 1, table.remove(self.offers, index))
+        end
+    end
+    return dropped
 end
 
 local function sameRoles(a, b)
