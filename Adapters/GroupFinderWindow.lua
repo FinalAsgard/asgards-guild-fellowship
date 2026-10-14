@@ -159,6 +159,15 @@ function GroupFinderWindow.Create(client, host, options)
     return window
 end
 
+-- Keeps `text` on one line: a name and its "(level)" stay side by side,
+-- cut short at the end rather than wrapped onto the line below.
+local function singleLine(text)
+    if type(text.SetWordWrap) == "function" then
+        text:SetWordWrap(false)
+    end
+    return text
+end
+
 function Window:button(parent, text, width, onClick)
     local made = self.environment.CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     made:SetWidth(width)
@@ -207,9 +216,7 @@ function Window:suggestionLine(index)
     line:SetPoint("TOPLEFT", self.suggestionList, "TOPLEFT", 0, -(index - 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
     line:SetPoint("RIGHT", self.suggestionList, "RIGHT", -GroupFinderWindow.REQUEST_WIDTH - 4, 0)
     line:SetJustifyH("LEFT")
-    if type(line.SetWordWrap) == "function" then
-        line:SetWordWrap(false)
-    end
+    singleLine(line)
     self.suggestionLines[index] = line
     -- Hovering the line shows where the player is now.
     local hover = self.environment.CreateFrame("Frame", nil, self.suggestionList)
@@ -455,6 +462,7 @@ function Window:buildGroup()
         text:SetPoint("TOPLEFT", group, "TOPLEFT", padding + 70, top)
         text:SetPoint("RIGHT", group, "RIGHT", -padding - 114, 0)
         text:SetJustifyH("LEFT")
+        singleLine(text)
         local row = { role = role, text = text }
         -- An accepted invitee who hasn't joined can be let go, opening the
         -- slot again.
@@ -627,6 +635,7 @@ function Window:partyRow(index)
     row.text:SetPoint("LEFT", frame, "LEFT", 0, 0)
     row.text:SetPoint("RIGHT", previous, "LEFT", -6, 0)
     row.text:SetJustifyH("LEFT")
+    singleLine(row.text)
     self.partyRows[index] = row
     return row
 end
