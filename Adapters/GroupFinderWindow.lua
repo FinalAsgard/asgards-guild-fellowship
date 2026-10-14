@@ -700,6 +700,8 @@ function GroupFinderWindow.OfferLine(group, offer)
         return group.label .. " accepted. They'll invite " .. offer.name .. " once it's online."
     elseif state == addon.GroupBoard.DECLINED then
         return group.label .. " turned down your offer."
+    elseif state == addon.GroupBoard.WITHDRAWN then
+        return group.label .. " no longer holds a slot for " .. offer.name .. "."
     end
     return group.label .. " didn't answer your offer."
 end

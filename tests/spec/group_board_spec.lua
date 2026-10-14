@@ -92,6 +92,25 @@ test.test("board: an offer waits for the organizer's answer, and goes unanswered
     test.assertEqual(addon.GroupBoard.EXPIRED, board:OfferFor("zap", NOW + addon.GroupBoard.OFFER_SECONDS).state)
 end)
 
+test.test("board: an accepted offer is withdrawn once the group no longer holds its character", function()
+    local addon = load()
+    local board = addon.GroupBoard.Create()
+    local option = { role = "healer", key = "hammer", name = "Hammer", level = 22 }
+    board:Offer("tool", "offer-1", option, NOW)
+    board:OnOfferAnswer("offer-1", "tool", true)
+    local group = addon.GroupFinderProtocol.Group(DEADMINES, slots({ { at = 2, n = "Hammer", l = 22, k = "hammer", w = true } }))
+    board:OnGroup(group, "tool", "Tool", NOW)
+    test.assertEqual(addon.GroupBoard.ACCEPTED, board:OfferFor("tool", NOW).state)
+
+    -- The organizer cancelled it: the next announcement drops Hammer.
+    board:OnGroup(addon.GroupFinderProtocol.Group(DEADMINES, slots({})), "tool", "Tool", NOW + 1)
+    test.assertEqual(addon.GroupBoard.WITHDRAWN, board:OfferFor("tool", NOW + 1).state)
+
+    -- An announcement sent before the accept, arriving late, doesn't stick.
+    board:OnGroup(group, "tool", "Tool", NOW + 2)
+    test.assertEqual(addon.GroupBoard.ACCEPTED, board:OfferFor("tool", NOW + 2).state)
+end)
+
 -- GroupSession -------------------------------------------------------------------
 
 local ME = { key = "Player-1", name = "Me", classToken = "WARRIOR", inGuild = true, isPlayer = true, rosterKey = "me" }
@@ -440,6 +459,33 @@ test.test("composed: a guildmate sees the group being formed, offers to fill a s
     organizer.groupFinderOptions.changed()
     fixtures.deliver(channel)
     test.assertEqual(0, #options.groups())
+end)
+
+test.test("composed: an accepted offer the organizer cancels can be made again", function()
+    local channel = fixtures.newChannel()
+    local organizer = login(channel, "Tool Box")
+    local hammer = login(channel, "Hammer Smith")
+    fixtures.deliver(channel)
+    startGroup(channel, organizer)
+    fixtures.openGroupFinder(hammer)
+    fixtures.deliver(channel)
+
+    local options = hammer.groupFinderOptions
+    local group = options.groups()[1]
+    options.offer(group, options.fillOptions(group, "healer")[1])
+    fixtures.deliver(channel)
+    organizer.handlers.accept(organizer.shown[1].id, 1)
+    fixtures.deliver(channel)
+
+    local slot = organizer.addon.groupSession:Slots()[2]
+    organizer.groupFinderOptions.cancelRequest(slot.request)
+    organizer.groupFinderOptions.changed()
+    fixtures.deliver(channel)
+
+    group = options.groups()[1]
+    test.assertEqual(nil, group.slots[2].name)
+    test.assertEqual(hammer.addon.GroupBoard.WITHDRAWN, options.offerFor(group).state)
+    test.assertEqual(1, #options.fillOptions(group, "healer"))
 end)
 
 test.test("composed: a turned-down offer says so, and the organizer's prompt closes", function()

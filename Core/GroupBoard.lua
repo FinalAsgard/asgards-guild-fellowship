@@ -16,6 +16,9 @@ local GroupBoard = {
     ACCEPTED = "accepted",
     DECLINED = "declined",
     EXPIRED = "expired",
+    -- Accepted, but the organizer's group no longer holds the character
+    -- (they cancelled it, say).
+    WITHDRAWN = "withdrawn",
 }
 addon.GroupBoard = GroupBoard
 
@@ -50,6 +53,18 @@ function Board:OnGroup(message, organizer, sender, now)
         slots = slots,
         at = now,
     }
+    -- An accepted offer holds while the group holds its character; one
+    -- the organizer dropped can be made again.
+    local offer = self.offers[organizer]
+    if offer ~= nil and (offer.state == GroupBoard.ACCEPTED or offer.state == GroupBoard.WITHDRAWN) then
+        local held = false
+        for index = 1, #slots do
+            if slots[index].key ~= nil and slots[index].key == offer.key then
+                held = true
+            end
+        end
+        offer.state = held and GroupBoard.ACCEPTED or GroupBoard.WITHDRAWN
+    end
 end
 
 -- Organizer `organizer`'s group ended.
