@@ -292,7 +292,7 @@ The window has three parts: the dungeon picker, or once you've picked one, your 
 
 The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
 
-On WoW Retail the list comes from the game's own Dungeon Finder, so it stays current without add-on updates. WoW Forever has no Dungeon Finder, so the add-on ships its dungeons (the Classic ones and Forever's new ones) with their fixed level ranges.
+The list and its level ranges come from the game's own Dungeon Finder, on WoW Retail and WoW Forever, so they stay current without add-on updates. Only if the game's Dungeon Finder lists nothing does the add-on fall back to its own list of dungeons with fixed level ranges.
 
 Picking a dungeon starts your group and shows its five slots: 1 tank, 1 healer and 3 DPS. Everyone already in your party, guild members or not, fills a slot, and the slots update as people join or leave:
 

@@ -910,13 +910,54 @@ end
 Compatibility.LFG_TYPE_RANDOM = 6
 Compatibility.LFG_SUBTYPE_DUNGEON = 1
 
--- The Dungeon Finder's dungeons as { id, name, minLevel, maxLevel }, or nil
--- on a client without one (WoW Forever) or when it lists none.
+-- The Classic-era Dungeon Finder (WoW Forever's) lists dungeons as
+-- activities in this category.
+Compatibility.LFG_LIST_DUNGEONS = 2
+
+-- The Classic-era Dungeon Finder's dungeons, from its activities: each
+-- with a name and a level range (the suggested one where the client gives
+-- it), heroic ones left out. Nil when there's no such Dungeon Finder or it
+-- lists none.
+function Client:activityDungeons()
+    local lfgList = self.environment.C_LFGList
+    if type(lfgList) ~= "table" or type(lfgList.GetActivityInfoTable) ~= "function" then
+        return nil
+    end
+    local ok, activities = callFunction(lfgList.GetAvailableActivities, Compatibility.LFG_LIST_DUNGEONS)
+    if not ok or type(activities) ~= "table" then
+        return nil
+    end
+    local dungeons = {}
+    local index
+    for index = 1, #activities do
+        local id = activities[index]
+        local infoOk, info = callFunction(lfgList.GetActivityInfoTable, id)
+        if infoOk and type(info) == "table" and not info.isHeroicActivity then
+            local name = info.fullName or info.shortName
+            local minLevel = info.minLevelSuggestion or info.minLevel
+            local maxLevel = info.maxLevelSuggestion or info.maxLevel
+            if type(name) == "string" and name ~= "" and type(minLevel) == "number" and type(maxLevel) == "number"
+                and minLevel > 0 and minLevel <= maxLevel
+            then
+                table.insert(dungeons, { id = id, name = name, minLevel = minLevel, maxLevel = maxLevel })
+            end
+        end
+    end
+    if #dungeons == 0 then
+        return nil
+    end
+    return dungeons
+end
+
+-- The Dungeon Finder's dungeons as { id, name, minLevel, maxLevel }: the
+-- Dungeon Finder's own list (Retail), else the Classic-era one's
+-- activities (WoW Forever). Nil on a client without either, or when they
+-- list none.
 function Client:GetDungeonList()
     local environment = self.environment
     local ok, order = callFunction(environment.GetLFDChoiceOrder, {})
     if not ok or type(order) ~= "table" or type(environment.GetLFGDungeonInfo) ~= "function" then
-        return nil
+        return self:activityDungeons()
     end
     local dungeons = {}
     local index
@@ -931,7 +972,7 @@ function Client:GetDungeonList()
         end
     end
     if #dungeons == 0 then
-        return nil
+        return self:activityDungeons()
     end
     return dungeons
 end

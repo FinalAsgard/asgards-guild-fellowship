@@ -2,10 +2,11 @@ local _, addon = ...
 
 -- The dungeons the Group Finder can form a group for, each
 -- { id, name, minLevel, maxLevel }. Where the client has a Dungeon Finder
--- (Retail), the WoW adapter supplies its dungeons; otherwise, or when it
--- supplies none, the client's static table below is used. It answers which
--- dungeons fit a level and whether a level fits a dungeon. Pure: it never
--- touches the game.
+-- (Retail's, or WoW Forever's Classic-era one), the WoW adapter supplies its
+-- dungeons and their live ranges; otherwise, or when it supplies none, the
+-- client's static table below is used. It answers which dungeons fit a
+-- level and whether a level fits a dungeon. Pure: it never touches the
+-- game.
 local DungeonCatalog = {}
 addon.DungeonCatalog = DungeonCatalog
 
@@ -16,11 +17,10 @@ local function dungeon(id, name, minLevel, maxLevel)
     return { id = id, name = name, minLevel = minLevel, maxLevel = maxLevel }
 end
 
--- Per-client tables, by client profile id. WoW Forever has no Dungeon
--- Finder, so its Classic dungeons and their fixed ranges live here; its
--- ranges still need checking in game. Retail's table is only a fallback for
--- when the Dungeon Finder reports nothing: the current expansion's leveling
--- dungeons, a best guess until checked in game.
+-- Per-client tables, by client profile id, used only when the game's
+-- Dungeon Finder reports nothing. WoW Forever's: its Classic dungeons and
+-- its own, with ranges still to be checked in game. Retail's: the current
+-- expansion's leveling dungeons, a best guess until checked in game.
 DungeonCatalog.STATIC = {
     forever = {
         dungeon("rfc", "Ragefire Chasm", 13, 18),
