@@ -23,8 +23,9 @@ Controller.__index = Controller
 --                 change to main links, with the set of every character
 --                 key whose player was involved, and each one's main before
 --                 the change (for guild sync)
---   onAliasChanged  optional function(key): after a manual alias change to
---                 the player of `key` (for guild sync)
+--   onAliasChanged  optional function(key, before): after a manual alias
+--                 change to the player of `key`, with the alias before it
+--                 ("" for none) (for guild sync)
 --   onScanFinished  optional function(): after every completed scan
 --   onSyncResumed  optional function(key): after "Don't sync" was turned
 --                 off for the player of `key`
@@ -466,13 +467,15 @@ end
 -- Runs a manual change, reports a refusal, and redraws at once (no scan).
 -- A change to main links reports every character of the players involved,
 -- before and after, to onMainLinksChanged, with each one's main before the
--- change; an alias change reports its character to onAliasChanged.
+-- change; an alias change reports its character to onAliasChanged, with
+-- the alias before the change ("" for none).
 function Controller:Organize(operation, key, ...)
     if self.current == nil then
         return false
     end
     local service = self:Service()
     local involved, before
+    local aliasBefore = operation == "SetAlias" and self:AliasOf(key) or nil
     if MAIN_LINK_OPERATIONS[operation] then
         involved = self:AddPlayerKeys({}, key)
         -- "Link as alt of…" also involves the player the character joins.
@@ -489,7 +492,7 @@ function Controller:Organize(operation, key, ...)
     elseif involved ~= nil and self.onMainLinksChanged ~= nil then
         self.onMainLinksChanged(self:AddPlayerKeys(involved, key), before)
     elseif operation == "SetAlias" and self.onAliasChanged ~= nil then
-        self.onAliasChanged(key)
+        self.onAliasChanged(key, aliasBefore)
     end
     self:Refresh()
     return ok == true

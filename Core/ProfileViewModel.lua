@@ -77,10 +77,14 @@ end
 --   roles        the client's RoleCatalog
 --   classColor   function(classToken) -> "ffrrggbb" or nil (optional)
 --   dnd          whether Do Not Disturb is on
+--   pending      this member's pending suggestions (SuggestionService:Pending),
+--                optional
 -- Returns { message, dnd } when there's no player to show, or:
 --   { label, alias, aliasMax, main, mainName, about, characters, suggested,
---     dnd }
--- where `alias` is "" without one, `aliasMax` its longest length and `main`
+--     waiting, dnd }
+-- where `waiting` lists what this player asked officers for and is still
+-- pending (SuggestionBundles.MemberItems), and
+-- `alias` is "" without one, `aliasMax` its longest length and `main`
 -- the main's key, and
 -- `about` lists the player's Discord, location and bio, each
 -- { kind, label, text, max } (`text` is "" when not set, `max` the most
@@ -146,6 +150,7 @@ function ProfileViewModel.Build(inputs)
         end
     end
     return {
+        waiting = addon.SuggestionBundles.MemberItems(partition, inputs.normalizer, own.player, inputs.pending),
         suggested = suggested,
         about = about,
         label = player.alias and (player.alias .. " (" .. main.name .. ")") or main.name,

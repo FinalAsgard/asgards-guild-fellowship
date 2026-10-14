@@ -155,6 +155,10 @@ Members know their own alts best, so a member's edits become suggestions for the
 - Rejecting puts your roster back the way the officers have it, so you stay on the same data as everyone else. If no officer ever set that character or alias, it goes back to what the guild notes and the roster say.
 - Until then, your edit stays in your roster unless a newer officer edit about the same character or alias arrives.
 - Your suggestions that are still waiting are listed at the bottom of your **Conflicts** window, marked "Your suggestion" and "Waiting for an officer". They aren't counted on the Conflicts button, and they leave the list once an officer decides them. Suggestions are only sent while you're online, so if you log off before an officer decides, yours are sent again the next time an officer is online.
+- All your waiting changes, made from any of your characters, from the roster or from My Profile, form one request for your player. [My Profile](#my-profile) lists them under **Waiting for an officer** in plain words, for example "Wrench as an alt of Hammer" or "Alias: Hammers".
+- Changing the same thing again replaces your earlier change in the request. Changing it back to how the officers have it drops it from the request, and from officers' queues.
+- **Undo** beside a waiting change puts your roster back the way the officers have it and takes the change back from officers' queues (officers who are offline are told when they next log in). An officer still on an older version of the add-on may keep seeing it until they decide it.
+- When an officer decides one of your changes, chat tells you: "An officer approved your change: …" or "An officer denied your change: …". A denial rolls back only that change; the rest of your request keeps waiting.
 
 ### Don't sync
 

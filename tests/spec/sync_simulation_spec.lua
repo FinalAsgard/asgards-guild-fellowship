@@ -1031,3 +1031,65 @@ test.test("/agf sync and the roster footer show when this client last synced", f
     test.assertContains(status, "Guild sync is paused while you're in combat")
     test.assertContains(status, "1 suggestion of yours is waiting for an officer.")
 end)
+
+-- Bundles: the member's side ---------------------------------------------------
+
+local function messagesOf(world)
+    return table.concat(world.messages, "\n")
+end
+
+test.test("a member undoes a pending change: their roster goes back and officers drop it", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammers"))
+    fixtures.deliver(channel)
+    test.assertTrue(queuedSuggestion(officer, "wrench-area52", "suggested main") ~= nil)
+
+    test.assertTrue(hammer.addon.syncSession:Undo("wrench-area52", "main"))
+    fixtures.deliver(channel)
+
+    test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual(nil, queuedSuggestion(officer, "wrench-area52", "suggested main"))
+    -- The other change still waits.
+    test.assertTrue(queuedSuggestion(officer, "hammer-area52", "suggested alias") ~= nil)
+    test.assertEqual(1, #pendingOf(hammer))
+    test.assertEqual("Hammers", aliasOf(hammer, "hammer-area52"))
+end)
+
+test.test("a member changing something back to the officers' value drops it, here and in officers' queues", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    fixtures.deliver(channel)
+    test.assertEqual(1, #pendingOf(hammer))
+
+    -- Split off again: back to how officers have it.
+    test.assertTrue(hammer.addon.rosterController:Detach("wrench-area52"))
+    fixtures.deliver(channel)
+
+    test.assertEqual(0, #pendingOf(hammer))
+    test.assertEqual(nil, queuedSuggestion(officer, "wrench-area52", "suggested main"))
+end)
+
+test.test("a member hears each decision; a denial rolls back only that change", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammers"))
+    fixtures.deliver(channel)
+
+    test.assertTrue(officer.addon.rosterController:AcceptConflict("hammer-area52", "suggested alias"))
+    fixtures.deliver(channel)
+    test.assertContains(messagesOf(hammer), "An officer approved your change: Alias: Hammers.")
+
+    test.assertTrue(officer.addon.rosterController:RejectConflict("wrench-area52", "suggested main"))
+    fixtures.deliver(channel)
+    test.assertContains(messagesOf(hammer), "An officer denied your change: Wrench as an alt of Hammer.")
+    test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual("Hammers", aliasOf(hammer, "hammer-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+end)

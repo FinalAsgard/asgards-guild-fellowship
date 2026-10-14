@@ -14,7 +14,8 @@ local function newSetup()
         "Core/FellowshipStore.lua",
         "Core/ReconcileEngine.lua",
         "Core/SyncFacts.lua",
-        "Core/SuggestionService.lua"
+        "Core/SuggestionService.lua",
+        "Core/SuggestionBundles.lua"
     )
     local partition = addon.FellowshipStore.Create({ schemaVersion = 2, guilds = {} }):Partition(GUILD)
     local keys = { OFFICER, MEMBER, "wrench-area52", "anvil-area52" }
@@ -278,4 +279,161 @@ test.test("suggestions stay queued through note scans", function()
     }))
 
     test.assertEqual(1, #queued(setup))
+end)
+
+-- Bundles: the member's side ---------------------------------------------------
+
+local function normalizer(setup)
+    return setup.addon.NameNormalizer.Create({ twoPartNames = false, homeRealm = "Area52" })
+end
+
+local function texts(items)
+    local list = {}
+    local index
+    for index = 1, #items do
+        list[index] = items[index].text
+    end
+    return table.concat(list, "; ")
+end
+
+test.test("bundles: a member's pending items are those of their player, from any of its characters", function()
+    local setup = newSetup()
+    local partition = setup.partition
+    -- Hammer and Wrench are one player; Anvil is someone else on this install.
+    partition:JoinPlayerOf("wrench-area52", MEMBER, "manual")
+    setup.service:Record({ link("anvil-area52", MEMBER, NOW, MEMBER) })
+    setup.service:Record({ alias(MEMBER, "Hammers", NOW + 1, "wrench-area52") })
+    setup.service:Record({ alias("anvil-area52", "Anvils", NOW + 2, "anvil-area52") })
+
+    local items = setup.addon.SuggestionBundles.MemberItems(partition, normalizer(setup),
+        partition:GetCharacter(MEMBER).player, setup.service:Pending())
+
+    test.assertEqual("anvil as an alt of hammer; Alias: Hammers", texts(items))
+    test.assertEqual("main", items[1].kind)
+    test.assertEqual("alias", items[2].kind)
+    test.assertEqual("Clear the alias",
+        setup.addon.SuggestionBundles.Describe(partition, normalizer(setup), alias(MEMBER, "")))
+    test.assertEqual("hammer as main",
+        setup.addon.SuggestionBundles.Describe(partition, normalizer(setup), link(MEMBER, MEMBER)))
+end)
+
+test.test("bundles: a re-edit replaces the item and keeps what it replaced; changing it back drops and withdraws it", function()
+    local setup = newSetup()
+    local partition = setup.partition
+    local function prior()
+        return { main = "wrench-area52" }
+    end
+
+    setup.service:Record({ link("wrench-area52", MEMBER, NOW) }, prior)
+    -- The second edit's prior is the member's own first edit; the officers'
+    -- value is still what the first one replaced.
+    setup.service:Record({ link("wrench-area52", "anvil-area52", NOW + 5) }, function()
+        return { main = MEMBER }
+    end)
+    local pending = setup.service:Pending()
+    test.assertEqual(1, #pending)
+    test.assertEqual("anvil-area52", pending[1].main)
+    test.assertEqual("wrench-area52", pending[1].was.main)
+    test.assertTrue(pending[1].was ~= nil)
+    test.assertTrue(setup.service:Outgoing()[1].was == nil)
+
+    -- Back to Wrench as its own main: nothing is pending any more.
+    partition:SetMainStamp("wrench-area52", NOW + 9, MEMBER)
+    test.assertEqual(1, setup.service:Record({ link("wrench-area52", "wrench-area52", NOW + 9) }, function()
+        return { main = "anvil-area52" }
+    end))
+    test.assertEqual(0, #setup.service:Pending())
+    -- Unstamped again, so officer data wins over it; the withdrawal goes out.
+    test.assertEqual(0, (partition:GetMainStamp("wrench-area52")))
+    local outgoing = setup.service:Outgoing()
+    test.assertEqual(1, #outgoing)
+    test.assertEqual("wrench-area52", outgoing[1].main)
+    test.assertEqual(NOW + 9, outgoing[1].at)
+end)
+
+test.test("bundles: undo puts back what the suggestion replaced, here, and withdraws it", function()
+    local setup = newSetup()
+    local partition = setup.partition
+    -- The member linked Wrench to Hammer, as stamping leaves it.
+    partition:JoinPlayerOf("wrench-area52", MEMBER, "manual")
+    partition:SetMainStamp("wrench-area52", NOW, MEMBER)
+    setup.service:Record({ link("wrench-area52", MEMBER, NOW) }, function()
+        return { main = "wrench-area52" }
+    end)
+    setup.service:Record({ alias(MEMBER, "Hammers", NOW) })
+
+    test.assertTrue(setup.service:Undo("wrench-area52", "main"))
+
+    test.assertEqual("wrench-area52", mainOf(partition, "wrench-area52"))
+    test.assertEqual(0, (partition:GetMainStamp("wrench-area52")))
+    -- Only that item went; the alias without a known prior can't be undone.
+    test.assertEqual(1, #setup.service:Pending())
+    local undone, reason = setup.service:Undo(MEMBER, "alias")
+    test.assertFalse(undone)
+    test.assertContains(reason, "isn't known")
+    test.assertFalse(setup.service:Undo("wrench-area52", "main"))
+    local outgoing = setup.service:Outgoing()
+    test.assertEqual("alias", outgoing[1].kind)
+    test.assertEqual("main", outgoing[2].kind)
+    test.assertEqual("wrench-area52", outgoing[2].main)
+    test.assertEqual(NOW + 1, outgoing[2].at)
+end)
+
+test.test("bundles: withdrawals are kept two weeks, and a new edit to the same thing replaces one", function()
+    local setup = newSetup()
+    local now = NOW
+    local service = setup.addon.SuggestionService.Create(setup.partition, {
+        now = function()
+            return now
+        end,
+    })
+    service:Record({ link("wrench-area52", MEMBER, NOW) }, function()
+        return { main = "wrench-area52" }
+    end)
+    service:Undo("wrench-area52", "main")
+    test.assertEqual(1, #service:Outgoing())
+
+    service:Record({ link("wrench-area52", "anvil-area52", NOW + 2) }, function()
+        return { main = "wrench-area52" }
+    end)
+    local outgoing = service:Outgoing()
+    test.assertEqual(1, #outgoing)
+    test.assertEqual("anvil-area52", outgoing[1].main)
+
+    service:Undo("wrench-area52", "main")
+    now = NOW + 15 * 86400
+    -- Only the withdrawal was left, and it's too old now.
+    test.assertEqual(0, #service:Outgoing())
+end)
+
+test.test("bundles: an officer's queue drops a member's suggestion they withdrew, and only theirs", function()
+    local setup = newSetup()
+    setup.service:Queue({ link("wrench-area52", MEMBER, NOW) }, MEMBER)
+    setup.service:Queue({ link("anvil-area52", "wrench-area52", NOW, "wrench-area52") }, "wrench-area52")
+    test.assertEqual(2, #queued(setup))
+
+    -- Another member's "withdrawal" of Hammer's suggestion is ignored.
+    test.assertEqual(0, setup.service:Queue({ link("wrench-area52", "wrench-area52", NOW + 5, "anvil-area52") },
+        "anvil-area52"))
+    -- An older one too.
+    test.assertEqual(0, setup.service:Queue({ link("wrench-area52", "wrench-area52", NOW - 5) }, MEMBER))
+    test.assertEqual(2, #queued(setup))
+
+    test.assertEqual(1, setup.service:Queue({ link("wrench-area52", "wrench-area52", NOW + 5) }, MEMBER))
+    local left = queued(setup)
+    test.assertEqual(1, #left)
+    test.assertEqual("anvil-area52", left[1].character)
+end)
+
+test.test("bundles: a decision names the member's pending items it settles", function()
+    local setup = newSetup()
+    setup.service:Record({ link("wrench-area52", MEMBER, NOW), alias(MEMBER, "Hammy", NOW) })
+
+    local named = setup.service:Named({ kind = "suggested main", character = "wrench-area52", from = MEMBER,
+        at = NOW, approved = true })
+    test.assertEqual(1, #named)
+    test.assertEqual("wrench-area52", named[1].character)
+    test.assertEqual(0, #setup.service:Named({ kind = "suggested main", character = "wrench-area52",
+        from = "anvil-area52", at = NOW }))
+    test.assertEqual(0, #setup.service:Named(nil))
 end)

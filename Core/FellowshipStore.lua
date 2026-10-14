@@ -206,7 +206,7 @@ local function validatePartition(data)
     end
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
-        "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn",
+        "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn", "withdrawals",
     }
     local index
     for index = 1, #containers do
@@ -242,7 +242,7 @@ local function validatePartition(data)
     -- are only created when needed.
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
-        recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true,
+        recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true, withdrawals = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -1074,6 +1074,20 @@ function Partition:SetSuggestions(entries)
         return false
     end
     self.data.suggestions = entries
+    return true
+end
+
+-- A member's withdrawn suggestions (SuggestionService), kept to tell
+-- officers who log in later.
+function Partition:GetWithdrawals()
+    return self.data.withdrawals or {}
+end
+
+function Partition:SetWithdrawals(entries)
+    if type(entries) ~= "table" then
+        return false
+    end
+    self.data.withdrawals = entries
     return true
 end
 

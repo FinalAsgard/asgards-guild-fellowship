@@ -13,7 +13,9 @@ local _, addon = ...
 -- player. Below the characters, "Your other characters on this computer"
 -- offers the characters this install has logged in on that aren't linked
 -- yet, each with Add as alt and Dismiss; nothing is ever linked without that
--- click. A Do Not Disturb check box sits along the bottom. Out of a guild,
+-- click. A member's changes still waiting for an officer are listed under
+-- "Waiting for an officer", each with Undo. A Do Not Disturb check box sits
+-- along the bottom. Out of a guild,
 -- or before the roster knows the character, the tab shows a short message
 -- instead.
 --
@@ -77,6 +79,7 @@ end
 --                         ProfileViewModel.AltCandidates)
 --   addAlt(key)           adds that character to the player as an alt
 --   dismiss(key)          stops suggesting that own character
+--   undo(character, kind) takes back a change waiting for an officer
 -- `host` is the master frame's content frame for the tab. Returns nil and
 -- the reason when there's none, or the tab can't be drawn.
 function ProfilePage.Create(client, host, options)
@@ -97,8 +100,10 @@ function ProfilePage.Create(client, host, options)
         end,
         addAlt = options.addAlt or function() end,
         dismiss = options.dismiss or function() end,
+        undo = options.undo or function() end,
         rows = {},
         suggestRows = {},
+        waitingRows = {},
         aboutRows = {},
     }, Page)
     local ok, reason = pcall(page.build, page)
@@ -452,6 +457,71 @@ function Page:suggestRow(index)
     return row
 end
 
+-- The waiting changes' row `index`, made on first use: what it asks for,
+-- with Undo.
+function Page:waitingRow(index)
+    if self.waitingRows[index] ~= nil then
+        return self.waitingRows[index]
+    end
+    local frame = self.environment.CreateFrame("Frame", nil, self.list)
+    frame:SetHeight(ProfilePage.SUGGEST_HEIGHT)
+    local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    text:SetPoint("LEFT", frame, "LEFT", 8, 0)
+    text:SetJustifyH("LEFT")
+    local row = { frame = frame, text = text }
+    row.undo = self:button(frame, "Undo", 70, function()
+        if row.character ~= nil then
+            pcall(self.undo, row.character, row.kind)
+            self:Refresh()
+        end
+    end)
+    row.undo:SetPoint("RIGHT", frame, "RIGHT", -4, 0)
+    self.waitingRows[index] = row
+    return row
+end
+
+-- Draws the changes waiting for an officer below `top` (pixels down the
+-- list); returns how far down the list now reaches.
+function Page:drawWaiting(waiting, top)
+    if self.waitingHeading == nil then
+        self.waitingHeading = self.list:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    end
+    local index
+    if waiting[1] == nil then
+        self.waitingHeading:Hide()
+        for index = 1, #self.waitingRows do
+            self.waitingRows[index].frame:Hide()
+        end
+        return top
+    end
+    self.waitingHeading:ClearAllPoints()
+    self.waitingHeading:SetPoint("TOPLEFT", self.list, "TOPLEFT", 0, -top - 6)
+    self.waitingHeading:SetText("Waiting for an officer")
+    self.waitingHeading:Show()
+    top = top + ProfilePage.SUGGEST_HEIGHT
+    for index = 1, #waiting do
+        local row = self:waitingRow(index)
+        local item = waiting[index]
+        row.character = item.character
+        row.kind = item.kind
+        row.text:SetText(item.text)
+        if item.canUndo then
+            row.undo:Show()
+        else
+            row.undo:Hide()
+        end
+        row.frame:ClearAllPoints()
+        row.frame:SetPoint("TOPLEFT", self.list, "TOPLEFT", 0, -top)
+        row.frame:SetPoint("RIGHT", self.list, "RIGHT", 0, 0)
+        row.frame:Show()
+        top = top + ProfilePage.SUGGEST_HEIGHT
+    end
+    for index = #waiting + 1, #self.waitingRows do
+        self.waitingRows[index].frame:Hide()
+    end
+    return top
+end
+
 -- Draws the suggested own characters below `top` (pixels down the list);
 -- returns how far down the list now reaches.
 function Page:drawSuggested(suggested, top)
@@ -566,7 +636,8 @@ function Page:draw()
     for index = #characters + 1, #self.rows do
         self.rows[index].frame:Hide()
     end
-    local bottom = self:drawSuggested(model.suggested or {}, #characters * ProfilePage.ROW_HEIGHT)
+    local bottom = self:drawWaiting(model.waiting or {}, #characters * ProfilePage.ROW_HEIGHT)
+    bottom = self:drawSuggested(model.suggested or {}, bottom)
     self.list:SetHeight(math.max(ProfilePage.ROW_HEIGHT, bottom))
 end
 

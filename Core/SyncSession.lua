@@ -82,6 +82,8 @@ local _, addon = ...
 --                or applied to this client's (the time is kept per guild)
 --   rolesOf(key) -> the roles `key` is willing to play now (its own
 --                preferences, or its class's roles), or nil
+--   onDecision(items, approved) called on a member's client after an
+--                officer decided `items` (their pending suggestion facts)
 --   onOfficial(keys) called after this officer's own add-on made a main or
 --                alias change official (their own edit, or their approval
 --                of a suggestion), with the set of characters it involved.
@@ -160,6 +162,7 @@ function SyncSession.Create(options)
             return nil
         end,
         onOfficial = options.onOfficial or function() end,
+        onDecision = options.onDecision or function() end,
         -- Announcer key -> a reply this client is waiting to send.
         replies = {},
         -- Background work waiting its turn, oldest first.
@@ -326,14 +329,21 @@ function Session:LocalEdit(keys, before)
         return facts:Stamp(keys, author, now)
     end, function(fact)
         return before == nil or before[fact.character] ~= fact.main
+    end, function(fact)
+        return before ~= nil and before[fact.character] ~= nil and { main = before[fact.character] } or nil
     end))
 end
 
 -- After this user set or cleared the alias of `key`'s player by hand: the
--- same, for that player's alias.
-function Session:LocalAliasEdit(key)
+-- same, for that player's alias. `before`, when given, is the alias it
+-- replaced ("" for none).
+function Session:LocalAliasEdit(key, before)
     return self:Official(self:StampAndSend(function(facts, author, now)
         return { facts:StampAlias(key, author, now) }
+    end, function(fact)
+        return before == nil or fact.alias ~= before
+    end, function()
+        return before ~= nil and { alias = before } or nil
     end))
 end
 
@@ -367,8 +377,9 @@ end
 
 -- Stamps with `stamp(facts, author, now)` -> list of facts, and broadcasts
 -- them when this user is an officer. A member's edit stays on their side and
--- the facts `changed(fact)` accepts (all, without it) become suggestions.
-function Session:StampAndSend(stamp, changed)
+-- the facts `changed(fact)` accepts (all, without it) become suggestions;
+-- `priorOf(fact)` gives the value each replaced (see SuggestionService).
+function Session:StampAndSend(stamp, changed, priorOf)
     local partition = self.context()
     local author = self.selfKey()
     local now = self.now()
@@ -389,7 +400,7 @@ function Session:StampAndSend(stamp, changed)
             end
         end
         if suggested[1] ~= nil then
-            suggestions:Record(suggested)
+            suggestions:Record(suggested, priorOf)
             if self.officerOnline() then
                 self:SendSuggestions(partition)
             end
@@ -451,14 +462,35 @@ function Session:Suggestions(partition)
     })
 end
 
--- Sends this member's pending suggestions, if any, for officers online to
--- queue. They stay pending until an officer decides them.
+-- Sends this member's pending suggestions and withdrawals, if any, for
+-- officers online to queue (or drop). Suggestions stay pending until an
+-- officer decides them.
 function Session:SendSuggestions(partition)
-    local pending = self:Suggestions(partition):Pending()
-    if pending[1] == nil then
+    local outgoing = self:Suggestions(partition):Outgoing()
+    if outgoing[1] == nil then
         return false
     end
-    self:Send({ t = SyncSession.TYPE_SUGGEST, facts = pending })
+    self:Send({ t = SyncSession.TYPE_SUGGEST, facts = outgoing })
+    return true
+end
+
+-- This member takes back their pending suggestion about `character` of
+-- fact kind `kind` ("main" or "alias"): their roster goes back to what it
+-- replaced, and officers online are told to drop it (others when they next
+-- log in). Returns true, or false and why not.
+function Session:Undo(character, kind)
+    local partition = self.context()
+    if partition == nil then
+        return false, "there's no guild roster"
+    end
+    local undone, reason = self:Suggestions(partition):Undo(character, kind)
+    if not undone then
+        return false, reason
+    end
+    if self.officerOnline() then
+        self:SendSuggestions(partition)
+    end
+    self.onApplied(0)
     return true
 end
 
@@ -838,6 +870,8 @@ function Session:Process(message, sender)
         decided = message.decided
     end
     local suggestions = self:Suggestions(partition)
+    -- This member's own suggestions the decision names, for telling them.
+    local outcome = suggestions:Named(decided)
     -- A rejected edit of this member's reverts first, so the officer fact
     -- sent with the rejection then applies over it.
     local reverted = suggestions:Revert(decided)
@@ -854,6 +888,9 @@ function Session:Process(message, sender)
     local settled = suggestions:Settle(decided) + suggestions:Prune(decided)
     if applied > 0 or settled > 0 or reverted > 0 then
         self.onApplied(applied)
+    end
+    if outcome[1] ~= nil then
+        self.onDecision(outcome, decided.approved == true)
     end
     if type(message.re) == "string" then
         -- Someone answered that announcement, so this client doesn't; an

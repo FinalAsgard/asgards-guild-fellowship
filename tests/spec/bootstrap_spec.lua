@@ -34,6 +34,7 @@ local MANIFEST_FILES = {
     "Core/SyncFacts.lua",
     "Core/SyncDigest.lua",
     "Core/SuggestionService.lua",
+    "Core/SuggestionBundles.lua",
     "Core/SyncLedger.lua",
     "Core/SyncSession.lua",
     "Core/ScanScheduler.lua",

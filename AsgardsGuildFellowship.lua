@@ -69,8 +69,8 @@ if clientProfile.supported then
         onMainLinksChanged = function(keys, before)
             syncSession:LocalEdit(keys, before)
         end,
-        onAliasChanged = function(key)
-            syncSession:LocalAliasEdit(key)
+        onAliasChanged = function(key, before)
+            syncSession:LocalAliasEdit(key, before)
         end,
         onScanFinished = function()
             syncSession:UpgradeLegacy()
@@ -1294,6 +1294,7 @@ if clientProfile.supported then
                         return client:GetClassColor(classToken)
                     end,
                     dnd = settings:Get("dnd") == true,
+                    pending = guild and syncSession:Suggestions(partition):Pending() or {},
                 })
             end,
             setRole = function(role, enabled)
@@ -1356,6 +1357,13 @@ if clientProfile.supported then
                 local own = guild and partition:GetCharacter(rosterController:SelfKey() or "")
                 if own then
                     rosterController:SetMainPlayer(key, own.player)
+                end
+            end,
+            -- A member takes back a change still waiting for an officer.
+            undo = function(character, kind)
+                local undone, why = syncSession:Undo(character, kind)
+                if not undone then
+                    rosterController:Print("That change can't be undone: " .. tostring(why) .. ".")
                 end
             end,
             dismiss = function(key)
@@ -1490,6 +1498,27 @@ if clientProfile.supported then
         end,
         onApplied = function()
             rosterController:Invalidate()
+            if profilePage ~= nil then
+                profilePage:Refresh()
+            end
+        end,
+        -- A member hears how an officer decided their changes.
+        onDecision = function(items, approved)
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return
+            end
+            local texts = {}
+            local index
+            for index = 1, #items do
+                texts[index] = addon.SuggestionBundles.Describe(partition, normalizer, items[index])
+            end
+            if approved then
+                rosterController:Print("An officer approved your change: " .. table.concat(texts, "; ") .. ".")
+            else
+                rosterController:Print("An officer denied your change: " .. table.concat(texts, "; ") ..
+                    ". Your roster went back to the officers' version.")
+            end
         end,
         onForgery = function(count, relayedBy)
             rosterController:Print("Warning: " .. tostring(relayedBy) .. " passed on " ..

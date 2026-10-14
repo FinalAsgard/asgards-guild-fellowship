@@ -15,6 +15,8 @@ local function load()
         "Core/ReconcileEngine.lua",
         "Core/PlayerService.lua",
         "Core/RoleCatalog.lua",
+        "Core/SyncFacts.lua",
+        "Core/SuggestionBundles.lua",
         "Core/ProfileViewModel.lua"
     )
 end
