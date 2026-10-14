@@ -122,6 +122,8 @@ test.test("panel rows offer the same actions as the right-click menu", function(
     test.assertTrue(characters[1].canDetach)
     test.assertTrue(characters[2].canMakeMain)
     test.assertTrue(characters[2].canDetach)
+    -- With alts, the player can't be merged into another.
+    test.assertFalse(state.build().canMerge)
 end)
 
 test.test("a player with no alts or history says so", function()
@@ -140,6 +142,7 @@ test.test("a player with no alts or history says so", function()
     test.assertEqual("No alts", empties[1].text)
     test.assertEqual("No former characters", empties[2].text)
     test.assertFalse(rowsOf(model, "character")[1].canDetach)
+    test.assertTrue(model.canMerge)
 end)
 
 test.test("an out-of-guild main shows in history with its date", function()

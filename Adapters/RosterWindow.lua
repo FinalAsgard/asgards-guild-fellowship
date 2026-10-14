@@ -414,6 +414,7 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     end)
     edit.aliasText = aliasText
     edit.aliasSource = aliasSource
+    edit.setMain = setMain
 
     -- "Don't sync": keep this client's own version of the player.
     local dontSync = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
@@ -1380,6 +1381,12 @@ function Window:ShowPlayer(model)
         end
         edit.aliasText:SetText(model.alias and ("Alias: " .. model.alias) or "|cff9d9d9dNo alias|r")
         edit.aliasSource:SetText(model.alias and model.aliasSource and ("Alias " .. model.aliasSource) or "")
+        -- A player with alts can't be merged into another.
+        if model.canMerge then
+            edit.setMain:Enable()
+        else
+            edit.setMain:Disable()
+        end
         edit.dontSync:SetChecked(model.dontSync == true)
         edit.dontSyncLabel:SetText(model.dontSync and "|cffff8000Don't sync: kept as yours|r" or "Don't sync")
         edit.scroll:SetData(model.rows)

@@ -22,6 +22,15 @@ Service.__index = Service
 
 PlayerService.MAX_ALIAS_LENGTH = 48
 
+-- Whether `key` is its player's main and the player has other characters:
+-- such a main can't be linked into another player (its alts would stay
+-- behind).
+function PlayerService.HasAlts(partition, key)
+    local character = partition:GetCharacter(key)
+    local player = character and partition:GetPlayer(character.player)
+    return player ~= nil and player.main == key and partition:CharactersOf(character.player)[2] ~= nil
+end
+
 -- options.now: function() -> timestamp, used for history dates.
 -- options.normalizer: a NameNormalizer, for display names in lookups.
 function PlayerService.Create(partition, options)
@@ -269,6 +278,10 @@ function Service:SetMainPlayer(key, playerId)
     end
     if character.player == playerId then
         return true
+    end
+    -- A main with alts stays with them: its alts move or split off first.
+    if PlayerService.HasAlts(self.partition, key) then
+        return false, "a main with alts can't join another player; move or split off its alts first"
     end
     local formerPlayer, wasMain = self:Membership(key)
     if not self.partition:JoinPlayerOf(key, player.main, addon.FellowshipStore.SOURCE_MANUAL) then

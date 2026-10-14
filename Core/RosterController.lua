@@ -500,7 +500,10 @@ function Controller:MenuFor(row)
     local player = partition:GetPlayer(character.player)
     local entries = {}
     if partition:IsInGuild(row.key) then
-        table.insert(entries, { text = "Link as alt of...", action = "setMain", key = row.key })
+        -- A main with alts can't join another player.
+        if not addon.PlayerService.HasAlts(partition, row.key) then
+            table.insert(entries, { text = "Link as alt of...", action = "setMain", key = row.key })
+        end
         if player ~= nil and player.main ~= row.key then
             table.insert(entries, { text = "Make this the main", action = "makeMain", key = row.key })
         end

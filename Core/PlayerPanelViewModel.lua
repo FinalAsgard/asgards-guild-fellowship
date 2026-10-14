@@ -141,9 +141,10 @@ end
 -- (optional function(keys) -> how often this user grouped with the player,
 -- or nil).
 -- Returns nil when the player no longer exists, or:
---   { id, label, alias, aliasSource, main, mainName, dontSync, rows }
--- where `main` is the main's character key, `dontSync` whether guild sync
--- leaves this player alone, and `rows` is a flat list for the
+--   { id, label, alias, aliasSource, main, mainName, canMerge, dontSync, rows }
+-- where `main` is the main's character key, `canMerge` whether the player
+-- can be merged into another (only with no alts), `dontSync` whether guild
+-- sync leaves this player alone, and `rows` is a flat list for the
 -- panel's scroll list:
 --   { kind = "stat", text }  (the player's ad count, then how often you
 --                             grouped with them, first, when there are any)
@@ -235,6 +236,7 @@ function PlayerPanelViewModel.Build(inputs)
         aliasSource = SOURCES[player.aliasSource],
         main = player.main,
         mainName = mainName,
+        canMerge = altCount == 0,
         dontSync = player.noSync == true,
         rows = rows,
     }
