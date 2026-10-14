@@ -731,8 +731,16 @@ function Window:drawBoard(group, member)
     local offering = offer ~= nil
         and (offer.state == addon.GroupBoard.SENT or offer.state == addon.GroupBoard.ACCEPTED)
     local open = {}
+    -- The player's own slot, found first: a player holding one gets no
+    -- Fill Slot.
     local mine
     local index
+    for index = 1, #group.slots do
+        local slot = group.slots[index]
+        if slot.name ~= nil and slot.key ~= nil and slot.key == selfKey then
+            mine = slot
+        end
+    end
     for index = 1, #self.boardRows do
         local row = self.boardRows[index]
         local slot = group.slots[index]
@@ -748,13 +756,10 @@ function Window:drawBoard(group, member)
                     name = slot.name, level = slot.level, classToken = slot.classToken, inGuild = true,
                 }, self.classColor)
                 row.text:SetText(slot.coming and (label .. " (coming)") or label)
-                if slot.key ~= nil and slot.key == selfKey then
-                    mine = slot
-                end
             else
                 row.text:SetText("open")
                 open[slot.role] = true
-                if not member and not offering then
+                if not member and not offering and mine == nil then
                     local okOptions, options = pcall(self.fillOptions, group, slot.role)
                     row.option = okOptions and type(options) == "table" and preferred(options, selfKey) or nil
                 end

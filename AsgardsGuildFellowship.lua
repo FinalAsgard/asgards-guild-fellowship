@@ -1537,7 +1537,20 @@ if clientProfile.supported then
                 end
                 return nil
             end,
+            -- Nothing to fill for a player who already holds a slot, on any
+            -- of their characters (an accepted invitee not in the party yet).
             fillOptions = function(group, role)
+                local guild, partition = rosterController:QuietContext()
+                local selfKey = rosterController:SelfKey()
+                local own = guild and selfKey and partition:GetCharacter(selfKey)
+                local index
+                for index = 1, #group.slots do
+                    local key = group.slots[index].key
+                    local character = own and key and partition:GetCharacter(key)
+                    if key == selfKey or (character and character.player == own.player) then
+                        return {}
+                    end
+                end
                 return joinRequests:OptionsFor({ r = { role }, lo = group.dungeon.minLevel, hi = group.dungeon.maxLevel })
             end,
             offer = function(group, option)

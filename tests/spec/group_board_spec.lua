@@ -280,6 +280,25 @@ test.test("group finder window: an offer waiting for an answer hides Fill Slot a
     test.assertEqual("Offer sent to Tool. Waiting for their answer.", window.offerText.text)
 end)
 
+test.test("group finder window: a player already holding a slot, not in the party yet, gets no Fill Slot", function()
+    local addon = test.newAddon("Core/RoleCatalog.lua", "Core/GroupSession.lua", "Core/GroupFinderProtocol.lua",
+        "Core/GroupBoard.lua", "Core/JoinRequests.lua", "Core/DungeonCatalog.lua", "Adapters/GroupFinderWindow.lua")
+    -- Their slot comes after the open ones.
+    local group = boardGroup(addon, { { at = 5, n = "Hammer", l = 24, k = "hammer", w = true } })
+    local window = newWindow(addon, {
+        groups = function() return { group } end,
+        boardGroup = function() return group end,
+        selfKey = function() return "hammer" end,
+        fillOptions = function(_, role) return { { role = role, key = "hammer", name = "Hammer", level = 24 } } end,
+    })
+    window:ViewGroup("tool")
+
+    local index
+    for index = 1, 4 do
+        test.assertFalse(window.boardRows[index].fill.shown)
+    end
+end)
+
 test.test("group finder window: in the organizer's party, the group shows with role and alt buttons only", function()
     local addon = test.newAddon("Core/RoleCatalog.lua", "Core/GroupSession.lua", "Core/GroupFinderProtocol.lua",
         "Core/GroupBoard.lua", "Core/JoinRequests.lua", "Core/DungeonCatalog.lua", "Adapters/GroupFinderWindow.lua")
@@ -495,4 +514,22 @@ test.test("composed: in the organizer's party, a member sees the group, changes 
     test.assertEqual("waiting", organizer.addon.groupSession:InviteState(slot, organizer.groupFinderOptions.isOnline))
     test.assertContains(organizer.messages[#organizer.messages], "Zap Arcane will come as Spark Arcane")
     test.assertContains(zap.messages[#zap.messages], "Log over to Spark Arcane")
+end)
+
+test.test("composed: a guildmate holding a slot on an alt is offered nothing to fill", function()
+    local channel = fixtures.newChannel()
+    local organizer = login(channel, "Tool Box")
+    local zap = login(channel, "Zap Arcane")
+    fixtures.deliver(channel)
+    startGroup(channel, organizer)
+    organizer.addon.groupSession:Accept({ key = "zap arcane-camelot", label = "Zap" },
+        { role = "dps", key = "spark arcane-camelot", name = "Spark Arcane", level = 59 }, 0, "tool box-camelot")
+    organizer.groupFinderOptions.changed()
+    fixtures.openGroupFinder(zap)
+    fixtures.deliver(channel)
+
+    local options = zap.groupFinderOptions
+    local group = options.groups()[1]
+    test.assertEqual("spark arcane-camelot", group.slots[3].key)
+    test.assertEqual(0, #options.fillOptions(group, "dps"))
 end)
