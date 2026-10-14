@@ -327,21 +327,53 @@ function Page:DrawPicker()
 end
 
 -- The bio's box: several lines, the full width, on a dark background
--- (the one-line box template has no multi-line look).
+-- (the one-line box template has no multi-line look). A multi-line box
+-- isn't cut off at its height, so it sits in a scroll frame BIO_HEIGHT
+-- tall: a long bio scrolls instead of running over the characters below.
+-- Returns the box and its scroll frame.
 function Page:bioBox(top)
+    local createFrame = self.environment.CreateFrame
     local padding = ProfilePage.PADDING
     local panel = self.panel
-    local box = self.environment.CreateFrame("EditBox", nil, panel)
+    local scroll = createFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scroll:SetHeight(ProfilePage.BIO_HEIGHT)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", padding + ProfilePage.ABOUT_LABEL_WIDTH + 6, top)
+    -- Room on the right for the scroll bar, then the counter.
+    scroll:SetPoint("RIGHT", panel, "RIGHT", -padding - ProfilePage.ABOUT_COUNTER_WIDTH - 22, 0)
+    local background = scroll:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(scroll)
+    background:SetColorTexture(0, 0, 0, 0.5)
+    local box = createFrame("EditBox", nil, scroll)
     box:SetMultiLine(true)
     box:SetFontObject("ChatFontNormal")
     box:SetTextInsets(6, 6, 4, 4)
     box:SetHeight(ProfilePage.BIO_HEIGHT)
-    box:SetPoint("TOPLEFT", panel, "TOPLEFT", padding + ProfilePage.ABOUT_LABEL_WIDTH + 6, top)
-    box:SetPoint("RIGHT", panel, "RIGHT", -padding - ProfilePage.ABOUT_COUNTER_WIDTH, 0)
-    local background = box:CreateTexture(nil, "BACKGROUND")
-    background:SetAllPoints(box)
-    background:SetColorTexture(0, 0, 0, 0.5)
-    return box
+    scroll:SetScrollChild(box)
+    -- The box takes the scroll frame's width, so its text wraps inside it.
+    scroll:SetScript("OnSizeChanged", function(_, width)
+        if type(width) == "number" and width > 0 then
+            box:SetWidth(width)
+        end
+    end)
+    -- The line being typed stays in view.
+    box:SetScript("OnCursorChanged", function(_, _, y, _, height)
+        local okScroll, offset = pcall(scroll.GetVerticalScroll, scroll)
+        local okHeight, visible = pcall(scroll.GetHeight, scroll)
+        if not okScroll or not okHeight or type(y) ~= "number" or type(height) ~= "number" then
+            return
+        end
+        local cursorTop = -y
+        if cursorTop < offset then
+            pcall(scroll.SetVerticalScroll, scroll, cursorTop)
+        elseif cursorTop + height > offset + visible then
+            pcall(scroll.SetVerticalScroll, scroll, cursorTop + height - visible)
+        end
+    end)
+    -- A click below the text still edits it.
+    scroll:SetScript("OnMouseDown", function()
+        box:SetFocus()
+    end)
+    return box, scroll
 end
 
 -- An About me field's row: its label, a text box, and how many characters
@@ -358,18 +390,21 @@ function Page:aboutRow(index)
     row.label:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, top - 4)
     row.label:SetWidth(ProfilePage.ABOUT_LABEL_WIDTH)
     row.label:SetJustifyH("LEFT")
+    -- `frame` is what's shown or hidden: the box, or the bio's scroll frame.
     if row.multiLine then
-        row.box = self:bioBox(top)
+        row.box, row.frame = self:bioBox(top)
     else
         row.box = createFrame("EditBox", nil, panel, "InputBoxTemplate")
         row.box:SetHeight(20)
         row.box:SetPoint("TOPLEFT", panel, "TOPLEFT", padding + ProfilePage.ABOUT_LABEL_WIDTH + 6, top)
         row.box:SetWidth(ProfilePage.SHORT_BOX_WIDTH)
+        row.frame = row.box
     end
     row.box:SetAutoFocus(false)
     row.counter = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     if row.multiLine then
-        row.counter:SetPoint("TOPLEFT", row.box, "TOPRIGHT", 6, -4)
+        -- Past the scroll bar.
+        row.counter:SetPoint("TOPLEFT", row.frame, "TOPRIGHT", 28, -4)
     else
         row.counter:SetPoint("LEFT", row.box, "RIGHT", 6, 0)
     end
@@ -409,7 +444,7 @@ function Page:drawAbout(about)
         if field == nil then
             row.kind = nil
             row.label:Hide()
-            row.box:Hide()
+            row.frame:Hide()
             row.counter:Hide()
         else
             row.kind = field.kind
@@ -424,7 +459,7 @@ function Page:drawAbout(about)
             end
             row.count()
             row.label:Show()
-            row.box:Show()
+            row.frame:Show()
             row.counter:Show()
         end
     end

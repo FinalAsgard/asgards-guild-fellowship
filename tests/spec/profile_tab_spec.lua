@@ -318,7 +318,13 @@ test.test("profile tab: About me fields show the player's text with a count, and
     test.assertEqual(width, location.box.width)
     test.assertTrue(page.aboutRows[4].box.multiLine)
     test.assertEqual(nil, rawget(discord.box, "multiLine"))
-    test.assertEqual(world.addon.ProfilePage.BIO_HEIGHT, page.aboutRows[4].box.height)
+    -- A long bio scrolls in a frame of the bio's height rather than running
+    -- over the characters below; the box wraps at that frame's width.
+    local bio = page.aboutRows[4]
+    test.assertEqual(world.addon.ProfilePage.BIO_HEIGHT, bio.frame.height)
+    test.assertTrue(bio.frame.scrollChild == bio.box)
+    bio.frame.scripts.OnSizeChanged(bio.frame, 300, 72)
+    test.assertEqual(300, bio.box.width)
     test.assertEqual("Characters", page.charactersHeading.text)
     test.assertTrue(page.charactersHeading.shown)
     test.assertEqual("Discord", discord.label.text)
