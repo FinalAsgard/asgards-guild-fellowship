@@ -9,8 +9,9 @@ local _, addon = ...
 -- bio can be edited, each with a count of characters used; Enter (or
 -- leaving the box) saves a change, Escape undoes it. Each alt has Make main
 -- and Remove (split off as its own player); Add alt… opens a picker of the
--- guild's other characters, warning when the one picked belongs to another
--- player. Below the characters, "Your other characters on this computer"
+-- guild's other characters (ProfileViewModel.AltCandidates): characters on
+-- their own, and, for a character on its own, other players' characters,
+-- picking one of which joins that player. Below the characters, "Your other characters on this computer"
 -- offers the characters this install has logged in on that aren't linked
 -- yet, each with Add as alt and Dismiss; nothing is ever linked without that
 -- click. A member's changes still waiting for an officer are listed under
@@ -23,13 +24,21 @@ local _, addon = ...
 -- environment (CreateFrame), so specs can draw it with fake frames.
 local ProfilePage = {
     PADDING = 12,
-    -- Where the About me fields start, below the title bar and heading.
-    ABOUT_TOP = 60,
+    -- Where the About me fields start, below the title bar and heading,
+    -- with some room under the heading.
+    ABOUT_TOP = 72,
     ABOUT_HEIGHT = 26,
     ABOUT_LABEL_WIDTH = 70,
     ABOUT_COUNTER_WIDTH = 60,
-    -- Where the character list starts, below the alias and About me fields.
-    LIST_TOP = 60 + 4 * 26 + 8,
+    -- The short fields (alias, Discord, location) share one width, sized
+    -- for their 48 characters at most; the bio takes the full width, on
+    -- several lines.
+    SHORT_BOX_WIDTH = 260,
+    BIO_HEIGHT = 72,
+    -- Where the character list starts, below the alias, the About me
+    -- fields, a gap and the Characters heading.
+    LIST_TOP = 72 + 3 * 26 + 72 + 36,
+    CHARACTERS_HEADING = 22,
     BUTTON_HEIGHT = 20,
     -- The Add alt picker: how many matches it lists.
     PICKER_ROWS = 8,
@@ -80,6 +89,8 @@ end
 --   candidates(query)     -> characters the player could add as alts (see
 --                         ProfileViewModel.AltCandidates)
 --   addAlt(key)           adds that character to the player as an alt
+--   join(key)             makes the logged-in character an alt of the
+--                         player that character belongs to
 --   dismiss(key)          stops suggesting that own character
 --   declare(key)          declares that character, the player's main, as
 --                         the main on purpose
@@ -103,6 +114,7 @@ function ProfilePage.Create(client, host, options)
             return {}
         end,
         addAlt = options.addAlt or function() end,
+        join = options.join or function() end,
         dismiss = options.dismiss or function() end,
         declare = options.declare or function() end,
         undo = options.undo or function() end,
@@ -137,6 +149,11 @@ function Page:build()
     self.messageText:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -ProfilePage.ABOUT_TOP)
     self.messageText:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
     self.messageText:SetJustifyH("LEFT")
+
+    self.charactersHeading = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.charactersHeading:SetPoint("TOPLEFT", panel, "TOPLEFT", padding,
+        -ProfilePage.LIST_TOP + ProfilePage.CHARACTERS_HEADING)
+    self.charactersHeading:SetText("Characters")
 
     local scroll = createFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -ProfilePage.LIST_TOP)
@@ -245,9 +262,9 @@ function Page:buildPicker()
     warning:SetJustifyH("LEFT")
     local add = self:button(picker, "Add", 80, function()
         if self.picked ~= nil then
-            local key = self.picked.key
+            local key, joins = self.picked.key, self.picked.joins
             self:ClosePicker()
-            pcall(self.addAlt, key)
+            pcall(joins and self.join or self.addAlt, key)
             self:Refresh()
         end
     end)
@@ -298,6 +315,7 @@ function Page:DrawPicker()
             result.button:Show()
         end
     end
+    picker.add:SetText(self.picked ~= nil and self.picked.joins and "Join" or "Add")
     if self.picked == nil then
         picker.warning:SetText(found[1] == nil and "No characters match." or "Pick a character to add.")
         picker.add:Disable()
@@ -308,25 +326,53 @@ function Page:DrawPicker()
     end
 end
 
+-- The bio's box: several lines, the full width, on a dark background
+-- (the one-line box template has no multi-line look).
+function Page:bioBox(top)
+    local padding = ProfilePage.PADDING
+    local panel = self.panel
+    local box = self.environment.CreateFrame("EditBox", nil, panel)
+    box:SetMultiLine(true)
+    box:SetFontObject("ChatFontNormal")
+    box:SetTextInsets(6, 6, 4, 4)
+    box:SetHeight(ProfilePage.BIO_HEIGHT)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT", padding + ProfilePage.ABOUT_LABEL_WIDTH + 6, top)
+    box:SetPoint("RIGHT", panel, "RIGHT", -padding - ProfilePage.ABOUT_COUNTER_WIDTH, 0)
+    local background = box:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(box)
+    background:SetColorTexture(0, 0, 0, 0.5)
+    return box
+end
+
 -- An About me field's row: its label, a text box, and how many characters
--- are used of how many.
+-- are used of how many. The rows go alias, then ProfileViewModel.ABOUT in
+-- order, so the last one is the bio.
 function Page:aboutRow(index)
     local createFrame = self.environment.CreateFrame
     local padding = ProfilePage.PADDING
     local panel = self.panel
     local top = -ProfilePage.ABOUT_TOP - (index - 1) * ProfilePage.ABOUT_HEIGHT
-    local row = {}
+    local about = addon.ProfileViewModel.ABOUT[index - 1]
+    local row = { multiLine = about ~= nil and about.kind == "bio" }
     row.label = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     row.label:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, top - 4)
     row.label:SetWidth(ProfilePage.ABOUT_LABEL_WIDTH)
     row.label:SetJustifyH("LEFT")
-    row.box = createFrame("EditBox", nil, panel, "InputBoxTemplate")
-    row.box:SetHeight(20)
-    row.box:SetPoint("TOPLEFT", panel, "TOPLEFT", padding + ProfilePage.ABOUT_LABEL_WIDTH + 6, top)
-    row.box:SetPoint("RIGHT", panel, "RIGHT", -padding - ProfilePage.ABOUT_COUNTER_WIDTH, 0)
+    if row.multiLine then
+        row.box = self:bioBox(top)
+    else
+        row.box = createFrame("EditBox", nil, panel, "InputBoxTemplate")
+        row.box:SetHeight(20)
+        row.box:SetPoint("TOPLEFT", panel, "TOPLEFT", padding + ProfilePage.ABOUT_LABEL_WIDTH + 6, top)
+        row.box:SetWidth(ProfilePage.SHORT_BOX_WIDTH)
+    end
     row.box:SetAutoFocus(false)
     row.counter = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    row.counter:SetPoint("LEFT", row.box, "RIGHT", 6, 0)
+    if row.multiLine then
+        row.counter:SetPoint("TOPLEFT", row.box, "TOPRIGHT", 6, -4)
+    else
+        row.counter:SetPoint("LEFT", row.box, "RIGHT", 6, 0)
+    end
     row.counter:SetWidth(ProfilePage.ABOUT_COUNTER_WIDTH - 6)
     row.counter:SetJustifyH("LEFT")
     local function count()
@@ -631,6 +677,7 @@ function Page:draw()
         self.messageText:SetText(model.message)
         self.messageText:Show()
         self.scroll:Hide()
+        self.charactersHeading:Hide()
         self.addAltButton:Hide()
         self.declareButton:Hide()
         self.mainKey = nil
@@ -639,6 +686,7 @@ function Page:draw()
         self.heading:SetText(model.label)
         self.messageText:Hide()
         self.scroll:Show()
+        self.charactersHeading:Show()
         self.addAltButton:Show()
         self.mainKey = model.main
         if model.declared then

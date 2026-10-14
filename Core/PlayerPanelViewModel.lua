@@ -58,6 +58,18 @@ PlayerPanelViewModel.BIO_LINE = 48
 -- can be (a word longer than a line is split).
 function PlayerPanelViewModel.Wrap(text, width)
     local lines = {}
+    -- A line break the player typed starts a new line.
+    if string.find(text, "\n", 1, true) ~= nil then
+        local paragraph
+        for paragraph in string.gmatch(text, "[^\n]+") do
+            local wrapped = PlayerPanelViewModel.Wrap(paragraph, width)
+            local index
+            for index = 1, #wrapped do
+                table.insert(lines, wrapped[index])
+            end
+        end
+        return lines
+    end
     local current = ""
     local word
     for word in string.gmatch(text, "%S+") do

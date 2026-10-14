@@ -1395,6 +1395,15 @@ if clientProfile.supported then
                     rosterController:SetMainPlayer(key, own.player)
                 end
             end,
+            -- A character on its own joins the player of `key`.
+            join = function(key)
+                local guild, partition = rosterController:QuietContext()
+                local selfKey = rosterController:SelfKey()
+                local target = guild and partition:GetCharacter(key)
+                if target and selfKey ~= nil then
+                    rosterController:SetMainPlayer(selfKey, target.player)
+                end
+            end,
             -- A member takes back a change still waiting for an officer.
             undo = function(character, kind)
                 local undone, why = syncSession:Undo(character, kind)

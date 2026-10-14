@@ -556,13 +556,13 @@ test.test("profile store: Discord, location and bio are kept on the character wi
     test.assertEqual(NOW, at)
     test.assertEqual(MEMBER, by)
 
-    -- Longest values: 32, 40 and 200 bytes; one more is refused.
+    -- Longest values: 32, 40 and 500 bytes; one more is refused.
     test.assertTrue(partition:SetProfileText(MEMBER, "discord", string.rep("d", 32), NOW, MEMBER))
     test.assertFalse(partition:SetProfileText(MEMBER, "discord", string.rep("d", 33), NOW, MEMBER))
     test.assertTrue(partition:SetProfileText(MEMBER, "location", string.rep("l", 40), NOW, MEMBER))
     test.assertFalse(partition:SetProfileText(MEMBER, "location", string.rep("l", 41), NOW, MEMBER))
-    test.assertTrue(partition:SetProfileText(MEMBER, "bio", string.rep("b", 200), NOW, MEMBER))
-    test.assertFalse(partition:SetProfileText(MEMBER, "bio", string.rep("b", 201), NOW, MEMBER))
+    test.assertTrue(partition:SetProfileText(MEMBER, "bio", string.rep("b", 500), NOW, MEMBER))
+    test.assertFalse(partition:SetProfileText(MEMBER, "bio", string.rep("b", 501), NOW, MEMBER))
     test.assertFalse(partition:SetProfileText(MEMBER, "pronouns", "they", NOW, MEMBER))
 
     -- Empty clears: the player then has no value.
@@ -573,7 +573,7 @@ end)
 test.test("profile store: a character with an unreadable bio is set aside intact", function()
     local addon = load()
     local database = { schemaVersion = 4, guilds = { ["Knights of Camelot-Area52"] = {
-        characters = { [MEMBER] = { player = 1, name = "Hammer-Area52", bio = string.rep("b", 201) } },
+        characters = { [MEMBER] = { player = 1, name = "Hammer-Area52", bio = string.rep("b", 501) } },
         players = { [1] = { main = MEMBER } },
         nextPlayerId = 2,
     } } }
@@ -583,7 +583,7 @@ test.test("profile store: a character with an unreadable bio is set aside intact
     test.assertEqual(nil, partition:GetCharacter(MEMBER))
     local quarantined = database.guilds["Knights of Camelot-Area52"].quarantine[1]
     test.assertEqual("character bio is invalid", quarantined.reason)
-    test.assertEqual(201, #quarantined.record.bio)
+    test.assertEqual(501, #quarantined.record.bio)
 end)
 
 test.test("profile store: the player's value is the newest across its characters", function()
@@ -650,7 +650,7 @@ test.test("guild sync: profile text is sent at once and others apply it", functi
     local member = newClient(network, MEMBER, "Hammer-Area52")
     local other = newClient(network, "wrench-area52", "Wrench-Area52")
     local bio = string.rep("A long bio. ", 16)
-    bio = string.sub(bio, 1, 200)
+    bio = string.sub(string.rep(bio, 3), 1, 500)
 
     local fact = member.session:LocalProfileEdit("bio", bio)
 
@@ -748,4 +748,10 @@ test.test("player panel: shows the player's Discord, location and bio when set",
     test.assertEqual("I heal dungeons most evenings and love a good", lines[3])
     test.assertEqual("keystone run with friends", lines[4])
     test.assertEqual(4, #lines)
+
+    -- A line break the player typed starts a new line.
+    partition:SetProfileText(MEMBER, "bio", "Healer.\nEvenings only.", NOW + 1, MEMBER)
+    lines = build()
+    test.assertEqual("Healer.", lines[3])
+    test.assertEqual("Evenings only.", lines[4])
 end)

@@ -27,7 +27,7 @@ local FellowshipStore = {
 -- Player profile text fields (schema 4), each with its longest value. A
 -- character's own: stored on the character that wrote it, as `<field>`,
 -- `<field>At` and `<field>By`.
-FellowshipStore.PROFILE_FIELDS = { discord = 32, location = 40, bio = 200 }
+FellowshipStore.PROFILE_FIELDS = { discord = 32, location = 40, bio = 500 }
 addon.FellowshipStore = FellowshipStore
 
 local Store = {}

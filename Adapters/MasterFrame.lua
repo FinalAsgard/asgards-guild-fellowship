@@ -21,9 +21,10 @@ local MasterFrame = {
     -- Each tab's picture: stock game icons present on both clients, kept
     -- together so they're easy to swap after testing.
     ICONS = {
-        roster = "Interface\\Icons\\INV_Misc_GroupNeedMore",
-        group = "Interface\\Icons\\INV_Misc_GroupLooking",
-        profile = "Interface\\Icons\\INV_Misc_Head_Human_01",
+        -- A ledger of the guild's players.
+        roster = "Interface\\Icons\\INV_Misc_Book_09",
+        group = "Interface\\Icons\\INV_Misc_GroupNeedMore",
+        profile = "Interface\\Icons\\INV_Misc_GroupLooking",
         recruitment = "Interface\\Icons\\INV_Scroll_03",
         ads = "Interface\\Icons\\INV_Misc_PocketWatch_01",
         greetings = "Interface\\Icons\\INV_Letter_15",

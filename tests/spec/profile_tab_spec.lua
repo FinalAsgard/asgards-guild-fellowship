@@ -165,7 +165,7 @@ end)
 local function newPage(model)
     local addon = test.newAddon("Core/RoleCatalog.lua", "Core/ProfileViewModel.lua", "Adapters/ProfilePage.lua")
     local environment = fakeFrames.install({})
-    local world = { model = model, roles = {}, dnd = {} }
+    local world = { model = model, roles = {}, dnd = {}, addon = addon }
     world.page = addon.ProfilePage.Create({ environment = environment }, fakeFrames.host(environment), {
         model = function()
             return world.model
@@ -287,7 +287,7 @@ test.test("profile view model: lists the player's Discord, location and bio, new
     test.assertEqual("", about[2].text)
     test.assertEqual(40, about[2].max)
     test.assertEqual("Hi", about[3].text)
-    test.assertEqual(200, about[3].max)
+    test.assertEqual(500, about[3].max)
 end)
 
 test.test("profile tab: About me fields show the player's text with a count, and save on Enter", function()
@@ -299,7 +299,7 @@ test.test("profile tab: About me fields show the player's text with a count, and
     model.about = {
         { kind = "discord", label = "Discord", text = "hammer#1", max = 32 },
         { kind = "location", label = "Location", text = "", max = 40 },
-        { kind = "bio", label = "Bio", text = "", max = 200 },
+        { kind = "bio", label = "Bio", text = "", max = 500 },
     }
     local world = newPage(model)
     world.texts = {}
@@ -310,6 +310,17 @@ test.test("profile tab: About me fields show the player's text with a count, and
     page.panel.hooks.OnShow()
 
     local discord, location = page.aboutRows[2], page.aboutRows[3]
+    -- The short fields share one width; the bio is a taller box on several
+    -- lines; the characters follow under their own heading.
+    local width = world.addon.ProfilePage.SHORT_BOX_WIDTH
+    test.assertEqual(width, page.aboutRows[1].box.width)
+    test.assertEqual(width, discord.box.width)
+    test.assertEqual(width, location.box.width)
+    test.assertTrue(page.aboutRows[4].box.multiLine)
+    test.assertEqual(nil, rawget(discord.box, "multiLine"))
+    test.assertEqual(world.addon.ProfilePage.BIO_HEIGHT, page.aboutRows[4].box.height)
+    test.assertEqual("Characters", page.charactersHeading.text)
+    test.assertTrue(page.charactersHeading.shown)
     test.assertEqual("Discord", discord.label.text)
     test.assertEqual("hammer#1", discord.box.text)
     test.assertEqual("8/32", discord.counter.text)
@@ -369,16 +380,31 @@ test.test("profile view model: alt candidates are the guild's other characters, 
         return table.concat(names, ","), found
     end
 
-    test.assertEqual("Bolt<Thunderer>,Spark<Thunderer>,Visitor-Stormrage", (candidates("")))
-    -- By name, or by the player's alias, in any case.
+    -- Toolbox already has an alt: Thunderer's characters can't be taken
+    -- from them, so only characters on their own are offered.
+    test.assertEqual("Visitor-Stormrage", (candidates("")))
     test.assertEqual("Visitor-Stormrage", (candidates("VIS")))
-    test.assertEqual("Bolt<Thunderer>,Spark<Thunderer>", (candidates("thunder")))
-    local _, found = candidates("spark")
-    test.assertEqual("Spark belongs to Thunderer. Adding it moves it from that player to yours.", found[1].warning)
-    _, found = candidates("visitor")
+    test.assertEqual("", (candidates("thunder")))
+    local _, found = candidates("visitor")
     test.assertEqual(nil, found[1].warning)
+    test.assertEqual(nil, found[1].joins)
     -- No logged-in character known: nothing to add to.
     test.assertEqual(0, #addon.ProfileViewModel.AltCandidates({ partition = partition, normalizer = normalizer }, ""))
+
+    -- Visitor is on its own: it's offered every player's characters, by
+    -- name or by the player's alias, and picking one joins that player.
+    local function fromVisitor(query)
+        return addon.ProfileViewModel.AltCandidates({
+            partition = partition, selfKey = "visitor-stormrage", normalizer = normalizer,
+        }, query)
+    end
+    found = fromVisitor("THUNDER")
+    test.assertEqual(2, #found)
+    test.assertEqual("Bolt", found[1].name)
+    test.assertTrue(found[1].joins)
+    test.assertEqual("Bolt belongs to Thunderer. Picking it adds Visitor-Stormrage to Thunderer's characters.",
+        found[1].warning)
+    test.assertEqual(4, #fromVisitor(""))
 end)
 
 test.test("profile tab: Make main and Remove on alts, and Add alt picks with a warning", function()
@@ -392,8 +418,8 @@ test.test("profile tab: Make main and Remove on alts, and Add alt picks with a w
     PLAYER.characters[2].canRemove = true
     page.candidates = function(query)
         local all = {
-            { key = "bolt", name = "Bolt", coloredName = "Bolt", level = 40, owner = "Thunderer",
-                warning = "Bolt belongs to Thunderer. Adding it moves it from that player to yours." },
+            { key = "bolt", name = "Bolt", coloredName = "Bolt", level = 40, owner = "Thunderer", joins = true,
+                warning = "Bolt belongs to Thunderer. Picking it adds Toolbox to Thunderer's characters." },
             { key = "visitor", name = "Visitor", coloredName = "Visitor", level = 80 },
         }
         if query == "vis" then
@@ -416,15 +442,24 @@ test.test("profile tab: Make main and Remove on alts, and Add alt picks with a w
     test.assertEqual("Pick a character to add.", page.picker.warning.text)
     page.picker.results[1].button.scripts.OnClick()
     test.assertContains(page.picker.warning.text, "Bolt belongs to Thunderer")
+    test.assertEqual("Join", page.picker.add.text)
     page.picker.search:SetText("vis")
     page.picker.search.scripts.OnTextChanged(page.picker.search)
     test.assertFalse(page.picker.results[2].button.shown)
     page.picker.results[1].button.scripts.OnClick()
     test.assertEqual("Add Visitor as an alt.", page.picker.warning.text)
+    test.assertEqual("Add", page.picker.add.text)
     page.picker.add.scripts.OnClick()
 
     test.assertEqual("add visitor", world.actions[3])
     test.assertFalse(page.picker.frame.shown)
+
+    -- Picking another player's character joins that player instead.
+    page.join = function(key) table.insert(world.actions, "join " .. key) end
+    page.addAltButton.scripts.OnClick()
+    page.picker.results[1].button.scripts.OnClick()
+    page.picker.add.scripts.OnClick()
+    test.assertEqual("join bolt", world.actions[4])
     PLAYER.characters[2].canMakeMain = nil
     PLAYER.characters[2].canRemove = nil
 end)

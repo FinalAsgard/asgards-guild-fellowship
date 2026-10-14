@@ -369,15 +369,15 @@ Below the heading are the same edits as the roster's right-click menu, for your 
 - **Make main** on an alt makes it your player's main.
 - **Remove** on an alt splits it off as a player of its own (**Split off as own player**).
 - **Declare as my main** says your main is your main on purpose, even if you have no alts. Your main then shows as **declared main**, here and in the roster.
-- **Add alt…** opens a search of the guild's other characters. Pick one and press **Add** to link it as your alt. If it already belongs to another player, a warning names that player first, because adding it moves it away from them.
+- **Add alt…** opens a search of the guild's other characters. Pick one and press **Add** to link it as your alt. Once your player has alts (or an alias), it lists only characters on their own: another player's characters can't be taken from them. If the character you're on is still on its own, it also lists other players' characters. Pick one and press **Join** to make the character you're on an alt of that player.
 
 These follow the same rules as the roster. An officer's edits are official at once and reach the whole guild. A member's apply in their own roster at once and are sent to officers as [suggestions](#suggestions). The page shows each change straight away.
 
-Below your characters, **Your other characters on this computer** lists the characters you've logged in on with this game install, in this guild, that aren't linked to your player yet. Each has **Add as alt**, which works like **Add alt…**, and **Dismiss**, which stops offering it on this computer for good. Nothing is ever linked by itself, so on a shared or family computer someone else's characters never end up as yours. The list of characters you've logged in on stays on your computer and is never sent to anyone.
+Below your characters, **Your other characters on this computer** lists the characters you've logged in on with this game install, in this guild, that aren't linked to your player yet. Each has **Add as alt**, which links it to your player, and **Dismiss**, which stops offering it on this computer for good. Nothing is ever linked by itself, so on a shared or family computer someone else's characters never end up as yours. The list of characters you've logged in on stays on your computer and is never sent to anyone.
 
 ### About me
 
-Below the alias are your **Discord** username (up to 32 characters), **Location** (up to 40, for example "Ohio, evenings") and a **Bio** (up to 200). Each box shows how many characters you've used. Type in one and press Enter (or click elsewhere) to save it; Escape puts back what was saved. Empty a box and save to stop sharing it.
+Below the alias are your **Discord** username (up to 32 characters), **Location** (up to 40, for example "Ohio, evenings") and a **Bio** (up to 500, in a taller box that wraps onto several lines). Each box shows how many characters you've used. Type in one and press Enter (or click elsewhere) to save it; Escape puts back what was saved. Empty a box and save to stop sharing it.
 
 These belong to your player, not to one character: whichever of your characters you're on, you see and edit the same values, and the newest edit wins. They're yours alone. They're saved and sent to the guild at once, with no officer approving them, and only your own characters can change them; officers can't edit or clear them. If someone's add-on passes on a change in your name that you never made, yours sends your real values back out, and you're warned who passed it on, as for role preferences. Guildmates see them under **About** in your player panel.
 

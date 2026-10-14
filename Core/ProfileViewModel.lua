@@ -189,21 +189,32 @@ candidateEntry = function(inputs, members, classColor, key, character)
     return entry
 end
 
--- The guild characters the logged-in character's player could add as alts:
--- every character still in the guild outside that player whose name, or
+-- Whether player `playerId` is put together: more than one character, or
+-- an alias.
+local function organized(partition, playerId)
+    local player = partition:GetPlayer(playerId)
+    return player ~= nil and (partition:CharactersOf(playerId)[2] ~= nil or player.alias ~= nil)
+end
+
+-- The guild characters the Add alt picker offers the logged-in character's
+-- player: characters still in the guild outside that player whose name, or
 -- whose player's alias, contains `query` (any case; an empty query lists
 -- them all), sorted by name, at most `limit` (default 50). `inputs` as for
 -- Build. Each:
---   { key, name, coloredName, level, owner, warning }
+--   { key, name, coloredName, level, owner, joins, warning }
 -- `owner` names the player it belongs to now (its alias, else its main)
--- when that player has other characters, and `warning` says adding it
--- moves it away from them; both are nil for a character on its own.
+-- when that player is put together (other characters, or an alias).
+-- A player already put together is offered only characters on their own:
+-- one of another player's can't be taken from them. A character on its
+-- own is also offered other players' characters: picking one `joins` that
+-- player, the logged-in character becoming its alt, and `warning` says so.
 function ProfileViewModel.AltCandidates(inputs, query, limit)
     local partition = inputs.partition
     local own = partition and inputs.selfKey and partition:GetCharacter(inputs.selfKey)
     if not own then
         return {}
     end
+    local alone = not organized(partition, own.player)
     local members = inputs.members or {}
     local classColor = inputs.classColor or function()
         return nil
@@ -215,6 +226,15 @@ function ProfileViewModel.AltCandidates(inputs, query, limit)
             return
         end
         local entry = candidateEntry(inputs, members, classColor, key, character)
+        if entry.owner ~= nil then
+            if not alone then
+                return
+            end
+            local ownName = inputs.normalizer:Display(own.name) or inputs.selfKey
+            entry.joins = true
+            entry.warning = entry.name .. " belongs to " .. entry.owner .. ". Picking it adds " .. ownName
+                .. " to " .. entry.owner .. "'s characters."
+        end
         local player = partition:GetPlayer(character.player)
         local searchable = string.lower(entry.name .. " " .. (player and player.alias or ""))
         if wanted == "" or string.find(searchable, wanted, 1, true) ~= nil then
