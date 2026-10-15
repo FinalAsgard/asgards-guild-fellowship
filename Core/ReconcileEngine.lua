@@ -36,7 +36,7 @@ addon.ReconcileEngine = ReconcileEngine
 -- Matches marker text against characters: a full name (with or without
 -- realm) of a roster member or a stored character no longer in the guild,
 -- or on Forever a single word as a unique first name of a roster member.
-local function newResolver(members, normalizer, twoPartNames, partition)
+function ReconcileEngine.NewResolver(members, normalizer, twoPartNames, partition)
     local byFirstName = {}
     if twoPartNames then
         local key, member
@@ -242,7 +242,7 @@ function ReconcileEngine.Plan(inputs)
     local rules = inputs.rules or {}
     local checkpoint = inputs.checkpoint or function() end
     local mode = inputs.mode or "initial"
-    local resolver = newResolver(members, inputs.normalizer, rules.twoPartNames == true, partition)
+    local resolver = ReconcileEngine.NewResolver(members, inputs.normalizer, rules.twoPartNames == true, partition)
     local sizes = playerSizes(partition)
     local plan = {
         aliases = {},

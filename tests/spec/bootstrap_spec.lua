@@ -21,6 +21,7 @@ local MANIFEST_FILES = {
     "Core/NoteParser.lua",
     "Core/FellowshipStore.lua",
     "Core/ReconcileEngine.lua",
+    "Core/NoteAudit.lua",
     "Core/PlayerService.lua",
     "Core/RosterViewModel.lua",
     "Core/ConflictViewModel.lua",
