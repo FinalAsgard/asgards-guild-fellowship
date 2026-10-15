@@ -719,6 +719,11 @@ function Controller:RedrawPanel()
         adStats = self.adStats,
         rolesOf = self.rolesOf,
         groupedWith = self.groupedWith,
+        -- The window wraps the bio to the panel's width, when it can
+        -- measure text.
+        wrap = self.window.WrapAbout and function(text)
+            return self.window:WrapAbout(text)
+        end or nil,
     })
     if model == nil then
         self:ClosePanel()
