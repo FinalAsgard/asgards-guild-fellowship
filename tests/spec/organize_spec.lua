@@ -72,14 +72,22 @@ test.test("set main links a character as an alt of the chosen player, marked man
     test.assertEqual("manual", state.partition:GetCharacter("visitor-area52").source)
 end)
 
-test.test("set main on a player's main moves it and its old player keeps a main", function()
+test.test("set main refuses a player's main while it has alts, and moves it once they're gone", function()
     local state = setup()
     local oldPlayer = state.playerIdOf("toolbox-area52")
+    local visitor = state.playerIdOf("visitor-area52")
 
-    test.assertTrue(state.service:SetMainPlayer("toolbox-area52", state.playerIdOf("visitor-area52")))
+    local ok, reason = state.service:SetMainPlayer("toolbox-area52", visitor)
+    test.assertFalse(ok)
+    test.assertContains(reason, "move or split off its alts first")
+    test.assertEqual(oldPlayer, state.playerIdOf("toolbox-area52"))
+    test.assertEqual("toolbox-area52", state.partition:GetPlayer(oldPlayer).main)
 
+    -- Its alts split off, it can join.
+    test.assertTrue(state.service:Detach("hammer-area52"))
+    test.assertTrue(state.service:Detach("wrench-area52"))
+    test.assertTrue(state.service:SetMainPlayer("toolbox-area52", visitor))
     test.assertEqual("visitor-area52", state.playerOf("toolbox-area52").main)
-    test.assertEqual("hammer-area52", state.partition:GetPlayer(oldPlayer).main)
 end)
 
 test.test("make this the main promotes an alt to main, marked manual", function()
@@ -288,13 +296,25 @@ test.test("the right-click menu offers the actions that apply to the row", funct
     local alt = actions(controller:MenuFor(rowFor(window, "Hammer")))
     test.assertTrue(alt.setMain and alt.makeMain and alt.alias and alt.detach)
 
+    -- A main with alts can't join another player.
     local main = actions(controller:MenuFor(rowFor(window, "Toolbox")))
-    test.assertTrue(main.setMain and main.alias and main.detach)
+    test.assertTrue(main.alias and main.detach)
     test.assertEqual(nil, main.makeMain)
+    test.assertEqual(nil, main.setMain)
 
     local single = actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage")))
     test.assertTrue(single.setMain and single.alias)
     test.assertEqual(nil, single.detach)
+
+    -- Each label says what it does.
+    local labels = {}
+    local entries = controller:MenuFor(rowFor(window, "Hammer"))
+    local index
+    for index = 1, #entries do
+        labels[index] = entries[index].text
+    end
+    test.assertEqual("Link as alt of..., Make this the main, Set alias..., View player..., Split off as own player",
+        table.concat(labels, ", "))
 
     local header = actions(controller:MenuFor(rowFor(window, "TheTool (Toolbox)")))
     test.assertTrue(header.alias and header.view)

@@ -20,6 +20,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
 | `/agf group` | Opens the window on the **Group Finder** tab (see [Group Finder](#group-finder)), or closes it. |
+| `/agf profile` | Opens the window on the **My Profile** tab (see [My Profile](#my-profile)), or closes it. |
 | `/agf dnd` | Turns Group Finder [Do Not Disturb](#do-not-disturb) on, or back off. |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
@@ -30,13 +31,14 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 Everything the add-on does is in one window, with picture tabs down its right edge. Hover a tab to see its name, and click it to show its page; the tab you're on looks selected. Every page scrolls when it's taller than the window.
 
 - **Roster**: the guild's players, mains and alts (see [Using the roster](#using-the-roster)).
+- **My Profile**: your own player, its characters and their role preferences, and Do Not Disturb (see [My Profile](#my-profile)).
 - **Group Finder**: build a dungeon group from the guild (see [Group Finder](#group-finder)).
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
-- **Settings**: everything else (General, Chat Tags, and the Group Finder's Do Not Disturb and role preferences), and the version you're running.
+- **Settings**: everything else (General, Chat Tags, and the Group Finder's Do Not Disturb), and the version you're running.
 
-The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf group`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
+The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf group`, `/agf profile`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
 
 ## Settings
 
@@ -69,6 +71,7 @@ Two markers in a character's **public** note seed the database:
 
 - `Main: Toolbox` or the shorter `>Toolbox` means "this character is an alt of Toolbox".
 - `Alias: TheTool` or the shorter `@TheTool` means "this player goes by TheTool".
+- A main marker naming the character itself (`>Toolbox` on Toolbox's own note) means "this is my main, on purpose": a **declared main**, even with no alts. On a character the roster has as someone's alt, it disagrees with the roster and goes to the conflict queue instead.
 
 A marker can sit anywhere in the note (for example `Tank, Main: Toolbox, Alias: TheTool`, `Tank >Toolbox` or `@TheTool raid lead`), and both kinds can appear in one note. Only the first main marker and the first alias marker count. The `Main:` and `Alias:` labels can be any case (`main:` works too), the space after the colon is optional, and a label only counts as a word of its own (`Domain:` isn't a main marker). Matching ignores case.
 
@@ -91,7 +94,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 
 - On the first scan, note markers are applied directly to any character the database doesn't know about.
 - After that, a note that disagrees with the database never overwrites it. The difference goes to the **conflict queue** instead. One exception: a note's alias is filled in for a player with no alias, as long as nobody ever set or cleared one by hand or through sync. An alias someone deliberately removed is never brought back by a note, and a note naming a different alias than the player has is still a conflict. A conflict like this left over from an earlier version is filled in the next time you use **Rescan**, or you can accept it. You'll also find in the queue any note naming a character that doesn't exist or matches more than one, and any note that loops back on itself.
-- **Conflicts (N)** at the bottom of the window opens the queue. Each entry shows the note and what it suggests next to what the database says. Accept or reject each one, or all at once.
+- **Conflicts (N)** at the bottom of the window opens the queue. Note conflicts are listed under **Note conflicts**: each shows the note and what it suggests next to what the database says. Accept or reject each one, or all at once. Members' changes are listed above them, one line per player (see [Suggestions](#suggestions)).
 - A rejected suggestion stays away until that note changes again.
 - Officer data from [guild sync](#guild-sync) beats guild notes. On a new install, notes fill in the roster first, and officer edits replace them where the two disagree. After an officer edit arrives, the next scan checks the notes it affects again. A note that disagrees goes to the conflict queue, and a pending conflict the edit already settled disappears.
 
@@ -103,7 +106,9 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 
 ### Organizing by hand
 
-Right-click a character for **Set main…**, **Make this the main**, **Set alias…**, **Detach as own player**, and **View player…**. Clicking a character also opens the player panel. It shows the alias, main, alts, and history, and has **Set alias…** and **Set main…** buttons that open the same dialogs as the menu. History lists characters that left the player: ones that left the guild, were detached, or were moved to another player.
+The roster marks a **declared main** (a player who said "this is my main" on purpose) as **(declared main)**, so confirmed players stand apart from characters nobody has organized yet. Players declare their main on [My Profile](#my-profile), or with a note marker naming the character itself (see [The guild note convention](#the-guild-note-convention)). Like the other organizing changes, an officer's declaration is official at once and a member's goes to officers as a [suggestion](#suggestions).
+
+Right-click a character for **Link as alt of…** (makes it an alt of another player), **Make this the main**, **Set alias…**, **Split off as own player** (takes it out of its player into one of its own), and **View player…**. Clicking a character also opens the player panel. It shows the alias, the player's Discord, location and bio under **About** (when they set any; see [About me](#about-me)), main, alts, and history, and has **Set alias…** and **Merge into player…** buttons: **Merge into player…** links the player's main as an alt of another player, the same as **Link as alt of…** on the main. A main that still has alts can't be moved: **Merge into player…** is greyed out and its right-click menu has no **Link as alt of…**. Move its alts or split them off first. History lists characters that left the player: ones that left the guild, were split off, or were moved to another player.
 
 For a player who has posted recruitment ads, the player panel also shows **Advertised: N (M in last 30 days)** (see [Ad counts](#ad-counts)).
 
@@ -119,13 +124,13 @@ Changes show up right away and are recorded as manual. An officer's changes then
 
 ## Guild sync
 
-When an officer changes which characters belong together, or what a player goes by, the change reaches everyone in the guild who runs the add-on and is online. This covers **Set main…**, **Make this the main**, **Detach as own player**, and **Set alias…**, including clearing an alias. Officers' edits update your roster and chat tags without a rescan.
+When an officer changes which characters belong together, or what a player goes by, the change reaches everyone in the guild who runs the add-on and is online. This covers **Link as alt of…**, **Merge into player…**, **Make this the main**, **Split off as own player**, and **Set alias…**, including clearing an alias. Officers' edits update your roster and chat tags without a rescan.
 
 - An officer is anyone whose guild rank can view officer notes. The guild master always counts. Nothing needs to be set up: promoting or demoting someone changes what their edits do.
 - When two officers change the same character or the same alias, the most recent edit wins everywhere.
 - A member's own edits apply in their roster right away and are sent to officers as suggestions (see [Suggestions](#suggestions)). Only officers' edits change everyone's roster directly.
 - Edits made before sync existed: they become official and are sent to the guild once you log in on an officer character with this version. Until then, and for members, they stay in your own roster only.
-- Only main and alt links, aliases, and each character's [role preferences](#role-preferences) are shared. Role preferences are set by the character itself, not by officers. Departures, purges, history (including your [group history](#group-history)), conflicts, and settings stay on your computer.
+- Only main and alt links, aliases, each character's [role preferences](#role-preferences), and each player's [Discord, location and bio](#about-me) are shared. Role preferences and About me are set by the player's own characters, never by officers, and reach the guild at once with no approval. Guildmates who were offline get them through the same catch-up as everything else. Departures, purges, history (including your [group history](#group-history)), conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
 - The Roster tab's footer shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
 - Sync never gets in the way of play. It sends and processes nothing while you're in combat, or on Retail during a boss encounter or a keystone run, and picks up where it left off once that's over. Like scans, it works on data a little at a time, so even a large guild's full sync doesn't cause a hitch, and your roster redraws once per batch rather than once per change.
@@ -134,13 +139,18 @@ When an officer changes which characters belong together, or what a player goes 
 
 Members know their own alts best, so a member's edits become suggestions for the officers:
 
-- When you're not an officer, **Set main…**, **Make this the main**, **Detach as own player**, and **Set alias…** still change your roster at once. Each change is also kept as a suggestion.
+- When you're not an officer, **Link as alt of…**, **Merge into player…**, **Make this the main**, **Split off as own player**, and **Set alias…** still change your roster at once. Each change is also kept as a suggestion.
 - Suggestions go to the guild as soon as an officer is online. If none is, they wait, and are sent when an officer logs in.
-- Officers find them in their conflict queue, marked "Suggested by" and the member's name. **Accept** and **Reject** work as for any other entry, and so do Accept all and Reject all.
+- Officers find them in their **Conflicts** window under **Member changes**, above **Note conflicts**: one line per player with changes waiting, with how many there are and a **Review** button. Suggestions from members on older versions of the add-on are grouped the same way. The Conflicts button and the minimap tooltip count each player's changes once, plus each note conflict.
+- **Review** opens a panel beside the window. It shows the player as they are now (**Before**) and as they'd be with every change (**Suggested**): main, alts and alias. Below, each change has its own line in plain words, for example "Bolt: Alt of Toolbox → Alt of Hammer", with **Approve** and **Deny**. **Approve all** and **Deny all** decide the whole player at once, and Accept all and Reject all at the bottom of the Conflicts window still decide everything.
 - The first officer to decide settles the suggestion for every officer, and it disappears from the other officers' queues. Accepting makes it an official edit under that officer's name, which reaches everyone.
-- Rejecting puts your roster back the way the officers have it, so you stay on the same data as everyone else. If no officer ever set that character or alias, it goes back to what the guild notes and the roster say.
+- Denying puts your roster back the way the officers have it, so you stay on the same data as everyone else. If no officer ever set that character or alias, it goes back to what the guild notes and the roster say.
 - Until then, your edit stays in your roster unless a newer officer edit about the same character or alias arrives.
 - Your suggestions that are still waiting are listed at the bottom of your **Conflicts** window, marked "Your suggestion" and "Waiting for an officer". They aren't counted on the Conflicts button, and they leave the list once an officer decides them. Suggestions are only sent while you're online, so if you log off before an officer decides, yours are sent again the next time an officer is online.
+- All your waiting changes, made from any of your characters, from the roster or from My Profile, form one request for your player. [My Profile](#my-profile) lists them under **Waiting for an officer** in plain words, for example "Wrench as an alt of Hammer" or "Alias: Hammers".
+- Changing the same thing again replaces your earlier change in the request. Changing it back to how the officers have it drops it from the request, and from officers' queues.
+- **Undo** beside a waiting change puts your roster back the way the officers have it and takes the change back from officers' queues (officers who are offline are told when they next log in). An officer still on an older version of the add-on may keep seeing it until they decide it.
+- When an officer decides one of your changes, chat tells you: "An officer approved your change: …" or "An officer denied your change: …". A denial rolls back only that change; the rest of your request keeps waiting.
 
 ### Don't sync
 
@@ -263,13 +273,13 @@ Everyone gets the window's **Recent Guild Advertisements** tab. It lists each ch
 
 ## Group Finder
 
-The **Group Finder** is a tab of the add-on's window, right below **Roster**. Click its tab, or type `/agf group` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it checks your level and party again and asks the guild who is around.
+The **Group Finder** is a tab of the add-on's window, right below **My Profile**. Click its tab, or type `/agf group` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it checks your level and party again and asks the guild who is around.
 
-The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
+The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the groups other guildmates are forming, the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
 
-The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Next to each dungeon, **T 1 · H 2 · D 3** shows how many guildmates online right now could fill tank, healer and DPS there, so you can pick one the guild can fill. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
+The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
 
-On WoW Retail the list comes from the game's own Dungeon Finder, so it stays current without add-on updates. WoW Forever has no Dungeon Finder, so the add-on ships its dungeons (the Classic ones and Forever's new ones) with their fixed level ranges.
+The list and its level ranges come from the game's own Dungeon Finder, on WoW Retail and WoW Forever, so they stay current without add-on updates. Only if the game's Dungeon Finder lists nothing does the add-on fall back to its own list of dungeons with fixed level ranges.
 
 Picking a dungeon starts your group and shows its five slots: 1 tank, 1 healer and 3 DPS. Everyone already in your party, guild members or not, fills a slot, and the slots update as people join or leave:
 
@@ -286,9 +296,9 @@ Beside the slots, each role that's still open lists the guildmates online right 
 
 **Bolt 22, Hammer 24**
 
-Each player gets one line, listing every character of theirs that fits, each name in its class color (as throughout the window). Hover over the line to see which character they're on and where they are. A character fits when its level is within the dungeon's range, its class can play the role, and the role is on in its [role preferences](#role-preferences). That includes offline alts, since they can log over. A role already filled lists nobody.
+Each player gets one line, listing every character of theirs that fits, each name in its class color (as throughout the window). Hover over the line to see which character they're on and where they are, and click it to whisper that character. A character fits when its level is within the dungeon's range, its class can play the role, and the role is on in its [role preferences](#role-preferences). That includes offline alts, since they can log over. A role already filled lists nobody.
 
-Guildmates whose add-on didn't answer (see [Who is around](#who-is-around)) are marked **(no add-on)**, and are suggested by what their class can do. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
+Guildmates whose add-on didn't answer (see [Who is around](#who-is-around)) are listed after the add-on users, and are suggested by what their class can do. They can't get a request, so their line has a **Whisper** button instead of **Request**, and hovering it says so. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
 
 ### Requesting a guildmate
 
@@ -301,6 +311,23 @@ Once someone accepts, getting them into your party is up to you; the add-on neve
 Prompts keep up with your group. When a slot fills, whether someone accepted or joined your party, everyone you've asked loses the options for that role. Anyone left with no option has their prompt closed, and their line in your window shows **withdrawn**. Once every role is filled, the remaining requests are withdrawn too.
 
 Asked by two organizers at once, a guildmate sees both prompts stacked. Accepting one declines the others, and those organizers see **joined another group**.
+
+### Groups being formed
+
+Until you start a group of your own, the right side of the window opens with **Groups forming**: every group a guildmate with the add-on is forming right now, one line each, for example **Toolbox: The Deadmines (17–26), 3/5**. Groups whose range is within 2 levels of your character's level come first; the rest are listed in grey. A group drops off the list when its organizer ends it, or a few minutes after their add-on was last heard from.
+
+Click a group to see its slots in place of the dungeon picker: who's in each one, with **(coming)** beside anyone the organizer is still waiting on, and **open** for the rest. An open slot you could fill has a **Fill Slot** button: your character's level must fit the dungeon, its class must play the role, and the role must be on in its [role preferences](#role-preferences). If the character you're on can't, the button offers one of your alts that can, for example **Fill as Bolt**. **Back** returns to the dungeon picker.
+
+**Fill Slot** doesn't put you in the group. It sends the organizer a prompt, **Hammer offers to fill your Healer slot**, with **Accept** and **Decline**. Under the slots you see where your offer stands, and the add-on tells you in chat when the organizer answers. An offer the organizer accepts works like an accepted request: the slot is held for you until they invite you. An offer goes unanswered after about 2 minutes, and closes if that role fills in the meantime.
+
+### In someone else's group
+
+Once you're in the party of a guildmate who is forming a group with the add-on, the Group Finder shows you their group, as it fills, instead of the dungeon picker. You can't invite or request anyone from it, but two things are yours to change:
+
+- **Your role:** the **Tank**, **Healer** and **DPS** buttons ask the organizer to move you to another open role your class can play. The organizer's add-on moves you as soon as it hears.
+- **Join as an alt:** one button for each of your alts that could come instead, for example **DPS — Bolt (23)**. Choosing one tells the organizer you're coming on that alt: it takes your slot, and their window shows **Waiting for Bolt to log in**, then **Invite** once Bolt is online. Log over to the alt and wait for the invite.
+
+You can also just log over to an alt without telling the organizer, as before.
 
 ### Ask in guild
 
@@ -316,13 +343,13 @@ The right side of the window always ends with **Nearby in <zone>**: the guildmat
 
 ### Do Not Disturb
 
-Turn on **Do Not Disturb** when you don't want group requests. It's in three places that always agree: the check box at the bottom of the Group Finder, **Do Not Disturb** under **Group Finder** in the settings, and `/agf dnd`. It applies to every character on your account. While it's on, your add-on tells organizers you're unavailable.
+Turn on **Do Not Disturb** when you don't want group requests. It's in four places that always agree: the check box at the bottom of the Group Finder, the same check box at the bottom of [My Profile](#my-profile), **Do Not Disturb** under **Group Finder** in the settings, and `/agf dnd`. It applies to every character on your account. While it's on, your add-on tells organizers you're unavailable.
 
 You're also unavailable automatically while you're in a group or inside an instance, with nothing to turn on.
 
 ### Role preferences
 
-Each character has its own role preferences: the roles you're willing to play on it. They start as every role its class can fill. To turn one off (say, a paladin you never heal on), log into that character and untick it under **Group Finder** on the **Settings** tab, or in the **Group Finder** section of the AddOns options. Only the roles that character's class can fill are listed. The player panel shows each character's role preferences next to it, as **Roles: Tank, DPS**.
+Each character has its own role preferences: the roles you're willing to play on it. They start as every role its class can fill. To turn one off (say, a paladin you never heal on), log into that character and untick it on the [My Profile](#my-profile) tab. Only the roles that character's class can fill are listed. The player panel shows each character's role preferences next to it, as **Roles: Tank, DPS**.
 
 Your role preferences reach the whole guild through [guild sync](#guild-sync), even while you're on another character or offline. Only the character itself can set them, not officers or anyone else. If your add-on sees a change in your character's name that you never made, it sends your real preferences back out to correct it, and warns you who passed it on.
 
@@ -331,6 +358,40 @@ Your role preferences reach the whole guild through [guild sync](#guild-sync), e
 Your add-on remembers, on your computer only, each party you've been in with guildmates: any party, not just ones from the Group Finder. It records when, which guild characters, and the dungeon when it knows it (the one you picked in the Group Finder, or the instance you're in). Guildmates joining later count as the same party, and so does reloading while in it. Your own alts never count. The history is never sent to anyone.
 
 A guildmate's player panel then shows **Grouped together 3 times, last on 2026-10-12**, counted across all their characters. Players you've never grouped with show nothing.
+
+## My Profile
+
+**My Profile** is a tab of the add-on's window, right below **Roster**: one place for everything about your own player. Click its tab, or type `/agf profile` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it reads everything again.
+
+It shows the player of the character you're logged in on: its alias and main at the top, for example **TheTool (Toolbox)**, then the main and each alt still in the guild, in its class color with its level. The character you're logged in on is marked **logged in**.
+
+### Alias, main and alts
+
+Below the heading are the same edits as the roster's right-click menu, for your own player:
+
+- **Alias**: type an alias (up to 48 characters) and press Enter to set it, or empty the box to clear it.
+- **Make main** on an alt makes it your player's main.
+- **Remove** on an alt splits it off as a player of its own (**Split off as own player**).
+- **Declare as my main** says your main is your main on purpose, even if you have no alts. Your main then shows as **declared main**, here and in the roster.
+- **Add alt…** opens a search of the guild's other characters. Pick one and press **Add** to link it as your alt. Once your player has alts (or an alias), it lists only characters on their own: another player's characters can't be taken from them. If the character you're on is still on its own, it also lists other players' characters. Pick one and press **Join** to make the character you're on an alt of that player.
+
+These follow the same rules as the roster. An officer's edits are official at once and reach the whole guild. A member's apply in their own roster at once and are sent to officers as [suggestions](#suggestions). The page shows each change straight away.
+
+Below your characters, **Your other characters on this computer** lists the characters you've logged in on with this game install, in this guild, that aren't linked to your player yet. Each has **Add as alt**, which links it to your player, and **Dismiss**, which stops offering it on this computer for good. Nothing is ever linked by itself, so on a shared or family computer someone else's characters never end up as yours. The list of characters you've logged in on stays on your computer and is never sent to anyone.
+
+### About me
+
+Below the alias are your **Discord** username (up to 32 characters), **Location** (up to 40, for example "Ohio, evenings") and a **Bio** (up to 500, in a taller box that wraps onto several lines). Each box shows how many characters you've used. Type in one and press Enter (or click elsewhere) to save it; Escape puts back what was saved. Empty a box and save to stop sharing it.
+
+These belong to your player, not to one character: whichever of your characters you're on, you see and edit the same values, and the newest edit wins. They're yours alone. They're saved and sent to the guild at once, with no officer approving them, and only your own characters can change them; officers can't edit or clear them. If someone's add-on passes on a change in your name that you never made, yours sends your real values back out, and you're warned who passed it on, as for role preferences. Guildmates see them under **About** in your player panel.
+
+### Characters and roles
+
+Under each character are its [role preferences](#role-preferences). The character you're logged in on has a check box for each role its class can fill. Ticking one changes it, and the guild hears about it through [guild sync](#guild-sync). Your other characters' roles are shown but can't be changed here: log in on that character to change them.
+
+Along the bottom is the **Do Not Disturb** check box, the same setting as in the Group Finder, the settings and `/agf dnd` (see [Do Not Disturb](#do-not-disturb)).
+
+On a character that isn't in a guild, My Profile just says it needs one. Right after joining, before the add-on has scanned the roster, it asks you to try again after the next scan.
 
 ## Supported clients
 

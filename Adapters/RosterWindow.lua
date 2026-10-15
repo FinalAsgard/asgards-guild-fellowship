@@ -113,7 +113,11 @@ local function cellText(row, field)
     if field == "name" then
         local text
         if row.standalone then
-            text = row.coloredLabel
+            -- A declared main on its own is a confirmed player, unlike a
+            -- character nobody has organized.
+            text = row.coloredLabel .. (row.declared and "  |cff9d9d9d(declared main)|r" or "")
+        elseif row.declared then
+            text = row.coloredName .. "  |cff9d9d9d(declared main)|r"
         else
             text = row.coloredName .. (row.isMain and "  |cff9d9d9d(main)|r" or "")
         end
@@ -174,7 +178,7 @@ local function refreshLines(scroll, rows, offset, totalLines)
     end
 end
 
--- Organize menu, alias dialog, and "Set main…" picker ---------------------
+-- Organize menu, alias dialog, and player picker ---------------------------
 
 -- Shows a context menu with the client's menu system: MenuUtil on newer
 -- clients, UIDropDownMenu otherwise. Returns false when neither exists.
@@ -279,9 +283,10 @@ end
 local PICKER_WIDTH = 360
 local PICKER_HEIGHT = 380
 
--- The "Set main…" picker: a search box and the matching players.
+-- The player picker ("Link as alt of…" and "Merge into player…"): a search
+-- box and the matching players.
 local function buildPicker(framework, frameName)
-    local panel = framework:CreateSimplePanel(UIParent, PICKER_WIDTH, PICKER_HEIGHT, "Set main", frameName .. "Picker")
+    local panel = framework:CreateSimplePanel(UIParent, PICKER_WIDTH, PICKER_HEIGHT, "Link as alt of", frameName .. "Picker")
     panel:SetFrameStrata("DIALOG")
     local prompt = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     prompt:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
@@ -343,6 +348,13 @@ local function buildPicker(framework, frameName)
     scroll:CreateLines(newLine, lineAmount)
     picker.scroll = scroll
 
+    function picker.setTitle(title)
+        if type(panel.SetTitle) == "function" then
+            panel:SetTitle(title)
+        elseif panel.Title ~= nil then
+            panel.Title:SetText(title)
+        end
+    end
     function picker.update()
         local results = picker.search_fn and picker.search_fn(search:GetText()) or {}
         scroll:SetData(results)
@@ -363,8 +375,9 @@ end
 local PANEL_WIDTH = 380
 local PANEL_HEIGHT = 440
 
--- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name)`
--- open the dialogs the right-click menu uses.
+-- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
+-- merge)` open the dialogs the right-click menu uses (`merge` titles the
+-- picker "Merge into player").
 local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
     panel:SetFrameStrata("HIGH")
@@ -372,17 +385,17 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
     local edit = { panel = panel }
 
-    -- The alias, and the same Set alias… and Set main… dialogs as the
-    -- right-click menu.
+    -- The alias, with Set alias… and Merge into player… buttons that open
+    -- the same dialogs as the right-click menu.
     local aliasText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     aliasText:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -32)
-    aliasText:SetPoint("RIGHT", panel, "RIGHT", -190, 0)
+    aliasText:SetPoint("RIGHT", panel, "RIGHT", -230, 0)
     aliasText:SetJustifyH("LEFT")
     aliasText:SetWordWrap(false)
     local setMain = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    setMain:SetSize(84, 20)
+    setMain:SetSize(124, 20)
     setMain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -28)
-    setMain:SetText("Set main...")
+    setMain:SetText("Merge into player...")
     local setAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     setAlias:SetSize(84, 20)
     setAlias:SetPoint("RIGHT", setMain, "LEFT", -4, 0)
@@ -396,11 +409,12 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     end)
     setMain:SetScript("OnClick", function()
         if edit.model ~= nil then
-            actions.openSetMain(edit.model.main, edit.model.mainName)
+            actions.openSetMain(edit.model.main, edit.model.mainName, true)
         end
     end)
     edit.aliasText = aliasText
     edit.aliasSource = aliasSource
+    edit.setMain = setMain
 
     -- "Don't sync": keep this client's own version of the player.
     local dontSync = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
@@ -461,6 +475,8 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                     text = "|cff9d9d9d" .. row.text .. "|r"
                 elseif row.kind == "stat" then
                     text = row.text
+                elseif row.kind == "about" then
+                    text = "  " .. row.text
                 elseif row.kind == "character" then
                     text = "  " .. row.name .. (row.level and ("  |cff9d9d9d" .. row.level .. "|r") or "") ..
                         "  |cff9d9d9d" .. tostring(row.status) .. "|r" ..
@@ -504,9 +520,12 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     return edit
 end
 
--- The conflict review panel: one line per pending conflict, with Accept and
--- Reject (or Dismiss, when there's nothing to apply), plus Accept all and
--- Reject all. A member's own suggestions follow, waiting for an officer.
+-- The conflict review panel, in two sections. Member changes: one line per
+-- player with suggestions, saying how many, with Review (see the bundle
+-- review below). Note conflicts: one line per conflict, with Accept and
+-- Reject (or Dismiss, when there's nothing to apply). Accept all and Reject
+-- all decide everything. A member's own suggestions follow, waiting for an
+-- officer.
 local CONFLICT_COLUMNS = {
     { field = "name", header = "Character", x = 8, width = 140 },
     { field = "note", header = "Note (live)", x = 152, width = 170 },
@@ -540,7 +559,12 @@ local function createConflictLine(scroll, index, options)
     line.accept:SetPoint("LEFT", line, "LEFT", 748, 0)
     line.accept:SetText("Accept")
     line.accept:SetScript("OnClick", function()
-        if line.row ~= nil then
+        if line.row == nil then
+            return
+        end
+        if line.row.kind == "bundle" then
+            options.onReviewBundle(line.row.group)
+        else
             options.onAcceptConflict(line.row.character, line.row.kind)
         end
     end)
@@ -578,7 +602,18 @@ local function refreshConflictLines(scroll, rows, offset, totalLines)
             end
             line.waiting:Hide()
             line.reject:Show()
-            if row.pending then
+            line.accept:SetText("Accept")
+            if row.kind == "heading" then
+                line.cells.name:SetText("|cffffd100" .. row.name .. "|r")
+                line.cells.note:SetText("")
+                line.accept:Hide()
+                line.reject:Hide()
+            elseif row.kind == "bundle" then
+                line.cells.note:SetText("")
+                line.accept:SetText("Review")
+                line.accept:Show()
+                line.reject:Hide()
+            elseif row.pending then
                 line.accept:Hide()
                 line.reject:Hide()
                 line.waiting:Show()
@@ -598,6 +633,121 @@ local function refreshConflictLines(scroll, rows, offset, totalLines)
     end
 end
 
+-- The rows the conflict panel lists: Member changes, Note conflicts and
+-- the member's own suggestions, each under a heading when there are any.
+function RosterWindow.ConflictSections(rows)
+    local sections = {
+        { heading = "Member changes", rows = {} },
+        { heading = "Note conflicts", rows = {} },
+        { heading = "Your suggestions", rows = {} },
+    }
+    local index
+    for index = 1, #rows do
+        local row = rows[index]
+        local section = row.kind == "bundle" and 1 or (row.pending and 3 or 2)
+        table.insert(sections[section].rows, row)
+    end
+    local listed = {}
+    for index = 1, #sections do
+        local section = sections[index]
+        if section.rows[1] ~= nil then
+            table.insert(listed, { kind = "heading", name = section.heading })
+            local rowIndex
+            for rowIndex = 1, #section.rows do
+                table.insert(listed, section.rows[rowIndex])
+            end
+        end
+    end
+    return listed
+end
+
+-- The bundle review: one member's player before and with their changes,
+-- one line per change with Approve and Deny, and Approve all / Deny all.
+local REVIEW_WIDTH = 560
+local REVIEW_HEIGHT = 380
+local REVIEW_LINES = 8
+
+local function buildReviewPanel(framework, options, frameName, anchor)
+    local panel = framework:CreateSimplePanel(UIParent, REVIEW_WIDTH, REVIEW_HEIGHT, "Review", frameName .. "Review")
+    panel:SetFrameStrata("DIALOG")
+    panel:ClearAllPoints()
+    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 8, 0)
+    local review = { panel = panel, before = {}, suggested = {}, lines = {} }
+    local function column(x, title, target)
+        local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        header:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -32)
+        header:SetText(title)
+        local index
+        for index = 1, 3 do
+            local text = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            text:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -34 - index * 16)
+            text:SetWidth(REVIEW_WIDTH / 2 - 24)
+            text:SetJustifyH("LEFT")
+            text:SetWordWrap(false)
+            target[index] = text
+        end
+    end
+    column(12, "Before", review.before)
+    column(REVIEW_WIDTH / 2, "Suggested", review.suggested)
+    local index
+    for index = 1, REVIEW_LINES do
+        local line = CreateFrame("Frame", nil, panel)
+        line:SetHeight(RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -110 - (index - 1) * RosterWindow.LINE_HEIGHT)
+        line:SetPoint("RIGHT", panel, "RIGHT", -10, 0)
+        line.text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        line.text:SetPoint("LEFT", line, "LEFT", 4, 0)
+        line.text:SetPoint("RIGHT", line, "RIGHT", -132, 0)
+        line.text:SetJustifyH("LEFT")
+        line.text:SetWordWrap(false)
+        line.approve = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+        line.approve:SetSize(62, 18)
+        line.approve:SetPoint("RIGHT", line, "RIGHT", -66, 0)
+        line.approve:SetText("Approve")
+        line.approve:SetScript("OnClick", function()
+            if line.item ~= nil then
+                options.onAcceptConflict(line.item.character, line.item.kind)
+            end
+        end)
+        line.deny = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+        line.deny:SetSize(62, 18)
+        line.deny:SetPoint("RIGHT", line, "RIGHT", -2, 0)
+        line.deny:SetText("Deny")
+        line.deny:SetScript("OnClick", function()
+            if line.item ~= nil then
+                options.onRejectConflict(line.item.character, line.item.kind)
+            end
+        end)
+        review.lines[index] = line
+    end
+    review.more = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    review.more:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -114 - REVIEW_LINES * RosterWindow.LINE_HEIGHT)
+    local approveAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    approveAll:SetSize(100, 22)
+    approveAll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 10)
+    approveAll:SetText("Approve all")
+    approveAll:SetScript("OnClick", function()
+        if review.group ~= nil then
+            options.onDecideBundle(review.group, true)
+        end
+    end)
+    local denyAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    denyAll:SetSize(100, 22)
+    denyAll:SetPoint("LEFT", approveAll, "RIGHT", 6, 0)
+    denyAll:SetText("Deny all")
+    denyAll:SetScript("OnClick", function()
+        if review.group ~= nil then
+            options.onDecideBundle(review.group, false)
+        end
+    end)
+    panel:HookScript("OnHide", function()
+        review.group = nil
+        options.onCloseReview()
+    end)
+    panel:Hide()
+    return review
+end
+
 local function buildConflictPanel(framework, options, frameName)
     local panel = framework:CreateSimplePanel(
         UIParent,
@@ -612,9 +762,10 @@ local function buildConflictPanel(framework, options, frameName)
     explain:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
     explain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -30)
     explain:SetJustifyH("LEFT")
-    explain:SetText("Guild notes that disagree with the roster, and members' suggestions. Accepting applies the " ..
-        "suggestion; rejecting keeps the roster. Guild notes are never edited. Your own suggestions are listed " ..
-        "last until an officer decides them.")
+    explain:SetText("Members' changes, one line per player: Review shows each player before and with their " ..
+        "changes, to approve or deny. Note conflicts: guild notes that disagree with the roster; accepting " ..
+        "applies the note, rejecting keeps the roster. Your own suggestions are listed last until an officer " ..
+        "decides them.")
 
     local headerIndex
     for headerIndex = 1, #CONFLICT_COLUMNS do
@@ -663,8 +814,13 @@ local function buildConflictPanel(framework, options, frameName)
     empty:SetPoint("CENTER", panel, "CENTER", 0, 0)
     empty:SetText("No conflicts. The roster and the guild notes agree.")
 
+    local review = buildReviewPanel(framework, options, frameName, panel)
+    panel:HookScript("OnHide", function()
+        review.panel:Hide()
+    end)
     panel:Hide()
-    return { panel = panel, scroll = scroll, empty = empty, acceptAll = acceptAll, rejectAll = rejectAll }
+    return { panel = panel, scroll = scroll, empty = empty, acceptAll = acceptAll, rejectAll = rejectAll,
+        review = review }
 end
 
 -- A list of rows in columns, as the Recruiters leaderboard and the Recent
@@ -901,9 +1057,17 @@ local function build(framework, options)
     local width, height = frame:GetSize()
     local lineAmount = math.floor((height - 120) / RosterWindow.LINE_HEIGHT)
     local picker = buildPicker(framework, frameName)
-    -- "Set main…": links `key` (named `name`) as an alt of the picked player.
-    local function openSetMain(key, name)
-        picker.prompt:SetText("Make " .. tostring(name) .. " an alt of:")
+    -- "Link as alt of…" links `key` (named `name`) as an alt of the picked
+    -- player. From the player panel it's "Merge into player…": the same link,
+    -- made for the player's main.
+    local function openSetMain(key, name, merge)
+        if merge then
+            picker.setTitle("Merge into player")
+            picker.prompt:SetText("Merge " .. tostring(name) .. " into player:")
+        else
+            picker.setTitle("Link as alt of")
+            picker.prompt:SetText("Link " .. tostring(name) .. " as an alt of:")
+        end
         picker.search_fn = function(query)
             return options.searchPlayers(key, query)
         end
@@ -1054,6 +1218,8 @@ end
 -- options.onRescan() runs when the Rescan button is clicked;
 -- options.onAcceptConflict(character, kind), onRejectConflict(character,
 -- kind), onAcceptAll(), and onRejectAll() resolve conflicts;
+-- options.onReviewBundle(group), onDecideBundle(group, approved) and
+-- onCloseReview() drive the review of a member's bundle of suggestions;
 -- options.onToggleDeparted() returns whether departed characters are now
 -- shown, and options.onPurge(key) / onPurgeAll() purge them;
 -- options.menuFor(row) lists a row's organize actions, and onSetMain(key,
@@ -1119,7 +1285,7 @@ function Window:SetConflicts(rows)
         local conflicts = self.conflicts
         local count = addon.ConflictViewModel.CountToReview(rows)
         conflicts.button:SetText("Conflicts (" .. count .. ")")
-        conflicts.scroll:SetData(rows)
+        conflicts.scroll:SetData(RosterWindow.ConflictSections(rows))
         conflicts.scroll:Refresh()
         if #rows == 0 then
             conflicts.empty:Show()
@@ -1134,6 +1300,43 @@ function Window:SetConflicts(rows)
             conflicts.rejectAll:Enable()
         end
     end))
+end
+
+-- Shows the bundle review (see BundleReviewViewModel) beside the conflict
+-- panel.
+function Window:ShowReview(model)
+    return (pcall(function()
+        local review = self.conflicts.review
+        review.group = model.group
+        if type(review.panel.SetTitle) == "function" then
+            review.panel:SetTitle(model.title)
+        elseif review.panel.Title ~= nil then
+            review.panel.Title:SetText(model.title)
+        end
+        local index
+        for index = 1, 3 do
+            review.before[index]:SetText(model.before[index] or "")
+            review.suggested[index]:SetText(model.suggested[index] or "")
+        end
+        for index = 1, #review.lines do
+            local line = review.lines[index]
+            local item = model.items[index]
+            line.item = item
+            if item == nil then
+                line:Hide()
+            else
+                line.text:SetText(item.text)
+                line:Show()
+            end
+        end
+        local hidden = #model.items - #review.lines
+        review.more:SetText(hidden > 0 and ("And " .. hidden .. " more: Approve all and Deny all include them.") or "")
+        review.panel:Show()
+    end))
+end
+
+function Window:HideReview()
+    self.conflicts.review.panel:Hide()
 end
 
 -- Shows the officers' Recruiters leaderboard on the Recruitment page (see
@@ -1178,6 +1381,12 @@ function Window:ShowPlayer(model)
         end
         edit.aliasText:SetText(model.alias and ("Alias: " .. model.alias) or "|cff9d9d9dNo alias|r")
         edit.aliasSource:SetText(model.alias and model.aliasSource and ("Alias " .. model.aliasSource) or "")
+        -- A player with alts can't be merged into another.
+        if model.canMerge then
+            edit.setMain:Enable()
+        else
+            edit.setMain:Disable()
+        end
         edit.dontSync:SetChecked(model.dontSync == true)
         edit.dontSyncLabel:SetText(model.dontSync and "|cffff8000Don't sync: kept as yours|r" or "Don't sync")
         edit.scroll:SetData(model.rows)

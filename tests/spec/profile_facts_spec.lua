@@ -118,7 +118,7 @@ test.test("profile store: saved data from schema 2 migrates to schema 3 without 
     world.loggedIn = true
     fixtures.fire(world, "PLAYER_LOGIN")
 
-    test.assertEqual(3, world.database.schemaVersion)
+    test.assertEqual(4, world.database.schemaVersion)
     local character = world.database.guilds[partitionKey].characters["tool box"]
     test.assertEqual("Tool Box", character.name)
     test.assertEqual(5, character.mainAt)
@@ -417,13 +417,14 @@ local function loggedIn(profile)
 end
 
 local function registerProfileTests(profile)
-    test.test(profile .. " settings: the logged-in character's roles default to its class and can be turned off", function()
+    test.test(profile .. " role preferences: the logged-in character's default to its class and can be turned off", function()
         local world, addon = loggedIn(profile)
         local settings = addon.settings
         -- The first member is a warrior: tank and DPS, never healer.
-        test.assertTrue(settings:IsShown("role_tank"))
+        -- Changed on My Profile only: no settings panel shows them.
+        test.assertFalse(settings:IsShown("role_tank"))
         test.assertFalse(settings:IsShown("role_healer"))
-        test.assertTrue(settings:IsShown("role_dps"))
+        test.assertFalse(settings:IsShown("role_dps"))
         test.assertTrue(settings:Get("role_tank"))
         test.assertTrue(settings:Get("role_dps"))
 
@@ -531,4 +532,227 @@ test.test("guild sync: an ordinary role change goes out at once", function()
     member.session:LocalRolesEdit({ "healer" })
 
     test.assertEqual(1, #member.sent)
+end)
+
+-- Discord, location and bio ------------------------------------------------------
+
+local function text(kind, at, by, character, value)
+    return { kind = kind, character = character or by, text = value, at = at, by = by }
+end
+
+-- Hammer and Wrench, one player with Hammer as main.
+local function onePlayer(partition)
+    partition:JoinPlayerOf("wrench-area52", MEMBER, "manual")
+end
+
+test.test("profile store: Discord, location and bio are kept on the character with their stamp", function()
+    local addon = load()
+    local partition = newPartition(addon)
+
+    test.assertEqual(nil, partition:GetProfileText(MEMBER, "discord"))
+    test.assertEqual(0, (partition:GetProfileStamp(MEMBER, "discord")))
+    test.assertTrue(partition:SetProfileText(MEMBER, "discord", "hammer#1", NOW, MEMBER))
+    test.assertEqual("hammer#1", partition:GetProfileText(MEMBER, "discord"))
+    local at, by = partition:GetProfileStamp(MEMBER, "discord")
+    test.assertEqual(NOW, at)
+    test.assertEqual(MEMBER, by)
+
+    -- Longest values: 32, 40 and 500 bytes; one more is refused.
+    test.assertTrue(partition:SetProfileText(MEMBER, "discord", string.rep("d", 32), NOW, MEMBER))
+    test.assertFalse(partition:SetProfileText(MEMBER, "discord", string.rep("d", 33), NOW, MEMBER))
+    test.assertTrue(partition:SetProfileText(MEMBER, "location", string.rep("l", 40), NOW, MEMBER))
+    test.assertFalse(partition:SetProfileText(MEMBER, "location", string.rep("l", 41), NOW, MEMBER))
+    test.assertTrue(partition:SetProfileText(MEMBER, "bio", string.rep("b", 500), NOW, MEMBER))
+    test.assertFalse(partition:SetProfileText(MEMBER, "bio", string.rep("b", 501), NOW, MEMBER))
+    test.assertFalse(partition:SetProfileText(MEMBER, "pronouns", "they", NOW, MEMBER))
+
+    -- Empty clears: the player then has no value.
+    test.assertTrue(partition:SetProfileText(MEMBER, "discord", "", NOW + 1, MEMBER))
+    test.assertEqual(nil, (partition:PlayerProfileText(partition:GetCharacter(MEMBER).player, "discord")))
+end)
+
+test.test("profile store: a character with an unreadable bio is set aside intact", function()
+    local addon = load()
+    local database = { schemaVersion = 4, guilds = { ["Knights of Camelot-Area52"] = {
+        characters = { [MEMBER] = { player = 1, name = "Hammer-Area52", bio = string.rep("b", 501) } },
+        players = { [1] = { main = MEMBER } },
+        nextPlayerId = 2,
+    } } }
+
+    local partition = addon.FellowshipStore.Create(database):Partition(GUILD)
+
+    test.assertEqual(nil, partition:GetCharacter(MEMBER))
+    local quarantined = database.guilds["Knights of Camelot-Area52"].quarantine[1]
+    test.assertEqual("character bio is invalid", quarantined.reason)
+    test.assertEqual(501, #quarantined.record.bio)
+end)
+
+test.test("profile store: the player's value is the newest across its characters", function()
+    local addon = load()
+    local partition = newPartition(addon)
+    onePlayer(partition)
+    local playerId = partition:GetCharacter(MEMBER).player
+
+    partition:SetProfileText(MEMBER, "location", "Ohio", NOW, MEMBER)
+    partition:SetProfileText("wrench-area52", "location", "Ohio, evenings", NOW + 10, "wrench-area52")
+    test.assertEqual("Ohio, evenings", (partition:PlayerProfileText(playerId, "location")))
+
+    -- Editing again on Hammer is newer than Wrench's, whatever the clock says.
+    local facts = newFacts(addon, partition)
+    local fact = facts:StampText(MEMBER, "location", "Texas", NOW)
+    test.assertEqual(NOW + 11, fact.at)
+    test.assertEqual("Texas", (partition:PlayerProfileText(playerId, "location")))
+end)
+
+test.test("profile facts: Discord, location and bio are accepted only from the character, within their length", function()
+    local addon = load()
+    local partition = newPartition(addon)
+    local facts = newFacts(addon, partition)
+
+    -- An officer can't edit or clear a member's profile text.
+    test.assertEqual("not the character's own", facts:Refusal(text("bio", NOW, OFFICER, MEMBER, "")))
+    test.assertEqual("not the character's own", facts:Refusal(text("discord", NOW, OFFICER, MEMBER, "x")))
+    test.assertEqual("malformed", facts:Refusal(text("discord", NOW, MEMBER, MEMBER, string.rep("d", 33))))
+    test.assertEqual("malformed", facts:Refusal(text("bio", NOW, MEMBER, MEMBER, nil)))
+    test.assertEqual(nil, facts:Refusal(text("bio", NOW, MEMBER, MEMBER, "Hi there")))
+
+    test.assertEqual(1, facts:ApplyAll({ text("bio", NOW, MEMBER, MEMBER, "Hi there") }))
+    test.assertEqual("Hi there", partition:GetProfileText(MEMBER, "bio"))
+    -- Older loses; newer wins; "" clears.
+    test.assertEqual(0, facts:ApplyAll({ text("bio", NOW - 1, MEMBER, MEMBER, "Old") }))
+    test.assertEqual(1, facts:ApplyAll({ text("bio", NOW + 1, MEMBER, MEMBER, "") }))
+    test.assertEqual("", partition:GetProfileText(MEMBER, "bio"))
+end)
+
+test.test("profile facts: Discord, location and bio are part of the digest and catch-up", function()
+    local addon = load()
+    local partition = newPartition(addon)
+    local facts = newFacts(addon, partition)
+    local before = addon.SyncDigest.Of(facts:SharedFacts())
+
+    partition:SetProfileText(MEMBER, "discord", "hammer#1", NOW, MEMBER)
+    partition:SetProfileText(MEMBER, "bio", "Hi", NOW, MEMBER)
+    -- Text someone else wrote isn't passed on.
+    partition:SetProfileText("wrench-area52", "bio", "Forged", NOW, OFFICER)
+
+    local shared = facts:SharedFacts()
+    test.assertEqual(2, #shared)
+    test.assertEqual("discord", shared[1].kind)
+    test.assertEqual("hammer#1", shared[1].text)
+    test.assertEqual("bio", shared[2].kind)
+    local after = addon.SyncDigest.Of(shared)
+    test.assertTrue(#addon.SyncDigest.Differing(before, after) >= 1)
+    partition:SetProfileText(MEMBER, "bio", "Hello", NOW, MEMBER)
+    test.assertTrue(#addon.SyncDigest.Differing(after, addon.SyncDigest.Of(facts:SharedFacts())) >= 1)
+end)
+
+test.test("guild sync: profile text is sent at once and others apply it", function()
+    local network = newNetwork()
+    local member = newClient(network, MEMBER, "Hammer-Area52")
+    local other = newClient(network, "wrench-area52", "Wrench-Area52")
+    local bio = string.rep("A long bio. ", 16)
+    bio = string.sub(string.rep(bio, 3), 1, 500)
+
+    local fact = member.session:LocalProfileEdit("bio", bio)
+
+    test.assertEqual("bio", fact.kind)
+    test.assertEqual(MEMBER, fact.by)
+    test.assertEqual("facts", member.sent[1].t)
+    deliver(network)
+    test.assertEqual(bio, other.partition:GetProfileText(MEMBER, "bio"))
+    -- Never a suggestion, and too long is never stored or sent.
+    test.assertEqual(0, #member.session:Suggestions(member.partition):Pending())
+    test.assertEqual(nil, member.session:LocalProfileEdit("discord", string.rep("d", 33)))
+    test.assertEqual(1, #member.sent)
+end)
+
+test.test("guild sync: an offline character's profile text reaches a client through catch-up", function()
+    local network = newNetwork()
+    local member = newClient(network, MEMBER, "Hammer-Area52")
+    member.session:LocalProfileEdit("discord", "hammer#1")
+    network.queue = {}
+    local latecomer = newClient(network, "wrench-area52", "Wrench-Area52")
+
+    latecomer.session:SendDigest()
+    deliver(network)
+
+    test.assertEqual("hammer#1", latecomer.partition:GetProfileText(MEMBER, "discord"))
+end)
+
+test.test("guild sync: the owner's client corrects forged profile text in its name", function()
+    local network = newNetwork()
+    local member = newClient(network, MEMBER, "Hammer-Area52")
+    local bystander = newClient(network, "wrench-area52", "Wrench-Area52")
+    local forger = newClient(network, OFFICER, "Toolbox-Area52")
+    member.session:LocalProfileEdit("location", "Ohio")
+    deliver(network)
+
+    forger.session:Send({ t = "facts", facts = {
+        text("location", NOW + 5, MEMBER, MEMBER, "Nowhere"),
+        -- Never set: corrected by clearing it.
+        text("discord", NOW + 5, MEMBER, MEMBER, "spam"),
+    } })
+    deliver(network)
+
+    test.assertEqual("Ohio", member.partition:GetProfileText(MEMBER, "location"))
+    test.assertEqual("Ohio", bystander.partition:GetProfileText(MEMBER, "location"))
+    test.assertEqual("", bystander.partition:GetProfileText(MEMBER, "discord"))
+    test.assertTrue((member.partition:GetProfileStamp(MEMBER, "location")) > NOW + 5)
+    test.assertEqual(1, #member.forgeries)
+end)
+
+test.test("guild sync: a fact of a kind this version doesn't know is ignored, as older versions ignore these", function()
+    local network = newNetwork()
+    local member = newClient(network, MEMBER, "Hammer-Area52")
+    local relay = newClient(network, "wrench-area52", "Wrench-Area52")
+
+    relay.session:Send({ t = "facts", facts = {
+        { kind = "pronouns", character = "wrench-area52", text = "they", at = NOW, by = "wrench-area52" },
+        roles(NOW, "wrench-area52", "wrench-area52", { "dps" }),
+    } })
+    deliver(network)
+
+    test.assertEqual("dps", table.concat(member.partition:GetRoles("wrench-area52"), ","))
+    test.assertEqual(nil, member.partition:GetCharacter("wrench-area52").pronouns)
+end)
+
+test.test("player panel: shows the player's Discord, location and bio when set", function()
+    local addon = test.newAddon("Core/NameNormalizer.lua", "Core/FellowshipStore.lua", "Core/RosterViewModel.lua",
+        "Core/PlayerPanelViewModel.lua")
+    local partition = addon.FellowshipStore.Create({ schemaVersion = 4, guilds = {} }):Partition(GUILD)
+    partition:RecordCharacter(MEMBER, { name = "Hammer-Area52", classToken = "PALADIN" })
+    local playerId = partition:GetCharacter(MEMBER).player
+    local function build()
+        local model = addon.PlayerPanelViewModel.Build({
+            partition = partition, playerId = playerId, normalizer = addon.NameNormalizer.Create(RULES),
+        })
+        local lines = {}
+        local index
+        for index = 1, #model.rows do
+            local row = model.rows[index]
+            if row.kind == "about" or (row.kind == "section" and row.text == "About") then
+                table.insert(lines, row.text)
+            end
+        end
+        return lines
+    end
+
+    test.assertEqual(0, #build())
+
+    partition:SetProfileText(MEMBER, "discord", "hammer#1", NOW, MEMBER)
+    partition:SetProfileText(MEMBER, "bio", "I heal dungeons most evenings and love a good keystone run with friends",
+        NOW, MEMBER)
+    local lines = build()
+    test.assertEqual("About", lines[1])
+    test.assertEqual("Discord: hammer#1", lines[2])
+    -- No location; the bio is wrapped to the panel.
+    test.assertEqual("I heal dungeons most evenings and love a good", lines[3])
+    test.assertEqual("keystone run with friends", lines[4])
+    test.assertEqual(4, #lines)
+
+    -- A line break the player typed starts a new line.
+    partition:SetProfileText(MEMBER, "bio", "Healer.\nEvenings only.", NOW + 1, MEMBER)
+    lines = build()
+    test.assertEqual("Healer.", lines[3])
+    test.assertEqual("Evenings only.", lines[4])
 end)

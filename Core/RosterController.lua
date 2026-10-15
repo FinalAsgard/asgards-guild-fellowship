@@ -23,8 +23,12 @@ Controller.__index = Controller
 --                 change to main links, with the set of every character
 --                 key whose player was involved, and each one's main before
 --                 the change (for guild sync)
---   onAliasChanged  optional function(key): after a manual alias change to
---                 the player of `key` (for guild sync)
+--   onDeclaredChanged optional function(key, before): after `key` was
+--                 declared its player's main by hand, or that was taken back,
+--                 with whether it was declared before (for guild sync)
+--   onAliasChanged  optional function(key, before): after a manual alias
+--                 change to the player of `key`, with the alias before it
+--                 ("" for none) (for guild sync)
 --   onScanFinished  optional function(): after every completed scan
 --   onSyncResumed  optional function(key): after "Don't sync" was turned
 --                 off for the player of `key`
@@ -56,6 +60,7 @@ function RosterController.Create(options)
         onDecideSuggestion = options.onDecideSuggestion,
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
+        onDeclaredChanged = options.onDeclaredChanged,
         onScanFinished = options.onScanFinished,
         onSyncResumed = options.onSyncResumed,
         collapsed = {},
@@ -202,13 +207,14 @@ function Controller:Context()
     return guild, partition, normalizer
 end
 
--- Pending conflicts for the current guild, for the minimap tooltip.
+-- Pending conflicts for the current guild, for the minimap tooltip: each
+-- note conflict, and each player's suggestions once.
 function Controller:PendingConflictCount()
     local guild, partition = self:QuietContext()
     if guild == nil then
         return 0
     end
-    return #(partition:GetConflicts() or {})
+    return addon.ConflictViewModel.CountQueue(partition)
 end
 
 -- Saved data is ready (after login): let the scheduler run its daily check.
@@ -374,6 +380,79 @@ function Controller:ResolveConflicts(action, character, kind)
     return ok == true
 end
 
+-- Members' suggestions are reviewed one player's bundle at a time (see
+-- ConflictViewModel.GroupOf): opens the review of bundle `group`.
+function Controller:ReviewBundle(group)
+    if self.current == nil then
+        return false
+    end
+    self.reviewing = group
+    self:Refresh()
+    return true
+end
+
+-- Redraws the bundle under review from `rows` (ConflictViewModel rows), or
+-- closes the review once that bundle is all decided.
+function Controller:RedrawReview(rows, normalizer)
+    if self.reviewing == nil or type(self.window.ShowReview) ~= "function" then
+        return
+    end
+    local index
+    for index = 1, #rows do
+        if rows[index].kind == "bundle" and rows[index].group == self.reviewing then
+            self.window:ShowReview(addon.BundleReviewViewModel.Build({
+                partition = self.current.partition,
+                normalizer = normalizer,
+                bundle = rows[index],
+            }))
+            return
+        end
+    end
+    self.reviewing = nil
+    if type(self.window.HideReview) == "function" then
+        self.window:HideReview()
+    end
+end
+
+-- The review closed.
+function Controller:CloseReview()
+    self.reviewing = nil
+end
+
+-- Approve all or Deny all for bundle `group`: decides each of that player's
+-- suggestions, as Accept and Reject do one at a time.
+function Controller:DecideBundle(group, approved)
+    if self.current == nil then
+        return 0
+    end
+    local partition = self.current.partition
+    local entries = {}
+    local conflicts = partition:GetConflicts() or {}
+    local index
+    for index = 1, #conflicts do
+        local entry = conflicts[index]
+        if entry.from ~= nil and addon.ConflictViewModel.GroupOf(partition, entry.from) == group then
+            table.insert(entries, { character = entry.character, kind = entry.kind })
+        end
+    end
+    local decided, reason = 0, nil
+    for index = 1, #entries do
+        local ok, why = false, "guild sync is not available"
+        if self.onDecideSuggestion ~= nil then
+            ok, why = self.onDecideSuggestion(entries[index].character, entries[index].kind, approved)
+        end
+        if ok then
+            decided = decided + 1
+        else
+            reason = why
+        end
+    end
+    self:Print((approved and "Approved " or "Denied ") .. plural(decided, "change") .. ".")
+    self:PrintUndecided(#entries - decided, reason)
+    self:Refresh()
+    return decided
+end
+
 function Controller:AcceptConflict(character, kind)
     return self:ResolveConflicts("accept", character, kind)
 end
@@ -421,7 +500,10 @@ function Controller:MenuFor(row)
     local player = partition:GetPlayer(character.player)
     local entries = {}
     if partition:IsInGuild(row.key) then
-        table.insert(entries, { text = "Set main...", action = "setMain", key = row.key })
+        -- A main with alts can't join another player.
+        if not addon.PlayerService.HasAlts(partition, row.key) then
+            table.insert(entries, { text = "Link as alt of...", action = "setMain", key = row.key })
+        end
         if player ~= nil and player.main ~= row.key then
             table.insert(entries, { text = "Make this the main", action = "makeMain", key = row.key })
         end
@@ -429,7 +511,7 @@ function Controller:MenuFor(row)
     table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
     table.insert(entries, { text = "View player...", action = "view", key = row.key })
     if partition:CharactersOf(character.player)[2] ~= nil then
-        table.insert(entries, { text = "Detach as own player", action = "detach", key = row.key })
+        table.insert(entries, { text = "Split off as own player", action = "detach", key = row.key })
     end
     return entries
 end
@@ -466,16 +548,19 @@ end
 -- Runs a manual change, reports a refusal, and redraws at once (no scan).
 -- A change to main links reports every character of the players involved,
 -- before and after, to onMainLinksChanged, with each one's main before the
--- change; an alias change reports its character to onAliasChanged.
+-- change; an alias change reports its character to onAliasChanged, with
+-- the alias before the change ("" for none).
 function Controller:Organize(operation, key, ...)
     if self.current == nil then
         return false
     end
     local service = self:Service()
     local involved, before
+    local aliasBefore = operation == "SetAlias" and self:AliasOf(key) or nil
+    local declaredBefore = operation == "SetDeclared" and self.current.partition:IsDeclared(key) or nil
     if MAIN_LINK_OPERATIONS[operation] then
         involved = self:AddPlayerKeys({}, key)
-        -- "Set main…" also involves the player the character joins.
+        -- "Link as alt of…" also involves the player the character joins.
         local target = operation == "SetMainPlayer" and select(1, ...) or nil
         local joined = target ~= nil and self.current.partition:GetPlayer(target)
         if joined then
@@ -489,7 +574,9 @@ function Controller:Organize(operation, key, ...)
     elseif involved ~= nil and self.onMainLinksChanged ~= nil then
         self.onMainLinksChanged(self:AddPlayerKeys(involved, key), before)
     elseif operation == "SetAlias" and self.onAliasChanged ~= nil then
-        self.onAliasChanged(key)
+        self.onAliasChanged(key, aliasBefore)
+    elseif operation == "SetDeclared" and self.onDeclaredChanged ~= nil then
+        self.onDeclaredChanged(key, declaredBefore == true)
     end
     self:Refresh()
     return ok == true
@@ -511,6 +598,11 @@ function Controller:Detach(key)
     return self:Organize("Detach", key)
 end
 
+-- "Declare as my main": `key` must be its player's main.
+function Controller:SetDeclared(key, declared)
+    return self:Organize("SetDeclared", key, declared)
+end
+
 -- Turns "Don't sync" on or off for `key`'s player. Turning it off reports
 -- the player to onSyncResumed, so guild sync can bring it back in line.
 function Controller:SetDontSync(key, enabled)
@@ -527,7 +619,7 @@ function Controller:SetDontSync(key, enabled)
     return ok == true
 end
 
--- Results for the "Set main…" picker, without `key`'s own player.
+-- Results for the "Link as alt of…" picker, without `key`'s own player.
 function Controller:SearchPlayers(key, query)
     if self.current == nil then
         return {}
@@ -740,12 +832,14 @@ function Controller:Redraw()
         }, stamp)
         self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
         self.window:SetRows(rows)
-        self.window:SetConflicts(addon.ConflictViewModel.Build({
+        local conflictRows = addon.ConflictViewModel.Build({
             partition = self.current.partition,
             members = members,
             normalizer = normalizer,
             pending = self.current.partition:GetSuggestions(),
-        }))
+        })
+        self.window:SetConflicts(conflictRows)
+        self:RedrawReview(conflictRows, normalizer)
         self:RedrawPanel()
     end
     self:RefreshRecruiters()

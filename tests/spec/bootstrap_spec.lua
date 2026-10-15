@@ -15,6 +15,7 @@ local MANIFEST_FILES = {
     "Adapters/GroupFinderWindow.lua",
     "Adapters/JoinPrompts.lua",
     "Adapters/GreetingsPage.lua",
+    "Adapters/ProfilePage.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",
@@ -23,12 +24,15 @@ local MANIFEST_FILES = {
     "Core/PlayerService.lua",
     "Core/RosterViewModel.lua",
     "Core/ConflictViewModel.lua",
+    "Core/BundleReviewViewModel.lua",
     "Core/PlayerPanelViewModel.lua",
+    "Core/ProfileViewModel.lua",
     "Core/ChatAnnotator.lua",
     "Core/OfficerAuthority.lua",
     "Core/SyncFacts.lua",
     "Core/SyncDigest.lua",
     "Core/SuggestionService.lua",
+    "Core/SuggestionBundles.lua",
     "Core/SyncLedger.lua",
     "Core/SyncSession.lua",
     "Core/ScanScheduler.lua",
@@ -52,6 +56,7 @@ local MANIFEST_FILES = {
     "Core/RoleCatalog.lua",
     "Core/GroupSession.lua",
     "Core/GroupFinderProtocol.lua",
+    "Core/GroupBoard.lua",
     "Core/GroupAvailability.lua",
     "Core/GroupCandidates.lua",
     "Core/JoinRequests.lua",
@@ -148,7 +153,7 @@ local function registerBootstrapTest(variant)
         world.loggedIn = true
         fixtures.fire(world, "PLAYER_LOGIN")
 
-        test.assertEqual(3, world.database.schemaVersion)
+        test.assertEqual(4, world.database.schemaVersion)
         test.assertEqual("table", type(world.database.guilds))
 
         test.assertEqual(variant.slashCommand, environment["SLASH_" .. variant.slashKey .. "1"])

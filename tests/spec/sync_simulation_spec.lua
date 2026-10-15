@@ -46,6 +46,13 @@ local function newWindow()
         return true
     end
     function window:ShowPlayer() end
+    function window:ShowReview(model)
+        self.review = model
+        return true
+    end
+    function window:HideReview()
+        self.review = nil
+    end
     function window:HidePlayer() end
     return window
 end
@@ -108,7 +115,7 @@ local function playerIdOf(world, key)
 end
 
 -- `world` links `alt` as an alt of `main`'s player, through the roster's
--- "Set main..." action.
+-- "Link as alt of..." action.
 local function linkAlt(world, alt, main)
     test.assertTrue(world.addon.rosterController:SetMainPlayer(alt, playerIdOf(world, main)))
 end
@@ -603,7 +610,7 @@ test.test("an upgraded officer's edits from before sync reach members", function
     local officer = login(channel, "Toolbox-Area52", { database = legacyDatabase() })
     fixtures.deliver(channel)
 
-    test.assertEqual(3, officer.database.schemaVersion)
+    test.assertEqual(4, officer.database.schemaVersion)
     test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
     test.assertEqual("Tools", aliasOf(member, "hammer-area52"))
     local at, by = partitionOf(officer):GetMainStamp("hammer-area52")
@@ -634,11 +641,11 @@ end)
 test.test("saved data from a newer add-on is never upgraded or sent", function()
     local channel = fixtures.newChannel()
     local database = legacyDatabase()
-    database.schemaVersion = 4
+    database.schemaVersion = 5
     local officer = login(channel, "Toolbox-Area52", { database = database, openRoster = false })
 
     test.assertEqual(0, #officer.sentMessages)
-    test.assertEqual(4, officer.database.schemaVersion)
+    test.assertEqual(5, officer.database.schemaVersion)
     test.assertEqual(nil, officer.database.guilds["Knights of Camelot-Area52"].characters["hammer-area52"].mainAt)
 end)
 
@@ -690,12 +697,20 @@ local function queuedSuggestion(world, character, kind)
     return nil
 end
 
+-- The conflict window's row about `character` of `kind`; members'
+-- suggestions are found inside their player's bundle.
 local function conflictRow(world, character, kind)
     local rows = world.addon.rosterController.window.conflicts or {}
-    local index
+    local index, itemIndex
     for index = 1, #rows do
-        if rows[index].character == character and rows[index].kind == kind then
-            return rows[index]
+        local row = rows[index]
+        if row.character == character and row.kind == kind then
+            return row
+        end
+        for itemIndex = 1, #(row.items or {}) do
+            if row.items[itemIndex].character == character and row.items[itemIndex].kind == kind then
+                return row.items[itemIndex]
+            end
         end
     end
     return nil
@@ -1030,4 +1045,183 @@ test.test("/agf sync and the roster footer show when this client last synced", f
     status = syncStatus(member)
     test.assertContains(status, "Guild sync is paused while you're in combat")
     test.assertContains(status, "1 suggestion of yours is waiting for an officer.")
+end)
+
+-- Bundles: the member's side ---------------------------------------------------
+
+local function messagesOf(world)
+    return table.concat(world.messages, "\n")
+end
+
+test.test("a member undoes a pending change: their roster goes back and officers drop it", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammers"))
+    fixtures.deliver(channel)
+    test.assertTrue(queuedSuggestion(officer, "wrench-area52", "suggested main") ~= nil)
+
+    test.assertTrue(hammer.addon.syncSession:Undo("wrench-area52", "main"))
+    fixtures.deliver(channel)
+
+    test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual(nil, queuedSuggestion(officer, "wrench-area52", "suggested main"))
+    -- The other change still waits.
+    test.assertTrue(queuedSuggestion(officer, "hammer-area52", "suggested alias") ~= nil)
+    test.assertEqual(1, #pendingOf(hammer))
+    test.assertEqual("Hammers", aliasOf(hammer, "hammer-area52"))
+end)
+
+test.test("a member changing something back to the officers' value drops it, here and in officers' queues", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    fixtures.deliver(channel)
+    test.assertEqual(1, #pendingOf(hammer))
+
+    -- Split off again: back to how officers have it.
+    test.assertTrue(hammer.addon.rosterController:Detach("wrench-area52"))
+    fixtures.deliver(channel)
+
+    test.assertEqual(0, #pendingOf(hammer))
+    test.assertEqual(nil, queuedSuggestion(officer, "wrench-area52", "suggested main"))
+end)
+
+test.test("a member hears each decision; a denial rolls back only that change", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammers"))
+    fixtures.deliver(channel)
+
+    test.assertTrue(officer.addon.rosterController:AcceptConflict("hammer-area52", "suggested alias"))
+    fixtures.deliver(channel)
+    test.assertContains(messagesOf(hammer), "An officer approved your change: Alias: Hammers.")
+
+    test.assertTrue(officer.addon.rosterController:RejectConflict("wrench-area52", "suggested main"))
+    fixtures.deliver(channel)
+    test.assertContains(messagesOf(hammer), "An officer denied your change: Wrench as an alt of Hammer.")
+    test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual("Hammers", aliasOf(hammer, "hammer-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+end)
+
+-- Bundles: the officer's side --------------------------------------------------
+
+local function bundleRows(world)
+    local rows = world.addon.rosterController.window.conflicts or {}
+    local bundles = {}
+    local index
+    for index = 1, #rows do
+        if rows[index].kind == "bundle" then
+            table.insert(bundles, rows[index])
+        end
+    end
+    return bundles
+end
+
+test.test("an officer sees one bundle per member's player, reviews it, and approves it all at once", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammers"))
+    test.assertTrue(wrench.addon.rosterController:SetAlias("wrench-area52", "Wrenches"))
+    fixtures.deliver(channel)
+
+    local bundles = bundleRows(officer)
+    test.assertEqual(2, #bundles)
+    local hammers = bundles[1].name == "Hammer" and bundles[1] or bundles[2]
+    test.assertEqual(2, hammers.count)
+    test.assertEqual("2 changes", hammers.suggests)
+    -- A bundle counts once, for the button and the minimap tooltip.
+    test.assertEqual(2, officer.addon.rosterController:PendingConflictCount())
+
+    test.assertTrue(officer.addon.rosterController:ReviewBundle(hammers.group))
+    local review = officer.addon.rosterController.window.review
+    test.assertEqual("Review: Hammer", review.title)
+    test.assertEqual("Alts: none", review.before[2])
+    test.assertEqual("Alts: Wrench", review.suggested[2])
+    test.assertEqual("Alias: Hammers", review.suggested[3])
+    test.assertEqual(2, #review.items)
+
+    test.assertEqual(2, officer.addon.rosterController:DecideBundle(hammers.group, true))
+    fixtures.deliver(channel)
+
+    test.assertEqual("hammer-area52", mainOf(officer, "wrench-area52"))
+    test.assertEqual("Hammers", aliasOf(officer, "hammer-area52"))
+    test.assertEqual("hammer-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+    -- Wrench is Hammer's now, so Wrench's own change joins Hammer's bundle,
+    -- which stays under review with just that left.
+    test.assertEqual(1, #bundleRows(officer))
+    test.assertEqual(hammers.group, bundleRows(officer)[1].group)
+    review = officer.addon.rosterController.window.review
+    test.assertEqual(1, #review.items)
+    test.assertContains(review.items[1].text, "Wrenches")
+    test.assertEqual(1, officer.addon.rosterController:DecideBundle(hammers.group, false))
+    fixtures.deliver(channel)
+    test.assertEqual(nil, officer.addon.rosterController.window.review)
+    test.assertEqual(0, #bundleRows(officer))
+end)
+
+test.test("deny all rolls back every change in the bundle on the member's side, and nothing else", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammers"))
+    fixtures.deliver(channel)
+
+    local group = bundleRows(officer)[1].group
+    test.assertEqual(2, officer.addon.rosterController:DecideBundle(group, false))
+    fixtures.deliver(channel)
+
+    test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual(nil, aliasOf(hammer, "hammer-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+    test.assertEqual(0, #bundleRows(officer))
+end)
+
+-- Declared mains ------------------------------------------------------------------
+
+test.test("an officer's declared main reaches everyone; a member's waits in their bundle for review", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+
+    test.assertTrue(officer.addon.rosterController:SetDeclared("toolbox-area52", true))
+    fixtures.deliver(channel)
+    test.assertTrue(partitionOf(hammer):IsDeclared("toolbox-area52"))
+
+    -- Not the main: refused.
+    linkAlt(hammer, "wrench-area52", "hammer-area52")
+    test.assertFalse(hammer.addon.rosterController:SetDeclared("wrench-area52", true))
+    test.assertTrue(hammer.addon.rosterController:SetDeclared("hammer-area52", true))
+    fixtures.deliver(channel)
+    test.assertTrue(partitionOf(hammer):IsDeclared("hammer-area52"))
+    test.assertFalse(partitionOf(officer):IsDeclared("hammer-area52"))
+
+    local group = bundleRows(officer)[1].group
+    officer.addon.rosterController:ReviewBundle(group)
+    local review = officer.addon.rosterController.window.review
+    test.assertEqual("Main: Hammer (declared)", review.suggested[1])
+    local found
+    local index
+    for index = 1, #review.items do
+        if review.items[index].kind == "suggested declared" then
+            found = review.items[index].text
+        end
+    end
+    test.assertEqual("Hammer: Not declared → Declared main", found)
+
+    officer.addon.rosterController:DecideBundle(group, true)
+    fixtures.deliver(channel)
+    test.assertTrue(partitionOf(officer):IsDeclared("hammer-area52"))
+    test.assertEqual(0, #pendingOf(hammer))
+    test.assertContains(messagesOf(hammer), "Hammer declared as main")
 end)

@@ -140,7 +140,7 @@ test.test("chains collapse to the root main", function()
     test.assertEqual("charlie-area52", main.main)
 end)
 
-test.test("unresolved, ambiguous, cyclic, and self markers become conflicts", function()
+test.test("unresolved and cyclic markers become conflicts, and a self marker declares a main", function()
     local addon, partition, plan = setup(RETAIL, {
         { "Alpha-Area52", ">Bravo" },
         { "Bravo-Area52", ">Alpha" },
@@ -161,7 +161,9 @@ test.test("unresolved, ambiguous, cyclic, and self markers become conflicts", fu
     end
     test.assertEqual("cycle", reasons["alpha-area52"])
     test.assertEqual("cycle", reasons["bravo-area52"])
-    test.assertEqual("self reference", reasons["self-area52"])
+    -- Naming itself as main: a declared main, not a conflict.
+    test.assertEqual(nil, reasons["self-area52"])
+    test.assertTrue(partition:IsDeclared("self-area52"))
     test.assertEqual("unresolved", reasons["lost-area52"])
     test.assertTrue(playerOf(partition, "alpha-area52") ~= playerOf(partition, "bravo-area52"))
 end)

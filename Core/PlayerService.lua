@@ -22,6 +22,15 @@ Service.__index = Service
 
 PlayerService.MAX_ALIAS_LENGTH = 48
 
+-- Whether `key` is its player's main and the player has other characters:
+-- such a main can't be linked into another player (its alts would stay
+-- behind).
+function PlayerService.HasAlts(partition, key)
+    local character = partition:GetCharacter(key)
+    local player = character and partition:GetPlayer(character.player)
+    return player ~= nil and player.main == key and partition:CharactersOf(character.player)[2] ~= nil
+end
+
 -- options.now: function() -> timestamp, used for history dates.
 -- options.normalizer: a NameNormalizer, for display names in lookups.
 function PlayerService.Create(partition, options)
@@ -257,7 +266,7 @@ end
 
 -- Manual organizing (the right-click menu) ---------------------------------
 
--- "Set main…": links `key` as an alt of `playerId`.
+-- "Link as alt of…": links `key` as an alt of `playerId`.
 function Service:SetMainPlayer(key, playerId)
     local character = self.partition:GetCharacter(key)
     local player = self.partition:GetPlayer(playerId)
@@ -269,6 +278,10 @@ function Service:SetMainPlayer(key, playerId)
     end
     if character.player == playerId then
         return true
+    end
+    -- A main with alts stays with them: its alts move or split off first.
+    if PlayerService.HasAlts(self.partition, key) then
+        return false, "a main with alts can't join another player; move or split off its alts first"
     end
     local formerPlayer, wasMain = self:Membership(key)
     if not self.partition:JoinPlayerOf(key, player.main, addon.FellowshipStore.SOURCE_MANUAL) then
@@ -308,7 +321,25 @@ function Service:SetAlias(key, alias)
     return true
 end
 
--- "Detach as own player": moves `key` into a new single-character player.
+-- "Declare as my main": says `key`, its player's main, is that player's main
+-- on purpose (or, with `declared` false, takes that back). Works for a
+-- player with no alts too.
+function Service:SetDeclared(key, declared)
+    local character = self.partition:GetCharacter(key)
+    local player = character and self.partition:GetPlayer(character.player)
+    if player == nil then
+        return false, "that character is not known"
+    end
+    if player.main ~= key then
+        return false, "only a player's main can be declared; make it the main first"
+    end
+    -- Marked as set by hand, so a note never overrides it, even before (or
+    -- without) guild sync stamping it.
+    self.partition:SetDeclared(key, declared == true, addon.FellowshipStore.SOURCE_MANUAL)
+    return true
+end
+
+-- "Split off as own player": moves `key` into a new single-character player.
 function Service:Detach(key)
     local character = self.partition:GetCharacter(key)
     if character == nil then
@@ -412,7 +443,7 @@ function Service:ChatTag(key)
 end
 
 -- Players matching `query` by alias or any in-guild character's name,
--- case-insensitively, for the "Set main…" picker. An empty query lists
+-- case-insensitively, for the "Link as alt of…" picker. An empty query lists
 -- everyone. Each result: { id, label, matched } where `matched` names the
 -- character that matched, when it wasn't the alias. Sorted by label.
 function Service:SearchPlayers(query, limit)

@@ -3,9 +3,11 @@ local _, addon = ...
 -- Group Finder join requests, as the invitee sees them: one window, below
 -- Guild Recruit's place, with a "Group Finder" heading and, stacked, one
 -- block per request: who asks and for which dungeon with a Decline button,
--- then a button per option ("Healer — Hammer (24)"). The frame is made on
--- first use and reused; a failing frame call hides the prompts rather than
--- raising an error, as in the other adapters.
+-- then a button per option ("Healer — Hammer (24)"). An organizer's
+-- prompts for guildmates offering to fill a slot stack in the same window,
+-- with their own heading and Accept button. The frame is made on first use
+-- and reused; a failing frame call hides the prompts rather than raising an
+-- error, as in the other adapters.
 local JoinPrompts = {
     WIDTH = 420,
     HEADER_HEIGHT = 30,
@@ -113,8 +115,12 @@ function Prompts:option(index)
     return option
 end
 
--- "Toolbox asks you to join The Deadmines (17–26)".
+-- "Toolbox asks you to join The Deadmines (17–26)", or the prompt's own
+-- `heading` (an offer to the organizer).
 function JoinPrompts.Heading(prompt)
+    if prompt.heading ~= nil then
+        return prompt.heading
+    end
     local organizer = string.match(prompt.sender or "", "^([^%-]+)") or prompt.sender or "Someone"
     local dungeon = prompt.dungeon
     return organizer .. " asks you to join " .. dungeon.name .. " (" .. dungeon.minLevel .. "–" .. dungeon.maxLevel .. ")"
@@ -143,7 +149,7 @@ function Prompts:layout()
             local option = self:option(optionCount)
             option.id = prompt.id
             option.choice = choice
-            option.button:SetText(addon.JoinRequests.OptionLabel(prompt.options[choice]))
+            option.button:SetText(prompt.options[choice].label or addon.JoinRequests.OptionLabel(prompt.options[choice]))
             option.button:ClearAllPoints()
             option.button:SetPoint("TOPLEFT", window, "TOPLEFT", JoinPrompts.PADDING * 2, -top)
             option.button:Show()

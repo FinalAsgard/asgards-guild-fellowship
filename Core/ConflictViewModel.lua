@@ -41,6 +41,9 @@ local function currentText(inputs, key, kind)
     if kind == "promotion" then
         return "Main of its player"
     end
+    if kind == "suggested declared" then
+        return inputs.partition:IsDeclared(key) and "Declared main" or "Not declared"
+    end
     if player.main == key then
         local count = #inputs.partition:CharactersOf(character.player)
         if count > 1 then
@@ -66,6 +69,9 @@ end
 
 -- What a member's suggestion about `key` asks for.
 local function suggestionText(inputs, key, kind, suggestion)
+    if kind == "suggested declared" then
+        return suggestion.declared and "Declared main" or "Not declared"
+    end
     if kind == "suggested main" then
         if suggestion.main == key then
             return "Main of its own player"
@@ -76,20 +82,70 @@ local function suggestionText(inputs, key, kind, suggestion)
     return (alias ~= nil and alias ~= "") and ("Alias \"" .. alias .. "\"") or "No alias"
 end
 
+-- The key members' suggestions are grouped by: the submitting member's
+-- player, or the member's key when this client doesn't know them.
+function ConflictViewModel.GroupOf(partition, from)
+    local character = partition:GetCharacter(from)
+    if character ~= nil then
+        return "player:" .. tostring(character.player)
+    end
+    return "member:" .. tostring(from)
+end
+
+-- How many things in the queue need a decision: each note conflict, and
+-- each player's suggestions once (for the Conflicts button and the minimap
+-- tooltip).
+function ConflictViewModel.CountQueue(partition)
+    local count = 0
+    local groups = {}
+    local conflicts = partition:GetConflicts() or {}
+    local index
+    for index = 1, #conflicts do
+        local entry = conflicts[index]
+        if entry.from ~= nil then
+            local group = ConflictViewModel.GroupOf(partition, entry.from)
+            if not groups[group] then
+                groups[group] = true
+                count = count + 1
+            end
+        else
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- The name a bundle goes by: the submitting player's alias, else its main.
+local function playerLabel(inputs, from)
+    local character = inputs.partition:GetCharacter(from)
+    local player = character and inputs.partition:GetPlayer(character.player)
+    if player == nil then
+        return displayName(inputs, from)
+    end
+    return player.alias or displayName(inputs, player.main)
+end
+
 -- inputs: partition, members (live roster facts by key), normalizer, and
 -- pending (this member's own pending suggestions, as stored: SyncFacts
 -- facts).
--- Returns rows:
+-- Returns rows, members' suggestions first, then note conflicts, then this
+-- member's own pending suggestions:
+--   { kind = "bundle", group, name, count, suggests, source, canAccept,
+--     items }
 --   { character, kind, name, note, suggests, current, source, canAccept,
---     from?, pending? }
--- `note` is the live public note, or nil when the character isn't in the
--- current roster. A member's suggestion has `from` (the member's key), no
--- note, and "Suggested by <member>" as its source. This member's own
--- pending suggestions come last, with `pending` set: they wait for an
--- officer and can't be accepted or rejected here.
+--     from?, suggestion?, pending? }
+-- Members' suggestions are grouped into one bundle per submitting player
+-- (see GroupOf): `name` is that player, `count` how many changes it asks
+-- for, and `items` the suggestion rows themselves, each with `from` (the
+-- member's key), its `suggestion`, no note, and "Suggested by <member>" as
+-- its source. `note` is the live public note, or nil when the character
+-- isn't in the current roster. This member's own pending suggestions come
+-- last, with `pending` set: they wait for an officer and can't be accepted
+-- or rejected here.
 function ConflictViewModel.Build(inputs)
     inputs.members = inputs.members or {}
     local rows = {}
+    local bundles, bundleOf = {}, {}
     local conflicts = inputs.partition:GetConflicts() or {}
     local index
     for index = 1, #conflicts do
@@ -97,7 +153,7 @@ function ConflictViewModel.Build(inputs)
         local key = conflict.character
         local suggests
         local fromMember = conflict.from ~= nil and type(conflict.suggestion) == "table"
-        if fromMember and (conflict.kind == "suggested main" or conflict.kind == "suggested alias") then
+        if fromMember and addon.SuggestionService.KINDS[conflict.kind] then
             suggests = suggestionText(inputs, key, conflict.kind, conflict.suggestion)
         elseif conflict.kind == "main" and conflict.suggestion then
             suggests = "Alt of " .. displayName(inputs, conflict.suggestion.main)
@@ -124,13 +180,37 @@ function ConflictViewModel.Build(inputs)
                 and type(conflict.suggestion) == "table",
         }
         if fromMember then
-            -- A member's suggestion, not a note: say who sent it.
+            -- A member's suggestion, not a note: say who sent it, and keep it
+            -- with the rest of that player's suggestions.
             row.note = nil
             row.source = "Suggested by " .. displayName(inputs, conflict.from)
             row.from = conflict.from
+            row.suggestion = conflict.suggestion
             row.canAccept = true
+            local group = ConflictViewModel.GroupOf(inputs.partition, conflict.from)
+            local bundle = bundleOf[group]
+            if bundle == nil then
+                bundle = {
+                    kind = "bundle",
+                    group = group,
+                    name = playerLabel(inputs, conflict.from),
+                    source = row.source,
+                    canAccept = true,
+                    items = {},
+                }
+                bundleOf[group] = bundle
+                table.insert(bundles, bundle)
+            end
+            table.insert(bundle.items, row)
+        else
+            table.insert(rows, row)
         end
-        table.insert(rows, row)
+    end
+    for index = #bundles, 1, -1 do
+        local bundle = bundles[index]
+        bundle.count = #bundle.items
+        bundle.suggests = bundle.count == 1 and "1 change" or (bundle.count .. " changes")
+        table.insert(rows, 1, bundle)
     end
     local pending = inputs.pending or {}
     for index = 1, #pending do
@@ -138,12 +218,14 @@ function ConflictViewModel.Build(inputs)
         local kind = "suggested main"
         if type(fact) == "table" and fact.kind == "alias" then
             kind = "suggested alias"
+        elseif type(fact) == "table" and fact.kind == "declared" then
+            kind = "suggested declared"
         end
         -- Suggestions about characters this client no longer knows are
         -- left out.
         if type(fact) == "table" and type(fact.character) == "string"
             and inputs.partition:GetCharacter(fact.character) ~= nil
-            and (kind == "suggested alias" or type(fact.main) == "string")
+            and (kind ~= "suggested main" or type(fact.main) == "string")
         then
             local live = inputs.members[fact.character]
             table.insert(rows, {

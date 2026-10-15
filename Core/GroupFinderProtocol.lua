@@ -34,6 +34,28 @@ local GroupFinderProtocol = {
     TYPE_WITHDRAW = "gf-withdraw",
     -- { v, t, to, id }: the invitee joined another organizer's group.
     TYPE_JOINED_ELSEWHERE = "gf-joined-elsewhere",
+    -- { v, t, dn, lo, hi, s = the five slots in layout order, each { r =
+    -- role, n = name?, l = level?, k = character key?, c = class token?, w =
+    -- an invitee not in the party yet? } }: the organizer's group as it is
+    -- now, to the whole guild. Sent whenever it changes, every
+    -- GROUP_RESEND_SECONDS while it lasts, and in answer to an ask. The
+    -- sender is the organizer.
+    TYPE_GROUP = "gf-group",
+    -- { v, t }: the sender's group ended.
+    TYPE_GROUP_END = "gf-group-end",
+    -- { v, t, to, id, role, c, n, l }: a guildmate offers to fill an open
+    -- `role` in organizer `to`'s group with character `c` (named `n`, at
+    -- level `l`).
+    TYPE_OFFER = "gf-offer",
+    -- { v, t, to, id, ok }: the organizer accepted the offer `id`, or not.
+    TYPE_OFFER_ANSWER = "gf-offer-answer",
+    -- { v, t, to, role }: a party member asks organizer `to` to put them in
+    -- `role`.
+    TYPE_ROLE = "gf-role",
+    -- { v, t, to, role, c, n, l }: a party member will come as their alt `c`
+    -- (named `n`, at level `l`) instead, in `role`.
+    TYPE_ALT = "gf-alt",
+    GROUP_RESEND_SECONDS = 60,
 }
 addon.GroupFinderProtocol = GroupFinderProtocol
 
@@ -67,6 +89,36 @@ local function isTargeted(message)
     return isText(message.to) and isText(message.id)
 end
 
+-- A character offered: { role, c, n, l } on `message`.
+local function isCharacter(message)
+    return ROLES[message.role] == true and isText(message.c) and isText(message.n) and isLevel(message.l)
+end
+
+-- A broadcast group slot: a role, and who fills it when anyone does.
+local function isGroupSlot(slot)
+    if type(slot) ~= "table" or not ROLES[slot.r] then
+        return false
+    end
+    if slot.n == nil then
+        return slot.l == nil and slot.k == nil and slot.w == nil and slot.c == nil
+    end
+    return isText(slot.n) and (slot.l == nil or isLevel(slot.l)) and (slot.k == nil or isText(slot.k))
+        and (slot.c == nil or isText(slot.c)) and (slot.w == nil or type(slot.w) == "boolean")
+end
+
+local function isGroupSlots(slots)
+    if type(slots) ~= "table" or #slots ~= 5 then
+        return false
+    end
+    local index
+    for index = 1, #slots do
+        if not isGroupSlot(slots[index]) then
+            return false
+        end
+    end
+    return true
+end
+
 -- Each type and the check its fields must pass.
 local CHECKS = {
     [GroupFinderProtocol.TYPE_ASK] = function()
@@ -95,6 +147,25 @@ local CHECKS = {
     end,
     [GroupFinderProtocol.TYPE_WITHDRAW] = isTargeted,
     [GroupFinderProtocol.TYPE_JOINED_ELSEWHERE] = isTargeted,
+    [GroupFinderProtocol.TYPE_GROUP] = function(message)
+        return isText(message.dn) and isLevel(message.lo) and isLevel(message.hi) and message.lo <= message.hi
+            and isGroupSlots(message.s)
+    end,
+    [GroupFinderProtocol.TYPE_GROUP_END] = function()
+        return true
+    end,
+    [GroupFinderProtocol.TYPE_OFFER] = function(message)
+        return isTargeted(message) and isCharacter(message)
+    end,
+    [GroupFinderProtocol.TYPE_OFFER_ANSWER] = function(message)
+        return isTargeted(message) and type(message.ok) == "boolean"
+    end,
+    [GroupFinderProtocol.TYPE_ROLE] = function(message)
+        return isText(message.to) and ROLES[message.role] == true
+    end,
+    [GroupFinderProtocol.TYPE_ALT] = function(message)
+        return isText(message.to) and isCharacter(message)
+    end,
 }
 
 -- Every Group Finder message type, for routing.
@@ -157,6 +228,45 @@ GroupFinderProtocol.JoinedElsewhere = targeted(GroupFinderProtocol.TYPE_JOINED_E
 -- Tells invitee `to` the roles still open for request `id`.
 function GroupFinderProtocol.Slots(to, id, openRoles)
     return { v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_SLOTS, to = to, id = id, r = openRoles }
+end
+
+-- The group for `dungeon` ({ name, minLevel, maxLevel }) with `slots`
+-- (each { r, n?, l?, k?, c?, w? }).
+function GroupFinderProtocol.Group(dungeon, slots)
+    return {
+        v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_GROUP,
+        dn = dungeon.name, lo = dungeon.minLevel, hi = dungeon.maxLevel, s = slots,
+    }
+end
+
+function GroupFinderProtocol.GroupEnd()
+    return { v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_GROUP_END }
+end
+
+-- Offers organizer `to` `option` ({ role, key, name, level }) as offer `id`.
+function GroupFinderProtocol.Offer(to, id, option)
+    return {
+        v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_OFFER, to = to, id = id,
+        role = option.role, c = option.key, n = option.name, l = option.level,
+    }
+end
+
+function GroupFinderProtocol.OfferAnswer(to, id, accepted)
+    return { v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_OFFER_ANSWER, to = to, id = id,
+        ok = accepted == true }
+end
+
+function GroupFinderProtocol.Role(to, role)
+    return { v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_ROLE, to = to, role = role }
+end
+
+-- Tells organizer `to` the sender comes as `option` ({ role, key, name,
+-- level }) instead.
+function GroupFinderProtocol.Alt(to, option)
+    return {
+        v = GroupFinderProtocol.VERSION, t = GroupFinderProtocol.TYPE_ALT, to = to,
+        role = option.role, c = option.key, n = option.name, l = option.level,
+    }
 end
 
 -- Whether `message` is a Group Finder message this version understands.

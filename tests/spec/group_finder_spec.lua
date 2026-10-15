@@ -143,6 +143,53 @@ test.test("Retail adapter lists the Dungeon Finder's normal dungeons with their 
     test.assertEqual(90, dungeons[1].maxLevel)
 end)
 
+-- The Classic-era Dungeon Finder's API with `activities` (activity info
+-- tables, each with its `id`), as WoW Forever has.
+local function installActivityFinder(environment, activities)
+    environment.C_LFGList = {
+        GetAvailableActivities = function(category)
+            local ids = {}
+            local index
+            for index = 1, #activities do
+                if category == 2 then
+                    ids[index] = activities[index].id
+                end
+            end
+            return ids
+        end,
+        GetActivityInfoTable = function(id)
+            local index
+            for index = 1, #activities do
+                if activities[index].id == id then
+                    return activities[index]
+                end
+            end
+            return nil
+        end,
+    }
+end
+
+test.test("Forever adapter lists the Classic-era Dungeon Finder's dungeons with their suggested ranges", function()
+    local world = fixtures.newEnvironment("Forever")
+    installActivityFinder(world.environment, {
+        { id = 798, fullName = "The Deadmines", minLevel = 10, minLevelSuggestion = 18, maxLevelSuggestion = 23 },
+        { id = 799, fullName = "Wailing Caverns", minLevel = 10, maxLevel = 25 },
+        { id = 800, fullName = "The Deadmines (Heroic)", minLevelSuggestion = 60, maxLevelSuggestion = 60,
+            isHeroicActivity = true },
+        { id = 801, fullName = "Somewhere", minLevel = 10 },
+    })
+
+    local dungeons = newClient(world):GetDungeonList()
+
+    test.assertEqual(2, #dungeons)
+    test.assertEqual(798, dungeons[1].id)
+    test.assertEqual("The Deadmines", dungeons[1].name)
+    test.assertEqual(18, dungeons[1].minLevel)
+    test.assertEqual(23, dungeons[1].maxLevel)
+    test.assertEqual("Wailing Caverns", dungeons[2].name)
+    test.assertEqual(25, dungeons[2].maxLevel)
+end)
+
 test.test("adapter reports no dungeon list without a Dungeon Finder, or when it lists none", function()
     local forever = fixtures.newEnvironment("Forever")
     test.assertEqual(nil, newClient(forever):GetDungeonList())
@@ -350,11 +397,12 @@ local function registerProfileTests(profile)
         test.assertFalse(world.masterFrame.shown)
         -- Drawn once, with the frame.
         test.assertEqual(1, window.creates)
-        -- The tab sits right after the Roster.
+        -- The third tab, after the Roster and My Profile.
         local tabs = addon.pages:Tabs()
         test.assertEqual("roster", tabs[1].id)
-        test.assertEqual("group", tabs[2].id)
-        test.assertEqual("Group Finder", tabs[2].label)
+        test.assertEqual("profile", tabs[2].id)
+        test.assertEqual("group", tabs[3].id)
+        test.assertEqual("Group Finder", tabs[3].label)
     end)
 
     test.test(profile .. " /agf group switches to the Group Finder tab when another tab is showing", function()

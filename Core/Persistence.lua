@@ -16,8 +16,15 @@ local _, addon = ...
 -- Schema 3 adds player profile data on character records: each
 -- character's role preferences, and when and by whom they were set. Like
 -- schema 2's, the fields are optional, so v2 data is already valid v3 data.
+--
+-- Schema 4 adds the player profile's text fields on character records:
+-- Discord, location and bio, each with when and by whom it was set; a
+-- declared-main flag with its stamp (officer data); and, per
+-- guild, the characters this install has logged in on and the ones the
+-- player dismissed as suggestions (local only). Optional again, so v3 data
+-- is already valid v4 data.
 local Persistence = {
-    SCHEMA_VERSION = 3,
+    SCHEMA_VERSION = 4,
 }
 addon.Persistence = Persistence
 

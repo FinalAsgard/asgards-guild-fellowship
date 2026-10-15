@@ -90,7 +90,9 @@ local function registerProfileTests(profile)
         test.assertTrue(contains(pages[2].frame.texts, "Show the minimap button"))
         test.assertTrue(contains(pages[3].frame.texts, "Tag guild chat speakers with their alias or main"))
         test.assertTrue(contains(pages[4].frame.texts, "Offer to greet guild members as they come online"))
-        test.assertTrue(contains(pages[5].frame.texts, "Willing to tank on this character"))
+        test.assertTrue(contains(pages[5].frame.texts, "Do Not Disturb: no group requests, on every character"))
+        -- Role preferences are changed on My Profile, not here.
+        test.assertFalse(widgetFor(addon.settingsPanel, "role_tank").frame.shown)
         test.assertTrue(contains(pages[6].frame.texts, "My ad, posted exactly as written"))
         -- The add-on's own page holds the Open window button and the version,
         -- and no feature's settings.

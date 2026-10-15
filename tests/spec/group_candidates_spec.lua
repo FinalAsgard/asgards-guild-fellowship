@@ -130,7 +130,7 @@ test.test("group candidates: add-on users' role preferences leave out roles they
     test.assertEqual("Bolt 22, Hammer 24", names(dps[1].fitting))
 end)
 
-test.test("group candidates: guildmates without the add-on are labeled and suggested by class alone", function()
+test.test("group candidates: guildmates without the add-on are suggested by class alone", function()
     local world = newGuild()
     -- Even a stored preference is ignored for someone whose add-on didn't
     -- reply: it may be stale.
@@ -141,7 +141,8 @@ test.test("group candidates: guildmates without the add-on are labeled and sugge
     test.assertTrue(healers[1].addon)
     test.assertEqual("Cleric", healers[2].label)
     test.assertFalse(healers[2].addon)
-    test.assertContains(world.addon.GroupCandidates.Describe(healers[2]), "(no add-on)")
+    -- No label: the window gives them a Whisper button instead.
+    test.assertEqual("Cleric 20", world.addon.GroupCandidates.Describe(healers[2]))
 end)
 
 test.test("group candidates: only players online now, and never unavailable or excluded ones", function()
@@ -184,22 +185,12 @@ test.test("group candidates: filled roles get no suggestions", function()
     test.assertEqual(0, #world.candidates():Suggestions(DEADMINES, {}))
 end)
 
-test.test("group candidates: counts how many online players could fill each role", function()
-    local world = newGuild()
-
-    local counts = world.candidates():Counts(DEADMINES)
-
-    test.assertEqual(1, counts.tank)
-    test.assertEqual(2, counts.healer)
-    test.assertEqual(3, counts.dps)
-end)
-
 test.test("group candidates: describes an entry with its fitting characters", function()
     local world = newGuild()
     local healers = world.candidates():ForRole("healer", DEADMINES)
 
     test.assertEqual("Bolt 22, Hammer 24", world.addon.GroupCandidates.Describe(healers[1]))
-    test.assertEqual("Cleric 20 (no add-on)", world.addon.GroupCandidates.Describe(healers[2]))
+    test.assertEqual("Cleric 20", world.addon.GroupCandidates.Describe(healers[2]))
     -- Where they are now goes in the mouseover.
     test.assertEqual("On Bolt, Ironforge", world.addon.GroupCandidates.Location(healers[1]))
 end)
@@ -215,7 +206,7 @@ test.test("group candidates: character names in their class colors", function()
     test.assertEqual("|cff0070ddBolt|r 22, |cfff58cbaHammer|r 24", world.addon.GroupCandidates.Describe(healers[1], colorOf))
     test.assertEqual("On |cff0070ddBolt|r, Ironforge", world.addon.GroupCandidates.Location(healers[1], colorOf))
     -- A class with no color stays plain.
-    test.assertEqual("Cleric 20 (no add-on)", world.addon.GroupCandidates.Describe(healers[2], colorOf))
+    test.assertEqual("Cleric 20", world.addon.GroupCandidates.Describe(healers[2], colorOf))
     local nearby = world.candidates():Nearby("Ironforge", "me")
     test.assertEqual("Thunderer — |cff0070ddBolt|r 22", world.addon.GroupCandidates.DescribeNearby(nearby[1], colorOf))
 end)
@@ -244,6 +235,10 @@ local function newWindow(world)
             end
         end,
         candidates = world.candidates,
+        whisper = function(key)
+            world.whispered = world.whispered or {}
+            table.insert(world.whispered, key)
+        end,
     })
     world.window:Opened()
     return world.window
@@ -260,11 +255,34 @@ local function shownLines(window)
     return texts
 end
 
-test.test("group finder window: the picker shows each dungeon's role counts", function()
+test.test("group finder window: resizing the frame keeps the suggestions, and their Request buttons, in view", function()
     local window = newWindow(newGuild())
 
-    test.assertContains(window.rows[1].label.text, "The Deadmines (17–26)")
-    test.assertContains(window.rows[1].label.text, "T 1 · H 2 · D 3")
+    -- Made smaller: the list shrinks with its column (less the scroll bar).
+    window.suggestions.scripts.OnSizeChanged(window.suggestions, 168, 300)
+    test.assertEqual(146, window.suggestionList.width)
+    -- Never narrower than a Request button and a little of the name.
+    window.suggestions.scripts.OnSizeChanged(window.suggestions, 40, 300)
+    test.assertEqual(104, window.suggestionList.width)
+end)
+
+test.test("group finder window: clicking a guildmate's name opens a whisper to the character they're on", function()
+    local world = newGuild()
+    local window = newWindow(world)
+    window:Pick("dm")
+
+    -- Line 2 is Thunderer, online on Bolt (not their offline alt Hammer).
+    window.suggestionHovers[2].frame.scripts.OnMouseUp()
+    test.assertEqual("bolt", world.whispered[1])
+    -- A heading opens nothing.
+    window.suggestionHovers[1].frame.scripts.OnMouseUp()
+    test.assertEqual(1, #world.whispered)
+end)
+
+test.test("group finder window: the picker shows each dungeon with its range and no role counts", function()
+    local window = newWindow(newGuild())
+
+    test.assertEqual("The Deadmines (17–26)", window.rows[1].label.text)
     -- Before a dungeon is picked, the column holds only Nearby.
     test.assertTrue(window.suggestions.shown)
     test.assertContains(window.suggestionLines[1].text, "Nearby")
@@ -281,11 +299,14 @@ test.test("group finder window: each open role lists who could fill it, and fill
     -- The organizer, a warrior, took the tank slot: no tank list.
     test.assertEqual("|cffffd100Healer|r", lines[1])
     test.assertEqual("  Bolt 22, Hammer 24", lines[2])
-    test.assertEqual("  Cleric 20 (no add-on)", lines[3])
+    test.assertEqual("  Cleric 20", lines[3])
     -- Hovering a guildmate's line shows where they are; headings have none.
     test.assertEqual("On Bolt, Ironforge", window.suggestionHovers[2].text)
     test.assertTrue(window.suggestionHovers[2].frame.shown)
     test.assertFalse(window.suggestionHovers[1].frame.shown)
+    -- Without the add-on, the tooltip says why there's no Request.
+    test.assertContains(window.suggestionHovers[3].text, "Doesn't use the add-on: whisper to ask.")
+    test.assertEqual(nil, string.find(window.suggestionHovers[2].text, "add-on", 1, true))
     local tooltip = { shown = false }
     function tooltip:SetOwner(owner, anchor) self.anchor = anchor end
     function tooltip:ClearAllPoints() self.point = nil end

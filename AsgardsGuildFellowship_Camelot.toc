@@ -28,6 +28,7 @@ Adapters/RecruitPrompts.lua
 Adapters/GroupFinderWindow.lua
 Adapters/JoinPrompts.lua
 Adapters/GreetingsPage.lua
+Adapters/ProfilePage.lua
 Core/Persistence.lua
 Core/NameNormalizer.lua
 Core/NoteParser.lua
@@ -36,12 +37,15 @@ Core/ReconcileEngine.lua
 Core/PlayerService.lua
 Core/RosterViewModel.lua
 Core/ConflictViewModel.lua
+Core/BundleReviewViewModel.lua
 Core/PlayerPanelViewModel.lua
+Core/ProfileViewModel.lua
 Core/ChatAnnotator.lua
 Core/OfficerAuthority.lua
 Core/SyncFacts.lua
 Core/SyncDigest.lua
 Core/SuggestionService.lua
+Core/SuggestionBundles.lua
 Core/SyncLedger.lua
 Core/SyncSession.lua
 Core/ScanScheduler.lua
@@ -65,6 +69,7 @@ Core/DungeonCatalog.lua
 Core/RoleCatalog.lua
 Core/GroupSession.lua
 Core/GroupFinderProtocol.lua
+Core/GroupBoard.lua
 Core/GroupAvailability.lua
 Core/GroupCandidates.lua
 Core/JoinRequests.lua

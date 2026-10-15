@@ -394,6 +394,9 @@ test.test("group finder window: role buttons assign party members the game gave 
     -- Wall's role came from the game, so only three rows have buttons.
     test.assertTrue(window.partyRows[3].frame.shown)
     test.assertEqual(nil, window.partyRows[4])
+    -- A name and its level stay on one line, the level to the right.
+    test.assertEqual(false, window.partyRows[3].text.wordWrap)
+    test.assertEqual(false, window.slotRows[1].text.wordWrap)
     -- A mage can only be DPS.
     test.assertFalse(window.partyRows[3].buttons.tank.shown)
     test.assertTrue(window.partyRows[3].buttons.dps.shown)

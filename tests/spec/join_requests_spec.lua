@@ -260,7 +260,7 @@ end)
 
 -- The organizer's window ---------------------------------------------------------
 
-test.test("group finder window: add-on users get Request, then Cancel while it's pending", function()
+test.test("group finder window: add-on users get Request, then Cancel while it's pending; others Whisper", function()
     local addon = load()
     local environment = fakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
@@ -294,6 +294,9 @@ test.test("group finder window: add-on users get Request, then Cancel while it's
             table.insert(calls, "cancel " .. id)
             session:Cancel(id)
         end,
+        whisper = function(key)
+            table.insert(calls, "whisper " .. key)
+        end,
     })
     window:Opened()
 
@@ -301,7 +304,13 @@ test.test("group finder window: add-on users get Request, then Cancel while it's
     test.assertFalse(window.suggestionButtons[1].button.shown)
     test.assertTrue(window.suggestionButtons[2].button.shown)
     test.assertEqual("Request", window.suggestionButtons[2].button.text)
-    test.assertFalse(window.suggestionButtons[3].button.shown)
+    test.assertTrue(window.suggestionButtons[3].button.shown)
+    test.assertEqual("Whisper", window.suggestionButtons[3].button.text)
+
+    -- Whisper opens a whisper to the character they're on, and sends no request.
+    window.suggestionButtons[3].button.scripts.OnClick()
+    test.assertEqual("whisper cleric", calls[1])
+    table.remove(calls, 1)
 
     window.suggestionButtons[2].button.scripts.OnClick()
     test.assertEqual("request Thunderer", calls[1])

@@ -183,6 +183,8 @@ end
 --   links        alt key -> the main key whose player it joins
 --   aliases      main key -> alias for that main's player
 --   aliasNotes   main key -> keys of the characters whose notes set that alias
+--   declared     character keys whose own note names them as main: they're
+--                declared mains
 --   conflicts    { character, kind, fingerprint, suggestion? } to queue
 --   departures   stored keys missing from the roster (full scans only)
 --   rejoins      departed keys back in the roster
@@ -199,6 +201,7 @@ function ReconcileEngine.Plan(inputs)
         aliases = {},
         fingerprints = {},
         aliasNotes = {},
+        declared = {},
         links = {},
         members = members,
         mode = mode,
@@ -272,7 +275,20 @@ function ReconcileEngine.Plan(inputs)
             elseif ref.status ~= "resolved" then
                 addConflict(plan, partition, key, ref.status)
             elseif ref.key == key then
-                addConflict(plan, partition, key, "self reference")
+                -- A note naming the character itself as main declares it a
+                -- main: seeded on a character nobody organized yet, filled in
+                -- on a player's main nobody declared (or un-declared) by
+                -- hand or through sync. On an alt, the note and the roster
+                -- disagree.
+                local character = partition:GetCharacter(key)
+                local player = character and partition:GetPlayer(character.player)
+                if seedable[key] or (player ~= nil and player.main == key) then
+                    if not partition:IsDeclared(key) and (character == nil or partition:DeclaredUntouched(key)) then
+                        plan.declared[key] = true
+                    end
+                else
+                    addConflict(plan, partition, key, "self reference")
+                end
             else
                 local root, reason = followChain(key, ref.key, parseOf, partition, sizes)
                 if root == nil then
@@ -444,6 +460,20 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         end
     end
 
+    -- Declared mains from notes: still each player's main, and still not
+    -- declared or un-declared by hand or through sync.
+    local declared = 0
+    local declaredKey
+    for declaredKey in pairs(plan.declared) do
+        local character = partition:GetCharacter(declaredKey)
+        local player = character and partition:GetPlayer(character.player)
+        if player ~= nil and player.main == declaredKey and partition:DeclaredUntouched(declaredKey)
+            and partition:SetDeclared(declaredKey, true, addon.FellowshipStore.SOURCE_NOTE)
+        then
+            declared = declared + 1
+        end
+    end
+
     local departed, rejoined = 0, 0
     local index
     for index = 1, #plan.departures do
@@ -505,6 +535,7 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         departed = departed,
         rejoined = rejoined,
         promoted = #promotions,
+        declared = declared,
     }
 end
 
