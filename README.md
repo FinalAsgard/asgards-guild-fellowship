@@ -31,8 +31,8 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 Everything the add-on does is in one window, with picture tabs down its right edge. Hover a tab to see its name, and click it to show its page; the tab you're on looks selected. Every page scrolls when it's taller than the window.
 
 - **Roster**: the guild's players, mains and alts (see [Using the roster](#using-the-roster)).
-- **Group Finder**: build a dungeon group from the guild (see [Group Finder](#group-finder)).
 - **My Profile**: your own player, its characters and their role preferences, and Do Not Disturb (see [My Profile](#my-profile)).
+- **Group Finder**: build a dungeon group from the guild (see [Group Finder](#group-finder)).
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
@@ -273,7 +273,7 @@ Everyone gets the window's **Recent Guild Advertisements** tab. It lists each ch
 
 ## Group Finder
 
-The **Group Finder** is a tab of the add-on's window, right below **Roster**. Click its tab, or type `/agf group` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it checks your level and party again and asks the guild who is around.
+The **Group Finder** is a tab of the add-on's window, right below **My Profile**. Click its tab, or type `/agf group` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it checks your level and party again and asks the guild who is around.
 
 The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the groups other guildmates are forming, the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
 
@@ -361,7 +361,7 @@ A guildmate's player panel then shows **Grouped together 3 times, last on 2026-1
 
 ## My Profile
 
-**My Profile** is a tab of the add-on's window, right below **Group Finder**: one place for everything about your own player. Click its tab, or type `/agf profile` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it reads everything again.
+**My Profile** is a tab of the add-on's window, right below **Roster**: one place for everything about your own player. Click its tab, or type `/agf profile` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it reads everything again.
 
 It shows the player of the character you're logged in on: its alias and main at the top, for example **TheTool (Toolbox)**, then the main and each alt still in the guild, in its class color with its level. The character you're logged in on is marked **logged in**.
 

@@ -621,10 +621,11 @@ local function registerProfileTests(profile)
         test.assertEqual("profile", world.frame.page)
 
         local tabs = addon.pages:Tabs()
-        test.assertEqual("group", tabs[2].id)
-        test.assertEqual("profile", tabs[3].id)
-        test.assertEqual("My Profile", tabs[3].label)
-        test.assertEqual(addon.MasterFrame.ICONS.profile, tabs[3].icon)
+        -- The second tab, right after the Roster.
+        test.assertEqual("profile", tabs[2].id)
+        test.assertEqual("My Profile", tabs[2].label)
+        test.assertEqual(addon.MasterFrame.ICONS.profile, tabs[2].icon)
+        test.assertEqual("group", tabs[3].id)
     end)
 
     test.test(profile .. " /agf help lists /agf profile", function()

@@ -47,8 +47,8 @@ if clientProfile.supported then
     -- entry points open it.
     pages = addon.PageNavigator.Create()
     pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
-    pages:Add("group", "Group Finder", addon.MasterFrame.ICONS.group)
     pages:Add("profile", "My Profile", addon.MasterFrame.ICONS.profile)
+    pages:Add("group", "Group Finder", addon.MasterFrame.ICONS.group)
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)

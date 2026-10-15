@@ -397,11 +397,12 @@ local function registerProfileTests(profile)
         test.assertFalse(world.masterFrame.shown)
         -- Drawn once, with the frame.
         test.assertEqual(1, window.creates)
-        -- The tab sits right after the Roster.
+        -- The third tab, after the Roster and My Profile.
         local tabs = addon.pages:Tabs()
         test.assertEqual("roster", tabs[1].id)
-        test.assertEqual("group", tabs[2].id)
-        test.assertEqual("Group Finder", tabs[2].label)
+        test.assertEqual("profile", tabs[2].id)
+        test.assertEqual("group", tabs[3].id)
+        test.assertEqual("Group Finder", tabs[3].label)
     end)
 
     test.test(profile .. " /agf group switches to the Group Finder tab when another tab is showing", function()
