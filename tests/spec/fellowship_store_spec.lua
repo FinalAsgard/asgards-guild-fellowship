@@ -478,9 +478,6 @@ test.test("an ignored out-of-date note is kept on the character across reloads",
     test.assertEqual("0badf00d", note)
     test.assertEqual(">Tinker Healer", suggested)
     test.assertEqual(0, #(database.guilds["Knights of Camelot-Area52"].quarantine or {}))
-
-    reloaded:ClearIgnoredNote("hammer-area52")
-    test.assertEqual(nil, reloaded:GetIgnoredNote("hammer-area52"))
 end)
 
 test.test("an unreadable ignored note quarantines its character intact", function()

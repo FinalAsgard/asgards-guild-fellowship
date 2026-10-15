@@ -1005,13 +1005,6 @@ function Partition:GetIgnoredNote(key)
     return ignored.note, ignored.suggested
 end
 
-function Partition:ClearIgnoredNote(key)
-    local character = self.data.characters[key]
-    if character ~= nil then
-        character.noteIgnored = nil
-    end
-end
-
 -- After `key` has moved out of `oldPlayer`: removes the old player if it is
 -- now empty, or hands its main role to the highest-level character left
 -- (ties by name). Acting-main rules (in-guild first) are applied on top by
