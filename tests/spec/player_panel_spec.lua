@@ -53,14 +53,16 @@ local function setup()
         addon = addon,
         partition = partition,
         playerId = playerId,
-        -- `adStats`, when given, answers the panel's ad count line.
-        build = function(adStats)
+        -- `adStats`, when given, answers the panel's ad count line; `wrap`
+        -- wraps the bio.
+        build = function(adStats, wrap)
             return addon.PlayerPanelViewModel.Build({
                 partition = partition,
                 playerId = playerId,
                 members = members({ guild[1], guild[2] }),
                 normalizer = normalizer,
                 adStats = adStats,
+                wrap = wrap,
                 formatDate = function(timestamp)
                     return "day " .. (timestamp - START) / 86400
                 end,
@@ -301,4 +303,59 @@ test.test("player panel: a player with an ad record shows it first, and one with
     test.assertEqual(0, #rowsOf(none, "stat"))
     test.assertEqual(0, #rowsOf(state.build(), "stat"))
     test.assertEqual(0, #rowsOf(state.build(function() error("boom") end), "stat"))
+end)
+
+test.test("the bio wraps at spaces to a measured width, never inside a character", function()
+    local addon = load()
+    -- Each byte measures 5 wide, as in a fixed-width font.
+    local function measure(text)
+        return #text * 5
+    end
+
+    local lines = addon.PlayerPanelViewModel.Wrap("I heal dungeons most evenings", 60, measure)
+    test.assertEqual("I heal", lines[1])
+    test.assertEqual("dungeons", lines[2])
+    test.assertEqual("most", lines[3])
+    test.assertEqual("evenings", lines[4])
+
+    -- A word wider than a line is split, keeping each character whole.
+    lines = addon.PlayerPanelViewModel.Wrap("ééééé", 20, measure)
+    test.assertEqual("éé", lines[1])
+    test.assertEqual("éé", lines[2])
+    test.assertEqual("é", lines[3])
+
+    -- Malformed text (a byte no character starts with) still gets split,
+    -- one byte at a time, never looping forever.
+    lines = addon.PlayerPanelViewModel.Wrap("\128\128\128\128\128", 10, measure)
+    test.assertEqual("\128\128", lines[1])
+    test.assertEqual("\128\128", lines[2])
+    test.assertEqual("\128", lines[3])
+end)
+
+test.test("a blank line typed in the bio stays; one at the very end doesn't", function()
+    local addon = load()
+    local lines = addon.PlayerPanelViewModel.Wrap("Healer.\n\nEvenings only.\n", 48)
+    test.assertEqual(3, #lines)
+    test.assertEqual("Healer.", lines[1])
+    test.assertEqual("", lines[2])
+    test.assertEqual("Evenings only.", lines[3])
+end)
+
+test.test("the panel model wraps the bio with the window's wrapper when given", function()
+    local state = setup()
+    state.partition:SetProfileText("toolbox-area52", "bio", "Raid lead on weekends", START, "toolbox-area52")
+
+    local model = state.build(nil, function(text)
+        return { "[" .. text .. "]" }
+    end)
+
+    local about = rowsOf(model, "about")
+    test.assertEqual("[Raid lead on weekends]", about[1].text)
+
+    -- Discord and Location are wrapped too, with their labels.
+    state.partition:SetProfileText("toolbox-area52", "location", "Stormwind", START, "toolbox-area52")
+    about = rowsOf(state.build(nil, function(text)
+        return { "[" .. text .. "]" }
+    end), "about")
+    test.assertEqual("[Location: Stormwind]", about[1].text)
 end)

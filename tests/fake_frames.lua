@@ -73,6 +73,14 @@ function FakeFrames.install(environment)
                     return function(self, position)
                         rawset(self, "cursor", position)
                     end
+                elseif method == "GetFontString" then
+                    -- A button's label: one font string, made on first use.
+                    return function(self)
+                        if rawget(self, "label") == nil then
+                            rawset(self, "label", widget(page))
+                        end
+                        return rawget(self, "label")
+                    end
                 elseif method == "SetWordWrap" then
                     return function(self, wrap)
                         rawset(self, "wordWrap", wrap)

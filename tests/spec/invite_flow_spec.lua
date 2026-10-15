@@ -62,6 +62,27 @@ test.test("invite flow: once the character joins, it takes the slot as a party m
     test.assertEqual(nil, session:InviteState(slots[3], function() return true end))
 end)
 
+test.test("invite flow: a joined invitee keeps their level while the game doesn't know it yet", function()
+    local addon = load()
+    local session = accepted(addon)
+
+    -- Just after joining, the game gives no level for Bolt.
+    session:UpdateParty({
+        ME,
+        { key = "Player-9", name = "Bolt", classToken = "SHAMAN", inGuild = true, rosterKey = "bolt" },
+    }, true)
+    test.assertEqual(22, session:Slots()[3].member.level)
+    -- The guild hears it too.
+    test.assertEqual(22, session:Summary()[3].l)
+
+    -- Once the game knows it, the game's level counts.
+    session:UpdateParty({
+        ME,
+        { key = "Player-9", name = "Bolt", classToken = "SHAMAN", level = 23, inGuild = true, rosterKey = "bolt" },
+    }, true)
+    test.assertEqual(23, session:Slots()[3].member.level)
+end)
+
 test.test("invite flow: a joined invitee whose party name carries a realm still takes their own slot", function()
     local addon = load()
     local session, request = accepted(addon)
@@ -80,8 +101,8 @@ test.test("invite flow: a joined invitee whose party name carries a realm still 
     test.assertEqual(nil, slots[2].member)
     test.assertEqual(nil, slots[4].member)
     test.assertEqual(nil, session:InviteState(slots[3], function() return true end))
-    -- Shown without the realm.
-    test.assertEqual("Bolt", addon.GroupFinderWindow.MemberLabel(slots[3].member))
+    -- Shown without the realm, with the level Bolt came as.
+    test.assertEqual("Bolt (22)", addon.GroupFinderWindow.MemberLabel(slots[3].member))
 end)
 
 test.test("invite flow: the invitee's own roster key wins over a same-named character from another realm", function()

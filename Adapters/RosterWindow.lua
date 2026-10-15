@@ -287,6 +287,8 @@ local PICKER_HEIGHT = 380
 -- box and the matching players.
 local function buildPicker(framework, frameName)
     local panel = framework:CreateSimplePanel(UIParent, PICKER_WIDTH, PICKER_HEIGHT, "Link as alt of", frameName .. "Picker")
+    -- Like every panel here, closed only with its close button or Escape.
+    panel.DontRightClickClose = true
     panel:SetFrameStrata("DIALOG")
     local prompt = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     prompt:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
@@ -344,7 +346,7 @@ local function buildPicker(framework, frameName)
         PICKER_WIDTH - 20, PICKER_HEIGHT - 100, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
     scroll:ClearAllPoints()
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -76)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 12)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 12)
     scroll:CreateLines(newLine, lineAmount)
     picker.scroll = scroll
 
@@ -380,6 +382,8 @@ local PANEL_HEIGHT = 440
 -- picker "Merge into player").
 local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
+    -- Like every panel here, closed only with its close button or Escape.
+    panel.DontRightClickClose = true
     panel:SetFrameStrata("HIGH")
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
@@ -488,6 +492,11 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                     text = "  " .. row.name .. "  |cff9d9d9d" .. row.role .. ", " .. row.reason ..
                         (row.dates ~= "" and (", " .. row.dates) or "") .. "|r"
                 end
+                -- Only character rows have buttons; the others' text uses
+                -- the line's full width.
+                line.text:ClearAllPoints()
+                line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
+                line.text:SetPoint("RIGHT", line, "RIGHT", row.kind == "character" and -128 or -6, 0)
                 line.text:SetText(text)
                 if row.kind == "character" and row.canMakeMain then
                     line.makeMain:Show()
@@ -506,9 +515,14 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         PANEL_WIDTH - 20, PANEL_HEIGHT - 90, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
     scroll:ClearAllPoints()
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -72)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 12)
+    -- Room on the right for the scroll bar, which sits beside the list.
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 12)
     scroll:CreateLines(newLine, lineAmount)
     edit.scroll = scroll
+    -- Measures text in the lines' font, to wrap the bio to their width.
+    local measure = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    measure:Hide()
+    edit.measure = measure
 
     panel:HookScript("OnHide", function()
         if edit.model ~= nil then
@@ -669,6 +683,8 @@ local REVIEW_LINES = 8
 
 local function buildReviewPanel(framework, options, frameName, anchor)
     local panel = framework:CreateSimplePanel(UIParent, REVIEW_WIDTH, REVIEW_HEIGHT, "Review", frameName .. "Review")
+    -- Like every panel here, closed only with its close button or Escape.
+    panel.DontRightClickClose = true
     panel:SetFrameStrata("DIALOG")
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 8, 0)
@@ -756,6 +772,9 @@ local function buildConflictPanel(framework, options, frameName)
         addon.Identity.displayName .. " - Conflicts",
         frameName .. "Conflicts"
     )
+    -- The framework hides its panels on a right-click anywhere inside;
+    -- ours close only with the close button or Escape.
+    panel.DontRightClickClose = true
     panel:SetFrameStrata("DIALOG")
 
     local explain = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -1369,6 +1388,25 @@ function Window:SetRecentAds(rows)
         recentAds.scroll:SetData(rows or {})
         recentAds.scroll:Refresh()
     end))
+end
+
+-- The bio's lines as they fit the player panel: `text` wrapped at spaces
+-- to the width an about row's text has, measured in its font. Without a
+-- way to measure, lines of PlayerPanelViewModel.BIO_LINE bytes.
+function Window:WrapAbout(text)
+    local measure = self.playerPanel and self.playerPanel.measure
+    if measure == nil or type(measure.GetStringWidth) ~= "function" then
+        return addon.PlayerPanelViewModel.Wrap(text, addon.PlayerPanelViewModel.BIO_LINE)
+    end
+    -- The list's width, less the line's inset from it, the text's margins
+    -- and the two spaces an about row starts with.
+    local width = PANEL_WIDTH - 10 - RosterWindow.SCROLL_BAR_ROOM - 20 - 12
+    measure:SetText("  ")
+    width = width - (measure:GetStringWidth() or 0)
+    return addon.PlayerPanelViewModel.Wrap(text, width, function(part)
+        measure:SetText(part)
+        return measure:GetStringWidth() or 0
+    end)
 end
 
 -- Shows the edit panel for a player (see PlayerPanelViewModel).

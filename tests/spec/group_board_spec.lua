@@ -270,6 +270,8 @@ test.test("group finder window: groups being formed head the column, far ones gr
     test.assertFalse(window.boardRows[1].fill.shown)
     test.assertTrue(window.boardRows[2].fill.shown)
     test.assertEqual("Fill Slot", window.boardRows[2].fill.text)
+    -- Its label stays on one line inside the button.
+    test.assertEqual(false, window.boardRows[2].fill:GetFontString().wordWrap)
     test.assertFalse(window.boardRows[3].fill.shown)
     -- No role or alt buttons: the player isn't in this group.
     test.assertFalse(window.roleButtons.tank.shown)
@@ -281,6 +283,53 @@ test.test("group finder window: groups being formed head the column, far ones gr
     window.backButton.scripts.OnClick()
     test.assertTrue(window.picker.shown)
     test.assertFalse(window.board.shown)
+end)
+
+test.test("group finder window: a slot only alts fit offers Fill as Alt, with a menu of those alts", function()
+    local addon = test.newAddon("Core/RoleCatalog.lua", "Core/GroupSession.lua", "Core/GroupFinderProtocol.lua",
+        "Core/GroupBoard.lua", "Core/JoinRequests.lua", "Core/DungeonCatalog.lua", "Adapters/GroupFinderWindow.lua")
+    local group = boardGroup(addon, { { at = 1, n = "Tool", l = 24, k = "tool" } })
+    local offers = {}
+    local window = newWindow(addon, {
+        groups = function() return { group } end,
+        boardGroup = function() return group end,
+        selfKey = function() return "hammer" end,
+        fillOptions = function(_, role)
+            if role == "healer" then
+                return { { role = "healer", key = "spark", name = "Sparkleshine", level = 23 },
+                    { role = "healer", key = "bolt", name = "Bolt", level = 22 } }
+            end
+            return {}
+        end,
+        offer = function(shown, option) table.insert(offers, shown.id .. " " .. option.key) end,
+    })
+    -- The game's menu, recorded: its title and buttons.
+    local menu
+    window.environment.MenuUtil = {
+        CreateContextMenu = function(_, build)
+            menu = { buttons = {} }
+            build(nil, {
+                CreateTitle = function(_, title) menu.title = title end,
+                CreateButton = function(_, text, onClick)
+                    table.insert(menu.buttons, { text = text, onClick = onClick })
+                end,
+            })
+        end,
+    }
+
+    window.suggestionHovers[2].frame.scripts.OnMouseUp()
+    -- The player's character doesn't fit, so no name goes on the button.
+    test.assertTrue(window.boardRows[2].fill.shown)
+    test.assertEqual("Fill as Alt", window.boardRows[2].fill.text)
+
+    window.boardRows[2].fill.scripts.OnClick()
+    test.assertEqual(0, #offers)
+    test.assertEqual("Fill as", menu.title)
+    test.assertEqual("Sparkleshine (23)", menu.buttons[1].text)
+    test.assertEqual("Bolt (22)", menu.buttons[2].text)
+
+    menu.buttons[2].onClick()
+    test.assertEqual("tool bolt", offers[1])
 end)
 
 test.test("group finder window: an offer waiting for an answer hides Fill Slot and says so", function()

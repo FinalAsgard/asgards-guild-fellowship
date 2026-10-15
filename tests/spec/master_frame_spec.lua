@@ -265,3 +265,22 @@ test.test("the add-on compartment opens the frame on the Roster tab", function()
     test.assertTrue(frame.shown)
     test.assertEqual("roster", frame:LastPage())
 end)
+
+test.test("no window closes on a right-click: every framework panel turns that off", function()
+    local listing = io.popen("ls Adapters")
+    local checked = 0
+    local name
+    for name in listing:lines() do
+        if string.match(name, "%.lua$") then
+            local handle = assert(io.open("Adapters/" .. name, "r"))
+            local source = handle:read("*a")
+            handle:close()
+            local _, made = string.gsub(source, ":CreateSimplePanel%(", "")
+            local _, guarded = string.gsub(source, "panel%.DontRightClickClose = true", "")
+            test.assertEqual(made, guarded, name .. " makes " .. made .. " panels, " .. guarded .. " kept open on right-click")
+            checked = checked + made
+        end
+    end
+    listing:close()
+    test.assertTrue(checked >= 5, "found the panels")
+end)

@@ -54,15 +54,32 @@ end
 -- How wide a line of the bio is, in characters, so it fits the panel.
 PlayerPanelViewModel.BIO_LINE = 48
 
--- `text` broken into lines of at most `width` bytes, at spaces where it
--- can be (a word longer than a line is split).
-function PlayerPanelViewModel.Wrap(text, width)
+-- One UTF-8 character at the start of a string.
+local CHARACTER = "^[%z\1-\127\194-\244][\128-\191]*"
+
+-- The first character of `text`: a UTF-8 character, or a byte that doesn't
+-- start one (malformed text) on its own.
+local function firstCharacter(text)
+    return string.match(text, CHARACTER) or string.sub(text, 1, 1)
+end
+
+-- `text` broken into lines at spaces where it can be (a word longer than a
+-- line is split, never inside a character). A line is at most `width`
+-- bytes, or, given `measure(text) -> width`, at most `width` as measured.
+function PlayerPanelViewModel.Wrap(text, width, measure)
+    measure = measure or function(part)
+        return #part
+    end
     local lines = {}
-    -- A line break the player typed starts a new line.
+    -- A line break the player typed starts a new line, and a blank line
+    -- they typed stays (one at the very end is dropped).
     if string.find(text, "\n", 1, true) ~= nil then
         local paragraph
-        for paragraph in string.gmatch(text, "[^\n]+") do
-            local wrapped = PlayerPanelViewModel.Wrap(paragraph, width)
+        for paragraph in string.gmatch(string.gsub(text, "\n+$", "") .. "\n", "([^\n]*)\n") do
+            local wrapped = PlayerPanelViewModel.Wrap(paragraph, width, measure)
+            if wrapped[1] == nil then
+                table.insert(lines, "")
+            end
             local index
             for index = 1, #wrapped do
                 table.insert(lines, wrapped[index])
@@ -73,17 +90,27 @@ function PlayerPanelViewModel.Wrap(text, width)
     local current = ""
     local word
     for word in string.gmatch(text, "%S+") do
-        while #word > width do
+        while measure(word) > width do
             if current ~= "" then
                 table.insert(lines, current)
                 current = ""
             end
-            table.insert(lines, string.sub(word, 1, width))
-            word = string.sub(word, width + 1)
+            -- As many characters from its start as fit, and always at
+            -- least one, so the word gets shorter each time.
+            local piece = firstCharacter(word)
+            while #piece < #word do
+                local character = firstCharacter(string.sub(word, #piece + 1))
+                if measure(piece .. character) > width then
+                    break
+                end
+                piece = piece .. character
+            end
+            table.insert(lines, piece)
+            word = string.sub(word, #piece + 1)
         end
         if current == "" then
             current = word
-        elseif #current + 1 + #word <= width then
+        elseif measure(current .. " " .. word) <= width then
             current = current .. " " .. word
         else
             table.insert(lines, current)
@@ -97,8 +124,9 @@ function PlayerPanelViewModel.Wrap(text, width)
 end
 
 -- The player's Discord, location and bio, as "about" rows under an About
--- heading; nothing when none is set.
-local function aboutRows(partition, playerId)
+-- heading; nothing when none is set. `wrap(text) -> lines` breaks each
+-- into lines that fit the panel.
+local function aboutRows(partition, playerId, wrap)
     local discord = partition:PlayerProfileText(playerId, "discord")
     local location = partition:PlayerProfileText(playerId, "location")
     local bio = partition:PlayerProfileText(playerId, "bio")
@@ -106,18 +134,21 @@ local function aboutRows(partition, playerId)
         return {}
     end
     local rows = { { kind = "section", text = "About" } }
-    if discord ~= nil then
-        table.insert(rows, { kind = "about", text = "Discord: " .. discord })
-    end
-    if location ~= nil then
-        table.insert(rows, { kind = "about", text = "Location: " .. location })
-    end
-    if bio ~= nil then
-        local lines = PlayerPanelViewModel.Wrap(bio, PlayerPanelViewModel.BIO_LINE)
+    local function add(text)
+        local lines = wrap(text)
         local index
         for index = 1, #lines do
             table.insert(rows, { kind = "about", text = lines[index] })
         end
+    end
+    if discord ~= nil then
+        add("Discord: " .. discord)
+    end
+    if location ~= nil then
+        add("Location: " .. location)
+    end
+    if bio ~= nil then
+        add(bio)
     end
     return rows
 end
@@ -139,7 +170,8 @@ end
 -- -> the player's ad count line, or nil), rolesOf (optional function(key)
 -- -> the character's role preferences as text, or nil), groupedWith
 -- (optional function(keys) -> how often this user grouped with the player,
--- or nil).
+-- or nil), wrap (optional function(text) -> an About entry's lines as
+-- they fit the panel; by default, lines of at most BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
 --   { id, label, alias, aliasSource, main, mainName, canMerge, dontSync, rows }
 -- where `main` is the main's character key, `canMerge` whether the player
@@ -183,7 +215,9 @@ function PlayerPanelViewModel.Build(inputs)
             table.insert(rows, { kind = "stat", text = line })
         end
     end
-    local about = aboutRows(partition, inputs.playerId)
+    local about = aboutRows(partition, inputs.playerId, inputs.wrap or function(text)
+        return PlayerPanelViewModel.Wrap(text, PlayerPanelViewModel.BIO_LINE)
+    end)
     for index = 1, #about do
         table.insert(rows, about[index])
     end

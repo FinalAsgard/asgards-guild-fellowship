@@ -236,6 +236,11 @@ function Session:place()
         if request.state == GroupSession.ACCEPTED then
             local member = joinedMember(self.members, request, claimed)
             if member ~= nil then
+                -- The game may not know a member's level yet just after
+                -- they join; the character they came as has it.
+                if member.level == nil then
+                    member.level = request.character.level
+                end
                 request.inParty = true
                 joinedRole[member.key] = request.role
                 claimed[member.key] = true
