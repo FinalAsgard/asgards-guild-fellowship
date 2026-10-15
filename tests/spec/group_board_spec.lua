@@ -270,6 +270,9 @@ test.test("group finder window: groups being formed head the column, far ones gr
     test.assertFalse(window.boardRows[1].fill.shown)
     test.assertTrue(window.boardRows[2].fill.shown)
     test.assertEqual("Fill Slot", window.boardRows[2].fill.text)
+    -- Its label stays on one line inside the button: a long "Fill as <alt>"
+    -- is cut short, never drawn past the button's edges.
+    test.assertEqual(false, window.boardRows[2].fill:GetFontString().wordWrap)
     test.assertFalse(window.boardRows[3].fill.shown)
     -- No role or alt buttons: the player isn't in this group.
     test.assertFalse(window.roleButtons.tank.shown)

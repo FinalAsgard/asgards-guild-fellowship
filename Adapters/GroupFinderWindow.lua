@@ -61,10 +61,12 @@ local GroupFinderWindow = {
     SUGGESTION_WIDTH = 334,
     CHECK_SIZE = 24,
     BUTTON_HEIGHT = 20,
+    -- How far a button's label sits in from its left and right edges.
+    BUTTON_TEXT_INSET = 6,
     ROLE_BUTTON_WIDTH = 56,
     -- Another organizer's group: Fill Slot beside each open slot, and up
     -- to ALT_BUTTONS alts to come as, two to a row.
-    FILL_WIDTH = 110,
+    FILL_WIDTH = 150,
     ALT_BUTTONS = 4,
     ALT_WIDTH = 170,
     -- Where a suggestion's tooltip sits from the mouse cursor: a little
@@ -239,6 +241,15 @@ function Window:button(parent, text, width, onClick)
     made:SetHeight(GroupFinderWindow.BUTTON_HEIGHT)
     made:SetText(text)
     made:SetScript("OnClick", onClick)
+    -- The label stays inside the button: a long one (an alt's name, say)
+    -- is cut short with "..." rather than running past its edges.
+    local label = type(made.GetFontString) == "function" and made:GetFontString() or nil
+    if label ~= nil then
+        label:ClearAllPoints()
+        label:SetPoint("LEFT", made, "LEFT", GroupFinderWindow.BUTTON_TEXT_INSET, 0)
+        label:SetPoint("RIGHT", made, "RIGHT", -GroupFinderWindow.BUTTON_TEXT_INSET, 0)
+        singleLine(label)
+    end
     return made
 end
 
