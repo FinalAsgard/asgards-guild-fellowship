@@ -14,6 +14,8 @@ Libs/LibSharedMedia-3.0/lib.xml
 Libs/DetailsFramework/load.xml
 Libs/AceSerializer-3.0/AceSerializer-3.0.xml
 Libs/AceComm-3.0/AceComm-3.0.xml
+Libs/HereBeDragons/HereBeDragons-2.0.lua
+Libs/HereBeDragons-Pins/HereBeDragons-Pins-2.0.lua
 
 Core/Identity.lua
 Adapters/ClientProfile.lua
@@ -30,6 +32,7 @@ Adapters/GroupFinderWindow.lua
 Adapters/JoinPrompts.lua
 Adapters/GreetingsPage.lua
 Adapters/ProfilePage.lua
+Adapters/MapPins.lua
 Core/Persistence.lua
 Core/NameNormalizer.lua
 Core/NoteParser.lua
@@ -76,5 +79,8 @@ Core/GroupAvailability.lua
 Core/GroupCandidates.lua
 Core/JoinRequests.lua
 Core/GroupHistory.lua
+Core/LocationProtocol.lua
+Core/LocationScheduler.lua
+Core/LocationBoard.lua
 Core/Lifecycle.lua
 AsgardsGuildFellowship.lua

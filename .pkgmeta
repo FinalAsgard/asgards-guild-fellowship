@@ -28,6 +28,12 @@ externals:
   Libs/AceComm-3.0:
     url: https://repos.curseforge.com/wow/ace3/tags/Release-r1403/AceComm-3.0
     type: svn
+  Libs/HereBeDragons:
+    url: https://github.com/Nevcairiel/HereBeDragons
+    tag: 2.18-release
+  Libs/HereBeDragons-Pins:
+    url: https://github.com/Nevcairiel/HereBeDragons
+    tag: 2.18-release
 
 ignore:
   - .github

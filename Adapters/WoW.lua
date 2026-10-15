@@ -564,6 +564,37 @@ function Client:GetZone()
     return { key = "zone:" .. name, name = name }
 end
 
+-- Where the player is on their zone's map: { mapId, x, y } with x and y from
+-- 0 to 1. Nil when the client can't say (no map APIs, a loading screen, or
+-- inside an instance, where the client gives no position).
+function Client:GetPlayerPosition()
+    local maps = self.environment.C_Map
+    local mapId = self:zoneMapId()
+    if type(maps) ~= "table" or mapId == nil then
+        return nil
+    end
+    local ok, position = callFunction(maps.GetPlayerMapPosition, mapId, "player")
+    if not ok or type(position) ~= "table" or type(position.GetXY) ~= "function" then
+        return nil
+    end
+    local xyOk, x, y = pcall(position.GetXY, position)
+    if not xyOk or type(x) ~= "number" or type(y) ~= "number" or x < 0 or x > 1 or y < 0 or y > 1
+        or (x == 0 and y == 0)
+    then
+        return nil
+    end
+    return { mapId = mapId, x = x, y = y }
+end
+
+-- The logged-in character's class token ("WARRIOR"), or nil.
+function Client:GetPlayerClass()
+    local ok, _, classToken = callFunction(self.environment.UnitClass, "player")
+    if not ok or type(classToken) ~= "string" or classToken == "" then
+        return nil
+    end
+    return classToken
+end
+
 -- True in a dungeon, raid, scenario, battleground or arena, or a keystone
 -- run on clients that have them. False when the client can't say.
 function Client:IsInInstance()

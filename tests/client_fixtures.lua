@@ -65,6 +65,8 @@ Fixtures.LIBRARY_MAJORS = {
     "DetailsFramework-1.0",
     "AceSerializer-3.0",
     "AceComm-3.0",
+    "HereBeDragons-2.0",
+    "HereBeDragons-Pins-2.0",
 }
 
 -- A stand-in for AceSerializer-3.0. Each serialized message is kept in this

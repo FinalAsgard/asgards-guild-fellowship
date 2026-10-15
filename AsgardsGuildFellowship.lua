@@ -29,6 +29,7 @@ local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSessi
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildNoteOverlay
+local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
 local onSlotsChanged, groupBoard, announceGroup
 -- Draws the Group Finder on its tab (set up with the Group Finder below).
@@ -2116,6 +2117,110 @@ if clientProfile.supported then
             end
         end,
     })
+    -- Guildmates on the map: add-on users share where they are with the
+    -- guild, and each other's dots are drawn on the zone map.
+    local function isOwnCharacter(key)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return false
+        end
+        local selfKey = rosterController:SelfKey()
+        if key == selfKey then
+            return true
+        end
+        local own = selfKey and partition:GetCharacter(selfKey)
+        local character = partition:GetCharacter(key)
+        if own ~= nil and character ~= nil and own.player == character.player then
+            return true
+        end
+        local owned = partition:OwnCharacters()
+        local index
+        for index = 1, #owned do
+            if owned[index] == key then
+                return true
+            end
+        end
+        return false
+    end
+    locationBoard = addon.LocationBoard.Create({ isOwn = isOwnCharacter })
+    locationScheduler = addon.LocationScheduler.Create()
+    mapPins = addon.MapPins.Create({
+        client = client,
+        dots = function()
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return {}
+            end
+            local people = addon.PlayerService.Create(partition, { normalizer = normalizer })
+            local dots = {}
+            local entries = locationBoard:All()
+            local index
+            for index = 1, #entries do
+                local entry = entries[index]
+                local tag = people:ChatTag(entry.key)
+                table.insert(dots, {
+                    key = entry.key,
+                    mapId = entry.mapId,
+                    x = entry.x,
+                    y = entry.y,
+                    class = entry.class,
+                    level = entry.level,
+                    name = people:CharacterName(entry.key) or entry.key,
+                    label = tag and tag.text or nil,
+                })
+            end
+            return dots
+        end,
+    })
+    -- A location from a guildmate: only from a character in the guild,
+    -- about itself.
+    onLocationMessage = function(message, sender)
+        if not addon.LocationProtocol.IsValid(message) then
+            return
+        end
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local senderKey = guild and normalizer:Key(sender) or nil
+        if senderKey == nil or not partition:IsInGuild(senderKey) then
+            return
+        end
+        if message.t ~= addon.LocationProtocol.TYPE_HIDE
+            and locationBoard:OnLocation(message, senderKey, client:Timestamp() or 0)
+        then
+            mapPins:Refresh()
+        end
+    end
+    -- Sends the player's location when it's due, and asks again every few
+    -- seconds.
+    local function shareLocation()
+        local spot = client:GetPlayerPosition()
+        if spot == nil then
+            return
+        end
+        spot.class = client:GetPlayerClass()
+        spot.level = client:GetPlayerLevel()
+        if spot.class == nil or spot.level == nil then
+            return
+        end
+        local character = rosterController:SelfKey()
+        local message = locationScheduler:Tick({ now = client:Timestamp(), character = character, spot = spot })
+        if message ~= nil then
+            comm:Broadcast(message)
+        end
+    end
+    local sharing = false
+    startLocations = function()
+        mapPins:Start()
+        if sharing then
+            return
+        end
+        local function tick()
+            shareLocation()
+            sharing = client:After(addon.LocationScheduler.TICK_SECONDS, tick)
+        end
+        tick()
+        -- A new zone goes out promptly (within the scheduler's minimum gap).
+        client:ObserveZone(shareLocation)
+    end
     entryPoints = addon.EntryPoints.Create({
         client = client,
         toggle = function()
@@ -2147,11 +2252,14 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildRecruit:OnMessage(message, sender)
         elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
             onGroupFinderMessage(message, sender)
+        elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
+            onLocationMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end
     end) then
         syncSession:Start()
+        startLocations()
     end
     -- The minimap button needs saved data for its position.
     entryPoints:Start()
@@ -2200,6 +2308,8 @@ addon.rosterController = rosterController
 addon.pages = pages
 addon.entryPoints = entryPoints
 addon.guildNoteOverlay = guildNoteOverlay
+addon.locationBoard = locationBoard
+addon.mapPins = mapPins
 addon.chatAnnotator = chatAnnotator
 addon.comm = comm
 addon.settings = settings
