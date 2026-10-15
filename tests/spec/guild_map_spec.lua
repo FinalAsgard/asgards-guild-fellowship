@@ -516,6 +516,7 @@ local function fakeWidget()
     function widget:SetAllPoints(target) self.allPoints = target end
     function widget:SetTexture(texture) self.textureFile = texture end
     function widget:SetVertexColor(r, g, b) self.color = { r, g, b } end
+    function widget:SetAlpha(alpha) self.alpha = alpha end
     function widget:EnableMouse(enabled) self.mouse = enabled end
     function widget:SetScript(name, handler) self.scripts[name] = handler end
     function widget:SetPoint(...) self.point = { ... } end
@@ -608,6 +609,9 @@ local function installMap(environment)
     end
     return pins
 end
+
+-- MapPins.DIM_ALPHA, the opacity of guildmates outside the player's party.
+local DIM_ALPHA = 0.35
 
 local DOTS = {
     { key = "hammer-area52", mapId = 1429, x = 0.4, y = 0.6, class = "MAGE", name = "Hammer", level = 42,
@@ -829,6 +833,39 @@ local function registerProfileTests(profile)
         local tooltip = world.environment.GameTooltip
         test.assertEqual(4, #tooltip.lines)
         test.assertEqual("Hammer, level 42 (TheTool)", tooltip.lines[1])
+    end)
+
+    test.test(profile .. ": guildmates outside the player's party are dimmed on every map", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        installCoordinates(world.environment)
+        local hammer = fixtures.snapshot(DOTS[1])
+        local wrench = fixtures.snapshot(DOTS[2])
+        wrench.mapId = 1429
+        wrench.dimmed = true
+        local outside = fixtures.snapshot(DOTS[2])
+        outside.dimmed = true
+        local markers = {
+            { area = 1429, mapId = 1415, display = "dots", people = { hammer, wrench } },
+            { area = 1415, mapId = 947, display = "count", people = { outside, outside, outside, outside } },
+        }
+        local mapPins = buildPins(world, { hammer, wrench }, markers, { mapId = 1429 })
+        mapPins:Start()
+        mapPins:Refresh()
+
+        local zoneDots = iconsOn(pins, 1429)
+        test.assertEqual(1, zoneDots[1].icon.alpha)
+        test.assertEqual(DIM_ALPHA, zoneDots[2].icon.alpha)
+        test.assertEqual(1, pins.minimap[1].icon.alpha)
+        test.assertEqual(DIM_ALPHA, pins.minimap[2].icon.alpha)
+        local zone = iconsOn(pins, 1415)[1].icon
+        test.assertEqual(1, zone.dots[1].alpha)
+        test.assertEqual(DIM_ALPHA, zone.dots[2].alpha)
+        test.assertEqual(1, zone.badge.alpha)
+        -- Nobody from the party: the whole count is dimmed.
+        local continent = iconsOn(pins, 947)[1].icon
+        test.assertEqual(DIM_ALPHA, continent.badge.alpha)
+        test.assertEqual(DIM_ALPHA, continent.count.alpha)
     end)
 
     test.test(profile .. ": markers are redrawn when the world map changes maps", function()
@@ -1184,6 +1221,36 @@ local function registerWholeAddonTests(profile)
             end
             test.assertEqual(0, whispered, kinds[index])
         end
+    end)
+
+    test.test(profile .. ": in the whole add-on, guildmates outside the player's party are dimmed", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+        login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        fixtures.deliver(channel)
+        test.assertEqual(1, viewer.pins.icons[1].icon.alpha)
+
+        -- In a party without the sharer.
+        local environment = viewer.environment
+        local units = { player = guild.members[1].name, party1 = "Stranger" }
+        environment.IsInGroup = function() return true end
+        environment.UnitExists = function(unit) return units[unit] ~= nil end
+        environment.UnitName = function(unit) return units[unit] end
+        fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        test.assertEqual(DIM_ALPHA, viewer.pins.icons[1].icon.alpha)
+        test.assertEqual(DIM_ALPHA, viewer.pins.minimap[1].icon.alpha)
+
+        -- The sharer joins the party.
+        units.party1 = guild.members[3].name
+        fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        test.assertEqual(1, viewer.pins.icons[1].icon.alpha)
+
+        -- Out of the party, nobody is dimmed.
+        environment.IsInGroup = function() return false end
+        units.party1 = nil
+        fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        test.assertEqual(1, viewer.pins.icons[1].icon.alpha)
     end)
 
     test.test(profile .. ": in the whole add-on, turning showing off clears every guildmate pin", function()

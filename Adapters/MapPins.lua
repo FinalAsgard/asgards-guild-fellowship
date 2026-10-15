@@ -23,6 +23,9 @@ local MapPins = {
     -- Marks people a marker shows from the guild roster's zone (they don't
     -- run the add-on, or haven't shared a position).
     ROSTER_TEXT = "from the roster",
+    -- While the player is in a party, guildmates outside it are drawn at
+    -- this opacity, so the party stands out.
+    DIM_ALPHA = 0.35,
 }
 addon.MapPins = MapPins
 
@@ -32,7 +35,8 @@ Pins.__index = Pins
 -- options:
 --   client  the compatibility adapter
 --   dots    function() -> the guildmates to draw: each { key, mapId, x, y,
---           class, name, level, label? } (label is the chat tag's text)
+--           class, name, level, label?, dimmed? } (label is the chat tag's
+--           text; dimmed is set for those outside the player's party)
 --   zone    function() -> the player's zone map ID, or nil (no minimap
 --           dots then)
 --   shown   function() -> false while guildmates are hidden from the maps
@@ -224,6 +228,7 @@ function Pins:DrawMarker(frame, marker)
         local person = dots and marker.people[index] or nil
         if person ~= nil then
             frame.dots[index]:SetVertexColor(self:ClassColor(person.class))
+            frame.dots[index]:SetAlpha(person.dimmed and MapPins.DIM_ALPHA or 1)
             frame.dots[index]:Show()
         else
             frame.dots[index]:Hide()
@@ -236,6 +241,22 @@ function Pins:DrawMarker(frame, marker)
         frame.badge:Show()
         frame.count:SetText(tostring(#marker.people))
     end
+    -- A marker with nobody from the player's party is dimmed as a whole.
+    local anyoneUndimmed = false
+    for index = 1, #marker.people do
+        if not marker.people[index].dimmed then
+            anyoneUndimmed = true
+        end
+    end
+    frame.badge:SetAlpha(anyoneUndimmed and 1 or MapPins.DIM_ALPHA)
+    frame.count:SetAlpha(anyoneUndimmed and 1 or MapPins.DIM_ALPHA)
+end
+
+-- Draws a dot frame in `dot`'s class color, dimmed when it's outside the
+-- player's party.
+function Pins:Color(icon, dot)
+    pcall(icon.texture.SetVertexColor, icon.texture, self:ClassColor(dot.class))
+    pcall(icon.SetAlpha, icon, dot.dimmed and MapPins.DIM_ALPHA or 1)
 end
 
 -- Where `area`'s center falls on map `mapId`, or nil.
@@ -286,7 +307,7 @@ function Pins:Refresh()
         local icon = self:Icon(index)
         if icon ~= nil then
             icon.dot = dot
-            pcall(icon.texture.SetVertexColor, icon.texture, self:ClassColor(dot.class))
+            self:Color(icon, dot)
             pcall(self.pins.AddWorldMapIconMap, self.pins, self, icon, dot.mapId, dot.x, dot.y, showFlag)
         end
     end
@@ -325,7 +346,7 @@ function Pins:DrawMinimap(dots)
             local icon = self:Icon(drawn, self.minimapIcons)
             if icon ~= nil then
                 icon.dot = dot
-                pcall(icon.texture.SetVertexColor, icon.texture, self:ClassColor(dot.class))
+                self:Color(icon, dot)
                 -- Not shown from a parent zone, and not floating on the edge.
                 pcall(self.pins.AddMinimapIconMap, self.pins, self, icon, dot.mapId, dot.x, dot.y, false, false)
             end

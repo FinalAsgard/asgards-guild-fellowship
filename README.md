@@ -392,6 +392,7 @@ Guildmates running the add-on share where they are, so you can see where the gui
 - **World map**: the same, one marker per continent.
 - Hover a dot to see the character's name, level, and alias or main (the same as its [chat tag](#chat-tags)). Hover a marker to list everyone there.
 - Guildmates without the add-on, and those whose position hasn't arrived yet, still count on the continent and world maps at zone level, using the zone the guild roster shows. They're marked **from the roster** in the hover list, and never get a dot on the zone map or minimap.
+- While you're in a party, guildmates outside it are dimmed on every map and the minimap, so your party members stand out. A marker with nobody from your party is dimmed as a whole.
 - Your own characters never show.
 
 Guildmates in your zone move every 10 seconds or so; everyone else updates about every 2 minutes, and promptly after a zone change. Same-zone updates go by whisper to at most the 10 guildmates heard from most recently. If whispers don't work, the add-on falls back to the guild-wide update alone.

@@ -2199,13 +2199,31 @@ if clientProfile.supported then
             return members[key] ~= nil and members[key].online == true
         end)
     end
+    -- The keys of the player's party members, or nil outside a party.
+    local function partyKeys(normalizer)
+        if not client:IsInGroup() then
+            return nil
+        end
+        local keys = {}
+        local members = client:GetPartyMembers()
+        local index
+        for index = 1, #members do
+            local key = normalizer:Key(members[index].name)
+            if key ~= nil then
+                keys[key] = true
+            end
+        end
+        return keys
+    end
     -- A board entry as the map shows it: with the character's name and its
-    -- chat tag (alias or main).
+    -- chat tag (alias or main), and dimmed while the player is in a party
+    -- it isn't in.
     local function describeLocations(entries)
         local guild, partition, normalizer = rosterController:QuietContext()
         if guild == nil then
             return {}
         end
+        local party = partyKeys(normalizer)
         local people = addon.PlayerService.Create(partition, { normalizer = normalizer })
         local described = {}
         local index
@@ -2222,6 +2240,7 @@ if clientProfile.supported then
                 name = people:CharacterName(entry.key) or entry.key,
                 label = tag and tag.text or nil,
                 fromRoster = entry.fromRoster,
+                dimmed = party ~= nil and not party[entry.key] or nil,
             })
         end
         return described
@@ -2462,6 +2481,10 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         recordParty()
         if groupFinder ~= nil then
             groupFinder:Refresh()
+        end
+        -- Guildmates outside the party are dimmed on the maps.
+        if mapPins ~= nil then
+            mapPins:Refresh()
         end
     end)
     -- Without a chat filter API, chat is simply left untagged.
