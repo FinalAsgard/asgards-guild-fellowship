@@ -2031,6 +2031,10 @@ if clientProfile.supported then
         if groupFinder ~= nil then
             groupFinder:Refresh()
         end
+        -- The roster's zones count on the world map.
+        if mapPins ~= nil then
+            mapPins:Refresh()
+        end
         -- The first loaded roster tells Guild Greet who was already online
         -- and how long everyone else has been away.
         guildGreet:OnRosterUpdate(function()
@@ -2166,6 +2170,7 @@ if clientProfile.supported then
                 level = entry.level,
                 name = people:CharacterName(entry.key) or entry.key,
                 label = tag and tag.text or nil,
+                fromRoster = entry.fromRoster,
             })
         end
         return described
@@ -2178,8 +2183,30 @@ if clientProfile.supported then
         end
         return mapParents[mapId]
     end
+    -- Zone maps by name, looked up once the client's maps give any.
+    local zoneMaps
+    -- Online guildmates whose roster zone is a zone on the map, for the
+    -- world map markers (the board leaves out those it has a position for).
+    local function rosterLocations()
+        local guild, _, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return {}
+        end
+        if zoneMaps == nil or next(zoneMaps) == nil then
+            zoneMaps = client:GetZoneMapIds()
+        end
+        local found = {}
+        local key, member
+        for key, member in pairs(rosterController:LiveMembers(normalizer)) do
+            local mapId = member.online and member.zone ~= nil and zoneMaps[member.zone] or nil
+            if mapId ~= nil then
+                table.insert(found, { key = key, mapId = mapId, class = member.classToken, level = member.level })
+            end
+        end
+        return found
+    end
     -- World map markers: per zone on its continent's map, and per continent
-    -- on the world map.
+    -- on the world map, counting guildmates the roster places in a zone.
     local function locationMarkers()
         local markers = {}
         local function add(grouped, shownOn)
@@ -2194,14 +2221,15 @@ if clientProfile.supported then
                 end
             end
         end
+        local roster = rosterLocations()
         add(locationBoard:Markers(function(mapId)
             return mapId
-        end), function(zone)
+        end, roster), function(zone)
             return parentsOf(zone).continent
         end)
         add(locationBoard:Markers(function(mapId)
             return parentsOf(mapId).continent
-        end), function(continent)
+        end, roster), function(continent)
             return parentsOf(continent).world
         end)
         return markers

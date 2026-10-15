@@ -176,6 +176,48 @@ test.test("the board groups guildmates per continent for the world map", functio
     test.assertEqual(4, #continents[2].people)
 end)
 
+test.test("online roster members without a position count on the world map, marked as from the roster", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local board = addon.LocationBoard.Create({
+        isOwn = function(key)
+            return key == "toolbox-area52"
+        end,
+    })
+    board:OnLocation(protocol.Location("hammer-area52", { mapId = ZONES.elwynn, x = 0.5, y = 0.5, class = "PALADIN",
+        level = 70 }), "hammer-area52", 1000)
+    local roster = {
+        -- A position from the add-on wins over the roster's zone.
+        { key = "hammer-area52", mapId = ZONES.westfall, class = "PALADIN", level = 70 },
+        { key = "wrench-area52", mapId = ZONES.elwynn, class = "ROGUE", level = 12 },
+        { key = "visitor-area52", mapId = ZONES.durotar, class = "MAGE", level = 80 },
+        -- Never the player's own characters.
+        { key = "toolbox-area52", mapId = ZONES.durotar, class = "WARRIOR", level = 80 },
+    }
+
+    local zones = board:Markers(function(mapId)
+        return mapId
+    end, roster)
+
+    test.assertEqual(2, #zones)
+    test.assertEqual(ZONES.durotar, zones[1].area)
+    test.assertEqual(1, #zones[1].people)
+    test.assertEqual("visitor-area52", zones[1].people[1].key)
+    test.assertTrue(zones[1].people[1].fromRoster)
+    test.assertEqual(nil, zones[1].people[1].x)
+    test.assertEqual(ZONES.elwynn, zones[2].area)
+    test.assertEqual(2, #zones[2].people)
+    test.assertEqual("hammer-area52", zones[2].people[1].key)
+    test.assertEqual(nil, zones[2].people[1].fromRoster)
+    test.assertEqual("wrench-area52", zones[2].people[2].key)
+    test.assertTrue(zones[2].people[2].fromRoster)
+    test.assertEqual("MAGE", board:Markers(function(mapId)
+        return CONTINENTS[mapId]
+    end, roster)[1].people[1].class)
+    -- They never become dots.
+    test.assertEqual(1, #board:All())
+end)
+
 -- WoW adapter ----------------------------------------------------------------
 
 local function newClient(environment)
@@ -249,6 +291,53 @@ test.test("the adapter finds the continent and world map a zone sits in", functi
     test.assertEqual(nil, newClient({}):GetMapParents(1429).continent)
     test.assertEqual(nil, newClient({ C_Map = { GetMapInfo = function() error("no maps") end } })
         :GetMapParents(1429).world)
+end)
+
+-- The zone maps under the cosmic map, as GetMapChildrenInfo lists them:
+-- an instance and a continent among them, and a name two zones share.
+local function zoneChildren(root, mapType, all)
+    test.assertEqual(946, root)
+    test.assertEqual(3, mapType)
+    test.assertTrue(all)
+    return {
+        { mapID = 1429, name = "Elwynn Forest", mapType = 3 },
+        { mapID = 1455, name = "Ironforge", mapType = 3 },
+        { mapID = 1415, name = "Eastern Kingdoms", mapType = 2 },
+        { mapID = 1581, name = "The Deadmines", mapType = 4 },
+        { mapID = 2000, name = "Dalaran", mapType = 3 },
+        { mapID = 1500, name = "Dalaran", mapType = 3 },
+    }
+end
+
+test.test("the adapter names the zones in the client's map tree", function()
+    local maps = treeMaps()
+    maps.GetBestMapForUnit = function()
+        return 1429
+    end
+    maps.GetMapChildrenInfo = zoneChildren
+    local zones = newClient({ C_Map = maps }):GetZoneMapIds()
+
+    test.assertEqual(1429, zones["Elwynn Forest"])
+    test.assertEqual(1455, zones["Ironforge"])
+    test.assertEqual(1500, zones["Dalaran"])
+    -- Instances and continents never match a roster zone.
+    test.assertEqual(nil, zones["The Deadmines"])
+    test.assertEqual(nil, zones["Eastern Kingdoms"])
+
+    -- Not yet placed on a map, it starts from the fallback world map.
+    maps.GetBestMapForUnit = function()
+        return nil
+    end
+    maps.GetFallbackWorldMapID = function()
+        return 947
+    end
+    test.assertEqual(1429, newClient({ C_Map = maps }):GetZoneMapIds()["Elwynn Forest"])
+
+    test.assertEqual(nil, next(newClient({}):GetZoneMapIds()))
+    maps.GetMapChildrenInfo = function()
+        error("no maps")
+    end
+    test.assertEqual(nil, next(newClient({ C_Map = maps }):GetZoneMapIds()))
 end)
 
 test.test("without a position or class the adapter returns nil instead of raising", function()
@@ -409,6 +498,10 @@ test.test("a marker's tooltip lists everyone there with their level and alias or
     test.assertEqual(2, #lines)
     test.assertEqual("Hammer, level 42 (TheTool)", lines[1])
     test.assertEqual("Wrench, level 70", lines[2])
+
+    lines = addon.MapPins.MarkerLines({ people = { { key = "anvil-area52", name = "Anvil", level = 12,
+        label = "Smithy", fromRoster = true } } })
+    test.assertEqual("Anvil, level 12 (Smithy), from the roster", lines[1])
 end)
 
 test.test("a dot's tooltip names the character, its level, and its alias or main", function()
@@ -622,6 +715,48 @@ local function registerWholeAddonTests(profile)
         test.assertEqual("MAGE", zone.icon.marker.people[1].class)
         local continent = iconsOn(pins, 947)[1]
         test.assertEqual(0.1415, continent.x)
+    end)
+
+    test.test(profile .. ": in the whole add-on, online guildmates count on the world map from the roster's zone", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        -- The officer is online in the fixture zone (Ironforge or Dornogal),
+        -- which sits on the Eastern Kingdoms here.
+        local zoneId = profile == "Retail" and 2339 or 1455
+        local viewer = login(profile, channel, guild.members[3].name, nil, nil, nil, function(environment)
+            installCoordinates(environment)
+            local maps = treeMaps()
+            environment.C_Map.GetMapInfo = function(mapId)
+                if mapId == zoneId then
+                    return { mapID = mapId, name = guild.members[1].zone, mapType = 3, parentMapID = 1415 }
+                end
+                return maps.GetMapInfo(mapId)
+            end
+            environment.C_Map.GetMapChildrenInfo = function()
+                return { { mapID = zoneId, name = guild.members[1].zone, mapType = 3 } }
+            end
+        end)
+
+        local pins = viewer.pins
+        -- Never a dot on the zone map.
+        test.assertEqual(0, #iconsOn(pins, zoneId))
+        local zone = iconsOn(pins, 1415)[1]
+        test.assertEqual(zoneId / 10000, zone.x)
+        local people = zone.icon.marker.people
+        test.assertEqual(1, #people)
+        test.assertTrue(people[1].fromRoster)
+        test.assertEqual("WARRIOR", people[1].class)
+        test.assertEqual(guild.members[1].level, people[1].level)
+        test.assertEqual(1, #iconsOn(pins, 947))
+
+        -- Once the officer shares a position, that replaces the roster's.
+        local officer = login(profile, channel, guild.members[1].name, { mapID = 1429, x = 0.25, y = 0.5 }, "WARRIOR")
+        test.assertEqual(1, locationMessages(officer))
+        fixtures.deliver(channel)
+        test.assertEqual(1, #iconsOn(pins, 1429))
+        people = iconsOn(pins, 1415)[1].icon.marker.people
+        test.assertEqual(1, #people)
+        test.assertEqual(nil, people[1].fromRoster)
     end)
 
     test.test(profile .. ": in the whole add-on, locations from outside the guild are ignored", function()

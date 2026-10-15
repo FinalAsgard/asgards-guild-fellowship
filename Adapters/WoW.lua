@@ -619,6 +619,53 @@ function Client:GetMapParents(mapId)
     return parents
 end
 
+local ZONE_MAP_TYPE = 3
+
+-- Every zone map in the client's map tree by name, as the guild roster
+-- names zones: { [name] = mapId }. A name two zones share goes to the lower
+-- map ID. Dungeons, raids and battlegrounds aren't zone maps, so their names
+-- never match. Empty when the client's maps don't say.
+function Client:GetZoneMapIds()
+    local maps = self.environment.C_Map
+    local zones = {}
+    if type(maps) ~= "table" then
+        return zones
+    end
+    -- The top of the tree: climb from the player's zone, or from the
+    -- client's fallback world map.
+    local root = self:zoneMapId()
+    if root == nil then
+        local ok, fallback = callFunction(maps.GetFallbackWorldMapID)
+        root = ok and type(fallback) == "number" and fallback or nil
+    end
+    if root == nil then
+        return zones
+    end
+    local steps
+    for steps = 1, 10 do
+        local ok, info = callFunction(maps.GetMapInfo, root)
+        if not ok or type(info) ~= "table" or type(info.parentMapID) ~= "number" or info.parentMapID == 0 then
+            break
+        end
+        root = info.parentMapID
+    end
+    local ok, children = callFunction(maps.GetMapChildrenInfo, root, ZONE_MAP_TYPE, true)
+    if not ok or type(children) ~= "table" then
+        return zones
+    end
+    local index
+    for index = 1, #children do
+        local child = children[index]
+        if type(child) == "table" and type(child.name) == "string" and child.name ~= ""
+            and type(child.mapID) == "number" and child.mapType == ZONE_MAP_TYPE
+            and (zones[child.name] == nil or child.mapID < zones[child.name])
+        then
+            zones[child.name] = child.mapID
+        end
+    end
+    return zones
+end
+
 -- The logged-in character's class token ("WARRIOR"), or nil.
 function Client:GetPlayerClass()
     local ok, _, classToken = callFunction(self.environment.UnitClass, "player")

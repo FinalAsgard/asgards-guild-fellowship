@@ -20,6 +20,9 @@ local MapPins = {
     -- HBD_PINS_WORLDMAP_SHOW_CURRENT: a dot shows on its own zone's map only.
     SHOW_CURRENT_GLOBAL = "HBD_PINS_WORLDMAP_SHOW_CURRENT",
     SHOW_CURRENT = 0,
+    -- Marks people a marker shows from the guild roster's zone (they don't
+    -- run the add-on, or haven't shared a position).
+    ROSTER_TEXT = "from the roster",
 }
 addon.MapPins = MapPins
 
@@ -34,7 +37,8 @@ Pins.__index = Pins
 --           display, people } where `area` is the zone or continent map the
 --           marker stands for, `mapId` the continent or world map it's
 --           drawn on, `display` "dots" or "count" (see LocationBoard), and
---           `people` dots as above
+--           `people` dots as above, those from the roster with fromRoster
+--           set and no position
 function MapPins.Create(options)
     return setmetatable({
         client = options.client,
@@ -61,7 +65,8 @@ function MapPins.TooltipLines(dot)
 end
 
 -- A marker's tooltip lines: one per person, with their level and their
--- alias or main when they have one.
+-- alias or main when they have one, and marked when only the guild roster
+-- says where they are.
 function MapPins.MarkerLines(marker)
     local lines = {}
     local index
@@ -70,6 +75,9 @@ function MapPins.MarkerLines(marker)
         local line = (person.name or person.key) .. ", level " .. tostring(person.level)
         if person.label ~= nil and person.label ~= "" then
             line = line .. " (" .. person.label .. ")"
+        end
+        if person.fromRoster then
+            line = line .. ", " .. MapPins.ROSTER_TEXT
         end
         table.insert(lines, line)
     end

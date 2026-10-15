@@ -62,12 +62,31 @@ LocationBoard.DOTS_MAX = 3
 -- Guildmates grouped into one marker per area, for the world map: `areaOf`
 -- gives the area an entry's zone map belongs to (the zone itself for a
 -- continent map, its continent for the world map), or nil to leave it out.
--- Returns markers sorted by area: { area, people (sorted by key), display }
--- with display "dots" for 1 to DOTS_MAX people and "count" for more.
-function Board:Markers(areaOf)
+-- `roster` optionally adds online roster members, each { key, mapId, class,
+-- level } with mapId the zone map their roster zone names: those with a
+-- position on the board, and the player's own characters, are left out,
+-- and the rest join with fromRoster = true. Returns markers sorted by area:
+-- { area, people (sorted by key), display } with display "dots" for 1 to
+-- DOTS_MAX people and "count" for more.
+function Board:Markers(areaOf, roster)
     local byArea, areas = {}, {}
     local entries = self:All()
     local index
+    for index = 1, #(roster or {}) do
+        local member = roster[index]
+        if self.entries[member.key] == nil and not self.isOwn(member.key) then
+            table.insert(entries, {
+                key = member.key,
+                mapId = member.mapId,
+                class = member.class,
+                level = member.level,
+                fromRoster = true,
+            })
+        end
+    end
+    table.sort(entries, function(left, right)
+        return left.key < right.key
+    end)
     for index = 1, #entries do
         local area = areaOf(entries[index].mapId)
         if area ~= nil then
