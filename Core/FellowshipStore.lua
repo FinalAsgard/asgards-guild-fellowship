@@ -950,7 +950,9 @@ end
 function Partition:LeftPlayer(oldPlayer, key)
     local remaining = self:CharactersOf(oldPlayer)
     if remaining[1] == nil then
+        local alias = self.data.players[oldPlayer].alias
         self.data.players[oldPlayer] = nil
+        self:AliasesChanged(alias, nil)
     elseif self.data.players[oldPlayer].main == key then
         local best = remaining[1]
         local index
@@ -1002,13 +1004,41 @@ function Partition:MoveToNewPlayer(key, source)
     return id
 end
 
+-- Kinds of note conflict a new, changed, or cleared alias may settle.
+local ALIAS_RETRY_KINDS = { unresolved = true, ambiguous = true }
+
+-- After the partition's set of aliases changed from `old` to `new` (either
+-- may be nil): notes with a pending unresolved or ambiguous conflict are
+-- marked unread, so the next scan reads them against the new aliases.
+function Partition:AliasesChanged(old, new)
+    if isText(old) and isText(new) and string.lower(old) == string.lower(new) then
+        return
+    end
+    if not isText(old) and not isText(new) then
+        return
+    end
+    local conflicts = self.data.conflicts
+    if type(conflicts) ~= "table" then
+        return
+    end
+    local index
+    for index = 1, #conflicts do
+        local entry = conflicts[index]
+        if type(entry) == "table" and entry.from == nil and ALIAS_RETRY_KINDS[entry.kind] then
+            self:ForgetNoteFingerprint(entry.character)
+        end
+    end
+end
+
 function Partition:ClearAlias(playerId, source)
     local player = self.data.players[playerId]
     if player == nil then
         return false
     end
+    local old = player.alias
     player.alias = nil
     player.aliasSource = source
+    self:AliasesChanged(old, nil)
     return true
 end
 
@@ -1017,8 +1047,10 @@ function Partition:SetAlias(playerId, alias, source)
     if player == nil or not isText(alias) then
         return false
     end
+    local old = player.alias
     player.alias = alias
     player.aliasSource = source
+    self:AliasesChanged(old, alias)
     return true
 end
 
@@ -1079,7 +1111,9 @@ end
 -- where kind is "main", "alias", "unresolved", "ambiguous", "cycle",
 -- "self reference", "chain too long", or "competing aliases", and
 -- suggestion is { main = key } or { alias = text } for the kinds that can be
--- accepted. Never the note text. A member's suggestion queued for an
+-- accepted. An "ambiguous" conflict from an alias held by several players
+-- also has `alias` and `mains` (the main of each of those players). Never
+-- the note text. A member's suggestion queued for an
 -- officer has kind "suggested main" or "suggested alias", plus `from` (the
 -- member's key) and `at` (when they made the edit); see SuggestionService.
 function Partition:SetConflicts(entries)

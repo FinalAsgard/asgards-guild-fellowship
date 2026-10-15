@@ -155,19 +155,43 @@ local function rootOf(key, ref, parseOf, partition, sizes)
 end
 
 -- Queues a conflict, unless the player already rejected this note.
-local function addConflict(plan, partition, key, kind, suggestion)
+-- `extra` fields (an ambiguous alias and the mains of the players holding
+-- it) are copied onto the entry.
+local function addConflict(plan, partition, key, kind, suggestion, extra)
     local character = partition:GetCharacter(key)
     if character ~= nil and character.rejected ~= nil
         and character.rejected[kind] == plan.fingerprints[key]
     then
         return
     end
-    table.insert(plan.conflicts, {
+    local entry = {
         character = key,
         fingerprint = plan.fingerprints[key],
         kind = kind,
         suggestion = suggestion,
-    })
+    }
+    local field, value
+    for field, value in pairs(extra or {}) do
+        entry[field] = value
+    end
+    table.insert(plan.conflicts, entry)
+end
+
+-- For an alias held by several players: the alias and the main of each
+-- player holding it, sorted.
+local function ambiguousAlias(ref, partition)
+    local mains = {}
+    local index
+    for index = 1, #ref.candidates do
+        local target = ref.candidates[index]
+        local player = target.player ~= nil and partition:GetPlayer(target.player)
+        local main = (player and player.main) or target.key
+        if main ~= nil then
+            table.insert(mains, main)
+        end
+    end
+    table.sort(mains)
+    return { alias = ref.text, mains = mains }
 end
 
 -- Which roster characters a plan processes:
@@ -402,6 +426,8 @@ function ReconcileEngine.Plan(inputs)
             if ref.status == "unresolved" then
                 -- Accepting records the name as an out-of-guild main.
                 addConflict(plan, partition, key, ref.status, { outOfGuild = ref.text })
+            elseif ref.status == "ambiguous" and ref.byAlias then
+                addConflict(plan, partition, key, ref.status, nil, ambiguousAlias(ref, partition))
             elseif ref.status ~= "resolved" then
                 addConflict(plan, partition, key, ref.status)
             elseif ref.byAlias and (ref.key == key or (ref.player ~= nil and partition:GetCharacter(key) ~= nil

@@ -573,3 +573,31 @@ test.test("the add-on never writes guild notes", function()
         end
     end
 end)
+
+test.test("the panel says an ambiguous alias is held by several players, and names them", function()
+    local state = setup()
+    state.scan({
+        { "Toolbox-Area52", "@Tinker" },
+        { "Hammer-Area52", "@Tinker" },
+        { "Wrench-Area52", "Healer >Tinker" },
+    }, "initial")
+    local members = state.roster({ { "Wrench-Area52", "Healer >Tinker" } })
+
+    local rows = state.addon.ConflictViewModel.Build({
+        partition = state.partition,
+        members = members,
+        normalizer = state.normalizer,
+    })
+
+    local found
+    local index
+    for index = 1, #rows do
+        if rows[index].character == "wrench-area52" then
+            found = rows[index]
+        end
+    end
+    test.assertEqual("ambiguous", found.kind)
+    test.assertEqual("Alias \"Tinker\" is held by several players: Hammer, Toolbox", found.suggests)
+    test.assertEqual("Healer >Tinker", found.note)
+    test.assertFalse(found.canAccept)
+end)
