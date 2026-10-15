@@ -10,10 +10,26 @@ local function fakeWidget()
     function widget:SetText(text) self.text = text end
     function widget:Show() self.shown = true end
     function widget:Hide() self.shown = false end
+    function widget:SetSize(width, height) self.size = { width, height } end
+    function widget:SetAllPoints(target) self.allPoints = target end
+    function widget:SetTexture(texture) self.texture = texture end
     function widget:CreateFontString()
         return fakeWidget()
     end
+    function widget:CreateTexture()
+        return fakeWidget()
+    end
     return widget
+end
+
+-- A member list row showing `name`; the list reuses rows for other members
+-- through SetMember.
+local function fakeRow(name)
+    local row = { memberInfo = name and { name = name } or nil }
+    function row:SetMember(memberInfo)
+        self.memberInfo = memberInfo
+    end
+    return row
 end
 
 -- Gives `environment` the Communities guild roster's member detail panel
@@ -27,7 +43,20 @@ local function installGuildRoster(environment)
     function detail:HookScript(name, handler)
         self.hooks[name] = handler
     end
-    environment.CommunitiesFrame = { GuildMemberDetailFrame = detail }
+    local list = { rows = {}, refreshes = 0 }
+    list.ScrollBox = {
+        ForEachFrame = function(_, callback)
+            local index
+            for index = 1, #list.rows do
+                callback(list.rows[index])
+            end
+        end,
+    }
+    function list:RefreshListDisplay()
+        self.refreshes = self.refreshes + 1
+    end
+    detail.memberList = list
+    environment.CommunitiesFrame = { GuildMemberDetailFrame = detail, MemberList = list }
     environment.securelyHooked = {}
     environment.hooksecurefunc = function(target, method, hook)
         table.insert(environment.securelyHooked, method)
@@ -42,6 +71,10 @@ local function installGuildRoster(environment)
         if parent == detail then
             detail.panel = fakeWidget()
             return detail.panel
+        end
+        if type(parent) == "table" and parent.SetMember ~= nil then
+            parent.marker = fakeWidget()
+            return parent.marker
         end
         return createFrame(frameType, name, parent, ...)
     end
@@ -187,7 +220,88 @@ local function registerProfileTests(profile)
         end)
 end
 
+local function registerRowTests(profile)
+    test.test(profile .. ": an officer sees a marker on rows of members with an out-of-date note", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local list = detail.memberList
+        list.rows = { fakeRow("Hammer"), fakeRow("Toolbox"), fakeRow(nil) }
+        local overlay = build(world, { rows = { Hammer = ROW } })
+
+        test.assertTrue(overlay:AttachRows())
+
+        test.assertTrue(list.rows[1].marker.shown)
+        test.assertFalse(list.rows[2].marker.shown)
+        test.assertFalse(list.rows[3].marker.shown)
+        test.assertEqual("RIGHT", list.rows[1].marker.points[1][1])
+        -- The list's own redraw still ran.
+        list:RefreshListDisplay()
+        test.assertEqual(1, list.refreshes)
+    end)
+
+    test.test(profile .. ": markers follow scrolling, sorting and refreshes", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local list = detail.memberList
+        list.rows = { fakeRow("Hammer"), fakeRow("Toolbox") }
+        local rows = { Hammer = ROW }
+        local overlay = build(world, { rows = rows })
+        overlay:AttachRows()
+
+        -- Scrolling: a row is reused for another member.
+        list.rows[1]:SetMember({ name = "Toolbox" })
+        list.rows[2]:SetMember({ name = "Hammer" })
+        test.assertFalse(list.rows[1].marker.shown)
+        test.assertTrue(list.rows[2].marker.shown)
+
+        -- Sorting or a roster refresh redraws the list.
+        list.rows[1].memberInfo = { name = "Hammer" }
+        list:RefreshListDisplay()
+        test.assertTrue(list.rows[1].marker.shown)
+
+        -- The note was fixed: the next refresh after a scan clears it.
+        rows.Hammer = nil
+        overlay:Refresh()
+        test.assertFalse(list.rows[1].marker.shown)
+        test.assertFalse(list.rows[2].marker.shown)
+    end)
+
+    test.test(profile .. ": members who aren't officers see no row markers", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        detail.memberList.rows = { fakeRow("Hammer") }
+        local overlay = build(world, { officer = false, rows = { Hammer = ROW } })
+
+        overlay:AttachRows()
+
+        test.assertFalse(detail.memberList.rows[1].marker.shown)
+    end)
+
+    test.test(profile .. ": in the whole add-on, an officer's row marker appears after the next roster update", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local officerName = world.guild.members[1].name
+        detail.memberList.rows = { fakeRow(officerName) }
+        fixtures.loadAddon(world)
+        fixtures.fire(world, "ADDON_LOADED", world.addonName)
+        world.loggedIn = true
+        fixtures.fire(world, "PLAYER_LOGIN")
+        fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local row = detail.memberList.rows[1]
+        test.assertFalse(row.marker.shown)
+
+        world.guild.members[1].note = "raid lead"
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+
+        test.assertTrue(row.marker.shown)
+    end)
+end
+
 local index
 for index = 1, #fixtures.PROFILES do
+    registerRowTests(fixtures.PROFILES[index])
     registerProfileTests(fixtures.PROFILES[index])
 end
