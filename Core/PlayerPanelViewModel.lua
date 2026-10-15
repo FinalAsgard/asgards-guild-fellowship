@@ -54,8 +54,14 @@ end
 -- How wide a line of the bio is, in characters, so it fits the panel.
 PlayerPanelViewModel.BIO_LINE = 48
 
--- One UTF-8 character.
-local CHARACTER = "[%z\1-\127\194-\244][\128-\191]*"
+-- One UTF-8 character at the start of a string.
+local CHARACTER = "^[%z\1-\127\194-\244][\128-\191]*"
+
+-- The first character of `text`: a UTF-8 character, or a byte that doesn't
+-- start one (malformed text) on its own.
+local function firstCharacter(text)
+    return string.match(text, CHARACTER) or string.sub(text, 1, 1)
+end
 
 -- `text` broken into lines at spaces where it can be (a word longer than a
 -- line is split, never inside a character). A line is at most `width`
@@ -65,11 +71,15 @@ function PlayerPanelViewModel.Wrap(text, width, measure)
         return #part
     end
     local lines = {}
-    -- A line break the player typed starts a new line.
+    -- A line break the player typed starts a new line, and a blank line
+    -- they typed stays (one at the very end is dropped).
     if string.find(text, "\n", 1, true) ~= nil then
         local paragraph
-        for paragraph in string.gmatch(text, "[^\n]+") do
+        for paragraph in string.gmatch(string.gsub(text, "\n+$", "") .. "\n", "([^\n]*)\n") do
             local wrapped = PlayerPanelViewModel.Wrap(paragraph, width, measure)
+            if wrapped[1] == nil then
+                table.insert(lines, "")
+            end
             local index
             for index = 1, #wrapped do
                 table.insert(lines, wrapped[index])
@@ -85,11 +95,12 @@ function PlayerPanelViewModel.Wrap(text, width, measure)
                 table.insert(lines, current)
                 current = ""
             end
-            -- As many characters as fit, and always at least one.
-            local piece = ""
-            local character
-            for character in string.gmatch(word, CHARACTER) do
-                if piece ~= "" and measure(piece .. character) > width then
+            -- As many characters from its start as fit, and always at
+            -- least one, so the word gets shorter each time.
+            local piece = firstCharacter(word)
+            while #piece < #word do
+                local character = firstCharacter(string.sub(word, #piece + 1))
+                if measure(piece .. character) > width then
                     break
                 end
                 piece = piece .. character
@@ -113,7 +124,7 @@ function PlayerPanelViewModel.Wrap(text, width, measure)
 end
 
 -- The player's Discord, location and bio, as "about" rows under an About
--- heading; nothing when none is set. `wrap(text) -> lines` breaks the bio
+-- heading; nothing when none is set. `wrap(text) -> lines` breaks each
 -- into lines that fit the panel.
 local function aboutRows(partition, playerId, wrap)
     local discord = partition:PlayerProfileText(playerId, "discord")
@@ -123,18 +134,21 @@ local function aboutRows(partition, playerId, wrap)
         return {}
     end
     local rows = { { kind = "section", text = "About" } }
-    if discord ~= nil then
-        table.insert(rows, { kind = "about", text = "Discord: " .. discord })
-    end
-    if location ~= nil then
-        table.insert(rows, { kind = "about", text = "Location: " .. location })
-    end
-    if bio ~= nil then
-        local lines = wrap(bio)
+    local function add(text)
+        local lines = wrap(text)
         local index
         for index = 1, #lines do
             table.insert(rows, { kind = "about", text = lines[index] })
         end
+    end
+    if discord ~= nil then
+        add("Discord: " .. discord)
+    end
+    if location ~= nil then
+        add("Location: " .. location)
+    end
+    if bio ~= nil then
+        add(bio)
     end
     return rows
 end
@@ -156,8 +170,8 @@ end
 -- -> the player's ad count line, or nil), rolesOf (optional function(key)
 -- -> the character's role preferences as text, or nil), groupedWith
 -- (optional function(keys) -> how often this user grouped with the player,
--- or nil), wrap (optional function(text) -> the bio's lines as they fit
--- the panel; by default, lines of at most BIO_LINE bytes).
+-- or nil), wrap (optional function(text) -> an About entry's lines as
+-- they fit the panel; by default, lines of at most BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
 --   { id, label, alias, aliasSource, main, mainName, canMerge, dontSync, rows }
 -- where `main` is the main's character key, `canMerge` whether the player

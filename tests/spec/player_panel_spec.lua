@@ -323,6 +323,22 @@ test.test("the bio wraps at spaces to a measured width, never inside a character
     test.assertEqual("éé", lines[1])
     test.assertEqual("éé", lines[2])
     test.assertEqual("é", lines[3])
+
+    -- Malformed text (a byte no character starts with) still gets split,
+    -- one byte at a time, never looping forever.
+    lines = addon.PlayerPanelViewModel.Wrap("\128\128\128\128\128", 10, measure)
+    test.assertEqual("\128\128", lines[1])
+    test.assertEqual("\128\128", lines[2])
+    test.assertEqual("\128", lines[3])
+end)
+
+test.test("a blank line typed in the bio stays; one at the very end doesn't", function()
+    local addon = load()
+    local lines = addon.PlayerPanelViewModel.Wrap("Healer.\n\nEvenings only.\n", 48)
+    test.assertEqual(3, #lines)
+    test.assertEqual("Healer.", lines[1])
+    test.assertEqual("", lines[2])
+    test.assertEqual("Evenings only.", lines[3])
 end)
 
 test.test("the panel model wraps the bio with the window's wrapper when given", function()
@@ -335,4 +351,11 @@ test.test("the panel model wraps the bio with the window's wrapper when given", 
 
     local about = rowsOf(model, "about")
     test.assertEqual("[Raid lead on weekends]", about[1].text)
+
+    -- Discord and Location are wrapped too, with their labels.
+    state.partition:SetProfileText("toolbox-area52", "location", "Stormwind", START, "toolbox-area52")
+    about = rowsOf(state.build(nil, function(text)
+        return { "[" .. text .. "]" }
+    end), "about")
+    test.assertEqual("[Location: Stormwind]", about[1].text)
 end)
