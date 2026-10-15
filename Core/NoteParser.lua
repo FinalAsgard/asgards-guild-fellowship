@@ -1,16 +1,23 @@
 local _, addon = ...
 
 -- Reads the main (`>Name` or `Main: Name`) and alias (`@Alias` or
--- `Alias: Name`) markers from a public guild note. Pure: the caller passes a
--- resolver that knows which characters exist.
+-- `Alias: Name`) markers from a public guild note. Pure: the caller passes
+-- resolvers that know which characters and aliases exist.
 --
---   resolver(text) -> array of character keys matching `text`, matched by
---                     full name or, for a single word on Forever, by unique
---                     first name
+--   resolver(text)      -> array of character keys matching `text`, matched
+--                          by full name or, for a single word on Forever, by
+--                          unique first name
+--   aliasResolver(word) -> array of targets whose alias is `word`, ignoring
+--                          case: { player = id } for a stored player, or
+--                          { key = character key } for a character whose
+--                          player a note is about to name
 --
--- Only the first main marker and the first alias marker count, anywhere in
--- the note; all other text is ignored. Nothing is ever guessed: a main that
--- doesn't match exactly one character is reported as unresolved or ambiguous.
+-- A main marker's word is checked against aliases first (one-word aliases
+-- only; on Forever the first word, before the two-word name), then against
+-- character names. Only the first main marker and the first alias marker
+-- count, anywhere in the note; all other text is ignored. Nothing is ever
+-- guessed: a main that doesn't match exactly one alias or character is
+-- reported as unresolved or ambiguous.
 local NoteParser = {}
 addon.NoteParser = NoteParser
 
@@ -94,7 +101,28 @@ local function markerTextStart(note, symbol, word)
     return symbolAt and symbolAt + 1 or nil
 end
 
-local function parseMain(note, resolver, twoPartNames)
+-- A main ref for the alias `word`, or nil when no alias is `word`.
+local function resolveAlias(aliasResolver, word)
+    if aliasResolver == nil or string.match(word, ALIAS_WORD .. "$") == nil then
+        return nil
+    end
+    local targets = aliasResolver(word) or {}
+    if #targets == 1 then
+        return {
+            status = "resolved",
+            key = targets[1].key,
+            player = targets[1].player,
+            text = word,
+            byAlias = true,
+        }
+    end
+    if #targets > 1 then
+        return { status = "ambiguous", text = word, candidates = targets, byAlias = true }
+    end
+    return nil
+end
+
+local function parseMain(note, resolver, twoPartNames, aliasResolver)
     local start = markerTextStart(note, ">", "main")
     if start == nil then
         return nil
@@ -102,6 +130,11 @@ local function parseMain(note, resolver, twoPartNames)
     local words = nameWords(string.sub(note, start), twoPartNames and 2 or 1)
     if #words == 0 then
         return nil
+    end
+
+    local byAlias = resolveAlias(aliasResolver, words[1])
+    if byAlias ~= nil then
+        return byAlias
     end
 
     if twoPartNames and #words == 2 then
@@ -128,15 +161,26 @@ local function parseAlias(note)
 end
 
 -- Returns { mainRef, alias } where mainRef is nil (no marker) or
--- { status = "resolved"|"unresolved"|"ambiguous", key?, text, candidates? }.
-function NoteParser.Parse(note, resolver, rules)
+-- { status = "resolved"|"unresolved"|"ambiguous", key?, player?, text,
+-- candidates?, byAlias? }. A resolved ref carries a character `key`, or a
+-- `player` id when the marker named a stored player's alias; `byAlias` is
+-- set when the marker matched an alias. `aliasResolver` may be nil.
+function NoteParser.Parse(note, resolver, rules, aliasResolver)
     if type(note) ~= "string" or note == "" then
         return { mainRef = nil, alias = nil }
     end
     return {
-        mainRef = parseMain(note, resolver, rules ~= nil and rules.twoPartNames == true),
+        mainRef = parseMain(note, resolver, rules ~= nil and rules.twoPartNames == true, aliasResolver),
         alias = parseAlias(note),
     }
+end
+
+-- Just the alias marker of a note, or nil. Needs no resolver.
+function NoteParser.Alias(note)
+    if type(note) ~= "string" or note == "" then
+        return nil
+    end
+    return parseAlias(note)
 end
 
 -- A short fingerprint of a note, so the store can tell when a note changed

@@ -441,3 +441,24 @@ test.test("guild recruit: the user's own timers default to 60 minutes and save a
     database.recruit.myGeneralGapMinutes = "often"
     test.assertEqual(60, store:RecruitMyGap("general"))
 end)
+
+test.test("a partition looks up its players by alias, ignoring case", function()
+    local store = newStore(foundationRoot())
+    local partition = store:Partition(GUILD)
+    partition:RecordCharacter("toolbox-area52", MEMBER)
+    partition:RecordCharacter("hammer-area52", MEMBER)
+    partition:RecordCharacter("wrench-area52", MEMBER)
+    local tool = partition:GetCharacter("toolbox-area52").player
+    local hammer = partition:GetCharacter("hammer-area52").player
+    partition:SetAlias(tool, "Tool", "manual")
+    partition:SetAlias(hammer, "TOOL", "note")
+    partition:SetAlias(partition:GetCharacter("wrench-area52").player, "The Tool", "manual")
+
+    local found = partition:PlayersWithAlias("tool")
+
+    test.assertEqual(2, #found)
+    test.assertEqual(math.min(tool, hammer), found[1])
+    test.assertEqual(math.max(tool, hammer), found[2])
+    test.assertEqual(0, #partition:PlayersWithAlias("Nobody"))
+    test.assertEqual(0, #partition:PlayersWithAlias(nil))
+end)

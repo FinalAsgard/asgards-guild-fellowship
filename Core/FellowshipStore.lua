@@ -1022,6 +1022,23 @@ function Partition:SetAlias(playerId, alias, source)
     return true
 end
 
+-- Ids of the players whose alias is `alias`, ignoring case, in id order.
+function Partition:PlayersWithAlias(alias)
+    local ids = {}
+    if not isText(alias) then
+        return ids
+    end
+    local folded = string.lower(alias)
+    local id, player
+    for id, player in pairs(self.data.players) do
+        if isText(player.alias) and string.lower(player.alias) == folded then
+            table.insert(ids, id)
+        end
+    end
+    table.sort(ids)
+    return ids
+end
+
 -- Keys of every character of a player, main first, then alphabetical. The
 -- reverse index is rebuilt in memory when needed and never persisted.
 function Partition:CharactersOf(playerId)

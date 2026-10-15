@@ -170,3 +170,85 @@ test.test("note fingerprints are short, stable, and never the note text", functi
     test.assertEqual(nil, string.find(fingerprint, "Tool", 1, true))
     test.assertEqual(nil, NoteParser.Fingerprint(nil))
 end)
+
+-- Aliases held by players: "Tool" by player 7, "Ann" by player 9 (who isn't
+-- an Ann character), "Shared" by players 3 and 4, and "Spark" by the
+-- character a note is about to name.
+local ALIASES = {
+    ["tool"] = { { player = 7 } },
+    ["ann"] = { { player = 9 } },
+    ["hammer"] = { { player = 8 } },
+    ["shared"] = { { player = 3 }, { player = 4 } },
+    ["spark"] = { { key = "spark-area52" } },
+}
+local aliasCalls
+local function aliasResolver(word)
+    table.insert(aliasCalls, word)
+    return ALIASES[string.lower(word)] or {}
+end
+
+local ALIAS_TARGET_CASES = {
+    { rules = RETAIL, note = ">Tool", player = 7, why = "Retail alias names its player" },
+    { rules = RETAIL, note = ">tOOL", player = 7, why = "alias match ignores case" },
+    { rules = RETAIL, note = ">Hammer", player = 8, why = "an alias wins over a character name" },
+    { rules = RETAIL, note = "Main: Tool", player = 7, why = "a Main: label names an alias too" },
+    { rules = RETAIL, note = ">Spark", key = "spark-area52", why = "an alias a note is about to set names its character" },
+    { rules = FOREVER, note = ">Tool", player = 7, why = "Forever alias wins over a unique first name" },
+    { rules = FOREVER, note = ">Tool Box", player = 7, why = "Forever tries the alias on the first word before the two-word name" },
+    { rules = FOREVER, note = ">Ann", player = 9, why = "Forever alias wins over a shared first name" },
+    { rules = FOREVER, note = ">Hammer Smith", player = 8, why = "Forever alias wins over a full two-word name" },
+}
+
+for index = 1, #ALIAS_TARGET_CASES do
+    local case = ALIAS_TARGET_CASES[index]
+    test.test("note parser alias target: " .. case.why, function()
+        aliasCalls = {}
+        local resolver = case.rules == FOREVER and foreverResolver or retailResolver
+        local ref = NoteParser.Parse(case.note, resolver, case.rules, aliasResolver).mainRef
+
+        test.assertEqual("resolved", ref.status)
+        test.assertEqual(case.player, ref.player)
+        test.assertEqual(case.key, ref.key)
+        test.assertTrue(ref.byAlias)
+    end)
+end
+
+test.test("note parser falls back to character names when no alias matches", function()
+    aliasCalls = {}
+    local retail = NoteParser.Parse(">Toolbox", retailResolver, RETAIL, aliasResolver).mainRef
+    local forever = NoteParser.Parse(">Tool Box", foreverResolver, FOREVER, function()
+        return {}
+    end).mainRef
+    local unknown = NoteParser.Parse(">Nobody", retailResolver, RETAIL, aliasResolver).mainRef
+
+    test.assertEqual("toolbox-area52", retail.key)
+    test.assertEqual(nil, retail.player)
+    test.assertEqual(nil, retail.byAlias)
+    test.assertEqual("tool box-camelot", forever.key)
+    test.assertEqual("unresolved", unknown.status)
+end)
+
+test.test("note parser reports an alias held by several players as ambiguous", function()
+    aliasCalls = {}
+    local ref = NoteParser.Parse(">Shared", retailResolver, RETAIL, aliasResolver).mainRef
+
+    test.assertEqual("ambiguous", ref.status)
+    test.assertEqual(2, #ref.candidates)
+    test.assertTrue(ref.byAlias)
+end)
+
+test.test("note parser only asks about one-word aliases", function()
+    aliasCalls = {}
+    NoteParser.Parse(">Tool#1", retailResolver, RETAIL, aliasResolver)
+    NoteParser.Parse(">The Tool", foreverResolver, FOREVER, aliasResolver)
+
+    -- "Tool#1" isn't an alias word; on Forever only the first word is tried.
+    test.assertEqual(1, #aliasCalls)
+    test.assertEqual("The", aliasCalls[1])
+end)
+
+test.test("note parser reads just the alias marker without any resolver", function()
+    test.assertEqual("TheTool", NoteParser.Alias(">Toolbox @TheTool"))
+    test.assertEqual(nil, NoteParser.Alias(">Toolbox"))
+    test.assertEqual(nil, NoteParser.Alias(nil))
+end)

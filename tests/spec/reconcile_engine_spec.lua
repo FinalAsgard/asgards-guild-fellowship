@@ -333,3 +333,189 @@ test.test("the store keeps a note fingerprint, never the note text", function()
     end
     test.assertFalse(containsNoteText(database))
 end)
+
+-- Plans and applies a scan of `entries` against an existing partition.
+local function rescan(addon, partition, rules, entries, mode, force)
+    local members, normalizer = roster(addon, rules, entries)
+    return addon.ReconcileEngine.Apply(partition, addon.ReconcileEngine.Plan({
+        partition = partition,
+        members = members,
+        normalizer = normalizer,
+        rules = rules,
+        mode = mode or "full",
+        force = force,
+    }))
+end
+
+local function conflictKinds(partition)
+    local kinds = {}
+    local conflicts = partition:GetConflicts()
+    local index
+    for index = 1, #conflicts do
+        kinds[conflicts[index].character] = conflicts[index]
+    end
+    return kinds
+end
+
+local ALIAS_SCANS = {
+    { rules = RETAIL, profile = "Retail", main = "Toolbox-Area52", mainKey = "toolbox-area52",
+        alts = { { "Hammer-Area52", "hammer-area52" }, { "Wrench-Area52", "wrench-area52" } } },
+    { rules = FOREVER, profile = "Forever", main = "Tool Box", mainKey = "tool box-camelot",
+        alts = { { "Hammer Smith", "hammer smith-camelot" }, { "Wrench Bolt", "wrench bolt-camelot" } } },
+}
+
+local scanIndex
+for scanIndex = 1, #ALIAS_SCANS do
+    local scan = ALIAS_SCANS[scanIndex]
+
+    test.test(scan.profile .. ": a main's @Alias and its alts' >Alias link in one first scan", function()
+        local addon, partition, plan = setup(scan.rules, {
+            { scan.main, "@Tinker raid lead" },
+            { scan.alts[1][1], "Healer >Tinker" },
+            { scan.alts[2][1], ">tinker" },
+        })
+
+        local result = addon.ReconcileEngine.Apply(partition, plan())
+
+        test.assertEqual(2, result.linked)
+        test.assertEqual(0, result.conflicts)
+        local main = playerOf(partition, scan.mainKey)
+        test.assertEqual(scan.mainKey, main.main)
+        test.assertEqual("Tinker", main.alias)
+        test.assertEqual(main, playerOf(partition, scan.alts[1][2]))
+        test.assertEqual(main, playerOf(partition, scan.alts[2][2]))
+        test.assertFalse(partition:IsDeclared(scan.mainKey))
+    end)
+
+    test.test(scan.profile .. ": a >Alias alt joins a stored player and stays when the main changes", function()
+        local addon, partition, plan = setup(scan.rules, {
+            { scan.main, "" },
+            { scan.alts[1][1], "" },
+        })
+        addon.ReconcileEngine.Apply(partition, plan())
+        local playerId = partition:GetCharacter(scan.mainKey).player
+        partition:SetAlias(playerId, "Tinker", "manual")
+        local entries = {
+            { scan.main, "" },
+            { scan.alts[1][1], "" },
+            { scan.alts[2][1], ">TINKER" },
+        }
+
+        local result = rescan(addon, partition, scan.rules, entries)
+
+        test.assertEqual(1, result.linked)
+        test.assertEqual(playerId, partition:GetCharacter(scan.alts[2][2]).player)
+
+        -- Another character becomes the main: the alt's note still agrees.
+        partition:JoinPlayerOf(scan.alts[1][2], scan.mainKey, "manual")
+        partition:SetMain(playerId, scan.alts[1][2])
+        result = rescan(addon, partition, scan.rules, entries, "full", true)
+
+        test.assertEqual(0, result.conflicts)
+        test.assertEqual(0, result.linked)
+        test.assertEqual(playerId, partition:GetCharacter(scan.alts[2][2]).player)
+        test.assertEqual(scan.alts[1][2], partition:GetPlayer(playerId).main)
+    end)
+end
+
+test.test("an alias wins over a character with the same name", function()
+    local addon, partition, plan = setup(RETAIL, {
+        { "Toolbox-Area52", "@Hammer" },
+        { "Hammer-Area52", "" },
+        { "Wrench-Area52", ">Hammer" },
+    })
+
+    addon.ReconcileEngine.Apply(partition, plan())
+
+    test.assertEqual("toolbox-area52", playerOf(partition, "wrench-area52").main)
+    test.assertEqual("hammer-area52", playerOf(partition, "hammer-area52").main)
+end)
+
+test.test("an alt repeating its player's alias next to >Alias is not ambiguous", function()
+    local addon, partition, plan = setup(RETAIL, {
+        { "Toolbox-Area52", "@Tinker" },
+        { "Hammer-Area52", ">Tinker @Tinker" },
+        { "Wrench-Area52", ">Toolbox @Tinker" },
+    })
+
+    local result = addon.ReconcileEngine.Apply(partition, plan())
+
+    test.assertEqual(0, result.conflicts)
+    test.assertEqual("toolbox-area52", playerOf(partition, "hammer-area52").main)
+    test.assertEqual("toolbox-area52", playerOf(partition, "wrench-area52").main)
+    test.assertEqual("Tinker", playerOf(partition, "toolbox-area52").alias)
+end)
+
+test.test("a note naming its own player's alias changes nothing and declares nothing", function()
+    local addon, partition, plan = setup(RETAIL, {
+        { "Toolbox-Area52", ">Tinker @Tinker" },
+        { "Hammer-Area52", ">Tinker" },
+    })
+
+    local result = addon.ReconcileEngine.Apply(partition, plan())
+
+    test.assertEqual(0, result.conflicts)
+    test.assertEqual("toolbox-area52", playerOf(partition, "hammer-area52").main)
+    test.assertFalse(partition:IsDeclared("toolbox-area52"))
+
+    -- A rescan of every note: the main and its alt both still agree.
+    result = rescan(addon, partition, RETAIL, {
+        { "Toolbox-Area52", ">Tinker @Tinker" },
+        { "Hammer-Area52", ">Tinker" },
+    }, "full", true)
+    test.assertEqual(0, result.conflicts)
+    test.assertFalse(partition:IsDeclared("toolbox-area52"))
+end)
+
+test.test("an organized character naming another player's alias is a main conflict", function()
+    local addon, partition, plan = setup(FOREVER, {
+        { "Tool Box", "@Tinker" },
+        { "Hammer Smith", "" },
+        { "Wrench Bolt", ">Hammer Smith" },
+    })
+    addon.ReconcileEngine.Apply(partition, plan())
+
+    local result = rescan(addon, partition, FOREVER, {
+        { "Tool Box", "@Tinker" },
+        { "Hammer Smith", "" },
+        { "Wrench Bolt", ">Tinker" },
+    })
+
+    test.assertEqual(0, result.linked)
+    test.assertEqual("hammer smith-camelot", playerOf(partition, "wrench bolt-camelot").main)
+    local conflict = conflictKinds(partition)["wrench bolt-camelot"]
+    test.assertEqual("main", conflict.kind)
+    test.assertEqual("tool box-camelot", conflict.suggestion.main)
+end)
+
+test.test("existing >Main notes behave as before when the word is nobody's alias", function()
+    local addon, partition, plan = setup(RETAIL, {
+        { "Toolbox-Area52", "@Tinker" },
+        { "Hammer-Area52", ">Toolbox" },
+        { "Wrench-Area52", ">Nobody" },
+    })
+
+    local result = plan()
+    addon.ReconcileEngine.Apply(partition, result)
+
+    test.assertEqual("toolbox-area52", result.links["hammer-area52"])
+    test.assertEqual("unresolved", conflictKinds(partition)["wrench-area52"].kind)
+end)
+
+test.test("a multi-word alias set by hand is never matched by a note", function()
+    local addon, partition, plan = setup(FOREVER, {
+        { "Tool Box", "" },
+        { "Hammer Smith", "" },
+    })
+    addon.ReconcileEngine.Apply(partition, plan())
+    partition:SetAlias(partition:GetCharacter("tool box-camelot").player, "The Tool", "manual")
+
+    rescan(addon, partition, FOREVER, {
+        { "Tool Box", "" },
+        { "Hammer Smith", "" },
+        { "Wrench Bolt", ">The Tool" },
+    })
+
+    test.assertEqual("unresolved", conflictKinds(partition)["wrench bolt-camelot"].kind)
+    test.assertTrue(playerOf(partition, "wrench bolt-camelot") ~= playerOf(partition, "tool box-camelot"))
+end)
