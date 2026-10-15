@@ -130,6 +130,9 @@ function MasterFrame.Build(framework, options)
         addon.Identity.displayName,
         options.frameName
     )
+    -- The framework hides its panels on a right-click anywhere inside;
+    -- ours close only with the close button or Escape.
+    panel.DontRightClickClose = true
     panel:SetFrameStrata("HIGH")
     setResizeBounds(panel)
     restoreGeometry(panel, options.loadGeometry(), parent)

@@ -287,6 +287,8 @@ local PICKER_HEIGHT = 380
 -- box and the matching players.
 local function buildPicker(framework, frameName)
     local panel = framework:CreateSimplePanel(UIParent, PICKER_WIDTH, PICKER_HEIGHT, "Link as alt of", frameName .. "Picker")
+    -- Like every panel here, closed only with its close button or Escape.
+    panel.DontRightClickClose = true
     panel:SetFrameStrata("DIALOG")
     local prompt = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     prompt:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
@@ -380,6 +382,8 @@ local PANEL_HEIGHT = 440
 -- picker "Merge into player").
 local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
+    -- Like every panel here, closed only with its close button or Escape.
+    panel.DontRightClickClose = true
     panel:SetFrameStrata("HIGH")
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
@@ -679,6 +683,8 @@ local REVIEW_LINES = 8
 
 local function buildReviewPanel(framework, options, frameName, anchor)
     local panel = framework:CreateSimplePanel(UIParent, REVIEW_WIDTH, REVIEW_HEIGHT, "Review", frameName .. "Review")
+    -- Like every panel here, closed only with its close button or Escape.
+    panel.DontRightClickClose = true
     panel:SetFrameStrata("DIALOG")
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 8, 0)
@@ -766,6 +772,9 @@ local function buildConflictPanel(framework, options, frameName)
         addon.Identity.displayName .. " - Conflicts",
         frameName .. "Conflicts"
     )
+    -- The framework hides its panels on a right-click anywhere inside;
+    -- ours close only with the close button or Escape.
+    panel.DontRightClickClose = true
     panel:SetFrameStrata("DIALOG")
 
     local explain = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
