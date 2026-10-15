@@ -2144,33 +2144,74 @@ if clientProfile.supported then
     end
     locationBoard = addon.LocationBoard.Create({ isOwn = isOwnCharacter })
     locationScheduler = addon.LocationScheduler.Create()
+    -- A board entry as the map shows it: with the character's name and its
+    -- chat tag (alias or main).
+    local function describeLocations(entries)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return {}
+        end
+        local people = addon.PlayerService.Create(partition, { normalizer = normalizer })
+        local described = {}
+        local index
+        for index = 1, #entries do
+            local entry = entries[index]
+            local tag = people:ChatTag(entry.key)
+            table.insert(described, {
+                key = entry.key,
+                mapId = entry.mapId,
+                x = entry.x,
+                y = entry.y,
+                class = entry.class,
+                level = entry.level,
+                name = people:CharacterName(entry.key) or entry.key,
+                label = tag and tag.text or nil,
+            })
+        end
+        return described
+    end
+    -- The continent and world map each zone map sits in, looked up once.
+    local mapParents = {}
+    local function parentsOf(mapId)
+        if mapParents[mapId] == nil then
+            mapParents[mapId] = client:GetMapParents(mapId)
+        end
+        return mapParents[mapId]
+    end
+    -- World map markers: per zone on its continent's map, and per continent
+    -- on the world map.
+    local function locationMarkers()
+        local markers = {}
+        local function add(grouped, shownOn)
+            local index
+            for index = 1, #grouped do
+                local marker = grouped[index]
+                local mapId = shownOn(marker.area)
+                if mapId ~= nil then
+                    marker.mapId = mapId
+                    marker.people = describeLocations(marker.people)
+                    table.insert(markers, marker)
+                end
+            end
+        end
+        add(locationBoard:Markers(function(mapId)
+            return mapId
+        end), function(zone)
+            return parentsOf(zone).continent
+        end)
+        add(locationBoard:Markers(function(mapId)
+            return parentsOf(mapId).continent
+        end), function(continent)
+            return parentsOf(continent).world
+        end)
+        return markers
+    end
     mapPins = addon.MapPins.Create({
         client = client,
         dots = function()
-            local guild, partition, normalizer = rosterController:QuietContext()
-            if guild == nil then
-                return {}
-            end
-            local people = addon.PlayerService.Create(partition, { normalizer = normalizer })
-            local dots = {}
-            local entries = locationBoard:All()
-            local index
-            for index = 1, #entries do
-                local entry = entries[index]
-                local tag = people:ChatTag(entry.key)
-                table.insert(dots, {
-                    key = entry.key,
-                    mapId = entry.mapId,
-                    x = entry.x,
-                    y = entry.y,
-                    class = entry.class,
-                    level = entry.level,
-                    name = people:CharacterName(entry.key) or entry.key,
-                    label = tag and tag.text or nil,
-                })
-            end
-            return dots
+            return describeLocations(locationBoard:All())
         end,
+        markers = locationMarkers,
     })
     -- A location from a guildmate: only from a character in the guild,
     -- about itself.

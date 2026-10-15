@@ -586,6 +586,39 @@ function Client:GetPlayerPosition()
     return { mapId = mapId, x = x, y = y }
 end
 
+local CONTINENT_MAP_TYPE = 2
+local WORLD_MAP_TYPE = 1
+
+-- The continent and world maps zone map `mapId` sits in: { continent,
+-- world }, either nil when the client's maps don't say.
+function Client:GetMapParents(mapId)
+    local maps = self.environment.C_Map
+    local parents = {}
+    if type(maps) ~= "table" or type(mapId) ~= "number" then
+        return parents
+    end
+    local current = mapId
+    local steps
+    for steps = 1, 10 do
+        local ok, info = callFunction(maps.GetMapInfo, current)
+        if not ok or type(info) ~= "table" or type(info.parentMapID) ~= "number" or info.parentMapID == 0 then
+            return parents
+        end
+        current = info.parentMapID
+        local parentOk, parent = callFunction(maps.GetMapInfo, current)
+        if not parentOk or type(parent) ~= "table" then
+            return parents
+        end
+        if parent.mapType == CONTINENT_MAP_TYPE and parents.continent == nil then
+            parents.continent = current
+        elseif parent.mapType == WORLD_MAP_TYPE then
+            parents.world = current
+            return parents
+        end
+    end
+    return parents
+end
+
 -- The logged-in character's class token ("WARRIOR"), or nil.
 function Client:GetPlayerClass()
     local ok, _, classToken = callFunction(self.environment.UnitClass, "player")

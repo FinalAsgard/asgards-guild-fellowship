@@ -113,6 +113,69 @@ test.test("the board keeps each guildmate's latest position and never the player
     test.assertEqual(1010, all[1].heard)
 end)
 
+-- Two Eastern Kingdoms zones and one Kalimdor zone.
+local ZONES = { elwynn = 1429, westfall = 1436, durotar = 1411 }
+local CONTINENTS = { [1429] = 1415, [1436] = 1415, [1411] = 1414 }
+
+test.test("the board groups guildmates per zone: up to 3 as dots, 4 or more as a count", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local board = addon.LocationBoard.Create()
+    local function at(key, mapId, now)
+        board:OnLocation(protocol.Location(key, { mapId = mapId, x = 0.5, y = 0.5, class = "MAGE", level = 30 }),
+            key, now or 1000)
+    end
+    at("a-area52", ZONES.elwynn)
+    at("b-area52", ZONES.elwynn)
+    at("c-area52", ZONES.elwynn)
+    at("d-area52", ZONES.westfall)
+    at("e-area52", ZONES.durotar)
+
+    local zones = board:Markers(function(mapId)
+        return mapId
+    end)
+    test.assertEqual(3, #zones)
+    test.assertEqual(ZONES.durotar, zones[1].area)
+    test.assertEqual(ZONES.elwynn, zones[2].area)
+    test.assertEqual("dots", zones[2].display)
+    test.assertEqual(3, #zones[2].people)
+    test.assertEqual("a-area52", zones[2].people[1].key)
+
+    at("f-area52", ZONES.elwynn)
+    zones = board:Markers(function(mapId)
+        return mapId
+    end)
+    test.assertEqual("count", zones[2].display)
+    test.assertEqual(4, #zones[2].people)
+end)
+
+test.test("the board groups guildmates per continent for the world map", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local board = addon.LocationBoard.Create()
+    local keys = { "a-area52", "b-area52", "c-area52", "d-area52", "e-area52" }
+    local maps = { ZONES.elwynn, ZONES.elwynn, ZONES.westfall, ZONES.westfall, ZONES.durotar }
+    local index
+    for index = 1, #keys do
+        board:OnLocation(protocol.Location(keys[index], { mapId = maps[index], x = 0.5, y = 0.5, class = "MAGE",
+            level = 30 }), keys[index], 1000)
+    end
+    -- A zone whose continent isn't known is left out.
+    board:OnLocation(protocol.Location("z-area52", { mapId = 9999, x = 0.5, y = 0.5, class = "MAGE", level = 30 }),
+        "z-area52", 1000)
+
+    local continents = board:Markers(function(mapId)
+        return CONTINENTS[mapId]
+    end)
+
+    test.assertEqual(2, #continents)
+    test.assertEqual(1414, continents[1].area)
+    test.assertEqual("dots", continents[1].display)
+    test.assertEqual(1415, continents[2].area)
+    test.assertEqual("count", continents[2].display)
+    test.assertEqual(4, #continents[2].people)
+end)
+
 -- WoW adapter ----------------------------------------------------------------
 
 local function newClient(environment)
@@ -155,6 +218,39 @@ test.test("the adapter reads the player's zone map, position and class", functio
     test.assertEqual("MAGE", client:GetPlayerClass())
 end)
 
+-- Elwynn Forest (zone) in the Eastern Kingdoms (continent) on Azeroth
+-- (world), under the cosmic map.
+local MAP_TREE = {
+    [1429] = { mapType = 3, parentMapID = 1415 },
+    [1415] = { mapType = 2, parentMapID = 947 },
+    [947] = { mapType = 1, parentMapID = 946 },
+    [946] = { mapType = 0, parentMapID = 0 },
+}
+
+local function treeMaps()
+    return {
+        GetMapInfo = function(mapId)
+            local info = MAP_TREE[mapId]
+            return info and { mapID = mapId, name = "Map " .. mapId, mapType = info.mapType,
+                parentMapID = info.parentMapID }
+        end,
+    }
+end
+
+test.test("the adapter finds the continent and world map a zone sits in", function()
+    local client = newClient({ C_Map = treeMaps() })
+
+    local parents = client:GetMapParents(1429)
+    test.assertEqual(1415, parents.continent)
+    test.assertEqual(947, parents.world)
+    test.assertEqual(947, client:GetMapParents(1415).world)
+    test.assertEqual(nil, client:GetMapParents(1415).continent)
+    test.assertEqual(nil, client:GetMapParents(12345).continent)
+    test.assertEqual(nil, newClient({}):GetMapParents(1429).continent)
+    test.assertEqual(nil, newClient({ C_Map = { GetMapInfo = function() error("no maps") end } })
+        :GetMapParents(1429).world)
+end)
+
 test.test("without a position or class the adapter returns nil instead of raising", function()
     local function raises()
         error("client API failed")
@@ -181,7 +277,14 @@ local function fakeWidget()
     function widget:SetVertexColor(r, g, b) self.color = { r, g, b } end
     function widget:EnableMouse(enabled) self.mouse = enabled end
     function widget:SetScript(name, handler) self.scripts[name] = handler end
+    function widget:SetPoint(...) self.point = { ... } end
+    function widget:SetText(text) self.text = text end
+    function widget:Show() self.shown = true end
+    function widget:Hide() self.shown = false end
     function widget:CreateTexture()
+        return fakeWidget()
+    end
+    function widget:CreateFontString()
         return fakeWidget()
     end
     return widget
@@ -257,16 +360,56 @@ local DOTS = {
     { key = "wrench-area52", mapId = 1453, x = 0.1, y = 0.2, class = "WARRIOR", name = "Wrench", level = 70 },
 }
 
-local function buildPins(world, dots)
-    local addon = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua", "Adapters/MapPins.lua")
+local function buildPins(world, dots, markers)
+    local addon = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua", "Adapters/MapPins.lua",
+        "Core/LocationBoard.lua")
     local client = addon.Compatibility.Create(world.environment)
     return addon.MapPins.Create({
         client = client,
         dots = function()
             return dots
         end,
+        markers = function()
+            return markers or {}
+        end,
     }), addon
 end
+
+-- A stand-in for HereBeDragons-2.0: an area's center is its map id over
+-- 10000 on any other map, so specs can tell where a marker went.
+local function installCoordinates(environment)
+    environment.LibStub.libs["HereBeDragons-2.0"] = {
+        TranslateZoneCoordinates = function(_, x, y, area, mapId)
+            test.assertEqual(0.5, x)
+            test.assertEqual(0.5, y)
+            if area == mapId then
+                return nil
+            end
+            return area / 10000, mapId / 10000
+        end,
+    }
+end
+
+-- The icons drawn on map `mapId`.
+local function iconsOn(pins, mapId)
+    local found = {}
+    local index
+    for index = 1, #pins.icons do
+        if pins.icons[index].mapId == mapId then
+            table.insert(found, pins.icons[index])
+        end
+    end
+    return found
+end
+
+test.test("a marker's tooltip lists everyone there with their level and alias or main", function()
+    local addon = test.newAddon("Adapters/MapPins.lua")
+
+    local lines = addon.MapPins.MarkerLines({ people = DOTS })
+    test.assertEqual(2, #lines)
+    test.assertEqual("Hammer, level 42 (TheTool)", lines[1])
+    test.assertEqual("Wrench, level 70", lines[2])
+end)
 
 test.test("a dot's tooltip names the character, its level, and its alias or main", function()
     local addon = test.newAddon("Adapters/MapPins.lua")
@@ -315,6 +458,68 @@ local function registerProfileTests(profile)
         test.assertEqual(1453, pins.icons[1].mapId)
     end)
 
+    test.test(profile .. ": world map markers sit at the area's center, dots side by side or a count", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        installCoordinates(world.environment)
+        local four = { DOTS[1], DOTS[2], DOTS[1], DOTS[2] }
+        local markers = {
+            { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1], DOTS[2] } },
+            { area = 1415, mapId = 947, display = "count", people = four },
+        }
+        local mapPins = buildPins(world, {}, markers)
+        mapPins:Start()
+        mapPins:Refresh()
+
+        local zone = iconsOn(pins, 1415)[1]
+        test.assertEqual(0.1429, zone.x)
+        test.assertEqual(0.1415, zone.y)
+        local frame = zone.icon
+        test.assertTrue(frame.dots[1].shown)
+        test.assertTrue(frame.dots[2].shown)
+        test.assertFalse(frame.dots[3].shown)
+        test.assertFalse(frame.badge.shown)
+        -- Side by side, never on top of each other.
+        test.assertTrue(frame.dots[1].point[4] < frame.dots[2].point[4])
+        test.assertEqual(0x3f / 255, frame.dots[1].color[1])
+        test.assertEqual(0xc6 / 255, frame.dots[2].color[1])
+
+        local continent = iconsOn(pins, 947)[1]
+        test.assertEqual(0.1415, continent.x)
+        test.assertTrue(continent.icon.badge.shown)
+        test.assertEqual("4", continent.icon.count.text)
+        test.assertFalse(continent.icon.dots[1].shown)
+
+        continent.icon.scripts.OnEnter(continent.icon)
+        local tooltip = world.environment.GameTooltip
+        test.assertEqual(4, #tooltip.lines)
+        test.assertEqual("Hammer, level 42 (TheTool)", tooltip.lines[1])
+    end)
+
+    test.test(profile .. ": markers are redrawn when the world map changes maps", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        installCoordinates(world.environment)
+        local markers = {}
+        world.environment.WorldMapFrame = { OnMapChanged = function() end }
+        world.environment.hooksecurefunc = function(target, method, hook)
+            local original = target[method]
+            target[method] = function(...)
+                original(...)
+                hook(...)
+            end
+        end
+        local mapPins = buildPins(world, {}, markers)
+        mapPins:Start()
+        mapPins:Refresh()
+        test.assertEqual(0, #pins.icons)
+
+        table.insert(markers, { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } })
+        world.environment.WorldMapFrame:OnMapChanged()
+
+        test.assertEqual(1, #iconsOn(pins, 1415))
+    end)
+
     test.test(profile .. ": without the pins library the map stays off without errors", function()
         local world = fixtures.newEnvironment(profile, { missingLibraries = { "HereBeDragons-Pins-2.0" } })
         local mapPins = buildPins(world, DOTS)
@@ -328,10 +533,13 @@ end
 
 -- Logs in a world on the shared channel as `playerName`, standing at `spot`
 -- ({ mapID, x, y }) when given.
-local function login(profile, channel, playerName, spot, class, guild)
+local function login(profile, channel, playerName, spot, class, guild, prepare)
     local world = fixtures.newEnvironment(profile, { playerName = playerName, guild = guild })
     local pins = installMap(world.environment)
     world.pins = pins
+    if prepare ~= nil then
+        prepare(world.environment)
+    end
     if spot ~= nil then
         world.zone.mapID = spot.mapID
         world.environment.C_Map.GetPlayerMapPosition = function(mapId)
@@ -393,6 +601,27 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(1, locationMessages(sharer))
         fixtures.runTimers(sharer, 60)
         test.assertEqual(2, locationMessages(sharer))
+    end)
+
+    test.test(profile .. ": in the whole add-on, a guildmate's zone and continent get world map markers", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local viewer = login(profile, channel, nil, nil, nil, nil, function(environment)
+            installCoordinates(environment)
+            environment.C_Map.GetMapInfo = treeMaps().GetMapInfo
+        end)
+        login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+
+        fixtures.deliver(channel)
+
+        local pins = viewer.pins
+        test.assertEqual(1, #iconsOn(pins, 1429))
+        local zone = iconsOn(pins, 1415)[1]
+        test.assertEqual(0.1429, zone.x)
+        test.assertEqual(1, #zone.icon.marker.people)
+        test.assertEqual("MAGE", zone.icon.marker.people[1].class)
+        local continent = iconsOn(pins, 947)[1]
+        test.assertEqual(0.1415, continent.x)
     end)
 
     test.test(profile .. ": in the whole add-on, locations from outside the guild are ignored", function()
