@@ -35,6 +35,8 @@ Pins.__index = Pins
 --           class, name, level, label? } (label is the chat tag's text)
 --   zone    function() -> the player's zone map ID, or nil (no minimap
 --           dots then)
+--   shown   function() -> false while guildmates are hidden from the maps
+--           and minimap
 --   markers function() -> the world map markers: each { area, mapId,
 --           display, people } where `area` is the zone or continent map the
 --           marker stands for, `mapId` the continent or world map it's
@@ -53,6 +55,9 @@ function MapPins.Create(options)
         end,
         zone = options.zone or function()
             return nil
+        end,
+        shown = options.shown or function()
+            return true
         end,
         icons = {},
         -- The minimap's own dots: a frame is drawn on one map only.
@@ -260,6 +265,13 @@ function Pins:Refresh()
         return
     end
     pcall(self.pins.RemoveAllWorldMapIcons, self.pins, self)
+    local okShown, shown = pcall(self.shown)
+    if okShown and shown == false then
+        if type(self.pins.RemoveAllMinimapIcons) == "function" then
+            pcall(self.pins.RemoveAllMinimapIcons, self.pins, self)
+        end
+        return
+    end
     local okDots, dots = pcall(self.dots)
     if not okDots or type(dots) ~= "table" then
         return

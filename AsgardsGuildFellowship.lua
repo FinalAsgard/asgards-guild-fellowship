@@ -29,7 +29,7 @@ local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSessi
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildNoteOverlay
-local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations
+local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
 local onSlotsChanged, groupBoard, announceGroup
 -- Draws the Group Finder on its tab (set up with the Group Finder below).
@@ -624,6 +624,38 @@ if clientProfile.supported then
             end,
         })
     end
+    settings:AddSection("guildMap", "Guild Map")
+    -- Account-wide, so they apply on every character.
+    local function guildMapToggle(id, setting, label, changed)
+        settings:Add("guildMap", {
+            id = id,
+            kind = "toggle",
+            label = label,
+            get = function()
+                local store = rosterController:Store()
+                return store == nil or store:GuildMapEnabled(setting)
+            end,
+            set = function(enabled)
+                local store = rosterController:Store()
+                if store == nil or not store:SetGuildMapEnabled(setting, enabled) then
+                    return nil, "saved data is unavailable"
+                end
+                changed()
+                return true
+            end,
+        })
+    end
+    -- Turned off, the player's dot disappears for everyone at once.
+    guildMapToggle("shareLocation", "share", "Share my location with the guild", function()
+        if shareLocationNow ~= nil then
+            shareLocationNow()
+        end
+    end)
+    guildMapToggle("showGuildMap", "show", "Show guildmates on the map and minimap", function()
+        if mapPins ~= nil then
+            mapPins:Refresh()
+        end
+    end)
     settings:AddSection("recruitment", "Recruitment", { page = "recruitment" })
     -- The user's own ad count, across all their characters.
     settings:Add("recruitment", {
@@ -2244,6 +2276,10 @@ if clientProfile.supported then
             local spot = client:GetPlayerPosition()
             return spot and spot.mapId or nil
         end,
+        shown = function()
+            local store = rosterController:Store()
+            return store == nil or store:GuildMapEnabled("show")
+        end,
     })
     -- A location from a guildmate: only from a character in the guild,
     -- about itself.
@@ -2256,29 +2292,41 @@ if clientProfile.supported then
         if senderKey == nil or not partition:IsInGuild(senderKey) then
             return
         end
-        if message.t ~= addon.LocationProtocol.TYPE_HIDE
-            and locationBoard:OnLocation(message, senderKey, client:Timestamp() or 0, sender)
-        then
+        local changed
+        if message.t == addon.LocationProtocol.TYPE_HIDE then
+            changed = locationBoard:OnHide(message, senderKey)
+        else
+            changed = locationBoard:OnLocation(message, senderKey, client:Timestamp() or 0, sender)
+        end
+        if changed then
             mapPins:Refresh()
         end
     end
     -- Sends the player's location when it's due, and asks again every few
     -- seconds.
     local function shareLocation()
-        local spot = client:GetPlayerPosition()
-        if spot == nil then
-            return
-        end
-        spot.class = client:GetPlayerClass()
-        spot.level = client:GetPlayerLevel()
-        if spot.class == nil or spot.level == nil then
-            return
+        local store = rosterController:Store()
+        local sharing = store == nil or store:GuildMapEnabled("share")
+        local spot
+        if sharing then
+            spot = client:GetPlayerPosition()
+            if spot == nil then
+                return
+            end
+            spot.class = client:GetPlayerClass()
+            spot.level = client:GetPlayerLevel()
+            if spot.class == nil or spot.level == nil then
+                return
+            end
         end
         local character = rosterController:SelfKey()
         local now = client:Timestamp()
-        local message = locationScheduler:Tick({ now = now, character = character, spot = spot })
+        local message = locationScheduler:Tick({ now = now, character = character, spot = spot, sharing = sharing })
         if message ~= nil then
             comm:Broadcast(message)
+        end
+        if not sharing then
+            return
         end
         -- Guildmates in the same zone hear more often, by whisper.
         local near, targets = locationScheduler:Near({ now = now, character = character, spot = spot,
@@ -2291,6 +2339,7 @@ if clientProfile.supported then
             end
         end
     end
+    shareLocationNow = shareLocation
     local sharing = false
     startLocations = function()
         mapPins:Start()

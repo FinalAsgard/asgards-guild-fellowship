@@ -146,6 +146,48 @@ test.test("after a whisper fails, only the guild broadcast goes on", function()
     test.assertEqual("gm-loc", scheduler:Tick(state).t)
 end)
 
+test.test("with sharing off, one gm-hide goes out and then nothing until it's back on", function()
+    local addon = load()
+    local scheduler = addon.LocationScheduler.Create()
+    local state = { now = 1000, character = "toolbox-area52", spot = SPOT, guildmates = guildmates(1) }
+    test.assertEqual("gm-loc", scheduler:Tick(state).t)
+
+    state.now = 1001
+    state.sharing = false
+    local hide = scheduler:Tick(state)
+    test.assertEqual("gm-hide", hide.t)
+    test.assertEqual("toolbox-area52", hide.c)
+    -- Sent even where the client can't place the player.
+    state.spot = nil
+    state.now = 2000
+    test.assertEqual(nil, scheduler:Tick(state))
+    state.spot = SPOT
+    test.assertEqual(nil, scheduler:Tick(state))
+    test.assertEqual(nil, scheduler:Near(state))
+
+    -- Back on, the location goes out at once.
+    state.sharing = true
+    state.now = 2001
+    test.assertEqual("gm-loc", scheduler:Tick(state).t)
+end)
+
+test.test("a gm-hide takes that guildmate off the board", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local board = addon.LocationBoard.Create()
+    board:OnLocation(protocol.Location("hammer-area52", SPOT), "hammer-area52", 1000)
+    board:OnLocation(protocol.Location("wrench-area52", SPOT), "wrench-area52", 1000)
+
+    -- Only about the sender itself.
+    test.assertFalse(board:OnHide(protocol.Hide("hammer-area52"), "wrench-area52"))
+    test.assertTrue(board:OnHide(protocol.Hide("hammer-area52"), "hammer-area52"))
+    test.assertFalse(board:OnHide(protocol.Hide("hammer-area52"), "hammer-area52"))
+
+    local all = board:All()
+    test.assertEqual(1, #all)
+    test.assertEqual("wrench-area52", all[1].key)
+end)
+
 test.test("the board keeps each guildmate's latest position and never the player's own characters", function()
     local addon = load()
     local protocol = addon.LocationProtocol
@@ -524,7 +566,7 @@ local DOTS = {
     { key = "wrench-area52", mapId = 1453, x = 0.1, y = 0.2, class = "WARRIOR", name = "Wrench", level = 70 },
 }
 
-local function buildPins(world, dots, markers, zone)
+local function buildPins(world, dots, markers, zone, shown)
     local addon = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua", "Adapters/MapPins.lua",
         "Core/LocationBoard.lua")
     local client = addon.Compatibility.Create(world.environment)
@@ -538,6 +580,9 @@ local function buildPins(world, dots, markers, zone)
         end,
         zone = function()
             return zone and zone.mapId
+        end,
+        shown = function()
+            return shown == nil or shown.value
         end,
     }), addon
 end
@@ -676,6 +721,29 @@ local function registerProfileTests(profile)
         test.assertEqual(0, #pins.minimap)
     end)
 
+    test.test(profile .. ": with showing turned off, no guildmates are drawn on any map", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        installCoordinates(world.environment)
+        local shown = { value = true }
+        local markers = { { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } } }
+        local mapPins = buildPins(world, { DOTS[1], DOTS[2] }, markers, { mapId = 1429 }, shown)
+        mapPins:Start()
+        mapPins:Refresh()
+        test.assertEqual(3, #pins.icons)
+        test.assertEqual(1, #pins.minimap)
+
+        shown.value = false
+        mapPins:Refresh()
+        test.assertEqual(0, #pins.icons)
+        test.assertEqual(0, #pins.minimap)
+
+        shown.value = true
+        mapPins:Refresh()
+        test.assertEqual(3, #pins.icons)
+        test.assertEqual(1, #pins.minimap)
+    end)
+
     test.test(profile .. ": world map markers sit at the area's center, dots side by side or a count", function()
         local world = fixtures.newEnvironment(profile)
         local pins = installMap(world.environment)
@@ -771,7 +839,7 @@ local function login(profile, channel, playerName, spot, class, guild, prepare)
         end
     end
     fixtures.joinChannel(channel, world)
-    fixtures.loadAddon(world)
+    world.addon = fixtures.loadAddon(world)
     fixtures.fire(world, "ADDON_LOADED", world.addonName)
     world.loggedIn = true
     fixtures.fire(world, "PLAYER_LOGIN")
@@ -927,6 +995,64 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(1, #whispers(sharer))
         fixtures.runTimers(sharer, 5)
         test.assertEqual(2, #whispers(sharer))
+    end)
+
+    -- The location messages of type `kind` the world sent.
+    local function sentOfType(world, kind)
+        local count = 0
+        local index
+        for index = 1, #world.sentMessages do
+            local ok, message = world.environment.LibStub.libs["AceSerializer-3.0"]
+                :Deserialize(world.sentMessages[index].text)
+            if ok and type(message) == "table" and message.t == kind then
+                count = count + 1
+            end
+        end
+        return count
+    end
+
+    test.test(profile .. ": in the whole add-on, turning sharing off hides the player's dot for everyone", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+        local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        fixtures.deliver(channel)
+        test.assertEqual(1, #viewer.pins.icons)
+
+        test.assertTrue(sharer.addon.settings:Set("shareLocation", false))
+        test.assertEqual(1, sentOfType(sharer, "gm-hide"))
+        fixtures.deliver(channel)
+        test.assertEqual(0, #viewer.pins.icons)
+        test.assertEqual(0, #viewer.pins.minimap)
+
+        -- Nothing more while it's off: no broadcasts, no whispers.
+        fixtures.runTimers(sharer, 300)
+        test.assertEqual(1, sentOfType(sharer, "gm-hide"))
+        test.assertEqual(1, sentOfType(sharer, "gm-loc"))
+        test.assertEqual(0, sentOfType(sharer, "gm-near"))
+
+        test.assertTrue(sharer.addon.settings:Set("shareLocation", true))
+        fixtures.runTimers(sharer, 5)
+        test.assertEqual(2, sentOfType(sharer, "gm-loc"))
+        fixtures.deliver(channel)
+        test.assertEqual(1, #viewer.pins.icons)
+    end)
+
+    test.test(profile .. ": in the whole add-on, turning showing off clears every guildmate pin", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+        login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        fixtures.deliver(channel)
+        test.assertEqual(1, #viewer.pins.minimap)
+
+        test.assertTrue(viewer.addon.settings:Set("showGuildMap", false))
+        test.assertEqual(0, #viewer.pins.icons)
+        test.assertEqual(0, #viewer.pins.minimap)
+        test.assertFalse(viewer.database.guildMap.show)
+
+        test.assertTrue(viewer.addon.settings:Set("showGuildMap", true))
+        test.assertEqual(1, #viewer.pins.icons)
     end)
 
     test.test(profile .. ": in the whole add-on, when whispers fail the guild broadcast goes on", function()

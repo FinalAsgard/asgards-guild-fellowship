@@ -703,6 +703,38 @@ function Store:SetRecruitAnchor(anchor)
     return true
 end
 
+-- Guildmates on the map, on every character: "share" (send the player's
+-- location to the guild) and "show" (draw guildmates on the maps and
+-- minimap). Both on unless turned off; an unusable stored value counts as
+-- on.
+local GUILD_MAP_SETTINGS = { share = true, show = true }
+
+function Store:GuildMapEnabled(setting)
+    local state = type(self.database) == "table" and self.database.guildMap or nil
+    return type(state) ~= "table" or state[setting] ~= false
+end
+
+-- Turns a guild map setting on or off. Refuses an unknown setting, and
+-- when an unusable value is stored for the guild map.
+function Store:SetGuildMapEnabled(setting, enabled)
+    if type(self.database) ~= "table" or not GUILD_MAP_SETTINGS[setting] or type(enabled) ~= "boolean" then
+        return false
+    end
+    if self.database.guildMap == nil then
+        self.database.guildMap = {}
+    end
+    if type(self.database.guildMap) ~= "table" then
+        return false
+    end
+    -- Only "off" is stored; on is the default.
+    if enabled then
+        self.database.guildMap[setting] = nil
+    else
+        self.database.guildMap[setting] = false
+    end
+    return true
+end
+
 -- Whether Do Not Disturb is on for the Group Finder, on every character.
 function Store:GroupFinderDnd()
     local state = type(self.database) == "table" and self.database.groupFinder or nil

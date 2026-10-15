@@ -8,7 +8,8 @@ local _, addon = ...
 -- change, but never more often than once every MIN_GAP_SECONDS. A `gm-near`
 -- is whispered every NEAR_SECONDS to the add-on guildmates last heard in the
 -- player's zone, at most the NEAR_MAX most recently heard, until a whisper
--- fails; then only the guild broadcast is used.
+-- fails; then only the guild broadcast is used. With sharing turned off, one
+-- `gm-hide` goes out and then nothing until sharing is back on.
 local LocationScheduler = {
     BROADCAST_SECONDS = 120,
     MIN_GAP_SECONDS = 10,
@@ -32,10 +33,26 @@ end
 --   character  the player's character key
 --   spot       { mapId, x, y, class, level }, or nil while the client can't
 --              place the player
+--   sharing    false when the player turned sharing off
 -- Returns the message to send to the guild now, or nil.
 function Scheduler:Tick(state)
     local spot = state.spot
-    if type(state.now) ~= "number" or state.character == nil or spot == nil then
+    if type(state.now) ~= "number" or state.character == nil then
+        return nil
+    end
+    if state.sharing == false then
+        if self.hidden then
+            return nil
+        end
+        self.hidden = true
+        return addon.LocationProtocol.Hide(state.character)
+    end
+    if self.hidden then
+        -- Back on: the location goes out at once.
+        self.hidden = false
+        self.sentAt = nil
+    end
+    if spot == nil then
         return nil
     end
     local since = self.sentAt and (state.now - self.sentAt) or nil
@@ -53,13 +70,16 @@ end
 --   now        wall-clock seconds
 --   character  the player's character key
 --   spot       as for Tick
+--   sharing    as for Tick
 --   guildmates the board's entries: each { key, name, mapId, heard }, with
 --              `name` the name to whisper
 -- Returns the `gm-near` to whisper now and the names to whisper it to, or
 -- nil.
 function Scheduler:Near(state)
     local spot = state.spot
-    if self.whisperOff or type(state.now) ~= "number" or state.character == nil or spot == nil then
+    if self.whisperOff or state.sharing == false or type(state.now) ~= "number" or state.character == nil
+        or spot == nil
+    then
         return nil
     end
     if self.nearAt ~= nil and state.now - self.nearAt < LocationScheduler.NEAR_SECONDS then

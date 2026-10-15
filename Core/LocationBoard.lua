@@ -41,6 +41,16 @@ function Board:OnLocation(message, senderKey, now, senderName)
     return true
 end
 
+-- A valid `gm-hide` from character `senderKey`: that guildmate is off the
+-- map. Returns true when the board changed.
+function Board:OnHide(message, senderKey)
+    if message.c ~= senderKey or self.entries[senderKey] == nil then
+        return false
+    end
+    self.entries[senderKey] = nil
+    return true
+end
+
 -- Every guildmate on the board, sorted by key: each { key, name, mapId, x,
 -- y, class, level, heard }.
 function Board:All()

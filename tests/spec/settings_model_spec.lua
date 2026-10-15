@@ -275,16 +275,45 @@ test.test("the composed add-on puts each section on its page and the Open window
     local settings = addon.settings
 
     local onSettings = settings:SectionsOn("settings")
-    test.assertEqual(3, #onSettings)
+    test.assertEqual(4, #onSettings)
     test.assertEqual("general", onSettings[1].id)
     test.assertEqual("chatTags", onSettings[2].id)
     test.assertEqual("groupFinder", onSettings[3].id)
+    test.assertEqual("guildMap", onSettings[4].id)
     test.assertEqual("guildGreet", settings:SectionsOn("greetings")[1].id)
     test.assertEqual("recruitment", settings:SectionsOn("recruitment")[1].id)
     test.assertTrue(settings:Sections()[1].home)
     test.assertEqual("openWindow", settings:Sections()[1].entries[1].id)
     test.assertTrue(settings:InHost("version", "frame"))
     test.assertTrue(settings:InHost("minimap", "frame"))
+end)
+
+test.test("guild map settings are on by default and saved account-wide", function()
+    local world, addon = loggedIn("Retail")
+    local settings = addon.settings
+
+    test.assertEqual("Share my location with the guild", settings:Entry("shareLocation").label)
+    test.assertEqual("Show guildmates on the map and minimap", settings:Entry("showGuildMap").label)
+    test.assertTrue(settings:Get("shareLocation"))
+    test.assertTrue(settings:Get("showGuildMap"))
+    test.assertEqual(nil, world.database.guildMap)
+
+    test.assertTrue(settings:Set("shareLocation", false))
+    test.assertTrue(settings:Set("showGuildMap", false))
+    -- Saved for the account, not per guild or character.
+    test.assertFalse(world.database.guildMap.share)
+    test.assertFalse(world.database.guildMap.show)
+    test.assertFalse(settings:Get("shareLocation"))
+
+    test.assertTrue(settings:Set("shareLocation", true))
+    test.assertEqual(nil, world.database.guildMap.share)
+    test.assertTrue(settings:Get("shareLocation"))
+
+    -- An unusable saved value counts as on and is never written over.
+    world.database.guildMap = "broken"
+    test.assertTrue(settings:Get("showGuildMap"))
+    test.assertEqual(nil, settings:Set("showGuildMap", false))
+    test.assertEqual("broken", world.database.guildMap)
 end)
 
 test.test("/agf options is listed in help and explains when the window can't open", function()
