@@ -21,6 +21,7 @@ local GuildNoteOverlay = {
         ["unreadable main"] = "Main marker can't be read",
     },
     TOO_LONG_TEXT = "Too long for a public note: the other text has to be trimmed.",
+    IGNORE_TEXT = "Ignore",
     -- The small marker on a roster row whose member's note is out of date.
     MARKER_TEXTURE = "Interface\\COMMON\\Indicator-Yellow",
     MARKER_SIZE = 12,
@@ -38,7 +39,11 @@ Overlay.__index = Overlay
 --   isOfficer   function() -> true when the logged-in character is an
 --               officer (OfficerAuthority); nobody else sees anything
 --   rowFor      function(name) -> the NoteAudit row for the roster member
---               named `name`, or nil when the note is up to date
+--               named `name`, or nil when the note is up to date (or
+--               ignored)
+--   ignore      function(row) -> leaves the row's mismatch alone until its
+--               note or suggestion changes (Partition:IgnoreNote); the
+--               overlay redraws afterwards
 function GuildNoteOverlay.Create(options)
     return setmetatable({
         client = options.client,
@@ -49,6 +54,7 @@ function GuildNoteOverlay.Create(options)
         rowFor = options.rowFor or function()
             return nil
         end,
+        ignore = options.ignore or function() end,
     }, Overlay)
 end
 
@@ -103,6 +109,14 @@ function Overlay:Attach()
             created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", 0, -4)
         end
         created:SetHeight(42)
+        local button = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
+        button:SetSize(64, 18)
+        button:SetPoint("TOPRIGHT", created, "TOPRIGHT", 0, 0)
+        button:SetText(GuildNoteOverlay.IGNORE_TEXT)
+        button:SetScript("OnClick", function()
+            self:IgnoreShown()
+        end)
+        created.ignore = button
         local function line(anchor, font)
             local text = created:CreateFontString(nil, "OVERLAY", font)
             if anchor == nil then
@@ -115,6 +129,7 @@ function Overlay:Attach()
             return text
         end
         created.suggested = line(nil, "GameFontHighlightSmall")
+        created.suggested:SetPoint("RIGHT", button, "LEFT", -4, 0)
         created.problems = line(created.suggested, "GameFontNormalSmall")
         created.tooLong = line(created.problems, "GameFontRedSmall")
         created:Hide()
@@ -151,6 +166,7 @@ function Overlay:ShowMember(name)
         local ok, found = pcall(self.rowFor, name)
         row = ok and found or nil
     end
+    self.shownRow = row
     if row == nil then
         panel:Hide()
         return
@@ -160,6 +176,17 @@ function Overlay:ShowMember(name)
     panel.problems:SetText(lines.problems)
     panel.tooLong:SetText(lines.tooLong)
     panel:Show()
+end
+
+-- The Ignore button: leaves the shown member's mismatch alone, then hides
+-- it from the panel and the row markers.
+function Overlay:IgnoreShown()
+    local row = self.shownRow
+    if row == nil or not self.isOfficer() then
+        return
+    end
+    pcall(self.ignore, row)
+    self:Refresh()
 end
 
 -- The guild roster's member list, or nil when it isn't loaded.

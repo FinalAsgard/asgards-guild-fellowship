@@ -195,6 +195,26 @@ test.test("departed characters and characters the store hasn't seen are skipped"
     test.assertTrue(byKey["wrench-area52"] ~= nil)
 end)
 
+test.test("an ignored mismatch is hidden until the note or the suggestion changes", function()
+    local state = retailGuild({ toolbox = "@Tinker", hammer = "Healer", wrench = ">Toolbox" }, "Tinker")
+    local row = state.audit()["hammer-area52"]
+    test.assertEqual(state.addon.NoteParser.Fingerprint("Healer"), row.fingerprint)
+
+    state.partition:IgnoreNote(row.key, row.fingerprint, row.suggested)
+    test.assertEqual(nil, state.audit()["hammer-area52"])
+
+    -- The note changed.
+    state.setNote("Hammer-Area52", "Healer, crafts maces")
+    test.assertEqual(">Tinker Healer, crafts maces", state.audit()["hammer-area52"].suggested)
+
+    -- Ignored again, then the record changes the suggestion.
+    row = state.audit()["hammer-area52"]
+    state.partition:IgnoreNote(row.key, row.fingerprint, row.suggested)
+    test.assertEqual(nil, state.audit()["hammer-area52"])
+    state.partition:SetAlias(playerId(state.partition, "toolbox-area52"), "Tools", "manual")
+    test.assertEqual(">Tools Healer, crafts maces", state.audit()["hammer-area52"].suggested)
+end)
+
 -- Forever: Tool Box is the main of Hammer Smith; Ann Lee and Ann Ray share
 -- a first name.
 local function foreverGuild(notes, alias)

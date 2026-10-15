@@ -145,6 +145,14 @@ local function characterProblem(character)
             return "character " .. field .. " author is invalid"
         end
     end
+    -- An out-of-date note an officer chose to leave alone: the note's
+    -- fingerprint and the suggested note at the time (see NoteAudit).
+    if character.noteIgnored ~= nil then
+        local ignored = character.noteIgnored
+        if type(ignored) ~= "table" or not isText(ignored.note) or type(ignored.suggested) ~= "string" then
+            return "character ignored note is invalid"
+        end
+    end
     if character.rejected ~= nil then
         if type(character.rejected) ~= "table" then
             return "character rejected fingerprints are invalid"
@@ -940,6 +948,35 @@ function Partition:ForgetNoteFingerprint(key)
     local character = self.data.characters[key]
     if character ~= nil then
         character.note = nil
+    end
+end
+
+-- Leaves an out-of-date note alone while the note (its fingerprint) and the
+-- suggested note both stay as they are now.
+function Partition:IgnoreNote(key, fingerprint, suggested)
+    local character = self.data.characters[key]
+    if character == nil or not isText(fingerprint) or type(suggested) ~= "string" then
+        return false
+    end
+    character.noteIgnored = { note = fingerprint, suggested = suggested }
+    return true
+end
+
+-- The note fingerprint and suggested note an officer ignored for `key`, or
+-- nil.
+function Partition:GetIgnoredNote(key)
+    local character = self.data.characters[key]
+    local ignored = character and character.noteIgnored
+    if ignored == nil then
+        return nil
+    end
+    return ignored.note, ignored.suggested
+end
+
+function Partition:ClearIgnoredNote(key)
+    local character = self.data.characters[key]
+    if character ~= nil then
+        character.noteIgnored = nil
     end
 end
 

@@ -2109,6 +2109,12 @@ if clientProfile.supported then
             local key = audit and audit.normalizer:Key(name)
             return key and audit.byKey[key] or nil
         end,
+        ignore = function(row)
+            local guild, partition = rosterController:QuietContext()
+            if guild ~= nil and partition:IgnoreNote(row.key, row.fingerprint, row.suggested) then
+                auditCache = nil
+            end
+        end,
     })
     entryPoints = addon.EntryPoints.Create({
         client = client,

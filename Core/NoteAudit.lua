@@ -162,9 +162,11 @@ end
 --   rules       the client's name rules ({ twoPartNames })
 --   maxLength   optional; the public note limit (MAX_LENGTH)
 -- Returns rows, sorted by key, for in-guild characters whose note is out of
--- date: { key, name, current, suggested, problems, tooLong }. `problems`
--- lists PROBLEMS values; `tooLong` means the note's other text didn't fit,
--- so `suggested` is the markers alone.
+-- date: { key, name, current, fingerprint, suggested, problems, tooLong }.
+-- `problems` lists PROBLEMS values; `tooLong` means the note's other text
+-- didn't fit, so `suggested` is the markers alone. A row an officer ignored
+-- (Partition:IgnoreNote) is left out while its note fingerprint and
+-- suggested note both still match.
 function NoteAudit.Build(inputs)
     local partition = inputs.partition
     local members = inputs.members or {}
@@ -301,14 +303,19 @@ function NoteAudit.Build(inputs)
                 if tooLong then
                     suggested = head
                 end
-                table.insert(rows, {
-                    key = key,
-                    name = normalizer:Display(member.name or character.name) or key,
-                    current = note,
-                    suggested = suggested,
-                    problems = problems,
-                    tooLong = tooLong,
-                })
+                local fingerprint = addon.NoteParser.Fingerprint(note)
+                local ignoredNote, ignoredSuggestion = partition:GetIgnoredNote(key)
+                if ignoredNote ~= fingerprint or ignoredSuggestion ~= suggested then
+                    table.insert(rows, {
+                        key = key,
+                        name = normalizer:Display(member.name or character.name) or key,
+                        current = note,
+                        fingerprint = fingerprint,
+                        suggested = suggested,
+                        problems = problems,
+                        tooLong = tooLong,
+                    })
+                end
             end
         end
     end

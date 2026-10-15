@@ -13,6 +13,7 @@ local function fakeWidget()
     function widget:SetSize(width, height) self.size = { width, height } end
     function widget:SetAllPoints(target) self.allPoints = target end
     function widget:SetTexture(texture) self.texture = texture end
+    function widget:SetScript(name, handler) self[name] = handler end
     function widget:CreateFontString()
         return fakeWidget()
     end
@@ -72,6 +73,10 @@ local function installGuildRoster(environment)
             detail.panel = fakeWidget()
             return detail.panel
         end
+        if parent ~= nil and parent == detail.panel then
+            detail.panel.button = fakeWidget()
+            return detail.panel.button
+        end
         if type(parent) == "table" and parent.SetMember ~= nil then
             parent.marker = fakeWidget()
             return parent.marker
@@ -96,6 +101,7 @@ local ROW = {
 
 local function build(world, options)
     options = options or {}
+    options.ignored = {}
     local addon = loadAdapter()
     local client = addon.Compatibility.Create(world.environment)
     local overlay = addon.GuildNoteOverlay.Create({
@@ -105,6 +111,10 @@ local function build(world, options)
         end,
         rowFor = function(name)
             return (options.rows or {})[name]
+        end,
+        ignore = function(row)
+            table.insert(options.ignored, row)
+            options.rows[row.name] = nil
         end,
     })
     return overlay, addon
@@ -152,6 +162,25 @@ local function registerProfileTests(profile)
         detail:DisplayMember(1, { name = "Hammer" })
         detail.hooks.OnHide()
         test.assertFalse(panel.shown)
+    end)
+
+    test.test(profile .. ": Ignore leaves the shown mismatch alone and hides it", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        detail.memberList.rows = { fakeRow("Hammer") }
+        local options = { rows = { Hammer = ROW } }
+        local overlay = build(world, options)
+        overlay:Attach()
+        overlay:AttachRows()
+        detail:DisplayMember(1, { name = "Hammer" })
+
+        local button = detail.panel.button
+        test.assertEqual("Ignore", button.text)
+        button.OnClick()
+
+        test.assertEqual(ROW, options.ignored[1])
+        test.assertFalse(detail.panel.shown)
+        test.assertFalse(detail.memberList.rows[1].marker.shown)
     end)
 
     test.test(profile .. ": members who aren't officers never see the overlay", function()
@@ -217,6 +246,20 @@ local function registerProfileTests(profile)
             test.assertTrue(detail.panel.shown)
             test.assertEqual("Should be: @TheTool raid lead", detail.panel.suggested.text)
             test.assertEqual("Alias missing", detail.panel.problems.text)
+
+            -- Ignored: hidden until the note changes again.
+            detail.panel.button.OnClick()
+            test.assertFalse(detail.panel.shown)
+            fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+            fixtures.runTimers(world)
+            detail:DisplayMember(1, { name = officerName })
+            test.assertFalse(detail.panel.shown)
+
+            world.guild.members[1].note = "raid lead, tank"
+            fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+            fixtures.runTimers(world)
+            test.assertTrue(detail.panel.shown)
+            test.assertEqual("Should be: @TheTool raid lead, tank", detail.panel.suggested.text)
         end)
 end
 
