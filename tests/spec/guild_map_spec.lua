@@ -86,6 +86,66 @@ end)
 
 -- LocationBoard --------------------------------------------------------------
 
+-- Guildmates heard in Elwynn Forest (1429) at times 1..n, and one elsewhere.
+local function guildmates(count)
+    local found = { { key = "far-area52", name = "Far-Area52", mapId = 1453, heard = 999 } }
+    local index
+    for index = 1, count do
+        table.insert(found, { key = "g" .. index .. "-area52", name = "G" .. index .. "-Area52", mapId = 1429,
+            heard = index })
+    end
+    return found
+end
+
+test.test("same-zone guildmates get a whispered update every 10 seconds", function()
+    local addon = load()
+    local scheduler = addon.LocationScheduler.Create()
+    local state = { now = 1000, character = "toolbox-area52", spot = SPOT, guildmates = guildmates(2) }
+
+    local message, targets = scheduler:Near(state)
+    test.assertEqual("gm-near", message.t)
+    test.assertEqual("toolbox-area52", message.c)
+    test.assertEqual(1429, message.m)
+    -- Only those in the same zone, most recently heard first.
+    test.assertEqual(2, #targets)
+    test.assertEqual("G2-Area52", targets[1])
+    test.assertEqual("G1-Area52", targets[2])
+
+    state.now = 1009
+    test.assertEqual(nil, scheduler:Near(state))
+    state.now = 1010
+    test.assertEqual(2, #select(2, scheduler:Near(state)))
+    -- Nobody nearby, nothing to whisper.
+    state.now = 1020
+    state.guildmates = { guildmates(0)[1] }
+    test.assertEqual(nil, scheduler:Near(state))
+end)
+
+test.test("whispers go to at most the 10 most recently heard guildmates", function()
+    local addon = load()
+    local scheduler = addon.LocationScheduler.Create()
+
+    local _, targets = scheduler:Near({ now = 1000, character = "toolbox-area52", spot = SPOT,
+        guildmates = guildmates(12) })
+
+    test.assertEqual(10, #targets)
+    test.assertEqual("G12-Area52", targets[1])
+    test.assertEqual("G3-Area52", targets[10])
+end)
+
+test.test("after a whisper fails, only the guild broadcast goes on", function()
+    local addon = load()
+    local scheduler = addon.LocationScheduler.Create()
+    local state = { now = 1000, character = "toolbox-area52", spot = SPOT, guildmates = guildmates(1) }
+    scheduler:Near(state)
+
+    scheduler:WhisperFailed()
+
+    state.now = 2000
+    test.assertEqual(nil, scheduler:Near(state))
+    test.assertEqual("gm-loc", scheduler:Tick(state).t)
+end)
+
 test.test("the board keeps each guildmate's latest position and never the player's own characters", function()
     local addon = load()
     local protocol = addon.LocationProtocol
@@ -96,8 +156,8 @@ test.test("the board keeps each guildmate's latest position and never the player
     })
 
     test.assertTrue(board:OnLocation(protocol.Location("hammer-area52", SPOT), "hammer-area52", 1000))
-    test.assertTrue(board:OnLocation(protocol.Location("hammer-area52", { mapId = 1429, x = 0.5, y = 0.25,
-        class = "MAGE", level = 43 }), "hammer-area52", 1010))
+    test.assertTrue(board:OnLocation(protocol.Near("hammer-area52", { mapId = 1429, x = 0.5, y = 0.25,
+        class = "MAGE", level = 43 }), "hammer-area52", 1010, "Hammer-Area52"))
     test.assertFalse(board:OnLocation(protocol.Location("toolbox-area52", SPOT), "toolbox-area52", 1010))
     test.assertFalse(board:OnLocation(protocol.Location("wrench-area52", SPOT), "wrench-area52", 1010))
     -- A message about someone else than its sender.
@@ -106,6 +166,7 @@ test.test("the board keeps each guildmate's latest position and never the player
     local all = board:All()
     test.assertEqual(1, #all)
     test.assertEqual("hammer-area52", all[1].key)
+    test.assertEqual("Hammer-Area52", all[1].name)
     test.assertEqual(0.5, all[1].x)
     test.assertEqual(0.25, all[1].y)
     test.assertEqual(43, all[1].level)
@@ -757,6 +818,60 @@ local function registerWholeAddonTests(profile)
         people = iconsOn(pins, 1415)[1].icon.marker.people
         test.assertEqual(1, #people)
         test.assertEqual(nil, people[1].fromRoster)
+    end)
+
+    -- Whispers the sharer sent.
+    local function whispers(world)
+        local found = {}
+        local index
+        for index = 1, #world.sentMessages do
+            if world.sentMessages[index].distribution == "WHISPER" then
+                table.insert(found, world.sentMessages[index])
+            end
+        end
+        return found
+    end
+
+    test.test(profile .. ": in the whole add-on, a guildmate in the same zone hears updates every 10 seconds", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+        local spot = { mapID = 1429, x = 0.25, y = 0.5 }
+        local sharer = login(profile, channel, guild.members[3].name, spot, "MAGE")
+        fixtures.deliver(channel)
+        test.assertEqual(0, #whispers(sharer))
+
+        spot.x = 0.75
+        fixtures.runTimers(sharer, 5)
+        local sent = whispers(sharer)
+        test.assertEqual(1, #sent)
+        test.assertEqual(guild.members[1].name, sent[1].recipient)
+        test.assertEqual("BULK", sent[1].priority)
+        -- Not yet time for the guild broadcast.
+        test.assertEqual(1, locationMessages(sharer))
+        fixtures.deliver(channel)
+        test.assertEqual(0.75, viewer.pins.icons[1].x)
+
+        fixtures.runTimers(sharer, 5)
+        test.assertEqual(1, #whispers(sharer))
+        fixtures.runTimers(sharer, 5)
+        test.assertEqual(2, #whispers(sharer))
+    end)
+
+    test.test(profile .. ": in the whole add-on, when whispers fail the guild broadcast goes on", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+        local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        fixtures.deliver(channel)
+        sharer.whisperFails = true
+
+        fixtures.runTimers(sharer, 5)
+        sharer.whisperFails = false
+        fixtures.runTimers(sharer, 30)
+        test.assertEqual(0, #whispers(sharer))
+        fixtures.runTimers(sharer, 90)
+        test.assertEqual(2, locationMessages(sharer))
     end)
 
     test.test(profile .. ": in the whole add-on, locations from outside the guild are ignored", function()

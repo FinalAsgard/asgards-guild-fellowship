@@ -5,10 +5,15 @@ local _, addon = ...
 -- returns.
 --
 -- A `gm-loc` goes out every BROADCAST_SECONDS, and promptly after a zone
--- change, but never more often than once every MIN_GAP_SECONDS.
+-- change, but never more often than once every MIN_GAP_SECONDS. A `gm-near`
+-- is whispered every NEAR_SECONDS to the add-on guildmates last heard in the
+-- player's zone, at most the NEAR_MAX most recently heard, until a whisper
+-- fails; then only the guild broadcast is used.
 local LocationScheduler = {
     BROADCAST_SECONDS = 120,
     MIN_GAP_SECONDS = 10,
+    NEAR_SECONDS = 10,
+    NEAR_MAX = 10,
     -- How often the caller should ask (Tick), so a zone change made inside
     -- the minimum gap still goes out soon after it ends.
     TICK_SECONDS = 5,
@@ -42,4 +47,50 @@ function Scheduler:Tick(state)
     self.sentAt = state.now
     self.sentMap = spot.mapId
     return addon.LocationProtocol.Location(state.character, spot)
+end
+
+-- state:
+--   now        wall-clock seconds
+--   character  the player's character key
+--   spot       as for Tick
+--   guildmates the board's entries: each { key, name, mapId, heard }, with
+--              `name` the name to whisper
+-- Returns the `gm-near` to whisper now and the names to whisper it to, or
+-- nil.
+function Scheduler:Near(state)
+    local spot = state.spot
+    if self.whisperOff or type(state.now) ~= "number" or state.character == nil or spot == nil then
+        return nil
+    end
+    if self.nearAt ~= nil and state.now - self.nearAt < LocationScheduler.NEAR_SECONDS then
+        return nil
+    end
+    local near = {}
+    local index
+    for index = 1, #(state.guildmates or {}) do
+        local guildmate = state.guildmates[index]
+        if guildmate.mapId == spot.mapId and type(guildmate.name) == "string" then
+            table.insert(near, guildmate)
+        end
+    end
+    if #near == 0 then
+        return nil
+    end
+    table.sort(near, function(left, right)
+        if left.heard ~= right.heard then
+            return left.heard > right.heard
+        end
+        return left.key < right.key
+    end)
+    local targets = {}
+    for index = 1, math.min(#near, LocationScheduler.NEAR_MAX) do
+        table.insert(targets, near[index].name)
+    end
+    self.nearAt = state.now
+    return addon.LocationProtocol.Near(state.character, spot), targets
+end
+
+-- A whisper couldn't be sent: no more `gm-near`, the guild broadcast goes on.
+function Scheduler:WhisperFailed()
+    self.whisperOff = true
 end

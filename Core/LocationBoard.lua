@@ -21,14 +21,16 @@ function LocationBoard.Create(options)
     }, Board)
 end
 
--- A valid `gm-loc` or `gm-near` from character `senderKey`, heard at `now`.
+-- A valid `gm-loc` or `gm-near` from character `senderKey`, heard at `now`
+-- under the name `senderName` (as the client gave it, for whispering back).
 -- Returns true when the board changed.
-function Board:OnLocation(message, senderKey, now)
+function Board:OnLocation(message, senderKey, now, senderName)
     if message.c ~= senderKey or self.isOwn(senderKey) then
         return false
     end
     self.entries[senderKey] = {
         key = senderKey,
+        name = senderName,
         mapId = message.m,
         x = message.x,
         y = message.y,
@@ -39,8 +41,8 @@ function Board:OnLocation(message, senderKey, now)
     return true
 end
 
--- Every guildmate on the board, sorted by key: each { key, mapId, x, y,
--- class, level, heard }.
+-- Every guildmate on the board, sorted by key: each { key, name, mapId, x,
+-- y, class, level, heard }.
 function Board:All()
     local found = {}
     local key, entry

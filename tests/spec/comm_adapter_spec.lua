@@ -36,6 +36,39 @@ test.test("only guild messages that deserialize to a table are passed on", funct
     test.assertEqual("Hammer-Area52", received[1].sender)
 end)
 
+test.test("whispers go to one character at BULK, and whispered messages only to the whisper receiver", function()
+    local world, comm = build()
+    local guild, whispered = {}, {}
+    test.assertTrue(comm:Start(function(message)
+        table.insert(guild, message)
+    end, function(message, sender)
+        table.insert(whispered, { message = message, sender = sender })
+    end))
+    local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
+
+    test.assertTrue(comm:Whisper({ v = 1, t = "gm-near" }, "Hammer-Area52"))
+    local sent = world.sentMessages[1]
+    test.assertEqual("WHISPER", sent.distribution)
+    test.assertEqual("Hammer-Area52", sent.recipient)
+    test.assertEqual("BULK", sent.priority)
+    test.assertFalse(comm:Whisper({ v = 1 }, ""))
+
+    world.commHandlers.AGFSync("AGFSync", serializer:Serialize({ v = 1, t = "gm-near" }), "WHISPER", "Hammer-Area52")
+    test.assertEqual(0, #guild)
+    test.assertEqual(1, #whispered)
+    test.assertEqual("gm-near", whispered[1].message.t)
+    test.assertEqual("Hammer-Area52", whispered[1].sender)
+end)
+
+test.test("a whisper that fails returns false without raising", function()
+    local world, comm = build()
+    comm:Start(function() end)
+    world.whisperFails = true
+
+    test.assertFalse(comm:Whisper({ v = 1 }, "Hammer-Area52"))
+    test.assertTrue(comm:Broadcast({ v = 1 }))
+end)
+
 test.test("a receiver that raises doesn't break the channel", function()
     local world, comm = build()
     comm:Start(function()

@@ -2253,7 +2253,7 @@ if clientProfile.supported then
             return
         end
         if message.t ~= addon.LocationProtocol.TYPE_HIDE
-            and locationBoard:OnLocation(message, senderKey, client:Timestamp() or 0)
+            and locationBoard:OnLocation(message, senderKey, client:Timestamp() or 0, sender)
         then
             mapPins:Refresh()
         end
@@ -2271,9 +2271,20 @@ if clientProfile.supported then
             return
         end
         local character = rosterController:SelfKey()
-        local message = locationScheduler:Tick({ now = client:Timestamp(), character = character, spot = spot })
+        local now = client:Timestamp()
+        local message = locationScheduler:Tick({ now = now, character = character, spot = spot })
         if message ~= nil then
             comm:Broadcast(message)
+        end
+        -- Guildmates in the same zone hear more often, by whisper.
+        local near, targets = locationScheduler:Near({ now = now, character = character, spot = spot,
+            guildmates = locationBoard:All() })
+        local index
+        for index = 1, #(targets or {}) do
+            if not comm:Whisper(near, targets[index]) then
+                locationScheduler:WhisperFailed()
+                return
+            end
         end
     end
     local sharing = false
@@ -2325,6 +2336,11 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             onLocationMessage(message, sender)
         else
             syncSession:Receive(message, sender)
+        end
+    end, function(message, sender)
+        -- Only guild map updates are whispered.
+        if addon.LocationProtocol.TYPES[message.t] ~= nil then
+            onLocationMessage(message, sender)
         end
     end) then
         syncSession:Start()

@@ -9,6 +9,7 @@ local _, addon = ...
 -- of raising.
 local Comm = {
     DISTRIBUTION = "GUILD",
+    WHISPER = "WHISPER",
     PRIORITY = "BULK",
     PRIORITY_NORMAL = "NORMAL",
     -- Index of "view officer note" in a rank's permission flags.
@@ -25,9 +26,10 @@ function Comm.Create(client, prefix)
 end
 
 -- Starts listening: onMessage(message, sender) runs for every guild message
--- with this prefix that deserializes to a table. Returns false when the
+-- with this prefix that deserializes to a table, and onWhisper(message,
+-- sender), when given, for every whispered one. Returns false when the
 -- libraries are missing, so sync simply stays off.
-function Endpoint:Start(onMessage)
+function Endpoint:Start(onMessage, onWhisper)
     if self.endpoint ~= nil then
         return true
     end
@@ -41,12 +43,14 @@ function Endpoint:Start(onMessage)
         return false
     end
     local ok = pcall(endpoint.RegisterComm, endpoint, self.prefix, function(_, text, distribution, sender)
-        if distribution ~= Comm.DISTRIBUTION or type(text) ~= "string" or type(sender) ~= "string" then
+        local receive = distribution == Comm.DISTRIBUTION and onMessage
+            or distribution == Comm.WHISPER and onWhisper or nil
+        if type(receive) ~= "function" or type(text) ~= "string" or type(sender) ~= "string" then
             return
         end
         local decoded, success, message = pcall(serializer.Deserialize, serializer, text)
         if decoded and success and type(message) == "table" then
-            pcall(onMessage, message, sender)
+            pcall(receive, message, sender)
         end
     end)
     if not ok then
@@ -69,6 +73,22 @@ function Endpoint:Broadcast(message, priority)
     end
     local ok = pcall(self.endpoint.SendCommMessage, self.endpoint, self.prefix, text,
         Comm.DISTRIBUTION, nil, priority or Comm.PRIORITY)
+    return ok
+end
+
+-- Whispers `message` to the character named `target` at BULK priority.
+-- Returns false when it couldn't be sent (whispered add-on messages may not
+-- work on every client).
+function Endpoint:Whisper(message, target)
+    if self.endpoint == nil or type(message) ~= "table" or type(target) ~= "string" or target == "" then
+        return false
+    end
+    local serialized, text = pcall(self.serializer.Serialize, self.serializer, message)
+    if not serialized or type(text) ~= "string" then
+        return false
+    end
+    local ok = pcall(self.endpoint.SendCommMessage, self.endpoint, self.prefix, text,
+        Comm.WHISPER, target, Comm.PRIORITY)
     return ok
 end
 
