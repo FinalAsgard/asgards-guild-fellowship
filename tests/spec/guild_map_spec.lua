@@ -440,10 +440,24 @@ local function fakeWidget()
     return widget
 end
 
--- A stand-in for HereBeDragons-Pins-2.0: the icons on the world map, by
--- owner.
+-- A stand-in for HereBeDragons-Pins-2.0: the icons on the world map and on
+-- the minimap, by owner.
 local function fakePins()
-    local pins = { icons = {} }
+    local pins = { icons = {}, minimap = {} }
+    function pins:AddMinimapIconMap(ref, icon, mapId, x, y, showInParent, floatOnEdge)
+        table.insert(self.minimap, { ref = ref, icon = icon, mapId = mapId, x = x, y = y,
+            showInParent = showInParent, floatOnEdge = floatOnEdge })
+    end
+    function pins:RemoveAllMinimapIcons(ref)
+        local kept = {}
+        local index
+        for index = 1, #self.minimap do
+            if self.minimap[index].ref ~= ref then
+                table.insert(kept, self.minimap[index])
+            end
+        end
+        self.minimap = kept
+    end
     function pins:AddWorldMapIconMap(ref, icon, mapId, x, y, showFlag)
         table.insert(self.icons, { ref = ref, icon = icon, mapId = mapId, x = x, y = y, showFlag = showFlag })
     end
@@ -510,7 +524,7 @@ local DOTS = {
     { key = "wrench-area52", mapId = 1453, x = 0.1, y = 0.2, class = "WARRIOR", name = "Wrench", level = 70 },
 }
 
-local function buildPins(world, dots, markers)
+local function buildPins(world, dots, markers, zone)
     local addon = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua", "Adapters/MapPins.lua",
         "Core/LocationBoard.lua")
     local client = addon.Compatibility.Create(world.environment)
@@ -521,6 +535,9 @@ local function buildPins(world, dots, markers)
         end,
         markers = function()
             return markers or {}
+        end,
+        zone = function()
+            return zone and zone.mapId
         end,
     }), addon
 end
@@ -610,6 +627,53 @@ local function registerProfileTests(profile)
         test.assertEqual(1, #pins.icons)
         test.assertEqual(icon.icon, pins.icons[1].icon)
         test.assertEqual(1453, pins.icons[1].mapId)
+    end)
+
+    test.test(profile .. ": guildmates in the player's zone are class-colored dots on the minimap", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        local dots = { DOTS[1], DOTS[2] }
+        local zone = { mapId = 1429 }
+        local mapPins = buildPins(world, dots, nil, zone)
+        mapPins:Start()
+        mapPins:Refresh()
+
+        -- Only Hammer is in the player's zone.
+        test.assertEqual(1, #pins.minimap)
+        local pin = pins.minimap[1]
+        test.assertEqual(1429, pin.mapId)
+        test.assertEqual(0.4, pin.x)
+        test.assertEqual(0.6, pin.y)
+        test.assertFalse(pin.showInParent)
+        test.assertFalse(pin.floatOnEdge)
+        test.assertEqual(0x3f / 255, pin.icon.texture.color[1])
+        -- Its own frame: one frame can't sit on both maps.
+        test.assertTrue(pin.icon ~= pins.icons[1].icon)
+
+        pin.icon.scripts.OnEnter(pin.icon)
+        local tooltip = world.environment.GameTooltip
+        test.assertEqual("Hammer", tooltip.lines[1])
+        test.assertEqual("Level 42", tooltip.lines[2])
+        test.assertEqual("TheTool", tooltip.lines[3])
+
+        -- Moving, then leaving the board.
+        dots[1] = { key = "hammer-area52", mapId = 1429, x = 0.7, y = 0.6, class = "MAGE", name = "Hammer", level = 42 }
+        mapPins:Refresh()
+        test.assertEqual(1, #pins.minimap)
+        test.assertEqual(0.7, pins.minimap[1].x)
+        test.assertEqual(pin.icon, pins.minimap[1].icon)
+        table.remove(dots, 1)
+        mapPins:Refresh()
+        test.assertEqual(0, #pins.minimap)
+
+        -- In another zone, the player sees that zone's guildmates.
+        zone.mapId = 1453
+        mapPins:Refresh()
+        test.assertEqual(1, #pins.minimap)
+        -- And none where the client can't place the player.
+        zone.mapId = nil
+        mapPins:Refresh()
+        test.assertEqual(0, #pins.minimap)
     end)
 
     test.test(profile .. ": world map markers sit at the area's center, dots side by side or a count", function()
@@ -784,7 +848,8 @@ local function registerWholeAddonTests(profile)
         -- The officer is online in the fixture zone (Ironforge or Dornogal),
         -- which sits on the Eastern Kingdoms here.
         local zoneId = profile == "Retail" and 2339 or 1455
-        local viewer = login(profile, channel, guild.members[3].name, nil, nil, nil, function(environment)
+        -- The viewer stands in that zone too.
+        local function prepare(environment)
             installCoordinates(environment)
             local maps = treeMaps()
             environment.C_Map.GetMapInfo = function(mapId)
@@ -796,11 +861,14 @@ local function registerWholeAddonTests(profile)
             environment.C_Map.GetMapChildrenInfo = function()
                 return { { mapID = zoneId, name = guild.members[1].zone, mapType = 3 } }
             end
-        end)
+        end
+        local viewer = login(profile, channel, guild.members[3].name, { mapID = zoneId, x = 0.5, y = 0.5 }, "MAGE",
+            nil, prepare)
 
         local pins = viewer.pins
-        -- Never a dot on the zone map.
+        -- Never a dot on the zone map or minimap, even in the same zone.
         test.assertEqual(0, #iconsOn(pins, zoneId))
+        test.assertEqual(0, #pins.minimap)
         local zone = iconsOn(pins, 1415)[1]
         test.assertEqual(zoneId / 10000, zone.x)
         local people = zone.icon.marker.people
@@ -851,6 +919,9 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(1, locationMessages(sharer))
         fixtures.deliver(channel)
         test.assertEqual(0.75, viewer.pins.icons[1].x)
+        -- In the same zone, so on the minimap too.
+        test.assertEqual(1, #viewer.pins.minimap)
+        test.assertEqual(0.75, viewer.pins.minimap[1].x)
 
         fixtures.runTimers(sharer, 5)
         test.assertEqual(1, #whispers(sharer))

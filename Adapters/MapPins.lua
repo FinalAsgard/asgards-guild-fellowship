@@ -1,8 +1,8 @@
 local _, addon = ...
 
 -- Draws guildmates on the game's maps with HereBeDragons-Pins-2.0: on the
--- zone map, each add-on guildmate is a class-colored dot at their exact
--- position, with a tooltip naming the character, their level, and their
+-- zone map, and on the minimap for those in the player's zone, each add-on
+-- guildmate is a class-colored dot at their exact position, with a tooltip naming the character, their level, and their
 -- alias or main the way chat tags do. On a continent map each zone with
 -- guildmates has one marker at the zone's center, and on the world map each
 -- continent does: up to three class-colored dots side by side, or a count,
@@ -33,6 +33,8 @@ Pins.__index = Pins
 --   client  the compatibility adapter
 --   dots    function() -> the guildmates to draw: each { key, mapId, x, y,
 --           class, name, level, label? } (label is the chat tag's text)
+--   zone    function() -> the player's zone map ID, or nil (no minimap
+--           dots then)
 --   markers function() -> the world map markers: each { area, mapId,
 --           display, people } where `area` is the zone or continent map the
 --           marker stands for, `mapId` the continent or world map it's
@@ -49,7 +51,12 @@ function MapPins.Create(options)
         markers = options.markers or function()
             return {}
         end,
+        zone = options.zone or function()
+            return nil
+        end,
         icons = {},
+        -- The minimap's own dots: a frame is drawn on one map only.
+        minimapIcons = {},
         markerFrames = {},
     }, Pins)
 end
@@ -135,9 +142,11 @@ local function hideTooltip(icon)
     end
 end
 
--- The `index`th dot frame, made the first time it's needed and reused.
-function Pins:Icon(index)
-    local icon = self.icons[index]
+-- The `index`th dot frame in `pool` (the world map's by default), made the
+-- first time it's needed and reused.
+function Pins:Icon(index, pool)
+    pool = pool or self.icons
+    local icon = pool[index]
     if icon ~= nil then
         return icon
     end
@@ -156,7 +165,7 @@ function Pins:Icon(index)
     if not ok then
         return nil
     end
-    self.icons[index] = created
+    pool[index] = created
     return created
 end
 
@@ -269,6 +278,7 @@ function Pins:Refresh()
             pcall(self.pins.AddWorldMapIconMap, self.pins, self, icon, dot.mapId, dot.x, dot.y, showFlag)
         end
     end
+    self:DrawMinimap(dots)
     local okMarkers, markers = pcall(self.markers)
     if not okMarkers or type(markers) ~= "table" then
         return
@@ -279,6 +289,34 @@ function Pins:Refresh()
         local frame = x ~= nil and self:MarkerFrame(index) or nil
         if frame ~= nil and pcall(self.DrawMarker, self, frame, marker) then
             pcall(self.pins.AddWorldMapIconMap, self.pins, self, frame, marker.mapId, x, y, showFlag)
+        end
+    end
+end
+
+-- Draws the dots in the player's zone on the minimap, replacing the ones
+-- drawn before. Nothing when the pins library can't draw on the minimap.
+function Pins:DrawMinimap(dots)
+    if type(self.pins.AddMinimapIconMap) ~= "function" or type(self.pins.RemoveAllMinimapIcons) ~= "function" then
+        return
+    end
+    pcall(self.pins.RemoveAllMinimapIcons, self.pins, self)
+    local okZone, zone = pcall(self.zone)
+    if not okZone or zone == nil then
+        return
+    end
+    local drawn = 0
+    local index
+    for index = 1, #dots do
+        local dot = dots[index]
+        if dot.mapId == zone then
+            drawn = drawn + 1
+            local icon = self:Icon(drawn, self.minimapIcons)
+            if icon ~= nil then
+                icon.dot = dot
+                pcall(icon.texture.SetVertexColor, icon.texture, self:ClassColor(dot.class))
+                -- Not shown from a parent zone, and not floating on the edge.
+                pcall(self.pins.AddMinimapIconMap, self.pins, self, icon, dot.mapId, dot.x, dot.y, false, false)
+            end
         end
     end
 end

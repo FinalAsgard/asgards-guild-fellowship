@@ -2122,7 +2122,7 @@ if clientProfile.supported then
         end,
     })
     -- Guildmates on the map: add-on users share where they are with the
-    -- guild, and each other's dots are drawn on the zone map.
+    -- guild, and each other's dots are drawn on the zone map and minimap.
     local function isOwnCharacter(key)
         local guild, partition = rosterController:QuietContext()
         if guild == nil then
@@ -2240,6 +2240,10 @@ if clientProfile.supported then
             return describeLocations(locationBoard:All())
         end,
         markers = locationMarkers,
+        zone = function()
+            local spot = client:GetPlayerPosition()
+            return spot and spot.mapId or nil
+        end,
     })
     -- A location from a guildmate: only from a character in the guild,
     -- about itself.
@@ -2298,8 +2302,12 @@ if clientProfile.supported then
             sharing = client:After(addon.LocationScheduler.TICK_SECONDS, tick)
         end
         tick()
-        -- A new zone goes out promptly (within the scheduler's minimum gap).
-        client:ObserveZone(shareLocation)
+        -- A new zone goes out promptly (within the scheduler's minimum gap),
+        -- and the minimap shows the new zone's guildmates.
+        client:ObserveZone(function()
+            shareLocation()
+            mapPins:Refresh()
+        end)
     end
     entryPoints = addon.EntryPoints.Create({
         client = client,
