@@ -171,6 +171,55 @@ test.test("with sharing off, one gm-hide goes out and then nothing until it's ba
     test.assertEqual("gm-loc", scheduler:Tick(state).t)
 end)
 
+test.test("inside an instance, one gm-hide goes out and the location resumes on leaving", function()
+    local addon = load()
+    local scheduler = addon.LocationScheduler.Create()
+    local state = { now = 1000, character = "toolbox-area52", spot = SPOT, guildmates = guildmates(1) }
+    test.assertEqual("gm-loc", scheduler:Tick(state).t)
+
+    state.now = 1001
+    state.inInstance = true
+    test.assertEqual("gm-hide", scheduler:Tick(state).t)
+    state.now = 2000
+    test.assertEqual(nil, scheduler:Tick(state))
+    test.assertEqual(nil, scheduler:Near(state))
+
+    state.inInstance = false
+    state.now = 2001
+    test.assertEqual("gm-loc", scheduler:Tick(state).t)
+end)
+
+test.test("board entries expire 5 minutes after their last update", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local board = addon.LocationBoard.Create()
+    board:OnLocation(protocol.Location("hammer-area52", SPOT), "hammer-area52", 1000)
+    board:OnLocation(protocol.Location("wrench-area52", SPOT), "wrench-area52", 1100)
+
+    test.assertFalse(board:Expire(1299))
+    test.assertTrue(board:Expire(1300))
+    local all = board:All()
+    test.assertEqual(1, #all)
+    test.assertEqual("wrench-area52", all[1].key)
+    test.assertFalse(board:Expire(nil))
+end)
+
+test.test("the board keeps only the guildmates the caller keeps", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local board = addon.LocationBoard.Create()
+    board:OnLocation(protocol.Location("hammer-area52", SPOT), "hammer-area52", 1000)
+    board:OnLocation(protocol.Location("wrench-area52", SPOT), "wrench-area52", 1000)
+
+    test.assertTrue(board:Keep(function(key)
+        return key == "wrench-area52"
+    end))
+    test.assertFalse(board:Keep(function()
+        return true
+    end))
+    test.assertEqual(1, #board:All())
+end)
+
 test.test("a gm-hide takes that guildmate off the board", function()
     local addon = load()
     local protocol = addon.LocationProtocol
@@ -1036,6 +1085,105 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(2, sentOfType(sharer, "gm-loc"))
         fixtures.deliver(channel)
         test.assertEqual(1, #viewer.pins.icons)
+    end)
+
+    test.test(profile .. ": in the whole add-on, entering an instance hides the player until they leave", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+        local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        fixtures.deliver(channel)
+        test.assertEqual(1, #viewer.pins.icons)
+
+        sharer.inInstance = "party"
+        fixtures.runTimers(sharer, 5)
+        test.assertEqual(1, sentOfType(sharer, "gm-hide"))
+        fixtures.deliver(channel)
+        test.assertEqual(0, #viewer.pins.icons)
+
+        fixtures.runTimers(sharer, 300)
+        test.assertEqual(1, sentOfType(sharer, "gm-hide"))
+        test.assertEqual(1, sentOfType(sharer, "gm-loc"))
+        test.assertEqual(0, sentOfType(sharer, "gm-near"))
+
+        sharer.inInstance = nil
+        fixtures.runTimers(sharer, 5)
+        test.assertEqual(2, sentOfType(sharer, "gm-loc"))
+        fixtures.deliver(channel)
+        test.assertEqual(1, #viewer.pins.icons)
+    end)
+
+    test.test(profile .. ": in the whole add-on, nothing is sent while the player is busy", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+        local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        fixtures.deliver(channel)
+
+        local inCombat = true
+        sharer.environment.InCombatLockdown = function()
+            return inCombat
+        end
+        fixtures.runTimers(sharer, 300)
+        test.assertEqual(1, sentOfType(sharer, "gm-loc"))
+        test.assertEqual(0, sentOfType(sharer, "gm-near"))
+        -- Turning sharing off waits too.
+        test.assertTrue(sharer.addon.settings:Set("shareLocation", false))
+        test.assertEqual(0, sentOfType(sharer, "gm-hide"))
+
+        inCombat = false
+        fixtures.runTimers(sharer, 5)
+        test.assertEqual(1, sentOfType(sharer, "gm-hide"))
+    end)
+
+    test.test(profile .. ": in the whole add-on, a guildmate's dot clears after 5 minutes without an update", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+        login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        fixtures.deliver(channel)
+        test.assertEqual(1, #viewer.pins.icons)
+
+        -- The sharer's updates stop arriving.
+        fixtures.runTimers(viewer, 295)
+        test.assertEqual(1, #viewer.pins.icons)
+        fixtures.runTimers(viewer, 5)
+        test.assertEqual(0, #viewer.pins.icons)
+        test.assertEqual(0, #viewer.pins.minimap)
+    end)
+
+    test.test(profile .. ": in the whole add-on, a guildmate the roster shows offline or gone leaves the map", function()
+        local guild = fixtures.GUILDS[profile]
+        local kinds = { "offline", "gone" }
+        local index
+        for index = 1, #kinds do
+            local channel = fixtures.newChannel()
+            local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+            local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 },
+                "MAGE")
+            fixtures.deliver(channel)
+            test.assertEqual(1, #viewer.pins.icons, kinds[index])
+
+            if kinds[index] == "offline" then
+                viewer.guild.members[3].online = false
+            else
+                table.remove(viewer.guild.members, 3)
+            end
+            fixtures.fire(viewer, "GUILD_ROSTER_UPDATE")
+            fixtures.runTimers(viewer)
+            test.assertEqual(0, #viewer.pins.icons, kinds[index])
+
+            -- And it gets no more whispers from the viewer.
+            fixtures.runTimers(viewer, 10)
+            local whispered = 0
+            local sent
+            for _, sent in ipairs(viewer.sentMessages) do
+                if sent.distribution == "WHISPER" and sent.recipient == sharer.playerName then
+                    whispered = whispered + 1
+                end
+            end
+            test.assertEqual(0, whispered, kinds[index])
+        end
     end)
 
     test.test(profile .. ": in the whole add-on, turning showing off clears every guildmate pin", function()

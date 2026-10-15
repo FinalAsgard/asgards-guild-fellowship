@@ -30,6 +30,7 @@ local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
+local dropOfflineLocations
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
 local onSlotsChanged, groupBoard, announceGroup
 -- Draws the Group Finder on its tab (set up with the Group Finder below).
@@ -2063,8 +2064,10 @@ if clientProfile.supported then
         if groupFinder ~= nil then
             groupFinder:Refresh()
         end
-        -- The roster's zones count on the world map.
+        -- The roster's zones count on the world map, and guildmates it shows
+        -- offline or gone leave the board.
         if mapPins ~= nil then
+            dropOfflineLocations()
             mapPins:Refresh()
         end
         -- The first loaded roster tells Guild Greet who was already online
@@ -2180,6 +2183,22 @@ if clientProfile.supported then
     end
     locationBoard = addon.LocationBoard.Create({ isOwn = isOwnCharacter })
     locationScheduler = addon.LocationScheduler.Create()
+    -- Guildmates the roster shows offline, or no longer lists, leave the
+    -- board (and so stop getting whispers). Nothing is dropped while the
+    -- roster hasn't loaded.
+    dropOfflineLocations = function()
+        local guild, _, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return
+        end
+        local members = rosterController:LiveMembers(normalizer)
+        if next(members) == nil then
+            return
+        end
+        locationBoard:Keep(function(key)
+            return members[key] ~= nil and members[key].online == true
+        end)
+    end
     -- A board entry as the map shows it: with the character's name and its
     -- chat tag (alias or main).
     local function describeLocations(entries)
@@ -2305,10 +2324,15 @@ if clientProfile.supported then
     -- Sends the player's location when it's due, and asks again every few
     -- seconds.
     local function shareLocation()
+        -- Nothing goes out in combat, a boss encounter or a keystone run.
+        if comm:IsBusy() then
+            return
+        end
         local store = rosterController:Store()
         local sharing = store == nil or store:GuildMapEnabled("share")
+        local inInstance = client:IsInInstance()
         local spot
-        if sharing then
+        if sharing and not inInstance then
             spot = client:GetPlayerPosition()
             if spot == nil then
                 return
@@ -2321,11 +2345,12 @@ if clientProfile.supported then
         end
         local character = rosterController:SelfKey()
         local now = client:Timestamp()
-        local message = locationScheduler:Tick({ now = now, character = character, spot = spot, sharing = sharing })
+        local message = locationScheduler:Tick({ now = now, character = character, spot = spot, sharing = sharing,
+            inInstance = inInstance })
         if message ~= nil then
             comm:Broadcast(message)
         end
-        if not sharing then
+        if not sharing or inInstance then
             return
         end
         -- Guildmates in the same zone hear more often, by whisper.
@@ -2347,6 +2372,10 @@ if clientProfile.supported then
             return
         end
         local function tick()
+            -- Guildmates who went quiet drop off the map.
+            if locationBoard:Expire(client:Timestamp()) then
+                mapPins:Refresh()
+            end
             shareLocation()
             sharing = client:After(addon.LocationScheduler.TICK_SECONDS, tick)
         end

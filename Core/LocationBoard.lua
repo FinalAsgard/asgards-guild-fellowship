@@ -51,6 +51,42 @@ function Board:OnHide(message, senderKey)
     return true
 end
 
+-- An entry not updated for this long is dropped (its sender went quiet:
+-- logged out, lost connection, or stopped sharing without a `gm-hide`).
+LocationBoard.EXPIRE_SECONDS = 300
+
+-- Drops entries last heard EXPIRE_SECONDS or more before `now`. Returns true
+-- when the board changed.
+function Board:Expire(now)
+    if type(now) ~= "number" then
+        return false
+    end
+    local changed = false
+    local key, entry
+    for key, entry in pairs(self.entries) do
+        if now - entry.heard >= LocationBoard.EXPIRE_SECONDS then
+            self.entries[key] = nil
+            changed = true
+        end
+    end
+    return changed
+end
+
+-- Keeps only the entries `keep(key)` answers true for (the caller drops
+-- guildmates the roster shows offline or gone). Returns true when the board
+-- changed.
+function Board:Keep(keep)
+    local changed = false
+    local key
+    for key in pairs(self.entries) do
+        if not keep(key) then
+            self.entries[key] = nil
+            changed = true
+        end
+    end
+    return changed
+end
+
 -- Every guildmate on the board, sorted by key: each { key, name, mapId, x,
 -- y, class, level, heard }.
 function Board:All()
