@@ -130,7 +130,7 @@ test.test("group candidates: add-on users' role preferences leave out roles they
     test.assertEqual("Bolt 22, Hammer 24", names(dps[1].fitting))
 end)
 
-test.test("group candidates: guildmates without the add-on are labeled and suggested by class alone", function()
+test.test("group candidates: guildmates without the add-on are suggested by class alone", function()
     local world = newGuild()
     -- Even a stored preference is ignored for someone whose add-on didn't
     -- reply: it may be stale.
@@ -141,7 +141,8 @@ test.test("group candidates: guildmates without the add-on are labeled and sugge
     test.assertTrue(healers[1].addon)
     test.assertEqual("Cleric", healers[2].label)
     test.assertFalse(healers[2].addon)
-    test.assertContains(world.addon.GroupCandidates.Describe(healers[2]), "(no add-on)")
+    -- No label: the window gives them a Whisper button instead.
+    test.assertEqual("Cleric 20", world.addon.GroupCandidates.Describe(healers[2]))
 end)
 
 test.test("group candidates: only players online now, and never unavailable or excluded ones", function()
@@ -189,7 +190,7 @@ test.test("group candidates: describes an entry with its fitting characters", fu
     local healers = world.candidates():ForRole("healer", DEADMINES)
 
     test.assertEqual("Bolt 22, Hammer 24", world.addon.GroupCandidates.Describe(healers[1]))
-    test.assertEqual("Cleric 20 (no add-on)", world.addon.GroupCandidates.Describe(healers[2]))
+    test.assertEqual("Cleric 20", world.addon.GroupCandidates.Describe(healers[2]))
     -- Where they are now goes in the mouseover.
     test.assertEqual("On Bolt, Ironforge", world.addon.GroupCandidates.Location(healers[1]))
 end)
@@ -205,7 +206,7 @@ test.test("group candidates: character names in their class colors", function()
     test.assertEqual("|cff0070ddBolt|r 22, |cfff58cbaHammer|r 24", world.addon.GroupCandidates.Describe(healers[1], colorOf))
     test.assertEqual("On |cff0070ddBolt|r, Ironforge", world.addon.GroupCandidates.Location(healers[1], colorOf))
     -- A class with no color stays plain.
-    test.assertEqual("Cleric 20 (no add-on)", world.addon.GroupCandidates.Describe(healers[2], colorOf))
+    test.assertEqual("Cleric 20", world.addon.GroupCandidates.Describe(healers[2], colorOf))
     local nearby = world.candidates():Nearby("Ironforge", "me")
     test.assertEqual("Thunderer — |cff0070ddBolt|r 22", world.addon.GroupCandidates.DescribeNearby(nearby[1], colorOf))
 end)
@@ -298,11 +299,14 @@ test.test("group finder window: each open role lists who could fill it, and fill
     -- The organizer, a warrior, took the tank slot: no tank list.
     test.assertEqual("|cffffd100Healer|r", lines[1])
     test.assertEqual("  Bolt 22, Hammer 24", lines[2])
-    test.assertEqual("  Cleric 20 (no add-on)", lines[3])
+    test.assertEqual("  Cleric 20", lines[3])
     -- Hovering a guildmate's line shows where they are; headings have none.
     test.assertEqual("On Bolt, Ironforge", window.suggestionHovers[2].text)
     test.assertTrue(window.suggestionHovers[2].frame.shown)
     test.assertFalse(window.suggestionHovers[1].frame.shown)
+    -- Without the add-on, the tooltip says why there's no Request.
+    test.assertContains(window.suggestionHovers[3].text, "Doesn't use the add-on: whisper to ask.")
+    test.assertEqual(nil, string.find(window.suggestionHovers[2].text, "add-on", 1, true))
     local tooltip = { shown = false }
     function tooltip:SetOwner(owner, anchor) self.anchor = anchor end
     function tooltip:ClearAllPoints() self.point = nil end

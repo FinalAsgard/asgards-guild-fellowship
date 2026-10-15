@@ -22,7 +22,8 @@ local _, addon = ...
 -- Beside the slots, for each role still open, the online guildmates who
 -- could fill it (GroupCandidates); clicking one opens a whisper to the
 -- character they're on now. Add-on users get a Request button (Cancel while their request is
--- pending), and their request's state beside their name. An accepted
+-- pending), and their request's state beside their name; the others get a
+-- Whisper button, and a tooltip saying why. An accepted
 -- invitee's slot reads "Waiting for <character> to log in" until that
 -- character is online, then shows an Invite button; nothing is invited
 -- without that click.
@@ -41,7 +42,10 @@ local _, addon = ...
 local GroupFinderWindow = {
     -- The picker and the slots take the left; suggestions the right.
     LEFT_WIDTH = 380,
-    SUGGESTION_HEIGHT = 18,
+    -- A suggestion line's height, with room above and below its text, and
+    -- the height of the Request or Whisper button centered in it.
+    SUGGESTION_HEIGHT = 24,
+    SUGGESTION_BUTTON_HEIGHT = 20,
     REQUEST_WIDTH = 64,
     PADDING = 12,
     ROW_HEIGHT = 20,
@@ -67,6 +71,8 @@ local GroupFinderWindow = {
     -- right of it and just above it.
     TOOLTIP_OFFSET_X = 12,
     TOOLTIP_OFFSET_Y = 12,
+    -- Added to the tooltip of a guildmate whose add-on didn't answer.
+    NO_ADDON_TOOLTIP = "Doesn't use the add-on: whisper to ask. Listed for every role their class can play.",
 }
 addon.GroupFinderWindow = GroupFinderWindow
 
@@ -285,8 +291,10 @@ function Window:suggestionLine(index)
         return self.suggestionLines[index]
     end
     local line = self.suggestionList:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    line:SetPoint("TOPLEFT", self.suggestionList, "TOPLEFT", 0, -(index - 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
-    line:SetPoint("RIGHT", self.suggestionList, "RIGHT", -GroupFinderWindow.REQUEST_WIDTH - 4, 0)
+    -- Centered in its row, so there's space above and below the text.
+    local middle = -(index - 0.5) * GroupFinderWindow.SUGGESTION_HEIGHT
+    line:SetPoint("LEFT", self.suggestionList, "TOPLEFT", 0, middle)
+    line:SetPoint("RIGHT", self.suggestionList, "TOPRIGHT", -GroupFinderWindow.REQUEST_WIDTH - 4, middle)
     line:SetJustifyH("LEFT")
     singleLine(line)
     self.suggestionLines[index] = line
@@ -326,6 +334,13 @@ function Window:suggestionLine(index)
         if item == nil then
             return
         end
+        -- A guildmate without the add-on can't get a request: whisper them.
+        if not item.player.addon then
+            if item.player.current ~= nil and item.player.current.key ~= nil then
+                pcall(self.whisper, item.player.current.key)
+            end
+            return
+        end
         local request = self.session:RequestFor(item.player.id)
         if request ~= nil and request.state == addon.GroupSession.PENDING then
             pcall(self.cancelRequest, request.id)
@@ -334,8 +349,8 @@ function Window:suggestionLine(index)
         end
         self:Refresh()
     end)
-    button:SetHeight(GroupFinderWindow.SUGGESTION_HEIGHT)
-    button:SetPoint("TOPRIGHT", self.suggestionList, "TOPRIGHT", 0, -(index - 1) * GroupFinderWindow.SUGGESTION_HEIGHT)
+    button:SetHeight(GroupFinderWindow.SUGGESTION_BUTTON_HEIGHT)
+    button:SetPoint("RIGHT", self.suggestionList, "TOPRIGHT", 0, middle)
     self.suggestionButtons[index] = { button = button }
     return line
 end
@@ -385,7 +400,11 @@ function GroupFinderWindow.SuggestionItems(lists, requestOf, colorOf)
             if request ~= nil then
                 text = text .. " |cff9d9d9d[" .. (GroupFinderWindow.STATE_LABELS[request.state] or request.state) .. "]|r"
             end
-            table.insert(items, { text = text, player = player, tooltip = addon.GroupCandidates.Location(player, colorOf) })
+            local tooltip = addon.GroupCandidates.Location(player, colorOf)
+            if not player.addon then
+                tooltip = tooltip .. "\n" .. GroupFinderWindow.NO_ADDON_TOOLTIP
+            end
+            table.insert(items, { text = text, player = player, tooltip = tooltip })
         end
     end
     return items
@@ -480,8 +499,11 @@ function Window:drawSuggestions(candidates, dungeon, grouping)
         local player = items[index].player
         slot.item = items[index]
         local request = player and self.session:RequestFor(player.id)
-        if player == nil or not player.addon or (request ~= nil and request.state == addon.GroupSession.ACCEPTED) then
+        if player == nil or (request ~= nil and request.state == addon.GroupSession.ACCEPTED) then
             slot.button:Hide()
+        elseif not player.addon then
+            slot.button:SetText("Whisper")
+            slot.button:Show()
         else
             local pending = request ~= nil and request.state == addon.GroupSession.PENDING
             slot.button:SetText(pending and "Cancel" or "Request")

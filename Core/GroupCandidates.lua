@@ -259,8 +259,7 @@ function GroupCandidates.DescribeNearby(entry, colorOf)
 end
 
 -- "Bolt 22, Hammer 24": the player's characters that fit, each name in
--- its class color, with "(no add-on)" for a player whose add-on didn't
--- reply. Where they are now is Location's.
+-- its class color. Where they are now is Location's.
 function GroupCandidates.Describe(entry, colorOf)
     local characters = {}
     local index
@@ -268,11 +267,7 @@ function GroupCandidates.Describe(entry, colorOf)
         local character = entry.fitting[index]
         characters[index] = colored(character.name, character.class, colorOf) .. " " .. tostring(character.level)
     end
-    local text = table.concat(characters, ", ")
-    if not entry.addon then
-        text = text .. " (no add-on)"
-    end
-    return text
+    return table.concat(characters, ", ")
 end
 
 -- "On Bolt, Ironforge": the character the player is on, and where.
