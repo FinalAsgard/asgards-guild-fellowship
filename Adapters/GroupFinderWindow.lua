@@ -66,7 +66,7 @@ local GroupFinderWindow = {
     ROLE_BUTTON_WIDTH = 56,
     -- Another organizer's group: Fill Slot beside each open slot, and up
     -- to ALT_BUTTONS alts to come as, two to a row.
-    FILL_WIDTH = 150,
+    FILL_WIDTH = 110,
     ALT_BUTTONS = 4,
     ALT_WIDTH = 170,
     -- Where a suggestion's tooltip sits from the mouse cursor: a little
@@ -669,6 +669,15 @@ function Window:buildBoard()
         row.text:SetJustifyH("LEFT")
         singleLine(row.text)
         row.fill = self:button(board, "Fill Slot", GroupFinderWindow.FILL_WIDTH, function()
+            -- Not the character the player is on: they pick which alt.
+            if row.group ~= nil and row.option == nil and row.alts ~= nil then
+                local group = row.group
+                self:showMenu(row.fill, "Fill as", GroupFinderWindow.AltEntries(row.alts), function(entry)
+                    pcall(self.offer, group, entry.option)
+                    self:Refresh()
+                end)
+                return
+            end
             if row.group ~= nil and row.option ~= nil then
                 pcall(self.offer, row.group, row.option)
                 self:Refresh()
@@ -741,14 +750,75 @@ end
 
 -- The one of `options` to offer: the character the player is on when it
 -- can, else their first other one.
-local function preferred(options, selfKey)
+-- The option for the character the player is on, if it's among `options`.
+local function ownOption(options, selfKey)
     local index
     for index = 1, #options do
         if options[index].key == selfKey then
             return options[index]
         end
     end
-    return options[1]
+    return nil
+end
+
+-- The Fill as Alt menu's entries, one per alt in `options`: "Bolt (22)".
+function GroupFinderWindow.AltEntries(options)
+    local entries = {}
+    local index
+    for index = 1, #options do
+        local option = options[index]
+        entries[index] = {
+            text = tostring(option.name) .. (option.level and (" (" .. option.level .. ")") or ""),
+            option = option,
+        }
+    end
+    return entries
+end
+
+-- Shows a menu of `entries` ({ text } each) under `title`, with the
+-- client's menu system: MenuUtil on newer clients, UIDropDownMenu
+-- otherwise. Choosing one calls onChoose(entry). False when the client has
+-- neither.
+function Window:showMenu(owner, title, entries, onChoose)
+    local environment = self.environment
+    local menuUtil = environment.MenuUtil
+    if type(menuUtil) == "table" and type(menuUtil.CreateContextMenu) == "function" then
+        return (pcall(menuUtil.CreateContextMenu, owner, function(_, root)
+            root:CreateTitle(title)
+            local index
+            for index = 1, #entries do
+                local entry = entries[index]
+                root:CreateButton(entry.text, function()
+                    onChoose(entry)
+                end)
+            end
+        end))
+    end
+    if type(environment.UIDropDownMenu_Initialize) == "function"
+        and type(environment.ToggleDropDownMenu) == "function"
+        and type(environment.UIDropDownMenu_AddButton) == "function"
+    then
+        self.menuFrame = self.menuFrame or environment.CreateFrame("Frame", addon.Identity.addonName .. "FillMenu",
+            environment.UIParent, "UIDropDownMenuTemplate")
+        return (pcall(function()
+            environment.UIDropDownMenu_Initialize(self.menuFrame, function(_, level)
+                environment.UIDropDownMenu_AddButton({ text = title, isTitle = true, notCheckable = true }, level)
+                local index
+                for index = 1, #entries do
+                    local entry = entries[index]
+                    environment.UIDropDownMenu_AddButton({
+                        text = entry.text,
+                        notCheckable = true,
+                        func = function()
+                            onChoose(entry)
+                        end,
+                    }, level)
+                end
+            end, "MENU")
+            environment.ToggleDropDownMenu(1, nil, self.menuFrame, owner, 0, 0)
+        end))
+    end
+    return false
 end
 
 function Window:drawBoard(group, member)
@@ -781,6 +851,7 @@ function Window:drawBoard(group, member)
         local slot = group.slots[index]
         row.group = group
         row.option = nil
+        row.alts = nil
         if slot == nil then
             row.role:SetText("")
             row.text:SetText("")
@@ -796,12 +867,22 @@ function Window:drawBoard(group, member)
                 open[slot.role] = true
                 if not member and not offering and mine == nil then
                     local okOptions, options = pcall(self.fillOptions, group, slot.role)
-                    row.option = okOptions and type(options) == "table" and preferred(options, selfKey) or nil
+                    if okOptions and type(options) == "table" and options[1] ~= nil then
+                        -- The character the player is on fills it as is;
+                        -- otherwise they choose an alt from a menu.
+                        row.option = ownOption(options, selfKey)
+                        if row.option == nil then
+                            row.alts = options
+                        end
+                    end
                 end
             end
         end
         if row.option ~= nil then
-            row.fill:SetText(row.option.key == selfKey and "Fill Slot" or ("Fill as " .. row.option.name))
+            row.fill:SetText("Fill Slot")
+            row.fill:Show()
+        elseif row.alts ~= nil then
+            row.fill:SetText("Fill as Alt")
             row.fill:Show()
         else
             row.fill:Hide()
