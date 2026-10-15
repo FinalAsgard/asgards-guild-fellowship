@@ -28,6 +28,7 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
+local guildNoteOverlay
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
 local onSlotsChanged, groupBoard, announceGroup
 -- Draws the Group Finder on its tab (set up with the Group Finder below).
@@ -99,6 +100,13 @@ if clientProfile.supported then
         onScanFinished = function()
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
+        end,
+        -- Out-of-date guild notes are worked out again after every scan,
+        -- sync, and manual change.
+        onChanged = function()
+            if guildNoteOverlay ~= nil then
+                guildNoteOverlay:Refresh()
+            end
         end,
         onSyncResumed = function(key)
             syncSession:Rejoin(key)
@@ -2066,6 +2074,42 @@ if clientProfile.supported then
             return store and store:ChatTagColor(kind)
         end,
     })
+    -- Officers see out-of-date guild notes in the game's guild roster. The
+    -- audit is cached until the roster's data changes.
+    local auditCache
+    local function noteAudit()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        local stamp = partition.key .. "#" .. tostring(rosterController.revision or 0)
+        if auditCache == nil or auditCache.stamp ~= stamp then
+            local rows = addon.NoteAudit.Build({
+                partition = partition,
+                members = rosterController:LiveMembers(normalizer),
+                normalizer = normalizer,
+                rules = clientProfile.nameRules,
+            })
+            local byKey = {}
+            local index
+            for index = 1, #rows do
+                byKey[rows[index].key] = rows[index]
+            end
+            auditCache = { stamp = stamp, byKey = byKey, normalizer = normalizer }
+        end
+        return auditCache
+    end
+    guildNoteOverlay = addon.GuildNoteOverlay.Create({
+        client = client,
+        isOfficer = function()
+            return officerAuthority:IsOfficer(rosterController:SelfKey())
+        end,
+        rowFor = function(name)
+            local audit = noteAudit()
+            local key = audit and audit.normalizer:Key(name)
+            return key and audit.byKey[key] or nil
+        end,
+    })
     entryPoints = addon.EntryPoints.Create({
         client = client,
         toggle = function()
@@ -2105,6 +2149,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     end
     -- The minimap button needs saved data for its position.
     entryPoints:Start()
+    guildNoteOverlay:Start()
     -- Settings show saved values, so the panel waits for saved data too.
     settingsPanel:Register()
     -- Without the system message event, Guild Greet simply never prompts.
@@ -2148,6 +2193,7 @@ addon.persistence = persistence
 addon.rosterController = rosterController
 addon.pages = pages
 addon.entryPoints = entryPoints
+addon.guildNoteOverlay = guildNoteOverlay
 addon.chatAnnotator = chatAnnotator
 addon.comm = comm
 addon.settings = settings

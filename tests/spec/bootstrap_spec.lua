@@ -8,6 +8,7 @@ local MANIFEST_FILES = {
     "Adapters/MasterFrame.lua",
     "Adapters/RosterWindow.lua",
     "Adapters/EntryPoints.lua",
+    "Adapters/GuildNoteOverlay.lua",
     "Adapters/Comm.lua",
     "Adapters/SettingsPanel.lua",
     "Adapters/GreetPrompts.lua",

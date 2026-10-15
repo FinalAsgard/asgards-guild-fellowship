@@ -30,6 +30,8 @@ Controller.__index = Controller
 --                 change to the player of `key`, with the alias before it
 --                 ("" for none) (for guild sync)
 --   onScanFinished  optional function(): after every completed scan
+--   onChanged     optional function(): after anything the roster shows
+--                 changed (a scan, sync, manual change, or roster update)
 --   onSyncResumed  optional function(key): after "Don't sync" was turned
 --                 off for the player of `key`
 --   onDecideSuggestion  optional function(character, kind, approved) ->
@@ -62,6 +64,7 @@ function RosterController.Create(options)
         onAliasChanged = options.onAliasChanged,
         onDeclaredChanged = options.onDeclaredChanged,
         onScanFinished = options.onScanFinished,
+        onChanged = options.onChanged,
         onSyncResumed = options.onSyncResumed,
         collapsed = {},
         showDeparted = false,
@@ -797,6 +800,13 @@ end
 function Controller:Refresh()
     self.revision = (self.revision or 0) + 1
     self:Redraw()
+    self:NotifyChanged()
+end
+
+function Controller:NotifyChanged()
+    if self.onChanged ~= nil then
+        self.onChanged()
+    end
 end
 
 -- Data changed: the rows are stale even while the window is hidden, so the
@@ -806,6 +816,7 @@ function Controller:Invalidate()
     if self.window ~= nil and self.window:IsShown() then
         self:Redraw()
     end
+    self:NotifyChanged()
 end
 
 -- Draws the window from the store plus live roster facts. The rows are
