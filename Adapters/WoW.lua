@@ -545,13 +545,11 @@ end
 -- the client has maps, else "zone:<name>"; the name is as the client shows
 -- it. Nil when the client can't say, including while a client whose maps
 -- work hasn't placed the player on one yet (just after a loading screen, or
--- on a boat), so one zone never goes by two keys.
+-- on a boat), so one zone never goes by two keys. A place with no map at
+-- all, whose instance is named for it (the Deeprun Tram), is keyed by name.
 function Client:GetZone()
-    local ok, name = callFunction(self.environment.GetRealZoneText)
-    if not ok or type(name) ~= "string" or name == "" then
-        ok, name = callFunction(self.environment.GetZoneText)
-    end
-    if not ok or type(name) ~= "string" or name == "" then
+    local name = self:zoneText()
+    if name == nil then
         return nil
     end
     local mapId, unplaced = self:zoneMapId()
@@ -559,9 +557,26 @@ function Client:GetZone()
         return { key = "map:" .. mapId, name = name }
     end
     if unplaced then
-        return nil
+        -- Just after a loading screen the instance is still the continent,
+        -- so its name isn't the zone's.
+        local ok, instanceName = callFunction(self.environment.GetInstanceInfo)
+        if not ok or instanceName ~= name then
+            return nil
+        end
     end
     return { key = "zone:" .. name, name = name }
+end
+
+-- The zone's name as the client shows it, or nil.
+function Client:zoneText()
+    local ok, name = callFunction(self.environment.GetRealZoneText)
+    if not ok or type(name) ~= "string" or name == "" then
+        ok, name = callFunction(self.environment.GetZoneText)
+    end
+    if not ok or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    return name
 end
 
 -- Where the player is on their zone's map: { mapId, x, y } with x and y from
@@ -751,7 +766,10 @@ end
 function Client:ChannelReport()
     local lines = {}
     local zone = self:GetZone()
-    table.insert(lines, "Zone: " .. (zone and (zone.name .. " (" .. zone.key .. ")") or "unknown"))
+    local text = self:zoneText()
+    table.insert(lines, "Zone: " .. (zone and (zone.name .. " (" .. zone.key .. ")")
+        or text and (text .. ", unknown: the game hasn't placed you on a map, so no prompts here")
+        or "unknown"))
     local listed = self:ListedChannels()
     if listed[1] == nil then
         table.insert(lines, "The game lists no channels here.")
