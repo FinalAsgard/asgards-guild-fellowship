@@ -26,6 +26,11 @@ local MapPins = {
     -- HBD_PINS_WORLDMAP_SHOW_CURRENT: a dot shows on its own zone's map only.
     SHOW_CURRENT_GLOBAL = "HBD_PINS_WORLDMAP_SHOW_CURRENT",
     SHOW_CURRENT = 0,
+    -- HBD_PINS_WORLDMAP_SHOW_WORLD: shown on the world map too. The world
+    -- map has no coordinates of its own, so a continent's world map marker
+    -- is added on the continent with this flag.
+    SHOW_WORLD_GLOBAL = "HBD_PINS_WORLDMAP_SHOW_WORLD",
+    SHOW_WORLD = 3,
     -- While the player is in a party, guildmates outside it are drawn at
     -- this opacity, so the party stands out.
     DIM_ALPHA = 0.35,
@@ -520,10 +525,53 @@ function Pins:Refresh()
                 frame = self:MarkerFrame(drawn)
             end
             if frame ~= nil and pcall(self.DrawMarker, self, frame, marker) then
-                pcall(self.pins.AddWorldMapIconMap, self.pins, self, frame, marker.mapId, x, y, showFlag)
+                self:AddMarker(frame, marker, x, y, showFlag)
             end
         end
     end
+end
+
+-- Adds `frame`, drawn for `marker`, at `x`, `y` on the marker's map. A
+-- continent's marker on the world map goes on the continent itself, at the
+-- point that shows at `x`, `y` on the world map (the pins library can't
+-- place anything from the world map's own coordinates); only drawn while
+-- the world map is open, it never shows on the continent's own map. Added
+-- on the world map directly when that point can't be worked out.
+function Pins:AddMarker(frame, marker, x, y, showFlag)
+    if self:IsWorldMap(marker.mapId) then
+        local areaX, areaY = self:Unproject(x, y, marker.area, marker.mapId)
+        if areaX ~= nil then
+            local worldFlag = self.environment[MapPins.SHOW_WORLD_GLOBAL]
+            if type(worldFlag) ~= "number" then
+                worldFlag = MapPins.SHOW_WORLD
+            end
+            pcall(self.pins.AddWorldMapIconMap, self.pins, self, frame, marker.area, areaX, areaY, worldFlag)
+            return
+        end
+    end
+    pcall(self.pins.AddWorldMapIconMap, self.pins, self, frame, marker.mapId, x, y, showFlag)
+end
+
+-- Whether `mapId` is a world map (the client's map type says so).
+function Pins:IsWorldMap(mapId)
+    local maps = self.environment.C_Map
+    if type(maps) ~= "table" or type(maps.GetMapInfo) ~= "function" then
+        return false
+    end
+    local ok, info = pcall(maps.GetMapInfo, mapId)
+    return ok and type(info) == "table" and info.mapType == MapPins.WORLD_MAP_TYPE
+end
+
+-- The point on map `area` that shows at `x`, `y` on map `mapId`, or nil:
+-- the pins library places a map inside another by scaling and moving it,
+-- so two corners are enough to work back.
+function Pins:Unproject(x, y, area, mapId)
+    local leftX, topY = self:Translate(0, 0, area, mapId)
+    local rightX, bottomY = self:Translate(1, 1, area, mapId)
+    if leftX == nil or rightX == nil or rightX == leftX or bottomY == topY then
+        return nil
+    end
+    return (x - leftX) / (rightX - leftX), (y - topY) / (bottomY - topY)
 end
 
 -- The map the world map shows now; false while it's closed; nil when the

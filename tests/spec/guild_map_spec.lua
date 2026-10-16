@@ -654,6 +654,27 @@ local function installCoordinates(environment)
 end
 
 -- The icons drawn on map `mapId`.
+-- The world map's markers: added on their continent, flagged to show on
+-- the world map.
+local function worldIcons(pins)
+    local found = {}
+    local index
+    for index = 1, #pins.icons do
+        if pins.icons[index].showFlag == 3 then
+            table.insert(found, pins.icons[index])
+        end
+    end
+    return found
+end
+
+-- Where the continent map `area` point that shows at `x`, `y` on world map
+-- `mapId` is, under installCoordinates.
+local function unprojected(x, y, area, mapId)
+    local leftX, topY = translated(0, 0, area, mapId)
+    local rightX, bottomY = translated(1, 1, area, mapId)
+    return (x - leftX) / (rightX - leftX), (y - topY) / (bottomY - topY)
+end
+
 local function iconsOn(pins, mapId)
     local found = {}
     local index
@@ -877,6 +898,47 @@ local function registerProfileTests(profile)
         test.assertEqual(0.50, drawn[1].y)
         test.assertEqual(0.80, drawn[2].x)
         test.assertEqual(0.44, drawn[2].y)
+    end)
+
+    test.test(profile .. ": a world map marker is added on its continent, flagged to show on the world map", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        installCoordinates(world.environment)
+        world.environment.C_Map.GetMapInfo = function(mapId)
+            return { mapID = mapId, mapType = mapId == 947 and 1 or 2 }
+        end
+        local markers = {
+            { area = 1415, mapId = 947, display = "dots", people = { DOTS[1] } },
+            { area = 113, mapId = 947, display = "dots", people = { DOTS[2] } },
+        }
+        local mapPins = buildPins(world, {}, markers)
+        mapPins:Start()
+        mapPins:Refresh()
+
+        test.assertEqual(0, #iconsOn(pins, 947))
+        local drawn = worldIcons(pins)
+        test.assertEqual(2, #drawn)
+        test.assertEqual(1415, drawn[1].mapId)
+        local x, y = unprojected(0.80, 0.44, 1415, 947)
+        test.assertEqual(x, drawn[1].x)
+        test.assertEqual(y, drawn[1].y)
+        -- A continent without a fixed spot, at the middle of its guildmates.
+        test.assertEqual(113, drawn[2].mapId)
+        local wrenchX, wrenchY = translated(0.1, 0.2, 1453, 947)
+        x, y = unprojected(wrenchX, wrenchY, 113, 947)
+        test.assertEqual(x, drawn[2].x)
+        test.assertEqual(y, drawn[2].y)
+
+        -- Without coordinates to work back from: on the world map directly.
+        world.environment.LibStub.libs["HereBeDragons-2.0"] = nil
+        local direct = buildPins(world, {}, { markers[1] })
+        direct:Start()
+        direct:Refresh()
+        local onWorld = iconsOn(pins, 947)
+        test.assertEqual(1, #onWorld)
+        test.assertEqual(0.80, onWorld[1].x)
+        test.assertEqual(0.44, onWorld[1].y)
+        test.assertEqual(0, onWorld[1].showFlag)
     end)
 
     test.test(profile .. ": guildmates at the same spot on a zone map are moved apart, not combined", function()
@@ -1195,10 +1257,14 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(y, zone.y)
         test.assertEqual(1, #zone.icon.marker.people)
         test.assertEqual("MAGE", zone.icon.marker.people[1].class)
-        -- On the world map, at the Eastern Kingdoms' spot.
-        local continent = iconsOn(pins, 947)[1]
-        test.assertEqual(0.80, continent.x)
-        test.assertEqual(0.44, continent.y)
+        -- On the world map, at the Eastern Kingdoms' spot: added on the
+        -- continent, at the point that shows there.
+        local continent = worldIcons(pins)[1]
+        local spotX, spotY = unprojected(0.80, 0.44, 1415, 947)
+        test.assertEqual(1415, continent.mapId)
+        test.assertEqual(spotX, continent.x)
+        test.assertEqual(spotY, continent.y)
+        test.assertEqual(1415, continent.icon.marker.area)
     end)
 
     test.test(profile .. ": in the whole add-on, online guildmates count on the world map from the roster's zone", function()
@@ -1244,7 +1310,7 @@ local function registerWholeAddonTests(profile)
         test.assertTrue(people[1].fromRoster)
         test.assertEqual("WARRIOR", people[1].class)
         test.assertEqual(guild.members[1].level, people[1].level)
-        test.assertEqual(1, #iconsOn(pins, 947))
+        test.assertEqual(1, #worldIcons(pins))
 
         -- Once the officer shares a position, that replaces the roster's.
         local officer = login(profile, channel, guild.members[1].name, { mapID = 1429, x = 0.25, y = 0.5 }, "WARRIOR")
