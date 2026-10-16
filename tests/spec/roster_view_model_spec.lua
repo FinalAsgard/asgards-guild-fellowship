@@ -283,3 +283,72 @@ test.test("the counts line reads naturally and leaves out unlinked at zero", fun
     test.assertEqual("1 player · 0 alts · 1 character",
         model.CountsText({ players = 1, alts = 0, unlinked = 0, characters = 1 }))
 end)
+
+test.test("counts who is online, aliases, declared mains, and unlinked online", function()
+    local addon = load()
+    local partition = setup(addon)
+    -- Anna has an alt online; Bert has an alias and is offline; Cleo
+    -- declared her main and is online; Dora and Eve are unlinked, Eve online.
+    local anna = record(partition, "Anna")
+    local annaTwo = record(partition, "Anna Two")
+    partition:JoinPlayerOf(annaTwo, anna, "note")
+    local bert = record(partition, "Bert")
+    partition:SetAlias(partition:GetCharacter(bert).player, "Bertie", "note")
+    local cleo = record(partition, "Cleo")
+    partition:SetDeclared(cleo, true, "manual")
+    record(partition, "Dora")
+    local eve = record(partition, "Eve")
+    -- A departed character online elsewhere is still not counted.
+    local fred = record(partition, "Fred")
+    partition:MarkDeparted(fred, 1790000000)
+    local members = {
+        [annaTwo] = { online = true },
+        [anna] = { online = false },
+        [cleo] = { online = true },
+        [eve] = { online = true },
+        [fred] = { online = true },
+    }
+
+    local counts = addon.RosterViewModel.Counts(partition, members)
+
+    assertCounts({ players = 3, alts = 1, unlinked = 2, characters = 6 }, counts)
+    test.assertEqual(2, counts.playersOnline)
+    test.assertEqual(3, counts.charactersOnline)
+    test.assertEqual(1, counts.unlinkedOnline)
+    test.assertEqual(1, counts.withAlias)
+    test.assertEqual(1, counts.declared)
+end)
+
+test.test("the counts tooltip gives the breakdown and explains unlinked", function()
+    local model = load().RosterViewModel
+
+    local lines = model.CountsTooltip({ players = 28, alts = 31, unlinked = 14, characters = 73,
+        playersOnline = 9, charactersOnline = 11, unlinkedOnline = 2, withAlias = 18, declared = 21 })
+
+    test.assertEqual(8, #lines)
+    test.assertEqual("Guild size", lines[1])
+    test.assertEqual("9 of 28 players online", lines[2])
+    test.assertEqual("11 of 73 characters online", lines[3])
+    test.assertEqual("18 players have an alias", lines[4])
+    test.assertEqual("21 mains declared", lines[5])
+    test.assertEqual("14 unlinked characters (2 online)", lines[6])
+    test.assertEqual("  A lone character with no alias or declared main.", lines[7])
+    test.assertEqual("  It may be someone's alt.", lines[8])
+end)
+
+test.test("the counts tooltip uses singular wording and leaves out unlinked at zero", function()
+    local model = load().RosterViewModel
+
+    local lines = model.CountsTooltip({ players = 1, alts = 0, unlinked = 0, characters = 1,
+        playersOnline = 1, charactersOnline = 1, unlinkedOnline = 0, withAlias = 1, declared = 1 })
+
+    test.assertEqual(5, #lines)
+    test.assertEqual("1 of 1 player online", lines[2])
+    test.assertEqual("1 of 1 character online", lines[3])
+    test.assertEqual("1 player has an alias", lines[4])
+    test.assertEqual("1 main declared", lines[5])
+
+    lines = model.CountsTooltip({ players = 0, alts = 0, unlinked = 1, characters = 1,
+        playersOnline = 0, charactersOnline = 0, unlinkedOnline = 0, withAlias = 0, declared = 0 })
+    test.assertEqual("1 unlinked character (0 online)", lines[6])
+end)

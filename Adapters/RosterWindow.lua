@@ -973,6 +973,70 @@ local function buildRecentAds(framework, page, frameName)
     return ads
 end
 
+-- The guild-size counts line: its text, and on hover a tooltip with the
+-- breakdown. Made with `environment`'s CreateFrame and GameTooltip, so
+-- specs can draw it with fake frames. Hidden until :Set gives it text.
+local CountsLine = {}
+CountsLine.__index = CountsLine
+
+function RosterWindow.CountsLine(environment, parent)
+    local frame = environment.CreateFrame("Frame", nil, parent)
+    frame:SetHeight(14)
+    frame:EnableMouse(true)
+    local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetPoint("LEFT", frame, "LEFT", 0, 0)
+    text:SetJustifyH("LEFT")
+    text:SetWordWrap(false)
+    local line = setmetatable({ environment = environment, frame = frame, text = text, lines = {} }, CountsLine)
+    frame:SetScript("OnEnter", function()
+        line.hovering = true
+        line:ShowTooltip()
+    end)
+    frame:SetScript("OnLeave", function()
+        line.hovering = false
+        local tooltip = environment.GameTooltip
+        if tooltip ~= nil then
+            pcall(tooltip.Hide, tooltip)
+        end
+    end)
+    frame:Hide()
+    return line
+end
+
+-- Shows `text` with tooltip `lines` (see RosterViewModel.CountsTooltip), or,
+-- for nil, hides the line. A tooltip already showing is redrawn.
+function CountsLine:Set(text, lines)
+    if text == nil then
+        self.frame:Hide()
+        return
+    end
+    self.text:SetText(text)
+    -- Only the text is hoverable.
+    self.frame:SetWidth((self.text:GetStringWidth() or 0) + 4)
+    self.lines = lines or {}
+    self.frame:Show()
+    if self.hovering then
+        self:ShowTooltip()
+    end
+end
+
+function CountsLine:ShowTooltip()
+    local tooltip = self.environment.GameTooltip
+    if tooltip == nil then
+        return
+    end
+    pcall(function()
+        tooltip:SetOwner(self.frame, "ANCHOR_BOTTOMRIGHT")
+        -- The first line is the tooltip's title.
+        tooltip:AddLine(self.lines[1])
+        local index
+        for index = 2, #self.lines do
+            tooltip:AddLine(self.lines[index], 1, 1, 1)
+        end
+        tooltip:Show()
+    end)
+end
+
 local function build(framework, options)
     local frameName = addon.Identity.addonName .. "RosterWindow"
     local host = addon.MasterFrame.Build(framework, {
@@ -1064,14 +1128,9 @@ local function build(framework, options)
         options.onExpandAll()
     end)
 
-    -- How big the guild is, under the controls; hidden until there is
-    -- guild data.
-    local counts = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    counts:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -58)
-    counts:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -58)
-    counts:SetJustifyH("LEFT")
-    counts:SetWordWrap(false)
-    counts:Hide()
+    -- How big the guild is, under the controls.
+    local counts = RosterWindow.CountsLine(_G, panel)
+    counts.frame:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -58)
 
     local headerIndex
     for headerIndex = 1, #COLUMNS do
@@ -1455,15 +1514,10 @@ function Window:SetStatus(text)
     self.status:SetText(text or "")
 end
 
--- Shows the guild-size counts line (see RosterViewModel.CountsText), or,
--- for nil, hides it.
-function Window:SetCounts(text)
-    if text == nil then
-        self.counts:Hide()
-        return
-    end
-    self.counts:SetText(text)
-    self.counts:Show()
+-- Shows the guild-size counts line (see RosterViewModel.CountsText) with
+-- its tooltip `lines`, or, for nil, hides it.
+function Window:SetCounts(text, lines)
+    self.counts:Set(text, lines)
 end
 
 -- Returns false instead of raising when the framework misbehaves.

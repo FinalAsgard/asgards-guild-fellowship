@@ -20,8 +20,9 @@ local function newWindow()
         self.status = text
     end
     -- `window.counts` is false once told to hide the counts line.
-    function window:SetCounts(text)
+    function window:SetCounts(text, lines)
         self.counts = text or false
+        self.countsTooltip = lines
     end
     function window:SetConflicts(rows)
         self.conflicts = rows
@@ -431,3 +432,65 @@ end
 for index = 1, #fixtures.PROFILES do
     registerCountsTests(fixtures.PROFILES[index])
 end
+
+local function registerCountsTooltipTests(profile)
+    test.test(profile .. " the counts tooltip shows who is online and follows logins", function()
+        local setup = build(profile)
+        setup.login()
+        setup.controller:Toggle()
+
+        -- Only the officer, Tool Box, is online.
+        local lines = setup.window.countsTooltip
+        test.assertEqual("Guild size", lines[1])
+        test.assertEqual("1 of 1 player online", lines[2])
+        test.assertEqual("1 of 3 characters online", lines[3])
+        test.assertEqual("1 player has an alias", lines[4])
+        test.assertEqual("0 mains declared", lines[5])
+        test.assertEqual("1 unlinked character (0 online)", lines[6])
+
+        setup.world.guild.members[3].online = true
+        setup.controller:OnRosterUpdate()
+
+        test.assertEqual("2 of 3 characters online", setup.window.countsTooltip[3])
+        test.assertEqual("1 unlinked character (1 online)", setup.window.countsTooltip[6])
+    end)
+end
+
+for index = 1, #fixtures.PROFILES do
+    registerCountsTooltipTests(fixtures.PROFILES[index])
+end
+
+test.test("hovering the counts line shows its tooltip, and leaving hides it", function()
+    local FakeFrames = require("tests.fake_frames")
+    local addon = test.newAddon("Core/Identity.lua", "Adapters/MasterFrame.lua", "Adapters/RosterWindow.lua")
+    local environment = FakeFrames.install({})
+    local tooltip = { lines = {}, shown = false }
+    function tooltip:SetOwner(owner) self.owner = owner; self.lines = {} end
+    function tooltip:AddLine(text) table.insert(self.lines, text) end
+    function tooltip:Show() self.shown = true end
+    function tooltip:Hide() self.shown = false end
+    environment.GameTooltip = tooltip
+    local counts = addon.RosterWindow.CountsLine(environment, FakeFrames.host(environment))
+    test.assertFalse(counts.frame.shown)
+
+    counts:Set("1 player · 1 alt · 1 unlinked · 3 characters", { "Guild size", "1 of 1 player online" })
+    test.assertTrue(counts.frame.shown)
+    test.assertEqual("1 player · 1 alt · 1 unlinked · 3 characters", counts.text.text)
+
+    counts.frame.scripts.OnEnter(counts.frame)
+    test.assertTrue(tooltip.shown)
+    test.assertEqual(counts.frame, tooltip.owner)
+    test.assertEqual(2, #tooltip.lines)
+    test.assertEqual("Guild size", tooltip.lines[1])
+    test.assertEqual("1 of 1 player online", tooltip.lines[2])
+
+    -- A rebuild while hovering redraws the tooltip.
+    counts:Set("1 player · 1 alt · 1 unlinked · 3 characters", { "Guild size", "0 of 1 player online" })
+    test.assertEqual("0 of 1 player online", tooltip.lines[2])
+
+    counts.frame.scripts.OnLeave(counts.frame)
+    test.assertFalse(tooltip.shown)
+
+    counts:Set(nil)
+    test.assertFalse(counts.frame.shown)
+end)

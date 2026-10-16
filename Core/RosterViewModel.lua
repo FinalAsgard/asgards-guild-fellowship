@@ -291,32 +291,50 @@ end
 
 -- How big the guild is, from every player's current characters (departed
 -- ones never count), whatever the roster's search and filters:
---   { players, alts, unlinked, characters }
+--   { players, alts, unlinked, characters, playersOnline, charactersOnline,
+--     unlinkedOnline, withAlias, declared }
 -- A player counts when they have two or more current characters, an alias,
 -- or a current main that was declared; otherwise their one character is
 -- unlinked. Alts are each counted player's characters after the first, so
--- players + alts + unlinked == characters.
-function RosterViewModel.Counts(partition)
-    local counts = { players = 0, alts = 0, unlinked = 0, characters = 0 }
+-- players + alts + unlinked == characters. `members` (live roster facts
+-- keyed by character key) says who is online: playersOnline counts players
+-- with a character online, unlinkedOnline unlinked characters online.
+-- withAlias and declared count players with an alias, and with a declared
+-- current main.
+function RosterViewModel.Counts(partition, members)
+    members = members or {}
+    local counts = {
+        players = 0, alts = 0, unlinked = 0, characters = 0,
+        playersOnline = 0, charactersOnline = 0, unlinkedOnline = 0, withAlias = 0, declared = 0,
+    }
     partition:EachPlayer(function(id, player)
         local keys = partition:CharactersOf(id)
-        local current = 0
+        local current, online = 0, 0
         local index
         for index = 1, #keys do
             if partition:IsInGuild(keys[index]) then
                 current = current + 1
+                local live = members[keys[index]]
+                if live ~= nil and live.online == true then
+                    online = online + 1
+                end
             end
         end
         if current == 0 then
             return
         end
         counts.characters = counts.characters + current
+        counts.charactersOnline = counts.charactersOnline + online
         local declared = player.main ~= nil and partition:IsInGuild(player.main) and partition:IsDeclared(player.main)
         if current >= 2 or player.alias ~= nil or declared then
             counts.players = counts.players + 1
             counts.alts = counts.alts + current - 1
+            counts.playersOnline = counts.playersOnline + (online > 0 and 1 or 0)
+            counts.withAlias = counts.withAlias + (player.alias ~= nil and 1 or 0)
+            counts.declared = counts.declared + (declared and 1 or 0)
         else
             counts.unlinked = counts.unlinked + 1
+            counts.unlinkedOnline = counts.unlinkedOnline + online
         end
     end)
     return counts
@@ -331,6 +349,25 @@ function RosterViewModel.CountsText(counts)
     end
     table.insert(parts, plural(counts.characters, "character"))
     return table.concat(parts, " · ")
+end
+
+-- The counts line's tooltip, one string per line: a "Guild size" title,
+-- who is online, how complete the Fellowship data is, and (when there are
+-- any) the unlinked characters with what "unlinked" means.
+function RosterViewModel.CountsTooltip(counts)
+    local lines = {
+        "Guild size",
+        counts.playersOnline .. " of " .. plural(counts.players, "player") .. " online",
+        counts.charactersOnline .. " of " .. plural(counts.characters, "character") .. " online",
+        plural(counts.withAlias, "player") .. " " .. (counts.withAlias == 1 and "has" or "have") .. " an alias",
+        plural(counts.declared, "main") .. " declared",
+    }
+    if counts.unlinked > 0 then
+        table.insert(lines, plural(counts.unlinked, "unlinked character") .. " (" .. counts.unlinkedOnline .. " online)")
+        table.insert(lines, "  A lone character with no alias or declared main.")
+        table.insert(lines, "  It may be someone's alt.")
+    end
+    return lines
 end
 
 -- Remembers the last build and returns it again while `stamp` (a value the
