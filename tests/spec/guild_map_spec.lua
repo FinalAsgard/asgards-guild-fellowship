@@ -517,6 +517,9 @@ local function fakeWidget()
     function widget:SetScript(name, handler) self.scripts[name] = handler end
     function widget:SetPoint(...) self.point = { ... } end
     function widget:SetText(text) self.text = text end
+    function widget:SetJustifyH(justify) self.justify = justify end
+    function widget:SetColorTexture(...) self.colorTexture = { ... } end
+    function widget:ClearAllPoints() self.point = nil end
     function widget:Show() self.shown = true end
     function widget:Hide() self.shown = false end
     function widget:CreateTexture()
@@ -799,9 +802,10 @@ local function registerProfileTests(profile)
             fromRoster = true }
         local markers = {
             { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } },
-            { area = 1415, mapId = 947, display = "count", people = four },
-            -- Only the roster places Anvil: at the zone's center on its own map.
-            { area = 1429, mapId = 1429, display = "dots", people = { anvil } },
+            -- Northrend has no fixed spot: the middle of everyone there.
+            { area = 113, mapId = 947, display = "count", people = four },
+            -- Only the roster places Anvil: its zone's center counts.
+            { area = 1436, mapId = 1415, display = "dots", people = { anvil } },
             -- Nobody here can be placed: the area's center.
             { area = 1411, mapId = 1414, display = "dots", people = { { key = "nowhere-area52", class = "MAGE" } } },
         }
@@ -822,6 +826,7 @@ local function registerProfileTests(profile)
 
         -- A count sits at the middle of everyone in it.
         local continent = iconsOn(pins, 947)[1]
+        test.assertEqual(4, #continent.icon.marker.people)
         local hammerX, hammerY = translated(0.4, 0.6, 1429, 947)
         local wrenchX, wrenchY = translated(0.1, 0.2, 1453, 947)
         test.assertEqual((0 + hammerX + wrenchX + hammerX + wrenchX) / 4, continent.x)
@@ -836,16 +841,128 @@ local function registerProfileTests(profile)
         test.assertEqual(4, #tooltip.lines)
         test.assertEqual("Hammer (TheTool) (42)", tooltip.lines[1])
 
-        local own = iconsOn(pins, 1429)[1]
-        test.assertEqual(0.5, own.x)
-        test.assertEqual(0.5, own.y)
-        test.assertEqual(0, own.showFlag)
-        test.assertEqual(0xff / 255, own.icon.dots[1].color[1])
+        local anvilX, anvilY = translated(0.5, 0.5, 1429, 1415)
+        test.assertEqual(anvilX, iconsOn(pins, 1415)[2].x)
+        test.assertEqual(anvilY, iconsOn(pins, 1415)[2].y)
 
         local unplaced = iconsOn(pins, 1414)[1]
         x, y = translated(0.5, 0.5, 1411, 1414)
         test.assertEqual(x, unplaced.x)
         test.assertEqual(y, unplaced.y)
+    end)
+
+    test.test(profile .. ": Kalimdor and the Eastern Kingdoms have fixed spots on the world map", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        installCoordinates(world.environment)
+        local continents = profile == "Retail" and { kalimdor = 12, kingdoms = 13 }
+            or { kalimdor = 1414, kingdoms = 1415 }
+        local markers = {
+            { area = continents.kalimdor, mapId = 947, display = "dots", people = { DOTS[2] } },
+            { area = continents.kingdoms, mapId = 947, display = "dots", people = { DOTS[1] } },
+        }
+        local mapPins = buildPins(world, {}, markers)
+        mapPins:Start()
+        mapPins:Refresh()
+
+        local drawn = iconsOn(pins, 947)
+        test.assertEqual(0.25, drawn[1].x)
+        test.assertEqual(0.50, drawn[1].y)
+        test.assertEqual(0.80, drawn[2].x)
+        test.assertEqual(0.44, drawn[2].y)
+    end)
+
+    test.test(profile .. ": guildmates at the same spot on a zone map are moved apart, not combined", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        local first = fixtures.snapshot(DOTS[1])
+        local second = fixtures.snapshot(DOTS[2])
+        second.mapId, second.x, second.y = first.mapId, first.x, first.y
+        local third = fixtures.snapshot(DOTS[2])
+        third.mapId, third.x, third.y = first.mapId, first.x + 0.005, first.y
+        local mapPins = buildPins(world, { first, second, third })
+        mapPins:Start()
+        mapPins:Refresh()
+
+        -- A dot's width is a hundredth of the map when the map can't say.
+        local drawn = iconsOn(pins, 1429)
+        test.assertEqual(3, #drawn)
+        test.assertEqual(0.4, drawn[1].x)
+        test.assertEqual(0.4 + 0.01, drawn[2].x)
+        test.assertEqual(0.6, drawn[2].y)
+        test.assertEqual(0.4 + 0.01 + 0.01, drawn[3].x)
+
+        -- With the map's width known, a dot moves by its own width.
+        world.environment.WorldMapFrame = { GetCanvas = function()
+            return { GetWidth = function() return 1000 end }
+        end }
+        mapPins:Refresh()
+        drawn = iconsOn(pins, 1429)
+        test.assertEqual(0.4 + 10 / 1000, drawn[2].x)
+    end)
+
+    test.test(profile .. ": pointing at a zone or continent lists its guildmates on the map", function()
+        local world = fixtures.newEnvironment(profile)
+        installMap(world.environment)
+        installCoordinates(world.environment)
+        local cursor = { over = true, mapId = 1415, area = 1429 }
+        local container = { name = "ScrollContainer" }
+        function container:IsMouseOver() return cursor.over end
+        function container:GetNormalizedCursorPosition() return 0.3, 0.4 end
+        world.environment.WorldMapFrame = {
+            ScrollContainer = container,
+            GetMapID = function() return cursor.mapId end,
+        }
+        world.environment.C_Map.GetMapInfoAtPosition = function(mapId, x, y)
+            test.assertEqual(cursor.mapId, mapId)
+            test.assertEqual(0.3, x)
+            test.assertEqual(0.4, y)
+            return { mapID = cursor.area }
+        end
+        world.environment.C_Map.GetMapInfo = function(mapId)
+            return { mapID = mapId, mapType = mapId == 947 and 1 or 2 }
+        end
+        local markers = {
+            { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } },
+            { area = 1415, mapId = 947, display = "count", people = { DOTS[1], DOTS[2] } },
+        }
+        local mapPins = buildPins(world, {}, markers)
+        mapPins:Start()
+        mapPins:Refresh()
+        local list = mapPins.areaList
+        local function tick()
+            mapPins.areaWatcher.scripts.OnUpdate(mapPins.areaWatcher, 0.2)
+        end
+
+        -- A zone on a continent map: listed at the map's right.
+        tick()
+        test.assertTrue(list.shown)
+        test.assertEqual("Hammer (TheTool) (42)", list.text.text)
+        test.assertEqual("RIGHT", list.point[1])
+        test.assertEqual(container, list.point[2])
+
+        -- A zone without guildmates, or the cursor off the map: nothing.
+        cursor.area = 1436
+        tick()
+        test.assertFalse(list.shown)
+        cursor.area = 1429
+        cursor.over = false
+        tick()
+        test.assertFalse(list.shown)
+
+        -- A continent on the world map: under its title.
+        cursor.over, cursor.mapId, cursor.area = true, 947, 1415
+        tick()
+        test.assertTrue(list.shown)
+        test.assertEqual("Hammer (TheTool) (42)\nWrench (70)", list.text.text)
+        test.assertEqual("TOP", list.point[1])
+        test.assertEqual("CENTER", list.text.justify)
+
+        -- Nothing listed once nobody's left there.
+        markers[2] = nil
+        mapPins:Refresh()
+        tick()
+        test.assertFalse(list.shown)
     end)
 
     test.test(profile .. ": guildmates outside the player's party are dimmed on every map", function()
@@ -1008,11 +1125,10 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(y, zone.y)
         test.assertEqual(1, #zone.icon.marker.people)
         test.assertEqual("MAGE", zone.icon.marker.people[1].class)
-        -- On the world map, over where they are on the continent.
+        -- On the world map, at the Eastern Kingdoms' spot.
         local continent = iconsOn(pins, 947)[1]
-        x, y = translated(0.25, 0.5, 1429, 947)
-        test.assertEqual(x, continent.x)
-        test.assertEqual(y, continent.y)
+        test.assertEqual(0.80, continent.x)
+        test.assertEqual(0.44, continent.y)
     end)
 
     test.test(profile .. ": in the whole add-on, online guildmates count on the world map from the roster's zone", function()
@@ -1039,14 +1155,14 @@ local function registerWholeAddonTests(profile)
             nil, prepare)
 
         local pins = viewer.pins
-        -- On the zone map, a marker at the zone's center; never a dot there
-        -- or on the minimap.
+        -- On the zone map, their own dot at the zone's center; never on
+        -- the minimap.
         local own = iconsOn(pins, zoneId)
         test.assertEqual(1, #own)
         test.assertEqual(0.5, own[1].x)
         test.assertEqual(0.5, own[1].y)
-        test.assertEqual(1, #own[1].icon.marker.people)
-        test.assertEqual(nil, own[1].icon.dot)
+        test.assertTrue(own[1].icon.dot.fromRoster)
+        test.assertEqual("WARRIOR", own[1].icon.dot.class)
         test.assertEqual(0, #pins.minimap)
         local zone = iconsOn(pins, 1415)[1]
         test.assertEqual(translated(0.5, 0.5, zoneId, 1415), zone.x)

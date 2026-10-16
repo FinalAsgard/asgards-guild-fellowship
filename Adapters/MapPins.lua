@@ -3,12 +3,13 @@ local _, addon = ...
 -- Draws guildmates on the game's maps with HereBeDragons-Pins-2.0: on the
 -- zone map, and on the minimap for those in the player's zone, each add-on
 -- guildmate is a class-colored dot at their exact position, with a tooltip naming the character, their alias or
--- main the way chat tags do, and their level. On a continent map each zone
--- with guildmates has one marker, and on the world map each continent does,
--- placed where those guildmates are: a class-colored dot for one, or a
--- count, with a tooltip listing everyone there. Guildmates only the roster
--- places get the same kind of marker at their zone's center on the zone
--- map. The only code that touches the
+-- main the way chat tags do, and their level. Dots that would overlap are
+-- moved apart. On a continent map each zone with guildmates has one marker,
+-- placed where those guildmates are, and on the world map each continent
+-- does, at a fixed spot over its land: a class-colored dot for one, or a
+-- count, with a tooltip listing everyone there. Pointing at a zone or
+-- continent on the world map lists its guildmates too. The only code that
+-- touches the
 -- HereBeDragons libraries. Without them the map simply stays empty
 -- (LibraryCheck already names the missing library).
 local MapPins = {
@@ -28,6 +29,25 @@ local MapPins = {
     -- While the player is in a party, guildmates outside it are drawn at
     -- this opacity, so the party stands out.
     DIM_ALPHA = 0.35,
+    -- Where each continent's marker sits on the world map, over its land:
+    -- Kalimdor and the Eastern Kingdoms, by their Forever and Retail map
+    -- IDs. Other continents go to the middle of their guildmates.
+    WORLD_SPOTS = {
+        [1414] = { 0.25, 0.50 },
+        [12] = { 0.25, 0.50 },
+        [1415] = { 0.80, 0.44 },
+        [13] = { 0.80, 0.44 },
+    },
+    -- A dot's width as a share of the map, when the map can't say.
+    DOT_WIDTH = 0.01,
+    WORLD_MAP_TYPE = 1,
+    -- The list of guildmates in the zone or continent under the cursor:
+    -- under the world map's continent title, or at the right of a
+    -- continent map. Checked this often, in seconds, while the map shows.
+    AREA_LIST_INTERVAL = 0.1,
+    AREA_LIST_TITLE_GAP = 64,
+    AREA_LIST_INSET = 16,
+    AREA_LIST_PADDING = 6,
 }
 addon.MapPins = MapPins
 
@@ -37,16 +57,18 @@ Pins.__index = Pins
 -- options:
 --   client  the compatibility adapter
 --   dots    function() -> the guildmates to draw: each { key, mapId, x, y,
---           class, name, level, label?, dimmed? } (label is the chat tag's
---           text; dimmed is set for those outside the player's party)
+--           class, name, level, label?, dimmed?, fromRoster? } (label is
+--           the chat tag's text; dimmed is set for those outside the
+--           player's party; fromRoster for those only the roster places,
+--           at their zone's center, never on the minimap)
 --   zone    function() -> the player's zone map ID, or nil (no minimap
 --           dots then)
 --   shown   function() -> false while guildmates are hidden from the maps
 --           and minimap
 --   markers function() -> the map markers: each { area, mapId, display,
 --           people } where `area` is the zone or continent map the marker
---           stands for, `mapId` the map it's drawn on (the zone's own map
---           for those only the roster places), `display` "dots" or "count"
+--           stands for, `mapId` the continent or world map it's drawn on,
+--           `display` "dots" or "count"
 --           (see LocationBoard), and `people` dots as above, those from the
 --           roster with fromRoster set and no position
 function MapPins.Create(options)
@@ -66,6 +88,7 @@ function MapPins.Create(options)
             return true
         end,
         icons = {},
+        drawnMarkers = {},
         -- The minimap's own dots: a frame is drawn on one map only.
         minimapIcons = {},
         markerFrames = {},
@@ -125,7 +148,105 @@ function Pins:Start()
             self:Refresh()
         end)
     end
+    self:StartAreaList()
     return true
+end
+
+-- Builds the list of guildmates in the area under the cursor on the world
+-- map's own map area, and a frame that shows whenever the map does, to
+-- check the cursor (a hidden list can't check for itself).
+function Pins:StartAreaList()
+    local worldMap = self.environment.WorldMapFrame
+    local container = type(worldMap) == "table" and worldMap.ScrollContainer or nil
+    if type(container) ~= "table" then
+        return
+    end
+    pcall(function()
+        local list = self.environment.CreateFrame("Frame", nil, container)
+        list.background = list:CreateTexture(nil, "BACKGROUND")
+        list.background:SetAllPoints(list)
+        list.background:SetColorTexture(0, 0, 0, 0.6)
+        list.text = list:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        list.text:SetPoint("CENTER", list, "CENTER", 0, 0)
+        list:Hide()
+        local watcher = self.environment.CreateFrame("Frame", nil, container)
+        local waited = 0
+        watcher:SetScript("OnUpdate", function(_, elapsed)
+            waited = waited + (elapsed or 0)
+            if waited >= MapPins.AREA_LIST_INTERVAL then
+                waited = 0
+                self:UpdateAreaList()
+            end
+        end)
+        self.areaList = list
+        self.areaWatcher = watcher
+    end)
+end
+
+-- The area under the cursor on the world map, and the map shown: the zone
+-- on a continent map, the continent on the world map. Nil when the cursor
+-- is off the map.
+function Pins:HoveredArea()
+    local worldMap = self.environment.WorldMapFrame
+    local maps = self.environment.C_Map
+    local container = type(worldMap) == "table" and worldMap.ScrollContainer or nil
+    if type(container) ~= "table" or type(maps) ~= "table" then
+        return nil
+    end
+    local okOver, over = pcall(container.IsMouseOver, container)
+    if not okOver or not over then
+        return nil
+    end
+    local okMap, mapId = pcall(worldMap.GetMapID, worldMap)
+    local okCursor, x, y = pcall(container.GetNormalizedCursorPosition, container)
+    if not okMap or type(mapId) ~= "number" or not okCursor or type(x) ~= "number" or type(y) ~= "number" then
+        return nil
+    end
+    local okInfo, info = pcall(maps.GetMapInfoAtPosition, mapId, x, y)
+    if not okInfo or type(info) ~= "table" or type(info.mapID) ~= "number" or info.mapID == mapId then
+        return nil
+    end
+    return info.mapID, mapId
+end
+
+-- Shows the guildmates in the area under the cursor, or hides the list.
+function Pins:UpdateAreaList()
+    local list = self.areaList
+    if list == nil then
+        return
+    end
+    local area, mapId = self:HoveredArea()
+    local marker
+    local index
+    for index = 1, #self.drawnMarkers do
+        local drawn = self.drawnMarkers[index]
+        if area ~= nil and drawn.area == area and drawn.mapId == mapId then
+            marker = drawn
+        end
+    end
+    if marker == nil then
+        list:Hide()
+        return
+    end
+    local lines = MapPins.MarkerLines(marker)
+    list.text:SetText(table.concat(lines, "\n"))
+    local padding = MapPins.AREA_LIST_PADDING
+    local okWidth, width = pcall(list.text.GetStringWidth, list.text)
+    local okHeight, height = pcall(list.text.GetStringHeight, list.text)
+    width = okWidth and type(width) == "number" and width or 160
+    height = okHeight and type(height) == "number" and height or 14 * #lines
+    list:SetSize(width + 2 * padding, height + 2 * padding)
+    local container = self.environment.WorldMapFrame.ScrollContainer
+    local okInfo, info = pcall(self.environment.C_Map.GetMapInfo, mapId)
+    pcall(list.ClearAllPoints, list)
+    if okInfo and type(info) == "table" and info.mapType == MapPins.WORLD_MAP_TYPE then
+        list.text:SetJustifyH("CENTER")
+        list:SetPoint("TOP", container, "TOP", 0, -MapPins.AREA_LIST_TITLE_GAP)
+    else
+        list.text:SetJustifyH("LEFT")
+        list:SetPoint("RIGHT", container, "RIGHT", -MapPins.AREA_LIST_INSET, 0)
+    end
+    list:Show()
 end
 
 local function showTooltip(icon)
@@ -275,10 +396,15 @@ function Pins:Translate(x, y, from, to)
     return toX, toY
 end
 
--- Where `marker` goes on its map: the middle of its people, each at their
--- position, or their zone's center when only the roster places them. The
--- area's center when none of them can be placed; nil when that can't either.
+-- Where `marker` goes on its map: a continent's fixed spot on the world
+-- map, else the middle of its people, each at their position, or their
+-- zone's center when only the roster places them. The area's center when
+-- none of them can be placed; nil when that can't either.
 function Pins:Place(marker)
+    local spot = MapPins.WORLD_SPOTS[marker.area]
+    if spot ~= nil then
+        return spot[1], spot[2]
+    end
     local sumX, sumY, placed = 0, 0, 0
     local index
     for index = 1, #marker.people do
@@ -314,6 +440,7 @@ function Pins:Refresh()
     pcall(self.pins.RemoveAllWorldMapIcons, self.pins, self)
     local okShown, shown = pcall(self.shown)
     if okShown and shown == false then
+        self.drawnMarkers = {}
         if type(self.pins.RemoveAllMinimapIcons) == "function" then
             pcall(self.pins.RemoveAllMinimapIcons, self.pins, self)
         end
@@ -327,6 +454,8 @@ function Pins:Refresh()
     if type(showFlag) ~= "number" then
         showFlag = MapPins.SHOW_CURRENT
     end
+    local width = self:DotWidth()
+    local placed = {}
     local index
     for index = 1, #dots do
         local dot = dots[index]
@@ -334,14 +463,17 @@ function Pins:Refresh()
         if icon ~= nil then
             icon.dot = dot
             self:Color(icon, dot)
-            pcall(self.pins.AddWorldMapIconMap, self.pins, self, icon, dot.mapId, dot.x, dot.y, showFlag)
+            local x, y = self:Spread(placed, dot.mapId, dot.x, dot.y, width)
+            pcall(self.pins.AddWorldMapIconMap, self.pins, self, icon, dot.mapId, x, y, showFlag)
         end
     end
     self:DrawMinimap(dots)
     local okMarkers, markers = pcall(self.markers)
     if not okMarkers or type(markers) ~= "table" then
+        self.drawnMarkers = {}
         return
     end
+    self.drawnMarkers = markers
     for index = 1, #markers do
         local marker = markers[index]
         local x, y = self:Place(marker)
@@ -350,6 +482,40 @@ function Pins:Refresh()
             pcall(self.pins.AddWorldMapIconMap, self.pins, self, frame, marker.mapId, x, y, showFlag)
         end
     end
+end
+
+-- A dot's width as a share of the world map's width now, so dots can be
+-- kept apart.
+function Pins:DotWidth()
+    local worldMap = self.environment.WorldMapFrame
+    if type(worldMap) == "table" and type(worldMap.GetCanvas) == "function" then
+        local ok, width = pcall(function()
+            return worldMap:GetCanvas():GetWidth()
+        end)
+        if ok and type(width) == "number" and width > 0 then
+            return MapPins.DOT_SIZE / width
+        end
+    end
+    return MapPins.DOT_WIDTH
+end
+
+-- Where a dot at `x`, `y` on map `mapId` goes so it doesn't cover one
+-- already in `placed`: moved right a dot's width at a time. Records it.
+function Pins:Spread(placed, mapId, x, y, width)
+    local moved = true
+    while moved do
+        moved = false
+        local index
+        for index = 1, #placed do
+            local other = placed[index]
+            if other.mapId == mapId and math.abs(other.x - x) < width and math.abs(other.y - y) < width then
+                x = other.x + width
+                moved = true
+            end
+        end
+    end
+    table.insert(placed, { mapId = mapId, x = x, y = y })
+    return x, y
 end
 
 -- Draws the dots in the player's zone on the minimap, replacing the ones
@@ -367,7 +533,8 @@ function Pins:DrawMinimap(dots)
     local index
     for index = 1, #dots do
         local dot = dots[index]
-        if dot.mapId == zone then
+        -- Those only the roster places have no real position to show.
+        if dot.mapId == zone and not dot.fromRoster then
             drawn = drawn + 1
             local icon = self:Icon(drawn, self.minimapIcons)
             if icon ~= nil then

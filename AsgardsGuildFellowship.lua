@@ -2276,8 +2276,7 @@ if clientProfile.supported then
         return found
     end
     -- Map markers: per zone on its continent's map, and per continent on
-    -- the world map, counting guildmates the roster places in a zone. Those
-    -- only the roster places also get a marker on their zone's own map.
+    -- the world map, counting guildmates the roster places in a zone.
     local function locationMarkers()
         local markers = {}
         local function add(grouped, shownOn)
@@ -2303,34 +2302,37 @@ if clientProfile.supported then
         end, roster), function(continent)
             return parentsOf(continent).world
         end)
+        return markers
+    end
+    -- Guildmates only the roster places, as dots at their zone's center on
+    -- the zone map: the roster names nothing closer.
+    local function rosterDots()
         local zones = locationBoard:Markers(function(mapId)
             return mapId
-        end, roster)
-        local rosterOnly = {}
-        local index
+        end, rosterLocations())
+        local found = {}
+        local index, each
         for index = 1, #zones do
-            local people = {}
-            local each
             for each = 1, #zones[index].people do
-                if zones[index].people[each].fromRoster then
-                    table.insert(people, zones[index].people[each])
+                local person = zones[index].people[each]
+                if person.fromRoster then
+                    person.x, person.y = 0.5, 0.5
+                    table.insert(found, person)
                 end
             end
-            if #people > 0 then
-                zones[index].people = people
-                zones[index].display = #people <= addon.LocationBoard.DOTS_MAX and "dots" or "count"
-                table.insert(rosterOnly, zones[index])
-            end
         end
-        add(rosterOnly, function(zone)
-            return zone
-        end)
-        return markers
+        return found
     end
     mapPins = addon.MapPins.Create({
         client = client,
         dots = function()
-            return describeLocations(locationBoard:All())
+            local dots = describeLocations(locationBoard:All())
+            local fromRoster = describeLocations(rosterDots())
+            local index
+            for index = 1, #fromRoster do
+                table.insert(dots, fromRoster[index])
+            end
+            return dots
         end,
         markers = locationMarkers,
         zone = function()

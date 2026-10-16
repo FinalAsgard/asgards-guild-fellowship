@@ -387,11 +387,11 @@ A guildmate's player panel then shows **Grouped together 3 times, last on 2026-1
 
 Guildmates running the add-on share where they are, so you can see where the guild is playing and find people to meet up with.
 
-- **Zone map and minimap**: each guildmate in that zone is a dot in their class color at their exact position. On the minimap you see the guildmates in your own zone.
-- **Continent map**: each zone with guildmates has one marker, placed where they are in that zone. One guildmate shows as a dot in their class color; 2 or more show as a count.
-- **World map**: the same, one marker per continent, placed over where its guildmates are.
+- **Zone map and minimap**: each guildmate in that zone is a dot in their class color at their exact position. Dots that would cover each other are moved apart by a dot's width. On the minimap you see the guildmates in your own zone.
+- **Continent map**: each zone with guildmates has one marker, placed where they are in that zone. One guildmate shows as a dot in their class color; 2 or more show as a count. Point at a zone to list its guildmates at the right of the map.
+- **World map**: one marker per continent, over its land (Kalimdor and the Eastern Kingdoms have fixed spots). Point at a continent to list its guildmates under its name.
 - Hover a dot to see the character's name, alias or main (the same as its [chat tag](#chat-tags)) and level, as `Name (Main) (70)`. Hover a marker to list everyone there.
-- Guildmates without the add-on, and those whose position hasn't arrived yet, still count on the continent and world maps at zone level, using the zone the guild roster shows. On their zone's own map they get a marker at the zone's center, since the roster names only the zone. They never get a dot on the minimap.
+- Guildmates without the add-on, and those whose position hasn't arrived yet, still count on the continent and world maps at zone level, using the zone the guild roster shows. On their zone's own map each gets a dot at the zone's center, since the roster names only the zone. They never get a dot on the minimap.
 - While you're in a party, guildmates outside it are dimmed on every map and the minimap, so your party members stand out. A marker with nobody from your party is dimmed as a whole.
 - Your own characters never show.
 
