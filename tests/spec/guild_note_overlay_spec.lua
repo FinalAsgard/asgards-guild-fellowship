@@ -268,11 +268,14 @@ local function registerProfileTests(profile)
         test.assertFalse(detail.panel.shown)
         test.assertEqual("TheTool (Toolbox)", shown.title.text)
         test.assertEqual("Discord: thetool\nMain: Toolbox (80)\nAlts: Hammer (70)", shown.body.text)
-        -- Hung under the detail panel, as wide as it.
+        -- Hung under the detail panel, as wide as it, moved a little right
+        -- to clear the guild roster window.
         test.assertEqual("TOPLEFT", shown.points[1][1])
         test.assertEqual(detail, shown.points[1][2])
         test.assertEqual("BOTTOMLEFT", shown.points[1][3])
+        test.assertEqual(6, shown.points[1][4])
         test.assertEqual("BOTTOMRIGHT", shown.points[2][3])
+        test.assertEqual(6, shown.points[2][4])
         -- Tall enough for the title and three lines; someone else's
         -- profile has no Edit button.
         test.assertEqual(12 + 3 + 3 * 12 + 16, shown.height)
@@ -302,7 +305,8 @@ local function registerProfileTests(profile)
         test.assertTrue(edit.shown)
         test.assertEqual("Edit", edit.text)
         test.assertEqual("BOTTOMRIGHT", edit.points[1][1])
-        test.assertEqual(12 + 3 + 12 + 3 + 18 + 16, detail.profile.height)
+        -- Room between the last line and the button.
+        test.assertEqual(12 + 3 + 12 + 10 + 18 + 16, detail.profile.height)
         edit.OnClick()
         test.assertEqual(1, options.edited)
     end)

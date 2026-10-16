@@ -34,6 +34,11 @@ local GuildNoteOverlay = {
     -- wide as the detail panel, and shows at most PROFILE_LINES lines.
     NOTE_WIDTH = 240,
     PROFILE_LINES = 30,
+    -- The profile panel sits this far right of the detail panel's edge, to
+    -- clear the guild roster window, and leaves this much room above its
+    -- Edit button.
+    PROFILE_SHIFT = 6,
+    EDIT_GAP = 10,
     PANEL_EDGE = 1,
     PANEL_PADDING = 8,
     LINE_GAP = 3,
@@ -173,8 +178,8 @@ function Overlay:Attach()
     end
     local okProfile, profile = pcall(function()
         local created = self:Box(detail)
-        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", 0, 0)
-        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", 0, 0)
+        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.PROFILE_SHIFT, 0)
+        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.PROFILE_SHIFT, 0)
         created.title = created:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         created.title:SetPoint("TOPLEFT", created, "TOPLEFT", padding, -padding)
         created.title:SetPoint("RIGHT", created, "RIGHT", -padding, 0)
@@ -285,7 +290,7 @@ function Overlay:ShowProfile(name)
     local button = 0
     if summary.own then
         profile.edit:Show()
-        button = GuildNoteOverlay.LINE_GAP + GuildNoteOverlay.IGNORE_SIZE[2]
+        button = GuildNoteOverlay.EDIT_GAP + GuildNoteOverlay.IGNORE_SIZE[2]
     else
         profile.edit:Hide()
     end
