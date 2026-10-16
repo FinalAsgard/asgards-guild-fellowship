@@ -30,10 +30,9 @@ local GuildNoteOverlay = {
     MARKER_SIZE = 12,
     -- The overlay's panels: their edge, the room inside them, and the gap
     -- between lines. The note panel is this wide; the profile panel is as
-    -- wide as the detail panel, and its bio shows at most PROFILE_LINES
-    -- lines.
+    -- wide as the detail panel, and shows at most PROFILE_LINES lines.
     NOTE_WIDTH = 240,
-    PROFILE_LINES = 16,
+    PROFILE_LINES = 30,
     PANEL_EDGE = 1,
     PANEL_PADDING = 8,
     LINE_GAP = 3,

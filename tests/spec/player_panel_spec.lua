@@ -368,32 +368,40 @@ test.test("the panel model wraps the bio with the window's wrapper when given", 
     test.assertEqual("[Location: Stormwind]", about[1].text)
 end)
 
-test.test("the mini profile names the player, then Discord, location, main, alts and bio", function()
+test.test("the mini profile lists the main, then Discord and location, alts, and the bio", function()
     local state = setup()
 
     local summary = state.summary()
     test.assertEqual("TheTool (Toolbox)", summary.title)
-    test.assertEqual(2, #summary.lines)
-    test.assertEqual("Main: Toolbox (80)", summary.lines[1])
-    test.assertEqual("Alts: Hammer (70)", summary.lines[2])
+    test.assertEqual(table.concat({
+        "Main: Toolbox (80)",
+        "",
+        "Alts:",
+        "Hammer (70)",
+    }, "|"), table.concat(summary.lines, "|"))
 
     state.partition:SetProfileText("toolbox-area52", "discord", "thetool", START, "toolbox-area52")
     state.partition:SetProfileText("toolbox-area52", "location", "Stormwind", START, "toolbox-area52")
     state.partition:SetProfileText("toolbox-area52", "bio", "Raid lead on weekends", START, "toolbox-area52")
-    summary = state.summary()
-    test.assertEqual(5, #summary.lines)
-    test.assertEqual("Discord: thetool", summary.lines[1])
-    test.assertEqual("Location: Stormwind", summary.lines[2])
-    test.assertEqual("Main: Toolbox (80)", summary.lines[3])
-    test.assertEqual("Alts: Hammer (70)", summary.lines[4])
-    test.assertEqual("Raid lead on weekends", summary.lines[5])
+    test.assertEqual(table.concat({
+        "Main: Toolbox (80)",
+        "",
+        "Discord: thetool",
+        "Location: Stormwind",
+        "",
+        "Alts:",
+        "Hammer (70)",
+        "",
+        "Personal Bio",
+        "Raid lead on weekends",
+    }, "|"), table.concat(state.summary().lines, "|"))
 end)
 
 test.test("the mini profile says when a player has no alts, and is nil for a player that's gone", function()
     local state = setup()
     state.addon.PlayerService.Create(state.partition):Detach("hammer-area52")
 
-    test.assertEqual("Alts: none", state.summary().lines[2])
+    test.assertEqual("Alts: none", state.summary().lines[3])
 
     local addon = state.addon
     test.assertEqual(nil, addon.PlayerPanelViewModel.Summary({ partition = state.partition, playerId = "nobody" }))
