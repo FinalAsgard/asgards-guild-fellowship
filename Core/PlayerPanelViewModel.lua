@@ -287,9 +287,9 @@ end
 
 -- The mini profile shown under a member in the game's guild roster: the
 -- player's label as a title, then lines for the panel (it wraps them):
--- their main; a blank line, then Discord and location when set; a blank
--- line, then "Alts:" and each alt on its own line; and a blank line, then
--- "Personal Bio" and the bio when set. inputs: partition, playerId,
+-- their main; a blank line, then Discord and location; a blank line, then
+-- "Alts:" and each alt on its own line; and a blank line, then "Personal
+-- Bio" and the bio. Anything not set is left blank after its label. inputs: partition, playerId,
 -- members (live facts by key), normalizer. Returns nil when the player no
 -- longer exists, or { title, lines }.
 function PlayerPanelViewModel.Summary(inputs)
@@ -303,33 +303,21 @@ function PlayerPanelViewModel.Summary(inputs)
     local discord = partition:PlayerProfileText(inputs.playerId, "discord")
     local location = partition:PlayerProfileText(inputs.playerId, "location")
     local bio = partition:PlayerProfileText(inputs.playerId, "bio")
-    if discord ~= nil or location ~= nil then
-        table.insert(lines, "")
-        if discord ~= nil then
-            table.insert(lines, "Discord: " .. discord)
-        end
-        if location ~= nil then
-            table.insert(lines, "Location: " .. location)
+    table.insert(lines, "")
+    table.insert(lines, "Discord:" .. (discord and (" " .. discord) or ""))
+    table.insert(lines, "Location:" .. (location and (" " .. location) or ""))
+    table.insert(lines, "")
+    table.insert(lines, "Alts:")
+    local keys = partition:CharactersOf(inputs.playerId)
+    local index
+    for index = 1, #keys do
+        if keys[index] ~= player.main then
+            table.insert(lines, summaryName(inputs, keys[index]))
         end
     end
     table.insert(lines, "")
-    local keys = partition:CharactersOf(inputs.playerId)
-    if #keys > 1 then
-        table.insert(lines, "Alts:")
-        local index
-        for index = 1, #keys do
-            if keys[index] ~= player.main then
-                table.insert(lines, summaryName(inputs, keys[index]))
-            end
-        end
-    else
-        table.insert(lines, "Alts: none")
-    end
-    if bio ~= nil then
-        table.insert(lines, "")
-        table.insert(lines, "Personal Bio")
-        table.insert(lines, bio)
-    end
+    table.insert(lines, "Personal Bio")
+    table.insert(lines, bio or "")
     local character = partition:GetCharacter(player.main) or {}
     local live = inputs.members[player.main] or {}
     local mainName = inputs.normalizer:Display(live.name or character.name) or player.main

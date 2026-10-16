@@ -82,6 +82,10 @@ local function installGuildRoster(environment)
             detail.profile = fakeWidget()
             return detail.profile
         end
+        if parent ~= nil and parent == detail.profile then
+            detail.profile.editButton = fakeWidget()
+            return detail.profile.editButton
+        end
         if parent ~= nil and parent == detail.panel then
             detail.panel.button = fakeWidget()
             return detail.panel.button
@@ -127,6 +131,9 @@ local function build(world, options)
         end,
         profileFor = function(name)
             return (options.profiles or {})[name]
+        end,
+        editProfile = function()
+            options.edited = (options.edited or 0) + 1
         end,
     })
     return overlay, addon
@@ -266,8 +273,10 @@ local function registerProfileTests(profile)
         test.assertEqual(detail, shown.points[1][2])
         test.assertEqual("BOTTOMLEFT", shown.points[1][3])
         test.assertEqual("BOTTOMRIGHT", shown.points[2][3])
-        -- Tall enough for the title and three lines.
+        -- Tall enough for the title and three lines; someone else's
+        -- profile has no Edit button.
         test.assertEqual(12 + 3 + 3 * 12 + 16, shown.height)
+        test.assertFalse(shown.editButton.shown)
 
         -- Someone the add-on has no record of: no profile.
         detail:DisplayMember(1, { name = "Stranger" })
@@ -276,6 +285,26 @@ local function registerProfileTests(profile)
         detail:DisplayMember(1, { name = "Hammer" })
         detail.hooks.OnHide()
         test.assertFalse(shown.shown)
+    end)
+
+    test.test(profile .. ": the user's own mini profile has an Edit button that opens My Profile", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local options = { officer = false, profiles = {
+            Toolbox = { title = "TheTool (Toolbox)", lines = { "Main: Toolbox (80)" }, own = true },
+        } }
+        local overlay = build(world, options)
+
+        overlay:Attach()
+        detail:DisplayMember(1, { name = "Toolbox" })
+
+        local edit = detail.profile.editButton
+        test.assertTrue(edit.shown)
+        test.assertEqual("Edit", edit.text)
+        test.assertEqual("BOTTOMRIGHT", edit.points[1][1])
+        test.assertEqual(12 + 3 + 12 + 3 + 18 + 16, detail.profile.height)
+        edit.OnClick()
+        test.assertEqual(1, options.edited)
     end)
 
     test.test(profile .. ": without the guild roster or hooksecurefunc, the overlay stays off", function()
@@ -314,6 +343,25 @@ local function registerProfileTests(profile)
             -- The officer's player, in brief, under the details.
             test.assertTrue(detail.profile.shown)
             test.assertEqual("TheTool (", string.sub(detail.profile.title.text, 1, #"TheTool ("))
+            -- It's the officer's own player: Edit opens My Profile.
+            test.assertTrue(detail.profile.editButton.shown)
+            local window = { shown = false }
+            function window:IsShown() return self.shown end
+            function window:Show() self.shown = true end
+            function window:Hide() self.shown = false end
+            function window:ShowPage(id) self.page = id end
+            function window:SetTitle() end
+            function window:SetStatus() end
+            function window:SetRows() return true end
+            function window:SetConflicts() return true end
+            function window:SetRecruiters() return true end
+            function window:SetRecentAds() return true end
+            world.addon.RosterWindow.Create = function()
+                return window
+            end
+            detail.profile.editButton.OnClick()
+            test.assertTrue(window.shown)
+            test.assertEqual("profile", window.page)
             test.assertEqual("Alias missing", detail.panel.problems.text)
 
             -- Ignored: hidden until the note changes again.

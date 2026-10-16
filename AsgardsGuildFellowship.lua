@@ -2163,12 +2163,21 @@ if clientProfile.supported then
             if character == nil then
                 return nil
             end
-            return addon.PlayerPanelViewModel.Summary({
+            local summary = addon.PlayerPanelViewModel.Summary({
                 partition = partition,
                 playerId = character.player,
                 members = rosterController:LiveMembers(normalizer),
                 normalizer = normalizer,
             })
+            local selfKey = rosterController:SelfKey()
+            local own = selfKey and partition:GetCharacter(selfKey)
+            if summary ~= nil and own ~= nil and own.player == character.player then
+                summary.own = true
+            end
+            return summary
+        end,
+        editProfile = function()
+            rosterController:Open("profile")
         end,
     })
     -- Guildmates on the map: add-on users share where they are with the

@@ -124,7 +124,7 @@ What a note should say:
 
 ### Mini profile in the guild roster
 
-Select any member in the game's guild roster and, if the add-on knows their player, a small panel under the game's member details shows that player in brief, under their alias and main as the title: their main, then their Discord and location when set, then their alts one per line, then their bio under **Personal Bio**. Levels follow each character's name. Everyone sees it, not just officers.
+Select any member in the game's guild roster and, if the add-on knows their player, a small panel under the game's member details shows that player in brief, under their alias and main as the title: their main, then their Discord and location, then their alts one per line, then their bio under **Personal Bio**. Anything they haven't set is left blank. Levels follow each character's name. On your own characters the panel has an **Edit** button that opens [My Profile](#my-profile). Everyone sees it, not just officers.
 
 ### Mains, alts, and departures
 

@@ -25,6 +25,7 @@ local GuildNoteOverlay = {
     },
     TOO_LONG_TEXT = "Too long for a public note: the other text has to be trimmed.",
     IGNORE_TEXT = "Ignore",
+    EDIT_TEXT = "Edit",
     -- The small marker on a roster row whose member's note is out of date.
     MARKER_TEXTURE = "Interface\\COMMON\\Indicator-Yellow",
     MARKER_SIZE = 12,
@@ -58,8 +59,10 @@ Overlay.__index = Overlay
 --               note or suggestion changes (Partition:IgnoreNote); the
 --               overlay redraws afterwards
 --   profileFor  function(name) -> the mini profile of the roster member
---               named `name`'s player, { title, lines }, or nil when the
---               add-on has no record of them
+--               named `name`'s player, { title, lines, own }, or nil when
+--               the add-on has no record of them; `own` when that player is
+--               the user's, who then gets an Edit button
+--   editProfile function() -> opens the user's My Profile page
 function GuildNoteOverlay.Create(options)
     return setmetatable({
         client = options.client,
@@ -74,6 +77,7 @@ function GuildNoteOverlay.Create(options)
         profileFor = options.profileFor or function()
             return nil
         end,
+        editProfile = options.editProfile or function() end,
     }, Overlay)
 end
 
@@ -182,6 +186,15 @@ function Overlay:Attach()
         if type(created.body.SetMaxLines) == "function" then
             created.body:SetMaxLines(GuildNoteOverlay.PROFILE_LINES)
         end
+        local edit = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
+        edit:SetSize(GuildNoteOverlay.IGNORE_SIZE[1], GuildNoteOverlay.IGNORE_SIZE[2])
+        edit:SetPoint("BOTTOMRIGHT", created, "BOTTOMRIGHT", -padding, padding)
+        edit:SetText(GuildNoteOverlay.EDIT_TEXT)
+        edit:SetScript("OnClick", function()
+            pcall(self.editProfile)
+        end)
+        edit:Hide()
+        created.edit = edit
         created:Hide()
         return created
     end)
@@ -268,8 +281,16 @@ function Overlay:ShowProfile(name)
         local ok, found = pcall(text.GetStringHeight, text)
         return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT * lines
     end
+    -- The user's own player gets an Edit button at the bottom.
+    local button = 0
+    if summary.own then
+        profile.edit:Show()
+        button = GuildNoteOverlay.LINE_GAP + GuildNoteOverlay.IGNORE_SIZE[2]
+    else
+        profile.edit:Hide()
+    end
     profile:SetHeight(height(profile.title, 1) + GuildNoteOverlay.LINE_GAP
-        + height(profile.body, math.max(#(summary.lines or {}), 1)) + 2 * GuildNoteOverlay.PANEL_PADDING)
+        + height(profile.body, math.max(#(summary.lines or {}), 1)) + button + 2 * GuildNoteOverlay.PANEL_PADDING)
     profile:Show()
 end
 
