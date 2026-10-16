@@ -73,7 +73,7 @@ Two markers in a character's **public** note seed the database:
 - `Main: Toolbox` or the shorter `>Toolbox` means "this character is an alt of Toolbox".
 - `Main: TheTool` or `>TheTool`, naming an alias instead, means "this character is an alt of the player who goes by TheTool", whoever their main is. The alt stays linked when that player changes main, so its note never has to be rewritten.
 - `Alias: TheTool` or the shorter `@TheTool` means "this player goes by TheTool".
-- A main marker naming the character itself (`>Toolbox` on Toolbox's own note) means "this is my main, on purpose": a **declared main**, even with no alts. On a character the roster has as someone's alt, it disagrees with the roster and goes to the conflict queue instead.
+- `^` at the very start of the note (for example `^ @TheTool raid lead`) means "this is my main, on purpose": a **declared main**, even with no alts. A main marker naming the character itself (`>Toolbox` on Toolbox's own note) says the same at more length. On a character the roster has as someone's alt, either one disagrees with the roster and goes to the conflict queue instead. A `^` anywhere else in the note is just text.
 
 A marker can sit anywhere in the note (for example `Tank, Main: Toolbox, Alias: TheTool`, `Tank >Toolbox` or `@TheTool raid lead`), and both kinds can appear in one note. Only the first main marker and the first alias marker count. The `Main:` and `Alias:` labels can be any case (`main:` works too), the space after the colon is optional, and a label only counts as a word of its own (`Domain:` isn't a main marker). Matching ignores case.
 
@@ -115,7 +115,7 @@ Guild notes are how members without the add-on see who's whose alt, and they dri
 What a note should say:
 
 - An alt points at its own player: `>Alias` and `>Main` both count as correct. A suggestion uses `>Alias` when the player has a one-word alias nobody else in the guild has, and otherwise the shortest form of the main's name that reads back as the right character (a unique first name on Forever).
-- A main carries `@Alias` when its player has a one-word alias. A [declared main](#organizing-by-hand) also carries a main marker naming itself.
+- A main carries `@Alias` when its player has a one-word alias. A [declared main](#organizing-by-hand)'s note also starts with `^` (a main marker naming itself counts as correct too). On an alt, `^` or a marker naming itself is flagged as naming the wrong player.
 - A character on its own, and not declared, has no main marker. An old marker left from before it was split off is flagged.
 
 `Main:` and `Alias:` labels that read correctly count as correct: style alone is never a problem. The suggestion puts the correct markers first and keeps the rest of the note's text after them. Public notes hold 31 characters. When the suggestion would be longer, it shows just the markers, with **Too long for a public note: the other text has to be trimmed.**
@@ -134,7 +134,7 @@ Select any member in the game's guild roster and, if the add-on knows their play
 
 ### Organizing by hand
 
-The roster marks a **declared main** (a player who said "this is my main" on purpose) as **(declared main)**, so confirmed players stand apart from characters nobody has organized yet. Players declare their main on [My Profile](#my-profile), or with a note marker naming the character itself (see [The guild note convention](#the-guild-note-convention)). Like the other organizing changes, an officer's declaration is official at once and a member's goes to officers as a [suggestion](#suggestions).
+The roster marks a **declared main** (a player who said "this is my main" on purpose) as **(declared main)**, so confirmed players stand apart from characters nobody has organized yet. Players declare their main on [My Profile](#my-profile), or by starting the character's note with `^` (see [The guild note convention](#the-guild-note-convention)). Like the other organizing changes, an officer's declaration is official at once and a member's goes to officers as a [suggestion](#suggestions).
 
 Right-click a character for **Link as alt of…** (makes it an alt of another player), **Make this the main**, **Set alias…**, **Split off as own player** (takes it out of its player into one of its own), and **View player…**. Clicking a character also opens the player panel. It shows the alias, the player's Discord, location and bio under **About** (when they set any; see [About me](#about-me)), main, alts, and history, and has **Set alias…** and **Merge into player…** buttons: **Merge into player…** links the player's main as an alt of another player, the same as **Link as alt of…** on the main. A main that still has alts can't be moved: **Merge into player…** is greyed out and its right-click menu has no **Link as alt of…**. Move its alts or split them off first. History lists characters that left the player: ones that left the guild, were split off, or were moved to another player.
 

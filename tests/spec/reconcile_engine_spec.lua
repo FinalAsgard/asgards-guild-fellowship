@@ -145,6 +145,7 @@ test.test("unresolved and cyclic markers become conflicts, and a self marker dec
         { "Alpha-Area52", ">Bravo" },
         { "Bravo-Area52", ">Alpha" },
         { "Self-Area52", ">Self" },
+        { "Caret-Area52", "^ raid lead" },
         { "Lost-Area52", ">Nobody" },
     })
 
@@ -164,6 +165,9 @@ test.test("unresolved and cyclic markers become conflicts, and a self marker dec
     -- Naming itself as main: a declared main, not a conflict.
     test.assertEqual(nil, reasons["self-area52"])
     test.assertTrue(partition:IsDeclared("self-area52"))
+    -- ^ starting the note says the same.
+    test.assertEqual(nil, reasons["caret-area52"])
+    test.assertTrue(partition:IsDeclared("caret-area52"))
     test.assertEqual("unresolved", reasons["lost-area52"])
     test.assertTrue(playerOf(partition, "alpha-area52") ~= playerOf(partition, "bravo-area52"))
 end)

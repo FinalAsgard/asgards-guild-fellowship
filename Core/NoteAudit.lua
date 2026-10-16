@@ -120,6 +120,9 @@ function NoteAudit.FreeText(note, rules, isName)
         return false
     end
     local rest = type(note) == "string" and note or ""
+    if addon.NoteParser.StartsSelfMain(rest) then
+        rest = string.gsub(rest, "^%s*%^", "", 1)
+    end
     while true do
         local marker = firstMarker(rest)
         if marker == nil then
@@ -184,8 +187,8 @@ function NoteAudit.Build(inputs)
         end
         return targets
     end
-    local function parse(note)
-        return addon.NoteParser.Parse(note, resolver, rules, aliasResolver)
+    local function parse(note, selfKey)
+        return addon.NoteParser.Parse(note, resolver, rules, aliasResolver, selfKey)
     end
     local function isName(text)
         return #(resolver(text) or {}) > 0
@@ -197,20 +200,15 @@ function NoteAudit.Build(inputs)
         local character = ref.key and partition:GetCharacter(ref.key)
         return character and character.player
     end
-    -- The shortest marker text that reads back as `key` itself, or as its
-    -- player when `asPlayer`.
-    local function shortestName(key, playerId, asPlayer)
+    -- The shortest form of `key`'s name that reads back, as a main marker,
+    -- as its player `playerId`.
+    local function shortestName(key, playerId)
         local forms = nameForms(partition, normalizer, key)
         local index
         for index = 1, #forms do
             local ref = parse(">" .. forms[index]).mainRef
-            if ref ~= nil and ref.status == "resolved" then
-                if asPlayer and playerOfRef(ref) == playerId then
-                    return forms[index]
-                end
-                if not asPlayer and not ref.byAlias and ref.key == key then
-                    return forms[index]
-                end
+            if ref ~= nil and ref.status == "resolved" and playerOfRef(ref) == playerId then
+                return forms[index]
             end
         end
         return forms[#forms]
@@ -234,7 +232,7 @@ function NoteAudit.Build(inputs)
         local player = partition:GetPlayer(character.player)
         if player ~= nil then
             local note = type(member.note) == "string" and member.note or ""
-            local parsed = parse(note)
+            local parsed = parse(note, key)
             local ref = parsed.mainRef
             local problems = {}
             local markers = {}
@@ -245,14 +243,16 @@ function NoteAudit.Build(inputs)
                     table.insert(problems, PROBLEMS.MISSING_MAIN)
                 elseif ref.status ~= "resolved" then
                     table.insert(problems, PROBLEMS.UNREADABLE_MAIN)
-                elseif playerOfRef(ref) ~= character.player then
+                elseif playerOfRef(ref) ~= character.player or (ref.key == key and not ref.byAlias) then
+                    -- Naming itself (`^`, or its own name) claims to be a
+                    -- main, which an alt isn't.
                     table.insert(problems, PROBLEMS.WRONG_PLAYER)
                 end
                 local alias = noteAlias(player.alias)
                 if alias ~= nil and #partition:PlayersWithAlias(alias) == 1 then
                     markers.main = alias
                 else
-                    markers.main = shortestName(player.main, character.player, true)
+                    markers.main = shortestName(player.main, character.player)
                 end
                 -- An alias on an alt's note names the whole player too.
                 if parsed.alias ~= nil
@@ -270,7 +270,9 @@ function NoteAudit.Build(inputs)
                     elseif ref.byAlias or ref.key ~= key then
                         table.insert(problems, PROBLEMS.WRONG_PLAYER)
                     end
-                    markers.main = shortestName(key, character.player, false)
+                    -- Its note starts with `^`, the short form of a main
+                    -- marker naming itself.
+                    markers.selfMain = true
                 elseif ref ~= nil then
                     table.insert(problems, PROBLEMS.STALE_MAIN)
                 end
@@ -287,6 +289,9 @@ function NoteAudit.Build(inputs)
 
             if #problems > 0 then
                 local parts = {}
+                if markers.selfMain then
+                    table.insert(parts, addon.NoteParser.SELF_MAIN)
+                end
                 if markers.main ~= nil then
                     table.insert(parts, ">" .. markers.main)
                 end

@@ -283,7 +283,7 @@ function ReconcileEngine.Plan(inputs)
     local storedParses = {}
     local function storedParseOf(key)
         if storedParses[key] == nil and members[key] ~= nil then
-            storedParses[key] = addon.NoteParser.Parse(members[key].note, resolver, rules, storedAliasResolver)
+            storedParses[key] = addon.NoteParser.Parse(members[key].note, resolver, rules, storedAliasResolver, key)
         end
         return storedParses[key]
     end
@@ -366,7 +366,7 @@ function ReconcileEngine.Plan(inputs)
     local parses = {}
     local function parseOf(key)
         if parses[key] == nil and members[key] ~= nil then
-            parses[key] = addon.NoteParser.Parse(members[key].note, resolver, rules, aliasResolver)
+            parses[key] = addon.NoteParser.Parse(members[key].note, resolver, rules, aliasResolver, key)
         end
         return parses[key]
     end

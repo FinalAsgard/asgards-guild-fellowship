@@ -1,7 +1,8 @@
 local _, addon = ...
 
--- Reads the main (`>Name` or `Main: Name`) and alias (`@Alias` or
--- `Alias: Name`) markers from a public guild note. Pure: the caller passes
+-- Reads the main (`>Name` or `Main: Name`, or `^` starting the note: "this
+-- character is my main") and alias (`@Alias` or `Alias: Name`) markers from
+-- a public guild note. Pure: the caller passes
 -- resolvers that know which characters and aliases exist.
 --
 --   resolver(text)      -> array of character keys matching `text`, matched
@@ -20,6 +21,10 @@ local _, addon = ...
 -- reported as unresolved or ambiguous.
 local NoteParser = {}
 addon.NoteParser = NoteParser
+
+-- Starting a note, this marks its own character as a main: the short form
+-- of a main marker naming the character itself.
+NoteParser.SELF_MAIN = "^"
 
 -- Characters that can't be part of a name in a `>` marker. Names may hold
 -- letters (including accented ones), a space on Forever, and a realm
@@ -126,7 +131,19 @@ local function resolveAlias(aliasResolver, word)
     return nil
 end
 
-local function parseMain(note, resolver, twoPartNames, aliasResolver)
+-- Whether `note` starts with the self-main marker (after any spaces).
+local function startsSelfMain(note)
+    return string.match(note, "^%s*%^") ~= nil
+end
+NoteParser.StartsSelfMain = startsSelfMain
+
+local function parseMain(note, resolver, twoPartNames, aliasResolver, selfKey)
+    if startsSelfMain(note) then
+        if selfKey ~= nil then
+            return { status = "resolved", key = selfKey, text = NoteParser.SELF_MAIN, selfMain = true }
+        end
+        return { status = "unresolved", text = NoteParser.SELF_MAIN }
+    end
     local start = markerTextStart(note, ">", "main")
     if start == nil then
         return nil
@@ -166,15 +183,18 @@ end
 
 -- Returns { mainRef, alias } where mainRef is nil (no marker) or
 -- { status = "resolved"|"unresolved"|"ambiguous", key?, player?, text,
--- candidates?, byAlias? }. A resolved ref carries a character `key`, or a
--- `player` id when the marker named a stored player's alias; `byAlias` is
--- set when the marker matched an alias. `aliasResolver` may be nil.
-function NoteParser.Parse(note, resolver, rules, aliasResolver)
+-- candidates?, byAlias?, selfMain? }. A resolved ref carries a character
+-- `key`, or a `player` id when the marker named a stored player's alias;
+-- `byAlias` is set when the marker matched an alias. `selfKey` is the key
+-- of the note's own character: a note starting with `^` names it, with
+-- `selfMain` set (without `selfKey`, `^` is unresolved). `aliasResolver`
+-- and `selfKey` may be nil.
+function NoteParser.Parse(note, resolver, rules, aliasResolver, selfKey)
     if type(note) ~= "string" or note == "" then
         return { mainRef = nil, alias = nil }
     end
     return {
-        mainRef = parseMain(note, resolver, rules ~= nil and rules.twoPartNames == true, aliasResolver),
+        mainRef = parseMain(note, resolver, rules ~= nil and rules.twoPartNames == true, aliasResolver, selfKey),
         alias = parseAlias(note),
     }
 end

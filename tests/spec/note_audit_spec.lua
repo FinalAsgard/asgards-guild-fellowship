@@ -147,6 +147,17 @@ test.test("an alias of several words can't be written, so a main's note carries 
     test.assertEqual("", row.suggested)
 end)
 
+test.test("^ on an undeclared main is stale, and on an alt names the wrong player", function()
+    local state = retailGuild({ toolbox = "^ raid lead", hammer = "^", wrench = ">Toolbox" })
+
+    local byKey = state.audit()
+
+    test.assertTrue(hasProblem(byKey["toolbox-area52"], "stale main"))
+    test.assertEqual("raid lead", byKey["toolbox-area52"].suggested)
+    test.assertTrue(hasProblem(byKey["hammer-area52"], "wrong player"))
+    test.assertEqual(">Toolbox", byKey["hammer-area52"].suggested)
+end)
+
 test.test("a main marker on an undeclared main or a lone character is stale", function()
     local state = retailGuild({ toolbox = ">Toolbox", hammer = ">Toolbox", wrench = ">Toolbox", visitor = ">Toolbox ex-alt" })
 
@@ -158,13 +169,24 @@ test.test("a main marker on an undeclared main or a lone character is stale", fu
     test.assertEqual("ex-alt", byKey["visitor-area52"].suggested)
 end)
 
-test.test("a declared main carries a main marker naming itself", function()
-    local state = retailGuild({ toolbox = "@Tinker", hammer = ">Toolbox", wrench = ">Toolbox" }, "Tinker")
+test.test("a declared main's note starts with ^, or carries a main marker naming itself", function()
+    local state = retailGuild({ toolbox = "@Tinker raid lead", hammer = ">Toolbox", wrench = ">Toolbox" }, "Tinker")
     state.partition:SetDeclared("toolbox-area52", true, "manual")
 
     local row = state.audit()["toolbox-area52"]
     test.assertTrue(hasProblem(row, "missing main"))
-    test.assertEqual(">Toolbox @Tinker", row.suggested)
+    test.assertEqual("^ @Tinker raid lead", row.suggested)
+
+    -- ^ starting the note, or the long form, both read correctly.
+    state.setNote("Toolbox-Area52", "^ @Tinker raid lead")
+    test.assertEqual(nil, state.audit()["toolbox-area52"])
+    state.setNote("Toolbox-Area52", "^@Tinker")
+    test.assertEqual(nil, state.audit()["toolbox-area52"])
+    state.setNote("Toolbox-Area52", ">Toolbox @Tinker")
+    test.assertEqual(nil, state.audit()["toolbox-area52"])
+    -- A ^ anywhere but the start is just text.
+    state.setNote("Toolbox-Area52", "@Tinker ^")
+    test.assertTrue(hasProblem(state.audit()["toolbox-area52"], "missing main"))
 
     -- Its own alias names the player, not the character: not a declaration.
     state.setNote("Toolbox-Area52", ">Tinker @Tinker")

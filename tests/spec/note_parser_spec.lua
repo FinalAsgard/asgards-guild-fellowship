@@ -252,3 +252,20 @@ test.test("note parser reads just the alias marker without any resolver", functi
     test.assertEqual(nil, NoteParser.Alias(">Toolbox"))
     test.assertEqual(nil, NoteParser.Alias(nil))
 end)
+
+test.test("^ starting a note marks the note's own character as a main", function()
+    local parsed = NoteParser.Parse("^ @TheTool raid lead", retailResolver, RETAIL, nil, "toolbox-area52")
+    test.assertEqual("resolved", parsed.mainRef.status)
+    test.assertEqual("toolbox-area52", parsed.mainRef.key)
+    test.assertTrue(parsed.mainRef.selfMain)
+    test.assertEqual("TheTool", parsed.alias)
+
+    -- After leading spaces too, and before a > marker, which it outranks.
+    parsed = NoteParser.Parse("  ^ >Hammer", retailResolver, RETAIL, nil, "toolbox-area52")
+    test.assertEqual("toolbox-area52", parsed.mainRef.key)
+
+    -- Only at the start: elsewhere it's just text.
+    test.assertEqual(nil, NoteParser.Parse("raid lead ^", retailResolver, RETAIL, nil, "toolbox-area52").mainRef)
+    -- Without the note's own key, it can't be resolved.
+    test.assertEqual("unresolved", NoteParser.Parse("^", retailResolver, RETAIL).mainRef.status)
+end)
