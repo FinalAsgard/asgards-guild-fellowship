@@ -686,6 +686,9 @@ test.test("a dot's tooltip is one line: the character, its alias or main, and it
     test.assertEqual("Hammer (TheTool) (42)", addon.MapPins.TooltipLines(DOTS[1])[1])
     test.assertEqual("Wrench (70)", addon.MapPins.TooltipLines(DOTS[2])[1])
     test.assertEqual("Anvil", addon.MapPins.TooltipLines({ key = "anvil-area52", name = "Anvil" })[1])
+    -- Only the roster's zone places them: the dot sits at the zone's center.
+    test.assertEqual("Anvil (Smithy) (12) (exact location unknown)", addon.MapPins.TooltipLines({
+        key = "anvil-area52", name = "Anvil", label = "Smithy", level = 12, fromRoster = true })[1])
 end)
 
 local function registerProfileTests(profile)
@@ -1230,6 +1233,9 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(0.5, own[1].y)
         test.assertTrue(own[1].icon.dot.fromRoster)
         test.assertEqual("WARRIOR", own[1].icon.dot.class)
+        own[1].icon.scripts.OnEnter(own[1].icon)
+        local tooltip = viewer.environment.GameTooltip.lines[1]
+        test.assertEqual(" (exact location unknown)", string.sub(tooltip, -#" (exact location unknown)"))
         test.assertEqual(0, #pins.minimap)
         local zone = iconsOn(pins, 1415)[1]
         test.assertEqual(translated(0.5, 0.5, zoneId, 1415), zone.x)

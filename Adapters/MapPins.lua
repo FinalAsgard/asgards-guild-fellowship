@@ -29,6 +29,8 @@ local MapPins = {
     -- While the player is in a party, guildmates outside it are drawn at
     -- this opacity, so the party stands out.
     DIM_ALPHA = 0.35,
+    -- Ends the tooltip of a zone map dot placed only by the roster's zone.
+    UNKNOWN_SPOT_TEXT = "(exact location unknown)",
     -- Where each continent's marker sits on the world map, over its land:
     -- Kalimdor and the Eastern Kingdoms, by their Forever and Retail map
     -- IDs. Other continents go to the middle of their guildmates.
@@ -110,9 +112,14 @@ function MapPins.Describe(person)
     return line
 end
 
--- A dot's tooltip lines: just the one guildmate.
+-- A dot's tooltip lines: just the one guildmate, noting when only the
+-- roster's zone places them (the dot then sits at the zone's center).
 function MapPins.TooltipLines(dot)
-    return { MapPins.Describe(dot) }
+    local line = MapPins.Describe(dot)
+    if dot.fromRoster then
+        line = line .. " " .. MapPins.UNKNOWN_SPOT_TEXT
+    end
+    return { line }
 end
 
 -- A marker's tooltip lines: one per person.
