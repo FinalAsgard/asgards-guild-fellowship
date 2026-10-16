@@ -836,9 +836,13 @@ local function registerProfileTests(profile)
         test.assertEqual("4", continent.icon.count.text)
         test.assertFalse(continent.icon.dots[1].shown)
 
-        continent.icon.scripts.OnEnter(continent.icon)
+        -- A count has no tooltip (its area lists everyone); a single dot does.
         local tooltip = world.environment.GameTooltip
-        test.assertEqual(4, #tooltip.lines)
+        continent.icon.scripts.OnEnter(continent.icon)
+        test.assertFalse(tooltip.shown)
+        frame.scripts.OnEnter(frame)
+        test.assertTrue(tooltip.shown)
+        test.assertEqual(1, #tooltip.lines)
         test.assertEqual("Hammer (TheTool) (42)", tooltip.lines[1])
 
         local anvilX, anvilY = translated(0.5, 0.5, 1429, 1415)
@@ -980,8 +984,9 @@ local function registerProfileTests(profile)
             return { mapID = mapId, mapType = mapId == 947 and 1 or 2 }
         end
         local markers = {
-            { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } },
+            { area = 1429, mapId = 1415, display = "count", people = { DOTS[1], DOTS[2] } },
             { area = 1415, mapId = 947, display = "count", people = { DOTS[1], DOTS[2] } },
+            { area = 1436, mapId = 1415, display = "dots", people = { DOTS[2] } },
         }
         local mapPins = buildPins(world, {}, markers)
         mapPins:Start()
@@ -991,15 +996,20 @@ local function registerProfileTests(profile)
             mapPins.areaWatcher.scripts.OnUpdate(mapPins.areaWatcher, 0.2)
         end
 
-        -- A zone on a continent map: listed at the map's right.
+        -- A zone on a continent map with several guildmates: listed at the
+        -- map's right.
         tick()
         test.assertTrue(list.shown)
-        test.assertEqual("Hammer (TheTool) (42)", list.text.text)
+        test.assertEqual("Hammer (TheTool) (42)\nWrench (70)", list.text.text)
         test.assertEqual("RIGHT", list.point[1])
         test.assertEqual(container, list.point[2])
 
-        -- A zone without guildmates, or the cursor off the map: nothing.
+        -- A zone with one guildmate (their dot has a tooltip), a zone
+        -- without guildmates, or the cursor off the map: nothing.
         cursor.area = 1436
+        tick()
+        test.assertFalse(list.shown)
+        cursor.area = 1453
         tick()
         test.assertFalse(list.shown)
         cursor.area = 1429
@@ -1016,7 +1026,7 @@ local function registerProfileTests(profile)
         test.assertEqual("CENTER", list.text.justify)
 
         -- Nothing listed once nobody's left there.
-        markers[2] = nil
+        table.remove(markers, 2)
         mapPins:Refresh()
         tick()
         test.assertFalse(list.shown)

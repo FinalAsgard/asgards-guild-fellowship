@@ -217,7 +217,9 @@ function Pins:HoveredArea()
     return info.mapID, mapId
 end
 
--- Shows the guildmates in the area under the cursor, or hides the list.
+-- Shows the guildmates in the area under the cursor when they're combined
+-- into a count, or hides the list. A single guildmate's dot has its own
+-- tooltip instead.
 function Pins:UpdateAreaList()
     local list = self.areaList
     if list == nil then
@@ -233,7 +235,7 @@ function Pins:UpdateAreaList()
     local index
     for index = 1, #self.drawnMarkers do
         local drawn = self.drawnMarkers[index]
-        if area ~= nil and drawn.area == area and drawn.mapId == mapId then
+        if area ~= nil and drawn.area == area and drawn.mapId == mapId and drawn.display ~= "dots" then
             marker = drawn
         end
     end
@@ -262,9 +264,14 @@ function Pins:UpdateAreaList()
     list:Show()
 end
 
+-- A combined marker (a count) has no tooltip: pointing at its area lists
+-- everyone there instead.
 local function showTooltip(icon)
     local tooltip = icon.owner.environment.GameTooltip
     if type(tooltip) ~= "table" or (icon.dot == nil and icon.marker == nil) then
+        return
+    end
+    if icon.marker ~= nil and icon.marker.display ~= "dots" then
         return
     end
     pcall(function()
