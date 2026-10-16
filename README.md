@@ -109,7 +109,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 Guild notes are how members without the add-on see who's whose alt, and they drift whenever mains, alts or aliases change. Officers see which notes are out of date right in the game's own guild roster (the Communities guild roster, on both clients). Members who aren't officers see nothing new.
 
 - Each member whose public note is out of date gets a small yellow marker at the right of their row.
-- Select that member, and a small panel under the game's member details shows **Should be: …** with the suggested note, then what's wrong with it: **No main marker**, **Main marker names the wrong player**, **Main marker shouldn't be there**, **Alias missing**, **Wrong alias**, or **Main marker can't be read**.
+- Select that member, and a small panel to the right of the game's member details, level with the public note, shows **Should be: …** with the suggested note, then what's wrong with it: **No main marker**, **Main marker names the wrong player**, **Main marker shouldn't be there**, **Alias missing**, **Wrong alias**, or **Main marker can't be read**.
 - Retype the suggestion in the game's note editor. The add-on never writes guild notes.
 
 What a note should say:
@@ -121,6 +121,10 @@ What a note should say:
 `Main:` and `Alias:` labels that read correctly count as correct: style alone is never a problem. The suggestion puts the correct markers first and keeps the rest of the note's text after them. Public notes hold 31 characters. When the suggestion would be longer, it shows just the markers, with **Too long for a public note: the other text has to be trimmed.**
 
 **Ignore** hides a mismatch you've chosen to leave alone. It comes back when the note or the add-on's record for that character changes. The list is worked out again after every scan, sync and change in the roster. Departed characters are skipped.
+
+### Mini profile in the guild roster
+
+Select any member in the game's guild roster and, if the add-on knows their player, a small panel under the game's member details shows that player in brief: their alias and main as the title, then their Discord and location when set, their main and alts with levels, and their bio. Everyone sees it, not just officers.
 
 ### Mains, alts, and departures
 

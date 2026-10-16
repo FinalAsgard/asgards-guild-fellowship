@@ -1,16 +1,17 @@
 local _, addon = ...
 
--- Shows officers, in the game's own guild roster, which members' public
+-- Adds to the game's own guild roster: for officers, which members' public
 -- notes are out of date (a marker on their rows) and what a selected
--- member's note should say (see NoteAudit). Forever and Retail
--- share the Communities guild roster, so one overlay serves both.
+-- member's note should say (see NoteAudit), in a small panel to the right
+-- of the member detail panel, level with its note; for everyone, a mini
+-- profile of the selected member's player (alias, Discord, location, bio,
+-- main and alts) in a panel hung under it. Forever and Retail share the
+-- Communities guild roster, so one overlay serves both.
 --
--- It only adds its own child frames (a small panel hung under the member
--- detail panel, and a marker on each row) and follows the game's frames
--- with hooksecurefunc and HookScript; nothing is drawn inside the game's
--- panel. It never replaces
--- or calls the game's functions, and never writes a note: officers retype
--- the suggestion in the game's note editor.
+-- It only adds its own child frames and follows the game's frames with
+-- hooksecurefunc and HookScript; nothing is drawn inside the game's panel.
+-- It never replaces or calls the game's functions, and never writes a
+-- note: officers retype the suggestion in the game's note editor.
 local GuildNoteOverlay = {
     -- The guild roster loads on demand; the overlay attaches when it does.
     GUILD_ADDONS = { "Blizzard_Communities" },
@@ -27,8 +28,12 @@ local GuildNoteOverlay = {
     -- The small marker on a roster row whose member's note is out of date.
     MARKER_TEXTURE = "Interface\\COMMON\\Indicator-Yellow",
     MARKER_SIZE = 12,
-    -- The panel under the member detail panel: its edge, the room inside
-    -- it, and the gap between lines.
+    -- The overlay's panels: their edge, the room inside them, and the gap
+    -- between lines. The note panel is this wide; the profile panel is as
+    -- wide as the detail panel, and its bio shows at most PROFILE_LINES
+    -- lines.
+    NOTE_WIDTH = 240,
+    PROFILE_LINES = 16,
     PANEL_EDGE = 1,
     PANEL_PADDING = 8,
     LINE_GAP = 3,
@@ -53,6 +58,9 @@ Overlay.__index = Overlay
 --   ignore      function(row) -> leaves the row's mismatch alone until its
 --               note or suggestion changes (Partition:IgnoreNote); the
 --               overlay redraws afterwards
+--   profileFor  function(name) -> the mini profile of the roster member
+--               named `name`'s player, { title, lines }, or nil when the
+--               add-on has no record of them
 function GuildNoteOverlay.Create(options)
     return setmetatable({
         client = options.client,
@@ -64,6 +72,9 @@ function GuildNoteOverlay.Create(options)
             return nil
         end,
         ignore = options.ignore or function() end,
+        profileFor = options.profileFor or function()
+            return nil
+        end,
     }, Overlay)
 end
 
@@ -96,9 +107,24 @@ function Overlay:FindDetailFrame()
     return detail
 end
 
--- Builds the panel hung under the detail panel, its own frame with its own
--- edge and background, made a child of the detail panel only so the two
--- show and hide together. Safe to call again; it attaches once.
+-- A frame of the overlay's own on `parent`, with its own edge and dark
+-- background.
+function Overlay:Box(parent)
+    local created = self.environment.CreateFrame("Frame", nil, parent)
+    local edge = created:CreateTexture(nil, "BACKGROUND")
+    edge:SetAllPoints(created)
+    edge:SetColorTexture(0.5, 0.5, 0.5, 0.8)
+    local fill = created:CreateTexture(nil, "BORDER")
+    fill:SetPoint("TOPLEFT", created, "TOPLEFT", GuildNoteOverlay.PANEL_EDGE, -GuildNoteOverlay.PANEL_EDGE)
+    fill:SetPoint("BOTTOMRIGHT", created, "BOTTOMRIGHT", -GuildNoteOverlay.PANEL_EDGE, GuildNoteOverlay.PANEL_EDGE)
+    fill:SetColorTexture(0, 0, 0, 0.9)
+    return created
+end
+
+-- Builds the note panel, to the right of the detail panel, and the profile
+-- panel, hung under it: the overlay's own frames, made children of the
+-- detail panel only so they show and hide with it. Safe to call again; it
+-- attaches once.
 function Overlay:Attach()
     if self.panel ~= nil then
         return true
@@ -108,18 +134,11 @@ function Overlay:Attach()
     if detail == nil or type(hook) ~= "function" or type(self.environment.CreateFrame) ~= "function" then
         return false
     end
+    local padding = GuildNoteOverlay.PANEL_PADDING
     local ok, panel = pcall(function()
-        local padding = GuildNoteOverlay.PANEL_PADDING
-        local created = self.environment.CreateFrame("Frame", nil, detail)
-        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", 0, 0)
-        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", 0, 0)
-        local edge = created:CreateTexture(nil, "BACKGROUND")
-        edge:SetAllPoints(created)
-        edge:SetColorTexture(0.5, 0.5, 0.5, 0.8)
-        local fill = created:CreateTexture(nil, "BORDER")
-        fill:SetPoint("TOPLEFT", created, "TOPLEFT", GuildNoteOverlay.PANEL_EDGE, -GuildNoteOverlay.PANEL_EDGE)
-        fill:SetPoint("BOTTOMRIGHT", created, "BOTTOMRIGHT", -GuildNoteOverlay.PANEL_EDGE, GuildNoteOverlay.PANEL_EDGE)
-        fill:SetColorTexture(0, 0, 0, 0.9)
+        local created = self:Box(detail)
+        created:SetPoint("TOPLEFT", detail, "TOPRIGHT", 0, 0)
+        created:SetWidth(GuildNoteOverlay.NOTE_WIDTH)
         local button = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
         button:SetSize(GuildNoteOverlay.IGNORE_SIZE[1], GuildNoteOverlay.IGNORE_SIZE[2])
         button:SetPoint("TOPRIGHT", created, "TOPRIGHT", -padding, -padding)
@@ -149,6 +168,25 @@ function Overlay:Attach()
     if not ok or panel == nil then
         return false
     end
+    local okProfile, profile = pcall(function()
+        local created = self:Box(detail)
+        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", 0, 0)
+        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", 0, 0)
+        created.title = created:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        created.title:SetPoint("TOPLEFT", created, "TOPLEFT", padding, -padding)
+        created.title:SetPoint("RIGHT", created, "RIGHT", -padding, 0)
+        created.title:SetJustifyH("LEFT")
+        created.body = created:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        created.body:SetPoint("TOPLEFT", created.title, "BOTTOMLEFT", 0, -GuildNoteOverlay.LINE_GAP)
+        created.body:SetPoint("RIGHT", created, "RIGHT", -padding, 0)
+        created.body:SetJustifyH("LEFT")
+        if type(created.body.SetMaxLines) == "function" then
+            created.body:SetMaxLines(GuildNoteOverlay.PROFILE_LINES)
+        end
+        created:Hide()
+        return created
+    end)
+    self.profile = okProfile and profile or nil
     local hooked = pcall(hook, detail, "DisplayMember", function(_, _, memberInfo)
         self:ShowMember(type(memberInfo) == "table" and memberInfo.name or nil)
     end)
@@ -164,14 +202,16 @@ function Overlay:Attach()
     return true
 end
 
--- Shows the panel for the member named `name`, or hides it: for anyone
--- but an officer, a member whose note is up to date, or nil.
+-- Shows the panels for the member named `name`, or hides them. The note
+-- panel is for officers, for a member whose note is out of date; the
+-- profile panel for anyone, for a member the add-on has a record of.
 function Overlay:ShowMember(name)
     self.member = name
     local panel = self.panel
     if panel == nil then
         return
     end
+    self:ShowProfile(name)
     local row
     if name ~= nil and self.isOfficer() then
         local ok, found = pcall(self.rowFor, name)
@@ -187,7 +227,51 @@ function Overlay:ShowMember(name)
     panel.problems:SetText(lines.problems)
     panel.tooLong:SetText(lines.tooLong)
     panel:SetHeight(self:PanelHeight(panel))
+    self:AlignWithNote(panel)
     panel:Show()
+end
+
+-- Moves the note panel down to the detail panel's public note, where the
+-- client can say where that is; else it stays level with the panel's top.
+function Overlay:AlignWithNote(panel)
+    local detail = self:FindDetailFrame()
+    local note = detail and detail.NoteBackground
+    local offset = 0
+    if type(note) == "table" then
+        local okNote, noteTop = pcall(note.GetTop, note)
+        local okDetail, detailTop = pcall(detail.GetTop, detail)
+        if okNote and okDetail and type(noteTop) == "number" and type(detailTop) == "number" then
+            offset = noteTop - detailTop
+        end
+    end
+    pcall(panel.ClearAllPoints, panel)
+    panel:SetPoint("TOPLEFT", detail, "TOPRIGHT", 0, offset)
+end
+
+-- Shows the mini profile of the member named `name`'s player, or hides it.
+function Overlay:ShowProfile(name)
+    local profile = self.profile
+    if profile == nil then
+        return
+    end
+    local summary
+    if name ~= nil then
+        local ok, found = pcall(self.profileFor, name)
+        summary = ok and type(found) == "table" and found or nil
+    end
+    if summary == nil then
+        profile:Hide()
+        return
+    end
+    profile.title:SetText(summary.title or name)
+    profile.body:SetText(table.concat(summary.lines or {}, "\n"))
+    local function height(text, lines)
+        local ok, found = pcall(text.GetStringHeight, text)
+        return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT * lines
+    end
+    profile:SetHeight(height(profile.title, 1) + GuildNoteOverlay.LINE_GAP
+        + height(profile.body, math.max(#(summary.lines or {}), 1)) + 2 * GuildNoteOverlay.PANEL_PADDING)
+    profile:Show()
 end
 
 -- The panel's height for the lines it shows now: each line as tall as its

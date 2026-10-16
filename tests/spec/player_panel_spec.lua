@@ -68,6 +68,14 @@ local function setup()
                 end,
             })
         end,
+        summary = function()
+            return addon.PlayerPanelViewModel.Summary({
+                partition = partition,
+                playerId = playerId,
+                members = members({ guild[1], guild[2] }),
+                normalizer = normalizer,
+            })
+        end,
     }
 end
 
@@ -358,4 +366,35 @@ test.test("the panel model wraps the bio with the window's wrapper when given", 
         return { "[" .. text .. "]" }
     end), "about")
     test.assertEqual("[Location: Stormwind]", about[1].text)
+end)
+
+test.test("the mini profile names the player, then Discord, location, main, alts and bio", function()
+    local state = setup()
+
+    local summary = state.summary()
+    test.assertEqual("TheTool (Toolbox)", summary.title)
+    test.assertEqual(2, #summary.lines)
+    test.assertEqual("Main: Toolbox (80)", summary.lines[1])
+    test.assertEqual("Alts: Hammer (70)", summary.lines[2])
+
+    state.partition:SetProfileText("toolbox-area52", "discord", "thetool", START, "toolbox-area52")
+    state.partition:SetProfileText("toolbox-area52", "location", "Stormwind", START, "toolbox-area52")
+    state.partition:SetProfileText("toolbox-area52", "bio", "Raid lead on weekends", START, "toolbox-area52")
+    summary = state.summary()
+    test.assertEqual(5, #summary.lines)
+    test.assertEqual("Discord: thetool", summary.lines[1])
+    test.assertEqual("Location: Stormwind", summary.lines[2])
+    test.assertEqual("Main: Toolbox (80)", summary.lines[3])
+    test.assertEqual("Alts: Hammer (70)", summary.lines[4])
+    test.assertEqual("Raid lead on weekends", summary.lines[5])
+end)
+
+test.test("the mini profile says when a player has no alts, and is nil for a player that's gone", function()
+    local state = setup()
+    state.addon.PlayerService.Create(state.partition):Detach("hammer-area52")
+
+    test.assertEqual("Alts: none", state.summary().lines[2])
+
+    local addon = state.addon
+    test.assertEqual(nil, addon.PlayerPanelViewModel.Summary({ partition = state.partition, playerId = "nobody" }))
 end)

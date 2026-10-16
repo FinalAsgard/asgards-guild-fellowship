@@ -6,6 +6,8 @@ local function fakeWidget()
     local widget = { points = {}, shown = true }
     function widget:SetPoint(...) table.insert(self.points, { ... }) end
     function widget:SetHeight(height) self.height = height end
+    function widget:SetWidth(width) self.width = width end
+    function widget:ClearAllPoints() self.points = {} end
     function widget:SetJustifyH(justify) self.justify = justify end
     function widget:SetText(text) self.text = text end
     function widget:GetText() return self.text end
@@ -71,9 +73,14 @@ local function installGuildRoster(environment)
     end
     local createFrame = environment.CreateFrame
     environment.CreateFrame = function(frameType, name, parent, ...)
+        -- The note panel first, then the profile panel.
         if parent == detail then
-            detail.panel = fakeWidget()
-            return detail.panel
+            if detail.panel == nil then
+                detail.panel = fakeWidget()
+                return detail.panel
+            end
+            detail.profile = fakeWidget()
+            return detail.profile
         end
         if parent ~= nil and parent == detail.panel then
             detail.panel.button = fakeWidget()
@@ -118,6 +125,9 @@ local function build(world, options)
             table.insert(options.ignored, row)
             options.rows[row.name] = nil
         end,
+        profileFor = function(name)
+            return (options.profiles or {})[name]
+        end,
     })
     return overlay, addon
 end
@@ -152,16 +162,13 @@ local function registerProfileTests(profile)
         test.assertTrue(panel.shown)
         test.assertEqual("Should be: >TheTool Healer", panel.suggested.text)
         test.assertEqual("No main marker; Wrong alias", panel.problems.text)
-        -- Hung under the detail panel, never drawn inside it.
+        -- To the right of the detail panel, never drawn inside it.
+        test.assertEqual(1, #panel.points)
         test.assertEqual("TOPLEFT", panel.points[1][1])
         test.assertEqual(detail, panel.points[1][2])
-        test.assertEqual("BOTTOMLEFT", panel.points[1][3])
-        test.assertEqual("TOPRIGHT", panel.points[2][1])
-        test.assertEqual("BOTTOMRIGHT", panel.points[2][3])
-        local panelPoints = #panel.points
-        for index = 1, panelPoints do
-            test.assertTrue(panel.points[index][2] ~= detail.NoteBackground)
-        end
+        test.assertEqual("TOPRIGHT", panel.points[1][3])
+        test.assertEqual(0, panel.points[1][5])
+        test.assertEqual(240, panel.width)
         -- Tall enough for its lines: the suggestion beside Ignore, then
         -- the problems.
         test.assertEqual(18 + 3 + 12 + 16, panel.height)
@@ -223,6 +230,54 @@ local function registerProfileTests(profile)
         test.assertTrue(detail.panel.shown)
     end)
 
+    test.test(profile .. ": the note panel sits level with the detail panel's public note", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        function detail:GetTop() return 500 end
+        function detail.NoteBackground:GetTop() return 380 end
+        local overlay = build(world, { rows = { Hammer = ROW } })
+
+        overlay:Attach()
+        detail:DisplayMember(1, { name = "Hammer" })
+
+        local panel = detail.panel
+        test.assertEqual(1, #panel.points)
+        test.assertEqual("TOPRIGHT", panel.points[1][3])
+        test.assertEqual(-120, panel.points[1][5])
+    end)
+
+    test.test(profile .. ": anyone selecting a member sees their player's mini profile under the details", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local summary = { title = "TheTool (Toolbox)", lines = { "Discord: thetool", "Main: Toolbox (80)",
+            "Alts: Hammer (70)" } }
+        local overlay = build(world, { officer = false, profiles = { Hammer = summary } })
+
+        overlay:Attach()
+        detail:DisplayMember(1, { name = "Hammer" })
+
+        local shown = detail.profile
+        test.assertTrue(shown.shown)
+        test.assertFalse(detail.panel.shown)
+        test.assertEqual("TheTool (Toolbox)", shown.title.text)
+        test.assertEqual("Discord: thetool\nMain: Toolbox (80)\nAlts: Hammer (70)", shown.body.text)
+        -- Hung under the detail panel, as wide as it.
+        test.assertEqual("TOPLEFT", shown.points[1][1])
+        test.assertEqual(detail, shown.points[1][2])
+        test.assertEqual("BOTTOMLEFT", shown.points[1][3])
+        test.assertEqual("BOTTOMRIGHT", shown.points[2][3])
+        -- Tall enough for the title and three lines.
+        test.assertEqual(12 + 3 + 3 * 12 + 16, shown.height)
+
+        -- Someone the add-on has no record of: no profile.
+        detail:DisplayMember(1, { name = "Stranger" })
+        test.assertFalse(shown.shown)
+        -- Closing the details hides it.
+        detail:DisplayMember(1, { name = "Hammer" })
+        detail.hooks.OnHide()
+        test.assertFalse(shown.shown)
+    end)
+
     test.test(profile .. ": without the guild roster or hooksecurefunc, the overlay stays off", function()
         local world = fixtures.newEnvironment(profile)
         local overlay = build(world)
@@ -256,6 +311,9 @@ local function registerProfileTests(profile)
 
             test.assertTrue(detail.panel.shown)
             test.assertEqual("Should be: @TheTool raid lead", detail.panel.suggested.text)
+            -- The officer's player, in brief, under the details.
+            test.assertTrue(detail.profile.shown)
+            test.assertEqual("TheTool (", string.sub(detail.profile.title.text, 1, #"TheTool ("))
             test.assertEqual("Alias missing", detail.panel.problems.text)
 
             -- Ignored: hidden until the note changes again.

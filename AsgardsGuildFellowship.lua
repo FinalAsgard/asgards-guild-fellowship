@@ -2155,6 +2155,21 @@ if clientProfile.supported then
                 auditCache = nil
             end
         end,
+        -- Anyone sees the selected member's player in brief.
+        profileFor = function(name)
+            local guild, partition, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(name)
+            local character = key and partition:GetCharacter(key)
+            if character == nil then
+                return nil
+            end
+            return addon.PlayerPanelViewModel.Summary({
+                partition = partition,
+                playerId = character.player,
+                members = rosterController:LiveMembers(normalizer),
+                normalizer = normalizer,
+            })
+        end,
     })
     -- Guildmates on the map: add-on users share where they are with the
     -- guild, and each other's dots are drawn on the zone map and minimap.

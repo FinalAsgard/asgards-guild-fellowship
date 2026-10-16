@@ -275,3 +275,56 @@ function PlayerPanelViewModel.Build(inputs)
         rows = rows,
     }
 end
+
+-- A character as the mini profile names it: "Name (level)".
+local function summaryName(inputs, key)
+    local character = inputs.partition:GetCharacter(key) or {}
+    local live = inputs.members[key] or {}
+    local name = inputs.normalizer:Display(live.name or character.name) or key
+    local level = live.level or character.level
+    return level ~= nil and (name .. " (" .. tostring(level) .. ")") or name
+end
+
+-- The mini profile shown under a member in the game's guild roster: the
+-- player's label as a title, then their Discord, location and bio, main,
+-- and alts, each as one line (the panel wraps them). inputs: partition,
+-- playerId, members (live facts by key), normalizer. Returns nil when the
+-- player no longer exists, or { title, lines }.
+function PlayerPanelViewModel.Summary(inputs)
+    inputs.members = inputs.members or {}
+    local partition = inputs.partition
+    local player = partition:GetPlayer(inputs.playerId)
+    if player == nil then
+        return nil
+    end
+    local lines = {}
+    local discord = partition:PlayerProfileText(inputs.playerId, "discord")
+    local location = partition:PlayerProfileText(inputs.playerId, "location")
+    local bio = partition:PlayerProfileText(inputs.playerId, "bio")
+    if discord ~= nil then
+        table.insert(lines, "Discord: " .. discord)
+    end
+    if location ~= nil then
+        table.insert(lines, "Location: " .. location)
+    end
+    table.insert(lines, "Main: " .. summaryName(inputs, player.main))
+    local alts = {}
+    local keys = partition:CharactersOf(inputs.playerId)
+    local index
+    for index = 1, #keys do
+        if keys[index] ~= player.main then
+            table.insert(alts, summaryName(inputs, keys[index]))
+        end
+    end
+    table.insert(lines, "Alts: " .. (alts[1] ~= nil and table.concat(alts, ", ") or "none"))
+    if bio ~= nil then
+        table.insert(lines, bio)
+    end
+    local character = partition:GetCharacter(player.main) or {}
+    local live = inputs.members[player.main] or {}
+    local mainName = inputs.normalizer:Display(live.name or character.name) or player.main
+    return {
+        title = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
+        lines = lines,
+    }
+end
