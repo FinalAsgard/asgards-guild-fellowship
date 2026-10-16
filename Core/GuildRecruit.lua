@@ -856,9 +856,10 @@ function Recruit:OffHere(key)
     local prompt = self:Prompt(key)
     local store, now = self.store(), self.now()
     if prompt ~= nil and prompt.zoneKey ~= nil and store ~= nil and type(now) == "number" then
-        store:SetRecruitOffZone(prompt.zoneKey, prompt.zoneName or prompt.zoneKey, now)
-        -- The Recent ads page lists it.
-        pcall(self.onStatsChanged)
+        if store:SetRecruitOffZone(prompt.zoneKey, prompt.zoneName or prompt.zoneKey, now) then
+            -- The Recent ads page lists it.
+            pcall(self.onStatsChanged)
+        end
     end
     self:Refresh()
 end
