@@ -5,8 +5,10 @@ local _, addon = ...
 -- member's note should say (see NoteAudit). Forever and Retail
 -- share the Communities guild roster, so one overlay serves both.
 --
--- It only adds its own child frames to the member detail panel and follows
--- the game's frames with hooksecurefunc and HookScript. It never replaces
+-- It only adds its own child frames (a small panel hung under the member
+-- detail panel, and a marker on each row) and follows the game's frames
+-- with hooksecurefunc and HookScript; nothing is drawn inside the game's
+-- panel. It never replaces
 -- or calls the game's functions, and never writes a note: officers retype
 -- the suggestion in the game's note editor.
 local GuildNoteOverlay = {
@@ -25,6 +27,13 @@ local GuildNoteOverlay = {
     -- The small marker on a roster row whose member's note is out of date.
     MARKER_TEXTURE = "Interface\\COMMON\\Indicator-Yellow",
     MARKER_SIZE = 12,
+    -- The panel under the member detail panel: its edge, the room inside
+    -- it, and the gap between lines.
+    PANEL_EDGE = 1,
+    PANEL_PADDING = 8,
+    LINE_GAP = 3,
+    LINE_HEIGHT = 12,
+    IGNORE_SIZE = { 64, 18 },
     -- Member list methods that redraw its rows (scrolling, sorting, and
     -- roster refreshes all end in one of these); hooked where they exist.
     LIST_REFRESHES = { "RefreshListDisplay", "RefreshLayout", "Update" },
@@ -87,8 +96,9 @@ function Overlay:FindDetailFrame()
     return detail
 end
 
--- Builds the panel just above the public note, as the detail panel's own
--- child. Safe to call again; it attaches once.
+-- Builds the panel hung under the detail panel, its own frame with its own
+-- edge and background, made a child of the detail panel only so the two
+-- show and hide together. Safe to call again; it attaches once.
 function Overlay:Attach()
     if self.panel ~= nil then
         return true
@@ -99,19 +109,20 @@ function Overlay:Attach()
         return false
     end
     local ok, panel = pcall(function()
+        local padding = GuildNoteOverlay.PANEL_PADDING
         local created = self.environment.CreateFrame("Frame", nil, detail)
-        local note = type(detail.NoteBackground) == "table" and detail.NoteBackground or nil
-        if note ~= nil then
-            created:SetPoint("BOTTOMLEFT", note, "TOPLEFT", 0, 16)
-            created:SetPoint("BOTTOMRIGHT", note, "TOPRIGHT", 0, 16)
-        else
-            created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", 0, -4)
-            created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", 0, -4)
-        end
-        created:SetHeight(42)
+        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", 0, 0)
+        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", 0, 0)
+        local edge = created:CreateTexture(nil, "BACKGROUND")
+        edge:SetAllPoints(created)
+        edge:SetColorTexture(0.5, 0.5, 0.5, 0.8)
+        local fill = created:CreateTexture(nil, "BORDER")
+        fill:SetPoint("TOPLEFT", created, "TOPLEFT", GuildNoteOverlay.PANEL_EDGE, -GuildNoteOverlay.PANEL_EDGE)
+        fill:SetPoint("BOTTOMRIGHT", created, "BOTTOMRIGHT", -GuildNoteOverlay.PANEL_EDGE, GuildNoteOverlay.PANEL_EDGE)
+        fill:SetColorTexture(0, 0, 0, 0.9)
         local button = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
-        button:SetSize(64, 18)
-        button:SetPoint("TOPRIGHT", created, "TOPRIGHT", 0, 0)
+        button:SetSize(GuildNoteOverlay.IGNORE_SIZE[1], GuildNoteOverlay.IGNORE_SIZE[2])
+        button:SetPoint("TOPRIGHT", created, "TOPRIGHT", -padding, -padding)
         button:SetText(GuildNoteOverlay.IGNORE_TEXT)
         button:SetScript("OnClick", function()
             self:IgnoreShown()
@@ -120,11 +131,11 @@ function Overlay:Attach()
         local function line(anchor, font)
             local text = created:CreateFontString(nil, "OVERLAY", font)
             if anchor == nil then
-                text:SetPoint("TOPLEFT", created, "TOPLEFT", 0, 0)
+                text:SetPoint("TOPLEFT", created, "TOPLEFT", padding, -padding)
             else
-                text:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+                text:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -GuildNoteOverlay.LINE_GAP)
             end
-            text:SetPoint("RIGHT", created, "RIGHT", 0, 0)
+            text:SetPoint("RIGHT", created, "RIGHT", -padding, 0)
             text:SetJustifyH("LEFT")
             return text
         end
@@ -175,7 +186,29 @@ function Overlay:ShowMember(name)
     panel.suggested:SetText(lines.suggested)
     panel.problems:SetText(lines.problems)
     panel.tooLong:SetText(lines.tooLong)
+    panel:SetHeight(self:PanelHeight(panel))
     panel:Show()
+end
+
+-- The panel's height for the lines it shows now: each line as tall as its
+-- wrapped text where the client says, the Ignore button's height at least
+-- for the first.
+function Overlay:PanelHeight(panel)
+    local function height(text)
+        local ok, found = pcall(text.GetStringHeight, text)
+        return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT
+    end
+    local total = math.max(height(panel.suggested), GuildNoteOverlay.IGNORE_SIZE[2])
+    local lines = { panel.problems, panel.tooLong }
+    local index
+    for index = 1, #lines do
+        local text = lines[index]
+        local ok, shown = pcall(text.GetText, text)
+        if ok and type(shown) == "string" and shown ~= "" then
+            total = total + GuildNoteOverlay.LINE_GAP + height(text)
+        end
+    end
+    return total + 2 * GuildNoteOverlay.PANEL_PADDING
 end
 
 -- The Ignore button: leaves the shown member's mismatch alone, then hides

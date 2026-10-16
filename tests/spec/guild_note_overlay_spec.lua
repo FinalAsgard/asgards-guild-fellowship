@@ -8,6 +8,8 @@ local function fakeWidget()
     function widget:SetHeight(height) self.height = height end
     function widget:SetJustifyH(justify) self.justify = justify end
     function widget:SetText(text) self.text = text end
+    function widget:GetText() return self.text end
+    function widget:SetColorTexture(...) self.color = { ... } end
     function widget:Show() self.shown = true end
     function widget:Hide() self.shown = false end
     function widget:SetSize(width, height) self.size = { width, height } end
@@ -150,10 +152,19 @@ local function registerProfileTests(profile)
         test.assertTrue(panel.shown)
         test.assertEqual("Should be: >TheTool Healer", panel.suggested.text)
         test.assertEqual("No main marker; Wrong alias", panel.problems.text)
-        -- Just above the public note.
-        test.assertEqual("BOTTOMLEFT", panel.points[1][1])
-        test.assertEqual(detail.NoteBackground, panel.points[1][2])
-        test.assertEqual("TOPLEFT", panel.points[1][3])
+        -- Hung under the detail panel, never drawn inside it.
+        test.assertEqual("TOPLEFT", panel.points[1][1])
+        test.assertEqual(detail, panel.points[1][2])
+        test.assertEqual("BOTTOMLEFT", panel.points[1][3])
+        test.assertEqual("TOPRIGHT", panel.points[2][1])
+        test.assertEqual("BOTTOMRIGHT", panel.points[2][3])
+        local panelPoints = #panel.points
+        for index = 1, panelPoints do
+            test.assertTrue(panel.points[index][2] ~= detail.NoteBackground)
+        end
+        -- Tall enough for its lines: the suggestion beside Ignore, then
+        -- the problems.
+        test.assertEqual(18 + 3 + 12 + 16, panel.height)
 
         -- A member whose note is up to date: nothing shows.
         detail:DisplayMember(1, { name = "Toolbox" })

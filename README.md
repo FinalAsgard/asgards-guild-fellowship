@@ -109,7 +109,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 Guild notes are how members without the add-on see who's whose alt, and they drift whenever mains, alts or aliases change. Officers see which notes are out of date right in the game's own guild roster (the Communities guild roster, on both clients). Members who aren't officers see nothing new.
 
 - Each member whose public note is out of date gets a small yellow marker at the right of their row.
-- Select that member, and just above their public note you see **Should be: …** with the suggested note, then what's wrong with it: **No main marker**, **Main marker names the wrong player**, **Main marker shouldn't be there**, **Alias missing**, **Wrong alias**, or **Main marker can't be read**.
+- Select that member, and a small panel under the game's member details shows **Should be: …** with the suggested note, then what's wrong with it: **No main marker**, **Main marker names the wrong player**, **Main marker shouldn't be there**, **Alias missing**, **Wrong alias**, or **Main marker can't be read**.
 - Retype the suggestion in the game's note editor. The add-on never writes guild notes.
 
 What a note should say:
