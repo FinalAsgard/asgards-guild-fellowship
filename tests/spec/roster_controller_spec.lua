@@ -19,6 +19,10 @@ local function newWindow()
     function window:SetStatus(text)
         self.status = text
     end
+    -- `window.counts` is false once told to hide the counts line.
+    function window:SetCounts(text)
+        self.counts = text or false
+    end
     function window:SetConflicts(rows)
         self.conflicts = rows
         return true
@@ -347,3 +351,83 @@ test.test("without a stats source, nobody gets the Recruiters view", function()
     test.assertEqual(nil, setup.controller:Recruiters())
     test.assertFalse(setup.window.recruiters)
 end)
+
+-- The guild-size counts line ---------------------------------------------------
+
+-- The fixture guild's lone character: the one not on Tool Box's player.
+local function loneKey(setup, mainKey)
+    local partition = setup.partition()
+    local key, character
+    for key, character in pairs(partition.characters) do
+        if character.player ~= partition.characters[mainKey].player then
+            return key
+        end
+    end
+end
+
+local function registerCountsTests(profile)
+    local first = EXPECTED_FIRST[profile]
+
+    test.test(profile .. " the roster shows how big the guild is", function()
+        local setup = build(profile)
+        setup.login()
+
+        setup.controller:Toggle()
+
+        test.assertEqual("1 player · 1 alt · 1 unlinked · 3 characters", setup.window.counts)
+    end)
+
+    test.test(profile .. " the counts line updates after linking an alt", function()
+        local setup = build(profile)
+        setup.login()
+        setup.controller:Toggle()
+        local playerId = setup.partition().characters[first.key].player
+
+        test.assertTrue(setup.controller:SetMainPlayer(loneKey(setup, first.key), playerId))
+
+        test.assertEqual("1 player · 2 alts · 3 characters", setup.window.counts)
+    end)
+
+    test.test(profile .. " the counts line updates after a scan finds a new member", function()
+        local setup = build(profile)
+        setup.login()
+        setup.controller:Toggle()
+        setup.world.guild.members[4] = newcomer()
+
+        setup.controller:Rescan()
+        setup.controller:OnRosterUpdate()
+
+        test.assertEqual("1 player · 1 alt · 2 unlinked · 4 characters", setup.window.counts)
+    end)
+
+    test.test(profile .. " the counts ignore search, Online only, Show departed, and collapsed groups", function()
+        local setup = build(profile)
+        setup.login()
+        setup.controller:Toggle()
+        local expected = setup.window.counts
+
+        setup.controller:SetSearch("nobody matches this")
+        test.assertEqual(0, #setup.window.rows)
+        test.assertEqual(expected, setup.window.counts)
+        setup.controller:SetSearch("")
+        setup.controller:ToggleOnlineOnly()
+        test.assertEqual(expected, setup.window.counts)
+        setup.controller:ToggleOnlineOnly()
+        setup.controller:CollapseAll()
+        test.assertEqual(expected, setup.window.counts)
+        setup.controller:ToggleDeparted()
+        test.assertEqual(expected, setup.window.counts)
+    end)
+
+    test.test(profile .. " the counts line is hidden with no guild data", function()
+        local setup = build(profile)
+
+        setup.controller:Toggle()
+
+        test.assertFalse(setup.window.counts)
+    end)
+end
+
+for index = 1, #fixtures.PROFILES do
+    registerCountsTests(fixtures.PROFILES[index])
+end

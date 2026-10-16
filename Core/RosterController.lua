@@ -848,6 +848,7 @@ function Controller:Redraw()
         }, stamp)
         self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
         self.window:SetRows(rows)
+        self:RedrawCounts()
         local conflictRows = addon.ConflictViewModel.Build({
             partition = self.current.partition,
             members = members,
@@ -860,6 +861,16 @@ function Controller:Redraw()
     end
     self:RefreshRecruiters()
     self:UpdateStatus()
+end
+
+-- Draws the guild-size counts line (see RosterViewModel.Counts), or hides
+-- it while the guild has no characters yet, so it never reads "0 players".
+function Controller:RedrawCounts()
+    if type(self.window.SetCounts) ~= "function" then
+        return
+    end
+    local counts = addon.RosterViewModel.Counts(self.current.partition)
+    self.window:SetCounts(counts.characters > 0 and addon.RosterViewModel.CountsText(counts) or nil)
 end
 
 -- The officers' Recruiters rows (see RecruitStats.Recruiters) for the

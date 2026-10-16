@@ -200,3 +200,86 @@ test.test("/agf sync says whether sync runs or is paused, when it last synced, a
     test.assertContains(model.SyncStatusLines({ on = false }, now)[1], "Guild sync is off")
     test.assertContains(model.SyncStatusLines(nil, now)[1], "isn't available")
 end)
+
+-- Guild-size counts ----------------------------------------------------------
+
+local function record(partition, name)
+    local key = string.lower(name) .. "-camelot"
+    partition:RecordCharacter(key, { name = name, classToken = "MAGE", level = 10 })
+    return key
+end
+
+local function assertCounts(expected, counts)
+    test.assertEqual(expected.players, counts.players, "players")
+    test.assertEqual(expected.alts, counts.alts, "alts")
+    test.assertEqual(expected.unlinked, counts.unlinked, "unlinked")
+    test.assertEqual(expected.characters, counts.characters, "characters")
+    test.assertEqual(counts.characters, counts.players + counts.alts + counts.unlinked, "the invariant")
+end
+
+test.test("counts an empty guild as nothing", function()
+    local addon = load()
+    local partition = setup(addon)
+
+    assertCounts({ players = 0, alts = 0, unlinked = 0, characters = 0 }, addon.RosterViewModel.Counts(partition))
+end)
+
+test.test("lone characters with no alias or declared main are all unlinked", function()
+    local addon = load()
+    local partition = setup(addon)
+    record(partition, "Anna")
+    record(partition, "Bert")
+    record(partition, "Cleo")
+
+    assertCounts({ players = 0, alts = 0, unlinked = 3, characters = 3 }, addon.RosterViewModel.Counts(partition))
+end)
+
+test.test("a player counts with alts, an alias, or a declared main; alts are the rest", function()
+    local addon = load()
+    local partition = setup(addon)
+    -- Three characters for one player: one player, two alts.
+    local anna = record(partition, "Anna")
+    partition:JoinPlayerOf(record(partition, "Anna Two"), anna, "note")
+    partition:JoinPlayerOf(record(partition, "Anna Three"), anna, "note")
+    -- One character with an alias, and one declared main: two players.
+    local bert = record(partition, "Bert")
+    partition:SetAlias(partition:GetCharacter(bert).player, "Bertie", "note")
+    partition:SetDeclared(record(partition, "Cleo"), true, "manual")
+    -- And one nobody has organized.
+    record(partition, "Dora")
+
+    assertCounts({ players = 3, alts = 2, unlinked = 1, characters = 6 }, addon.RosterViewModel.Counts(partition))
+end)
+
+test.test("departed characters are never counted", function()
+    local addon = load()
+    local partition = setup(addon)
+    -- A main who left, with two alts still here: still a player, one alt.
+    local anna = record(partition, "Anna")
+    partition:JoinPlayerOf(record(partition, "Anna Two"), anna, "note")
+    partition:JoinPlayerOf(record(partition, "Anna Three"), anna, "note")
+    partition:MarkDeparted(anna, 1790000000)
+    -- A player whose characters have all left is ignored.
+    local bert = record(partition, "Bert")
+    partition:JoinPlayerOf(record(partition, "Bert Two"), bert, "note")
+    partition:MarkDeparted(bert, 1790000000)
+    partition:MarkDeparted("bert two-camelot", 1790000000)
+    -- A declared main who left leaves its alt on its own: unlinked.
+    local cleo = record(partition, "Cleo")
+    partition:SetDeclared(cleo, true, "manual")
+    partition:JoinPlayerOf(record(partition, "Cleo Two"), cleo, "note")
+    partition:MarkDeparted(cleo, 1790000000)
+
+    assertCounts({ players = 1, alts = 1, unlinked = 1, characters = 3 }, addon.RosterViewModel.Counts(partition))
+end)
+
+test.test("the counts line reads naturally and leaves out unlinked at zero", function()
+    local model = load().RosterViewModel
+
+    test.assertEqual("28 players · 31 alts · 14 unlinked · 73 characters",
+        model.CountsText({ players = 28, alts = 31, unlinked = 14, characters = 73 }))
+    test.assertEqual("1 player · 1 alt · 1 unlinked · 3 characters",
+        model.CountsText({ players = 1, alts = 1, unlinked = 1, characters = 3 }))
+    test.assertEqual("1 player · 0 alts · 1 character",
+        model.CountsText({ players = 1, alts = 0, unlinked = 0, characters = 1 }))
+end)

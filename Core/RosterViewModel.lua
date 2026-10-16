@@ -289,6 +289,50 @@ function RosterViewModel.GroupIds(partition)
     return ids
 end
 
+-- How big the guild is, from every player's current characters (departed
+-- ones never count), whatever the roster's search and filters:
+--   { players, alts, unlinked, characters }
+-- A player counts when they have two or more current characters, an alias,
+-- or a current main that was declared; otherwise their one character is
+-- unlinked. Alts are each counted player's characters after the first, so
+-- players + alts + unlinked == characters.
+function RosterViewModel.Counts(partition)
+    local counts = { players = 0, alts = 0, unlinked = 0, characters = 0 }
+    partition:EachPlayer(function(id, player)
+        local keys = partition:CharactersOf(id)
+        local current = 0
+        local index
+        for index = 1, #keys do
+            if partition:IsInGuild(keys[index]) then
+                current = current + 1
+            end
+        end
+        if current == 0 then
+            return
+        end
+        counts.characters = counts.characters + current
+        local declared = player.main ~= nil and partition:IsInGuild(player.main) and partition:IsDeclared(player.main)
+        if current >= 2 or player.alias ~= nil or declared then
+            counts.players = counts.players + 1
+            counts.alts = counts.alts + current - 1
+        else
+            counts.unlinked = counts.unlinked + 1
+        end
+    end)
+    return counts
+end
+
+-- The roster's counts line: "28 players · 31 alts · 14 unlinked · 73
+-- characters", leaving out the unlinked part when there are none.
+function RosterViewModel.CountsText(counts)
+    local parts = { plural(counts.players, "player"), plural(counts.alts, "alt") }
+    if counts.unlinked > 0 then
+        table.insert(parts, counts.unlinked .. " unlinked")
+    end
+    table.insert(parts, plural(counts.characters, "character"))
+    return table.concat(parts, " · ")
+end
+
 -- Remembers the last build and returns it again while `stamp` (a value the
 -- caller changes whenever any input changes) is the same, so reopening the
 -- window or redrawing without changes doesn't rebuild.

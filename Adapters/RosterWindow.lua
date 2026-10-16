@@ -1064,17 +1064,26 @@ local function build(framework, options)
         options.onExpandAll()
     end)
 
+    -- How big the guild is, under the controls; hidden until there is
+    -- guild data.
+    local counts = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    counts:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -58)
+    counts:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -58)
+    counts:SetJustifyH("LEFT")
+    counts:SetWordWrap(false)
+    counts:Hide()
+
     local headerIndex
     for headerIndex = 1, #COLUMNS do
         local column = COLUMNS[headerIndex]
         local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -58)
+        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -76)
         header:SetText(column.header)
     end
 
     -- Enough lines for the frame's restored height.
     local width, height = frame:GetSize()
-    local lineAmount = math.floor((height - 120) / RosterWindow.LINE_HEIGHT)
+    local lineAmount = math.floor((height - 138) / RosterWindow.LINE_HEIGHT)
     local picker = buildPicker(framework, frameName)
     -- "Link as alt of…" links `key` (named `name`) as an alt of the picked
     -- player. From the player panel it's "Merge into player…": the same link,
@@ -1147,14 +1156,14 @@ local function build(framework, options)
         refreshLines,
         {},
         width - 20,
-        height - 120,
+        height - 138,
         lineAmount,
         RosterWindow.LINE_HEIGHT,
         newLine,
         true
     )
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -74)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -92)
     -- The scroll bar is drawn just outside the list's right edge, so the
     -- list stops short of the frame's edge to keep the bar inside it, clear
     -- of the tabs.
@@ -1221,7 +1230,7 @@ local function build(framework, options)
         playerPanel.panel:Hide()
     end)
 
-    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds
+    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts
 end
 
 -- options.navigator is the PageNavigator with the master frame's pages;
@@ -1254,7 +1263,8 @@ function RosterWindow.Create(client, options)
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds = pcall(build, framework, options)
+    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts =
+        pcall(build, framework, options)
     if not ok or host == nil then
         return nil, "the Details! Framework could not build the window"
     end
@@ -1267,6 +1277,7 @@ function RosterWindow.Create(client, options)
         playerPanel = playerPanel,
         recruiters = recruiters,
         recentAds = recentAds,
+        counts = counts,
     }, Window)
 end
 
@@ -1442,6 +1453,17 @@ end
 
 function Window:SetStatus(text)
     self.status:SetText(text or "")
+end
+
+-- Shows the guild-size counts line (see RosterViewModel.CountsText), or,
+-- for nil, hides it.
+function Window:SetCounts(text)
+    if text == nil then
+        self.counts:Hide()
+        return
+    end
+    self.counts:SetText(text)
+    self.counts:Show()
 end
 
 -- Returns false instead of raising when the framework misbehaves.
