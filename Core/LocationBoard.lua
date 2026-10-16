@@ -103,9 +103,9 @@ function Board:All()
     return found
 end
 
--- At most this many people show as dots side by side on a world map
--- marker; more show as a count.
-LocationBoard.DOTS_MAX = 3
+-- At most this many people show as a dot on a map marker; more show as a
+-- count, which keeps markers small on the continent map.
+LocationBoard.DOTS_MAX = 1
 
 -- Guildmates grouped into one marker per area, for the world map: `areaOf`
 -- gives the area an entry's zone map belongs to (the zone itself for a

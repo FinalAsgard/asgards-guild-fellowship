@@ -269,7 +269,7 @@ end)
 local ZONES = { elwynn = 1429, westfall = 1436, durotar = 1411 }
 local CONTINENTS = { [1429] = 1415, [1436] = 1415, [1411] = 1414 }
 
-test.test("the board groups guildmates per zone: up to 3 as dots, 4 or more as a count", function()
+test.test("the board groups guildmates per zone: one as a dot, 2 or more as a count", function()
     local addon = load()
     local protocol = addon.LocationProtocol
     local board = addon.LocationBoard.Create()
@@ -289,16 +289,11 @@ test.test("the board groups guildmates per zone: up to 3 as dots, 4 or more as a
     test.assertEqual(3, #zones)
     test.assertEqual(ZONES.durotar, zones[1].area)
     test.assertEqual(ZONES.elwynn, zones[2].area)
-    test.assertEqual("dots", zones[2].display)
+    test.assertEqual("count", zones[2].display)
     test.assertEqual(3, #zones[2].people)
     test.assertEqual("a-area52", zones[2].people[1].key)
-
-    at("f-area52", ZONES.elwynn)
-    zones = board:Markers(function(mapId)
-        return mapId
-    end)
-    test.assertEqual("count", zones[2].display)
-    test.assertEqual(4, #zones[2].people)
+    test.assertEqual("dots", zones[3].display)
+    test.assertEqual(1, #zones[3].people)
 end)
 
 test.test("the board groups guildmates per continent for the world map", function()
@@ -323,6 +318,7 @@ test.test("the board groups guildmates per continent for the world map", functio
     test.assertEqual(2, #continents)
     test.assertEqual(1414, continents[1].area)
     test.assertEqual("dots", continents[1].display)
+    test.assertEqual(1, #continents[1].people)
     test.assertEqual(1415, continents[2].area)
     test.assertEqual("count", continents[2].display)
     test.assertEqual(4, #continents[2].people)
@@ -640,17 +636,16 @@ local function buildPins(world, dots, markers, zone, shown)
     }), addon
 end
 
--- A stand-in for HereBeDragons-2.0: an area's center is its map id over
--- 10000 on any other map, so specs can tell where a marker went.
+-- A stand-in for HereBeDragons-2.0's translation: a point on map `area`
+-- lands on map `mapId` at a spot both map ids and the point show in, so
+-- specs can tell where a marker went.
+local function translated(x, y, area, mapId)
+    return area / 10000 + x / 100, mapId / 10000 + y / 100
+end
 local function installCoordinates(environment)
     environment.LibStub.libs["HereBeDragons-2.0"] = {
         TranslateZoneCoordinates = function(_, x, y, area, mapId)
-            test.assertEqual(0.5, x)
-            test.assertEqual(0.5, y)
-            if area == mapId then
-                return nil
-            end
-            return area / 10000, mapId / 10000
+            return translated(x, y, area, mapId)
         end,
     }
 end
@@ -667,27 +662,27 @@ local function iconsOn(pins, mapId)
     return found
 end
 
-test.test("a marker's tooltip lists everyone there with their level and alias or main", function()
+test.test("a marker's tooltip lists everyone there with their alias or main and level", function()
     local addon = test.newAddon("Adapters/MapPins.lua")
 
     local lines = addon.MapPins.MarkerLines({ people = DOTS })
     test.assertEqual(2, #lines)
-    test.assertEqual("Hammer, level 42 (TheTool)", lines[1])
-    test.assertEqual("Wrench, level 70", lines[2])
+    test.assertEqual("Hammer (TheTool) (42)", lines[1])
+    test.assertEqual("Wrench (70)", lines[2])
 
+    -- Those only the roster places read the same.
     lines = addon.MapPins.MarkerLines({ people = { { key = "anvil-area52", name = "Anvil", level = 12,
         label = "Smithy", fromRoster = true } } })
-    test.assertEqual("Anvil, level 12 (Smithy), from the roster", lines[1])
+    test.assertEqual("Anvil (Smithy) (12)", lines[1])
 end)
 
-test.test("a dot's tooltip names the character, its level, and its alias or main", function()
+test.test("a dot's tooltip is one line: the character, its alias or main, and its level", function()
     local addon = test.newAddon("Adapters/MapPins.lua")
 
-    local lines = addon.MapPins.TooltipLines(DOTS[1])
-    test.assertEqual("Hammer", lines[1])
-    test.assertEqual("Level 42", lines[2])
-    test.assertEqual("TheTool", lines[3])
-    test.assertEqual(2, #addon.MapPins.TooltipLines(DOTS[2]))
+    test.assertEqual(1, #addon.MapPins.TooltipLines(DOTS[1]))
+    test.assertEqual("Hammer (TheTool) (42)", addon.MapPins.TooltipLines(DOTS[1])[1])
+    test.assertEqual("Wrench (70)", addon.MapPins.TooltipLines(DOTS[2])[1])
+    test.assertEqual("Anvil", addon.MapPins.TooltipLines({ key = "anvil-area52", name = "Anvil" })[1])
 end)
 
 local function registerProfileTests(profile)
@@ -713,9 +708,8 @@ local function registerProfileTests(profile)
         icon.icon.scripts.OnEnter(icon.icon)
         local tooltip = world.environment.GameTooltip
         test.assertTrue(tooltip.shown)
-        test.assertEqual("Hammer", tooltip.lines[1])
-        test.assertEqual("Level 42", tooltip.lines[2])
-        test.assertEqual("TheTool", tooltip.lines[3])
+        test.assertEqual("Hammer (TheTool) (42)", tooltip.lines[1])
+        test.assertEqual(1, #tooltip.lines)
         icon.icon.scripts.OnLeave(icon.icon)
         test.assertFalse(tooltip.shown)
 
@@ -750,9 +744,8 @@ local function registerProfileTests(profile)
 
         pin.icon.scripts.OnEnter(pin.icon)
         local tooltip = world.environment.GameTooltip
-        test.assertEqual("Hammer", tooltip.lines[1])
-        test.assertEqual("Level 42", tooltip.lines[2])
-        test.assertEqual("TheTool", tooltip.lines[3])
+        test.assertEqual("Hammer (TheTool) (42)", tooltip.lines[1])
+        test.assertEqual(1, #tooltip.lines)
 
         -- Moving, then leaving the board.
         dots[1] = { key = "hammer-area52", mapId = 1429, x = 0.7, y = 0.6, class = "MAGE", name = "Hammer", level = 42 }
@@ -797,42 +790,62 @@ local function registerProfileTests(profile)
         test.assertEqual(1, #pins.minimap)
     end)
 
-    test.test(profile .. ": world map markers sit at the area's center, dots side by side or a count", function()
+    test.test(profile .. ": markers sit where their guildmates are, a class-colored dot for one or a count", function()
         local world = fixtures.newEnvironment(profile)
         local pins = installMap(world.environment)
         installCoordinates(world.environment)
         local four = { DOTS[1], DOTS[2], DOTS[1], DOTS[2] }
+        local anvil = { key = "anvil-area52", name = "Anvil", mapId = 1429, class = "ROGUE", level = 12,
+            fromRoster = true }
         local markers = {
-            { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1], DOTS[2] } },
+            { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } },
             { area = 1415, mapId = 947, display = "count", people = four },
+            -- Only the roster places Anvil: at the zone's center on its own map.
+            { area = 1429, mapId = 1429, display = "dots", people = { anvil } },
+            -- Nobody here can be placed: the area's center.
+            { area = 1411, mapId = 1414, display = "dots", people = { { key = "nowhere-area52", class = "MAGE" } } },
         }
         local mapPins = buildPins(world, {}, markers)
         mapPins:Start()
         mapPins:Refresh()
 
         local zone = iconsOn(pins, 1415)[1]
-        test.assertEqual(0.1429, zone.x)
-        test.assertEqual(0.1415, zone.y)
+        local x, y = translated(0.4, 0.6, 1429, 1415)
+        test.assertEqual(x, zone.x)
+        test.assertEqual(y, zone.y)
         local frame = zone.icon
+        test.assertEqual(1, #frame.dots)
         test.assertTrue(frame.dots[1].shown)
-        test.assertTrue(frame.dots[2].shown)
-        test.assertFalse(frame.dots[3].shown)
         test.assertFalse(frame.badge.shown)
-        -- Side by side, never on top of each other.
-        test.assertTrue(frame.dots[1].point[4] < frame.dots[2].point[4])
         test.assertEqual(0x3f / 255, frame.dots[1].color[1])
-        test.assertEqual(0xc6 / 255, frame.dots[2].color[1])
+        test.assertEqual(0xc7 / 255, frame.dots[1].color[2])
 
+        -- A count sits at the middle of everyone in it.
         local continent = iconsOn(pins, 947)[1]
-        test.assertEqual(0.1415, continent.x)
+        local hammerX, hammerY = translated(0.4, 0.6, 1429, 947)
+        local wrenchX, wrenchY = translated(0.1, 0.2, 1453, 947)
+        test.assertEqual((0 + hammerX + wrenchX + hammerX + wrenchX) / 4, continent.x)
+        test.assertEqual((0 + hammerY + wrenchY + hammerY + wrenchY) / 4, continent.y)
         test.assertTrue(continent.icon.badge.shown)
+        test.assertEqual(0.1, continent.icon.badge.color[1])
         test.assertEqual("4", continent.icon.count.text)
         test.assertFalse(continent.icon.dots[1].shown)
 
         continent.icon.scripts.OnEnter(continent.icon)
         local tooltip = world.environment.GameTooltip
         test.assertEqual(4, #tooltip.lines)
-        test.assertEqual("Hammer, level 42 (TheTool)", tooltip.lines[1])
+        test.assertEqual("Hammer (TheTool) (42)", tooltip.lines[1])
+
+        local own = iconsOn(pins, 1429)[1]
+        test.assertEqual(0.5, own.x)
+        test.assertEqual(0.5, own.y)
+        test.assertEqual(0, own.showFlag)
+        test.assertEqual(0xff / 255, own.icon.dots[1].color[1])
+
+        local unplaced = iconsOn(pins, 1414)[1]
+        x, y = translated(0.5, 0.5, 1411, 1414)
+        test.assertEqual(x, unplaced.x)
+        test.assertEqual(y, unplaced.y)
     end)
 
     test.test(profile .. ": guildmates outside the player's party are dimmed on every map", function()
@@ -846,7 +859,8 @@ local function registerProfileTests(profile)
         local outside = fixtures.snapshot(DOTS[2])
         outside.dimmed = true
         local markers = {
-            { area = 1429, mapId = 1415, display = "dots", people = { hammer, wrench } },
+            { area = 1429, mapId = 1415, display = "dots", people = { hammer } },
+            { area = 1436, mapId = 1415, display = "dots", people = { wrench } },
             { area = 1415, mapId = 947, display = "count", people = { outside, outside, outside, outside } },
         }
         local mapPins = buildPins(world, { hammer, wrench }, markers, { mapId = 1429 })
@@ -860,8 +874,8 @@ local function registerProfileTests(profile)
         test.assertEqual(DIM_ALPHA, pins.minimap[2].icon.alpha)
         local zone = iconsOn(pins, 1415)[1].icon
         test.assertEqual(1, zone.dots[1].alpha)
-        test.assertEqual(DIM_ALPHA, zone.dots[2].alpha)
         test.assertEqual(1, zone.badge.alpha)
+        test.assertEqual(DIM_ALPHA, iconsOn(pins, 1415)[2].icon.dots[1].alpha)
         -- Nobody from the party: the whole count is dimmed.
         local continent = iconsOn(pins, 947)[1].icon
         test.assertEqual(DIM_ALPHA, continent.badge.alpha)
@@ -989,11 +1003,16 @@ local function registerWholeAddonTests(profile)
         local pins = viewer.pins
         test.assertEqual(1, #iconsOn(pins, 1429))
         local zone = iconsOn(pins, 1415)[1]
-        test.assertEqual(0.1429, zone.x)
+        local x, y = translated(0.25, 0.5, 1429, 1415)
+        test.assertEqual(x, zone.x)
+        test.assertEqual(y, zone.y)
         test.assertEqual(1, #zone.icon.marker.people)
         test.assertEqual("MAGE", zone.icon.marker.people[1].class)
+        -- On the world map, over where they are on the continent.
         local continent = iconsOn(pins, 947)[1]
-        test.assertEqual(0.1415, continent.x)
+        x, y = translated(0.25, 0.5, 1429, 947)
+        test.assertEqual(x, continent.x)
+        test.assertEqual(y, continent.y)
     end)
 
     test.test(profile .. ": in the whole add-on, online guildmates count on the world map from the roster's zone", function()
@@ -1020,11 +1039,17 @@ local function registerWholeAddonTests(profile)
             nil, prepare)
 
         local pins = viewer.pins
-        -- Never a dot on the zone map or minimap, even in the same zone.
-        test.assertEqual(0, #iconsOn(pins, zoneId))
+        -- On the zone map, a marker at the zone's center; never a dot there
+        -- or on the minimap.
+        local own = iconsOn(pins, zoneId)
+        test.assertEqual(1, #own)
+        test.assertEqual(0.5, own[1].x)
+        test.assertEqual(0.5, own[1].y)
+        test.assertEqual(1, #own[1].icon.marker.people)
+        test.assertEqual(nil, own[1].icon.dot)
         test.assertEqual(0, #pins.minimap)
         local zone = iconsOn(pins, 1415)[1]
-        test.assertEqual(zoneId / 10000, zone.x)
+        test.assertEqual(translated(0.5, 0.5, zoneId, 1415), zone.x)
         local people = zone.icon.marker.people
         test.assertEqual(1, #people)
         test.assertTrue(people[1].fromRoster)
@@ -1037,6 +1062,7 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(1, locationMessages(officer))
         fixtures.deliver(channel)
         test.assertEqual(1, #iconsOn(pins, 1429))
+        test.assertEqual(0, #iconsOn(pins, zoneId))
         people = iconsOn(pins, 1415)[1].icon.marker.people
         test.assertEqual(1, #people)
         test.assertEqual(nil, people[1].fromRoster)

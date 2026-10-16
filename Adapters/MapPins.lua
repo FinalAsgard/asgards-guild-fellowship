@@ -2,11 +2,13 @@ local _, addon = ...
 
 -- Draws guildmates on the game's maps with HereBeDragons-Pins-2.0: on the
 -- zone map, and on the minimap for those in the player's zone, each add-on
--- guildmate is a class-colored dot at their exact position, with a tooltip naming the character, their level, and their
--- alias or main the way chat tags do. On a continent map each zone with
--- guildmates has one marker at the zone's center, and on the world map each
--- continent does: up to three class-colored dots side by side, or a count,
--- with a tooltip listing everyone there. The only code that touches the
+-- guildmate is a class-colored dot at their exact position, with a tooltip naming the character, their alias or
+-- main the way chat tags do, and their level. On a continent map each zone
+-- with guildmates has one marker, and on the world map each continent does,
+-- placed where those guildmates are: a class-colored dot for one, or a
+-- count, with a tooltip listing everyone there. Guildmates only the roster
+-- places get the same kind of marker at their zone's center on the zone
+-- map. The only code that touches the
 -- HereBeDragons libraries. Without them the map simply stays empty
 -- (LibraryCheck already names the missing library).
 local MapPins = {
@@ -15,14 +17,14 @@ local MapPins = {
     -- The gap between a marker's dots, so they sit side by side.
     DOT_GAP = 2,
     COUNT_SIZE = 18,
-    DOT_TEXTURE = "Interface\\COMMON\\Indicator-Gray",
+    -- A plain white circle, so the class color tints it.
+    DOT_TEXTURE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask",
     DOT_SIZE = 10,
+    -- A count's badge: a dark circle under the white number.
+    BADGE_COLOR = { 0.1, 0.1, 0.1 },
     -- HBD_PINS_WORLDMAP_SHOW_CURRENT: a dot shows on its own zone's map only.
     SHOW_CURRENT_GLOBAL = "HBD_PINS_WORLDMAP_SHOW_CURRENT",
     SHOW_CURRENT = 0,
-    -- Marks people a marker shows from the guild roster's zone (they don't
-    -- run the add-on, or haven't shared a position).
-    ROSTER_TEXT = "from the roster",
     -- While the player is in a party, guildmates outside it are drawn at
     -- this opacity, so the party stands out.
     DIM_ALPHA = 0.35,
@@ -41,12 +43,12 @@ Pins.__index = Pins
 --           dots then)
 --   shown   function() -> false while guildmates are hidden from the maps
 --           and minimap
---   markers function() -> the world map markers: each { area, mapId,
---           display, people } where `area` is the zone or continent map the
---           marker stands for, `mapId` the continent or world map it's
---           drawn on, `display` "dots" or "count" (see LocationBoard), and
---           `people` dots as above, those from the roster with fromRoster
---           set and no position
+--   markers function() -> the map markers: each { area, mapId, display,
+--           people } where `area` is the zone or continent map the marker
+--           stands for, `mapId` the map it's drawn on (the zone's own map
+--           for those only the roster places), `display` "dots" or "count"
+--           (see LocationBoard), and `people` dots as above, those from the
+--           roster with fromRoster set and no position
 function MapPins.Create(options)
     return setmetatable({
         client = options.client,
@@ -70,32 +72,30 @@ function MapPins.Create(options)
     }, Pins)
 end
 
--- A dot's tooltip lines: the character's name, then its level, then its
--- alias or main when it has one.
-function MapPins.TooltipLines(dot)
-    local lines = { dot.name or dot.key, "Level " .. tostring(dot.level) }
-    if dot.label ~= nil and dot.label ~= "" then
-        table.insert(lines, dot.label)
+-- How a guildmate reads on the map: "Name (alias or main) (level)", each
+-- part in parentheses only when known.
+function MapPins.Describe(person)
+    local line = person.name or person.key
+    if person.label ~= nil and person.label ~= "" then
+        line = line .. " (" .. person.label .. ")"
     end
-    return lines
+    if person.level ~= nil then
+        line = line .. " (" .. tostring(person.level) .. ")"
+    end
+    return line
 end
 
--- A marker's tooltip lines: one per person, with their level and their
--- alias or main when they have one, and marked when only the guild roster
--- says where they are.
+-- A dot's tooltip lines: just the one guildmate.
+function MapPins.TooltipLines(dot)
+    return { MapPins.Describe(dot) }
+end
+
+-- A marker's tooltip lines: one per person.
 function MapPins.MarkerLines(marker)
     local lines = {}
     local index
     for index = 1, #(marker.people or {}) do
-        local person = marker.people[index]
-        local line = (person.name or person.key) .. ", level " .. tostring(person.level)
-        if person.label ~= nil and person.label ~= "" then
-            line = line .. " (" .. person.label .. ")"
-        end
-        if person.fromRoster then
-            line = line .. ", " .. MapPins.ROSTER_TEXT
-        end
-        table.insert(lines, line)
+        table.insert(lines, MapPins.Describe(marker.people[index]))
     end
     return lines
 end
@@ -178,7 +178,7 @@ function Pins:Icon(index, pool)
     return created
 end
 
--- The `index`th world map marker frame: DOTS_MAX dots side by side and a
+-- The `index`th map marker frame: DOTS_MAX dots side by side and a
 -- count, made the first time it's needed and reused.
 function Pins:MarkerFrame(index)
     local frame = self.markerFrames[index]
@@ -203,6 +203,7 @@ function Pins:MarkerFrame(index)
         marker.badge:SetSize(MapPins.COUNT_SIZE, MapPins.COUNT_SIZE)
         marker.badge:SetPoint("CENTER", marker, "CENTER", 0, 0)
         marker.badge:SetTexture(MapPins.DOT_TEXTURE)
+        marker.badge:SetVertexColor(MapPins.BADGE_COLOR[1], MapPins.BADGE_COLOR[2], MapPins.BADGE_COLOR[3])
         marker.count = marker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         marker.count:SetPoint("CENTER", marker.badge, "CENTER", 0, 0)
         marker:EnableMouse(true)
@@ -259,16 +260,41 @@ function Pins:Color(icon, dot)
     pcall(icon.SetAlpha, icon, dot.dimmed and MapPins.DIM_ALPHA or 1)
 end
 
--- Where `area`'s center falls on map `mapId`, or nil.
-function Pins:Center(area, mapId)
+-- Where point `x`, `y` on map `from` falls on map `to`, or nil.
+function Pins:Translate(x, y, from, to)
+    if from == to then
+        return x, y
+    end
     if self.map == nil then
         return nil
     end
-    local ok, x, y = pcall(self.map.TranslateZoneCoordinates, self.map, 0.5, 0.5, area, mapId)
-    if not ok or type(x) ~= "number" or type(y) ~= "number" then
+    local ok, toX, toY = pcall(self.map.TranslateZoneCoordinates, self.map, x, y, from, to)
+    if not ok or type(toX) ~= "number" or type(toY) ~= "number" then
         return nil
     end
-    return x, y
+    return toX, toY
+end
+
+-- Where `marker` goes on its map: the middle of its people, each at their
+-- position, or their zone's center when only the roster places them. The
+-- area's center when none of them can be placed; nil when that can't either.
+function Pins:Place(marker)
+    local sumX, sumY, placed = 0, 0, 0
+    local index
+    for index = 1, #marker.people do
+        local person = marker.people[index]
+        local x, y
+        if type(person.mapId) == "number" then
+            x, y = self:Translate(person.x or 0.5, person.y or 0.5, person.mapId, marker.mapId)
+        end
+        if x ~= nil then
+            sumX, sumY, placed = sumX + x, sumY + y, placed + 1
+        end
+    end
+    if placed > 0 then
+        return sumX / placed, sumY / placed
+    end
+    return self:Translate(0.5, 0.5, marker.area, marker.mapId)
 end
 
 -- An "ffrrggbb" color as r, g, b from 0 to 1, or white.
@@ -318,7 +344,7 @@ function Pins:Refresh()
     end
     for index = 1, #markers do
         local marker = markers[index]
-        local x, y = self:Center(marker.area, marker.mapId)
+        local x, y = self:Place(marker)
         local frame = x ~= nil and self:MarkerFrame(index) or nil
         if frame ~= nil and pcall(self.DrawMarker, self, frame, marker) then
             pcall(self.pins.AddWorldMapIconMap, self.pins, self, frame, marker.mapId, x, y, showFlag)
