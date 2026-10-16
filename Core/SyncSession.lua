@@ -446,6 +446,24 @@ function Session:LocalProfileEdit(kind, text)
     return fact
 end
 
+-- After this officer set a guildmate's Discord username to `text` ("" clears
+-- it) from the player panel: stores it on the main of `key`'s player as
+-- written by this officer now, newer than any of that player's own, and
+-- sends the fact to the guild. Returns the facts sent, or nil when nothing
+-- was sent (or this user isn't an officer).
+function Session:LocalDiscordEdit(key, text)
+    local partition = self.context()
+    local author = self.selfKey()
+    local character = partition and partition:GetCharacter(key)
+    local player = character and partition:GetPlayer(character.player)
+    if player == nil or author == nil or not self.isOfficer(author) then
+        return nil
+    end
+    return self:StampAndSend(function(facts, officer, now)
+        return { facts:StampText(player.main, addon.SyncFacts.KIND_DISCORD, text, now, officer) }
+    end)
+end
+
 -- Suggestions -----------------------------------------------------------------
 
 function Session:Suggestions(partition)
@@ -711,8 +729,11 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
         local fact = facts[index]
         -- One dated too far ahead is refused like any other, so its date
         -- never reaches a correction.
+        -- Profile facts are the characters' own, except a Discord
+        -- username this officer set for someone else.
         if addon.SyncFacts.IsValid(fact) and fact.by == officer
-            and not addon.SyncFacts.PROFILE_KINDS[fact.kind]
+            and (not addon.SyncFacts.PROFILE_KINDS[fact.kind]
+                or (addon.SyncFacts.OFFICER_TEXT_KINDS[fact.kind] and fact.character ~= officer))
             and not (now > 0 and fact.at > now + addon.SyncFacts.MAX_FUTURE_SECONDS)
             and ledger:IsForged(fact, now)
         then
@@ -725,6 +746,11 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
                     table.insert(corrections, own:StampAlias(fact.character, officer, at))
                 elseif fact.kind == addon.SyncFacts.KIND_DECLARED then
                     table.insert(corrections, own:StampDeclared(fact.character, officer, at))
+                elseif addon.SyncFacts.OFFICER_TEXT_KINDS[fact.kind] then
+                    -- The player's value as this officer holds it.
+                    local player = partition:GetCharacter(fact.character).player
+                    local held = partition:PlayerProfileText(player, fact.kind) or ""
+                    table.insert(corrections, own:StampText(fact.character, fact.kind, held, at, officer))
                 else
                     local stamped = own:Stamp({ [fact.character] = true }, officer, at)
                     table.insert(corrections, stamped[1])
@@ -752,7 +778,8 @@ end
 -- newest it wrote, so a newer one in that character's name dated since
 -- this client started is forged: it's left out and logged, this
 -- character's own data goes to the guild stamped newer, and the player is
--- warned.
+-- warned. A Discord username an officer set for this character isn't in
+-- its name, so it's left to the officers' ledgers.
 function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
     local now = self.now()
     if type(facts) ~= "table" or now == nil then
@@ -767,7 +794,7 @@ function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
     for index = 1, #facts do
         local fact = facts[index]
         if addon.SyncFacts.IsValid(fact) and addon.SyncFacts.PROFILE_KINDS[fact.kind]
-            and fact.character == owner and fact.at >= since and own:Refusal(fact) == nil
+            and fact.character == owner and fact.by == owner and fact.at >= since and own:Refusal(fact) == nil
         then
             forged = forged + 1
             addon.SyncLedger.Create(partition):LogForgery(fact, relayer, now)

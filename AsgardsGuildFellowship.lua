@@ -96,6 +96,9 @@ if clientProfile.supported then
         onAliasChanged = function(key, before)
             syncSession:LocalAliasEdit(key, before)
         end,
+        onDiscordChanged = function(key, text)
+            return syncSession:LocalDiscordEdit(key, text)
+        end,
         onDeclaredChanged = function(key, before)
             syncSession:LocalDeclaredEdit(key, before)
         end,
@@ -254,6 +257,9 @@ if clientProfile.supported then
                 end,
                 onSetAlias = function(key, text)
                     rosterController:SetAlias(key, text)
+                end,
+                onSetDiscord = function(key, text)
+                    rosterController:SetDiscord(key, text)
                 end,
                 onDetach = function(key)
                     rosterController:Detach(key)

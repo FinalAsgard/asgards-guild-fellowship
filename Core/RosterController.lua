@@ -26,6 +26,9 @@ Controller.__index = Controller
 --   onDeclaredChanged optional function(key, before): after `key` was
 --                 declared its player's main by hand, or that was taken back,
 --                 with whether it was declared before (for guild sync)
+--   onDiscordChanged  optional function(key, text) -> facts or nil: an
+--                 officer set the Discord username of `key`'s player from
+--                 the player panel ("" clears it); nil when it wasn't saved
 --   onAliasChanged  optional function(key, before): after a manual alias
 --                 change to the player of `key`, with the alias before it
 --                 ("" for none) (for guild sync)
@@ -62,6 +65,7 @@ function RosterController.Create(options)
         onDecideSuggestion = options.onDecideSuggestion,
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
+        onDiscordChanged = options.onDiscordChanged,
         onDeclaredChanged = options.onDeclaredChanged,
         onScanFinished = options.onScanFinished,
         onChanged = options.onChanged,
@@ -601,6 +605,26 @@ function Controller:Detach(key)
     return self:Organize("Detach", key)
 end
 
+-- An officer's "Set Discord…" from the player panel: sets the Discord
+-- username of `key`'s player to `text` ("" clears it) and redraws.
+function Controller:SetDiscord(key, text)
+    if self.current == nil or self.onDiscordChanged == nil or not self:IsOfficerNow() then
+        return false
+    end
+    if self.onDiscordChanged(key, text) == nil then
+        self:Print("That Discord username wasn't saved: the server time isn't known yet.")
+        return false
+    end
+    self:Refresh()
+    return true
+end
+
+-- Whether the logged-in character is an officer now.
+function Controller:IsOfficerNow()
+    local ok, officer = pcall(self.isOfficer)
+    return ok and officer == true
+end
+
 -- "Declare as my main": `key` must be its player's main.
 function Controller:SetDeclared(key, declared)
     return self:Organize("SetDeclared", key, declared)
@@ -722,6 +746,7 @@ function Controller:RedrawPanel()
         adStats = self.adStats,
         rolesOf = self.rolesOf,
         groupedWith = self.groupedWith,
+        canSetDiscord = self:IsOfficerNow(),
         -- The window wraps the bio to the panel's width, when it can
         -- measure text.
         wrap = self.window.WrapAbout and function(text)

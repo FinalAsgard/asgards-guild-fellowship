@@ -182,7 +182,9 @@ end)
 
 -- Controller: selecting and editing ------------------------------------------
 
-local function controllerSetup(onSyncResumed)
+-- `options.isOfficer` and `options.onDiscordChanged` as for the controller.
+local function controllerSetup(onSyncResumed, options)
+    options = options or {}
     local world = fixtures.newEnvironment("Retail")
     world.environment.date = function(format, timestamp)
         return os.date("!" .. format, timestamp)
@@ -219,6 +221,8 @@ local function controllerSetup(onSyncResumed)
         getDatabase = function() return database end,
         createWindow = function() return window end,
         onSyncResumed = onSyncResumed,
+        isOfficer = options.isOfficer,
+        onDiscordChanged = options.onDiscordChanged,
     })
     controller:OnSavedDataReady()
     controller:OnRosterUpdate()
@@ -281,6 +285,60 @@ test.test("don't sync is toggled from the panel, marked there, and turning it of
     test.assertFalse(controller.current.partition:IsNoSync(window.player.id))
     test.assertEqual(1, #resumed)
     test.assertEqual("toolbox-area52", resumed[1])
+end)
+
+test.test("set discord: only officers are offered it, prefilled with the player's Discord", function()
+    local controller, window = controllerSetup(nil, { isOfficer = function() return false end })
+    controller:SelectPlayerOf("hammer-area52")
+    test.assertFalse(window.player.canSetDiscord)
+
+    local officer, officerWindow = controllerSetup(nil, { isOfficer = function() return true end })
+    officer.current.partition:SetProfileText("hammer-area52", "discord", "hammer#1", 1790000000, "hammer-area52")
+    officer:SelectPlayerOf("hammer-area52")
+    test.assertTrue(officerWindow.player.canSetDiscord)
+    test.assertEqual("hammer#1", officerWindow.player.discord)
+end)
+
+test.test("set discord: an officer's edit goes to guild sync and the panel redraws", function()
+    local edits = {}
+    local controller, window
+    controller, window = controllerSetup(nil, {
+        isOfficer = function() return true end,
+        onDiscordChanged = function(key, text)
+            table.insert(edits, { key = key, text = text })
+            controller.current.partition:SetProfileText(key, "discord", text, 1790000000, "toolbox-area52")
+            return { {} }
+        end,
+    })
+    controller:SelectPlayerOf("hammer-area52")
+
+    test.assertTrue(controller:SetDiscord(window.player.main, "tool#1"))
+
+    test.assertEqual(1, #edits)
+    test.assertEqual(window.player.main, edits[1].key)
+    test.assertEqual("tool#1", window.player.discord)
+end)
+
+test.test("set discord: refused for a member, and reported when it couldn't be saved", function()
+    local edits = 0
+    local member = controllerSetup(nil, {
+        isOfficer = function() return false end,
+        onDiscordChanged = function()
+            edits = edits + 1
+            return {}
+        end,
+    })
+    test.assertFalse(member:SetDiscord("hammer-area52", "spam"))
+    test.assertEqual(0, edits)
+
+    local officer, _, client = controllerSetup(nil, {
+        isOfficer = function() return true end,
+        onDiscordChanged = function() return nil end,
+    })
+    local printed
+    client.Print = function(_, message) printed = message end
+    test.assertFalse(officer:SetDiscord("hammer-area52", "tool#1"))
+    test.assertTrue(string.find(printed, "wasn't saved", 1, true) ~= nil)
 end)
 
 test.test("dates are formatted by the client", function()

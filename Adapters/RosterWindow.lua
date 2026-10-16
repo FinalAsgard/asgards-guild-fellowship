@@ -236,12 +236,13 @@ local function popupEditBox(popup)
     return nil
 end
 
--- A text dialog for "Set alias…". Saving an empty alias clears it.
-local function showAliasDialog(label, current, onSave)
+-- A one-line text dialog, registered as `id`: `prompt` names `label` (%s),
+-- the box starts with `current` and holds at most `maxLetters`.
+local function showTextDialog(id, prompt, maxLetters, label, current, onSave)
     if type(StaticPopupDialogs) ~= "table" or type(StaticPopup_Show) ~= "function" then
         return false
     end
-    local name = addon.Identity.addonName .. "_SET_ALIAS"
+    local name = addon.Identity.addonName .. "_" .. id
     if StaticPopupDialogs[name] == nil then
         local function save(popup, data)
             local box = popupEditBox(popup)
@@ -250,11 +251,11 @@ local function showAliasDialog(label, current, onSave)
             end
         end
         StaticPopupDialogs[name] = {
-            text = "Alias for %s (leave empty to clear):",
+            text = prompt,
             button1 = ACCEPT or "Accept",
             button2 = CANCEL or "Cancel",
             hasEditBox = true,
-            maxLetters = 48,
+            maxLetters = maxLetters,
             OnShow = function(popup, data)
                 local box = popupEditBox(popup)
                 if box ~= nil and data ~= nil then
@@ -278,6 +279,17 @@ local function showAliasDialog(label, current, onSave)
     end
     StaticPopup_Show(name, label, nil, { current = current, onSave = onSave })
     return true
+end
+
+-- A text dialog for "Set alias…". Saving an empty alias clears it.
+local function showAliasDialog(label, current, onSave)
+    return showTextDialog("SET_ALIAS", "Alias for %s (leave empty to clear):", 48, label, current, onSave)
+end
+
+-- A text dialog for an officer's "Set Discord…". Saving empty clears it.
+local function showDiscordDialog(label, current, onSave)
+    return showTextDialog("SET_DISCORD", "Discord username for %s (leave empty to clear):",
+        addon.FellowshipStore.PROFILE_FIELDS.discord, label, current, onSave)
 end
 
 local PICKER_WIDTH = 360
@@ -381,9 +393,29 @@ local PANEL_HEIGHT = 440
 local PANEL_BAR_MARGIN = 10
 local PANEL_BAR_HEIGHT = 40
 
+-- Lines up the action bar's shown buttons left to right, in `edit.actions`
+-- order.
+local function layoutActions(edit)
+    local previous
+    local index
+    for index = 1, #edit.actions do
+        local button = edit.actions[index]
+        if button:IsShown() then
+            button:ClearAllPoints()
+            if previous == nil then
+                button:SetPoint("BOTTOMLEFT", edit.panel, "BOTTOMLEFT", 12, PANEL_BAR_MARGIN)
+            else
+                button:SetPoint("LEFT", previous, "RIGHT", 4, 0)
+            end
+            previous = button
+        end
+    end
+end
+
 -- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
 -- merge)` open the dialogs the right-click menu uses (`merge` titles the
--- picker "Merge into player").
+-- picker "Merge into player"); `actions.openSetDiscord(key, title,
+-- current)` opens an officer's "Set Discord…" dialog.
 local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
     -- Like every panel here, closed only with its close button or Escape.
@@ -417,27 +449,28 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     aliasSource:SetPoint("TOPLEFT", aliasText, "BOTTOMLEFT", 0, -6)
 
     -- The action bar along the bottom: Set alias… and Merge into player…,
-    -- which open the same dialogs as the right-click menu. Its buttons sit
-    -- left to right in `edit.actions` order.
+    -- which open the same dialogs as the right-click menu, with an
+    -- officer's Set Discord… between them. Its shown buttons sit left to
+    -- right in `edit.actions` order.
     local setAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     setAlias:SetSize(84, 20)
     setAlias:SetText("Set alias...")
+    local setDiscord = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    setDiscord:SetSize(100, 20)
+    setDiscord:SetText("Set Discord...")
     local setMain = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     setMain:SetSize(124, 20)
     setMain:SetText("Merge into player...")
-    edit.actions = { setAlias, setMain }
-    local actionIndex
-    for actionIndex = 1, #edit.actions do
-        local button = edit.actions[actionIndex]
-        if actionIndex == 1 then
-            button:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, PANEL_BAR_MARGIN)
-        else
-            button:SetPoint("LEFT", edit.actions[actionIndex - 1], "RIGHT", 4, 0)
-        end
-    end
+    edit.actions = { setAlias, setDiscord, setMain }
+    layoutActions(edit)
     setAlias:SetScript("OnClick", function()
         if edit.model ~= nil then
             actions.openSetAlias(edit.model.main, edit.model.label)
+        end
+    end)
+    setDiscord:SetScript("OnClick", function()
+        if edit.model ~= nil then
+            actions.openSetDiscord(edit.model.main, edit.model.label, edit.model.discord)
         end
     end)
     setMain:SetScript("OnClick", function()
@@ -448,6 +481,7 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.aliasText = aliasText
     edit.aliasSource = aliasSource
     edit.setMain = setMain
+    edit.setDiscord = setDiscord
 
     local lineAmount = math.floor((PANEL_HEIGHT - 72 - PANEL_BAR_HEIGHT) / RosterWindow.LINE_HEIGHT)
     local function newLine(scroll, index)
@@ -1188,6 +1222,13 @@ local function build(framework, options)
             options.onMenuUnavailable()
         end
     end
+    local function openSetDiscord(key, title, current)
+        if not showDiscordDialog(title, current, function(text)
+            options.onSetDiscord(key, text)
+        end) then
+            options.onMenuUnavailable()
+        end
+    end
     local function openRowMenu(row, line)
         local entries = options.menuFor(row)
         if entries[1] == nil then
@@ -1290,6 +1331,7 @@ local function build(framework, options)
     local conflicts = buildConflictPanel(framework, options, frameName)
     local playerPanel = buildPlayerPanel(framework, options, frameName, frame, {
         openSetAlias = openSetAlias,
+        openSetDiscord = openSetDiscord,
         openSetMain = openSetMain,
     })
     conflictsButton:SetScript("OnClick", function()
@@ -1327,6 +1369,7 @@ end
 -- shown, and options.onPurge(key) / onPurgeAll() purge them;
 -- options.menuFor(row) lists a row's organize actions, and onSetMain(key,
 -- playerId), onMakeMain(key), onSetAlias(key, text), onDetach(key),
+-- onSetDiscord(key, text) (an officer's, from the player panel),
 -- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them;
 -- options.onSearch(text), onToggleOnlineOnly(), onExpandAll(), and
 -- onCollapseAll() drive the controls row; options.onSelectCharacter(key)
@@ -1511,6 +1554,13 @@ function Window:ShowPlayer(model)
         else
             edit.setMain:Disable()
         end
+        -- Only officers set a guildmate's Discord.
+        if model.canSetDiscord then
+            edit.setDiscord:Show()
+        else
+            edit.setDiscord:Hide()
+        end
+        layoutActions(edit)
         edit.dontSync:SetChecked(model.dontSync == true)
         edit.dontSyncLabel:SetText(model.dontSync and "|cffff8000Don't sync: kept as yours|r" or "Don't sync")
         edit.scroll:SetData(model.rows)
