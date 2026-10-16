@@ -376,6 +376,10 @@ end
 
 local PANEL_WIDTH = 380
 local PANEL_HEIGHT = 440
+-- The action bar along the panel's bottom: its buttons' gap from the edge,
+-- and the room the list leaves for it.
+local PANEL_BAR_MARGIN = 10
+local PANEL_BAR_HEIGHT = 40
 
 -- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
 -- merge)` open the dialogs the right-click menu uses (`merge` titles the
@@ -389,23 +393,48 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
     local edit = { panel = panel }
 
-    -- The alias, with Set alias… and Merge into player… buttons that open
-    -- the same dialogs as the right-click menu.
+    -- "Don't sync": keep this client's own version of the player.
+    local dontSync = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    dontSync:SetSize(20, 20)
+    dontSync:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -160, -28)
+    local dontSyncLabel = dontSync:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dontSyncLabel:SetPoint("LEFT", dontSync, "RIGHT", 2, 0)
+    dontSync:SetScript("OnClick", function(button)
+        if edit.model ~= nil then
+            options.onSetDontSync(edit.model.main, button:GetChecked() == true)
+        end
+    end)
+    edit.dontSync = dontSync
+    edit.dontSyncLabel = dontSyncLabel
+
+    -- The alias and where it came from, beside "Don't sync".
     local aliasText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     aliasText:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -32)
-    aliasText:SetPoint("RIGHT", panel, "RIGHT", -230, 0)
+    aliasText:SetPoint("RIGHT", dontSync, "LEFT", -8, 0)
     aliasText:SetJustifyH("LEFT")
     aliasText:SetWordWrap(false)
-    local setMain = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    setMain:SetSize(124, 20)
-    setMain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -28)
-    setMain:SetText("Merge into player...")
-    local setAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    setAlias:SetSize(84, 20)
-    setAlias:SetPoint("RIGHT", setMain, "LEFT", -4, 0)
-    setAlias:SetText("Set alias...")
     local aliasSource = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     aliasSource:SetPoint("TOPLEFT", aliasText, "BOTTOMLEFT", 0, -6)
+
+    -- The action bar along the bottom: Set alias… and Merge into player…,
+    -- which open the same dialogs as the right-click menu. Its buttons sit
+    -- left to right in `edit.actions` order.
+    local setAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    setAlias:SetSize(84, 20)
+    setAlias:SetText("Set alias...")
+    local setMain = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    setMain:SetSize(124, 20)
+    setMain:SetText("Merge into player...")
+    edit.actions = { setAlias, setMain }
+    local actionIndex
+    for actionIndex = 1, #edit.actions do
+        local button = edit.actions[actionIndex]
+        if actionIndex == 1 then
+            button:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, PANEL_BAR_MARGIN)
+        else
+            button:SetPoint("LEFT", edit.actions[actionIndex - 1], "RIGHT", 4, 0)
+        end
+    end
     setAlias:SetScript("OnClick", function()
         if edit.model ~= nil then
             actions.openSetAlias(edit.model.main, edit.model.label)
@@ -420,21 +449,7 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.aliasSource = aliasSource
     edit.setMain = setMain
 
-    -- "Don't sync": keep this client's own version of the player.
-    local dontSync = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    dontSync:SetSize(20, 20)
-    dontSync:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -160, -50)
-    local dontSyncLabel = dontSync:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    dontSyncLabel:SetPoint("LEFT", dontSync, "RIGHT", 2, 0)
-    dontSync:SetScript("OnClick", function(button)
-        if edit.model ~= nil then
-            options.onSetDontSync(edit.model.main, button:GetChecked() == true)
-        end
-    end)
-    edit.dontSync = dontSync
-    edit.dontSyncLabel = dontSyncLabel
-
-    local lineAmount = math.floor((PANEL_HEIGHT - 90) / RosterWindow.LINE_HEIGHT)
+    local lineAmount = math.floor((PANEL_HEIGHT - 72 - PANEL_BAR_HEIGHT) / RosterWindow.LINE_HEIGHT)
     local function newLine(scroll, index)
         local line = CreateFrame("Frame", nil, scroll)
         line:SetHeight(RosterWindow.LINE_HEIGHT)
@@ -512,11 +527,12 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         end
     end
     local scroll = framework:CreateScrollBox(panel, frameName .. "PlayerScroll", refreshLines, {},
-        PANEL_WIDTH - 20, PANEL_HEIGHT - 90, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
+        PANEL_WIDTH - 20, PANEL_HEIGHT - 72 - PANEL_BAR_HEIGHT, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
     scroll:ClearAllPoints()
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -72)
-    -- Room on the right for the scroll bar, which sits beside the list.
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 12)
+    -- Room on the right for the scroll bar, which sits beside the list, and
+    -- below for the action bar.
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, PANEL_BAR_HEIGHT)
     scroll:CreateLines(newLine, lineAmount)
     edit.scroll = scroll
     -- Measures text in the lines' font, to wrap the bio to their width.
