@@ -171,16 +171,13 @@ end
 -- -> the character's role preferences as text, or nil), groupedWith
 -- (optional function(keys) -> how often this user grouped with the player,
 -- or nil), wrap (optional function(text) -> an About entry's lines as
--- they fit the panel; by default, lines of at most BIO_LINE bytes),
--- canSetDiscord (true when this user, an officer, may set the player's
--- Discord username).
+-- they fit the panel; by default, lines of at most BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
 --   { id, label, alias, aliasSource, main, mainName, canMerge, discord,
---     canSetDiscord, dontSync, rows }
+--     dontSync, rows }
 -- where `main` is the main's character key, `canMerge` whether the player
 -- can be merged into another (only with no alts), `discord` the player's
--- Discord username or nil, `canSetDiscord` whether "Set Discord…" is
--- offered, `dontSync` whether guild
+-- Discord username or nil (for "Set Discord…"), `dontSync` whether guild
 -- sync leaves this player alone, and `rows` is a flat list for the
 -- panel's scroll list:
 --   { kind = "stat", text }  (the player's ad count, then how often you
@@ -277,7 +274,6 @@ function PlayerPanelViewModel.Build(inputs)
         mainName = mainName,
         canMerge = altCount == 0,
         discord = (partition:PlayerProfileText(inputs.playerId, "discord")),
-        canSetDiscord = inputs.canSetDiscord == true,
         dontSync = player.noSync == true,
         rows = rows,
     }

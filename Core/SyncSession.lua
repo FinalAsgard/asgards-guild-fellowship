@@ -446,22 +446,33 @@ function Session:LocalProfileEdit(kind, text)
     return fact
 end
 
--- After this officer set a guildmate's Discord username to `text` ("" clears
+-- After this user set a guildmate's Discord username to `text` ("" clears
 -- it) from the player panel: stores it on the main of `key`'s player as
--- written by this officer now, newer than any of that player's own, and
--- sends the fact to the guild. Returns the facts sent, or nil when nothing
--- was sent (or this user isn't an officer).
+-- written by this user now, newer than any of that player's own. An
+-- officer's goes to the guild at once; a member's stays on their side as a
+-- suggestion for officers to decide. Returns the facts stamped, or nil
+-- when nothing could be (no server time yet, or unusable text).
 function Session:LocalDiscordEdit(key, text)
     local partition = self.context()
-    local author = self.selfKey()
     local character = partition and partition:GetCharacter(key)
     local player = character and partition:GetPlayer(character.player)
-    if player == nil or author == nil or not self.isOfficer(author) then
+    if player == nil then
         return nil
     end
-    return self:StampAndSend(function(facts, officer, now)
-        return { facts:StampText(player.main, addon.SyncFacts.KIND_DISCORD, text, now, officer) }
+    local before = partition:PlayerProfileText(character.player, addon.SyncFacts.KIND_DISCORD) or ""
+    local stamped
+    self:StampAndSend(function(facts, author, now)
+        stamped = { facts:StampText(player.main, addon.SyncFacts.KIND_DISCORD, text, now, author) }
+        return stamped
+    end, function(fact)
+        return fact.text ~= before
+    end, function()
+        return { text = before }
     end)
+    if stamped == nil or stamped[1] == nil then
+        return nil
+    end
+    return stamped
 end
 
 -- Suggestions -----------------------------------------------------------------

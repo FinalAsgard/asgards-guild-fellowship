@@ -44,6 +44,10 @@ local function currentText(inputs, key, kind)
     if kind == "suggested declared" then
         return inputs.partition:IsDeclared(key) and "Declared main" or "Not declared"
     end
+    if kind == "suggested discord" then
+        local discord = inputs.partition:PlayerProfileText(character.player, "discord")
+        return discord and ("Discord \"" .. discord .. "\"") or "No Discord"
+    end
     if player.main == key then
         local count = #inputs.partition:CharactersOf(character.player)
         if count > 1 then
@@ -71,6 +75,10 @@ end
 local function suggestionText(inputs, key, kind, suggestion)
     if kind == "suggested declared" then
         return suggestion.declared and "Declared main" or "Not declared"
+    end
+    if kind == "suggested discord" then
+        local text = suggestion.text
+        return (text ~= nil and text ~= "") and ("Discord \"" .. text .. "\"") or "No Discord"
     end
     if kind == "suggested main" then
         if suggestion.main == key then
@@ -231,6 +239,8 @@ function ConflictViewModel.Build(inputs)
             kind = "suggested alias"
         elseif type(fact) == "table" and fact.kind == "declared" then
             kind = "suggested declared"
+        elseif type(fact) == "table" and fact.kind == "discord" then
+            kind = "suggested discord"
         end
         -- Suggestions about characters this client no longer knows are
         -- left out.

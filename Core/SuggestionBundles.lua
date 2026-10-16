@@ -14,8 +14,16 @@ end
 
 -- What a suggestion fact asks for: "Wrench as an alt of Hammer", "Hammer
 -- as main", "Alias: Tools", "Clear the alias", "Hammer declared as main",
--- or "Hammer no longer declared".
+-- "Hammer no longer declared", "Hammer's Discord: hammer#1", or "Clear
+-- Hammer's Discord".
 function SuggestionBundles.Describe(partition, normalizer, fact)
+    if fact.kind == addon.SyncFacts.KIND_DISCORD then
+        local name = nameOf(partition, normalizer, fact.character)
+        if fact.text == "" then
+            return "Clear " .. name .. "'s Discord"
+        end
+        return name .. "'s Discord: " .. tostring(fact.text)
+    end
     if fact.kind == addon.SyncFacts.KIND_DECLARED then
         local name = nameOf(partition, normalizer, fact.character)
         return fact.declared and (name .. " declared as main") or (name .. " no longer declared")

@@ -26,9 +26,11 @@ Controller.__index = Controller
 --   onDeclaredChanged optional function(key, before): after `key` was
 --                 declared its player's main by hand, or that was taken back,
 --                 with whether it was declared before (for guild sync)
---   onDiscordChanged  optional function(key, text) -> facts or nil: an
---                 officer set the Discord username of `key`'s player from
---                 the player panel ("" clears it); nil when it wasn't saved
+--   onDiscordChanged  optional function(key, text) -> facts or nil: this
+--                 user set the Discord username of `key`'s player from the
+--                 player panel ("" clears it): official at once for an
+--                 officer, a suggestion for a member; nil when it wasn't
+--                 saved
 --   onAliasChanged  optional function(key, before): after a manual alias
 --                 change to the player of `key`, with the alias before it
 --                 ("" for none) (for guild sync)
@@ -605,10 +607,11 @@ function Controller:Detach(key)
     return self:Organize("Detach", key)
 end
 
--- An officer's "Set Discord…" from the player panel: sets the Discord
--- username of `key`'s player to `text` ("" clears it) and redraws.
+-- "Set Discord…" from the player panel: sets the Discord username of
+-- `key`'s player to `text` ("" clears it), as an officer's or as a member's
+-- suggestion, and redraws.
 function Controller:SetDiscord(key, text)
-    if self.current == nil or self.onDiscordChanged == nil or not self:IsOfficerNow() then
+    if self.current == nil or self.onDiscordChanged == nil then
         return false
     end
     if self.onDiscordChanged(key, text) == nil then
@@ -617,12 +620,6 @@ function Controller:SetDiscord(key, text)
     end
     self:Refresh()
     return true
-end
-
--- Whether the logged-in character is an officer now.
-function Controller:IsOfficerNow()
-    local ok, officer = pcall(self.isOfficer)
-    return ok and officer == true
 end
 
 -- "Declare as my main": `key` must be its player's main.
@@ -746,7 +743,6 @@ function Controller:RedrawPanel()
         adStats = self.adStats,
         rolesOf = self.rolesOf,
         groupedWith = self.groupedWith,
-        canSetDiscord = self:IsOfficerNow(),
         -- The window wraps the bio to the panel's width, when it can
         -- measure text.
         wrap = self.window.WrapAbout and function(text)

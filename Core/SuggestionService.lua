@@ -16,10 +16,15 @@ local _, addon = ...
 --     from, at }
 --   { character, kind = "suggested declared", suggestion = { declared = boolean },
 --     from, at }
--- An alias suggestion names the player by its main; an empty alias clears it.
+--   { character, kind = "suggested discord", suggestion = { text = text },
+--     from, at }
+-- An alias or Discord suggestion names the player by its main; an empty
+-- alias or Discord clears it. A Discord suggestion is about the player's
+-- Discord username, the newest any of its characters holds (see
+-- FellowshipStore PlayerProfileText): the player's own later edit settles it.
 --
 -- A pending suggestion also remembers `was`: the value it replaced ({ main =
--- key } or { alias = text }), the officers' value as far as this client
+-- key }, { alias = text } or { text = text }), the officers' value as far as this client
 -- knows. Editing the same thing again replaces the suggestion but keeps
 -- `was`; changing it back to `was`, or undoing it, drops the suggestion,
 -- puts `was` back as if notes or the roster had set it, and withdraws it:
@@ -33,6 +38,7 @@ local SuggestionService = {
     KIND_MAIN = "suggested main",
     KIND_ALIAS = "suggested alias",
     KIND_DECLARED = "suggested declared",
+    KIND_DISCORD = "suggested discord",
     -- How long a withdrawal is kept for officers who weren't online.
     WITHDRAWAL_SECONDS = 14 * 86400,
 }
@@ -43,6 +49,7 @@ SuggestionService.KINDS = {
     [SuggestionService.KIND_MAIN] = true,
     [SuggestionService.KIND_ALIAS] = true,
     [SuggestionService.KIND_DECLARED] = true,
+    [SuggestionService.KIND_DISCORD] = true,
 }
 
 local Service = {}
@@ -80,6 +87,7 @@ local function copy(fact)
         main = fact.main,
         alias = fact.alias,
         declared = fact.declared,
+        text = fact.text,
         at = fact.at,
         by = fact.by,
     }
@@ -96,6 +104,9 @@ local function isValue(fact, was)
     if fact.kind == addon.SyncFacts.KIND_DECLARED then
         return fact.declared == (was.declared == true)
     end
+    if fact.kind == addon.SyncFacts.KIND_DISCORD then
+        return fact.text == (was.text or "")
+    end
     return fact.main == was.main
 end
 
@@ -107,6 +118,9 @@ local function queueKind(factKind)
     if factKind == addon.SyncFacts.KIND_DECLARED then
         return SuggestionService.KIND_DECLARED
     end
+    if factKind == addon.SyncFacts.KIND_DISCORD then
+        return SuggestionService.KIND_DISCORD
+    end
     return SuggestionService.KIND_MAIN
 end
 
@@ -117,7 +131,44 @@ local function factKind(kind)
     if kind == SuggestionService.KIND_DECLARED then
         return addon.SyncFacts.KIND_DECLARED
     end
+    if kind == SuggestionService.KIND_DISCORD then
+        return addon.SyncFacts.KIND_DISCORD
+    end
     return addon.SyncFacts.KIND_MAIN
+end
+
+-- The player's Discord username as `key`'s player holds it: the key of the
+-- character holding the newest, its text ("" for none), and its stamp (0
+-- and no author when none was set). Nil for an unknown character.
+local function playerDiscord(partition, key)
+    local character = partition:GetCharacter(key)
+    if character == nil then
+        return nil
+    end
+    local _, at, by = partition:PlayerProfileText(character.player, addon.SyncFacts.KIND_DISCORD)
+    local keys = partition:CharactersOf(character.player)
+    local index
+    for index = 1, #keys do
+        local heldAt, heldBy = partition:GetProfileStamp(keys[index], addon.SyncFacts.KIND_DISCORD)
+        if at > 0 and heldAt == at and heldBy == by then
+            return keys[index], partition:GetProfileText(keys[index], addon.SyncFacts.KIND_DISCORD), at, by
+        end
+    end
+    return key, "", 0, nil
+end
+
+-- When the thing `fact` is about was last set, and by whom, or nil for an
+-- unknown character. A Discord username is the player's: the newest any of
+-- its characters holds.
+function Service:HeldStamp(fact)
+    if fact.kind == addon.SyncFacts.KIND_DISCORD then
+        local key, _, at, by = playerDiscord(self.partition, fact.character)
+        if key == nil then
+            return nil
+        end
+        return at, by
+    end
+    return self.facts:HeldStamp(fact)
 end
 
 -- The member's side ----------------------------------------------------------
@@ -178,6 +229,7 @@ function Service:Withdraw(fact, was, at)
         main = was.main,
         alias = was.alias,
         declared = was.declared == true,
+        text = was.text or "",
     })
     local withdrawal = copy(fact)
     withdrawal.main = fact.kind == addon.SyncFacts.KIND_MAIN and was.main or nil
@@ -186,6 +238,7 @@ function Service:Withdraw(fact, was, at)
     if fact.kind == addon.SyncFacts.KIND_DECLARED then
         withdrawal.declared = was.declared == true
     end
+    withdrawal.text = fact.kind == addon.SyncFacts.KIND_DISCORD and (was.text or "") or nil
     withdrawal.at = at
     withdrawal.kept = self.now()
     local withdrawals = self.partition:GetWithdrawals()
@@ -289,7 +342,7 @@ function Service:Prune(decided)
     local index
     for index = 1, #pending do
         local fact = pending[index]
-        local heldAt, heldBy = self.facts:HeldStamp(fact)
+        local heldAt, heldBy = self:HeldStamp(fact)
         local settled = decided ~= nil and decided.kind == queueKind(fact.kind)
             and decided.character == fact.character and decided.from == fact.by
             and type(decided.at) == "number" and fact.at <= decided.at
@@ -315,7 +368,7 @@ function Service:Revert(decided)
     local index
     for index = 1, #pending do
         local fact = pending[index]
-        local heldAt, heldBy = self.facts:HeldStamp(fact)
+        local heldAt, heldBy = self:HeldStamp(fact)
         local named = decided.kind == queueKind(fact.kind) and decided.character == fact.character
             and decided.from == fact.by and type(decided.at) == "number" and fact.at <= decided.at
         if named and heldAt == fact.at and heldBy == fact.by and self.facts:Restore({
@@ -324,6 +377,7 @@ function Service:Revert(decided)
             main = decided.official.main,
             alias = decided.official.alias,
             declared = decided.official.declared == true,
+            text = decided.official.text or "",
         }) then
             reverted = reverted + 1
         end
@@ -345,6 +399,9 @@ function Service:Differs(fact)
     end
     if fact.kind == addon.SyncFacts.KIND_DECLARED then
         return self.partition:IsDeclared(fact.character) ~= fact.declared
+    end
+    if fact.kind == addon.SyncFacts.KIND_DISCORD then
+        return select(2, playerDiscord(self.partition, fact.character)) ~= fact.text
     end
     -- "character's main is main": the same player, led by that main.
     local main = self.partition:GetCharacter(fact.main)
@@ -382,7 +439,7 @@ function Service:Queue(facts, from)
             and self.partition:GetCharacter(fact.character) ~= nil
             and (fact.kind ~= addon.SyncFacts.KIND_MAIN or self.partition:GetCharacter(fact.main) ~= nil)
         if usable then
-            local heldAt, heldBy = self.facts:HeldStamp(fact)
+            local heldAt, heldBy = self:HeldStamp(fact)
             usable = addon.SyncFacts.IsNewer(fact.at, fact.by, heldAt, heldBy) and self:Differs(fact)
         end
         local kind = queueKind(fact.kind)
@@ -411,6 +468,8 @@ function Service:Queue(facts, from)
                 suggestion = { alias = fact.alias }
             elseif fact.kind == addon.SyncFacts.KIND_DECLARED then
                 suggestion = { declared = fact.declared }
+            elseif fact.kind == addon.SyncFacts.KIND_DISCORD then
+                suggestion = { text = fact.text }
             end
             table.insert(conflicts, {
                 character = fact.character,
@@ -440,8 +499,8 @@ end
 
 -- What deciding `entry` tells everyone: { kind, character, from, at,
 -- approved }. A rejection also carries `official`, this client's value for
--- that thing ({ main = key } or { alias = text }), for the member to revert
--- to.
+-- that thing ({ main = key }, { alias = text } or { text = text }), for the
+-- member to revert to.
 function Service:Decision(entry, approved)
     local decided = {
         kind = entry.kind,
@@ -452,13 +511,22 @@ function Service:Decision(entry, approved)
     }
     if not decided.approved then
         local held = self:Held(entry) or {}
-        decided.official = { main = held.main, alias = held.alias, declared = held.declared }
+        decided.official = { main = held.main, alias = held.alias, declared = held.declared, text = held.text }
     end
     return decided
 end
 
--- This client's fact for the thing `entry` is about.
+-- This client's fact for the thing `entry` is about. For a Discord
+-- username, the player's: the fact of the character holding the newest
+-- (about `entry`'s character, with "" and no stamp, when none was set).
 function Service:Held(entry)
+    if entry.kind == SuggestionService.KIND_DISCORD then
+        local key, text, at, by = playerDiscord(self.partition, entry.character)
+        if key == nil then
+            return nil
+        end
+        return { kind = addon.SyncFacts.KIND_DISCORD, character = key, text = text, at = at, by = by }
+    end
     if entry.kind == SuggestionService.KIND_ALIAS then
         return self.facts:AliasFactOf(entry.character)
     end
@@ -490,10 +558,16 @@ function Service:FactFor(entry, officer, now)
         fact.alias = entry.suggestion.alias
     elseif fact.kind == addon.SyncFacts.KIND_DECLARED then
         fact.declared = entry.suggestion.declared == true
+    elseif fact.kind == addon.SyncFacts.KIND_DISCORD then
+        fact.text = entry.suggestion.text
     else
         fact.main = entry.suggestion.main
     end
-    local heldAt = self.facts:HeldStamp(fact) or 0
+    local heldAt = self:HeldStamp(fact) or 0
+    if fact.kind == addon.SyncFacts.KIND_DISCORD then
+        -- Also newer than what the character it's stored on holds.
+        heldAt = math.max(heldAt, self.facts:HeldStamp(fact) or 0)
+    end
     fact.at = math.max(now, heldAt + 1)
     return fact
 end
@@ -510,7 +584,7 @@ function Service:Settle(decided)
         if entry.from ~= nil and SuggestionService.KINDS[entry.kind] then
             local named = decided ~= nil and decided.kind == entry.kind and decided.character == entry.character
                 and type(decided.at) == "number" and entry.at <= decided.at
-            local heldAt, heldBy = self.facts:HeldStamp({ kind = factKind(entry.kind), character = entry.character })
+            local heldAt, heldBy = self:HeldStamp({ kind = factKind(entry.kind), character = entry.character })
             local overtaken = heldAt == nil or not addon.SyncFacts.IsNewer(entry.at, entry.from, heldAt, heldBy)
             if named or overtaken then
                 table.remove(conflicts, index)

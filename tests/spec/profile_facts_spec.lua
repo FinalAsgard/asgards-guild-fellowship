@@ -20,7 +20,13 @@ local function load()
         "Core/SuggestionService.lua",
         "Core/SyncLedger.lua",
         "Core/SyncSession.lua",
-        "Core/RoleCatalog.lua"
+        "Core/RoleCatalog.lua",
+        "Core/PlayerService.lua",
+        "Core/ConflictViewModel.lua",
+        "Core/BundleReviewViewModel.lua",
+        "Core/SuggestionBundles.lua",
+        "Core/ScanScheduler.lua",
+        "Core/RosterController.lua"
     )
 end
 
@@ -803,19 +809,167 @@ test.test("guild sync: an officer sets a guildmate's Discord on their main, and 
     test.assertEqual("mine#1", (other.partition:PlayerProfileText(playerId, "discord")))
 end)
 
-test.test("guild sync: a member can't set a guildmate's Discord directly", function()
+-- An officer, the member suggesting, and the guildmate (Wrench) it's about.
+local function suggestionNetwork()
     local network = newNetwork()
+    local officer = newClient(network, OFFICER, "Toolbox-Area52")
     local member = newClient(network, MEMBER, "Hammer-Area52")
-    local other = newClient(network, "wrench-area52", "Wrench-Area52")
+    local guildmate = newClient(network, "wrench-area52", "Wrench-Area52")
+    member.session.officerOnline = function()
+        return true
+    end
+    return network, officer, member, guildmate
+end
 
-    test.assertEqual(nil, member.session:LocalDiscordEdit("wrench-area52", "spam"))
-    test.assertEqual(0, #member.sent)
-    test.assertEqual(nil, member.partition:GetProfileText("wrench-area52", "discord"))
+local function discordOf(client, key)
+    return (client.partition:PlayerProfileText(client.partition:GetCharacter(key).player, "discord"))
+end
 
-    -- Sent anyway, it's refused.
-    member.session:Send({ t = "facts", facts = { text("discord", NOW, MEMBER, "wrench-area52", "spam") } })
+test.test("discord suggestions: a member's edit stays theirs and reaches officers' queues", function()
+    local network, officer, member, guildmate = suggestionNetwork()
+    guildmate.session:LocalProfileEdit("discord", "old#1")
     deliver(network)
-    test.assertEqual(nil, other.partition:GetProfileText("wrench-area52", "discord"))
+
+    local facts = member.session:LocalDiscordEdit("wrench-area52", "wrench#1")
+    deliver(network)
+
+    test.assertEqual(MEMBER, facts[1].by)
+    -- The member's own view shows it, pending.
+    test.assertEqual("wrench#1", discordOf(member, "wrench-area52"))
+    local pending = member.session:Suggestions(member.partition):Pending()
+    test.assertEqual(1, #pending)
+    test.assertEqual("discord", pending[1].kind)
+    test.assertEqual("old#1", pending[1].was.text)
+    -- Sent as a suggestion, never applied elsewhere.
+    test.assertEqual("suggest", member.sent[1].t)
+    test.assertEqual("old#1", discordOf(guildmate, "wrench-area52"))
+    test.assertEqual("old#1", discordOf(officer, "wrench-area52"))
+    local entry = officer.partition:GetConflicts()[1]
+    test.assertEqual("suggested discord", entry.kind)
+    test.assertEqual("wrench-area52", entry.character)
+    test.assertEqual("wrench#1", entry.suggestion.text)
+    test.assertEqual(MEMBER, entry.from)
+end)
+
+test.test("discord suggestions: approving syncs it as the officer's", function()
+    local network, officer, member, guildmate = suggestionNetwork()
+    member.session:LocalDiscordEdit("wrench-area52", "wrench#1")
+    deliver(network)
+
+    test.assertTrue(officer.session:Decide("wrench-area52", "suggested discord", true))
+    deliver(network)
+
+    local at, by = guildmate.partition:GetProfileStamp("wrench-area52", "discord")
+    test.assertEqual(OFFICER, by)
+    test.assertEqual("wrench#1", discordOf(guildmate, "wrench-area52"))
+    test.assertEqual("wrench#1", discordOf(member, "wrench-area52"))
+    test.assertEqual(0, #officer.partition:GetConflicts())
+    test.assertEqual(0, #member.session:Suggestions(member.partition):Pending())
+    -- The guildmate's client doesn't take the officer's edit for a forgery.
+    test.assertEqual(0, #guildmate.forgeries)
+end)
+
+test.test("discord suggestions: denying drops it and the member's view reverts", function()
+    local network, officer, member, guildmate = suggestionNetwork()
+    guildmate.session:LocalProfileEdit("discord", "old#1")
+    deliver(network)
+    member.session:LocalDiscordEdit("wrench-area52", "spam#1")
+    deliver(network)
+
+    test.assertTrue(officer.session:Decide("wrench-area52", "suggested discord", false))
+    deliver(network)
+
+    test.assertEqual("old#1", discordOf(member, "wrench-area52"))
+    test.assertEqual("old#1", discordOf(guildmate, "wrench-area52"))
+    test.assertEqual(0, #officer.partition:GetConflicts())
+    test.assertEqual(0, #member.session:Suggestions(member.partition):Pending())
+end)
+
+test.test("discord suggestions: one the player's own newer edit overtakes is settled", function()
+    local network, officer, member, guildmate = suggestionNetwork()
+    member.session:LocalDiscordEdit("wrench-area52", "wrench#1")
+    deliver(network)
+    test.assertEqual(1, #officer.partition:GetConflicts())
+
+    guildmate.time = NOW + 60
+    guildmate.session:LocalProfileEdit("discord", "mine#1")
+    deliver(network)
+
+    test.assertEqual(0, #officer.partition:GetConflicts())
+    test.assertEqual(0, #member.session:Suggestions(member.partition):Pending())
+    test.assertEqual("mine#1", discordOf(member, "wrench-area52"))
+end)
+
+test.test("discord suggestions: changing it back withdraws it", function()
+    local network, officer, member = suggestionNetwork()
+    member.session:LocalDiscordEdit("wrench-area52", "wrench#1")
+    deliver(network)
+
+    member.session:LocalDiscordEdit("wrench-area52", "")
+    deliver(network)
+
+    test.assertEqual(0, #member.session:Suggestions(member.partition):Pending())
+    test.assertEqual(nil, discordOf(member, "wrench-area52"))
+    test.assertEqual(0, #officer.partition:GetConflicts())
+end)
+
+local function decideAll(network, officer, approved)
+    local addon = network.addon
+    local controller = addon.RosterController.Create({
+        client = { Print = function() end },
+        onDecideSuggestion = function(character, kind, decision)
+            return officer.session:Decide(character, kind, decision)
+        end,
+    })
+    controller.current = { partition = officer.partition }
+    return controller:DecideBundle(addon.ConflictViewModel.GroupOf(officer.partition, MEMBER), approved)
+end
+
+test.test("discord suggestions: Approve all and Deny all include them", function()
+    local network, officer, member, guildmate = suggestionNetwork()
+    member.session:LocalDiscordEdit("wrench-area52", "wrench#1")
+    member.session:LocalDiscordEdit(OFFICER, "toolbox#1")
+    deliver(network)
+    test.assertEqual(2, #officer.partition:GetConflicts())
+
+    test.assertEqual(2, decideAll(network, officer, true))
+    deliver(network)
+
+    test.assertEqual("wrench#1", discordOf(guildmate, "wrench-area52"))
+    test.assertEqual("toolbox#1", discordOf(guildmate, OFFICER))
+
+    member.session:LocalDiscordEdit("wrench-area52", "spam#1")
+    deliver(network)
+    test.assertEqual(1, decideAll(network, officer, false))
+    deliver(network)
+    test.assertEqual("wrench#1", discordOf(member, "wrench-area52"))
+    test.assertEqual(0, #officer.partition:GetConflicts())
+end)
+
+test.test("discord suggestions: the conflict queue and the review word them like aliases", function()
+    local network, officer, member, guildmate = suggestionNetwork()
+    guildmate.session:LocalProfileEdit("discord", "old#1")
+    deliver(network)
+    member.session:LocalDiscordEdit("wrench-area52", "wrench#1")
+    deliver(network)
+    local addon = network.addon
+    local normalizer = addon.NameNormalizer.Create(RULES)
+
+    local rows = addon.ConflictViewModel.Build({ partition = officer.partition, normalizer = normalizer })
+    local item = rows[1].items[1]
+    test.assertEqual("Discord \"old#1\"", item.current)
+    test.assertEqual("Discord \"wrench#1\"", item.suggests)
+    local review = addon.BundleReviewViewModel.Build({ partition = officer.partition, normalizer = normalizer,
+        bundle = rows[1] })
+    test.assertEqual("Wrench's Discord: Discord \"old#1\" → Discord \"wrench#1\"", review.items[1].text)
+
+    -- The member's own pending list.
+    local own = addon.ConflictViewModel.Build({ partition = member.partition, normalizer = normalizer,
+        pending = member.session:Suggestions(member.partition):Pending() })
+    test.assertEqual("suggested discord", own[1].kind)
+    test.assertTrue(own[1].pending)
+    test.assertEqual("Wrench's Discord: wrench#1",
+        addon.SuggestionBundles.Describe(member.partition, normalizer, member.session:Suggestions(member.partition):Pending()[1]))
 end)
 
 test.test("guild sync: an officer's Discord reaches a latecomer through catch-up", function()

@@ -473,6 +473,7 @@ function Facts:Restore(value)
         main = type(value) == "table" and value.main,
         alias = type(value) == "table" and value.alias,
         declared = type(value) == "table" and value.declared,
+        text = type(value) == "table" and value.text,
         at = 1,
         by = "?",
     }
@@ -483,6 +484,11 @@ function Facts:Restore(value)
         return false
     end
     local store = addon.FellowshipStore
+    if fact.kind == SyncFacts.KIND_DISCORD then
+        -- Stamped the oldest possible, so the player's own and officers'
+        -- values win over it.
+        return self.partition:SetProfileText(fact.character, fact.kind, fact.text, 1, "?")
+    end
     if fact.kind == SyncFacts.KIND_DECLARED then
         self.partition:SetDeclared(fact.character, fact.declared, store.SOURCE_NOTE)
         self.partition:ClearDeclaredStamp(fact.character)
