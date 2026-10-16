@@ -99,8 +99,8 @@ Recruit.__index = Recruit
 --   isOwnKey    function(key) -> true for one of the user's own characters.
 --               Optional.
 --   onStatsChanged function() -> runs after an ad count or a channel's last
---               ad time changes (the user posted, or heard of an ad).
---               Optional.
+--               ad time changes (the user posted, or heard of an ad), or a
+--               zone is turned off with Off here. Optional.
 --   mapName     function(mapID) -> the map's name, for naming a zone's
 --               General in the Recruiters view. Optional.
 --   askWait     function() -> seconds an ask waits for answers. Optional;
@@ -173,10 +173,9 @@ function GuildRecruit.Create(options)
         answering = {},
         -- True during combat or a boss encounter.
         inCombat = false,
-        -- This session's Not now (channel key -> when it ends) and Off here
-        -- (zone key -> true). Neither is saved.
+        -- This session's Not now (channel key -> when it ends). Off here is
+        -- saved (see OffZones).
         snoozes = {},
-        muted = {},
         view = options.view,
         -- True once this login's permission check has run.
         loginChecked = false,
@@ -204,7 +203,8 @@ function GuildRecruit.Create(options)
             return recruit.snoozes[key]
         end,
         muted = function(zoneKey)
-            return recruit.muted[zoneKey] == true
+            local store = recruit.store()
+            return store ~= nil and store:RecruitOffZones()[zoneKey] ~= nil
         end,
         paused = function()
             return recruit:Config():Get("paused") == true
@@ -850,14 +850,47 @@ function Recruit:NotNow(key)
 end
 
 -- The user pressed Off here on the prompt for `key`: no more prompts in that
--- prompt's zone (its General, and Trade while there) until logout or
--- reload.
+-- prompt's zone (its General, and Trade while there), on any character,
+-- until it's turned back on from the Recent ads page.
 function Recruit:OffHere(key)
     local prompt = self:Prompt(key)
-    if prompt ~= nil and prompt.zoneKey ~= nil then
-        self.muted[prompt.zoneKey] = true
+    local store, now = self.store(), self.now()
+    if prompt ~= nil and prompt.zoneKey ~= nil and store ~= nil and type(now) == "number" then
+        store:SetRecruitOffZone(prompt.zoneKey, prompt.zoneName or prompt.zoneKey, now)
+        -- The Recent ads page lists it.
+        pcall(self.onStatsChanged)
     end
     self:Refresh()
+end
+
+-- The zones turned off with Off here, by name, as { key, name, at }.
+function Recruit:OffZones()
+    local store = self.store()
+    local zones = {}
+    if store == nil then
+        return zones
+    end
+    local key, zone
+    for key, zone in pairs(store:RecruitOffZones()) do
+        table.insert(zones, { key = key, name = zone.name, at = zone.at })
+    end
+    table.sort(zones, function(a, b)
+        if a.name ~= b.name then
+            return a.name < b.name
+        end
+        return a.key < b.key
+    end)
+    return zones
+end
+
+-- Turns prompts in the zone `zoneKey` back on after Off here.
+function Recruit:TurnBackOn(zoneKey)
+    local store = self.store()
+    if store == nil or not store:ClearRecruitOffZone(zoneKey) then
+        return false
+    end
+    self:Refresh()
+    return true
 end
 
 -- A "config" message: applied setting by setting, newest wins, when both

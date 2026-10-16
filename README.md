@@ -277,7 +277,7 @@ Guild Recruit spreads the guild's recruitment ads out: every zone sees the guild
 - **The guild's floor**: officers set the shortest time the guild allows between ads, 30 minutes for General and 10 for Trade by default (never below 15 and 5, at most 4 hours). Nobody's timer goes below it, so officers decide how often the guild can advertise. The Recruitment page shows the current floor.
 - Officers can also pause recruitment for the whole guild, and turn the guild ad off by clearing it.
 - Staying in one place, you're prompted again when a timer runs out.
-- **Not now** hides that channel's prompt for 10 minutes. **Off here** stops prompts in the current zone (its General, and Trade while you're there) until you log out or reload.
+- **Not now** hides that channel's prompt for 10 minutes. **Off here** stops prompts in the current zone (its General, and Trade while you're there), on every character, until you turn it back on: the zone is listed on the **Recent Guild Advertisements** page with a **Turn back on** button.
 - Prompts wait during combat, boss encounters, dungeons, raids, battlegrounds, arenas, and keystone runs, and close when you leave the zone or city they're for.
 - Ads are posted exactly as written, up to 255 characters. A send the game refuses doesn't count as an ad.
 

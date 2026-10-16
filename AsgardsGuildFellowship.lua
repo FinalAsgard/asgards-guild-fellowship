@@ -141,6 +141,12 @@ if clientProfile.supported then
         recentAds = function()
             return guildRecruit:KnownAds()
         end,
+        offZones = function()
+            return guildRecruit:OffZones()
+        end,
+        turnBackOn = function(zoneKey)
+            guildRecruit:TurnBackOn(zoneKey)
+        end,
         isOfficer = function()
             return guildRecruit:IsOfficer()
         end,
@@ -199,6 +205,9 @@ if clientProfile.supported then
                 end,
                 onRecentAdsShown = function()
                     rosterController:RefreshRecruiters()
+                end,
+                onTurnBackOn = function(zoneKey)
+                    rosterController:TurnBackOn(zoneKey)
                 end,
                 loadGeometry = function()
                     local store = rosterController:Store()

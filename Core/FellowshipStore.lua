@@ -864,6 +864,52 @@ function Store:SetRecruitUseOfficerAd(enabled)
     return true
 end
 
+-- The zones the user turned off with Off here, shared by every character on
+-- the account: zone key -> { name, at } (when it was turned off). Unusable
+-- entries are left out.
+function Store:RecruitOffZones()
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local saved = type(state) == "table" and state.offZones or nil
+    local zones = {}
+    if type(saved) ~= "table" then
+        return zones
+    end
+    local key, entry
+    for key, entry in pairs(saved) do
+        if isText(key) and type(entry) == "table" and isText(entry.n) and isWholeNumber(entry.a) then
+            zones[key] = { name = entry.n, at = entry.a }
+        end
+    end
+    return zones
+end
+
+-- Turns prompts in the zone `key` (named `name`) off from `at`, until
+-- turned back on.
+function Store:SetRecruitOffZone(key, name, at)
+    if not isText(key) or not isText(name) or not isWholeNumber(at) then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    if type(state.offZones) ~= "table" then
+        state.offZones = {}
+    end
+    state.offZones[key] = { n = name, a = at }
+    return true
+end
+
+-- Turns prompts in the zone `key` back on.
+function Store:ClearRecruitOffZone(key)
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    if type(state) ~= "table" or type(state.offZones) ~= "table" then
+        return false
+    end
+    state.offZones[key] = nil
+    return true
+end
+
 -- The character `key`'s answer to "Help with guild recruitment?": true
 -- (Yes), false (No), or nil while undecided. An unusable saved set, or an
 -- unusable answer in it, counts as undecided.

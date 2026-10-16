@@ -567,11 +567,12 @@ test.test("guild recruit: Not now hides a channel's prompt for 10 minutes, then 
     test.assertTrue(promptFor(world, "Advertise in Trade?") ~= nil)
 end)
 
-test.test("guild recruit: Off here quiets the zone's General and Trade for the session only", function()
+test.test("guild recruit: Off here quiets the zone's General and Trade until turned back on", function()
     local world = login("Retail")
     optIn(world)
     inCity(world, "Dornogal")
 
+    local offAt = world.time
     world.handlers.offHere(world.shown[1].key)
     test.assertEqual(0, #world.shown)
     fixtures.runTimers(world, 2 * HOUR)
@@ -584,10 +585,20 @@ test.test("guild recruit: Off here quiets the zone's General and Trade for the s
     inCity(world, "Dornogal")
     test.assertEqual(0, #world.shown)
 
-    -- Nothing is saved, so a reload prompts again.
-    local reloaded = login("Retail", { database = world.database, time = world.time })
-    inCity(reloaded, "Dornogal")
-    test.assertEqual(2, #reloaded.shown)
+    -- It's saved: days later, after logging in again, it's still off.
+    local later = login("Retail", { database = world.database, time = world.time + 3 * 24 * HOUR })
+    inCity(later, "Dornogal")
+    test.assertEqual(0, #later.shown)
+    local zones = later.addon.guildRecruit:OffZones()
+    test.assertEqual(1, #zones)
+    test.assertEqual("map:2339", zones[1].key)
+    test.assertEqual("Dornogal", zones[1].name)
+    test.assertEqual(offAt, zones[1].at)
+
+    -- Turning it back on prompts there again at once.
+    test.assertTrue(later.addon.guildRecruit:TurnBackOn("map:2339"))
+    test.assertEqual(2, #later.shown)
+    test.assertEqual(0, #later.addon.guildRecruit:OffZones())
 end)
 
 test.test("guild recruit: prompts are held in combat and boss encounters, then appear if still due", function()
@@ -1647,4 +1658,30 @@ test.test("recruitment settings: the user's own count goes up with each post, an
 
     test.assertEqual("You've posted 1 guild ad (1 in the last 30 days).", world.addon.settings:Get("recruitMyCount"))
     test.assertTrue(refreshes > 0)
+end)
+
+test.test("recent ads: zones turned off with Off here are listed, each with a button to turn it back on", function()
+    local world = login("Retail", { playerName = MEMBER })
+    world.environment.date = function(format, timestamp)
+        return os.date("!" .. format, timestamp)
+    end
+    local window = recruitersWindow(world)
+    optIn(world)
+    inCity(world, "Dornogal")
+    test.assertEqual(0, #rowsOfKind(window.ads, "off"))
+
+    world.handlers.offHere(world.shown[1].key)
+
+    -- The open page lists it at once.
+    local off = rowsOfKind(window.ads, "off")
+    test.assertEqual(1, #off)
+    test.assertEqual("Dornogal (General and Trade)", off[1].label)
+    test.assertEqual(os.date("!%Y-%m-%d", world.time), off[1].by)
+    test.assertEqual("Turn back on", off[1].action)
+    local headings = rowsOfKind(window.ads, "heading")
+    test.assertEqual("Turned off with Off here", headings[2].label)
+
+    world.addon.rosterController:TurnBackOn(off[1].zoneKey)
+    test.assertEqual(0, #rowsOfKind(window.ads, "off"))
+    test.assertEqual(2, #world.shown)
 end)

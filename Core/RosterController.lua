@@ -53,6 +53,9 @@ Controller.__index = Controller
 --                 is an officer; only officers get the Recruiters leaderboard
 --   recentAds     optional function() -> the channels advertised in lately,
 --                 newest first, as { label, ago } (see GuildRecruit:KnownAds)
+--   offZones      optional function() -> the zones turned off with Off
+--                 here, as { key, name, at } (see GuildRecruit:OffZones)
+--   turnBackOn    optional function(zoneKey): turns a zone's prompts back on
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
@@ -61,6 +64,8 @@ function RosterController.Create(options)
         groupedWith = options.groupedWith,
         recruitRecord = options.recruitRecord,
         recentAds = options.recentAds,
+        offZones = options.offZones,
+        turnBackOn = options.turnBackOn,
         isOfficer = options.isOfficer or function()
             return false
         end,
@@ -960,9 +965,12 @@ end
 -- The Recent ads page's rows, for every member: the channels this client
 -- knows were advertised in lately, newest first, with who posted and how
 -- long ago. It starts with a heading row ({ kind = "heading", label, by,
--- recent }: its column titles), and says so when there are none.
+-- recent }: its column titles), and says so when there are none. Then,
+-- when any zone was turned off with Off here, a heading and a row for each,
+-- with when it was turned off and a button (`action`) to turn it back on.
 --   { kind = "ad", label, by, recent }    -- recent: how long ago
 --   { kind = "empty", label }
+--   { kind = "off", label, by, action, zoneKey }
 function Controller:RecentAdsView()
     local rows = { { kind = "heading", label = "Channel", by = "Posted by", recent = "When" } }
     local guild, partition, normalizer = self:QuietContext()
@@ -981,7 +989,31 @@ function Controller:RecentAdsView()
     if ads[1] == nil then
         table.insert(rows, { kind = "empty", label = "No recent ads known." })
     end
+    local okZones, zones = pcall(self.offZones or function() return {} end)
+    zones = okZones and type(zones) == "table" and zones or {}
+    if zones[1] ~= nil then
+        table.insert(rows, { kind = "empty", label = "" })
+        table.insert(rows, { kind = "heading", label = "Turned off with Off here", by = "Since", recent = "" })
+    end
+    for index = 1, #zones do
+        table.insert(rows, {
+            kind = "off",
+            label = zones[index].name .. " (General and Trade)",
+            by = self.client:FormatDate(zones[index].at),
+            action = "Turn back on",
+            zoneKey = zones[index].key,
+        })
+    end
     return rows
+end
+
+-- "Turn back on" on the Recent ads page: prompts in the zone `zoneKey`
+-- may show again, and the page redraws.
+function Controller:TurnBackOn(zoneKey)
+    if self.turnBackOn ~= nil then
+        pcall(self.turnBackOn, zoneKey)
+    end
+    self:RefreshRecruiters()
 end
 
 -- Redraws the Recruiters leaderboard on the Recruitment page, and the

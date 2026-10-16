@@ -883,8 +883,10 @@ end
 -- A list of rows in columns, as the Recruiters leaderboard and the Recent
 -- ads page show them: a heading row in gold naming the columns, rows on
 -- faint stripes, and a grey line when the list is empty (see
--- RosterController:RecruitersView and RecentAdsView).
-local function listLineCreator(columns)
+-- RosterController:RecruitersView and RecentAdsView). A column marked
+-- `action` shows a button instead of text on a row with an `action` (its
+-- label); pressing it runs `onAction(row)`.
+local function listLineCreator(columns, onAction)
     return function(scroll, index)
         local line = CreateFrame("Frame", nil, scroll)
         line:SetHeight(RosterWindow.LINE_HEIGHT)
@@ -902,6 +904,18 @@ local function listLineCreator(columns)
             cell:SetJustifyH("LEFT")
             cell:SetWordWrap(false)
             line.cells[column.field] = cell
+            if column.action then
+                local button = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+                button:SetSize(100, RosterWindow.LINE_HEIGHT)
+                button:SetPoint("LEFT", line, "LEFT", column.x, 0)
+                button:SetScript("OnClick", function()
+                    if line.row ~= nil and onAction ~= nil then
+                        onAction(line.row)
+                    end
+                end)
+                button:Hide()
+                line.button = button
+            end
         end
         return line
     end
@@ -915,6 +929,15 @@ local function listLineRefresher(columns)
             local row = rows[dataIndex]
             if row ~= nil then
                 local line = scroll:GetLine(lineIndex)
+                line.row = row
+                if line.button ~= nil then
+                    line.button:SetText(row.action or "")
+                    if row.action ~= nil then
+                        line.button:Show()
+                    else
+                        line.button:Hide()
+                    end
+                end
                 local columnIndex
                 for columnIndex = 1, #columns do
                     local field = columns[columnIndex].field
@@ -939,15 +962,15 @@ local function listLineRefresher(columns)
 end
 
 -- Draws a titled list of `lines` rows in `columns`, `width` wide, into
--- `parent`. Returns { holder, scroll }.
-local function buildList(framework, parent, scrollName, title, columns, width, lines)
+-- `parent`, its buttons running `onAction(row)`. Returns { holder, scroll }.
+local function buildList(framework, parent, scrollName, title, columns, width, lines, onAction)
     local holder = CreateFrame("Frame", nil, parent)
     holder:SetAllPoints(parent)
     local heading = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     heading:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -4)
     heading:SetText(title)
     local height = lines * RosterWindow.LINE_HEIGHT
-    local createLine = listLineCreator(columns)
+    local createLine = listLineCreator(columns, onAction)
     local scroll = framework:CreateScrollBox(
         holder,
         scrollName,
@@ -989,24 +1012,29 @@ local function buildLeaderboard(framework, parent, frameName)
 end
 
 -- The Recent Guild Advertisements page, for every member: each channel
--- advertised in lately, who posted, and how long ago.
+-- advertised in lately, who posted, and how long ago, then the zones turned
+-- off with Off here, each with a button to turn it back on.
 local AD_COLUMNS = {
     { field = "label", x = 8, width = 270 },
     { field = "by", x = 284, width = 230 },
-    { field = "recent", x = 520, width = 140 },
+    { field = "recent", x = 520, width = 140, action = true },
 }
 
 -- Draws the Recent Guild Advertisements list onto its page, below the
 -- frame's title bar, filling the page (clear of the scroll bar) with as
 -- many lines as it holds; more lines are made as the frame grows.
-local function buildRecentAds(framework, page, frameName)
+local function buildRecentAds(framework, page, frameName, onTurnBackOn)
     local holder = CreateFrame("Frame", nil, page)
     holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
     holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
     local width, height = page:GetSize()
     local lines = math.max(1, math.floor((height - 70) / RosterWindow.LINE_HEIGHT))
     local ads = buildList(framework, holder, frameName .. "RecentAdsScroll", "Recent Guild Advertisements",
-        AD_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines)
+        AD_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines, function(row)
+            if row.zoneKey ~= nil and onTurnBackOn ~= nil then
+                onTurnBackOn(row.zoneKey)
+            end
+        end)
     ads.scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 0)
     return ads
 end
@@ -1106,7 +1134,7 @@ local function build(framework, options)
     local recentAds
     local adsPage = host:Content("ads")
     if adsPage ~= nil then
-        local built, ads = pcall(buildRecentAds, framework, adsPage, frameName)
+        local built, ads = pcall(buildRecentAds, framework, adsPage, frameName, options.onTurnBackOn)
         recentAds = built and ads or nil
         -- Showing the page brings "how long ago" up to date.
         if options.onRecentAdsShown ~= nil then
@@ -1344,7 +1372,8 @@ end
 -- the Recruitment page's returns a frame LEADERBOARD_HEIGHT tall below its
 -- settings, where the officers' leaderboard is drawn;
 -- options.onHide() runs whenever the frame closes;
--- options.onRecentAdsShown() runs whenever the Recent ads page shows;
+-- options.onRecentAdsShown() runs whenever the Recent ads page shows, and
+-- options.onTurnBackOn(zoneKey) when a zone's "Turn back on" is pressed;
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
 -- options.onToggleGroup(playerId) runs when a player header is clicked;
