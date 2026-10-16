@@ -564,6 +564,117 @@ function Client:GetZone()
     return { key = "zone:" .. name, name = name }
 end
 
+-- Where the player is on their zone's map: { mapId, x, y } with x and y from
+-- 0 to 1. Nil when the client can't say (no map APIs, a loading screen, or
+-- inside an instance, where the client gives no position).
+function Client:GetPlayerPosition()
+    local maps = self.environment.C_Map
+    local mapId = self:zoneMapId()
+    if type(maps) ~= "table" or mapId == nil then
+        return nil
+    end
+    local ok, position = callFunction(maps.GetPlayerMapPosition, mapId, "player")
+    if not ok or type(position) ~= "table" or type(position.GetXY) ~= "function" then
+        return nil
+    end
+    local xyOk, x, y = pcall(position.GetXY, position)
+    if not xyOk or type(x) ~= "number" or type(y) ~= "number" or x < 0 or x > 1 or y < 0 or y > 1
+        or (x == 0 and y == 0)
+    then
+        return nil
+    end
+    return { mapId = mapId, x = x, y = y }
+end
+
+local CONTINENT_MAP_TYPE = 2
+local WORLD_MAP_TYPE = 1
+
+-- The continent and world maps zone map `mapId` sits in: { continent,
+-- world }, either nil when the client's maps don't say.
+function Client:GetMapParents(mapId)
+    local maps = self.environment.C_Map
+    local parents = {}
+    if type(maps) ~= "table" or type(mapId) ~= "number" then
+        return parents
+    end
+    local current = mapId
+    local steps
+    for steps = 1, 10 do
+        local ok, info = callFunction(maps.GetMapInfo, current)
+        if not ok or type(info) ~= "table" or type(info.parentMapID) ~= "number" or info.parentMapID == 0 then
+            return parents
+        end
+        current = info.parentMapID
+        local parentOk, parent = callFunction(maps.GetMapInfo, current)
+        if not parentOk or type(parent) ~= "table" then
+            return parents
+        end
+        if parent.mapType == CONTINENT_MAP_TYPE and parents.continent == nil then
+            parents.continent = current
+        elseif parent.mapType == WORLD_MAP_TYPE then
+            parents.world = current
+            return parents
+        end
+    end
+    return parents
+end
+
+local ZONE_MAP_TYPE = 3
+
+-- Every zone map in the client's map tree by name, as the guild roster
+-- names zones: { [name] = mapId }. A name two zones share goes to the lower
+-- map ID. Dungeons, raids and battlegrounds aren't zone maps, so their names
+-- never match. Empty when the client's maps don't say.
+function Client:GetZoneMapIds()
+    local maps = self.environment.C_Map
+    local zones = {}
+    if type(maps) ~= "table" then
+        return zones
+    end
+    -- The top of the tree: climb from the player's zone, or from the
+    -- client's fallback world map.
+    local root = self:zoneMapId()
+    if root == nil then
+        local ok, fallback = callFunction(maps.GetFallbackWorldMapID)
+        root = ok and type(fallback) == "number" and fallback or nil
+    end
+    if root == nil then
+        return zones
+    end
+    local steps
+    for steps = 1, 10 do
+        local ok, info = callFunction(maps.GetMapInfo, root)
+        if not ok or type(info) ~= "table" or type(info.parentMapID) ~= "number" or info.parentMapID == 0 then
+            break
+        end
+        root = info.parentMapID
+    end
+    local ok, children = callFunction(maps.GetMapChildrenInfo, root, ZONE_MAP_TYPE, true)
+    if not ok or type(children) ~= "table" then
+        return zones
+    end
+    local index
+    for index = 1, #children do
+        local child = children[index]
+        if type(child) == "table" and type(child.name) == "string" and child.name ~= ""
+            and type(child.mapID) == "number" and child.mapType == ZONE_MAP_TYPE
+            and (zones[child.name] == nil or child.mapID < zones[child.name])
+        then
+            zones[child.name] = child.mapID
+        end
+    end
+    return zones
+end
+
+-- The logged-in character's class token ("WARRIOR"), or nil.
+function Client:GetPlayerClass()
+    local ok, _, classToken = callFunction(self.environment.UnitClass, "player")
+    if not ok or type(classToken) ~= "string" or classToken == "" then
+        return nil
+    end
+    return classToken
+end
+
 -- True in a dungeon, raid, scenario, battleground or arena, or a keystone
 -- run on clients that have them. False when the client can't say.
 function Client:IsInInstance()

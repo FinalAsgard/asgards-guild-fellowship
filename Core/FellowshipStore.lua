@@ -145,6 +145,14 @@ local function characterProblem(character)
             return "character " .. field .. " author is invalid"
         end
     end
+    -- An out-of-date note an officer chose to leave alone: the note's
+    -- fingerprint and the suggested note at the time (see NoteAudit).
+    if character.noteIgnored ~= nil then
+        local ignored = character.noteIgnored
+        if type(ignored) ~= "table" or not isText(ignored.note) or type(ignored.suggested) ~= "string" then
+            return "character ignored note is invalid"
+        end
+    end
     if character.rejected ~= nil then
         if type(character.rejected) ~= "table" then
             return "character rejected fingerprints are invalid"
@@ -695,6 +703,38 @@ function Store:SetRecruitAnchor(anchor)
     return true
 end
 
+-- Guildmates on the map, on every character: "share" (send the player's
+-- location to the guild) and "show" (draw guildmates on the maps and
+-- minimap). Both on unless turned off; an unusable stored value counts as
+-- on.
+local GUILD_MAP_SETTINGS = { share = true, show = true }
+
+function Store:GuildMapEnabled(setting)
+    local state = type(self.database) == "table" and self.database.guildMap or nil
+    return type(state) ~= "table" or state[setting] ~= false
+end
+
+-- Turns a guild map setting on or off. Refuses an unknown setting, and
+-- when an unusable value is stored for the guild map.
+function Store:SetGuildMapEnabled(setting, enabled)
+    if type(self.database) ~= "table" or not GUILD_MAP_SETTINGS[setting] or type(enabled) ~= "boolean" then
+        return false
+    end
+    if self.database.guildMap == nil then
+        self.database.guildMap = {}
+    end
+    if type(self.database.guildMap) ~= "table" then
+        return false
+    end
+    -- Only "off" is stored; on is the default.
+    if enabled then
+        self.database.guildMap[setting] = nil
+    else
+        self.database.guildMap[setting] = false
+    end
+    return true
+end
+
 -- Whether Do Not Disturb is on for the Group Finder, on every character.
 function Store:GroupFinderDnd()
     local state = type(self.database) == "table" and self.database.groupFinder or nil
@@ -943,6 +983,28 @@ function Partition:ForgetNoteFingerprint(key)
     end
 end
 
+-- Leaves an out-of-date note alone while the note (its fingerprint) and the
+-- suggested note both stay as they are now.
+function Partition:IgnoreNote(key, fingerprint, suggested)
+    local character = self.data.characters[key]
+    if character == nil or not isText(fingerprint) or type(suggested) ~= "string" then
+        return false
+    end
+    character.noteIgnored = { note = fingerprint, suggested = suggested }
+    return true
+end
+
+-- The note fingerprint and suggested note an officer ignored for `key`, or
+-- nil.
+function Partition:GetIgnoredNote(key)
+    local character = self.data.characters[key]
+    local ignored = character and character.noteIgnored
+    if ignored == nil then
+        return nil
+    end
+    return ignored.note, ignored.suggested
+end
+
 -- After `key` has moved out of `oldPlayer`: removes the old player if it is
 -- now empty, or hands its main role to the highest-level character left
 -- (ties by name). Acting-main rules (in-guild first) are applied on top by
@@ -950,7 +1012,9 @@ end
 function Partition:LeftPlayer(oldPlayer, key)
     local remaining = self:CharactersOf(oldPlayer)
     if remaining[1] == nil then
+        local alias = self.data.players[oldPlayer].alias
         self.data.players[oldPlayer] = nil
+        self:AliasesChanged(alias, nil)
     elseif self.data.players[oldPlayer].main == key then
         local best = remaining[1]
         local index
@@ -1002,13 +1066,41 @@ function Partition:MoveToNewPlayer(key, source)
     return id
 end
 
+-- Kinds of note conflict a new, changed, or cleared alias may settle.
+local ALIAS_RETRY_KINDS = { unresolved = true, ambiguous = true }
+
+-- After the partition's set of aliases changed from `old` to `new` (either
+-- may be nil): notes with a pending unresolved or ambiguous conflict are
+-- marked unread, so the next scan reads them against the new aliases.
+function Partition:AliasesChanged(old, new)
+    if isText(old) and isText(new) and string.lower(old) == string.lower(new) then
+        return
+    end
+    if not isText(old) and not isText(new) then
+        return
+    end
+    local conflicts = self.data.conflicts
+    if type(conflicts) ~= "table" then
+        return
+    end
+    local index
+    for index = 1, #conflicts do
+        local entry = conflicts[index]
+        if type(entry) == "table" and entry.from == nil and ALIAS_RETRY_KINDS[entry.kind] then
+            self:ForgetNoteFingerprint(entry.character)
+        end
+    end
+end
+
 function Partition:ClearAlias(playerId, source)
     local player = self.data.players[playerId]
     if player == nil then
         return false
     end
+    local old = player.alias
     player.alias = nil
     player.aliasSource = source
+    self:AliasesChanged(old, nil)
     return true
 end
 
@@ -1017,9 +1109,28 @@ function Partition:SetAlias(playerId, alias, source)
     if player == nil or not isText(alias) then
         return false
     end
+    local old = player.alias
     player.alias = alias
     player.aliasSource = source
+    self:AliasesChanged(old, alias)
     return true
+end
+
+-- Ids of the players whose alias is `alias`, ignoring case, in id order.
+function Partition:PlayersWithAlias(alias)
+    local ids = {}
+    if not isText(alias) then
+        return ids
+    end
+    local folded = string.lower(alias)
+    local id, player
+    for id, player in pairs(self.data.players) do
+        if isText(player.alias) and string.lower(player.alias) == folded then
+            table.insert(ids, id)
+        end
+    end
+    table.sort(ids)
+    return ids
 end
 
 -- Keys of every character of a player, main first, then alphabetical. The
@@ -1062,7 +1173,9 @@ end
 -- where kind is "main", "alias", "unresolved", "ambiguous", "cycle",
 -- "self reference", "chain too long", or "competing aliases", and
 -- suggestion is { main = key } or { alias = text } for the kinds that can be
--- accepted. Never the note text. A member's suggestion queued for an
+-- accepted. An "ambiguous" conflict from an alias held by several players
+-- also has `alias` and `mains` (the main of each of those players). Never
+-- the note text. A member's suggestion queued for an
 -- officer has kind "suggested main" or "suggested alias", plus `from` (the
 -- member's key) and `at` (when they made the edit); see SuggestionService.
 function Partition:SetConflicts(entries)

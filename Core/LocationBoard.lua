@@ -1,0 +1,156 @@
+local _, addon = ...
+
+-- Guildmates' latest positions, as their add-ons report them (see
+-- LocationProtocol). Pure: the caller checks that the sender is in the
+-- guild and passes the clock.
+local LocationBoard = {}
+addon.LocationBoard = LocationBoard
+
+local Board = {}
+Board.__index = Board
+
+-- options.isOwn: function(key) -> true for the player's own characters,
+-- which are never held (the player isn't shown twice).
+function LocationBoard.Create(options)
+    options = options or {}
+    return setmetatable({
+        entries = {},
+        isOwn = options.isOwn or function()
+            return false
+        end,
+    }, Board)
+end
+
+-- A valid `gm-loc` or `gm-near` from character `senderKey`, heard at `now`
+-- under the name `senderName` (as the client gave it, for whispering back).
+-- Returns true when the board changed.
+function Board:OnLocation(message, senderKey, now, senderName)
+    if message.c ~= senderKey or self.isOwn(senderKey) then
+        return false
+    end
+    self.entries[senderKey] = {
+        key = senderKey,
+        name = senderName,
+        mapId = message.m,
+        x = message.x,
+        y = message.y,
+        class = message.cl,
+        level = message.l,
+        heard = now,
+    }
+    return true
+end
+
+-- A valid `gm-hide` from character `senderKey`: that guildmate is off the
+-- map. Returns true when the board changed.
+function Board:OnHide(message, senderKey)
+    if message.c ~= senderKey or self.entries[senderKey] == nil then
+        return false
+    end
+    self.entries[senderKey] = nil
+    return true
+end
+
+-- An entry not updated for this long is dropped (its sender went quiet:
+-- logged out, lost connection, or stopped sharing without a `gm-hide`).
+LocationBoard.EXPIRE_SECONDS = 300
+
+-- Drops entries last heard EXPIRE_SECONDS or more before `now`. Returns true
+-- when the board changed.
+function Board:Expire(now)
+    if type(now) ~= "number" then
+        return false
+    end
+    local changed = false
+    local key, entry
+    for key, entry in pairs(self.entries) do
+        if now - entry.heard >= LocationBoard.EXPIRE_SECONDS then
+            self.entries[key] = nil
+            changed = true
+        end
+    end
+    return changed
+end
+
+-- Keeps only the entries `keep(key)` answers true for (the caller drops
+-- guildmates the roster shows offline or gone). Returns true when the board
+-- changed.
+function Board:Keep(keep)
+    local changed = false
+    local key
+    for key in pairs(self.entries) do
+        if not keep(key) then
+            self.entries[key] = nil
+            changed = true
+        end
+    end
+    return changed
+end
+
+-- Every guildmate on the board, sorted by key: each { key, name, mapId, x,
+-- y, class, level, heard }.
+function Board:All()
+    local found = {}
+    local key, entry
+    for key, entry in pairs(self.entries) do
+        if not self.isOwn(key) then
+            table.insert(found, entry)
+        end
+    end
+    table.sort(found, function(left, right)
+        return left.key < right.key
+    end)
+    return found
+end
+
+-- At most this many people show as a dot on a map marker; more show as a
+-- count, which keeps markers small on the continent map.
+LocationBoard.DOTS_MAX = 1
+
+-- Guildmates grouped into one marker per area, for the world map: `areaOf`
+-- gives the area an entry's zone map belongs to (the zone itself for a
+-- continent map, its continent for the world map), or nil to leave it out.
+-- `roster` optionally adds online roster members, each { key, mapId, class,
+-- level } with mapId the zone map their roster zone names: those with a
+-- position on the board, and the player's own characters, are left out,
+-- and the rest join with fromRoster = true. Returns markers sorted by area:
+-- { area, people (sorted by key), display } with display "dots" for 1 to
+-- DOTS_MAX people and "count" for more.
+function Board:Markers(areaOf, roster)
+    local byArea, areas = {}, {}
+    local entries = self:All()
+    local index
+    for index = 1, #(roster or {}) do
+        local member = roster[index]
+        if self.entries[member.key] == nil and not self.isOwn(member.key) then
+            table.insert(entries, {
+                key = member.key,
+                mapId = member.mapId,
+                class = member.class,
+                level = member.level,
+                fromRoster = true,
+            })
+        end
+    end
+    table.sort(entries, function(left, right)
+        return left.key < right.key
+    end)
+    for index = 1, #entries do
+        local area = areaOf(entries[index].mapId)
+        if area ~= nil then
+            if byArea[area] == nil then
+                byArea[area] = { area = area, people = {} }
+                table.insert(areas, area)
+            end
+            table.insert(byArea[area].people, entries[index])
+        end
+    end
+    table.sort(areas)
+    local markers = {}
+    for index = 1, #areas do
+        local marker = byArea[areas[index]]
+        marker.display = #marker.people <= LocationBoard.DOTS_MAX and "dots" or "count"
+        table.insert(markers, marker)
+    end
+    return markers
+end

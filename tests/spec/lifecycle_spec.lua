@@ -238,7 +238,7 @@ local function registerProfileTests(profile, addonName)
             world.messages[#world.messages - 1]
         )
         test.assertEqual(
-            identity.chatPrefix .. " Libraries: all 8 present.",
+            identity.chatPrefix .. " Libraries: all 10 present.",
             world.messages[#world.messages]
         )
 

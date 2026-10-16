@@ -22,6 +22,8 @@ local LibraryCheck = {
         },
         { name = "AceSerializer-3.0", major = "AceSerializer-3.0" },
         { name = "AceComm-3.0", major = "AceComm-3.0" },
+        { name = "HereBeDragons-2.0", major = "HereBeDragons-2.0" },
+        { name = "HereBeDragons-Pins-2.0", major = "HereBeDragons-Pins-2.0" },
     },
 }
 addon.LibraryCheck = LibraryCheck

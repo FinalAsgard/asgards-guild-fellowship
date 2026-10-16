@@ -36,7 +36,7 @@ Everything the add-on does is in one window, with picture tabs down its right ed
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
-- **Settings**: everything else (General, Chat Tags, and the Group Finder's Do Not Disturb), and the version you're running.
+- **Settings**: everything else (General, Chat Tags, Guild Map, and the Group Finder's Do Not Disturb), and the version you're running.
 
 The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf group`, `/agf profile`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
 
@@ -46,6 +46,7 @@ The settings are in two places that always agree: the window's tabs, and **Esc �
 
 - **General**: show or hide the minimap button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off, and choose the colors of the alias tag and the main's-name tag (see [Chat tags](#chat-tags)).
+- **Guild Map**: **Share my location with the guild** and **Show guildmates on the map and minimap**, both on unless you turn them off (see [Guild map](#guild-map)).
 - **Guild Greet**: at the top, turn Guild Greet on or off (everywhere, or just on the character you're playing) and unlock the prompts to move them; under **Which arrivals to prompt for**, turn each category's prompts on or off; under **Timing**, set the welcome-back minutes and long-absence days and how many greetings close your prompt. On the window's Greetings tab the greetings editor follows, under its own **Greetings** heading. In the AddOns options it also has an **Edit Greetings** button that opens the window's Greetings tab.
 - **Recruitment**: how many guild ads you've posted (all your characters together, and in the last 30 days), then turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, choose whether you also post the officers' guild ad (hover the info icon beside it to read the guild ad), and set your own timers (sliders) for how long General and Trade go without a guild ad before you're asked. On a character that can't invite to the guild these are greyed out, with a line saying why. Officers also get the guild ad, the guild's floor under everyone's timers for General and for Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild. Regular members don't see the officer settings.
 
@@ -70,8 +71,9 @@ Opening the window never scans the guild, so it's always quick. The Conflicts wi
 Two markers in a character's **public** note seed the database:
 
 - `Main: Toolbox` or the shorter `>Toolbox` means "this character is an alt of Toolbox".
+- `Main: TheTool` or `>TheTool`, naming an alias instead, means "this character is an alt of the player who goes by TheTool", whoever their main is. The alt stays linked when that player changes main, so its note never has to be rewritten.
 - `Alias: TheTool` or the shorter `@TheTool` means "this player goes by TheTool".
-- A main marker naming the character itself (`>Toolbox` on Toolbox's own note) means "this is my main, on purpose": a **declared main**, even with no alts. On a character the roster has as someone's alt, it disagrees with the roster and goes to the conflict queue instead.
+- `^` at the very start of the note (for example `^ @TheTool raid lead`) means "this is my main, on purpose": a **declared main**, even with no alts. A main marker naming the character itself (`>Toolbox` on Toolbox's own note) says the same at more length. On a character the roster has as someone's alt, either one disagrees with the roster and goes to the conflict queue instead. A `^` anywhere else in the note is just text.
 
 A marker can sit anywhere in the note (for example `Tank, Main: Toolbox, Alias: TheTool`, `Tank >Toolbox` or `@TheTool raid lead`), and both kinds can appear in one note. Only the first main marker and the first alias marker count. The `Main:` and `Alias:` labels can be any case (`main:` works too), the space after the colon is optional, and a label only counts as a word of its own (`Domain:` isn't a main marker). Matching ignores case.
 
@@ -79,6 +81,10 @@ A marker can sit anywhere in the note (for example `Tank, Main: Toolbox, Alias: 
 - On **Retail**, `Main: Toolbox` and `>Toolbox` use the single character name. A realm suffix is optional.
 
 An alias from a note is one word: letters (accented ones too), digits, `_`, `'`, and `-`. Longer aliases can be set in the window, up to 48 characters.
+
+A main marker's word is checked against aliases first, then against character names. So when a word is both someone's alias and a character's name, the note links to the player with that alias. Only one-word aliases can be named, upper and lower case don't matter, and on Forever `>Tool` matches the alias Tool before it tries a first name. A main's `@TheTool` and its alts' `>TheTool` link up in the same scan. A main marker naming the player's own alias (`>TheTool` on one of TheTool's characters) changes nothing.
+
+If two players share the alias a note names, or nobody has that alias yet, the add-on doesn't guess: the note goes to the conflict queue. When an alias is set, changed or cleared (from a note, by hand, or through [guild sync](#guild-sync)), those notes are read again on the next scan, so the alt links itself as soon as the alias exists.
 
 The add-on never writes to guild notes.
 
@@ -98,6 +104,28 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 - A rejected suggestion stays away until that note changes again.
 - Officer data from [guild sync](#guild-sync) beats guild notes. On a new install, notes fill in the roster first, and officer edits replace them where the two disagree. After an officer edit arrives, the next scan checks the notes it affects again. A note that disagrees goes to the conflict queue, and a pending conflict the edit already settled disappears.
 
+### Out-of-date guild notes
+
+Guild notes are how members without the add-on see who's whose alt, and they drift whenever mains, alts or aliases change. Officers see which notes are out of date right in the game's own guild roster (the Communities guild roster, on both clients). Members who aren't officers see nothing new.
+
+- Each member whose public note is out of date gets a small yellow marker at the right of their row.
+- Select that member, and a small panel to the right of the game's member details, level with the public note, shows **Should be: …** with the suggested note, then what's wrong with it: **No main marker**, **Main marker names the wrong player**, **Main marker shouldn't be there**, **Alias missing**, **Wrong alias**, or **Main marker can't be read**.
+- Retype the suggestion in the game's note editor. The add-on never writes guild notes.
+
+What a note should say:
+
+- An alt points at its own player: `>Alias` and `>Main` both count as correct. A suggestion uses `>Alias` when the player has a one-word alias nobody else in the guild has, and otherwise the shortest form of the main's name that reads back as the right character (a unique first name on Forever).
+- A main carries `@Alias` when its player has a one-word alias. A [declared main](#organizing-by-hand)'s note also starts with `^` (a main marker naming itself counts as correct too). On an alt, `^` or a marker naming itself is flagged as naming the wrong player.
+- A character on its own, and not declared, has no main marker. An old marker left from before it was split off is flagged.
+
+`Main:` and `Alias:` labels that read correctly count as correct: style alone is never a problem. The suggestion puts the correct markers first and keeps the rest of the note's text after them. Public notes hold 31 characters. When the suggestion would be longer, it shows just the markers, with **Too long for a public note: the other text has to be trimmed.**
+
+**Ignore** hides a mismatch you've chosen to leave alone. It comes back when the note or the add-on's record for that character changes. The list is worked out again after every scan, sync and change in the roster. Departed characters are skipped.
+
+### Mini profile in the guild roster
+
+Select any member in the game's guild roster and, if the add-on knows their player, a small panel under the game's member details shows that player in brief, under their alias and main as the title: their main, then their Discord and location, then their alts one per line, then their bio under **Personal Bio**. Anything they haven't set is left blank. Levels follow each character's name. On your own characters the panel has an **Edit** button that opens [My Profile](#my-profile). Everyone sees it, not just officers.
+
 ### Mains, alts, and departures
 
 - A player always leads with a character who is in the guild. If their main leaves, or a note names a main outside the guild, an in-guild alt becomes the acting main: the highest level, then the most recently online. You confirm that change in the conflict queue.
@@ -106,7 +134,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 
 ### Organizing by hand
 
-The roster marks a **declared main** (a player who said "this is my main" on purpose) as **(declared main)**, so confirmed players stand apart from characters nobody has organized yet. Players declare their main on [My Profile](#my-profile), or with a note marker naming the character itself (see [The guild note convention](#the-guild-note-convention)). Like the other organizing changes, an officer's declaration is official at once and a member's goes to officers as a [suggestion](#suggestions).
+The roster marks a **declared main** (a player who said "this is my main" on purpose) as **(declared main)**, so confirmed players stand apart from characters nobody has organized yet. Players declare their main on [My Profile](#my-profile), or by starting the character's note with `^` (see [The guild note convention](#the-guild-note-convention)). Like the other organizing changes, an officer's declaration is official at once and a member's goes to officers as a [suggestion](#suggestions).
 
 Right-click a character for **Link as alt of…** (makes it an alt of another player), **Make this the main**, **Set alias…**, **Split off as own player** (takes it out of its player into one of its own), and **View player…**. Clicking a character also opens the player panel. It shows the alias, the player's Discord, location and bio under **About** (when they set any; see [About me](#about-me)), main, alts, and history, and has **Set alias…** and **Merge into player…** buttons: **Merge into player…** links the player's main as an alt of another player, the same as **Link as alt of…** on the main. A main that still has alts can't be moved: **Merge into player…** is greyed out and its right-click menu has no **Link as alt of…**. Move its alts or split them off first. History lists characters that left the player: ones that left the guild, were split off, or were moved to another player.
 
@@ -359,6 +387,34 @@ Your add-on remembers, on your computer only, each party you've been in with gui
 
 A guildmate's player panel then shows **Grouped together 3 times, last on 2026-10-12**, counted across all their characters. Players you've never grouped with show nothing.
 
+## Guild map
+
+Guildmates running the add-on share where they are, so you can see where the guild is playing and find people to meet up with.
+
+- **Zone map and minimap**: each guildmate in that zone is a dot in their class color at their exact position. Dots that would cover each other are moved apart by a dot's width. On the minimap you see the guildmates in your own zone.
+- **Continent map**: each zone with guildmates has one marker, placed where they are in that zone. One guildmate shows as a dot in their class color; 2 or more show as a count. Point at a zone with a count to list its guildmates at the right of the map.
+- **World map**: one marker per continent, over its land (Kalimdor and the Eastern Kingdoms have fixed spots). Point at a continent with a count to list its guildmates under its name.
+- Hover a single guildmate's dot to see their name, alias or main (the same as their [chat tag](#chat-tags)) and level, as `Name (Main) (70)`. A count has no tooltip of its own: its area's list shows everyone there.
+- Guildmates without the add-on, and those whose position hasn't arrived yet, still count on the continent and world maps at zone level, using the zone the guild roster shows. On their zone's own map each gets a dot at the zone's center, since the roster names only the zone; its tooltip ends with **(exact location unknown)**. They never get a dot on the minimap.
+- While you're in a party, guildmates outside it are dimmed on every map and the minimap, so your party members stand out. A marker with nobody from your party is dimmed as a whole.
+- Your own characters never show.
+
+Guildmates in your zone move every 10 seconds or so; everyone else updates about every 2 minutes, and promptly after a zone change. Same-zone updates go by whisper to at most the 10 guildmates heard from most recently. If whispers don't work, the add-on falls back to the guild-wide update alone.
+
+A dot disappears when the guildmate:
+
+- enters a dungeon, raid, battleground or arena (they come back when they leave),
+- turns sharing off,
+- hasn't sent an update for 5 minutes, or
+- shows as offline, or gone from the guild, in the guild roster.
+
+Nothing is sent during combat, a boss encounter or a keystone run. Location messages from outside the guild, or from add-on versions yours doesn't understand, are ignored.
+
+Two settings, in the window's **Settings** tab and the **Guild Map** page of the AddOns options, apply to every character on this game install:
+
+- **Share my location with the guild** (on by default). Turning it off removes your dot from everyone's maps at once, and nothing more is sent until you turn it back on.
+- **Show guildmates on the map and minimap** (on by default). Turning it off clears every guildmate dot and marker from your maps.
+
 ## My Profile
 
 **My Profile** is a tab of the add-on's window, right below **Roster**: one place for everything about your own player. Click its tab, or type `/agf profile` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it reads everything again.
@@ -416,7 +472,7 @@ The rest of this page is for people working on the add-on. To work on it in game
 
 ## Libraries
 
-The add-on uses LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, LibSharedMedia-3.0, the Details! Framework, AceSerializer-3.0, and AceComm-3.0 (which brings ChatThrottleLib). They are not committed. [`tools/libraries.txt`](tools/libraries.txt) pins each one to a tag, and both release packages (`.pkgmeta` externals) and development checkouts use those pins. To fetch them into the git-ignored `Libs/` folder, run this in PowerShell (Windows PowerShell or `pwsh`):
+The add-on uses LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0, LibSharedMedia-3.0, the Details! Framework, AceSerializer-3.0, AceComm-3.0 (which brings ChatThrottleLib), and HereBeDragons-2.0 with HereBeDragons-Pins-2.0 (for the [guild map](#guild-map)). They are not committed. [`tools/libraries.txt`](tools/libraries.txt) pins each one to a tag, and both release packages (`.pkgmeta` externals) and development checkouts use those pins. To fetch them into the git-ignored `Libs/` folder, run this in PowerShell (Windows PowerShell or `pwsh`):
 
 ```powershell
 ./tools/Fetch-Libraries.ps1

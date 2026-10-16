@@ -161,6 +161,17 @@ function ConflictViewModel.Build(inputs)
             suggests = "Alias \"" .. conflict.suggestion.alias .. "\""
         elseif conflict.kind == "unresolved" and conflict.suggestion and conflict.suggestion.outOfGuild then
             suggests = "Main \"" .. conflict.suggestion.outOfGuild .. "\", not in the guild"
+        elseif conflict.kind == "ambiguous" and type(conflict.alias) == "string" then
+            local names = {}
+            local mains = type(conflict.mains) == "table" and conflict.mains or {}
+            local mainIndex
+            for mainIndex = 1, #mains do
+                table.insert(names, displayName(inputs, mains[mainIndex]))
+            end
+            suggests = "Alias \"" .. conflict.alias .. "\" is held by several players"
+            if #names > 0 then
+                suggests = suggests .. ": " .. table.concat(names, ", ")
+            end
         elseif conflict.kind == "promotion" and conflict.suggestion then
             suggests = "Acting main now, since " ..
                 displayName(inputs, conflict.suggestion.former) .. " left"

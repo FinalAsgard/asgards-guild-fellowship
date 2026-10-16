@@ -8,6 +8,7 @@ local MANIFEST_FILES = {
     "Adapters/MasterFrame.lua",
     "Adapters/RosterWindow.lua",
     "Adapters/EntryPoints.lua",
+    "Adapters/GuildNoteOverlay.lua",
     "Adapters/Comm.lua",
     "Adapters/SettingsPanel.lua",
     "Adapters/GreetPrompts.lua",
@@ -16,11 +17,13 @@ local MANIFEST_FILES = {
     "Adapters/JoinPrompts.lua",
     "Adapters/GreetingsPage.lua",
     "Adapters/ProfilePage.lua",
+    "Adapters/MapPins.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",
     "Core/FellowshipStore.lua",
     "Core/ReconcileEngine.lua",
+    "Core/NoteAudit.lua",
     "Core/PlayerService.lua",
     "Core/RosterViewModel.lua",
     "Core/ConflictViewModel.lua",
@@ -61,6 +64,9 @@ local MANIFEST_FILES = {
     "Core/GroupCandidates.lua",
     "Core/JoinRequests.lua",
     "Core/GroupHistory.lua",
+    "Core/LocationProtocol.lua",
+    "Core/LocationScheduler.lua",
+    "Core/LocationBoard.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }
@@ -174,7 +180,7 @@ local function registerBootstrapTest(variant)
             world.messages[helpLines - 1],
             "Version " .. variant.version .. " on " .. variant.clientLabel .. "."
         )
-        test.assertContains(world.messages[helpLines], "Libraries: all 8 present.")
+        test.assertContains(world.messages[helpLines], "Libraries: all 10 present.")
 
         -- A bare slash command opens the roster. The fixtures' stand-in
         -- framework can't build windows, so it reports that instead of

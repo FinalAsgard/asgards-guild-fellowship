@@ -28,6 +28,9 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
+local guildNoteOverlay
+local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
+local dropOfflineLocations
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
 local onSlotsChanged, groupBoard, announceGroup
 -- Draws the Group Finder on its tab (set up with the Group Finder below).
@@ -99,6 +102,13 @@ if clientProfile.supported then
         onScanFinished = function()
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
+        end,
+        -- Out-of-date guild notes are worked out again after every scan,
+        -- sync, and manual change.
+        onChanged = function()
+            if guildNoteOverlay ~= nil then
+                guildNoteOverlay:Refresh()
+            end
         end,
         onSyncResumed = function(key)
             syncSession:Rejoin(key)
@@ -615,6 +625,38 @@ if clientProfile.supported then
             end,
         })
     end
+    settings:AddSection("guildMap", "Guild Map")
+    -- Account-wide, so they apply on every character.
+    local function guildMapToggle(id, setting, label, changed)
+        settings:Add("guildMap", {
+            id = id,
+            kind = "toggle",
+            label = label,
+            get = function()
+                local store = rosterController:Store()
+                return store == nil or store:GuildMapEnabled(setting)
+            end,
+            set = function(enabled)
+                local store = rosterController:Store()
+                if store == nil or not store:SetGuildMapEnabled(setting, enabled) then
+                    return nil, "saved data is unavailable"
+                end
+                changed()
+                return true
+            end,
+        })
+    end
+    -- Turned off, the player's dot disappears for everyone at once.
+    guildMapToggle("shareLocation", "share", "Share my location with the guild", function()
+        if shareLocationNow ~= nil then
+            shareLocationNow()
+        end
+    end)
+    guildMapToggle("showGuildMap", "show", "Show guildmates on the map and minimap", function()
+        if mapPins ~= nil then
+            mapPins:Refresh()
+        end
+    end)
     settings:AddSection("recruitment", "Recruitment", { page = "recruitment" })
     -- The user's own ad count, across all their characters.
     settings:Add("recruitment", {
@@ -2022,6 +2064,12 @@ if clientProfile.supported then
         if groupFinder ~= nil then
             groupFinder:Refresh()
         end
+        -- The roster's zones count on the world map, and guildmates it shows
+        -- offline or gone leave the board.
+        if mapPins ~= nil then
+            dropOfflineLocations()
+            mapPins:Refresh()
+        end
         -- The first loaded roster tells Guild Greet who was already online
         -- and how long everyone else has been away.
         guildGreet:OnRosterUpdate(function()
@@ -2066,6 +2114,347 @@ if clientProfile.supported then
             return store and store:ChatTagColor(kind)
         end,
     })
+    -- Officers see out-of-date guild notes in the game's guild roster. The
+    -- audit is cached until the roster's data changes.
+    local auditCache
+    local function noteAudit()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        local stamp = partition.key .. "#" .. tostring(rosterController.revision or 0)
+        if auditCache == nil or auditCache.stamp ~= stamp then
+            local rows = addon.NoteAudit.Build({
+                partition = partition,
+                members = rosterController:LiveMembers(normalizer),
+                normalizer = normalizer,
+                rules = clientProfile.nameRules,
+            })
+            local byKey = {}
+            local index
+            for index = 1, #rows do
+                byKey[rows[index].key] = rows[index]
+            end
+            auditCache = { stamp = stamp, byKey = byKey, normalizer = normalizer }
+        end
+        return auditCache
+    end
+    guildNoteOverlay = addon.GuildNoteOverlay.Create({
+        client = client,
+        isOfficer = function()
+            return officerAuthority:IsOfficer(rosterController:SelfKey())
+        end,
+        rowFor = function(name)
+            local audit = noteAudit()
+            local key = audit and audit.normalizer:Key(name)
+            return key and audit.byKey[key] or nil
+        end,
+        ignore = function(row)
+            local guild, partition = rosterController:QuietContext()
+            if guild ~= nil and partition:IgnoreNote(row.key, row.fingerprint, row.suggested) then
+                auditCache = nil
+            end
+        end,
+        -- Anyone sees the selected member's player in brief.
+        profileFor = function(name)
+            local guild, partition, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(name)
+            local character = key and partition:GetCharacter(key)
+            if character == nil then
+                return nil
+            end
+            local summary = addon.PlayerPanelViewModel.Summary({
+                partition = partition,
+                playerId = character.player,
+                members = rosterController:LiveMembers(normalizer),
+                normalizer = normalizer,
+            })
+            local selfKey = rosterController:SelfKey()
+            local own = selfKey and partition:GetCharacter(selfKey)
+            if summary ~= nil and own ~= nil and own.player == character.player then
+                summary.own = true
+            end
+            return summary
+        end,
+        editProfile = function()
+            rosterController:Open("profile")
+        end,
+    })
+    -- Guildmates on the map: add-on users share where they are with the
+    -- guild, and each other's dots are drawn on the zone map and minimap.
+    local function isOwnCharacter(key)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return false
+        end
+        local selfKey = rosterController:SelfKey()
+        if key == selfKey then
+            return true
+        end
+        local own = selfKey and partition:GetCharacter(selfKey)
+        local character = partition:GetCharacter(key)
+        if own ~= nil and character ~= nil and own.player == character.player then
+            return true
+        end
+        local owned = partition:OwnCharacters()
+        local index
+        for index = 1, #owned do
+            if owned[index] == key then
+                return true
+            end
+        end
+        return false
+    end
+    locationBoard = addon.LocationBoard.Create({ isOwn = isOwnCharacter })
+    locationScheduler = addon.LocationScheduler.Create()
+    -- Guildmates the roster shows offline, or no longer lists, leave the
+    -- board (and so stop getting whispers). Nothing is dropped while the
+    -- roster hasn't loaded.
+    dropOfflineLocations = function()
+        local guild, _, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return
+        end
+        local members = rosterController:LiveMembers(normalizer)
+        if next(members) == nil then
+            return
+        end
+        locationBoard:Keep(function(key)
+            return members[key] ~= nil and members[key].online == true
+        end)
+    end
+    -- The keys of the player's party members, or nil outside a party.
+    local function partyKeys(normalizer)
+        if not client:IsInGroup() then
+            return nil
+        end
+        local keys = {}
+        local members = client:GetPartyMembers()
+        local index
+        for index = 1, #members do
+            local key = normalizer:Key(members[index].name)
+            if key ~= nil then
+                keys[key] = true
+            end
+        end
+        return keys
+    end
+    -- A board entry as the map shows it: with the character's name and its
+    -- chat tag (alias or main), and dimmed while the player is in a party
+    -- it isn't in.
+    local function describeLocations(entries)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return {}
+        end
+        local party = partyKeys(normalizer)
+        local people = addon.PlayerService.Create(partition, { normalizer = normalizer })
+        local described = {}
+        local index
+        for index = 1, #entries do
+            local entry = entries[index]
+            local tag = people:ChatTag(entry.key)
+            table.insert(described, {
+                key = entry.key,
+                mapId = entry.mapId,
+                x = entry.x,
+                y = entry.y,
+                class = entry.class,
+                level = entry.level,
+                name = people:CharacterName(entry.key) or entry.key,
+                label = tag and tag.text or nil,
+                fromRoster = entry.fromRoster,
+                dimmed = party ~= nil and not party[entry.key] or nil,
+            })
+        end
+        return described
+    end
+    -- The continent and world map each zone map sits in, looked up once.
+    local mapParents = {}
+    local function parentsOf(mapId)
+        if mapParents[mapId] == nil then
+            mapParents[mapId] = client:GetMapParents(mapId)
+        end
+        return mapParents[mapId]
+    end
+    -- Zone maps by name, looked up once the client's maps give any.
+    local zoneMaps
+    -- Online guildmates whose roster zone is a zone on the map, for the
+    -- world map markers (the board leaves out those it has a position for).
+    local function rosterLocations()
+        local guild, _, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return {}
+        end
+        if zoneMaps == nil or next(zoneMaps) == nil then
+            zoneMaps = client:GetZoneMapIds()
+        end
+        local found = {}
+        local key, member
+        for key, member in pairs(rosterController:LiveMembers(normalizer)) do
+            local mapId = member.online and member.zone ~= nil and zoneMaps[member.zone] or nil
+            if mapId ~= nil then
+                table.insert(found, { key = key, mapId = mapId, class = member.classToken, level = member.level })
+            end
+        end
+        return found
+    end
+    -- Map markers: per zone on its continent's map, and per continent on
+    -- the world map, counting guildmates the roster places in a zone.
+    local function locationMarkers()
+        local markers = {}
+        local function add(grouped, shownOn)
+            local index
+            for index = 1, #grouped do
+                local marker = grouped[index]
+                local mapId = shownOn(marker.area)
+                if mapId ~= nil then
+                    marker.mapId = mapId
+                    marker.people = describeLocations(marker.people)
+                    table.insert(markers, marker)
+                end
+            end
+        end
+        local roster = rosterLocations()
+        add(locationBoard:Markers(function(mapId)
+            return mapId
+        end, roster), function(zone)
+            return parentsOf(zone).continent
+        end)
+        add(locationBoard:Markers(function(mapId)
+            return parentsOf(mapId).continent
+        end, roster), function(continent)
+            return parentsOf(continent).world
+        end)
+        return markers
+    end
+    -- Guildmates only the roster places, as dots at their zone's center on
+    -- the zone map: the roster names nothing closer.
+    local function rosterDots()
+        local zones = locationBoard:Markers(function(mapId)
+            return mapId
+        end, rosterLocations())
+        local found = {}
+        local index, each
+        for index = 1, #zones do
+            for each = 1, #zones[index].people do
+                local person = zones[index].people[each]
+                if person.fromRoster then
+                    person.x, person.y = 0.5, 0.5
+                    table.insert(found, person)
+                end
+            end
+        end
+        return found
+    end
+    mapPins = addon.MapPins.Create({
+        client = client,
+        dots = function()
+            local dots = describeLocations(locationBoard:All())
+            local fromRoster = describeLocations(rosterDots())
+            local index
+            for index = 1, #fromRoster do
+                table.insert(dots, fromRoster[index])
+            end
+            return dots
+        end,
+        markers = locationMarkers,
+        zone = function()
+            local spot = client:GetPlayerPosition()
+            return spot and spot.mapId or nil
+        end,
+        shown = function()
+            local store = rosterController:Store()
+            return store == nil or store:GuildMapEnabled("show")
+        end,
+    })
+    -- A location from a guildmate: only from a character in the guild,
+    -- about itself.
+    onLocationMessage = function(message, sender)
+        if not addon.LocationProtocol.IsValid(message) then
+            return
+        end
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local senderKey = guild and normalizer:Key(sender) or nil
+        if senderKey == nil or not partition:IsInGuild(senderKey) then
+            return
+        end
+        local changed
+        if message.t == addon.LocationProtocol.TYPE_HIDE then
+            changed = locationBoard:OnHide(message, senderKey)
+        else
+            changed = locationBoard:OnLocation(message, senderKey, client:Timestamp() or 0, sender)
+        end
+        if changed then
+            mapPins:Refresh()
+        end
+    end
+    -- Sends the player's location when it's due, and asks again every few
+    -- seconds.
+    local function shareLocation()
+        -- Nothing goes out in combat, a boss encounter or a keystone run.
+        if comm:IsBusy() then
+            return
+        end
+        local store = rosterController:Store()
+        local sharing = store == nil or store:GuildMapEnabled("share")
+        local inInstance = client:IsInInstance()
+        local spot
+        if sharing and not inInstance then
+            spot = client:GetPlayerPosition()
+            if spot == nil then
+                return
+            end
+            spot.class = client:GetPlayerClass()
+            spot.level = client:GetPlayerLevel()
+            if spot.class == nil or spot.level == nil then
+                return
+            end
+        end
+        local character = rosterController:SelfKey()
+        local now = client:Timestamp()
+        local message = locationScheduler:Tick({ now = now, character = character, spot = spot, sharing = sharing,
+            inInstance = inInstance })
+        if message ~= nil then
+            comm:Broadcast(message)
+        end
+        if not sharing or inInstance then
+            return
+        end
+        -- Guildmates in the same zone hear more often, by whisper.
+        local near, targets = locationScheduler:Near({ now = now, character = character, spot = spot,
+            guildmates = locationBoard:All() })
+        local index
+        for index = 1, #(targets or {}) do
+            if not comm:Whisper(near, targets[index]) then
+                locationScheduler:WhisperFailed()
+                return
+            end
+        end
+    end
+    shareLocationNow = shareLocation
+    local sharing = false
+    startLocations = function()
+        mapPins:Start()
+        if sharing then
+            return
+        end
+        local function tick()
+            -- Guildmates who went quiet drop off the map.
+            if locationBoard:Expire(client:Timestamp()) then
+                mapPins:Refresh()
+            end
+            shareLocation()
+            sharing = client:After(addon.LocationScheduler.TICK_SECONDS, tick)
+        end
+        tick()
+        -- A new zone goes out promptly (within the scheduler's minimum gap),
+        -- and the minimap shows the new zone's guildmates.
+        client:ObserveZone(function()
+            shareLocation()
+            mapPins:Refresh()
+        end)
+    end
     entryPoints = addon.EntryPoints.Create({
         client = client,
         toggle = function()
@@ -2097,14 +2486,23 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildRecruit:OnMessage(message, sender)
         elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
             onGroupFinderMessage(message, sender)
+        elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
+            onLocationMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end
+    end, function(message, sender)
+        -- Only guild map updates are whispered.
+        if addon.LocationProtocol.TYPES[message.t] ~= nil then
+            onLocationMessage(message, sender)
+        end
     end) then
         syncSession:Start()
+        startLocations()
     end
     -- The minimap button needs saved data for its position.
     entryPoints:Start()
+    guildNoteOverlay:Start()
     -- Settings show saved values, so the panel waits for saved data too.
     settingsPanel:Register()
     -- Without the system message event, Guild Greet simply never prompts.
@@ -2133,6 +2531,10 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         if groupFinder ~= nil then
             groupFinder:Refresh()
         end
+        -- Guildmates outside the party are dimmed on the maps.
+        if mapPins ~= nil then
+            mapPins:Refresh()
+        end
     end)
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
@@ -2148,6 +2550,9 @@ addon.persistence = persistence
 addon.rosterController = rosterController
 addon.pages = pages
 addon.entryPoints = entryPoints
+addon.guildNoteOverlay = guildNoteOverlay
+addon.locationBoard = locationBoard
+addon.mapPins = mapPins
 addon.chatAnnotator = chatAnnotator
 addon.comm = comm
 addon.settings = settings

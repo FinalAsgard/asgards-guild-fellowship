@@ -17,6 +17,9 @@
 # The Details! Framework requires LibSharedMedia-3.0 at load, so it is pinned
 # here too. AceComm-3.0 (guild sync messages) ships ChatThrottleLib in its
 # folder and needs CallbackHandler-1.0; AceSerializer-3.0 encodes them.
+# HereBeDragons-2.0 (map coordinates) and HereBeDragons-Pins-2.0 (map and
+# minimap pins, for guildmates on the map) ship in one repository; each is
+# fetched into its own folder so every row keeps its own target.
 
 LibStub | LibStub | Libs/LibStub | LibStub.lua | svn | https://repos.curseforge.com/wow/libstub/tags/1.0.3 | 1.0.3
 CallbackHandler-1.0 | CallbackHandler-1.0 | Libs/CallbackHandler-1.0 | CallbackHandler-1.0.xml | svn | https://repos.curseforge.com/wow/callbackhandler/tags/1.0.9/CallbackHandler-1.0 | 1.0.9
@@ -26,3 +29,5 @@ LibSharedMedia-3.0 | LibSharedMedia-3.0 | Libs/LibSharedMedia-3.0 | lib.xml | sv
 Details! Framework | DetailsFramework-1.0 | Libs/DetailsFramework | load.xml | git | https://github.com/Tercioo/Details-Framework | v12.0.7.746
 AceSerializer-3.0 | AceSerializer-3.0 | Libs/AceSerializer-3.0 | AceSerializer-3.0.xml | svn | https://repos.curseforge.com/wow/ace3/tags/Release-r1403/AceSerializer-3.0 | Release-r1403
 AceComm-3.0 | AceComm-3.0 | Libs/AceComm-3.0 | AceComm-3.0.xml | svn | https://repos.curseforge.com/wow/ace3/tags/Release-r1403/AceComm-3.0 | Release-r1403
+HereBeDragons-2.0 | HereBeDragons-2.0 | Libs/HereBeDragons | HereBeDragons-2.0.lua | git | https://github.com/Nevcairiel/HereBeDragons | 2.18-release
+HereBeDragons-Pins-2.0 | HereBeDragons-Pins-2.0 | Libs/HereBeDragons-Pins | HereBeDragons-Pins-2.0.lua | git | https://github.com/Nevcairiel/HereBeDragons | 2.18-release

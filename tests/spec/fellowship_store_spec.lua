@@ -441,3 +441,62 @@ test.test("guild recruit: the user's own timers default to 60 minutes and save a
     database.recruit.myGeneralGapMinutes = "often"
     test.assertEqual(60, store:RecruitMyGap("general"))
 end)
+
+test.test("a partition looks up its players by alias, ignoring case", function()
+    local store = newStore(foundationRoot())
+    local partition = store:Partition(GUILD)
+    partition:RecordCharacter("toolbox-area52", MEMBER)
+    partition:RecordCharacter("hammer-area52", MEMBER)
+    partition:RecordCharacter("wrench-area52", MEMBER)
+    local tool = partition:GetCharacter("toolbox-area52").player
+    local hammer = partition:GetCharacter("hammer-area52").player
+    partition:SetAlias(tool, "Tool", "manual")
+    partition:SetAlias(hammer, "TOOL", "note")
+    partition:SetAlias(partition:GetCharacter("wrench-area52").player, "The Tool", "manual")
+
+    local found = partition:PlayersWithAlias("tool")
+
+    test.assertEqual(2, #found)
+    test.assertEqual(math.min(tool, hammer), found[1])
+    test.assertEqual(math.max(tool, hammer), found[2])
+    test.assertEqual(0, #partition:PlayersWithAlias("Nobody"))
+    test.assertEqual(0, #partition:PlayersWithAlias(nil))
+end)
+
+test.test("an ignored out-of-date note is kept on the character across reloads", function()
+    local database = foundationRoot()
+    local partition = newStore(database):Partition(GUILD)
+    partition:RecordCharacter("hammer-area52", MEMBER)
+
+    test.assertEqual(nil, partition:GetIgnoredNote("hammer-area52"))
+    test.assertTrue(partition:IgnoreNote("hammer-area52", "0badf00d", ">Tinker Healer"))
+    test.assertFalse(partition:IgnoreNote("nobody-area52", "0badf00d", ">Tinker"))
+    test.assertFalse(partition:IgnoreNote("hammer-area52", "", ">Tinker"))
+
+    local reloaded = newStore(database):Partition(GUILD)
+    local note, suggested = reloaded:GetIgnoredNote("hammer-area52")
+    test.assertEqual("0badf00d", note)
+    test.assertEqual(">Tinker Healer", suggested)
+    test.assertEqual(0, #(database.guilds["Knights of Camelot-Area52"].quarantine or {}))
+end)
+
+test.test("an unreadable ignored note quarantines its character intact", function()
+    local database = foundationRoot()
+    database.guilds["Knights of Camelot-Area52"] = {
+        characters = {
+            ["hammer-area52"] = { player = 1, noteIgnored = { note = "0badf00d" } },
+            ["toolbox-area52"] = { player = 2, noteIgnored = { note = "0badf00d", suggested = "" } },
+        },
+        players = {
+            [1] = { main = "hammer-area52" },
+            [2] = { main = "toolbox-area52" },
+        },
+    }
+
+    local partition = newStore(database):Partition(GUILD)
+
+    test.assertEqual(nil, partition:GetCharacter("hammer-area52"))
+    test.assertEqual("0badf00d", partition:GetIgnoredNote("toolbox-area52"))
+    local quarantined = database.guilds["Knights of Camelot-Area52"].quarantine
+    test.assertEqual("character ignored note is invalid", quarantined[1].reason)
+end)

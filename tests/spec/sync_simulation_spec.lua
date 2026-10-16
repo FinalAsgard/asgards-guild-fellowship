@@ -1225,3 +1225,62 @@ test.test("an officer's declared main reaches everyone; a member's waits in thei
     test.assertEqual(0, #pendingOf(hammer))
     test.assertContains(messagesOf(hammer), "Hammer declared as main")
 end)
+
+-- `base` with notes: the officer's says `@Tinker`, and Hammer and Wrench
+-- point at that alias.
+local function aliasNotes(base, mainName, hammerName, wrenchName)
+    local index
+    for index = 1, #base.members do
+        local member = base.members[index]
+        if member.name == mainName then
+            member.note = "@Tinker"
+        elseif member.name == hammerName then
+            member.note = ">Tinker"
+        elseif member.name == wrenchName then
+            member.note = "Healer >tinker"
+        end
+    end
+    return base
+end
+
+local ALIAS_SYNC = {
+    { profile = "Retail", guild = function()
+        return aliasNotes(guild(), "Toolbox-Area52", "Hammer-Area52", "Wrench-Area52")
+    end, officer = "Toolbox-Area52", member = "Wrench-Area52",
+        main = "toolbox-area52", hammer = "hammer-area52", wrench = "wrench-area52" },
+    { profile = "Forever", guild = function()
+        return aliasNotes(foreverGuild(), "Tool Box", "Hammer Smith", "Wrench Bolt")
+    end, officer = "Tool Box", member = "Wrench Bolt", main = TOOL, hammer = HAMMER, wrench = WRENCH },
+}
+
+local aliasIndex
+for aliasIndex = 1, #ALIAS_SYNC do
+    local case = ALIAS_SYNC[aliasIndex]
+    test.test(case.profile .. ": >Alias links agree everywhere and follow a synced main change", function()
+        local channel = fixtures.newChannel()
+        local officer = login(channel, case.officer, { profile = case.profile, guild = case.guild() })
+        local member = login(channel, case.member, { profile = case.profile, guild = case.guild() })
+        fixtures.deliver(channel)
+
+        local world
+        for _, world in ipairs({ officer, member }) do
+            test.assertEqual(case.main, mainOf(world, case.hammer))
+            test.assertEqual(case.main, mainOf(world, case.wrench))
+            test.assertEqual("Tinker", aliasOf(world, case.main))
+            test.assertEqual(0, #partitionOf(world):GetConflicts())
+        end
+
+        test.assertTrue(officer.addon.rosterController:MakeMain(case.hammer))
+        fixtures.deliver(channel)
+        for _, world in ipairs({ officer, member }) do
+            test.assertEqual(case.hammer, mainOf(world, case.wrench))
+            test.assertEqual(case.hammer, mainOf(world, case.main))
+        end
+
+        -- A rescan of every note finds the alias notes still agree.
+        test.assertTrue(member.addon.rosterController:Rescan())
+        fixtures.runTimers(member)
+        test.assertEqual(case.hammer, mainOf(member, case.wrench))
+        test.assertEqual(0, #partitionOf(member):GetConflicts())
+    end)
+end

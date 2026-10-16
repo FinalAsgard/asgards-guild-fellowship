@@ -20,6 +20,10 @@ local _, addon = ...
 -- the most recently online. The former main goes into the player's history,
 -- and a confirmation conflict is queued.
 --
+-- Alias targets: a main marker naming a player's one-word alias (stored, or
+-- set by a note in the same plan) joins that player, whoever its main is. A
+-- note naming its own player's alias is consistent and changes nothing.
+--
 -- Out-of-guild mains: a marker naming a stored character who isn't in the
 -- guild links to that character's player. A marker naming nobody known is an
 -- "unresolved" conflict whose suggestion, if accepted, records the name as
@@ -32,7 +36,7 @@ addon.ReconcileEngine = ReconcileEngine
 -- Matches marker text against characters: a full name (with or without
 -- realm) of a roster member or a stored character no longer in the guild,
 -- or on Forever a single word as a unique first name of a roster member.
-local function newResolver(members, normalizer, twoPartNames, partition)
+function ReconcileEngine.NewResolver(members, normalizer, twoPartNames, partition)
     local byFirstName = {}
     if twoPartNames then
         local key, member
@@ -120,6 +124,11 @@ local function followChain(start, target, parseOf, partition, sizes)
 
         local parse = parseOf(current)
         local nextRef = parse and parse.mainRef
+        if nextRef ~= nil and nextRef.status == "resolved" and nextRef.player ~= nil then
+            -- A note naming a stored player's alias ends at that player's main.
+            local player = partition:GetPlayer(nextRef.player)
+            return player and player.main or current
+        end
         if nextRef == nil or nextRef.status ~= "resolved" or nextRef.key == current then
             return current
         end
@@ -131,20 +140,58 @@ local function followChain(start, target, parseOf, partition, sizes)
     end
 end
 
+-- The main a resolved ref on `key`'s note leads to: a named player's
+-- current main, or the end of the chain of notes. Returns nil and a reason
+-- when the chain can't be followed.
+local function rootOf(key, ref, parseOf, partition, sizes)
+    if ref.player ~= nil then
+        local player = partition:GetPlayer(ref.player)
+        if player == nil then
+            return nil, "unresolved"
+        end
+        return player.main
+    end
+    return followChain(key, ref.key, parseOf, partition, sizes)
+end
+
 -- Queues a conflict, unless the player already rejected this note.
-local function addConflict(plan, partition, key, kind, suggestion)
+-- `extra` fields (an ambiguous alias and the mains of the players holding
+-- it) are copied onto the entry.
+local function addConflict(plan, partition, key, kind, suggestion, extra)
     local character = partition:GetCharacter(key)
     if character ~= nil and character.rejected ~= nil
         and character.rejected[kind] == plan.fingerprints[key]
     then
         return
     end
-    table.insert(plan.conflicts, {
+    local entry = {
         character = key,
         fingerprint = plan.fingerprints[key],
         kind = kind,
         suggestion = suggestion,
-    })
+    }
+    local field, value
+    for field, value in pairs(extra or {}) do
+        entry[field] = value
+    end
+    table.insert(plan.conflicts, entry)
+end
+
+-- For an alias held by several players: the alias and the main of each
+-- player holding it, sorted.
+local function ambiguousAlias(ref, partition)
+    local mains = {}
+    local index
+    for index = 1, #ref.candidates do
+        local target = ref.candidates[index]
+        local player = target.player ~= nil and partition:GetPlayer(target.player)
+        local main = (player and player.main) or target.key
+        if main ~= nil then
+            table.insert(mains, main)
+        end
+    end
+    table.sort(mains)
+    return { alias = ref.text, mains = mains }
 end
 
 -- Which roster characters a plan processes:
@@ -195,7 +242,7 @@ function ReconcileEngine.Plan(inputs)
     local rules = inputs.rules or {}
     local checkpoint = inputs.checkpoint or function() end
     local mode = inputs.mode or "initial"
-    local resolver = newResolver(members, inputs.normalizer, rules.twoPartNames == true, partition)
+    local resolver = ReconcileEngine.NewResolver(members, inputs.normalizer, rules.twoPartNames == true, partition)
     local sizes = playerSizes(partition)
     local plan = {
         aliases = {},
@@ -213,12 +260,113 @@ function ReconcileEngine.Plan(inputs)
         now = inputs.now or 0,
     }
 
+    -- A main marker's word names an alias before a character. Aliases come
+    -- from the store and from the notes this plan reads, so a first scan
+    -- links `>Tool` to the player whose note says `@Tool`.
+    local storedTargets = {}
+    local function storedAliasResolver(word)
+        local folded = string.lower(word)
+        if storedTargets[folded] == nil then
+            local targets = {}
+            local ids = partition:PlayersWithAlias(word)
+            local index
+            for index = 1, #ids do
+                table.insert(targets, { player = ids[index] })
+            end
+            storedTargets[folded] = targets
+        end
+        return storedTargets[folded]
+    end
+
+    -- Notes read against stored aliases only, to work out which player each
+    -- note's own alias will name.
+    local storedParses = {}
+    local function storedParseOf(key)
+        if storedParses[key] == nil and members[key] ~= nil then
+            storedParses[key] = addon.NoteParser.Parse(members[key].note, resolver, rules, storedAliasResolver, key)
+        end
+        return storedParses[key]
+    end
+
+    -- Folded alias -> keys of processed characters whose notes carry it.
+    local noteAliases = {}
+
+    -- The target a note's `@Alias` on `key` names: the stored player, when
+    -- `key` (or the main its note leads to) is organized and nobody named
+    -- that player by hand or through sync; otherwise the root character
+    -- the plan will make the main. Nil when the note can't name a player.
+    local function noteAliasTarget(key)
+        local root = key
+        if not hasRelationship(partition, sizes, key) then
+            local ref = storedParseOf(key).mainRef
+            if ref ~= nil and ref.status == "resolved" and ref.key ~= key then
+                root = rootOf(key, ref, storedParseOf, partition, sizes) or key
+            end
+        end
+        local rootCharacter = partition:GetCharacter(root)
+        if rootCharacter ~= nil and hasRelationship(partition, sizes, root) then
+            local player = partition:GetPlayer(rootCharacter.player)
+            if aliasUntouched(player) then
+                return { player = rootCharacter.player }
+            end
+            -- Already named: the store's alias is what counts.
+            return nil
+        end
+        return { key = root }
+    end
+
+    local aliasTargets = {}
+    local function aliasResolver(word)
+        local folded = string.lower(word)
+        if aliasTargets[folded] ~= nil then
+            return aliasTargets[folded]
+        end
+        local targets = {}
+        local players, roots = {}, {}
+        local function add(target)
+            if target == nil then
+                return
+            end
+            if target.player ~= nil and not players[target.player] then
+                players[target.player] = true
+                table.insert(targets, target)
+            elseif target.key ~= nil and not roots[target.key] then
+                roots[target.key] = true
+                table.insert(targets, target)
+            end
+        end
+        local stored = storedAliasResolver(word)
+        local index
+        for index = 1, #stored do
+            add(stored[index])
+        end
+        -- A note whose own main marker names the alias it carries only
+        -- follows the others; it names a player only when nothing else does.
+        local followers = {}
+        local sources = noteAliases[folded] or {}
+        for index = 1, #sources do
+            local ref = storedParseOf(sources[index]).mainRef
+            if ref ~= nil and ref.status ~= "resolved" and string.lower(ref.text) == folded then
+                table.insert(followers, sources[index])
+            else
+                add(noteAliasTarget(sources[index]))
+            end
+        end
+        if #targets == 0 then
+            for index = 1, #followers do
+                add(noteAliasTarget(followers[index]))
+            end
+        end
+        aliasTargets[folded] = targets
+        return targets
+    end
+
     -- Notes are parsed only when needed: for processed characters, and for
     -- the targets of a chain being followed.
     local parses = {}
     local function parseOf(key)
         if parses[key] == nil and members[key] ~= nil then
-            parses[key] = addon.NoteParser.Parse(members[key].note, resolver, rules)
+            parses[key] = addon.NoteParser.Parse(members[key].note, resolver, rules, aliasResolver, key)
         end
         return parses[key]
     end
@@ -263,6 +411,12 @@ function ReconcileEngine.Plan(inputs)
     for index = 1, #keys do
         key = keys[index]
         seedable[key] = not hasRelationship(partition, sizes, key)
+        local alias = addon.NoteParser.Alias(members[key].note)
+        if alias ~= nil then
+            local folded = string.lower(alias)
+            noteAliases[folded] = noteAliases[folded] or {}
+            table.insert(noteAliases[folded], key)
+        end
     end
 
     for index = 1, #keys do
@@ -272,8 +426,15 @@ function ReconcileEngine.Plan(inputs)
             if ref.status == "unresolved" then
                 -- Accepting records the name as an out-of-guild main.
                 addConflict(plan, partition, key, ref.status, { outOfGuild = ref.text })
+            elseif ref.status == "ambiguous" and ref.byAlias then
+                addConflict(plan, partition, key, ref.status, nil, ambiguousAlias(ref, partition))
             elseif ref.status ~= "resolved" then
                 addConflict(plan, partition, key, ref.status)
+            elseif ref.byAlias and (ref.key == key or (ref.player ~= nil and partition:GetCharacter(key) ~= nil
+                and partition:GetCharacter(key).player == ref.player))
+            then
+                -- A note naming its own player's alias is consistent: it
+                -- changes nothing and declares nothing.
             elseif ref.key == key then
                 -- A note naming the character itself as main declares it a
                 -- main: seeded on a character nobody organized yet, filled in
@@ -290,7 +451,7 @@ function ReconcileEngine.Plan(inputs)
                     addConflict(plan, partition, key, "self reference")
                 end
             else
-                local root, reason = followChain(key, ref.key, parseOf, partition, sizes)
+                local root, reason = rootOf(key, ref, parseOf, partition, sizes)
                 if root == nil then
                     addConflict(plan, partition, key, reason)
                 elseif seedable[key] then

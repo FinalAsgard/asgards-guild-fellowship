@@ -65,6 +65,8 @@ Fixtures.LIBRARY_MAJORS = {
     "DetailsFramework-1.0",
     "AceSerializer-3.0",
     "AceComm-3.0",
+    "HereBeDragons-2.0",
+    "HereBeDragons-Pins-2.0",
 }
 
 -- A stand-in for AceSerializer-3.0. Each serialized message is kept in this
@@ -93,7 +95,8 @@ end
 
 -- A stand-in for AceComm-3.0. Messages a world sends are recorded in
 -- `world.sentMessages` and, when the world joined a channel, queued there
--- until Fixtures.deliver hands them to every world on it.
+-- until Fixtures.deliver hands them to every world on it (a whisper only to
+-- the world it names). `world.whisperFails = true` makes whispers raise.
 local function newComm(world)
     local comm = {}
     function comm:Embed(target)
@@ -101,10 +104,14 @@ local function newComm(world)
             world.commHandlers[prefix] = handler
         end
         function target:SendCommMessage(prefix, text, distribution, recipient, priority)
+            if distribution == "WHISPER" and world.whisperFails then
+                error("whispers aren't supported")
+            end
             table.insert(world.sentMessages, {
                 prefix = prefix,
                 text = text,
                 distribution = distribution,
+                recipient = recipient,
                 priority = priority,
             })
             if world.channel ~= nil then
@@ -113,6 +120,7 @@ local function newComm(world)
                     prefix = prefix,
                     text = text,
                     distribution = distribution,
+                    recipient = recipient,
                 })
             end
         end
@@ -619,7 +627,13 @@ function Fixtures.deliver(channel)
         local sender = message.from.playerName or message.from.guild.members[1].name
         local index
         for index = 1, #channel.worlds do
-            local handler = channel.worlds[index].commHandlers[message.prefix]
+            local receiver = channel.worlds[index]
+            local handler = receiver.commHandlers[message.prefix]
+            if message.distribution == "WHISPER"
+                and message.recipient ~= (receiver.playerName or (receiver.guild and receiver.guild.members[1].name))
+            then
+                handler = nil
+            end
             if handler ~= nil then
                 handler(message.prefix, message.text, message.distribution, sender)
             end

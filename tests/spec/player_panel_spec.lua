@@ -68,6 +68,14 @@ local function setup()
                 end,
             })
         end,
+        summary = function()
+            return addon.PlayerPanelViewModel.Summary({
+                partition = partition,
+                playerId = playerId,
+                members = members({ guild[1], guild[2] }),
+                normalizer = normalizer,
+            })
+        end,
     }
 end
 
@@ -358,4 +366,53 @@ test.test("the panel model wraps the bio with the window's wrapper when given", 
         return { "[" .. text .. "]" }
     end), "about")
     test.assertEqual("[Location: Stormwind]", about[1].text)
+end)
+
+test.test("the mini profile lists the main, then Discord and location, alts, and the bio", function()
+    local state = setup()
+
+    -- Nothing set: the labels stay, left blank.
+    local summary = state.summary()
+    test.assertEqual("TheTool (Toolbox)", summary.title)
+    test.assertEqual(table.concat({
+        "Main: Toolbox (80)",
+        "",
+        "Discord:",
+        "Location:",
+        "",
+        "Alts:",
+        "Hammer (70)",
+        "",
+        "Personal Bio",
+        "",
+    }, "|"), table.concat(summary.lines, "|"))
+
+    state.partition:SetProfileText("toolbox-area52", "discord", "thetool", START, "toolbox-area52")
+    state.partition:SetProfileText("toolbox-area52", "location", "Stormwind", START, "toolbox-area52")
+    state.partition:SetProfileText("toolbox-area52", "bio", "Raid lead on weekends", START, "toolbox-area52")
+    test.assertEqual(table.concat({
+        "Main: Toolbox (80)",
+        "",
+        "Discord: thetool",
+        "Location: Stormwind",
+        "",
+        "Alts:",
+        "Hammer (70)",
+        "",
+        "Personal Bio",
+        "Raid lead on weekends",
+    }, "|"), table.concat(state.summary().lines, "|"))
+end)
+
+test.test("the mini profile leaves Alts blank for a player without alts, and is nil for one that's gone", function()
+    local state = setup()
+    state.addon.PlayerService.Create(state.partition):Detach("hammer-area52")
+
+    local lines = state.summary().lines
+    test.assertEqual("Alts:", lines[6])
+    test.assertEqual("", lines[7])
+    test.assertEqual("Personal Bio", lines[8])
+
+    local addon = state.addon
+    test.assertEqual(nil, addon.PlayerPanelViewModel.Summary({ partition = state.partition, playerId = "nobody" }))
 end)
