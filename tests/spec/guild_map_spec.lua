@@ -890,7 +890,32 @@ local function registerProfileTests(profile)
         test.assertEqual(0.4, drawn[1].x)
         test.assertEqual(0.4 + 0.01, drawn[2].x)
         test.assertEqual(0.6, drawn[2].y)
-        test.assertEqual(0.4 + 0.01 + 0.01, drawn[3].x)
+        test.assertEqual(0.405 + 2 * 0.01, drawn[3].x)
+
+        -- A crowd fills rows of 8, going down.
+        local crowd = {}
+        local index
+        for index = 1, 10 do
+            local dot = fixtures.snapshot(DOTS[1])
+            dot.key = "crowd" .. index
+            table.insert(crowd, dot)
+        end
+        local crowded = buildPins(world, crowd)
+        crowded:Start()
+        crowded:Refresh()
+        drawn = {}
+        for index = 1, #pins.icons do
+            if pins.icons[index].ref == crowded then
+                table.insert(drawn, pins.icons[index])
+            end
+        end
+        test.assertEqual(10, #drawn)
+        test.assertEqual(0.4 + 7 * 0.01, drawn[8].x)
+        test.assertEqual(0.6, drawn[8].y)
+        test.assertEqual(0.4, drawn[9].x)
+        test.assertEqual(0.6 + 0.01, drawn[9].y)
+        test.assertEqual(0.4 + 0.01, drawn[10].x)
+        test.assertEqual(0.6 + 0.01, drawn[10].y)
 
         -- With the map's width known, a dot moves by its own width.
         world.environment.WorldMapFrame = { GetCanvas = function()
@@ -899,6 +924,38 @@ local function registerProfileTests(profile)
         mapPins:Refresh()
         drawn = iconsOn(pins, 1429)
         test.assertEqual(0.4 + 10 / 1000, drawn[2].x)
+    end)
+
+    test.test(profile .. ": only the open map's dots and markers are drawn, and none while the map is closed", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        installCoordinates(world.environment)
+        local worldMap = { shown = false, mapId = 1429 }
+        function worldMap:IsShown() return self.shown end
+        function worldMap:GetMapID() return self.mapId end
+        function worldMap:HookScript(scriptName, hook) self[scriptName] = hook end
+        world.environment.WorldMapFrame = worldMap
+        local markers = { { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } } }
+        local mapPins = buildPins(world, { DOTS[1], DOTS[2] }, markers, { mapId = 1429 })
+        mapPins:Start()
+        mapPins:Refresh()
+
+        -- Closed: nothing on the world map, the minimap still drawn.
+        test.assertEqual(0, #pins.icons)
+        test.assertEqual(1, #pins.minimap)
+
+        -- Opened on Elwynn: Elwynn's dot only.
+        worldMap.shown = true
+        worldMap.OnShow()
+        test.assertEqual(1, #pins.icons)
+        test.assertEqual(1429, pins.icons[1].mapId)
+
+        -- On the continent: its marker only.
+        worldMap.mapId = 1415
+        mapPins:Refresh()
+        test.assertEqual(1, #pins.icons)
+        test.assertEqual(1415, pins.icons[1].mapId)
+        test.assertTrue(pins.icons[1].icon.marker ~= nil)
     end)
 
     test.test(profile .. ": pointing at a zone or continent lists its guildmates on the map", function()

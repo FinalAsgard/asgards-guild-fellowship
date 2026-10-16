@@ -40,6 +40,8 @@ local MapPins = {
     },
     -- A dot's width as a share of the map, when the map can't say.
     DOT_WIDTH = 0.01,
+    -- Dots moved apart sit in rows of at most this many.
+    SPREAD_ROW = 8,
     WORLD_MAP_TYPE = 1,
     -- The list of guildmates in the zone or continent under the cursor:
     -- under the world map's continent title, or at the right of a
@@ -148,6 +150,12 @@ function Pins:Start()
             self:Refresh()
         end)
     end
+    -- Nothing is drawn on the world map while it's closed: draw on opening.
+    if type(worldMap) == "table" and type(worldMap.HookScript) == "function" then
+        pcall(worldMap.HookScript, worldMap, "OnShow", function()
+            self:Refresh()
+        end)
+    end
     self:StartAreaList()
     return true
 end
@@ -216,6 +224,11 @@ function Pins:UpdateAreaList()
         return
     end
     local area, mapId = self:HoveredArea()
+    -- Nothing to redo while the same area is under the cursor.
+    if area == self.listedArea and mapId == self.listedMap and self.listedRefresh == self.refreshes then
+        return
+    end
+    self.listedArea, self.listedMap, self.listedRefresh = area, mapId, self.refreshes
     local marker
     local index
     for index = 1, #self.drawnMarkers do
@@ -438,6 +451,7 @@ function Pins:Refresh()
         return
     end
     pcall(self.pins.RemoveAllWorldMapIcons, self.pins, self)
+    self.refreshes = (self.refreshes or 0) + 1
     local okShown, shown = pcall(self.shown)
     if okShown and shown == false then
         self.drawnMarkers = {}
@@ -454,17 +468,24 @@ function Pins:Refresh()
     if type(showFlag) ~= "number" then
         showFlag = MapPins.SHOW_CURRENT
     end
+    -- Each dot and marker shows on its own map only, so only those for the
+    -- map open now are drawn, and none while the world map is closed.
+    local open = self:OpenMap()
     local width = self:DotWidth()
     local placed = {}
+    local drawn = 0
     local index
     for index = 1, #dots do
         local dot = dots[index]
-        local icon = self:Icon(index)
-        if icon ~= nil then
-            icon.dot = dot
-            self:Color(icon, dot)
-            local x, y = self:Spread(placed, dot.mapId, dot.x, dot.y, width)
-            pcall(self.pins.AddWorldMapIconMap, self.pins, self, icon, dot.mapId, x, y, showFlag)
+        if open == nil or dot.mapId == open then
+            drawn = drawn + 1
+            local icon = self:Icon(drawn)
+            if icon ~= nil then
+                icon.dot = dot
+                self:Color(icon, dot)
+                local x, y = self:Spread(placed, dot.mapId, dot.x, dot.y, width)
+                pcall(self.pins.AddWorldMapIconMap, self.pins, self, icon, dot.mapId, x, y, showFlag)
+            end
         end
     end
     self:DrawMinimap(dots)
@@ -474,14 +495,39 @@ function Pins:Refresh()
         return
     end
     self.drawnMarkers = markers
+    drawn = 0
     for index = 1, #markers do
         local marker = markers[index]
-        local x, y = self:Place(marker)
-        local frame = x ~= nil and self:MarkerFrame(index) or nil
-        if frame ~= nil and pcall(self.DrawMarker, self, frame, marker) then
-            pcall(self.pins.AddWorldMapIconMap, self.pins, self, frame, marker.mapId, x, y, showFlag)
+        if open == nil or marker.mapId == open then
+            local x, y = self:Place(marker)
+            local frame
+            if x ~= nil then
+                drawn = drawn + 1
+                frame = self:MarkerFrame(drawn)
+            end
+            if frame ~= nil and pcall(self.DrawMarker, self, frame, marker) then
+                pcall(self.pins.AddWorldMapIconMap, self.pins, self, frame, marker.mapId, x, y, showFlag)
+            end
         end
     end
+end
+
+-- The map the world map shows now; false while it's closed; nil when the
+-- client can't say (then everything is drawn and the pins library sorts it).
+function Pins:OpenMap()
+    local worldMap = self.environment.WorldMapFrame
+    if type(worldMap) ~= "table" or type(worldMap.IsShown) ~= "function" or type(worldMap.GetMapID) ~= "function" then
+        return nil
+    end
+    local okShown, shown = pcall(worldMap.IsShown, worldMap)
+    if not okShown then
+        return nil
+    end
+    if not shown then
+        return false
+    end
+    local okMap, mapId = pcall(worldMap.GetMapID, worldMap)
+    return okMap and type(mapId) == "number" and mapId or nil
 end
 
 -- A dot's width as a share of the world map's width now, so dots can be
@@ -500,22 +546,33 @@ function Pins:DotWidth()
 end
 
 -- Where a dot at `x`, `y` on map `mapId` goes so it doesn't cover one
--- already in `placed`: moved right a dot's width at a time. Records it.
+-- already in `placed`: the first free spot moving right a dot's width at a
+-- time, in rows of SPREAD_ROW going down. Records it.
 function Pins:Spread(placed, mapId, x, y, width)
-    local moved = true
-    while moved do
-        moved = false
+    -- Neighbors exactly a dot's width apart don't overlap, rounding aside.
+    local apart = width * 0.999
+    local function free(spotX, spotY)
         local index
         for index = 1, #placed do
             local other = placed[index]
-            if other.mapId == mapId and math.abs(other.x - x) < width and math.abs(other.y - y) < width then
-                x = other.x + width
-                moved = true
+            if other.mapId == mapId and math.abs(other.x - spotX) < apart and math.abs(other.y - spotY) < apart then
+                return false
             end
         end
+        return true
     end
-    table.insert(placed, { mapId = mapId, x = x, y = y })
-    return x, y
+    local row = MapPins.SPREAD_ROW
+    local step = 0
+    local spotX, spotY = x, y
+    -- Every placed dot rules out at most a few spots, so a free one comes
+    -- within this many steps.
+    while not free(spotX, spotY) and step <= 4 * #placed do
+        step = step + 1
+        spotX = x + (step % row) * width
+        spotY = y + math.floor(step / row) * width
+    end
+    table.insert(placed, { mapId = mapId, x = spotX, y = spotY })
+    return spotX, spotY
 end
 
 -- Draws the dots in the player's zone on the minimap, replacing the ones
