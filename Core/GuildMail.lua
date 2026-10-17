@@ -36,8 +36,13 @@ local GuildMail = {
     NO_GUILD = "Guild Mail needs a guild.",
     HINT_SENDING = "Sending...",
     HINT_PAUSED = "The game didn't send the last mail on its own. Press Send next for each mail.",
+    HINT_STOPPING = "Stopping after this mail...",
+    HINT_STOPPED = "Stopped. Continue sends to the rest; End gives up on them.",
     SEND_TEXT = "Send",
     SEND_NEXT_TEXT = "Send next",
+    CONTINUE_TEXT = "Continue",
+    STOP_TEXT = "Stop",
+    END_TEXT = "End",
     HINT_NO_RANKS = "Tick at least one rank.",
     HINT_NOBODY = "Nobody in those ranks to mail.",
     HINT_NONE_TICKED = "Tick at least one recipient.",
@@ -248,10 +253,16 @@ function Mail:refresh()
     end
 end
 
+-- Whether a send is under way: going, paused or stopped part way.
+function Mail:busy()
+    return self.sender:IsSending() or self.sender:IsStopped()
+end
+
 -- A finished send stays on show until the officer changes something; then
--- the list is worked out afresh. Nothing changes while mails are going out.
+-- the list is worked out afresh. Nothing changes while a send is under
+-- way, stopped or not, so continuing it never mails anyone twice.
 function Mail:editable()
-    if self.sender:IsSending() then
+    if self:busy() then
         return false
     end
     self.batch = nil
@@ -354,10 +365,14 @@ function Mail:OnMailboxOpened()
     self:refresh()
 end
 
+-- Closing the mailbox stops sending, as Stop does; the list and progress
+-- stay for when it's opened again.
 function Mail:OnMailboxClosed()
     self.mailboxOpen = false
     self.confirming = false
-    self:refresh()
+    if not self.sender:Stop() then
+        self:refresh()
+    end
 end
 
 -- The rank list: { index, name, checked } for every rank, highest first.
@@ -435,6 +450,12 @@ end
 -- Why Send can't be pressed now, or nil when it can. `recipients` is the
 -- list, ticked or not.
 function Mail:hint(recipients)
+    if self.sender:IsStopped() then
+        return self.mailboxOpen and GuildMail.HINT_STOPPED or GuildMail.HINT_NO_MAILBOX
+    end
+    if self.sender:IsStopping() then
+        return GuildMail.HINT_STOPPING
+    end
     if self.sender:IsPaused() then
         return self.mailboxOpen and GuildMail.HINT_PAUSED or GuildMail.HINT_NO_MAILBOX
     end
@@ -473,8 +494,9 @@ end
 -- pressed now.
 -- While sending is paused (the game didn't send a mail on its own), Send
 -- next sends the next mail at once: from a click, the game takes it.
+-- After Stop, Continue sends to the rows still pending.
 function Mail:RequestSend()
-    if self.sender:IsPaused() then
+    if self.sender:IsPaused() or self.sender:IsStopped() then
         return self.mailboxOpen and self.sender:Resume()
     end
     if not self:CanSend() then
@@ -511,6 +533,17 @@ function Mail:Confirm()
     return self.sender:Start(mails)
 end
 
+-- Stops sending after the mail in flight. Returns false when nothing is
+-- being sent.
+function Mail:Stop()
+    return self.sender:Stop()
+end
+
+-- After Stop, gives up on the rows still pending: the send is finished.
+function Mail:End()
+    return self.sender:End()
+end
+
 -- MAIL_SEND_SUCCESS and MAIL_FAILED, passed on to the sender.
 function Mail:OnSent()
     return self.sender:OnSent()
@@ -534,20 +567,22 @@ function Mail:IsSending()
     return self.sender:IsSending()
 end
 
+-- "Sent 3 of 12, 1 failed · Postage spent: 90c" while sending; once done,
+-- the summary "Sent 40 · Failed 2 · Postage spent: 12s".
 function Mail:progressText()
     if self.batch == nil then
         return nil
     end
     local progress = self.sender:Progress()
+    local postage = " · Postage spent: " .. self:coins(progress.sent * (self.batchPerMail or 0))
+    if progress.state == addon.GuildMailSender.DONE then
+        return "Sent " .. progress.sent .. " · Failed " .. progress.failed .. postage
+    end
     local text = "Sent " .. progress.sent .. " of " .. progress.total
     if progress.failed > 0 then
         text = text .. ", " .. progress.failed .. " failed"
     end
-    text = text .. " · Postage spent: " .. self:coins(progress.sent * (self.batchPerMail or 0))
-    if progress.state == addon.GuildMailSender.DONE then
-        text = text .. ". Done."
-    end
-    return text
+    return text .. postage
 end
 
 -- "Online", "3 days ago", or "" when the live roster doesn't say.
@@ -572,11 +607,14 @@ end
 --   moneyText    "You have 152g 3s", or nil when the money isn't known
 --   affordable   whether the officer's money covers the cost
 --   canSend      whether Send can be pressed
---   sendText     "Send", or "Send next" while paused
---   hint         why it can't, or nil
+--   sendText     "Send", "Send next" while paused, "Continue" after Stop
+--   stopText     "Stop" while sending, "End" after Stop, else nil
+--   canStop      whether that button can be pressed
+--   hint         why Send can't be pressed, or what's happening, or nil
 --   confirming   whether the confirmation is up, with confirmText
 --   progressText "Sent 3 of 12", or nil before a send
---   sending      whether mails are going out
+--   sending      whether a send is under way (going, paused or stopped),
+--                which locks everything but Send and Stop
 function Mail:Model()
     local partition = self.context()
     local ranks = self:rankList(partition)
@@ -635,12 +673,16 @@ function Mail:Model()
         moneyText = type(money) == "number" and ("You have " .. self:coins(money)) or nil,
         affordable = cost.affordable,
         canSend = officer and ((hint == nil and self.batch == nil)
-            or (self.sender:IsPaused() and self.mailboxOpen)),
-        sendText = self.sender:IsPaused() and GuildMail.SEND_NEXT_TEXT or GuildMail.SEND_TEXT,
+            or ((self.sender:IsPaused() or self.sender:IsStopped()) and self.mailboxOpen)),
+        sendText = (self.sender:IsStopped() and GuildMail.CONTINUE_TEXT)
+            or (self.sender:IsPaused() and GuildMail.SEND_NEXT_TEXT) or GuildMail.SEND_TEXT,
+        stopText = (self.sender:IsStopped() and GuildMail.END_TEXT)
+            or (self.sender:IsSending() and GuildMail.STOP_TEXT) or nil,
+        canStop = self.sender:IsStopped() or (self.sender:IsSending() and not self.sender:IsStopping()),
         hint = hint,
         confirming = self.confirming,
         confirmText = "Send " .. plural(#ticked, "mail", "mails") .. " for " .. self:coins(cost.total) .. " postage?",
         progressText = self:progressText(),
-        sending = self.sender:IsSending(),
+        sending = self:busy(),
     }
 end

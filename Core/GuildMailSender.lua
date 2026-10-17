@@ -13,6 +13,10 @@ local _, addon = ...
 -- every later mail also waits for a click, since the game would likely
 -- stall again. An answer that turns up late still counts.
 --
+-- Stop halts sending: at once when nothing is in flight, else as soon as
+-- the game answers the mail in flight. Resume then carries on with the
+-- mails still pending, so nobody is mailed twice; End gives up on them.
+--
 -- Some mails the game refuses at once with only an error message (a
 -- one-word name on a client with two-part names), never answering
 -- MAIL_FAILED; and a MAIL_FAILED is followed by the error that says why.
@@ -29,6 +33,7 @@ local GuildMailSender = {
     IDLE = "idle",
     SENDING = "sending",
     PAUSED = "paused",
+    STOPPED = "stopped",
     DONE = "done",
     PENDING = "pending",
     SENT = "sent",
@@ -63,6 +68,7 @@ function GuildMailSender.Create(options)
         fresh = false,
         lastFailed = nil,
         manual = false,
+        stopping = false,
         attempt = 0,
     }, Sender)
 end
@@ -74,6 +80,16 @@ end
 
 function Sender:IsPaused()
     return self.state == GuildMailSender.PAUSED
+end
+
+-- True after Stop, until Resume or End.
+function Sender:IsStopped()
+    return self.state == GuildMailSender.STOPPED
+end
+
+-- True after Stop while the mail in flight is still to be answered.
+function Sender:IsStopping()
+    return self.stopping and self.state == GuildMailSender.SENDING
 end
 
 -- Whether every mail now waits for a click (after the game stalled once).
@@ -97,6 +113,7 @@ function Sender:Start(mails)
     self.current = 1
     self.inFlight = false
     self.manual = false
+    self.stopping = false
     self:sendCurrent()
     return true
 end
@@ -160,8 +177,36 @@ function Sender:pause()
     end
     self.attempt = self.attempt + 1
     self.manual = true
-    self.state = GuildMailSender.PAUSED
+    self.state = self.stopping and GuildMailSender.STOPPED or GuildMailSender.PAUSED
     self:changed()
+end
+
+-- Stops sending: now when no mail is in flight, else once the game
+-- answers it (or doesn't, in time). Returns false when nothing is being
+-- sent.
+function Sender:Stop()
+    if not self:IsSending() then
+        return false
+    end
+    self.stopping = true
+    if not self.inFlight or self:IsPaused() then
+        self.attempt = self.attempt + 1
+        self.state = GuildMailSender.STOPPED
+    end
+    self:changed()
+    return true
+end
+
+-- Gives up on the mails still pending after Stop: sending is done, and
+-- they stay pending. Returns false when not stopped.
+function Sender:End()
+    if not self:IsStopped() then
+        return false
+    end
+    self.attempt = self.attempt + 1
+    self.stopping = false
+    self:finishAll()
+    return true
 end
 
 -- Moves on to the next mail: after a click when manual, else a moment
@@ -172,6 +217,11 @@ function Sender:advance()
     self.current = self.current + 1
     if self.current > #self.mails then
         self:finishAll()
+        return
+    end
+    if self.stopping then
+        self.state = GuildMailSender.STOPPED
+        self:changed()
         return
     end
     if self.manual then
@@ -189,8 +239,8 @@ function Sender:advance()
 end
 
 function Sender:finish(status, reason)
-    -- A late answer to a paused mail still counts: it did go.
-    if not self:IsSending() or self.current == nil or not self.inFlight then
+    -- A late answer to a paused or stopped mail still counts: it did go.
+    if not (self:IsSending() or self:IsStopped()) or self.current == nil or not self.inFlight then
         return false
     end
     self.statuses[self.current] = status
@@ -242,12 +292,13 @@ function Sender:OnError(message)
     return false
 end
 
--- Sends the paused mail now (call it from a click). Returns false when
--- nothing is paused.
+-- Sends the paused mail now (call it from a click), or carries on after
+-- Stop with the mails still pending. Returns false when neither.
 function Sender:Resume()
-    if not self:IsPaused() then
+    if not (self:IsPaused() or self:IsStopped()) then
         return false
     end
+    self.stopping = false
     self:sendCurrent()
     return true
 end

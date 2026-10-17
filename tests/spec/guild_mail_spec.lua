@@ -498,6 +498,92 @@ end)
 
 local RANK_NAMES = { "Guild Master", "Officer", "Member", "Initiate" }
 
+-- Stop --------------------------------------------------------------------
+
+test.test("guild mail sender: Stop waits for the mail in flight, then halts", function()
+    local addon, world = newSender()
+    world.sender:Start(MAILS)
+
+    test.assertTrue(world.sender:Stop())
+    test.assertTrue(world.sender:IsStopping())
+    test.assertFalse(world.sender:IsStopped())
+    world.sender:OnSent()
+
+    test.assertTrue(world.sender:IsStopped())
+    test.assertFalse(world.sender:IsSending())
+    test.assertEqual("Ann Bell", table.concat(world.sent, ","))
+    test.assertEqual(addon.GuildMailSender.SENT, world.sender:Status(1))
+    test.assertEqual(addon.GuildMailSender.PENDING, world.sender:Status(2))
+end)
+
+test.test("guild mail sender: continuing after Stop sends only the pending mails", function()
+    local addon, world = newSender()
+    world.sender:Start(MAILS)
+    world.sender:Stop()
+    world.sender:OnSent()
+
+    test.assertTrue(world.sender:Resume())
+    world.sender:OnSent()
+    world.sender:OnSent()
+
+    test.assertEqual("Ann Bell,Gus Reed,Zed Stone", table.concat(world.sent, ","))
+    test.assertEqual(addon.GuildMailSender.DONE, world.sender:Progress().state)
+    test.assertEqual(3, world.sender:Progress().sent)
+end)
+
+test.test("guild mail sender: Stop between mails halts before the next one goes", function()
+    local _, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.sender:OnSent()
+
+    -- The next mail waits for the gap; Stop comes first.
+    test.assertTrue(world.sender:Stop())
+    test.assertTrue(world.sender:IsStopped())
+    world.fire(1)
+
+    test.assertEqual("Ann Bell", table.concat(world.sent, ","))
+end)
+
+test.test("guild mail sender: a stopped mail that never answers waits stopped, and a late answer counts", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.sender:Stop()
+    world.fire(10)
+
+    test.assertTrue(world.sender:IsStopped())
+    test.assertTrue(world.sender:OnSent())
+    test.assertEqual(addon.GuildMailSender.SENT, world.sender:Status(1))
+    test.assertTrue(world.sender:IsStopped())
+    test.assertEqual(1, #world.sent)
+end)
+
+test.test("guild mail sender: End gives up on the pending mails", function()
+    local addon, world = newSender()
+    world.sender:Start(MAILS)
+    world.sender:Stop()
+    world.sender:OnSent()
+
+    test.assertTrue(world.sender:End())
+    test.assertEqual(addon.GuildMailSender.DONE, world.sender:Progress().state)
+    test.assertEqual(addon.GuildMailSender.PENDING, world.sender:Status(2))
+    test.assertFalse(world.sender:Resume())
+    test.assertFalse(world.sender:Stop())
+end)
+
+test.test("guild mail sender: a rejected mail fails with its reason and sending carries on", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+
+    world.sender:OnFailed()
+    world.sender:OnError("Cannot find mail recipient.")
+    world.fire(1)
+
+    test.assertEqual("Ann Bell,Gus Reed", table.concat(world.sent, ","))
+    local status, reason = world.sender:Status(1)
+    test.assertEqual(addon.GuildMailSender.FAILED, status)
+    test.assertEqual("Cannot find mail recipient.", reason)
+end)
+
 local function newMail(overrides)
     overrides = overrides or {}
     local addon, partition = setup()
@@ -759,7 +845,7 @@ test.test("guild mail: confirmed mails go out one at a time, with progress", fun
     test.assertEqual("Sent 1 of 2 · Postage spent: 30c", world.view.model.progressText)
 
     world.mail:OnSent()
-    test.assertEqual("Sent 2 of 2 · Postage spent: 60c. Done.", world.view.model.progressText)
+    test.assertEqual("Sent 2 · Failed 0 · Postage spent: 60c", world.view.model.progressText)
     test.assertEqual(addon.GuildMailSender.SENT, world.view.model.recipients[2].status)
 end)
 
@@ -869,7 +955,7 @@ test.test("guild mail: only ticked recipients are sent", function()
 
     test.assertEqual(1, #world.sent)
     test.assertEqual("Gus Reed", world.sent[1].to)
-    test.assertEqual("Sent 1 of 1 · Postage spent: 30c. Done.", world.mail:Model().progressText)
+    test.assertEqual("Sent 1 · Failed 0 · Postage spent: 30c", world.mail:Model().progressText)
 end)
 
 test.test("guild mail: with everyone unticked, Send waits", function()
@@ -911,6 +997,78 @@ test.test("guild mail: ticks can't change while sending", function()
     test.assertFalse(world.mail:SetRecipient("gus reed-camelot", false))
     world.mail:OnSent()
     test.assertEqual("Gus Reed", world.sent[2].to)
+end)
+
+test.test("guild mail: Stop halts the send, and Continue sends only to the rest", function()
+    local addon, world = newMail()
+    readyToSend(world)
+    world.mail:SetRank(3, true)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+
+    local model = world.mail:Model()
+    test.assertEqual(addon.GuildMail.STOP_TEXT, model.stopText)
+    test.assertTrue(model.canStop)
+    test.assertTrue(world.mail:Stop())
+    test.assertEqual(addon.GuildMail.HINT_STOPPING, world.mail:Model().hint)
+    test.assertFalse(world.mail:Model().canStop)
+    world.mail:OnSent()
+
+    model = world.mail:Model()
+    test.assertEqual(addon.GuildMail.HINT_STOPPED, model.hint)
+    test.assertEqual(addon.GuildMail.CONTINUE_TEXT, model.sendText)
+    test.assertEqual(addon.GuildMail.END_TEXT, model.stopText)
+    test.assertTrue(model.canSend)
+    test.assertTrue(model.sending)
+    test.assertEqual(addon.GuildMailSender.SENT, model.recipients[1].status)
+    test.assertFalse(world.mail:SetSubject("Changed"))
+    test.assertFalse(world.mail:SetRank(2, false))
+
+    test.assertTrue(world.mail:RequestSend())
+    world.mail:OnSent()
+    world.mail:OnSent()
+    test.assertEqual("Ann Bell,Gus Reed,Zed Stone", world.sent[1].to .. "," .. world.sent[2].to .. "," .. world.sent[3].to)
+    test.assertEqual(3, #world.sent)
+    test.assertEqual("Sent 3 · Failed 0 · Postage spent: 90c", world.mail:Model().progressText)
+end)
+
+test.test("guild mail: closing the mailbox stops sending, and reopening it keeps the progress", function()
+    local addon, world = newMail()
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+
+    world.mail:OnMailboxClosed()
+    world.mail:OnSent()
+    test.assertEqual(1, #world.sent)
+    test.assertEqual(addon.GuildMail.HINT_NO_MAILBOX, world.mail:Model().hint)
+    test.assertFalse(world.mail:Model().canSend)
+    test.assertFalse(world.mail:RequestSend())
+
+    world.mail:OnMailboxOpened()
+    test.assertEqual("Sent 1 of 2 · Postage spent: 30c", world.mail:Model().progressText)
+    test.assertTrue(world.mail:RequestSend())
+    test.assertEqual("Gus Reed", world.sent[2].to)
+end)
+
+test.test("guild mail: End finishes a stopped send, and failures stay listed in the summary", function()
+    local addon, world = newMail()
+    readyToSend(world)
+    world.mail:SetRank(3, true)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    world.mail:OnFailed("Mailbox full")
+    world.mail:Stop()
+    world.mail:OnSent()
+
+    test.assertTrue(world.mail:End())
+    local model = world.mail:Model()
+    test.assertEqual("Sent 1 · Failed 1 · Postage spent: 30c", model.progressText)
+    test.assertEqual(addon.GuildMailSender.FAILED, model.recipients[1].status)
+    test.assertEqual("Mailbox full", model.recipients[1].reason)
+    test.assertEqual(nil, model.stopText)
+    test.assertFalse(model.sending)
+    test.assertTrue(world.mail:SetBody("Changed"))
 end)
 
 -- TEMPORARY (#205): remove with the Tester rank.
@@ -1061,6 +1219,8 @@ local function newWindow()
         onSend = record("send"),
         onConfirm = record("confirm"),
         onCancel = record("cancel"),
+        onStop = record("stop"),
+        onEnd = record("end"),
         onMailboxButton = record("mailbox"),
     })
     return addon, world
@@ -1216,6 +1376,30 @@ test.test("guild mail window: the preferences are summed up beside their Edit bu
 
     test.assertEqual("Send to: Most recently online character · Skip Discord names",
         world.window.preferencesText.text)
+end)
+
+test.test("guild mail window: Stop shows while sending, becomes End, and shows the hint under progress", function()
+    local _, world = newWindow()
+    world.window:Render(MODEL)
+    test.assertFalse(world.window.stop.shown)
+
+    local sending = {}
+    local key, value
+    for key, value in pairs(MODEL) do
+        sending[key] = value
+    end
+    sending.stopText, sending.canStop = "Stop", true
+    sending.progressText, sending.hint = "Sent 1 of 3", "Stopping after this mail..."
+    world.window:Render(sending)
+    test.assertTrue(world.window.stop.shown)
+    test.assertEqual("Sent 1 of 3\nStopping after this mail...", world.window.status.text)
+    world.window.stop.scripts.OnClick(world.window.stop)
+    test.assertEqual("stop", world.calls[1].name)
+
+    sending.stopText = "End"
+    world.window:Render(sending)
+    world.window.stop.scripts.OnClick(world.window.stop)
+    test.assertEqual("end", world.calls[2].name)
 end)
 
 test.test("guild mail window: the confirmation replaces Send until answered", function()

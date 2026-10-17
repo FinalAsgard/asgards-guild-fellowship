@@ -3,7 +3,7 @@ local _, addon = ...
 -- Guild Mail's window: rank check boxes, a line saying who in each player
 -- gets the mail and who is skipped, a subject and a message, how many will
 -- get it, the estimated cost and the officer's money, and Send (with a
--- confirmation in the window, then progress). Two Edit buttons open panels
+-- confirmation in the window, then progress, with Stop beside it). Two Edit buttons open panels
 -- beside the window, one at a time:
 --   Preferences  the Send to choice (mains, most recently online character,
 --                or every character) and two check boxes to skip players
@@ -26,7 +26,7 @@ local GuildMailWindow = {
     -- Up to 10 guild ranks, plus the temporary Tester rank (#205).
     RANK_ROWS = 6,
     MODE_ROW_HEIGHT = 20,
-    MESSAGE_HEIGHT = 200,
+    MESSAGE_HEIGHT = 190,
     PANEL_WIDTH = 360,
     PREFERENCES_HEIGHT = 190,
     -- The recipients panel is as tall as the window.
@@ -58,6 +58,8 @@ Window.__index = Window
 --   onSend()     Send pressed: ask for confirmation
 --   onConfirm()  the confirmation's Send pressed
 --   onCancel()   the confirmation's Cancel pressed
+--   onStop()     Stop pressed while sending
+--   onEnd()      End pressed after Stop
 --   onMailboxButton()  the mailbox's Guild Mail button pressed
 function GuildMailWindow.Create(client, handlers)
     handlers = handlers or {}
@@ -76,6 +78,8 @@ function GuildMailWindow.Create(client, handlers)
         onSend = handler("onSend"),
         onConfirm = handler("onConfirm"),
         onCancel = handler("onCancel"),
+        onStop = handler("onStop"),
+        onEnd = handler("onEnd"),
         onMailboxButton = handler("onMailboxButton"),
         rankBoxes = {},
         modeButtons = {},
@@ -277,6 +281,15 @@ function Window:window()
         self.onSend()
     end)
     self.send:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
+    self.stop = self:button(frame, "Stop", nil, function()
+        if self.stopEnds then
+            self.onEnd()
+        else
+            self.onStop()
+        end
+    end)
+    self.stop:SetPoint("RIGHT", self.send, "LEFT", -6, 0)
+    self.stop:Hide()
     self.cancel = self:button(frame, "Cancel", nil, function()
         self.onCancel()
     end)
@@ -544,7 +557,14 @@ function Window:Render(model)
 
     self.cost:SetText(model.costText or "")
     self.money:SetText(model.moneyText or "")
-    self.status:SetText(model.progressText or model.hint or "")
+    local status = {}
+    if model.progressText ~= nil then
+        table.insert(status, model.progressText)
+    end
+    if model.hint ~= nil then
+        table.insert(status, model.hint)
+    end
+    self.status:SetText(table.concat(status, "\n"))
 
     if model.confirming then
         self.send:Hide()
@@ -559,6 +579,15 @@ function Window:Render(model)
         self.send:SetText(model.sendText or "Send")
         self.send:Show()
         setEnabled(self.send, model.canSend)
+    end
+    if model.stopText ~= nil and not model.confirming then
+        self.stopEnds = model.stopText == addon.GuildMail.END_TEXT
+        self.stop:SetText(model.stopText)
+        self.stop:Show()
+        setEnabled(self.stop, model.canStop)
+    else
+        self.stopEnds = false
+        self.stop:Hide()
     end
 end
 

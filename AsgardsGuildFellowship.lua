@@ -1962,6 +1962,12 @@ if clientProfile.supported then
                 guildMail:Refresh()
             end
         end,
+        onStop = function()
+            guildMail:Stop()
+        end,
+        onEnd = function()
+            guildMail:End()
+        end,
         onRecipient = function(key, checked)
             if not guildMail:SetRecipient(key, checked) then
                 guildMail:Refresh()
