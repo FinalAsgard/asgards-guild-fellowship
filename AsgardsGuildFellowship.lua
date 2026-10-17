@@ -1999,7 +1999,7 @@ if clientProfile.supported then
         end,
         -- TEMPORARY (#205): a Tester rank for trying Guild Mail without
         -- mailing the officers.
-        testers = { "Malgen Zelwindran", "Zillatha Zelwindran" },
+        testers = { "Beorn Zelwindran", "Zillatha Zelwindran" },
         view = guildMailWindow,
     })
     router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()
