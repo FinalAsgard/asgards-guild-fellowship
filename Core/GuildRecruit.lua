@@ -87,7 +87,7 @@ Recruit.__index = Recruit
 --   here        function() -> as location, for advertising on demand,
 --               which may also name a zone the client can't place on a map.
 --               Optional; location otherwise.
---   after      function(seconds, callback) -> false when there's no timer
+--   after       function(seconds, callback) -> false when there's no timer
 --   inInstance  function() -> true in an instance, battleground or keystone
 --               run, where prompts are held. Optional.
 --   random      function(low, high) -> a whole number. Optional.
