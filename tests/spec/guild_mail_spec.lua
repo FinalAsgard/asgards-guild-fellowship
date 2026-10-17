@@ -6,9 +6,12 @@ local function load()
     return test.newAddon(
         "Core/NameNormalizer.lua",
         "Core/FellowshipStore.lua",
+        "Core/PlayerService.lua",
         "Core/RosterViewModel.lua",
+        "Core/GreetingLibrary.lua",
         "Core/GuildGreet.lua",
         "Core/GuildMailAudience.lua",
+        "Core/GuildMailComposer.lua",
         "Core/GuildMailSender.lua",
         "Core/GuildMail.lua"
     )
@@ -1091,6 +1094,118 @@ test.test("guild mail: End finishes a stopped send, and failures stay listed in 
     test.assertTrue(world.mail:SetBody("Changed"))
 end)
 
+-- Composer ------------------------------------------------------------------
+
+local function foreverNormalizer(addon)
+    return addon.NameNormalizer.Create({ twoPartNames = true, homeRealm = "Camelot" })
+end
+
+local function cogWheel()
+    return { key = "cog wheel-camelot", name = "Cog Wheel" }
+end
+
+test.test("guild mail composer: every placeholder is filled in, in any case", function()
+    local addon, partition = setup()
+    partition:SetAlias(partition:GetCharacter("ann bell-camelot").player, "Annie", "ann bell-camelot")
+
+    local mail = addon.GuildMailComposer.Compose("Hi {NAME}",
+        "{name}|{main}|{MainFirst}|{mainlast}|{character}|{CHARACTERFIRST}|{characterLast}|{other}",
+        cogWheel(), partition, foreverNormalizer(addon))
+
+    test.assertEqual("Hi Annie", mail.subject)
+    test.assertEqual("Annie|Ann Bell|Ann|Bell|Cog Wheel|Cog|Wheel|{other}", mail.body)
+    test.assertEqual(nil, mail.warning)
+end)
+
+test.test("guild mail composer: {character} is the character mailed, and {name} is the main without an alias", function()
+    local addon, partition = setup()
+
+    local mail = addon.GuildMailComposer.Compose("{character}", "{name} / {main}", cogWheel(), partition,
+        foreverNormalizer(addon))
+
+    test.assertEqual("Cog Wheel", mail.subject)
+    test.assertEqual("Ann Bell / Ann Bell", mail.body)
+end)
+
+test.test("guild mail composer: one-word names fill first and last parts with the whole name", function()
+    local addon, partition = setup()
+
+    local mail = addon.GuildMailComposer.Compose("{mainFirst}", "{characterLast}", cogWheel(), partition, nil)
+
+    test.assertEqual("Ann Bell", mail.subject)
+    test.assertEqual("Cog Wheel", mail.body)
+end)
+
+test.test("guild mail composer: a filled-in subject over 64 or message over 500 letters is flagged", function()
+    local addon, partition = setup()
+    local compose = function(subject, body)
+        return addon.GuildMailComposer.Compose(subject, body, cogWheel(), partition, nil)
+    end
+
+    test.assertEqual(nil, compose(string.rep("a", 64), string.rep("b", 500)).warning)
+    test.assertEqual("subject too long (65/64)", compose(string.rep("a", 65), "").warning)
+    test.assertEqual("message too long (501/500)", compose("", string.rep("b", 501)).warning)
+    -- "Cog Wheel" is 9 letters: 56 + 9 = 65.
+    test.assertEqual("subject too long (65/64)", compose(string.rep("a", 56) .. "{character}", "").warning)
+    -- Letters, not bytes: "é" is two bytes but one letter.
+    test.assertEqual(nil, compose(string.rep("\195\169", 64), "").warning)
+    test.assertEqual(64, addon.GuildMailComposer.Letters(string.rep("\195\169", 64)))
+end)
+
+test.test("guild mail: each mail is filled in for its recipient", function()
+    local _, world = newMail()
+    readyToSend(world)
+    world.mail:SetSubject("News for {name}")
+    world.mail:SetBody("Hi {character}!")
+
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    world.mail:OnSent()
+
+    test.assertEqual("News for Ann Bell", world.sent[1].subject)
+    test.assertEqual("Hi Ann Bell!", world.sent[1].body)
+    test.assertEqual("News for Gus Reed", world.sent[2].subject)
+end)
+
+test.test("guild mail: the preview shows the mail as the first ticked recipient gets it", function()
+    local _, world = newMail()
+    readyToSend(world)
+    world.mail:SetBody("Hi {character}!")
+
+    test.assertEqual("Ann Bell", world.mail:Model().preview.to)
+    test.assertEqual("Hi Ann Bell!", world.mail:Model().preview.body)
+
+    world.mail:SetRecipient("ann bell-camelot", false)
+    test.assertEqual("Gus Reed", world.mail:Model().preview.to)
+    test.assertEqual("Launch night", world.mail:Model().preview.subject)
+
+    world.mail:SetRecipient("gus reed-camelot", false)
+    test.assertEqual(nil, world.mail:Model().preview)
+end)
+
+test.test("guild mail: a recipient whose mail is too long is warned about and unticked", function()
+    local _, world = newMail()
+    readyToSend(world)
+    -- 56 letters plus {name}: "Ann Bell" (8) makes 64 and fits; the alias
+    -- "Gus the Great" (13) makes 69.
+    world.partition:SetAlias(world.partition:GetCharacter("gus reed-camelot").player, "Gus the Great", "gus reed-camelot")
+    world.mail:SetSubject(string.rep("a", 56) .. "{name}")
+
+    local rows = world.mail:Model().recipients
+    test.assertEqual("Ann Bell", rows[1].name)
+    test.assertTrue(rows[1].checked)
+    test.assertEqual(nil, rows[1].warning)
+    test.assertFalse(rows[2].checked)
+    test.assertEqual("subject too long (69/64)", rows[2].warning)
+    test.assertEqual("1 of 2 mails", world.mail:Model().countText)
+    test.assertContains(world.mail:Model().costText, "1 mail to 1 player")
+
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    test.assertEqual(1, #world.sent)
+    test.assertEqual("Ann Bell", world.sent[1].to)
+end)
+
 -- TEMPORARY (#205): remove with the Tester rank.
 test.test("guild mail: the temporary Tester rank mails only the testers", function()
     local addon, partition = setup()
@@ -1220,7 +1335,8 @@ end)
 -- Window ----------------------------------------------------------------------
 
 local function newWindow()
-    local addon = test.newAddon("Core/GuildMailAudience.lua", "Core/GuildMail.lua", "Adapters/GuildMailWindow.lua")
+    local addon = test.newAddon("Core/GuildMailAudience.lua", "Core/GuildMailComposer.lua", "Core/GuildMail.lua",
+        "Adapters/GuildMailWindow.lua")
     local environment = FakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
     local world = { calls = {}, environment = environment }
@@ -1420,6 +1536,33 @@ test.test("guild mail window: Stop shows while sending, becomes End, and shows t
     world.window:Render(sending)
     world.window.stop.scripts.OnClick(world.window.stop)
     test.assertEqual("end", world.calls[2].name)
+end)
+
+test.test("guild mail window: the preview panel shows the first recipient's mail, and warnings show on rows", function()
+    local _, world = newWindow()
+    local model = {}
+    local key, value
+    for key, value in pairs(MODEL) do
+        model[key] = value
+    end
+    model.preview = { to = "Ann Bell", subject = "Hi Ann Bell", body = "See you tonight!" }
+    model.recipients = {
+        { key = "ann bell-camelot", name = "Ann Bell", rank = 2, rankName = "Member", checked = false,
+            warning = "subject too long (65/64)" },
+    }
+
+    world.window:Render(model)
+    world.window.editPreview.scripts.OnClick(world.window.editPreview)
+
+    test.assertTrue(world.window.preview.shown)
+    test.assertEqual("To: Ann Bell", world.window.previewTo.text)
+    test.assertEqual("Subject: Hi Ann Bell", world.window.previewSubject.text)
+    test.assertEqual("See you tonight!", world.window.previewBody.text)
+    test.assertContains(world.window.recipientRows[1].line.text, "subject too long (65/64)")
+
+    model.preview = nil
+    world.window:Render(model)
+    test.assertEqual("Nobody is ticked to preview.", world.window.previewTo.text)
 end)
 
 test.test("guild mail window: the confirmation replaces Send until answered", function()

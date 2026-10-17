@@ -1994,8 +1994,11 @@ if clientProfile.supported then
     })
     guildMail = addon.GuildMail.Create({
         context = function()
-            local guild, partition = rosterController:QuietContext()
-            return guild and partition or nil
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return partition, normalizer
         end,
         selfKey = function()
             return rosterController:SelfKey()

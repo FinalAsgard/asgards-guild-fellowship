@@ -9,8 +9,13 @@ local _, addon = ...
 -- It holds the window's state and works out what the window shows
 -- (Model); the window only draws that and passes clicks and typing back.
 --
+-- The subject and body may use Guild Greet's placeholders, filled in for
+-- each recipient (GuildMailComposer). A recipient whose filled-in mail is
+-- too long for the game is shown with a warning and can't be ticked.
+--
 -- options:
---   context     function() -> the current guild's partition, or nil
+--   context     function() -> the current guild's partition and its name
+--               normalizer, or nil
 --   selfKey     function() -> the logged-in character's key, or nil
 --   isOfficer   function() -> true when the logged-in character is an
 --               officer (OfficerAuthority)
@@ -348,12 +353,17 @@ function Mail:SetRecipient(key, checked)
     return true
 end
 
+-- Whether `recipient` is ticked: not unticked, and their mail fits.
+function Mail:isTicked(recipient)
+    return not self.unticked[recipient.key] and not (recipient.mail and recipient.mail.warning)
+end
+
 -- The recipients in `recipients` that are ticked.
 function Mail:ticked(recipients)
     local list = {}
     local index
     for index = 1, #recipients do
-        if not self.unticked[recipients[index].key] then
+        if self:isTicked(recipients[index]) then
             table.insert(list, recipients[index])
         end
     end
@@ -412,9 +422,10 @@ function Mail:rankList(partition)
     return list
 end
 
--- Who is on the list now, ticked or not.
+-- Who is on the list now, ticked or not, each with their filled-in mail
+-- (`mail`, from GuildMailComposer.Compose).
 function Mail:Recipients()
-    local partition = self.context()
+    local partition, normalizer = self.context()
     if partition == nil then
         return {}
     end
@@ -443,6 +454,11 @@ function Mail:Recipients()
                 })
             end
         end
+    end
+    local index
+    for index = 1, #recipients do
+        recipients[index].mail = addon.GuildMailComposer.Compose(self.subject, self.body, recipients[index],
+            partition, normalizer)
     end
     return recipients
 end
@@ -526,7 +542,8 @@ function Mail:Confirm()
     local mails = {}
     local index
     for index = 1, #recipients do
-        mails[index] = { to = recipients[index].name, subject = self.subject, body = self.body }
+        local mail = recipients[index].mail
+        mails[index] = { to = recipients[index].name, subject = mail.subject, body = mail.body }
     end
     self.batch = recipients
     self.batchPerMail = self:cost(recipients).perMail
@@ -599,7 +616,8 @@ end
 --   skipDiscord, activeOnly   the two skip check boxes
 --   subject, body
 --   recipients   { key, name, playerName, rank, rankName, lastSeen,
---                checked, status, reason }; status is nil
+--                checked, warning, status, reason }; `warning` says why
+--                the filled-in mail is too long; status is nil
 --                until a send starts, then "pending", "sent" or "failed"
 --   countText    "12 mails", or "10 of 12 mails" with some unticked
 --   costText     "42 mails to 38 players · Estimated cost: 12s 60c (30c
@@ -611,6 +629,8 @@ end
 --   stopText     "Stop" while sending, "End" after Stop, else nil
 --   canStop      whether that button can be pressed
 --   hint         why Send can't be pressed, or what's happening, or nil
+--   preview      { to, subject, body }: the mail as the first ticked
+--                recipient gets it, or nil when nobody is ticked
 --   confirming   whether the confirmation is up, with confirmText
 --   progressText "Sent 3 of 12", or nil before a send
 --   sending      whether a send is under way (going, paused or stopped),
@@ -638,7 +658,8 @@ function Mail:Model()
             lastSeen = lastSeen(recipients[index]),
             rank = recipients[index].rank,
             rankName = rankNames[recipients[index].rank] or ("Rank " .. (recipients[index].rank + 1)),
-            checked = self.batch ~= nil or not self.unticked[recipients[index].key],
+            checked = self.batch ~= nil or self:isTicked(recipients[index]),
+            warning = recipients[index].mail and recipients[index].mail.warning,
             status = status,
             reason = reason,
         }
@@ -682,6 +703,9 @@ function Mail:Model()
         hint = hint,
         confirming = self.confirming,
         confirmText = "Send " .. plural(#ticked, "mail", "mails") .. " for " .. self:coins(cost.total) .. " postage?",
+        preview = ticked[1] and ticked[1].mail and {
+            to = ticked[1].name, subject = ticked[1].mail.subject, body = ticked[1].mail.body,
+        } or nil,
         progressText = self:progressText(),
         sending = self:busy(),
     }

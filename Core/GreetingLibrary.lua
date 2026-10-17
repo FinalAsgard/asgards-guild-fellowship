@@ -141,19 +141,24 @@ function GreetingLibrary.Check(text)
     return tidied
 end
 
--- Fills in a greeting's placeholders from `names`, keyed in lowercase (see
--- GuildGreet:Names). Placeholders ignore case, so {MainLast} and {mainlast}
--- are the same. The result is cut to one chat message.
-function GreetingLibrary.Render(text, names)
+-- Fills in `text`'s placeholders from `names`, keyed in lowercase (see
+-- GuildGreet:Names), at any length. Placeholders ignore case, so
+-- {MainLast} and {mainlast} are the same.
+function GreetingLibrary.Fill(text, names)
     names = names or {}
-    local rendered = string.gsub(text, "{(%a+)}", function(placeholder)
+    local filled = string.gsub(text, "{(%a+)}", function(placeholder)
         local value = names[string.lower(placeholder)]
         if type(value) == "string" then
             return value
         end
         return nil
     end)
-    return cut(rendered, GreetingLibrary.MAX_LENGTH)
+    return filled
+end
+
+-- Fills in a greeting's placeholders (Fill), cut to one chat message.
+function GreetingLibrary.Render(text, names)
+    return cut(GreetingLibrary.Fill(text, names), GreetingLibrary.MAX_LENGTH)
 end
 
 -- The saved greetings table, created (with the starters) on first use. Nil

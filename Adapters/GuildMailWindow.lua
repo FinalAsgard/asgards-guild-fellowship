@@ -10,7 +10,10 @@ local _, addon = ...
 --                with a Discord name on file and characters not online in
 --                30 days
 --   Recipients   the list of who will get the mail, each with a check box
---                to leave them out
+--                to leave them out, and a warning on any whose mail is too
+--                long once the placeholders are filled in
+--   Preview      the mail as the first ticked recipient gets it, and the
+--                placeholders the subject and message can use
 -- It only draws GuildMail's model and passes clicks and typing back. It opens beside the mailbox when opened from there, and can
 -- be dragged anywhere. Officers also get a Guild Mail button beside the
 -- mailbox's Send Mail tab.
@@ -151,6 +154,7 @@ function Window:togglePanel(panel)
     local opening = self.openPanel ~= panel
     self.preferences:Hide()
     self.recipients:Hide()
+    self.preview:Hide()
     self.openPanel = nil
     if opening then
         panel:Show()
@@ -224,7 +228,14 @@ function Window:window()
     self.subject = subject
     top = top - 46
 
-    self:label(frame, "Message", top)
+    local messageLabel = self:label(frame, "Message", top - 4)
+    self.editPreview = self:button(frame, "Preview", GuildMailWindow.EDIT_BUTTON_WIDTH + 10, function()
+        self:togglePanel(self.preview)
+    end)
+    self.editPreview:SetPoint("LEFT", messageLabel, "RIGHT", 8, 0)
+    local placeholderHint = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    placeholderHint:SetPoint("LEFT", self.editPreview, "RIGHT", 8, 0)
+    placeholderHint:SetText("|cff999999{name} and other placeholders work|r")
     local messageScroll = self:scrollArea(frame, top - 18, GuildMailWindow.MESSAGE_HEIGHT)
     local body = createFrame("EditBox", nil, messageScroll)
     body:SetMultiLine(true)
@@ -305,6 +316,7 @@ function Window:window()
 
     self:preferencesPanel()
     self:recipientsPanel()
+    self:previewPanel()
 
     frame:Hide()
     return frame
@@ -340,6 +352,38 @@ function Window:preferencesPanel()
         addon.GuildMail.ACTIVE_DAYS .. " days", top - 22, function(checked)
         self.onActiveOnly(checked)
     end)
+end
+
+-- The Preview panel: the mail as its first recipient gets it, then the
+-- placeholder key, as in the Greetings window.
+function Window:previewPanel()
+    local panel = self:panel("Preview", GuildMailWindow.HEIGHT)
+    self.preview = panel
+    local padding = GuildMailWindow.PADDING
+    local function text(top, template)
+        local line = panel:CreateFontString(nil, "OVERLAY", template or "GameFontHighlight")
+        line:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, top)
+        line:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
+        line:SetJustifyH("LEFT")
+        line:SetJustifyV("TOP")
+        return line
+    end
+    self.previewTo = text(-36, "GameFontNormal")
+    self.previewSubject = text(-56)
+    self.previewBody = text(-80, "ChatFontNormal")
+    self.previewBody:SetWordWrap(true)
+
+    local placeholders = addon.GuildMailComposer.PLACEHOLDERS
+    local keyTop = -GuildMailWindow.HEIGHT + 20 + (#placeholders + 2) * 15
+    self.previewBody:SetPoint("BOTTOM", panel, "TOP", 0, keyTop + 8)
+    text(keyTop, "GameFontNormal"):SetText("Placeholders (upper or lower case both work)")
+    local index
+    for index = 1, #placeholders do
+        text(keyTop - index * 15, "GameFontHighlightSmall"):SetText(
+            "|cffffd100" .. placeholders[index][1] .. "|r  " .. placeholders[index][2])
+    end
+    text(keyTop - (#placeholders + 1) * 15, "GameFontHighlightSmall"):SetText(
+        "|cff999999First and last parts only differ on WoW Forever's two-part names.|r")
 end
 
 -- The Recipients panel: who will get the mail, each with a check box.
@@ -522,6 +566,15 @@ function Window:Render(model)
     self.preferencesText:SetText(GuildMailWindow.PreferencesText(model))
     self.listLabel:SetText("Recipients (" .. model.countText .. ")")
     self.recipients.heading:SetText("Recipients (" .. model.countText .. ")")
+    if model.preview ~= nil then
+        self.previewTo:SetText("To: " .. model.preview.to)
+        self.previewSubject:SetText("Subject: " .. model.preview.subject)
+        self.previewBody:SetText(model.preview.body)
+    else
+        self.previewTo:SetText("Nobody is ticked to preview.")
+        self.previewSubject:SetText("")
+        self.previewBody:SetText("")
+    end
     for index = 1, #model.recipients do
         local row = model.recipients[index]
         local details = { row.rankName }
@@ -532,6 +585,9 @@ function Window:Render(model)
             table.insert(details, row.lastSeen)
         end
         local line = row.name .. "  |cff999999" .. table.concat(details, " · ") .. "|r"
+        if row.warning ~= nil then
+            line = line .. " |cffff4040" .. tostring(row.warning) .. "|r"
+        end
         if row.status ~= nil then
             line = line .. (GuildMailWindow.STATUS_TEXT[row.status] or "")
             if row.reason ~= nil then
@@ -543,7 +599,8 @@ function Window:Render(model)
         box.line:SetText(line)
         -- A box clicked while sending is put back to match the model.
         box:SetChecked(row.checked ~= false)
-        setEnabled(box, not model.sending)
+        -- A mail that's too long can't be ticked.
+        setEnabled(box, not model.sending and row.warning == nil)
         box:Show()
         box.line:Show()
     end

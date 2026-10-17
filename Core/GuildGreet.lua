@@ -205,6 +205,13 @@ end
 -- the database doesn't know is its own main.
 function Greet:Names(key, rawName)
     local partition, normalizer = self.context()
+    return GuildGreet.NamesFor(partition, normalizer, key, rawName)
+end
+
+-- Greet:Names for character `key` (spelled `rawName`) in `partition`, with
+-- the guild's name `normalizer`; either may be nil. Guild Mail fills in
+-- the same placeholders with it.
+function GuildGreet.NamesFor(partition, normalizer, key, rawName)
     local character = normalizer and normalizer:Display(rawName) or rawName
     local characterFirst, characterLast = nameParts(normalizer, rawName, character)
     local names = {

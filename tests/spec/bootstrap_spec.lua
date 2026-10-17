@@ -69,6 +69,7 @@ local MANIFEST_FILES = {
     "Core/LocationScheduler.lua",
     "Core/LocationBoard.lua",
     "Core/GuildMailAudience.lua",
+    "Core/GuildMailComposer.lua",
     "Core/GuildMailSender.lua",
     "Core/GuildMail.lua",
     "Core/Lifecycle.lua",
