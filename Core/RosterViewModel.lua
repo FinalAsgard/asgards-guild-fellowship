@@ -144,13 +144,15 @@ end
 --   collapsed    set of player ids whose groups are collapsed
 --   showDeparted true to include characters who left the guild
 --   now          the current timestamp, for "Left N days ago"
---   search       text to match against character names and aliases,
---                ignoring case; a matching player shows its whole group
+--   search       text to match against character names, aliases and
+--                Discord usernames, ignoring case; a matching player shows
+--                its whole group
 --   onlineOnly   true to show only players with a character online
 -- Returns rows. A player with several characters gets a header row:
---   { kind = "player", id, label, alias, mainName, online, onlineAs,
---     collapsed, count }
--- where `label` is "Alias (Main)", or the main's name without an alias, and
+--   { kind = "player", id, label, alias, discord, mainName, online,
+--     onlineAs, collapsed, count }
+-- where `label` is "Alias (Main)", or the main's name without an alias,
+-- `discord` is the player's Discord username or nil, and
 -- `onlineAs` names the online character (the main if it is online),
 -- followed (unless collapsed) by its character rows:
 --   { kind = "character", key, player, isMain, declared, name, coloredName,
@@ -160,7 +162,8 @@ end
 -- the character left. Departed characters are hidden unless showDeparted;
 -- a player with no visible characters is left out.
 -- A single-character player is just its character row, marked
--- `standalone = true` and carrying the player's `label` and `coloredLabel`.
+-- `standalone = true` and carrying the player's `label`, `coloredLabel` and
+-- `discord`.
 -- Players sort online first, then by label.
 local function trimmedLower(text)
     if type(text) ~= "string" then
@@ -178,7 +181,7 @@ local function shown(group, needle, onlineOnly)
     if onlineOnly and not group.online then
         return false
     end
-    if needle == "" or contains(group.alias, needle) then
+    if needle == "" or contains(group.alias, needle) or contains(group.discord, needle) then
         return true
     end
     local index
@@ -223,6 +226,7 @@ function RosterViewModel.Build(inputs)
                 id = id,
                 label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
                 alias = player.alias,
+                discord = (partition:PlayerProfileText(id, "discord")),
                 mainName = mainName,
                 online = online,
                 onlineAs = onlineAs,
@@ -251,6 +255,7 @@ function RosterViewModel.Build(inputs)
             local row = group.rows[1]
             row.standalone = true
             row.label = group.label
+            row.discord = group.discord
             row.coloredLabel = group.alias and (group.alias .. " (" .. row.coloredName .. ")")
                 or row.coloredName
             table.insert(rows, row)
@@ -260,6 +265,7 @@ function RosterViewModel.Build(inputs)
                 id = group.id,
                 label = group.label,
                 alias = group.alias,
+                discord = group.discord,
                 mainName = group.mainName,
                 online = group.online,
                 onlineAs = group.onlineAs,

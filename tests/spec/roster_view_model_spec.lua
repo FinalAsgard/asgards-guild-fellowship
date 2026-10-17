@@ -390,3 +390,36 @@ test.test("the counts tooltip uses singular wording and leaves out unlinked at z
     test.assertEqual("1 player has an alias", lines[6])
     test.assertEqual("1 main declared", lines[7])
 end)
+
+test.test("a player's Discord shows on their header or lone row, and the search finds it", function()
+    local addon = load()
+    local partition, normalizer = setup(addon)
+    seedGuild(partition)
+    -- Set on Tool Box's alt, it's still the player's; Zélie has her own.
+    test.assertTrue(partition:SetProfileText("hammer smith-camelot", "discord", "toolbox_42", 1790000000,
+        "hammer smith-camelot"))
+    test.assertTrue(partition:SetProfileText("zélie rune-camelot", "discord", "ZelieR", 1790000000,
+        "zélie rune-camelot"))
+
+    local rows = build(addon, partition, normalizer)
+
+    test.assertEqual("toolbox_42", rows[1].discord)
+    test.assertEqual(nil, rows[2].discord)
+    test.assertEqual(nil, rows[3].discord)
+    test.assertEqual("ZelieR", rows[4].discord)
+
+    local function search(text)
+        return addon.RosterViewModel.Build({ partition = partition, members = LIVE, normalizer = normalizer,
+            search = text })
+    end
+    -- Case doesn't matter, and the whole group shows.
+    rows = search("TOOLBOX_")
+    test.assertEqual(3, #rows)
+    test.assertEqual("TheTool (Tool Box)", rows[1].label)
+    rows = search("zelier")
+    test.assertEqual(1, #rows)
+    test.assertEqual("ZelieR", rows[1].discord)
+    -- A cleared Discord is no longer found.
+    test.assertTrue(partition:SetProfileText("zélie rune-camelot", "discord", "", 1790000001, "zélie rune-camelot"))
+    test.assertEqual(0, #search("zelier"))
+end)

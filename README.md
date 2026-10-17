@@ -153,7 +153,8 @@ Changes show up right away and are recorded as manual. An officer's changes then
 
 ### Finding people
 
-- The search box matches character names and aliases.
+- The search box matches character names, aliases and Discord usernames.
+- The **Discord** column shows a player's Discord username, when it's known, on their group's header (or their row, for a player with one character).
 - **Online only** hides players with no character online.
 - **Expand all** and **Collapse all** open and close every group.
 - Online players come first, then everyone else by name. A group shows "online as …" when the player is on an alt.

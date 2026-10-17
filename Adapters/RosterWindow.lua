@@ -23,11 +23,14 @@ local Window = {}
 Window.__index = Window
 
 -- Column layout: x offset and width of each text column in a line.
+-- Discord is the player's, so it shows on a player's header (or a lone
+-- character's row), not on each alt.
 local COLUMNS = {
-    { field = "name", header = "Name", x = 8, width = 240 },
-    { field = "level", header = "Level", x = 254, width = 44 },
-    { field = "rank", header = "Rank", x = 302, width = 120 },
-    { field = "location", header = "Zone / Last online", x = 428, width = 180 },
+    { field = "name", header = "Name", x = 8, width = 200 },
+    { field = "level", header = "Level", x = 214, width = 40 },
+    { field = "rank", header = "Rank", x = 258, width = 100 },
+    { field = "discord", header = "Discord", x = 364, width = 120 },
+    { field = "location", header = "Zone / Last online", x = 490, width = 140 },
 }
 
 -- Row backgrounds: a tint for player headers, and a faint stripe on every
@@ -107,6 +110,9 @@ local function cellText(row, field)
         end
         if field == "location" and row.online then
             return "|cff20ff20Online as " .. tostring(row.onlineAs) .. "|r"
+        end
+        if field == "discord" then
+            return row.discord or ""
         end
         return ""
     end
@@ -1152,7 +1158,7 @@ local function build(framework, options)
     search:SetAutoFocus(false)
     local placeholder = search:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     placeholder:SetPoint("LEFT", search, "LEFT", 2, 0)
-    placeholder:SetText("Search names and aliases")
+    placeholder:SetText("Search names, aliases and Discord")
     search:SetScript("OnTextChanged", function(box)
         local text = box:GetText()
         if text == "" then
