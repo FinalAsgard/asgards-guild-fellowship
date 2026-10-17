@@ -1199,6 +1199,38 @@ function Client:SendMail(to, subject, body)
     return (callFunction(self.environment.SendMail, to, subject, type(body) == "string" and body or ""))
 end
 
+-- What the mail being written in the game's send box would cost to send, in
+-- copper (30 for text only), or nil when the client can't say.
+function Client:GetSendMailPrice()
+    local ok, price = callFunction(self.environment.GetSendMailPrice)
+    if not ok or type(price) ~= "number" or price < 0 then
+        return nil
+    end
+    return price
+end
+
+-- The logged-in character's money in copper, or nil.
+function Client:GetMoney()
+    local ok, money = callFunction(self.environment.GetMoney)
+    if not ok or type(money) ~= "number" then
+        return nil
+    end
+    return money
+end
+
+-- `copper` in the game's gold, silver and copper style with coin icons, or
+-- nil when the client can't draw it.
+function Client:FormatMoney(copper)
+    if type(copper) ~= "number" then
+        return nil
+    end
+    local ok, text = callFunction(self.environment.GetCoinTextureString, copper)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
 -- True while the game's mailbox is open.
 function Client:IsMailboxOpen()
     local frame = self.environment.MailFrame

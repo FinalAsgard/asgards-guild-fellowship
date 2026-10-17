@@ -2007,6 +2007,17 @@ if clientProfile.supported then
         after = function(seconds, callback)
             return client:After(seconds, callback)
         end,
+        -- Postage: the game's own price at a mailbox; away from one Guild
+        -- Mail estimates the standard text-mail price.
+        price = function()
+            return client:GetSendMailPrice()
+        end,
+        money = function()
+            return client:GetMoney()
+        end,
+        formatMoney = function(copper)
+            return client:FormatMoney(copper)
+        end,
         -- TEMPORARY (#205): a Tester rank for trying Guild Mail without
         -- mailing the officers.
         testers = { "Beorn Zelwindran", "Zillatha Zelwindran" },

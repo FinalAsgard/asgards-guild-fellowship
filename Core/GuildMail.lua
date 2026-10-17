@@ -22,6 +22,11 @@ local _, addon = ...
 --               the mail
 --   after       function(seconds, callback) -> true when the timer was set
 --               (pacing, and noticing when the game doesn't answer)
+--   price       function() -> what a text mail costs to send, in copper,
+--               at an open mailbox (the game's own price), else nil
+--   money       function() -> the officer's money in copper, or nil
+--   formatMoney function(copper) -> the game's coin text with icons, or
+--               nil to use plain "12s 60c"
 --   testers     TEMPORARY (#205): character names a "Tester" rank mails,
 --               so Guild Mail can be tried without mailing the guild
 --   view        optional window: Show(fromMailbox), Render(model),
@@ -37,6 +42,11 @@ local GuildMail = {
     HINT_NOBODY = "Nobody in those ranks to mail.",
     HINT_NO_SUBJECT = "Write a subject.",
     HINT_NO_MAILBOX = "Open a mailbox to send.",
+    HINT_NO_MONEY = "Not enough money for postage.",
+    -- A text-only mail's postage, used away from a mailbox, where the game
+    -- doesn't give its price.
+    STANDARD_POSTAGE = 30,
+    NOT_ENOUGH_COLOR = "ffff4040",
     ONLINE_TEXT = "Online",
     -- "Skip characters not online in the last 30 days".
     ACTIVE_DAYS = 30,
@@ -63,6 +73,54 @@ local function plural(count, one, many)
     return count .. " " .. (count == 1 and one or many)
 end
 
+-- `copper` as "152g 3s", "12s 60c" or "30c": its non-zero coins, or "0c".
+function GuildMail.FormatCopper(copper)
+    copper = math.max(0, math.floor(copper or 0))
+    local parts = {}
+    local gold, silver, rest = math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100
+    if gold > 0 then
+        table.insert(parts, gold .. "g")
+    end
+    if silver > 0 then
+        table.insert(parts, silver .. "s")
+    end
+    if rest > 0 or #parts == 0 then
+        table.insert(parts, rest .. "c")
+    end
+    return table.concat(parts, " ")
+end
+
+-- What sending to `recipients` costs:
+--   { mails, players, perMail, total, estimated, affordable }
+-- `perMail` is the game's price at a mailbox, or nil away from one, when
+-- STANDARD_POSTAGE is used and the cost is `estimated`. `affordable` is
+-- true when `money` covers it, or when the money isn't known.
+function GuildMail.Cost(recipients, perMail, money)
+    local players = {}
+    local count = 0
+    local index
+    for index = 1, #recipients do
+        local id = recipients[index].playerId or recipients[index].key
+        if id ~= nil and not players[id] then
+            players[id] = true
+            count = count + 1
+        end
+    end
+    local estimated = type(perMail) ~= "number"
+    if estimated then
+        perMail = GuildMail.STANDARD_POSTAGE
+    end
+    local total = perMail * #recipients
+    return {
+        mails = #recipients,
+        players = count,
+        perMail = perMail,
+        total = total,
+        estimated = estimated,
+        affordable = type(money) ~= "number" or money >= total,
+    }
+end
+
 function GuildMail.Create(options)
     options = options or {}
     local mail = setmetatable({
@@ -83,6 +141,15 @@ function GuildMail.Create(options)
         end,
         sendMail = options.send or function()
             return false
+        end,
+        price = options.price or function()
+            return nil
+        end,
+        money = options.money or function()
+            return nil
+        end,
+        formatMoney = options.formatMoney or function()
+            return nil
         end,
         view = options.view,
         testers = options.testers or {},
@@ -106,6 +173,32 @@ function GuildMail.Create(options)
         end,
     })
     return mail
+end
+
+function Mail:ask(callback, ...)
+    local ok, value = pcall(callback, ...)
+    if ok then
+        return value
+    end
+    return nil
+end
+
+-- What sending to `recipients` costs now (GuildMail.Cost), and the
+-- officer's money.
+function Mail:cost(recipients)
+    local price = self.mailboxOpen and self:ask(self.price) or nil
+    local money = self:ask(self.money)
+    return GuildMail.Cost(recipients, type(price) == "number" and price or nil,
+        type(money) == "number" and money or nil), money
+end
+
+-- `copper` as the game draws coins, or "12s 60c".
+function Mail:coins(copper)
+    local text = self:ask(self.formatMoney, copper)
+    if type(text) == "string" and text ~= "" then
+        return text
+    end
+    return GuildMail.FormatCopper(copper)
 end
 
 function Mail:IsOfficer()
@@ -328,6 +421,9 @@ function Mail:hint(recipients)
     if blank(self.subject) then
         return GuildMail.HINT_NO_SUBJECT
     end
+    if not self:cost(recipients).affordable then
+        return GuildMail.HINT_NO_MONEY
+    end
     if not self.mailboxOpen then
         return GuildMail.HINT_NO_MAILBOX
     end
@@ -378,6 +474,7 @@ function Mail:Confirm()
         mails[index] = { to = recipients[index].name, subject = self.subject, body = self.body }
     end
     self.batch = recipients
+    self.batchPerMail = self:cost(recipients).perMail
     return self.sender:Start(mails)
 end
 
@@ -413,6 +510,7 @@ function Mail:progressText()
     if progress.failed > 0 then
         text = text .. ", " .. progress.failed .. " failed"
     end
+    text = text .. " · Postage spent: " .. self:coins(progress.sent * (self.batchPerMail or 0))
     if progress.state == addon.GuildMailSender.DONE then
         text = text .. ". Done."
     end
@@ -436,6 +534,10 @@ end
 --                reason }; status is nil
 --                until a send starts, then "pending", "sent" or "failed"
 --   countText    "12 mails"
+--   costText     "42 mails to 38 players · Estimated cost: 12s 60c (30c
+--                each)", in red when the officer can't afford it
+--   moneyText    "You have 152g 3s", or nil when the money isn't known
+--   affordable   whether the officer's money covers the cost
 --   canSend      whether Send can be pressed
 --   sendText     "Send", or "Send next" while paused
 --   hint         why it can't, or nil
@@ -469,6 +571,12 @@ function Mail:Model()
     end
     local hint = self:hint(recipients)
     local officer = self:IsOfficer()
+    local cost, money = self:cost(recipients)
+    local costText = plural(cost.mails, "mail", "mails") .. " to " .. plural(cost.players, "player", "players") ..
+        " · Estimated cost: " .. self:coins(cost.total) .. " (" .. self:coins(cost.perMail) .. " each)"
+    if not cost.affordable then
+        costText = "|c" .. GuildMail.NOT_ENOUGH_COLOR .. costText .. "|r"
+    end
     local modes = {}
     for index = 1, #GuildMail.MODES do
         modes[index] = {
@@ -486,12 +594,15 @@ function Mail:Model()
         body = self.body,
         recipients = rows,
         countText = plural(#rows, "mail", "mails"),
+        costText = costText,
+        moneyText = type(money) == "number" and ("You have " .. self:coins(money)) or nil,
+        affordable = cost.affordable,
         canSend = officer and ((hint == nil and self.batch == nil)
             or (self.sender:IsPaused() and self.mailboxOpen)),
         sendText = self.sender:IsPaused() and GuildMail.SEND_NEXT_TEXT or GuildMail.SEND_TEXT,
         hint = hint,
         confirming = self.confirming,
-        confirmText = "Send " .. plural(#rows, "mail", "mails") .. "?",
+        confirmText = "Send " .. plural(#rows, "mail", "mails") .. " for " .. self:coins(cost.total) .. " postage?",
         progressText = self:progressText(),
         sending = self.sender:IsSending(),
     }

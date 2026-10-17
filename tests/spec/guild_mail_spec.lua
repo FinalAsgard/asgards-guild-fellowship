@@ -539,6 +539,13 @@ local function newMail(overrides)
             table.insert(world.sent, { to = to, subject = subject, body = body })
             return true
         end,
+        price = function()
+            return world.price
+        end,
+        money = function()
+            return world.money
+        end,
+        formatMoney = overrides.formatMoney,
         view = world.view,
     })
     return addon, world
@@ -721,7 +728,7 @@ test.test("guild mail: nothing is sent until the officer confirms", function()
     test.assertTrue(world.mail:RequestSend())
     local model = world.mail:Model()
     test.assertTrue(model.confirming)
-    test.assertEqual("Send 2 mails?", model.confirmText)
+    test.assertEqual("Send 2 mails for 60c postage?", model.confirmText)
     test.assertEqual(0, #world.sent)
 
     world.mail:Cancel()
@@ -742,17 +749,17 @@ test.test("guild mail: confirmed mails go out one at a time, with progress", fun
     test.assertEqual("Ann Bell", world.sent[1].to)
     test.assertEqual("Launch night", world.sent[1].subject)
     test.assertEqual("Join us on Discord!", world.sent[1].body)
-    test.assertEqual("Sent 0 of 2", world.view.model.progressText)
+    test.assertEqual("Sent 0 of 2 · Postage spent: 0c", world.view.model.progressText)
     test.assertEqual(addon.GuildMail.HINT_SENDING, world.view.model.hint)
     test.assertEqual(addon.GuildMailSender.PENDING, world.view.model.recipients[1].status)
 
     world.mail:OnSent()
     test.assertEqual(2, #world.sent)
     test.assertEqual("Gus Reed", world.sent[2].to)
-    test.assertEqual("Sent 1 of 2", world.view.model.progressText)
+    test.assertEqual("Sent 1 of 2 · Postage spent: 30c", world.view.model.progressText)
 
     world.mail:OnSent()
-    test.assertEqual("Sent 2 of 2. Done.", world.view.model.progressText)
+    test.assertEqual("Sent 2 of 2 · Postage spent: 60c. Done.", world.view.model.progressText)
     test.assertEqual(addon.GuildMailSender.SENT, world.view.model.recipients[2].status)
 end)
 
@@ -845,6 +852,95 @@ test.test("guild mail: the temporary Tester rank mails only the testers", functi
     test.assertEqual(addon.GuildMail.TESTER_RANK_NAME, rows[1].rankName)
 end)
 
+-- Cost ----------------------------------------------------------------------
+
+test.test("guild mail cost: coins are written like the game's", function()
+    local addon = load()
+
+    test.assertEqual("30c", addon.GuildMail.FormatCopper(30))
+    test.assertEqual("12s 60c", addon.GuildMail.FormatCopper(1260))
+    test.assertEqual("152g 3s", addon.GuildMail.FormatCopper(1520300))
+    test.assertEqual("0c", addon.GuildMail.FormatCopper(0))
+end)
+
+test.test("guild mail cost: mails and players are counted, and every character costs more", function()
+    local addon = load()
+    local recipients = {
+        { key = "ann bell-camelot", playerId = 2 },
+        { key = "cog wheel-camelot", playerId = 2 },
+        { key = "zed stone-camelot", playerId = 3 },
+    }
+
+    local cost = addon.GuildMail.Cost(recipients, 30, 1000)
+
+    test.assertEqual(3, cost.mails)
+    test.assertEqual(2, cost.players)
+    test.assertEqual(90, cost.total)
+    test.assertFalse(cost.estimated)
+end)
+
+test.test("guild mail cost: away from a mailbox the standard 30c is estimated", function()
+    local addon = load()
+
+    local cost = addon.GuildMail.Cost({ { key = "a", playerId = 1 } }, nil, nil)
+
+    test.assertEqual(30, cost.perMail)
+    test.assertTrue(cost.estimated)
+    test.assertTrue(cost.affordable)
+end)
+
+test.test("guild mail cost: exactly enough money is enough", function()
+    local addon = load()
+    local two = { { key = "a", playerId = 1 }, { key = "b", playerId = 2 } }
+
+    test.assertTrue(addon.GuildMail.Cost(two, 30, 60).affordable)
+    test.assertFalse(addon.GuildMail.Cost(two, 30, 59).affordable)
+end)
+
+test.test("guild mail: the cost line counts mails and players and uses the game's price", function()
+    local _, world = newMail()
+    world.money = 1520300
+    world.mail:SetRank(2, true)
+    world.mail:SetRank(3, true)
+    world.mail:SetMode("all")
+
+    -- Away from a mailbox: the standard price.
+    test.assertEqual("5 mails to 3 players · Estimated cost: 1s 50c (30c each)", world.mail:Model().costText)
+    test.assertEqual("You have 152g 3s", world.mail:Model().moneyText)
+
+    world.price = 40
+    world.mail:OnMailboxOpened()
+    test.assertEqual("5 mails to 3 players · Estimated cost: 2s (40c each)", world.mail:Model().costText)
+
+    world.mail:SetMode("mains")
+    test.assertEqual("3 mails to 3 players · Estimated cost: 1s 20c (40c each)", world.mail:Model().costText)
+end)
+
+test.test("guild mail: the cost is drawn with the game's coins when it can", function()
+    local _, world = newMail({ formatMoney = function(copper)
+        return "<" .. copper .. ">"
+    end })
+    world.mail:SetRank(2, true)
+
+    test.assertEqual("2 mails to 2 players · Estimated cost: <60> (<30> each)", world.mail:Model().costText)
+end)
+
+test.test("guild mail: without enough money, the cost turns red and Send is blocked", function()
+    local addon, world = newMail()
+    readyToSend(world)
+    world.money = 59
+
+    local model = world.mail:Model()
+    test.assertFalse(model.affordable)
+    test.assertFalse(model.canSend)
+    test.assertEqual(addon.GuildMail.HINT_NO_MONEY, model.hint)
+    test.assertContains(model.costText, "|cffff4040")
+    test.assertFalse(world.mail:RequestSend())
+
+    world.money = 60
+    test.assertTrue(world.mail:Model().canSend)
+end)
+
 test.test("guild mail: retyping the same text changes nothing", function()
     local _, world = newMail()
     readyToSend(world)
@@ -897,6 +993,8 @@ local MODEL = {
         { name = "Gus Reed", rank = 2, rankName = "Member", status = "failed", reason = "Mailbox full" },
     },
     countText = "3 mails",
+    costText = "3 mails to 2 players · Estimated cost: 90c (30c each)",
+    moneyText = "You have 5g",
     skipDiscord = true,
     activeOnly = false,
     canSend = true,
@@ -914,6 +1012,8 @@ test.test("guild mail window: draws the ranks, the text and the recipients", fun
     test.assertEqual("Launch night", world.window.subject.text)
     test.assertEqual("Join us!", world.window.body.text)
     test.assertEqual("Recipients (3 mails)", world.window.listLabel.text)
+    test.assertEqual("3 mails to 2 players · Estimated cost: 90c (30c each)", world.window.cost.text)
+    test.assertEqual("You have 5g", world.window.money.text)
     test.assertContains(world.window.listText.text, "Ann Bell")
     test.assertContains(world.window.listText.text, "Mailbox full")
     test.assertContains(world.window.listText.text, "Cog Wheel  |cff999999Annie · Initiate · Online|r")

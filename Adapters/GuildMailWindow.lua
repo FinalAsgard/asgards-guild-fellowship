@@ -3,7 +3,7 @@ local _, addon = ...
 -- Guild Mail's window: rank check boxes, the Send to choice (mains, most
 -- recently online character, or every character), two check boxes to skip
 -- players with a Discord name on file and characters not online in 30 days,
--- a subject and a message, the list
+-- a subject and a message, the estimated cost and the officer's money, the list
 -- of who will get the mail, and Send (with a confirmation in the window,
 -- then progress). It only draws GuildMail's model and passes clicks and
 -- typing back. It opens beside the mailbox when opened from there, and can
@@ -14,7 +14,7 @@ local _, addon = ...
 -- failing frame call leaves the window as it was rather than raising.
 local GuildMailWindow = {
     WIDTH = 440,
-    HEIGHT = 690,
+    HEIGHT = 726,
     PADDING = 14,
     RANK_COLUMNS = 2,
     RANK_ROW_HEIGHT = 22,
@@ -229,6 +229,17 @@ function Window:window()
     self.list, self.listText = list, listText
     top = top - 18 - GuildMailWindow.LIST_HEIGHT - 10
 
+    local cost = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    cost:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, top)
+    cost:SetPoint("RIGHT", frame, "RIGHT", -padding, 0)
+    cost:SetJustifyH("LEFT")
+    self.cost = cost
+    local money = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    money:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, top - 18)
+    money:SetJustifyH("LEFT")
+    self.money = money
+    top = top - 36
+
     local status = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     status:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, top)
     status:SetPoint("RIGHT", frame, "RIGHT", -padding, 0)
@@ -400,6 +411,8 @@ function Window:Render(model)
     self.listText:SetText(table.concat(lines, "\n"))
     self.list:SetHeight(math.max(GuildMailWindow.LIST_HEIGHT, #lines * 14 + 8))
 
+    self.cost:SetText(model.costText or "")
+    self.money:SetText(model.moneyText or "")
     self.status:SetText(model.progressText or model.hint or "")
 
     if model.confirming then
