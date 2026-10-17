@@ -33,7 +33,7 @@ local MapPins = {
     SHOW_WORLD = 3,
     -- While the player is in a party, guildmates outside it are drawn at
     -- this opacity, so the party stands out.
-    DIM_ALPHA = 0.35,
+    DIM_ALPHA = 0.6,
     -- Ends the tooltip of a zone map dot placed only by the roster's zone.
     UNKNOWN_SPOT_TEXT = "(exact location unknown)",
     -- Where each continent's marker sits on the world map, over its land:

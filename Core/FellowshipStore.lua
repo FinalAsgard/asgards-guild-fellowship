@@ -487,6 +487,27 @@ function Store:SetGreetEnabled(enabled)
     return true
 end
 
+-- Whether Guild Greet prompts inside a dungeon, raid, battleground or arena.
+-- On unless turned off; unusable saved data counts as on.
+function Store:GreetInInstances()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    return type(state) ~= "table" or state.inInstances ~= false
+end
+
+-- Turns Guild Greet's prompts inside instances on or off. An unusable
+-- existing value is left alone.
+function Store:SetGreetInInstances(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.inInstances ~= nil and type(state.inInstances) ~= "boolean") then
+        return false
+    end
+    state.inInstances = enabled
+    return true
+end
+
 local function isGreetCap(value)
     return type(value) == "number" and value == math.floor(value)
         and value >= FellowshipStore.GREET_CAP_MIN and value <= FellowshipStore.GREET_CAP_MAX

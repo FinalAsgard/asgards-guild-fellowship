@@ -448,6 +448,29 @@ if clientProfile.supported then
             return true
         end,
     })
+    settings:Add("guildGreet", {
+        id = "greetInInstances",
+        kind = "toggle",
+        label = "Greet while in a dungeon, raid or other instance",
+        info = function()
+            return "Turn this off to get no greet prompts inside dungeons, raids, battlegrounds, arenas and " ..
+                "keystone runs. Guildmates who come online while you're inside aren't prompted for later."
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:GreetInInstances()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetInInstances(enabled) then
+                return nil, "the saved setting is unreadable, so it stays on"
+            end
+            return true
+        end,
+    })
     -- Not saved, and only while the master frame or the options are open:
     -- closing either, or a reload, locks the prompts again.
     settings:Add("guildGreet", {
@@ -1955,6 +1978,9 @@ if clientProfile.supported then
         send = function(text)
             return client:SendGuildMessage(text)
         end,
+        inInstance = function()
+            return client:IsInInstance()
+        end,
         -- Heard within seconds, unlike sync's bulk traffic.
         announce = function(message)
             return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
@@ -2092,6 +2118,8 @@ if clientProfile.supported then
             guildRecruit:Refresh()
         elseif id == "guildGreet" or id == "greetCharacter" then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
+        elseif id == "greetInInstances" then
+            guildGreet:OnZoneChanged()
         elseif entry ~= nil and entry.category ~= nil then
             guildGreet:OnCategoryChanged(entry.category, value)
         end
@@ -2557,9 +2585,11 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         guildGreet:OnCombatChanged(true)
         guildRecruit:OnCombatChanged(true)
     end
-    -- Advertise prompts follow the player from zone to zone.
+    -- Advertise prompts follow the player from zone to zone, and greet
+    -- prompts close on entering an instance where they're off.
     client:ObserveZone(function()
         guildRecruit:Refresh()
+        guildGreet:OnZoneChanged()
     end)
     guildRecruit:Refresh()
     -- The Group Finder's slots follow the party, and every party with

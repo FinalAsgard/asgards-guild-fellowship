@@ -247,7 +247,7 @@ Greetings can use these placeholders, in any capitalization:
 | `{character}` | The character that just logged in. |
 | `{characterFirst}`, `{characterLast}` | The first or last part of that character's name. |
 
-First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** settings. Greetings and settings are shared by every character on this game install, and **Greet from this character** turns it off on just the one you're playing, say an alt in another guild (hover its info icon for a reminder).
+First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** settings. Greetings and settings are shared by every character on this game install, and **Greet from this character** turns it off on just the one you're playing, say an alt in another guild (hover its info icon for a reminder). Turn off **Greet while in a dungeon, raid or other instance** to get no greet prompts inside dungeons, raids, battlegrounds, arenas and keystone runs. Guildmates who come online while you're inside aren't prompted for later.
 
 ### Greeting together
 
@@ -398,7 +398,7 @@ Guildmates running the add-on share where they are, so you can see where the gui
 - **World map**: one marker per continent, over its land (Kalimdor and the Eastern Kingdoms have fixed spots). Point at a continent with a count to list its guildmates under its name.
 - Hover a single guildmate's dot to see their name, alias or main (the same as their [chat tag](#chat-tags)) and level, as `Name (Main) (70)`. A count has no tooltip of its own: its area's list shows everyone there.
 - Guildmates without the add-on, and those whose position hasn't arrived yet, still count on the continent and world maps at zone level, using the zone the guild roster shows. On their zone's own map each gets a dot at the zone's center, since the roster names only the zone; its tooltip ends with **(exact location unknown)**. They never get a dot on the minimap.
-- While you're in a party, guildmates outside it are dimmed on every map and the minimap, so your party members stand out. A marker with nobody from your party is dimmed as a whole.
+- While you're in a party, guildmates outside it are slightly dimmed on every map and the minimap, so your party members stand out. A marker with nobody from your party is dimmed as a whole.
 - Your own characters never show.
 
 Guildmates in your zone move every 10 seconds or so; everyone else updates about every 2 minutes, and promptly after a zone change. Same-zone updates go by whisper to at most the 10 guildmates heard from most recently. If whispers don't work, the add-on falls back to the guild-wide update alone.
