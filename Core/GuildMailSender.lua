@@ -7,11 +7,14 @@ local _, addon = ...
 -- answer to the last one went nowhere in game. Answers that arrive with
 -- nothing in flight (the player sending a mail of their own) are ignored.
 --
--- When the game doesn't answer within ANSWER_SECONDS, or blocks the send,
--- sending pauses on that mail. Resume (from a click on Send next) sends it
--- again; the game always takes a mail sent from a click. After one pause,
--- every later mail also waits for a click, since the game would likely
--- stall again. An answer that turns up late still counts.
+-- When the game doesn't answer within ANSWER_SECONDS, that mail fails
+-- ("no response") and sending moves on; it's tried once more at the end of
+-- the list, and fails for good if the game doesn't answer then either.
+--
+-- When the game blocks the send, sending pauses on that mail. Resume (from
+-- a click on Send next) sends it again; the game always takes a mail sent
+-- from a click. After one pause, every later mail also waits for a click,
+-- since the game would likely block again.
 --
 -- Stop halts sending: at once when nothing is in flight, else as soon as
 -- the game answers the mail in flight. Resume then carries on with the
@@ -39,6 +42,8 @@ local GuildMailSender = {
     SENT = "sent",
     FAILED = "failed",
     REFUSED = "the game didn't take the mail",
+    NO_RESPONSE = "no response",
+    NO_RESPONSE_RETRY = "no response, will try again at the end",
     GAP_SECONDS = 1,
     ANSWER_SECONDS = 10,
     -- An error this soon after a send is taken to be about that mail.
@@ -60,6 +65,11 @@ function GuildMailSender.Create(options)
         end,
         onChange = options.onChange or function() end,
         mails = {},
+        -- The mails to send, as indexes into `mails`, in order; a mail
+        -- with no answer is added again at the end, once.
+        queue = {},
+        position = nil,
+        retried = {},
         statuses = {},
         reasons = {},
         state = GuildMailSender.IDLE,
@@ -104,12 +114,14 @@ function Sender:Start(mails)
         return false
     end
     self.mails = mails
-    self.statuses, self.reasons = {}, {}
+    self.statuses, self.reasons, self.queue, self.retried = {}, {}, {}, {}
     local index
     for index = 1, #mails do
         self.statuses[index] = GuildMailSender.PENDING
+        self.queue[index] = index
     end
     self.state = GuildMailSender.SENDING
+    self.position = 1
     self.current = 1
     self.inFlight = false
     self.manual = false
@@ -137,7 +149,8 @@ end
 -- Sends the current mail. One the client won't take is marked failed at
 -- once and the next one is tried.
 function Sender:sendCurrent()
-    while self.current ~= nil and self.current <= #self.mails do
+    while self.position ~= nil and self.position <= #self.queue do
+        self.current = self.queue[self.position]
         self.attempt = self.attempt + 1
         self.lastFailed = nil
         local ok, taken = pcall(self.send, self.mails[self.current])
@@ -145,8 +158,11 @@ function Sender:sendCurrent()
             self.inFlight = true
             self.fresh = true
             self.state = GuildMailSender.SENDING
+            -- A mail being tried again is pending once more.
+            self.statuses[self.current] = GuildMailSender.PENDING
+            self.reasons[self.current] = nil
             self:later(GuildMailSender.ANSWER_SECONDS, function()
-                self:pause()
+                self:noAnswer()
             end)
             self:later(GuildMailSender.ERROR_SECONDS, function()
                 self.fresh = false
@@ -156,21 +172,35 @@ function Sender:sendCurrent()
         end
         self.statuses[self.current] = GuildMailSender.FAILED
         self.reasons[self.current] = GuildMailSender.REFUSED
-        self.current = self.current + 1
+        self.position = self.position + 1
     end
     self:finishAll()
 end
 
+-- The game didn't answer the mail in flight in time: it fails, is queued
+-- to be tried once more at the end, and sending moves on.
+function Sender:noAnswer()
+    if not self.inFlight then
+        return
+    end
+    local reason = GuildMailSender.NO_RESPONSE
+    if not self.retried[self.current] then
+        self.retried[self.current] = true
+        table.insert(self.queue, self.current)
+        reason = GuildMailSender.NO_RESPONSE_RETRY
+    end
+    self:finish(GuildMailSender.FAILED, reason)
+end
+
 function Sender:finishAll()
     self.current = nil
+    self.position = nil
     self.inFlight = false
     self.state = GuildMailSender.DONE
     self:changed()
 end
 
 -- Waits for a click on Send next before the current mail goes (again).
--- A mail that may still be on its way stays in flight, so a late answer
--- counts.
 function Sender:pause()
     if not self:IsSending() or self.current == nil then
         return
@@ -214,11 +244,12 @@ end
 function Sender:advance()
     self.attempt = self.attempt + 1
     self.inFlight = false
-    self.current = self.current + 1
-    if self.current > #self.mails then
+    self.position = self.position + 1
+    if self.position > #self.queue then
         self:finishAll()
         return
     end
+    self.current = self.queue[self.position]
     if self.stopping then
         self.state = GuildMailSender.STOPPED
         self:changed()

@@ -35,7 +35,7 @@ local GuildMail = {
     OFFICERS_ONLY = "Guild Mail is for officers.",
     NO_GUILD = "Guild Mail needs a guild.",
     HINT_SENDING = "Sending...",
-    HINT_PAUSED = "The game didn't send the last mail on its own. Press Send next for each mail.",
+    HINT_PAUSED = "The game blocked the last mail. Press Send next for each mail.",
     HINT_STOPPING = "Stopping after this mail...",
     HINT_STOPPED = "Stopped. Continue sends to the rest; End gives up on them.",
     SEND_TEXT = "Send",
@@ -492,7 +492,7 @@ end
 
 -- Asks for confirmation before sending. Returns false when Send can't be
 -- pressed now.
--- While sending is paused (the game didn't send a mail on its own), Send
+-- While sending is paused (the game blocked a mail), Send
 -- next sends the next mail at once: from a click, the game takes it.
 -- After Stop, Continue sends to the rows still pending.
 function Mail:RequestSend()
