@@ -1191,6 +1191,33 @@ test.test("guild mail window: typed text is passed back, but text it sets itself
     test.assertEqual("Raid tonight", world.calls[1].args[1])
 end)
 
+test.test("guild mail window: preferences and recipients open beside it, one at a time", function()
+    local _, world = newWindow()
+    world.window:Render(MODEL)
+    local preferences, recipients = world.window.preferences, world.window.recipients
+
+    test.assertFalse(preferences.shown)
+    test.assertFalse(recipients.shown)
+    world.window.editPreferences.scripts.OnClick(world.window.editPreferences)
+    test.assertTrue(preferences.shown)
+
+    world.window.editRecipients.scripts.OnClick(world.window.editRecipients)
+    test.assertFalse(preferences.shown)
+    test.assertTrue(recipients.shown)
+    test.assertEqual("Recipients (3 mails)", recipients.heading.text)
+
+    world.window.editRecipients.scripts.OnClick(world.window.editRecipients)
+    test.assertFalse(recipients.shown)
+end)
+
+test.test("guild mail window: the preferences are summed up beside their Edit button", function()
+    local _, world = newWindow()
+    world.window:Render(MODEL)
+
+    test.assertEqual("Send to: Most recently online character · Skip Discord names",
+        world.window.preferencesText.text)
+end)
+
 test.test("guild mail window: the confirmation replaces Send until answered", function()
     local _, world = newWindow()
     local confirming = {}

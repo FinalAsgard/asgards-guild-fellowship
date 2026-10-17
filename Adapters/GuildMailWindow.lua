@@ -1,12 +1,17 @@
 local _, addon = ...
 
--- Guild Mail's window: rank check boxes, the Send to choice (mains, most
--- recently online character, or every character), two check boxes to skip
--- players with a Discord name on file and characters not online in 30 days,
--- a subject and a message, the estimated cost and the officer's money, the list
--- of who will get the mail (each with a check box to leave them out), and Send (with a confirmation in the window,
--- then progress). It only draws GuildMail's model and passes clicks and
--- typing back. It opens beside the mailbox when opened from there, and can
+-- Guild Mail's window: rank check boxes, a line saying who in each player
+-- gets the mail and who is skipped, a subject and a message, how many will
+-- get it, the estimated cost and the officer's money, and Send (with a
+-- confirmation in the window, then progress). Two Edit buttons open panels
+-- beside the window, one at a time:
+--   Preferences  the Send to choice (mains, most recently online character,
+--                or every character) and two check boxes to skip players
+--                with a Discord name on file and characters not online in
+--                30 days
+--   Recipients   the list of who will get the mail, each with a check box
+--                to leave them out
+-- It only draws GuildMail's model and passes clicks and typing back. It opens beside the mailbox when opened from there, and can
 -- be dragged anywhere. Officers also get a Guild Mail button beside the
 -- mailbox's Send Mail tab.
 --
@@ -14,17 +19,21 @@ local _, addon = ...
 -- failing frame call leaves the window as it was rather than raising.
 local GuildMailWindow = {
     WIDTH = 440,
-    HEIGHT = 726,
+    HEIGHT = 630,
     PADDING = 14,
     RANK_COLUMNS = 2,
     RANK_ROW_HEIGHT = 22,
     -- Up to 10 guild ranks, plus the temporary Tester rank (#205).
     RANK_ROWS = 6,
     MODE_ROW_HEIGHT = 20,
-    MESSAGE_HEIGHT = 90,
-    LIST_HEIGHT = 120,
+    MESSAGE_HEIGHT = 200,
+    PANEL_WIDTH = 360,
+    PREFERENCES_HEIGHT = 190,
+    -- The recipients panel is as tall as the window.
+    LIST_HEIGHT = 560,
     LIST_ROW_HEIGHT = 18,
     BUTTON_WIDTH = 96,
+    EDIT_BUTTON_WIDTH = 60,
     BUTTON_HEIGHT = 24,
     MAILBOX_BUTTON_WIDTH = 96,
     -- The game's limits on a mail's subject and body.
@@ -106,6 +115,45 @@ function Window:scrollArea(parent, top, height)
     return scroll
 end
 
+-- A panel beside the window, hidden until its Edit button is pressed.
+function Window:panel(title, height)
+    local frame = self.frame
+    local panel = self.environment.CreateFrame("Frame", nil, frame)
+    panel:SetWidth(GuildMailWindow.PANEL_WIDTH)
+    panel:SetHeight(height)
+    panel:SetPoint("TOPLEFT", frame, "TOPRIGHT", 4, 0)
+    panel:SetClampedToScreen(true)
+    panel:EnableMouse(true)
+    local background = panel:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(panel)
+    background:SetColorTexture(0.05, 0.05, 0.08, 0.95)
+    local heading = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    heading:SetPoint("TOP", panel, "TOP", 0, -12)
+    heading:SetText(title)
+    panel.heading = heading
+    local close = self.environment.CreateFrame("Button", nil, panel, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, 0)
+    close:SetScript("OnClick", function()
+        panel:Hide()
+        self.openPanel = nil
+    end)
+    panel:Hide()
+    return panel
+end
+
+-- Shows `panel`, or hides it when it's already up. Only one panel is up
+-- at a time.
+function Window:togglePanel(panel)
+    local opening = self.openPanel ~= panel
+    self.preferences:Hide()
+    self.recipients:Hide()
+    self.openPanel = nil
+    if opening then
+        panel:Show()
+        self.openPanel = panel
+    end
+end
+
 -- The window, made on first use.
 function Window:window()
     if self.frame ~= nil then
@@ -146,31 +194,13 @@ function Window:window()
     self.ranksTop = top - 18
     top = self.ranksTop - GuildMailWindow.RANK_ROWS * GuildMailWindow.RANK_ROW_HEIGHT - 8
 
-    self:label(frame, "Send to", top)
-    local index
-    for index = 1, #addon.GuildMail.MODES do
-        local mode = addon.GuildMail.MODES[index]
-        local radio = createFrame("CheckButton", nil, frame, "UIRadioButtonTemplate")
-        radio:SetPoint("TOPLEFT", frame, "TOPLEFT", padding + 4, top - 18 - (index - 1) * GuildMailWindow.MODE_ROW_HEIGHT)
-        local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        label:SetPoint("LEFT", radio, "RIGHT", 4, 0)
-        label:SetText(mode.label)
-        radio.modeId = mode.id
-        radio:SetScript("OnClick", function(clicked)
-            self.onMode(clicked.modeId)
-        end)
-        self.modeButtons[index] = radio
-    end
-    top = top - 18 - #addon.GuildMail.MODES * GuildMailWindow.MODE_ROW_HEIGHT - 8
-
-    self.skipDiscord = self:checkBox(frame, "Skip players with a Discord name on file", top, function(checked)
-        self.onSkipDiscord(checked)
+    self.preferencesText = self:label(frame, "", top - 4, "GameFontHighlightSmall")
+    self.preferencesText:SetPoint("RIGHT", frame, "RIGHT", -padding - GuildMailWindow.EDIT_BUTTON_WIDTH - 6, 0)
+    self.editPreferences = self:button(frame, "Edit", GuildMailWindow.EDIT_BUTTON_WIDTH, function()
+        self:togglePanel(self.preferences)
     end)
-    self.activeOnly = self:checkBox(frame, "Skip characters not online in the last " ..
-        addon.GuildMail.ACTIVE_DAYS .. " days", top - 22, function(checked)
-        self.onActiveOnly(checked)
-    end)
-    top = top - 50
+    self.editPreferences:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -padding, top)
+    top = top - 32
 
     self:label(frame, "Subject", top)
     local subject = createFrame("EditBox", nil, frame, "InputBoxTemplate")
@@ -219,14 +249,12 @@ function Window:window()
     self.body = body
     top = top - 18 - GuildMailWindow.MESSAGE_HEIGHT - 10
 
-    self.listLabel = self:label(frame, "Recipients", top)
-    local listScroll = self:scrollArea(frame, top - 18, GuildMailWindow.LIST_HEIGHT)
-    local list = createFrame("Frame", nil, listScroll)
-    list:SetWidth(GuildMailWindow.WIDTH - 2 * padding - 22)
-    list:SetHeight(GuildMailWindow.LIST_HEIGHT)
-    listScroll:SetScrollChild(list)
-    self.list = list
-    top = top - 18 - GuildMailWindow.LIST_HEIGHT - 10
+    self.listLabel = self:label(frame, "Recipients", top - 4)
+    self.editRecipients = self:button(frame, "Edit", GuildMailWindow.EDIT_BUTTON_WIDTH, function()
+        self:togglePanel(self.recipients)
+    end)
+    self.editRecipients:SetPoint("LEFT", self.listLabel, "RIGHT", 8, 0)
+    top = top - 30
 
     local cost = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     cost:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, top)
@@ -262,8 +290,55 @@ function Window:window()
     confirmText:SetJustifyH("LEFT")
     self.confirmText = confirmText
 
+    self:preferencesPanel()
+    self:recipientsPanel()
+
     frame:Hide()
     return frame
+end
+
+-- The Preferences panel: the Send to choice and the two skip boxes.
+function Window:preferencesPanel()
+    local panel = self:panel("Preferences", GuildMailWindow.PREFERENCES_HEIGHT)
+    self.preferences = panel
+    local top = -36
+    self:label(panel, "Send to", top)
+    local index
+    for index = 1, #addon.GuildMail.MODES do
+        local mode = addon.GuildMail.MODES[index]
+        local radio = self.environment.CreateFrame("CheckButton", nil, panel, "UIRadioButtonTemplate")
+        radio:SetPoint("TOPLEFT", panel, "TOPLEFT", GuildMailWindow.PADDING + 4,
+            top - 18 - (index - 1) * GuildMailWindow.MODE_ROW_HEIGHT)
+        local label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("LEFT", radio, "RIGHT", 4, 0)
+        label:SetText(mode.label)
+        radio.modeId = mode.id
+        radio:SetScript("OnClick", function(clicked)
+            self.onMode(clicked.modeId)
+        end)
+        self.modeButtons[index] = radio
+    end
+    top = top - 18 - #addon.GuildMail.MODES * GuildMailWindow.MODE_ROW_HEIGHT - 8
+
+    self.skipDiscord = self:checkBox(panel, "Skip players with a Discord name on file", top, function(checked)
+        self.onSkipDiscord(checked)
+    end)
+    self.activeOnly = self:checkBox(panel, "Skip characters not online in the last " ..
+        addon.GuildMail.ACTIVE_DAYS .. " days", top - 22, function(checked)
+        self.onActiveOnly(checked)
+    end)
+end
+
+-- The Recipients panel: who will get the mail, each with a check box.
+function Window:recipientsPanel()
+    local panel = self:panel("Recipients", GuildMailWindow.HEIGHT)
+    self.recipients = panel
+    local listScroll = self:scrollArea(panel, -36, GuildMailWindow.LIST_HEIGHT)
+    local list = self.environment.CreateFrame("Frame", nil, listScroll)
+    list:SetWidth(GuildMailWindow.PANEL_WIDTH - 2 * GuildMailWindow.PADDING - 22)
+    list:SetHeight(GuildMailWindow.LIST_HEIGHT)
+    listScroll:SetScrollChild(list)
+    self.list = list
 end
 
 -- A check box with its label, across the window at `top`.
@@ -361,6 +436,25 @@ function Window:Hide()
     end
 end
 
+-- The line beside Preferences' Edit button: "Send to: Mains only · Skip
+-- Discord names · Skip inactive".
+function GuildMailWindow.PreferencesText(model)
+    local parts = {}
+    local index
+    for index = 1, #(model.modes or {}) do
+        if model.modes[index].checked then
+            table.insert(parts, "Send to: " .. model.modes[index].label)
+        end
+    end
+    if model.skipDiscord then
+        table.insert(parts, "Skip Discord names")
+    end
+    if model.activeOnly then
+        table.insert(parts, "Skip inactive")
+    end
+    return table.concat(parts, " · ")
+end
+
 local function setText(box, text)
     -- Retyping the same text would move the cursor while someone types.
     if box:GetText() ~= text then
@@ -412,7 +506,9 @@ function Window:Render(model)
     setText(self.subject, model.subject)
     setText(self.body, model.body)
 
+    self.preferencesText:SetText(GuildMailWindow.PreferencesText(model))
     self.listLabel:SetText("Recipients (" .. model.countText .. ")")
+    self.recipients.heading:SetText("Recipients (" .. model.countText .. ")")
     for index = 1, #model.recipients do
         local row = model.recipients[index]
         local details = { row.rankName }
