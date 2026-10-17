@@ -2043,9 +2043,6 @@ if clientProfile.supported then
                 store:SetGuildMailDraft(draft)
             end
         end,
-        -- TEMPORARY (#205): a Tester rank for trying Guild Mail without
-        -- mailing the officers.
-        testers = { "Beorn Zelwindran", "Zillatha Zelwindran" },
         view = guildMailWindow,
     })
     router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()
@@ -2055,70 +2052,6 @@ if clientProfile.supported then
         local opened, reason = guildMail:Open(client:IsMailboxOpen())
         if not opened then
             rosterController:Print(reason)
-        end
-    end)
-    -- TEMPORARY for the in-game check in #197; remove after testing.
-    -- `/agf mailtest Name One, Name-Realm, Zzqxnotreal` sends a short test
-    -- mail to each name through Guild Mail's own sender and client:SendMail,
-    -- printing each step and anything the game reports.
-    local mailTestSender
-    mailTestSender = addon.GuildMailSender.Create({
-        send = function(item)
-            local taken = client:SendMail(item.to, item.subject, item.body)
-            rosterController:Print("[mailtest] SendMail(" .. item.to .. ") -> " .. tostring(taken))
-            return taken
-        end,
-        after = function(seconds, callback)
-            return client:After(seconds, callback)
-        end,
-        onChange = function()
-            local progress = mailTestSender:Progress()
-            rosterController:Print("[mailtest] sent " .. progress.sent .. ", failed " .. progress.failed ..
-                " of " .. progress.total .. " (" .. progress.state ..
-                (mailTestSender:IsPaused() and "; type mailtest next to send the next one" or "") .. ")")
-        end,
-    })
-    local mailTestFrame
-    addon.mailTest = mailTestSender
-    router:Register("mailtest", "TEMPORARY: test mail sending (#197)", function(arguments)
-        if mailTestFrame == nil then
-            mailTestFrame = client:CreateEventFrame()
-            client:SetEventHandler(mailTestFrame, function(_, eventName, ...)
-                if eventName ~= "UI_ERROR_MESSAGE" or mailTestSender:IsSending() then
-                    local parts = {}
-                    local index
-                    for index = 1, select("#", ...) do
-                        parts[index] = tostring((select(index, ...)))
-                    end
-                    rosterController:Print("[mailtest] " .. eventName .. " " .. table.concat(parts, ", "))
-                end
-            end)
-            client:RegisterEvent(mailTestFrame, "UI_ERROR_MESSAGE")
-            client:RegisterEvent(mailTestFrame, "ADDON_ACTION_BLOCKED")
-            client:RegisterEvent(mailTestFrame, "ADDON_ACTION_FORBIDDEN")
-        end
-        if string.lower(arguments or "") == "next" then
-            if not mailTestSender:Resume() then
-                rosterController:Print("[mailtest] nothing is paused")
-            end
-            return
-        end
-        local mails = {}
-        local name
-        for name in string.gmatch(arguments or "", "[^,]+") do
-            name = string.match(name, "^%s*(.-)%s*$")
-            if name ~= "" then
-                table.insert(mails, { to = name, subject = "AGF test " .. (#mails + 1),
-                    body = "Guild Mail test " .. (#mails + 1) })
-            end
-        end
-        if #mails == 0 then
-            rosterController:Print("[mailtest] Usage: mailtest Name One, Name-Realm, Zzqxnotreal")
-            return
-        end
-        rosterController:Print("[mailtest] mailbox open: " .. tostring(client:IsMailboxOpen()))
-        if not mailTestSender:Start(mails) then
-            rosterController:Print("[mailtest] already sending; /reload to reset")
         end
     end)
     -- Prompts stack from a place the user can move; it's saved account-wide.
@@ -2796,7 +2729,6 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             -- text.
             local message = type(blockedCall) == "string" and blockedCall or blockedAddon
             guildMail:OnError(message)
-            addon.mailTest:OnError(message)
             return
         end
         if kind == "blocked" then
@@ -2804,9 +2736,6 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             if not string.find(tostring(blockedCall), "SendMail", 1, true) then
                 return
             end
-            -- TEMPORARY for #197.
-            rosterController:Print("[mailtest] blocked: " .. tostring(blockedAddon) .. " " .. tostring(blockedCall))
-            addon.mailTest:OnBlocked()
             if guildMail:OnBlocked() then
                 rosterController:Print("The game blocked Guild Mail's send. Press Send next for each mail.")
             end
@@ -2819,14 +2748,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildMail:OnMailboxClosed()
         elseif kind == "sent" then
             guildMail:OnSent()
-            addon.mailTest:OnSent()
         elseif kind == "failed" then
             guildMail:OnFailed(nil)
-            addon.mailTest:OnFailed(nil)
-        end
-        -- TEMPORARY for #197: shows every mail event while testing.
-        if addon.mailTest:IsSending() or kind == "sent" or kind == "failed" then
-            rosterController:Print("[mailtest] mail event: " .. kind)
         end
     end)
     -- Without a chat filter API, chat is simply left untagged.

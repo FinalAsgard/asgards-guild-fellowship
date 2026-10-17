@@ -41,8 +41,6 @@ local _, addon = ...
 --               mode, skipDiscord, activeOnly }, `ranks` a list of rank
 --               indexes), or nil
 --   saveDraft   function(draft) saves it, in the same shape
---   testers     TEMPORARY (#205): character names a "Tester" rank mails,
---               so Guild Mail can be tried without mailing the guild
 --   view        optional window: Show(fromMailbox), Render(model),
 --               IsShown()
 local GuildMail = {
@@ -70,9 +68,6 @@ local GuildMail = {
     ONLINE_TEXT = "Online",
     -- "Skip characters not online in the last 30 days".
     ACTIVE_DAYS = 30,
-    -- TEMPORARY (#205): the pretend rank that mails only the testers.
-    TESTER_RANK = -1,
-    TESTER_RANK_NAME = "Tester (temporary)",
     -- The Send to choices, in the order shown.
     MODES = {
         { id = "mains", label = "Mains only" },
@@ -177,7 +172,6 @@ function GuildMail.Create(options)
         saveDraft = options.saveDraft or function() end,
         draftLoaded = false,
         view = options.view,
-        testers = options.testers or {},
         ranks = {},
         mode = addon.GuildMailAudience.MAINS,
         skipDiscord = false,
@@ -491,10 +485,6 @@ function Mail:rankList(partition)
             return first.index < second.index
         end)
     end
-    -- TEMPORARY (#205): the Tester rank comes first.
-    if #self.testers > 0 then
-        table.insert(list, 1, { index = GuildMail.TESTER_RANK, name = GuildMail.TESTER_RANK_NAME })
-    end
     local index
     for index = 1, #list do
         list[index].checked = self.ranks[list[index].index] == true
@@ -533,23 +523,6 @@ function Mail:Recipients()
         skipDiscord = self.skipDiscord,
         activeDays = self.activeOnly and GuildMail.ACTIVE_DAYS or nil,
     })
-    -- TEMPORARY (#205): the Tester rank mails exactly the testers, first,
-    -- whatever Send to says.
-    if ranks[GuildMail.TESTER_RANK] then
-        local listed = {}
-        local index
-        for index = 1, #recipients do
-            listed[string.lower(recipients[index].name)] = true
-        end
-        for index = #self.testers, 1, -1 do
-            local name = self.testers[index]
-            if not listed[string.lower(name)] then
-                table.insert(recipients, 1, {
-                    key = name, name = name, playerName = name, rank = GuildMail.TESTER_RANK,
-                })
-            end
-        end
-    end
     local index
     for index = 1, #recipients do
         recipients[index].mail = addon.GuildMailComposer.Compose(self.subject, self.body, recipients[index],
