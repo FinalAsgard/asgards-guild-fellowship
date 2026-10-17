@@ -38,6 +38,8 @@ local GuildMail = {
     HINT_NO_SUBJECT = "Write a subject.",
     HINT_NO_MAILBOX = "Open a mailbox to send.",
     ONLINE_TEXT = "Online",
+    -- "Skip characters not online in the last 30 days".
+    ACTIVE_DAYS = 30,
     -- TEMPORARY (#205): the pretend rank that mails only the testers.
     TESTER_RANK = -1,
     TESTER_RANK_NAME = "Tester (temporary)",
@@ -86,6 +88,8 @@ function GuildMail.Create(options)
         testers = options.testers or {},
         ranks = {},
         mode = addon.GuildMailAudience.MAINS,
+        skipDiscord = false,
+        activeOnly = false,
         subject = "",
         body = "",
         mailboxOpen = false,
@@ -182,6 +186,28 @@ function Mail:SetMode(mode)
     return true
 end
 
+-- "Skip players with a Discord name on file".
+function Mail:SetSkipDiscord(skip)
+    skip = skip == true
+    if skip == self.skipDiscord or not self:editable() then
+        return false
+    end
+    self.skipDiscord = skip
+    self:refresh()
+    return true
+end
+
+-- "Skip characters not online in the last 30 days".
+function Mail:SetActiveOnly(active)
+    active = active == true
+    if active == self.activeOnly or not self:editable() then
+        return false
+    end
+    self.activeOnly = active
+    self:refresh()
+    return true
+end
+
 function Mail:SetSubject(text)
     text = type(text) == "string" and text or ""
     if text == self.subject or not self:editable() then
@@ -262,6 +288,8 @@ function Mail:Recipients()
         mode = self.mode,
         live = ok and type(live) == "table" and live or nil,
         selfKey = self.selfKey(),
+        skipDiscord = self.skipDiscord,
+        activeDays = self.activeOnly and GuildMail.ACTIVE_DAYS or nil,
     })
     -- TEMPORARY (#205): the Tester rank mails exactly the testers, first,
     -- whatever Send to says.
@@ -402,6 +430,7 @@ end
 -- What the window shows:
 --   ranks        { index, name, checked } for every rank
 --   modes        { id, label, checked } for each Send to choice
+--   skipDiscord, activeOnly   the two skip check boxes
 --   subject, body
 --   recipients   { name, playerName, rank, rankName, lastSeen, status,
 --                reason }; status is nil
@@ -451,6 +480,8 @@ function Mail:Model()
     return {
         ranks = ranks,
         modes = modes,
+        skipDiscord = self.skipDiscord,
+        activeOnly = self.activeOnly,
         subject = self.subject,
         body = self.body,
         recipients = rows,

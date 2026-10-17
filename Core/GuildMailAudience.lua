@@ -10,7 +10,9 @@ local _, addon = ...
 --           recent), one per player
 --   all     every candidate
 -- Departed characters are never mailed, and neither is any character of the
--- sender's own player.
+-- sender's own player. Two filters can drop more, before the mode picks:
+-- every character of a player with a Discord name on file, and characters
+-- not online within the last N days.
 --
 -- Pure: it reads a FellowshipStore partition and the live roster facts it's
 -- given, and never touches the game.
@@ -62,6 +64,9 @@ end
 --   live     live roster facts by character key ({ online, lastOnline }),
 --            for the last-online times
 --   selfKey  the sender's character key, or nil
+--   skipDiscord  true to leave out players with a Discord name on file
+--   activeDays   when set, only characters online now or within this many
+--                days count; one the live roster doesn't know doesn't
 function GuildMailAudience.Recipients(partition, options)
     options = options or {}
     local ranks = options.ranks or {}
@@ -69,11 +74,18 @@ function GuildMailAudience.Recipients(partition, options)
     local live = options.live or {}
     local sender = options.selfKey and partition:GetCharacter(options.selfKey)
     local own = sender and sender.player
+    local activeHours = type(options.activeDays) == "number" and options.activeDays * 24 or nil
 
     local recipients = {}
     partition:EachPlayer(function(id, player)
         if id == own then
             return
+        end
+        if options.skipDiscord then
+            local discord = partition:PlayerProfileText(id, "discord")
+            if type(discord) == "string" and string.match(discord, "%S") then
+                return
+            end
         end
         local main = player.main and partition:GetCharacter(player.main)
         local playerName = player.alias or (main and main.name) or player.main
@@ -83,10 +95,12 @@ function GuildMailAudience.Recipients(partition, options)
         for index = 1, #keys do
             local key = keys[index]
             local character = partition:GetCharacter(key)
+            local member = live[key]
+            local away = hoursAway(member)
             if partition:IsInGuild(key) and type(character.rank) == "number" and ranks[character.rank]
                 and (mode ~= GuildMailAudience.MAINS or key == player.main)
+                and (activeHours == nil or (away ~= nil and away <= activeHours))
             then
-                local member = live[key]
                 table.insert(candidates, {
                     key = key,
                     playerId = id,
@@ -95,7 +109,7 @@ function GuildMailAudience.Recipients(partition, options)
                     rank = character.rank,
                     online = member ~= nil and member.online == true,
                     lastOnline = member and member.lastOnline,
-                    hoursAway = hoursAway(member),
+                    hoursAway = away,
                 })
             end
         end

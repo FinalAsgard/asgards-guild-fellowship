@@ -168,6 +168,77 @@ test.test("guild mail audience: each recipient knows its player and when it was 
     test.assertEqual("Zed Stone", recipients[#recipients].playerName)
 end)
 
+local function audience(options)
+    local addon, partition = setup()
+    if options.before then
+        options.before(partition)
+    end
+    options.before = nil
+    options.selfKey = options.selfKey or "tool box-camelot"
+    return addon.GuildMailAudience.Recipients(partition, options)
+end
+
+test.test("guild mail audience: a Discord name on any character skips the whole player", function()
+    local recipients = audience({
+        ranks = { [2] = true, [3] = true }, mode = "all", skipDiscord = true,
+        before = function(partition)
+            -- Set on Cog Wheel, an alt: Ann Bell goes too.
+            partition:SetProfileText("cog wheel-camelot", "discord", "annie#1234", 10, "cog wheel-camelot")
+        end,
+    })
+
+    test.assertEqual("Gus Reed,Bo Reed,Zed Stone", names(recipients))
+end)
+
+test.test("guild mail audience: a blank Discord name doesn't count as one", function()
+    local recipients = audience({
+        ranks = { [2] = true }, skipDiscord = true,
+        before = function(partition)
+            partition:SetProfileText("gus reed-camelot", "discord", "   ", 10, "gus reed-camelot")
+            partition:SetProfileText("ann bell-camelot", "discord", "", 10, "ann bell-camelot")
+        end,
+    })
+
+    test.assertEqual("Ann Bell,Gus Reed", names(recipients))
+end)
+
+test.test("guild mail audience: without the box ticked, Discord names don't matter", function()
+    local recipients = audience({
+        ranks = { [2] = true },
+        before = function(partition)
+            partition:SetProfileText("ann bell-camelot", "discord", "annie#1234", 10, "ann bell-camelot")
+        end,
+    })
+
+    test.assertEqual("Ann Bell,Gus Reed", names(recipients))
+end)
+
+local EDGES = {
+    ["zed stone-camelot"] = { online = false, lastOnline = { years = 0, months = 0, days = 30, hours = 0 } },
+    ["gus reed-camelot"] = { online = false, lastOnline = { years = 0, months = 0, days = 30, hours = 1 } },
+    ["bo reed-camelot"] = { online = false, lastOnline = { years = 0, months = 1, days = 0, hours = 0 } },
+    ["cog wheel-camelot"] = { online = true },
+}
+
+test.test("guild mail audience: only characters online in the last 30 days, at the edges", function()
+    -- Exactly 30 days and "1 month" are in; 30 days and an hour is out;
+    -- Ann Bell isn't in the live roster, so she's out too.
+    local recipients = audience({ ranks = { [2] = true, [3] = true }, mode = "all", live = EDGES, activeDays = 30 })
+
+    test.assertEqual("Bo Reed,Cog Wheel,Zed Stone", names(recipients))
+end)
+
+test.test("guild mail audience: the 30-day filter applies before the mode picks", function()
+    -- Gus Reed's main is out, so Mains only mails nobody of his player;
+    -- most recently online then picks Bo Reed.
+    test.assertEqual("Zed Stone", names(audience({
+        ranks = { [2] = true, [3] = true }, mode = "mains", live = EDGES, activeDays = 30,
+    })))
+    test.assertEqual("Bo Reed,Cog Wheel,Zed Stone", names(audience({
+        ranks = { [2] = true, [3] = true }, mode = "recent", live = EDGES, activeDays = 30,
+    })))
+end)
+
 test.test("guild mail audience: no ranks ticked means no one", function()
     test.assertEqual("", names(recipientsFor({})))
 end)
@@ -587,6 +658,28 @@ test.test("guild mail: recipient rows show the player and when they were last on
     test.assertEqual("", rows[3].lastSeen)
 end)
 
+test.test("guild mail: the skip boxes start off and change the list", function()
+    local _, world = newMail()
+    world.partition:SetProfileText("ann bell-camelot", "discord", "annie#1234", 10, "ann bell-camelot")
+    world.mail:Open(false)
+    world.mail:SetRank(2, true)
+
+    test.assertFalse(world.view.model.skipDiscord)
+    test.assertFalse(world.view.model.activeOnly)
+    test.assertEqual("2 mails", world.view.model.countText)
+
+    test.assertTrue(world.mail:SetSkipDiscord(true))
+    test.assertTrue(world.view.model.skipDiscord)
+    test.assertEqual("Gus Reed", world.view.model.recipients[1].name)
+    test.assertFalse(world.mail:SetSkipDiscord(true))
+
+    -- In LIVE, Gus Reed was on 2 days ago.
+    test.assertTrue(world.mail:SetActiveOnly(true))
+    test.assertEqual("1 mail", world.view.model.countText)
+    world.mail:SetSkipDiscord(false)
+    test.assertEqual("2 mails", world.view.model.countText)
+end)
+
 test.test("guild mail: Send to can't change while sending", function()
     local _, world = newMail()
     readyToSend(world)
@@ -594,6 +687,8 @@ test.test("guild mail: Send to can't change while sending", function()
     world.mail:Confirm()
 
     test.assertFalse(world.mail:SetMode("all"))
+    test.assertFalse(world.mail:SetSkipDiscord(true))
+    test.assertFalse(world.mail:SetActiveOnly(true))
 end)
 
 test.test("guild mail: Send waits for ranks, recipients, a subject and an open mailbox", function()
@@ -773,6 +868,8 @@ local function newWindow()
     world.window = addon.GuildMailWindow.Create({ environment = environment }, {
         onRank = record("rank"),
         onMode = record("mode"),
+        onSkipDiscord = record("skipDiscord"),
+        onActiveOnly = record("activeOnly"),
         onSubject = record("subject"),
         onSend = record("send"),
         onConfirm = record("confirm"),
@@ -800,6 +897,8 @@ local MODEL = {
         { name = "Gus Reed", rank = 2, rankName = "Member", status = "failed", reason = "Mailbox full" },
     },
     countText = "3 mails",
+    skipDiscord = true,
+    activeOnly = false,
     canSend = true,
     confirming = false,
     confirmText = "Send 2 mails?",
@@ -818,6 +917,19 @@ test.test("guild mail window: draws the ranks, the text and the recipients", fun
     test.assertContains(world.window.listText.text, "Ann Bell")
     test.assertContains(world.window.listText.text, "Mailbox full")
     test.assertContains(world.window.listText.text, "Cog Wheel  |cff999999Annie · Initiate · Online|r")
+end)
+
+test.test("guild mail window: the skip boxes are drawn and passed back", function()
+    local _, world = newWindow()
+    world.window:Render(MODEL)
+
+    test.assertTrue(world.window.skipDiscord:GetChecked())
+    test.assertFalse(world.window.activeOnly:GetChecked())
+    world.window.activeOnly:SetChecked(true)
+    world.window.activeOnly.scripts.OnClick(world.window.activeOnly)
+
+    test.assertEqual("activeOnly", world.calls[1].name)
+    test.assertTrue(world.calls[1].args[1])
 end)
 
 test.test("guild mail window: the Send to choice is drawn and passed back", function()

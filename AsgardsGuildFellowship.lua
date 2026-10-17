@@ -1952,6 +1952,16 @@ if clientProfile.supported then
                 guildMail:Refresh()
             end
         end,
+        onSkipDiscord = function(checked)
+            if not guildMail:SetSkipDiscord(checked) then
+                guildMail:Refresh()
+            end
+        end,
+        onActiveOnly = function(checked)
+            if not guildMail:SetActiveOnly(checked) then
+                guildMail:Refresh()
+            end
+        end,
         onSubject = function(text)
             guildMail:SetSubject(text)
         end,

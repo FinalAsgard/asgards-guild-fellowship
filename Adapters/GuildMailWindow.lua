@@ -1,7 +1,9 @@
 local _, addon = ...
 
 -- Guild Mail's window: rank check boxes, the Send to choice (mains, most
--- recently online character, or every character), a subject and a message, the list
+-- recently online character, or every character), two check boxes to skip
+-- players with a Discord name on file and characters not online in 30 days,
+-- a subject and a message, the list
 -- of who will get the mail, and Send (with a confirmation in the window,
 -- then progress). It only draws GuildMail's model and passes clicks and
 -- typing back. It opens beside the mailbox when opened from there, and can
@@ -12,7 +14,7 @@ local _, addon = ...
 -- failing frame call leaves the window as it was rather than raising.
 local GuildMailWindow = {
     WIDTH = 440,
-    HEIGHT = 640,
+    HEIGHT = 690,
     PADDING = 14,
     RANK_COLUMNS = 2,
     RANK_ROW_HEIGHT = 22,
@@ -41,6 +43,7 @@ Window.__index = Window
 
 -- handlers (each optional):
 --   onRank(index, checked), onMode(mode), onSubject(text), onBody(text)
+--   onSkipDiscord(checked), onActiveOnly(checked)
 --   onSend()     Send pressed: ask for confirmation
 --   onConfirm()  the confirmation's Send pressed
 --   onCancel()   the confirmation's Cancel pressed
@@ -54,6 +57,8 @@ function GuildMailWindow.Create(client, handlers)
         environment = client.environment,
         onRank = handler("onRank"),
         onMode = handler("onMode"),
+        onSkipDiscord = handler("onSkipDiscord"),
+        onActiveOnly = handler("onActiveOnly"),
         onSubject = handler("onSubject"),
         onBody = handler("onBody"),
         onSend = handler("onSend"),
@@ -154,6 +159,15 @@ function Window:window()
     end
     top = top - 18 - #addon.GuildMail.MODES * GuildMailWindow.MODE_ROW_HEIGHT - 8
 
+    self.skipDiscord = self:checkBox(frame, "Skip players with a Discord name on file", top, function(checked)
+        self.onSkipDiscord(checked)
+    end)
+    self.activeOnly = self:checkBox(frame, "Skip characters not online in the last " ..
+        addon.GuildMail.ACTIVE_DAYS .. " days", top - 22, function(checked)
+        self.onActiveOnly(checked)
+    end)
+    top = top - 50
+
     self:label(frame, "Subject", top)
     local subject = createFrame("EditBox", nil, frame, "InputBoxTemplate")
     subject:SetHeight(20)
@@ -240,6 +254,21 @@ function Window:window()
 
     frame:Hide()
     return frame
+end
+
+-- A check box with its label, across the window at `top`.
+function Window:checkBox(parent, text, top, onClick)
+    local box = self.environment.CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    box:SetWidth(22)
+    box:SetHeight(22)
+    box:SetPoint("TOPLEFT", parent, "TOPLEFT", GuildMailWindow.PADDING, top)
+    local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    label:SetPoint("LEFT", box, "RIGHT", 2, 0)
+    label:SetText(text)
+    box:SetScript("OnClick", function(clicked)
+        onClick(clicked:GetChecked() and true or false)
+    end)
+    return box
 end
 
 -- The check box for the rank in list position `position`, made on first
@@ -339,6 +368,11 @@ function Window:Render(model)
         self.modeButtons[index]:SetChecked(mode ~= nil and mode.checked)
         setEnabled(self.modeButtons[index], not model.sending)
     end
+
+    self.skipDiscord:SetChecked(model.skipDiscord == true)
+    setEnabled(self.skipDiscord, not model.sending)
+    self.activeOnly:SetChecked(model.activeOnly == true)
+    setEnabled(self.activeOnly, not model.sending)
 
     setText(self.subject, model.subject)
     setText(self.body, model.body)
