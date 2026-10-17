@@ -1,31 +1,72 @@
 local _, addon = ...
 
--- Decides who gets a Guild Mail: one mail per player, to their main, when
--- that main's own rank is one of the ticked ranks. Every player with a
--- character in the guild has an in-guild main (a lone character is its own
--- main), so nobody unorganized drops out. Departed characters are never
--- mailed, and neither is any character of the sender's own player.
+-- Decides who gets a Guild Mail. A character is a candidate when it's in the
+-- guild and its own rank is one of the ticked ranks; the Send to mode then
+-- picks from each player's candidates:
+--   mains   the player's main, when the main is a candidate. Every player
+--           with a character in the guild has an in-guild main (a lone
+--           character is its own main), so nobody unorganized drops out.
+--   recent  the candidate online most recently (online now counts as most
+--           recent), one per player
+--   all     every candidate
+-- Departed characters are never mailed, and neither is any character of the
+-- sender's own player.
 --
--- Pure: it reads a FellowshipStore partition and never touches the game.
-local GuildMailAudience = {}
+-- Pure: it reads a FellowshipStore partition and the live roster facts it's
+-- given, and never touches the game.
+local GuildMailAudience = {
+    MAINS = "mains",
+    RECENT = "recent",
+    ALL = "all",
+}
 addon.GuildMailAudience = GuildMailAudience
+
+-- Characters missing from the live roster sort after everyone with a known
+-- last-online time.
+local UNKNOWN_HOURS = math.huge
 
 local function sortName(recipient)
     return string.lower(recipient.name)
 end
 
+local function byName(first, second)
+    local firstName, secondName = sortName(first), sortName(second)
+    if firstName ~= secondName then
+        return firstName < secondName
+    end
+    return first.key < second.key
+end
+
+-- Hours since the character was last online: 0 while online, nil when the
+-- live roster doesn't say.
+local function hoursAway(member)
+    if member == nil then
+        return nil
+    end
+    if member.online then
+        return 0
+    end
+    return addon.GuildGreet.HoursAway(member.lastOnline)
+end
+
 -- The recipients, sorted by rank (highest rank first, as the game numbers
 -- them from 0) and then by name. Each is
---   { key, playerId, name, rank }
+--   { key, playerId, name, playerName, rank, online, lastOnline, hoursAway }
 -- where `name` is the character's name as the roster spells it, which is
--- what the mail is addressed to.
+-- what the mail is addressed to, and `playerName` is the player's alias or
+-- their main's name.
 --
 -- options:
 --   ranks    set of 0-based rank indexes ({ [2] = true, [4] = true })
+--   mode     "mains" (the default), "recent" or "all"
+--   live     live roster facts by character key ({ online, lastOnline }),
+--            for the last-online times
 --   selfKey  the sender's character key, or nil
 function GuildMailAudience.Recipients(partition, options)
     options = options or {}
     local ranks = options.ranks or {}
+    local mode = options.mode or GuildMailAudience.MAINS
+    local live = options.live or {}
     local sender = options.selfKey and partition:GetCharacter(options.selfKey)
     local own = sender and sender.player
 
@@ -34,31 +75,51 @@ function GuildMailAudience.Recipients(partition, options)
         if id == own then
             return
         end
-        local key = player.main
-        local character = key and partition:GetCharacter(key)
-        if character == nil or not partition:IsInGuild(key) then
-            return
+        local main = player.main and partition:GetCharacter(player.main)
+        local playerName = player.alias or (main and main.name) or player.main
+        local candidates = {}
+        local keys = partition:CharactersOf(id)
+        local index
+        for index = 1, #keys do
+            local key = keys[index]
+            local character = partition:GetCharacter(key)
+            if partition:IsInGuild(key) and type(character.rank) == "number" and ranks[character.rank]
+                and (mode ~= GuildMailAudience.MAINS or key == player.main)
+            then
+                local member = live[key]
+                table.insert(candidates, {
+                    key = key,
+                    playerId = id,
+                    name = character.name or key,
+                    playerName = playerName,
+                    rank = character.rank,
+                    online = member ~= nil and member.online == true,
+                    lastOnline = member and member.lastOnline,
+                    hoursAway = hoursAway(member),
+                })
+            end
         end
-        if type(character.rank) ~= "number" or not ranks[character.rank] then
-            return
+        if mode == GuildMailAudience.RECENT and #candidates > 1 then
+            table.sort(candidates, function(first, second)
+                local firstHours = first.hoursAway or UNKNOWN_HOURS
+                local secondHours = second.hoursAway or UNKNOWN_HOURS
+                if firstHours ~= secondHours then
+                    return firstHours < secondHours
+                end
+                return byName(first, second)
+            end)
+            candidates = { candidates[1] }
         end
-        table.insert(recipients, {
-            key = key,
-            playerId = id,
-            name = character.name or key,
-            rank = character.rank,
-        })
+        for index = 1, #candidates do
+            table.insert(recipients, candidates[index])
+        end
     end)
 
     table.sort(recipients, function(first, second)
         if first.rank ~= second.rank then
             return first.rank < second.rank
         end
-        local firstName, secondName = sortName(first), sortName(second)
-        if firstName ~= secondName then
-            return firstName < secondName
-        end
-        return first.key < second.key
+        return byName(first, second)
     end)
     return recipients
 end

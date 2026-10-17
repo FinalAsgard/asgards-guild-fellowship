@@ -16,6 +16,8 @@ local _, addon = ...
 --               officer (OfficerAuthority)
 --   rankNames   function() -> the guild's rank names, a list where entry 1
 --               is rank 0 (the guild master's), or nil
+--   live        function() -> live roster facts by character key
+--               ({ online, lastOnline }), or nil
 --   send        function(to, subject, body) -> true when the client took
 --               the mail
 --   view        optional window: Show(fromMailbox), Render(model),
@@ -28,6 +30,13 @@ local GuildMail = {
     HINT_NOBODY = "Nobody in those ranks to mail.",
     HINT_NO_SUBJECT = "Write a subject.",
     HINT_NO_MAILBOX = "Open a mailbox to send.",
+    ONLINE_TEXT = "Online",
+    -- The Send to choices, in the order shown.
+    MODES = {
+        { id = "mains", label = "Mains only" },
+        { id = "recent", label = "Most recently online character" },
+        { id = "all", label = "Every character" },
+    },
 }
 addon.GuildMail = GuildMail
 
@@ -57,11 +66,15 @@ function GuildMail.Create(options)
         rankNames = options.rankNames or function()
             return nil
         end,
+        live = options.live or function()
+            return nil
+        end,
         sendMail = options.send or function()
             return false
         end,
         view = options.view,
         ranks = {},
+        mode = addon.GuildMailAudience.MAINS,
         subject = "",
         body = "",
         mailboxOpen = false,
@@ -105,6 +118,12 @@ function Mail:Open(fromMailbox)
     return true
 end
 
+-- Redraws the window, e.g. to put a control back that was clicked to no
+-- effect.
+function Mail:Refresh()
+    self:refresh()
+end
+
 function Mail:refresh()
     if self.view == nil then
         return
@@ -132,6 +151,21 @@ function Mail:SetRank(index, checked)
         return false
     end
     self.ranks[index] = checked
+    self:refresh()
+    return true
+end
+
+-- Chooses who in each player gets the mail: "mains", "recent" or "all".
+function Mail:SetMode(mode)
+    local known = false
+    local index
+    for index = 1, #GuildMail.MODES do
+        known = known or GuildMail.MODES[index].id == mode
+    end
+    if not known or mode == self.mode or not self:editable() then
+        return false
+    end
+    self.mode = mode
     self:refresh()
     return true
 end
@@ -206,8 +240,11 @@ function Mail:Recipients()
     if partition == nil then
         return {}
     end
+    local ok, live = pcall(self.live)
     return addon.GuildMailAudience.Recipients(partition, {
         ranks = self.ranks,
+        mode = self.mode,
+        live = ok and type(live) == "table" and live or nil,
         selfKey = self.selfKey(),
     })
 end
@@ -302,10 +339,20 @@ function Mail:progressText()
     return text
 end
 
+-- "Online", "3 days ago", or "" when the live roster doesn't say.
+local function lastSeen(recipient)
+    if recipient.online then
+        return GuildMail.ONLINE_TEXT
+    end
+    return addon.RosterViewModel.FormatLastOnline(recipient.lastOnline) or ""
+end
+
 -- What the window shows:
 --   ranks        { index, name, checked } for every rank
+--   modes        { id, label, checked } for each Send to choice
 --   subject, body
---   recipients   { name, rank, rankName, status, reason }; status is nil
+--   recipients   { name, playerName, rank, rankName, lastSeen, status,
+--                reason }; status is nil
 --                until a send starts, then "pending", "sent" or "failed"
 --   countText    "12 mails"
 --   canSend      whether Send can be pressed
@@ -330,6 +377,8 @@ function Mail:Model()
         end
         rows[index] = {
             name = recipients[index].name,
+            playerName = recipients[index].playerName,
+            lastSeen = lastSeen(recipients[index]),
             rank = recipients[index].rank,
             rankName = rankNames[recipients[index].rank] or ("Rank " .. (recipients[index].rank + 1)),
             status = status,
@@ -338,8 +387,17 @@ function Mail:Model()
     end
     local hint = self:hint(recipients)
     local officer = self:IsOfficer()
+    local modes = {}
+    for index = 1, #GuildMail.MODES do
+        modes[index] = {
+            id = GuildMail.MODES[index].id,
+            label = GuildMail.MODES[index].label,
+            checked = GuildMail.MODES[index].id == self.mode,
+        }
+    end
     return {
         ranks = ranks,
+        modes = modes,
         subject = self.subject,
         body = self.body,
         recipients = rows,

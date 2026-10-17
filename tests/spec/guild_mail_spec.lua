@@ -6,6 +6,8 @@ local function load()
     return test.newAddon(
         "Core/NameNormalizer.lua",
         "Core/FellowshipStore.lua",
+        "Core/RosterViewModel.lua",
+        "Core/GuildGreet.lua",
         "Core/GuildMailAudience.lua",
         "Core/GuildMailSender.lua",
         "Core/GuildMail.lua"
@@ -50,10 +52,21 @@ local function names(recipients)
     return table.concat(result, ",")
 end
 
-local function recipientsFor(ranks, selfKey)
+local function recipientsFor(ranks, selfKey, mode, live)
     local addon, partition = setup()
-    return addon.GuildMailAudience.Recipients(partition, { ranks = ranks, selfKey = selfKey })
+    return addon.GuildMailAudience.Recipients(partition, {
+        ranks = ranks, selfKey = selfKey, mode = mode, live = live,
+    })
 end
+
+-- Live roster facts: Cog Wheel is online; Ann Bell was on 3 days ago; Gus
+-- and Bo Reed both 2 days ago; Zed Stone isn't in the live roster.
+local LIVE = {
+    ["ann bell-camelot"] = { online = false, lastOnline = { years = 0, months = 0, days = 3, hours = 0 } },
+    ["cog wheel-camelot"] = { online = true },
+    ["gus reed-camelot"] = { online = false, lastOnline = { years = 0, months = 0, days = 2, hours = 0 } },
+    ["bo reed-camelot"] = { online = false, lastOnline = { years = 0, months = 0, days = 2, hours = 0 } },
+}
 
 -- Audience ------------------------------------------------------------------
 
@@ -101,6 +114,58 @@ test.test("guild mail audience: sorted by rank, then name, with no one twice", f
         test.assertEqual(nil, seen[recipients[index].key])
         seen[recipients[index].key] = true
     end
+end)
+
+test.test("guild mail audience: most recently online picks one character per player", function()
+    local recipients = recipientsFor({ [2] = true, [3] = true }, "tool box-camelot", "recent", LIVE)
+
+    -- Cog Wheel is online, so beats Ann Bell; Bo and Gus Reed tie on 2 days
+    -- and Bo comes first by name; Zed Stone is his player's only candidate.
+    test.assertEqual("Bo Reed,Cog Wheel,Zed Stone", names(recipients))
+    test.assertEqual(0, recipients[2].hoursAway)
+    test.assertEqual(48, recipients[1].hoursAway)
+end)
+
+test.test("guild mail audience: most recently online only picks from the ticked ranks", function()
+    -- Cog Wheel is online but an Initiate; only Ann Bell is a Member.
+    local recipients = recipientsFor({ [2] = true }, nil, "recent", LIVE)
+
+    test.assertEqual("Ann Bell,Gus Reed", names(recipients))
+end)
+
+test.test("guild mail audience: a character the live roster doesn't know sorts after known ones", function()
+    local recipients = recipientsFor({ [2] = true, [3] = true }, nil, "recent", {
+        ["ann bell-camelot"] = { online = false, lastOnline = { years = 1, months = 0, days = 0, hours = 0 } },
+    })
+
+    test.assertEqual("Ann Bell", recipients[1].name)
+    test.assertEqual(nil, string.find(names(recipients), "Cog Wheel", 1, true))
+end)
+
+test.test("guild mail audience: every character mails each candidate", function()
+    local recipients = recipientsFor({ [2] = true, [3] = true }, "tool box-camelot", "all", LIVE)
+
+    test.assertEqual("Ann Bell,Gus Reed,Bo Reed,Cog Wheel,Zed Stone", names(recipients))
+end)
+
+test.test("guild mail audience: each recipient knows its player and when it was last online", function()
+    local addon, partition = setup()
+    partition:SetAlias(partition:GetCharacter("ann bell-camelot").player, "Annie", "note")
+
+    local recipients = addon.GuildMailAudience.Recipients(partition, {
+        ranks = { [3] = true }, mode = "all", live = LIVE,
+    })
+
+    local cog
+    local index
+    for index = 1, #recipients do
+        if recipients[index].name == "Cog Wheel" then
+            cog = recipients[index]
+        end
+    end
+    test.assertEqual("Annie", cog.playerName)
+    test.assertTrue(cog.online)
+    test.assertEqual("Zed Stone", recipients[#recipients].playerName)
 end)
 
 test.test("guild mail audience: no ranks ticked means no one", function()
@@ -249,6 +314,9 @@ local function newMail(overrides)
         rankNames = function()
             return overrides.rankNames or RANK_NAMES
         end,
+        live = function()
+            return LIVE
+        end,
         send = function(to, subject, body)
             table.insert(world.sent, { to = to, subject = subject, body = body })
             return true
@@ -333,6 +401,52 @@ test.test("guild mail: the recipient list follows the ticked ranks", function()
     test.assertEqual("3 mails", world.view.model.countText)
     world.mail:SetRank(2, false)
     test.assertEqual("1 mail", world.view.model.countText)
+end)
+
+test.test("guild mail: Send to starts on mains only and can be changed", function()
+    local _, world = newMail()
+    world.mail:Open(false)
+    world.mail:SetRank(2, true)
+    world.mail:SetRank(3, true)
+
+    local modes = world.view.model.modes
+    test.assertEqual("mains", modes[1].id)
+    test.assertTrue(modes[1].checked)
+    test.assertEqual("3 mails", world.view.model.countText)
+
+    test.assertTrue(world.mail:SetMode("all"))
+    test.assertTrue(world.view.model.modes[3].checked)
+    -- Tool Box's own alt Hammer Smith is still skipped.
+    test.assertEqual("5 mails", world.view.model.countText)
+
+    test.assertTrue(world.mail:SetMode("recent"))
+    test.assertEqual("Cog Wheel", world.view.model.recipients[2].name)
+    test.assertFalse(world.mail:SetMode("recent"))
+    test.assertFalse(world.mail:SetMode("everyone"))
+end)
+
+test.test("guild mail: recipient rows show the player and when they were last online", function()
+    local _, world = newMail()
+    world.mail:SetRank(3, true)
+    world.mail:SetMode("all")
+
+    local rows = world.mail:Model().recipients
+    test.assertEqual("Cog Wheel", rows[2].name)
+    test.assertEqual("Ann Bell", rows[2].playerName)
+    test.assertEqual("Online", rows[2].lastSeen)
+    test.assertEqual("Bo Reed", rows[1].name)
+    test.assertEqual("2 days ago", rows[1].lastSeen)
+    test.assertEqual("Zed Stone", rows[3].name)
+    test.assertEqual("", rows[3].lastSeen)
+end)
+
+test.test("guild mail: Send to can't change while sending", function()
+    local _, world = newMail()
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+
+    test.assertFalse(world.mail:SetMode("all"))
 end)
 
 test.test("guild mail: Send waits for ranks, recipients, a subject and an open mailbox", function()
@@ -440,7 +554,7 @@ end)
 -- Window ----------------------------------------------------------------------
 
 local function newWindow()
-    local addon = test.newAddon("Adapters/GuildMailWindow.lua")
+    local addon = test.newAddon("Core/GuildMailAudience.lua", "Core/GuildMail.lua", "Adapters/GuildMailWindow.lua")
     local environment = FakeFrames.install({})
     environment.UIParent = environment.CreateFrame("Frame", nil, nil)
     local world = { calls = {}, environment = environment }
@@ -451,6 +565,7 @@ local function newWindow()
     end
     world.window = addon.GuildMailWindow.Create({ environment = environment }, {
         onRank = record("rank"),
+        onMode = record("mode"),
         onSubject = record("subject"),
         onSend = record("send"),
         onConfirm = record("confirm"),
@@ -467,11 +582,17 @@ local MODEL = {
     },
     subject = "Launch night",
     body = "Join us!",
+    modes = {
+        { id = "mains", label = "Mains only", checked = false },
+        { id = "recent", label = "Most recently online character", checked = true },
+        { id = "all", label = "Every character", checked = false },
+    },
     recipients = {
         { name = "Ann Bell", rank = 2, rankName = "Member" },
+        { name = "Cog Wheel", playerName = "Annie", rank = 3, rankName = "Initiate", lastSeen = "Online" },
         { name = "Gus Reed", rank = 2, rankName = "Member", status = "failed", reason = "Mailbox full" },
     },
-    countText = "2 mails",
+    countText = "3 mails",
     canSend = true,
     confirming = false,
     confirmText = "Send 2 mails?",
@@ -486,9 +607,22 @@ test.test("guild mail window: draws the ranks, the text and the recipients", fun
     test.assertTrue(world.window.rankBoxes[2]:GetChecked())
     test.assertEqual("Launch night", world.window.subject.text)
     test.assertEqual("Join us!", world.window.body.text)
-    test.assertEqual("Recipients (2 mails)", world.window.listLabel.text)
+    test.assertEqual("Recipients (3 mails)", world.window.listLabel.text)
     test.assertContains(world.window.listText.text, "Ann Bell")
     test.assertContains(world.window.listText.text, "Mailbox full")
+    test.assertContains(world.window.listText.text, "Cog Wheel  |cff999999Annie · Initiate · Online|r")
+end)
+
+test.test("guild mail window: the Send to choice is drawn and passed back", function()
+    local _, world = newWindow()
+    world.window:Render(MODEL)
+
+    test.assertFalse(world.window.modeButtons[1]:GetChecked())
+    test.assertTrue(world.window.modeButtons[2]:GetChecked())
+    world.window.modeButtons[3].scripts.OnClick(world.window.modeButtons[3])
+
+    test.assertEqual("mode", world.calls[1].name)
+    test.assertEqual("all", world.calls[1].args[1])
 end)
 
 test.test("guild mail window: ticking a rank and pressing Send are passed back", function()

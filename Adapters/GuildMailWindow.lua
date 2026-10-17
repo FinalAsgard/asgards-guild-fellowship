@@ -1,6 +1,7 @@
 local _, addon = ...
 
--- Guild Mail's window: rank check boxes, a subject and a message, the list
+-- Guild Mail's window: rank check boxes, the Send to choice (mains, most
+-- recently online character, or every character), a subject and a message, the list
 -- of who will get the mail, and Send (with a confirmation in the window,
 -- then progress). It only draws GuildMail's model and passes clicks and
 -- typing back. It opens beside the mailbox when opened from there, and can
@@ -11,11 +12,12 @@ local _, addon = ...
 -- failing frame call leaves the window as it was rather than raising.
 local GuildMailWindow = {
     WIDTH = 440,
-    HEIGHT = 560,
+    HEIGHT = 640,
     PADDING = 14,
     RANK_COLUMNS = 2,
     RANK_ROW_HEIGHT = 22,
     RANK_ROWS = 5,
+    MODE_ROW_HEIGHT = 20,
     MESSAGE_HEIGHT = 90,
     LIST_HEIGHT = 120,
     BUTTON_WIDTH = 96,
@@ -37,7 +39,7 @@ local Window = {}
 Window.__index = Window
 
 -- handlers (each optional):
---   onRank(index, checked), onSubject(text), onBody(text)
+--   onRank(index, checked), onMode(mode), onSubject(text), onBody(text)
 --   onSend()     Send pressed: ask for confirmation
 --   onConfirm()  the confirmation's Send pressed
 --   onCancel()   the confirmation's Cancel pressed
@@ -50,6 +52,7 @@ function GuildMailWindow.Create(client, handlers)
     return setmetatable({
         environment = client.environment,
         onRank = handler("onRank"),
+        onMode = handler("onMode"),
         onSubject = handler("onSubject"),
         onBody = handler("onBody"),
         onSend = handler("onSend"),
@@ -57,6 +60,7 @@ function GuildMailWindow.Create(client, handlers)
         onCancel = handler("onCancel"),
         onMailboxButton = handler("onMailboxButton"),
         rankBoxes = {},
+        modeButtons = {},
     }, Window)
 end
 
@@ -131,6 +135,23 @@ function Window:window()
     self:label(frame, "Send to these ranks", top)
     self.ranksTop = top - 18
     top = self.ranksTop - GuildMailWindow.RANK_ROWS * GuildMailWindow.RANK_ROW_HEIGHT - 8
+
+    self:label(frame, "Send to", top)
+    local index
+    for index = 1, #addon.GuildMail.MODES do
+        local mode = addon.GuildMail.MODES[index]
+        local radio = createFrame("CheckButton", nil, frame, "UIRadioButtonTemplate")
+        radio:SetPoint("TOPLEFT", frame, "TOPLEFT", padding + 4, top - 18 - (index - 1) * GuildMailWindow.MODE_ROW_HEIGHT)
+        local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("LEFT", radio, "RIGHT", 4, 0)
+        label:SetText(mode.label)
+        radio.modeId = mode.id
+        radio:SetScript("OnClick", function(clicked)
+            self.onMode(clicked.modeId)
+        end)
+        self.modeButtons[index] = radio
+    end
+    top = top - 18 - #addon.GuildMail.MODES * GuildMailWindow.MODE_ROW_HEIGHT - 8
 
     self:label(frame, "Subject", top)
     local subject = createFrame("EditBox", nil, frame, "InputBoxTemplate")
@@ -310,6 +331,14 @@ function Window:Render(model)
         self.rankBoxes[index].rankLabel:Hide()
     end
 
+    for index = 1, #self.modeButtons do
+        local mode = model.modes and model.modes[index]
+        -- A radio button clicked while sending, or on the choice already
+        -- made, is put back to match the model.
+        self.modeButtons[index]:SetChecked(mode ~= nil and mode.checked)
+        setEnabled(self.modeButtons[index], not model.sending)
+    end
+
     setText(self.subject, model.subject)
     setText(self.body, model.body)
 
@@ -317,7 +346,14 @@ function Window:Render(model)
     local lines = {}
     for index = 1, #model.recipients do
         local row = model.recipients[index]
-        local line = row.name .. "  |cff999999" .. row.rankName .. "|r"
+        local details = { row.rankName }
+        if row.playerName ~= nil and row.playerName ~= row.name then
+            table.insert(details, 1, row.playerName)
+        end
+        if row.lastSeen ~= nil and row.lastSeen ~= "" then
+            table.insert(details, row.lastSeen)
+        end
+        local line = row.name .. "  |cff999999" .. table.concat(details, " · ") .. "|r"
         if row.status ~= nil then
             line = line .. (GuildMailWindow.STATUS_TEXT[row.status] or "")
             if row.reason ~= nil then

@@ -1939,11 +1939,18 @@ if clientProfile.supported then
             rosterController:Print(lines[index])
         end
     end)
-    -- Guild Mail: officers mail the ranks they tick, one mail per player to
-    -- their main, sent from a mailbox one at a time.
+    -- Guild Mail: officers mail the ranks they tick (to each player's main,
+    -- their most recently online character, or every character), sent from
+    -- a mailbox one at a time.
     guildMailWindow = addon.GuildMailWindow.Create(client, {
         onRank = function(index, checked)
             guildMail:SetRank(index, checked)
+        end,
+        onMode = function(mode)
+            if not guildMail:SetMode(mode) then
+                -- Puts the radio buttons back when nothing changed.
+                guildMail:Refresh()
+            end
         end,
         onSubject = function(text)
             guildMail:SetSubject(text)
@@ -1977,6 +1984,12 @@ if clientProfile.supported then
         end,
         rankNames = function()
             return client:GetGuildRankNames()
+        end,
+        -- Who is online, and when the others last were, for "most
+        -- recently online" and the recipient list.
+        live = function()
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and rosterController:LiveMembers(normalizer) or nil
         end,
         send = function(to, subject, body)
             return client:SendMail(to, subject, body)
