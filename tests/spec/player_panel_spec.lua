@@ -182,7 +182,9 @@ end)
 
 -- Controller: selecting and editing ------------------------------------------
 
-local function controllerSetup(onSyncResumed)
+-- `options.onDiscordChanged` as for the controller.
+local function controllerSetup(onSyncResumed, options)
+    options = options or {}
     local world = fixtures.newEnvironment("Retail")
     world.environment.date = function(format, timestamp)
         return os.date("!" .. format, timestamp)
@@ -219,6 +221,7 @@ local function controllerSetup(onSyncResumed)
         getDatabase = function() return database end,
         createWindow = function() return window end,
         onSyncResumed = onSyncResumed,
+        onDiscordChanged = options.onDiscordChanged,
     })
     controller:OnSavedDataReady()
     controller:OnRosterUpdate()
@@ -281,6 +284,46 @@ test.test("don't sync is toggled from the panel, marked there, and turning it of
     test.assertFalse(controller.current.partition:IsNoSync(window.player.id))
     test.assertEqual(1, #resumed)
     test.assertEqual("toolbox-area52", resumed[1])
+end)
+
+test.test("set discord: the panel carries the player's Discord to prefill the dialog", function()
+    local controller, window = controllerSetup()
+    controller.current.partition:SetProfileText("hammer-area52", "discord", "hammer#1", 1790000000, "hammer-area52")
+
+    controller:SelectPlayerOf("hammer-area52")
+
+    test.assertEqual("hammer#1", window.player.discord)
+end)
+
+test.test("set discord: the edit goes to guild sync and the panel redraws", function()
+    local edits = {}
+    local controller, window
+    controller, window = controllerSetup(nil, {
+        onDiscordChanged = function(key, text)
+            table.insert(edits, { key = key, text = text })
+            controller.current.partition:SetProfileText(key, "discord", text, 1790000000, "toolbox-area52")
+            return { {} }
+        end,
+    })
+    controller:SelectPlayerOf("hammer-area52")
+
+    test.assertTrue(controller:SetDiscord(window.player.main, "tool#1"))
+
+    test.assertEqual(1, #edits)
+    test.assertEqual(window.player.main, edits[1].key)
+    test.assertEqual("tool#1", window.player.discord)
+end)
+
+test.test("set discord: an edit that couldn't be saved is reported", function()
+    local controller, _, client = controllerSetup(nil, {
+        onDiscordChanged = function() return nil end,
+    })
+    local printed
+    client.Print = function(_, message) printed = message end
+
+    test.assertFalse(controller:SetDiscord("hammer-area52", "tool#1"))
+
+    test.assertTrue(string.find(printed, "wasn't saved", 1, true) ~= nil)
 end)
 
 test.test("dates are formatted by the client", function()

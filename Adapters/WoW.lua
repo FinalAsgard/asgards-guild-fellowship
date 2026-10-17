@@ -545,13 +545,11 @@ end
 -- the client has maps, else "zone:<name>"; the name is as the client shows
 -- it. Nil when the client can't say, including while a client whose maps
 -- work hasn't placed the player on one yet (just after a loading screen, or
--- on a boat), so one zone never goes by two keys.
+-- on a boat), so one zone never goes by two keys. A place with no map at
+-- all (the Deeprun Tram) is never placed, so it's never prompted.
 function Client:GetZone()
-    local ok, name = callFunction(self.environment.GetRealZoneText)
-    if not ok or type(name) ~= "string" or name == "" then
-        ok, name = callFunction(self.environment.GetZoneText)
-    end
-    if not ok or type(name) ~= "string" or name == "" then
+    local name = self:zoneText()
+    if name == nil then
         return nil
     end
     local mapId, unplaced = self:zoneMapId()
@@ -562,6 +560,18 @@ function Client:GetZone()
         return nil
     end
     return { key = "zone:" .. name, name = name }
+end
+
+-- The zone's name as the client shows it, or nil.
+function Client:zoneText()
+    local ok, name = callFunction(self.environment.GetRealZoneText)
+    if not ok or type(name) ~= "string" or name == "" then
+        ok, name = callFunction(self.environment.GetZoneText)
+    end
+    if not ok or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    return name
 end
 
 -- Where the player is on their zone's map: { mapId, x, y } with x and y from
@@ -751,7 +761,11 @@ end
 function Client:ChannelReport()
     local lines = {}
     local zone = self:GetZone()
-    table.insert(lines, "Zone: " .. (zone and (zone.name .. " (" .. zone.key .. ")") or "unknown"))
+    local text = self:zoneText()
+    table.insert(lines, "Zone: " .. (zone and (zone.name .. " (" .. zone.key .. ")")
+        or text and (text .. ", unknown: the game hasn't placed you on a map, so no prompts here;"
+            .. " /agf advertise still posts")
+        or "unknown"))
     local listed = self:ListedChannels()
     if listed[1] == nil then
         table.insert(lines, "The game lists no channels here.")
@@ -824,12 +838,19 @@ end
 -- the player just left). True when it's named for that zone, or its name
 -- can't be read or carries no zone, so nothing is ruled out then.
 function Client:IsChannelOfZone(number, zoneName)
+    local zone = self:ChannelZoneName(number)
+    return zone == nil or zone == zoneName
+end
+
+-- The zone the channel numbered `number` is named for ("Booty Bay" for
+-- "General - Booty Bay"), or nil when its name can't be read or carries no
+-- zone.
+function Client:ChannelZoneName(number)
     local ok, _, fullName = callFunction(self.environment.GetChannelName, number)
     if not ok or type(fullName) ~= "string" or self:IsSecretValue(fullName) then
-        return true
+        return nil
     end
-    local zone = string.match(fullName, "^[^-]+ %- (.+)$")
-    return zone == nil or zone == zoneName
+    return string.match(fullName, "^[^-]+ %- (.+)$")
 end
 
 -- The number of the Trade channel, or nil when the player isn't in it or

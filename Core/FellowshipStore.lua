@@ -487,6 +487,27 @@ function Store:SetGreetEnabled(enabled)
     return true
 end
 
+-- Whether Guild Greet prompts inside a dungeon, raid, battleground or arena.
+-- On unless turned off; unusable saved data counts as on.
+function Store:GreetInInstances()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    return type(state) ~= "table" or state.inInstances ~= false
+end
+
+-- Turns Guild Greet's prompts inside instances on or off. An unusable
+-- existing value is left alone.
+function Store:SetGreetInInstances(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.inInstances ~= nil and type(state.inInstances) ~= "boolean") then
+        return false
+    end
+    state.inInstances = enabled
+    return true
+end
+
 local function isGreetCap(value)
     return type(value) == "number" and value == math.floor(value)
         and value >= FellowshipStore.GREET_CAP_MIN and value <= FellowshipStore.GREET_CAP_MAX
@@ -861,6 +882,52 @@ function Store:SetRecruitUseOfficerAd(enabled)
         return false
     end
     state.useOfficerAd = enabled
+    return true
+end
+
+-- The zones the user turned off with Off here, shared by every character on
+-- the account: zone key -> { name, at } (when it was turned off). Unusable
+-- entries are left out.
+function Store:RecruitOffZones()
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    local saved = type(state) == "table" and state.offZones or nil
+    local zones = {}
+    if type(saved) ~= "table" then
+        return zones
+    end
+    local key, entry
+    for key, entry in pairs(saved) do
+        if isText(key) and type(entry) == "table" and isText(entry.n) and isWholeNumber(entry.a) then
+            zones[key] = { name = entry.n, at = entry.a }
+        end
+    end
+    return zones
+end
+
+-- Turns prompts in the zone `key` (named `name`) off from `at`, until
+-- turned back on.
+function Store:SetRecruitOffZone(key, name, at)
+    if not isText(key) or not isText(name) or not isWholeNumber(at) then
+        return false
+    end
+    local state = self:GetRecruitState()
+    if state == nil then
+        return false
+    end
+    if type(state.offZones) ~= "table" then
+        state.offZones = {}
+    end
+    state.offZones[key] = { n = name, a = at }
+    return true
+end
+
+-- Turns prompts in the zone `key` back on.
+function Store:ClearRecruitOffZone(key)
+    local state = type(self.database) == "table" and self.database.recruit or nil
+    if type(state) ~= "table" or type(state.offZones) ~= "table" then
+        return false
+    end
+    state.offZones[key] = nil
     return true
 end
 

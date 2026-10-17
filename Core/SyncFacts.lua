@@ -24,9 +24,13 @@ local _, addon = ...
 -- none), and the player's Discord username, location and bio as that
 -- character last set them ("" clears one). Only the character itself can
 -- write one: a profile fact is accepted only when `by` is `character`,
--- whatever the author's rank, and is never a suggestion. Newest wins, as
--- for officer facts. A text field is stored on the character that wrote
--- it; the player's value is the newest across its characters. Older
+-- whatever the author's rank, and is never a suggestion. The one exception
+-- is Discord, which an officer may also set for a guildmate: a Discord fact
+-- by someone else is accepted when `by` is an officer, like officer facts
+-- (and refused for a "Don't sync" player). Newest wins, as for officer
+-- facts. A text field is stored on the character that wrote it (an
+-- officer's on the player's main); the player's value is the newest across
+-- its characters. Older
 -- clients see these kinds as malformed and ignore them. Player ids are
 -- local counters, so facts only ever name characters, and each client
 -- rebuilds its own players from them.
@@ -56,6 +60,8 @@ SyncFacts.PROFILE_KINDS = {
 -- The profile kinds that carry text, each a FellowshipStore profile field
 -- of the same name, in the order they're shown.
 SyncFacts.TEXT_KINDS = { SyncFacts.KIND_DISCORD, SyncFacts.KIND_LOCATION, SyncFacts.KIND_BIO }
+-- The profile text kinds an officer may also set for someone else.
+SyncFacts.OFFICER_TEXT_KINDS = { [SyncFacts.KIND_DISCORD] = true }
 addon.SyncFacts = SyncFacts
 
 local Facts = {}
@@ -268,18 +274,20 @@ function Facts:ProfileFactOf(key, kind)
     return self:TextFactOf(key, kind)
 end
 
--- Sets `key`'s `kind` text to `text` ("" clears it), written by the
--- character itself at `at`, and returns its fact, or nil for an unknown
--- character or unusable text. The stamp is newer than any of the player's
--- characters' for that field, so the player's value becomes this one.
-function Facts:StampText(key, kind, text, at)
+-- Sets `key`'s `kind` text to `text` ("" clears it), written by `author`
+-- (the character itself, without it) at `at`, and returns its fact, or nil
+-- for an unknown character or unusable text. The stamp is newer than any of
+-- the player's characters' for that field, so the player's value becomes
+-- this one.
+function Facts:StampText(key, kind, text, at, author)
+    author = author or key
     local character = self.partition:GetCharacter(key)
     if character == nil then
         return nil
     end
     local _, newestAt = self.partition:PlayerProfileText(character.player, kind)
     local heldAt = self.partition:GetProfileStamp(key, kind) or 0
-    if not self.partition:SetProfileText(key, kind, text, math.max(at, heldAt + 1, (newestAt or 0) + 1), key) then
+    if not self.partition:SetProfileText(key, kind, text, math.max(at, heldAt + 1, (newestAt or 0) + 1), author) then
         return nil
     end
     return self:TextFactOf(key, kind)
@@ -364,10 +372,15 @@ function Facts:Refusal(fact)
 end
 
 -- Refusal for a valid profile fact: only the character itself may write
--- one. "Don't sync" is about officers' data, so it doesn't apply.
+-- one, or an officer a Discord username. "Don't sync" is about officers'
+-- data, so it applies only to an officer's.
 function Facts:ProfileRefusal(fact)
-    if fact.by ~= fact.character then
+    local own = fact.by == fact.character
+    if not own and not SyncFacts.OFFICER_TEXT_KINDS[fact.kind] then
         return "not the character's own"
+    end
+    if not own and not self.isOfficer(fact.by) then
+        return "not an officer"
     end
     local now = self.now()
     if now > 0 and fact.at > now + SyncFacts.MAX_FUTURE_SECONDS then
@@ -375,6 +388,9 @@ function Facts:ProfileRefusal(fact)
     end
     if self.partition:GetCharacter(fact.character) == nil then
         return "unknown character"
+    end
+    if not own and self:IsPinned(fact.character) then
+        return "don't sync"
     end
     local heldAt, heldBy = self:HeldStamp(fact)
     if not SyncFacts.IsNewer(fact.at, fact.by, heldAt, heldBy) then
@@ -457,6 +473,7 @@ function Facts:Restore(value)
         main = type(value) == "table" and value.main,
         alias = type(value) == "table" and value.alias,
         declared = type(value) == "table" and value.declared,
+        text = type(value) == "table" and value.text,
         at = 1,
         by = "?",
     }
@@ -467,6 +484,11 @@ function Facts:Restore(value)
         return false
     end
     local store = addon.FellowshipStore
+    if fact.kind == SyncFacts.KIND_DISCORD then
+        -- Stamped the oldest possible, so the player's own and officers'
+        -- values win over it.
+        return self.partition:SetProfileText(fact.character, fact.kind, fact.text, 1, "?")
+    end
     if fact.kind == SyncFacts.KIND_DECLARED then
         self.partition:SetDeclared(fact.character, fact.declared, store.SOURCE_NOTE)
         self.partition:ClearDeclaredStamp(fact.character)
@@ -538,7 +560,8 @@ function Facts:OfficerFacts(checkpoint)
 end
 
 -- Every profile fact this client holds, which it can pass on to others:
--- each character's own role preferences and profile text, sorted by
+-- each character's own role preferences and profile text, and Discord
+-- usernames officers set (except for "Don't sync" players), sorted by
 -- character (roles, then Discord, location and bio). `checkpoint` as for
 -- OfficerFacts.
 function Facts:ProfileFacts(checkpoint)
@@ -558,7 +581,10 @@ function Facts:ProfileFacts(checkpoint)
         end
         for kindIndex = 1, #SyncFacts.TEXT_KINDS do
             local kind = SyncFacts.TEXT_KINDS[kindIndex]
-            if character[kind] ~= nil and character[kind .. "At"] ~= nil and character[kind .. "By"] == key then
+            local by = character[kind .. "By"]
+            local officers = SyncFacts.OFFICER_TEXT_KINDS[kind] and by ~= nil and self.isOfficer(by)
+                and not self.partition:IsNoSync(character.player)
+            if character[kind] ~= nil and character[kind .. "At"] ~= nil and (by == key or officers) then
                 table.insert(facts, self:TextFactOf(key, kind))
             end
         end

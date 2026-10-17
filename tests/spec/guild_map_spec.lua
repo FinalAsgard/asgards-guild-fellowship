@@ -610,7 +610,7 @@ local function installMap(environment)
 end
 
 -- MapPins.DIM_ALPHA, the opacity of guildmates outside the player's party.
-local DIM_ALPHA = 0.35
+local DIM_ALPHA = 0.6
 
 local DOTS = {
     { key = "hammer-area52", mapId = 1429, x = 0.4, y = 0.6, class = "MAGE", name = "Hammer", level = 42,

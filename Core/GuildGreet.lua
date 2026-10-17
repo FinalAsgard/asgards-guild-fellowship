@@ -42,6 +42,9 @@ Greet.__index = Greet
 --                 guild's add-on users. Optional.
 --   showDelay     function() -> seconds a new prompt waits before showing.
 --                 Optional; a random 5 to 10 otherwise.
+--   inInstance    function() -> true in a dungeon, raid, battleground,
+--                 arena or keystone run, where the user can turn prompts
+--                 off. Optional.
 --   view          { Show = function(view, prompts, handlers) }: draws the
 --                 prompts; handlers.greet(player) and handlers.close(player)
 function GuildGreet.Create(options)
@@ -58,7 +61,10 @@ function GuildGreet.Create(options)
         end,
         view = options.view,
         showDelay = options.showDelay,
-        queue = addon.GreetPromptQueue.Create(),
+        inInstance = options.inInstance or function()
+            return false
+        end,
+        queue =addon.GreetPromptQueue.Create(),
         -- Hours since each offline member's last login, as the roster said
         -- when the session's roster first loaded.
         absences = {},
@@ -82,7 +88,7 @@ function GuildGreet.Create(options)
             return greet:AbsenceOf(key)
         end,
         enabled = function()
-            return greet:IsEnabled()
+            return greet:IsEnabled() and not greet:QuietHere()
         end,
         categoryEnabled = function(category)
             local store = greet.store()
@@ -138,6 +144,26 @@ function Greet:IsEnabled()
     end
     local selfKey = self.selfKey()
     return store:GreetEnabled() and (selfKey == nil or store:GreetOnCharacter(selfKey))
+end
+
+-- True inside an instance when the user turned prompts off there.
+function Greet:QuietHere()
+    local store = self.store()
+    if store == nil or store:GreetInInstances() then
+        return false
+    end
+    local ok, inside = pcall(self.inInstance)
+    return ok and inside == true
+end
+
+-- The player moved, or prompts in instances were turned on or off: inside
+-- an instance where they're off, waiting prompts close, and arrivals there
+-- are never prompted later.
+function Greet:OnZoneChanged()
+    if self:QuietHere() then
+        self.queue:Clear()
+        self:Refresh()
+    end
 end
 
 -- True for any of the user's own characters.

@@ -19,6 +19,11 @@ local function newWindow()
     function window:SetStatus(text)
         self.status = text
     end
+    -- `window.counts` is false once told to hide the counts line.
+    function window:SetCounts(text, lines)
+        self.counts = text or false
+        self.countsTooltip = lines
+    end
     function window:SetConflicts(rows)
         self.conflicts = rows
         return true
@@ -346,4 +351,148 @@ test.test("without a stats source, nobody gets the Recruiters view", function()
 
     test.assertEqual(nil, setup.controller:Recruiters())
     test.assertFalse(setup.window.recruiters)
+end)
+
+-- The guild-size counts line ---------------------------------------------------
+
+-- The fixture guild's lone character: the one not on Tool Box's player.
+local function loneKey(setup, mainKey)
+    local partition = setup.partition()
+    local key, character
+    for key, character in pairs(partition.characters) do
+        if character.player ~= partition.characters[mainKey].player then
+            return key
+        end
+    end
+end
+
+local function registerCountsTests(profile)
+    local first = EXPECTED_FIRST[profile]
+
+    test.test(profile .. " the roster shows how big the guild is", function()
+        local setup = build(profile)
+        setup.login()
+
+        setup.controller:Toggle()
+
+        test.assertEqual("2 players (1 known + 1 unlinked) · 1 alt · 3 characters", setup.window.counts)
+    end)
+
+    test.test(profile .. " the counts line updates after linking an alt", function()
+        local setup = build(profile)
+        setup.login()
+        setup.controller:Toggle()
+        local playerId = setup.partition().characters[first.key].player
+
+        test.assertTrue(setup.controller:SetMainPlayer(loneKey(setup, first.key), playerId))
+
+        test.assertEqual("1 player · 2 alts · 3 characters", setup.window.counts)
+    end)
+
+    test.test(profile .. " the counts line updates after a scan finds a new member", function()
+        local setup = build(profile)
+        setup.login()
+        setup.controller:Toggle()
+        setup.world.guild.members[4] = newcomer()
+
+        setup.controller:Rescan()
+        setup.controller:OnRosterUpdate()
+
+        test.assertEqual("3 players (1 known + 2 unlinked) · 1 alt · 4 characters", setup.window.counts)
+    end)
+
+    test.test(profile .. " the counts ignore search, Online only, Show departed, and collapsed groups", function()
+        local setup = build(profile)
+        setup.login()
+        setup.controller:Toggle()
+        local expected = setup.window.counts
+
+        setup.controller:SetSearch("nobody matches this")
+        test.assertEqual(0, #setup.window.rows)
+        test.assertEqual(expected, setup.window.counts)
+        setup.controller:SetSearch("")
+        setup.controller:ToggleOnlineOnly()
+        test.assertEqual(expected, setup.window.counts)
+        setup.controller:ToggleOnlineOnly()
+        setup.controller:CollapseAll()
+        test.assertEqual(expected, setup.window.counts)
+        setup.controller:ToggleDeparted()
+        test.assertEqual(expected, setup.window.counts)
+    end)
+
+    test.test(profile .. " the counts line is hidden with no guild data", function()
+        local setup = build(profile)
+
+        setup.controller:Toggle()
+
+        test.assertFalse(setup.window.counts)
+    end)
+end
+
+for index = 1, #fixtures.PROFILES do
+    registerCountsTests(fixtures.PROFILES[index])
+end
+
+local function registerCountsTooltipTests(profile)
+    test.test(profile .. " the counts tooltip shows who is online and follows logins", function()
+        local setup = build(profile)
+        setup.login()
+        setup.controller:Toggle()
+
+        -- Only the officer, Tool Box, is online.
+        local lines = setup.window.countsTooltip
+        test.assertEqual("Guild size", lines[1])
+        test.assertEqual("2 players: 1 known + 1 unlinked", lines[2])
+        test.assertContains(lines[3], "Active players: ")
+        test.assertEqual("1 of 2 players online", lines[4])
+        test.assertEqual("1 of 3 characters online", lines[5])
+        test.assertEqual("1 player has an alias", lines[6])
+        test.assertEqual("0 mains declared", lines[7])
+
+        -- The unlinked character logs in.
+        setup.world.guild.members[3].online = true
+        setup.controller:OnRosterUpdate()
+
+        test.assertEqual("2 of 2 players online", setup.window.countsTooltip[4])
+        test.assertEqual("2 of 3 characters online", setup.window.countsTooltip[5])
+    end)
+end
+
+for index = 1, #fixtures.PROFILES do
+    registerCountsTooltipTests(fixtures.PROFILES[index])
+end
+
+test.test("hovering the counts line shows its tooltip, and leaving hides it", function()
+    local FakeFrames = require("tests.fake_frames")
+    local addon = test.newAddon("Core/Identity.lua", "Adapters/MasterFrame.lua", "Adapters/RosterWindow.lua")
+    local environment = FakeFrames.install({})
+    local tooltip = { lines = {}, shown = false }
+    function tooltip:SetOwner(owner) self.owner = owner; self.lines = {} end
+    function tooltip:AddLine(text) table.insert(self.lines, text) end
+    function tooltip:Show() self.shown = true end
+    function tooltip:Hide() self.shown = false end
+    environment.GameTooltip = tooltip
+    local counts = addon.RosterWindow.CountsLine(environment, FakeFrames.host(environment))
+    test.assertFalse(counts.frame.shown)
+
+    counts:Set("1 player · 1 alt · 1 unlinked · 3 characters", { "Guild size", "1 of 1 player online" })
+    test.assertTrue(counts.frame.shown)
+    test.assertEqual("1 player · 1 alt · 1 unlinked · 3 characters", counts.text.text)
+
+    counts.frame.scripts.OnEnter(counts.frame)
+    test.assertTrue(tooltip.shown)
+    test.assertEqual(counts.frame, tooltip.owner)
+    test.assertEqual(2, #tooltip.lines)
+    test.assertEqual("Guild size", tooltip.lines[1])
+    test.assertEqual("1 of 1 player online", tooltip.lines[2])
+
+    -- A rebuild while hovering redraws the tooltip.
+    counts:Set("1 player · 1 alt · 1 unlinked · 3 characters", { "Guild size", "0 of 1 player online" })
+    test.assertEqual("0 of 1 player online", tooltip.lines[2])
+
+    counts.frame.scripts.OnLeave(counts.frame)
+    test.assertFalse(tooltip.shown)
+
+    counts:Set(nil)
+    test.assertFalse(counts.frame.shown)
 end)

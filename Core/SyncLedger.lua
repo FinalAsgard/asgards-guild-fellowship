@@ -6,12 +6,13 @@ local _, addon = ...
 --
 -- Stored in the partition:
 --   ledger    { since = time, facts = { ["main|key"] = { at, main },
---               ["alias|key"] = { at, alias } } }
+--               ["alias|key"] = { at, alias },
+--               ["discord|key"] = { at, text } } }
 --             Only the newest fact about each thing is kept. `since` is
 --             when the ledger started: facts dated earlier (made before
 --             this install kept a ledger) can't be judged and are trusted.
 --   forgeries a list, newest last, of
---             { kind, character, main?, alias?, at, relayedBy, seen }
+--             { kind, character, main?, alias?, text?, at, relayedBy, seen }
 --             keeping the last MAX_FORGERIES.
 --
 -- Pure: works on a FellowshipStore partition and never touches the game.
@@ -62,7 +63,7 @@ function Ledger:Record(facts, now)
         if addon.SyncFacts.IsValid(fact) then
             local held = data.facts[keyOf(fact)]
             if type(held) ~= "table" or not isTime(held.at) or fact.at >= held.at then
-                data.facts[keyOf(fact)] = { at = fact.at, main = fact.main, alias = fact.alias }
+                data.facts[keyOf(fact)] = { at = fact.at, main = fact.main, alias = fact.alias, text = fact.text }
             end
         end
     end
@@ -85,7 +86,7 @@ function Ledger:IsForged(fact, now)
     if fact.at ~= held.at then
         return fact.at > held.at
     end
-    return fact.main ~= held.main or fact.alias ~= held.alias
+    return fact.main ~= held.main or fact.alias ~= held.alias or fact.text ~= held.text
 end
 
 -- Logs a forged fact and the character (key) that relayed it.
@@ -96,6 +97,7 @@ function Ledger:LogForgery(fact, relayedBy, now)
         character = fact.character,
         main = fact.main,
         alias = fact.alias,
+        text = fact.text,
         roles = fact.roles,
         at = fact.at,
         relayedBy = relayedBy,

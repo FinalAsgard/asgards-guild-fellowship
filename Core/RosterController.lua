@@ -26,6 +26,11 @@ Controller.__index = Controller
 --   onDeclaredChanged optional function(key, before): after `key` was
 --                 declared its player's main by hand, or that was taken back,
 --                 with whether it was declared before (for guild sync)
+--   onDiscordChanged  optional function(key, text) -> facts or nil: this
+--                 user set the Discord username of `key`'s player from the
+--                 player panel ("" clears it): official at once for an
+--                 officer, a suggestion for a member; nil when it wasn't
+--                 saved
 --   onAliasChanged  optional function(key, before): after a manual alias
 --                 change to the player of `key`, with the alias before it
 --                 ("" for none) (for guild sync)
@@ -48,6 +53,9 @@ Controller.__index = Controller
 --                 is an officer; only officers get the Recruiters leaderboard
 --   recentAds     optional function() -> the channels advertised in lately,
 --                 newest first, as { label, ago } (see GuildRecruit:KnownAds)
+--   offZones      optional function() -> the zones turned off with Off
+--                 here, as { key, name, at } (see GuildRecruit:OffZones)
+--   turnBackOn    optional function(zoneKey): turns a zone's prompts back on
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
@@ -56,12 +64,15 @@ function RosterController.Create(options)
         groupedWith = options.groupedWith,
         recruitRecord = options.recruitRecord,
         recentAds = options.recentAds,
+        offZones = options.offZones,
+        turnBackOn = options.turnBackOn,
         isOfficer = options.isOfficer or function()
             return false
         end,
         onDecideSuggestion = options.onDecideSuggestion,
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
+        onDiscordChanged = options.onDiscordChanged,
         onDeclaredChanged = options.onDeclaredChanged,
         onScanFinished = options.onScanFinished,
         onChanged = options.onChanged,
@@ -601,6 +612,21 @@ function Controller:Detach(key)
     return self:Organize("Detach", key)
 end
 
+-- "Set Discord…" from the player panel: sets the Discord username of
+-- `key`'s player to `text` ("" clears it), as an officer's or as a member's
+-- suggestion, and redraws.
+function Controller:SetDiscord(key, text)
+    if self.current == nil or self.onDiscordChanged == nil then
+        return false
+    end
+    if self.onDiscordChanged(key, text) == nil then
+        self:Print("That Discord username wasn't saved: the server time isn't known yet.")
+        return false
+    end
+    self:Refresh()
+    return true
+end
+
 -- "Declare as my main": `key` must be its player's main.
 function Controller:SetDeclared(key, declared)
     return self:Organize("SetDeclared", key, declared)
@@ -848,6 +874,7 @@ function Controller:Redraw()
         }, stamp)
         self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
         self.window:SetRows(rows)
+        self:RedrawCounts(members)
         local conflictRows = addon.ConflictViewModel.Build({
             partition = self.current.partition,
             members = members,
@@ -860,6 +887,21 @@ function Controller:Redraw()
     end
     self:RefreshRecruiters()
     self:UpdateStatus()
+end
+
+-- Draws the guild-size counts line and its tooltip (see
+-- RosterViewModel.Counts) from `members`, the live roster facts, or hides
+-- it while the guild has no characters yet, so it never reads "0 players".
+function Controller:RedrawCounts(members)
+    if type(self.window.SetCounts) ~= "function" then
+        return
+    end
+    local counts = addon.RosterViewModel.Counts(self.current.partition, members)
+    if counts.characters == 0 then
+        self.window:SetCounts(nil)
+        return
+    end
+    self.window:SetCounts(addon.RosterViewModel.CountsText(counts), addon.RosterViewModel.CountsTooltip(counts))
 end
 
 -- The officers' Recruiters rows (see RecruitStats.Recruiters) for the
@@ -923,9 +965,12 @@ end
 -- The Recent ads page's rows, for every member: the channels this client
 -- knows were advertised in lately, newest first, with who posted and how
 -- long ago. It starts with a heading row ({ kind = "heading", label, by,
--- recent }: its column titles), and says so when there are none.
+-- recent }: its column titles), and says so when there are none. Then,
+-- when any zone was turned off with Off here, a heading and a row for each,
+-- with when it was turned off and a button (`action`) to turn it back on.
 --   { kind = "ad", label, by, recent }    -- recent: how long ago
 --   { kind = "empty", label }
+--   { kind = "off", label, by, action, zoneKey }
 function Controller:RecentAdsView()
     local rows = { { kind = "heading", label = "Channel", by = "Posted by", recent = "When" } }
     local guild, partition, normalizer = self:QuietContext()
@@ -944,7 +989,31 @@ function Controller:RecentAdsView()
     if ads[1] == nil then
         table.insert(rows, { kind = "empty", label = "No recent ads known." })
     end
+    local okZones, zones = pcall(self.offZones or function() return {} end)
+    zones = okZones and type(zones) == "table" and zones or {}
+    if zones[1] ~= nil then
+        table.insert(rows, { kind = "empty", label = "" })
+        table.insert(rows, { kind = "heading", label = "Turned off with Off here", by = "Since", recent = "" })
+    end
+    for index = 1, #zones do
+        table.insert(rows, {
+            kind = "off",
+            label = zones[index].name .. " (General and Trade)",
+            by = self.client:FormatDate(zones[index].at),
+            action = "Turn back on",
+            zoneKey = zones[index].key,
+        })
+    end
     return rows
+end
+
+-- "Turn back on" on the Recent ads page: prompts in the zone `zoneKey`
+-- may show again, and the page redraws.
+function Controller:TurnBackOn(zoneKey)
+    if self.turnBackOn ~= nil then
+        pcall(self.turnBackOn, zoneKey)
+    end
+    self:RefreshRecruiters()
 end
 
 -- Redraws the Recruiters leaderboard on the Recruitment page, and the

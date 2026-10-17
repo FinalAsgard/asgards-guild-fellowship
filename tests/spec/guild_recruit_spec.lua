@@ -567,11 +567,12 @@ test.test("guild recruit: Not now hides a channel's prompt for 10 minutes, then 
     test.assertTrue(promptFor(world, "Advertise in Trade?") ~= nil)
 end)
 
-test.test("guild recruit: Off here quiets the zone's General and Trade for the session only", function()
+test.test("guild recruit: Off here quiets the zone's General and Trade until turned back on", function()
     local world = login("Retail")
     optIn(world)
     inCity(world, "Dornogal")
 
+    local offAt = world.time
     world.handlers.offHere(world.shown[1].key)
     test.assertEqual(0, #world.shown)
     fixtures.runTimers(world, 2 * HOUR)
@@ -584,10 +585,20 @@ test.test("guild recruit: Off here quiets the zone's General and Trade for the s
     inCity(world, "Dornogal")
     test.assertEqual(0, #world.shown)
 
-    -- Nothing is saved, so a reload prompts again.
-    local reloaded = login("Retail", { database = world.database, time = world.time })
-    inCity(reloaded, "Dornogal")
-    test.assertEqual(2, #reloaded.shown)
+    -- It's saved: days later, after logging in again, it's still off.
+    local later = login("Retail", { database = world.database, time = world.time + 3 * 24 * HOUR })
+    inCity(later, "Dornogal")
+    test.assertEqual(0, #later.shown)
+    local zones = later.addon.guildRecruit:OffZones()
+    test.assertEqual(1, #zones)
+    test.assertEqual("map:2339", zones[1].key)
+    test.assertEqual("Dornogal", zones[1].name)
+    test.assertEqual(offAt, zones[1].at)
+
+    -- Turning it back on prompts there again at once.
+    test.assertTrue(later.addon.guildRecruit:TurnBackOn("map:2339"))
+    test.assertEqual(2, #later.shown)
+    test.assertEqual(0, #later.addon.guildRecruit:OffZones())
 end)
 
 test.test("guild recruit: prompts are held in combat and boss encounters, then appear if still due", function()
@@ -1647,4 +1658,119 @@ test.test("recruitment settings: the user's own count goes up with each post, an
 
     test.assertEqual("You've posted 1 guild ad (1 in the last 30 days).", world.addon.settings:Get("recruitMyCount"))
     test.assertTrue(refreshes > 0)
+end)
+
+test.test("recent ads: zones turned off with Off here are listed, each with a button to turn it back on", function()
+    local world = login("Retail", { playerName = MEMBER })
+    world.environment.date = function(format, timestamp)
+        return os.date("!" .. format, timestamp)
+    end
+    local window = recruitersWindow(world)
+    optIn(world)
+    inCity(world, "Dornogal")
+    test.assertEqual(0, #rowsOfKind(window.ads, "off"))
+
+    world.handlers.offHere(world.shown[1].key)
+
+    -- The open page lists it at once.
+    local off = rowsOfKind(window.ads, "off")
+    test.assertEqual(1, #off)
+    test.assertEqual("Dornogal (General and Trade)", off[1].label)
+    test.assertEqual(os.date("!%Y-%m-%d", world.time), off[1].by)
+    test.assertEqual("Turn back on", off[1].action)
+    local headings = rowsOfKind(window.ads, "heading")
+    test.assertEqual("Turned off with Off here", headings[2].label)
+
+    world.addon.rosterController:TurnBackOn(off[1].zoneKey)
+    test.assertEqual(0, #rowsOfKind(window.ads, "off"))
+    test.assertEqual(2, #world.shown)
+end)
+
+-- What the add-on printed since message `from`.
+local function printedSince(world, from)
+    return table.concat(world.messages, "\n", from + 1)
+end
+
+test.test("/agf advertise posts to General here now, counts it, and won't post again while it's fresh", function()
+    local world = login("Retail")
+    optIn(world)
+    local before = #world.messages
+
+    fixtures.slash(world, "advertise")
+
+    test.assertEqual(1, #world.chat)
+    test.assertEqual(AD, world.chat[1].text)
+    test.assertEqual(1, world.chat[1].target)
+    -- Counted as any ad: the prompt closes and the guild hears of it.
+    test.assertEqual(0, #world.shown)
+    test.assertEqual("general:map:2339", advertised(world)[1].k)
+    test.assertEqual(1, #world.addon.guildRecruit:KnownAds())
+
+    -- Pressing it again is refused while the guild's ad there is fresh.
+    world.time = world.time + 60
+    fixtures.slash(world, "advertise")
+    test.assertEqual(1, #world.chat)
+    test.assertContains(printedSince(world, before), "Not advertised: Dornogal General was advertised lately; again in ")
+end)
+
+test.test("/agf advertise trade posts to Trade, and only where there is one", function()
+    local world = login("Retail")
+    optIn(world)
+    local before = #world.messages
+
+    fixtures.slash(world, "advertise trade")
+    test.assertEqual(0, #world.chat)
+    test.assertContains(printedSince(world, before), "Not advertised: there's no Trade channel here.")
+
+    inCity(world, "Dornogal")
+    fixtures.slash(world, "advertise trade")
+    test.assertEqual(1, #world.chat)
+    test.assertEqual(2, world.chat[1].target)
+    test.assertEqual("trade", advertised(world)[1].k)
+end)
+
+test.test("/agf advertise works without prompts, after Off here, and in a place with no map", function()
+    local world = login("Retail")
+    -- Not opted in to prompts: advertising on demand needs only an ad.
+    test.assertTrue(world.addon.settings:Set("recruitAd", AD))
+    test.assertEqual(0, #world.shown)
+
+    -- The Deeprun Tram has no map, so it's never prompted, and its General
+    -- names the zone.
+    world.zone = { name = "Deeprun Tram" }
+    world.channels = { [1] = "General - Deeprun Tram" }
+    fixtures.fire(world, "ZONE_CHANGED_NEW_AREA")
+    fixtures.slash(world, "advertise")
+
+    test.assertEqual(1, #world.chat)
+    test.assertEqual("general:zone:Deeprun Tram", advertised(world)[1].k)
+    test.assertEqual("Deeprun Tram General", advertised(world)[1].n)
+    test.assertEqual("Deeprun Tram General", world.addon.guildRecruit:KnownAds()[1].label)
+end)
+
+test.test("/agf advertise is refused without permission, an ad, or while busy or paused", function()
+    local world = login("Retail")
+    local before = #world.messages
+
+    fixtures.slash(world, "advertise")
+    test.assertContains(printedSince(world, before), "Not advertised: there's no ad to post; write one with /agf recruit.")
+
+    optIn(world)
+    world.inInstance = "party"
+    fixtures.slash(world, "advertise")
+    test.assertContains(printedSince(world, before), "Not advertised: not during combat or in an instance.")
+    world.inInstance = nil
+
+    world.addon.guildRecruit.policy.paused = function()
+        return true
+    end
+    fixtures.slash(world, "advertise")
+    test.assertContains(printedSince(world, before), "Not advertised: officers have paused recruitment.")
+
+    world.addon.guildRecruit.canInvite = function()
+        return false
+    end
+    fixtures.slash(world, "advertise")
+    test.assertContains(printedSince(world, before), "Not advertised: this character can't invite to the guild.")
+    test.assertEqual(0, #world.chat)
 end)

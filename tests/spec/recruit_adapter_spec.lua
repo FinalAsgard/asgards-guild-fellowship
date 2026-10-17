@@ -320,6 +320,35 @@ test.test("a zone whose maps work but haven't placed the player yet has no key",
     test.assertEqual(nil, client:GetZone())
 end)
 
+test.test("a place with no map is unknown, and its General names the zone", function()
+    local client = newClient({
+        GetRealZoneText = function()
+            return "Deeprun Tram"
+        end,
+        C_Map = {
+            GetBestMapForUnit = function()
+                return nil
+            end,
+        },
+        GetChannelList = function()
+            return 1, "General", false
+        end,
+        GetChannelName = function(number)
+            if number == 1 then
+                return 1, "General - Deeprun Tram", 0
+            end
+            return 0, nil, 0
+        end,
+    })
+
+    test.assertEqual(nil, client:GetZone())
+    test.assertContains(table.concat(client:ChannelReport(), "\n"),
+        "Zone: Deeprun Tram, unknown: the game hasn't placed you on a map, so no prompts here;"
+            .. " /agf advertise still posts")
+    test.assertEqual("Deeprun Tram", client:ChannelZoneName(1))
+    test.assertEqual(nil, client:ChannelZoneName(2))
+end)
+
 test.test("a channel is the zone's unless its name says it's another zone's", function()
     local names = { [1] = "General - Booty Bay", [2] = "Trade - City", [3] = "General", [4] = 42 }
     local client = newClient({

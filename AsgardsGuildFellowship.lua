@@ -96,6 +96,9 @@ if clientProfile.supported then
         onAliasChanged = function(key, before)
             syncSession:LocalAliasEdit(key, before)
         end,
+        onDiscordChanged = function(key, text)
+            return syncSession:LocalDiscordEdit(key, text)
+        end,
         onDeclaredChanged = function(key, before)
             syncSession:LocalDeclaredEdit(key, before)
         end,
@@ -137,6 +140,12 @@ if clientProfile.supported then
         end,
         recentAds = function()
             return guildRecruit:KnownAds()
+        end,
+        offZones = function()
+            return guildRecruit:OffZones()
+        end,
+        turnBackOn = function(zoneKey)
+            guildRecruit:TurnBackOn(zoneKey)
         end,
         isOfficer = function()
             return guildRecruit:IsOfficer()
@@ -197,6 +206,9 @@ if clientProfile.supported then
                 onRecentAdsShown = function()
                     rosterController:RefreshRecruiters()
                 end,
+                onTurnBackOn = function(zoneKey)
+                    rosterController:TurnBackOn(zoneKey)
+                end,
                 loadGeometry = function()
                     local store = rosterController:Store()
                     return store and store:GetFrameState()
@@ -254,6 +266,9 @@ if clientProfile.supported then
                 end,
                 onSetAlias = function(key, text)
                     rosterController:SetAlias(key, text)
+                end,
+                onSetDiscord = function(key, text)
+                    rosterController:SetDiscord(key, text)
                 end,
                 onDetach = function(key)
                     rosterController:Detach(key)
@@ -428,6 +443,29 @@ if clientProfile.supported then
                 return nil, "this character isn't in a guild"
             end
             if not store:SetGreetOnCharacter(selfKey, enabled) then
+                return nil, "the saved setting is unreadable, so it stays on"
+            end
+            return true
+        end,
+    })
+    settings:Add("guildGreet", {
+        id = "greetInInstances",
+        kind = "toggle",
+        label = "Greet while in a dungeon, raid or other instance",
+        info = function()
+            return "Turn this off to get no greet prompts inside dungeons, raids, battlegrounds, arenas and " ..
+                "keystone runs. Guildmates who come online while you're inside aren't prompted for later."
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:GreetInInstances()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetInInstances(enabled) then
                 return nil, "the saved setting is unreadable, so it stays on"
             end
             return true
@@ -1885,6 +1923,14 @@ if clientProfile.supported then
             rosterController:Print(lines[index])
         end
     end)
+    router:Register("advertise", "post the guild ad to General here now (advertise trade: to Trade)", function(arguments)
+        local channel = string.lower(arguments or "") == "trade" and addon.RecruitPolicy.TRADE
+            or addon.RecruitPolicy.GENERAL
+        local sent, reason = guildRecruit:Advertise(channel)
+        if sent == nil then
+            rosterController:Print("Not advertised: " .. tostring(reason) .. ".")
+        end
+    end)
     router:Register("sync", "show guild sync status", function()
         local lines = addon.RosterViewModel.SyncStatusLines(syncSession:Status(), client:Timestamp())
         local index
@@ -1932,6 +1978,9 @@ if clientProfile.supported then
         send = function(text)
             return client:SendGuildMessage(text)
         end,
+        inInstance = function()
+            return client:IsInInstance()
+        end,
         -- Heard within seconds, unlike sync's bulk traffic.
         announce = function(message)
             return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
@@ -1952,6 +2001,26 @@ if clientProfile.supported then
             end
         end,
     })
+    local function recruitLocation()
+        local zone = client:GetZone()
+        if zone == nil then
+            return nil
+        end
+        -- Arriving somewhere, the client can put the player in the new
+        -- zone's General a moment before it reports the new zone. Until
+        -- the two agree there's no General here, so an ad is never sent
+        -- to one zone and counted for another.
+        local general = client:GetGeneralChannel()
+        if general ~= nil and not client:IsChannelOfZone(general, zone.name) then
+            general = nil
+        end
+        return {
+            key = zone.key,
+            name = zone.name,
+            general = general,
+            trade = client:GetTradeChannel(),
+        }
+    end
     -- Guild Recruit keeps its ad times with the current guild.
     guildRecruit = addon.GuildRecruit.Create({
         partition = function()
@@ -1970,25 +2039,21 @@ if clientProfile.supported then
         canInvite = function()
             return client:CanGuildInvite()
         end,
-        location = function()
-            local zone = client:GetZone()
-            if zone == nil then
+        location = recruitLocation,
+        -- Advertising on demand also works where the client can't place the
+        -- player on a map (the Deeprun Tram): the zone is the one General
+        -- is named for.
+        here = function()
+            local location = recruitLocation()
+            if location ~= nil then
+                return location
+            end
+            local general = client:GetGeneralChannel()
+            local name = general and client:ChannelZoneName(general)
+            if name == nil then
                 return nil
             end
-            -- Arriving somewhere, the client can put the player in the new
-            -- zone's General a moment before it reports the new zone. Until
-            -- the two agree there's no General here, so an ad is never sent
-            -- to one zone and counted for another.
-            local general = client:GetGeneralChannel()
-            if general ~= nil and not client:IsChannelOfZone(general, zone.name) then
-                general = nil
-            end
-            return {
-                key = zone.key,
-                name = zone.name,
-                general = general,
-                trade = client:GetTradeChannel(),
-            }
+            return { key = "zone:" .. name, name = name, general = general, trade = client:GetTradeChannel() }
         end,
         after = function(seconds, callback)
             return client:After(seconds, callback)
@@ -2053,6 +2118,8 @@ if clientProfile.supported then
             guildRecruit:Refresh()
         elseif id == "guildGreet" or id == "greetCharacter" then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
+        elseif id == "greetInInstances" then
+            guildGreet:OnZoneChanged()
         elseif entry ~= nil and entry.category ~= nil then
             guildGreet:OnCategoryChanged(entry.category, value)
         end
@@ -2518,9 +2585,11 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         guildGreet:OnCombatChanged(true)
         guildRecruit:OnCombatChanged(true)
     end
-    -- Advertise prompts follow the player from zone to zone.
+    -- Advertise prompts follow the player from zone to zone, and greet
+    -- prompts close on entering an instance where they're off.
     client:ObserveZone(function()
         guildRecruit:Refresh()
+        guildGreet:OnZoneChanged()
     end)
     guildRecruit:Refresh()
     -- The Group Finder's slots follow the party, and every party with

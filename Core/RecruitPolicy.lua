@@ -61,7 +61,12 @@ end
 -- True when the user may be prompted at all: permission, an ad, opt-in, and
 -- recruitment not paused for the guild.
 function Policy:Allowed()
-    return answers(self.canInvite) and answers(self.hasAd) and answers(self.optedIn) and not answers(self.paused)
+    return answers(self.canInvite) and answers(self.hasAd) and answers(self.optedIn) and not self:Paused()
+end
+
+-- True while officers have paused recruitment for the whole guild.
+function Policy:Paused()
+    return answers(self.paused)
 end
 
 -- The channels the user could advertise in at `location` ({ key, name,

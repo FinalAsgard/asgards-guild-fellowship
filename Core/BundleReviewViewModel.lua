@@ -89,6 +89,13 @@ function BundleReviewViewModel.Build(inputs)
                 kind = item.kind,
                 text = item.name .. ": " .. item.current .. " → " .. item.suggests,
             })
+        elseif item.kind == addon.SuggestionService.KIND_DISCORD then
+            -- Often about a guildmate, not the member's own player.
+            table.insert(lines, {
+                character = item.character,
+                kind = item.kind,
+                text = item.name .. "'s Discord: " .. item.current .. " → " .. item.suggests,
+            })
         elseif item.kind == addon.SuggestionService.KIND_ALIAS then
             suggestedAlias = item.suggestion and item.suggestion.alias or suggestedAlias
             table.insert(lines, {

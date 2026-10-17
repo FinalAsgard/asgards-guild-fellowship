@@ -144,13 +144,15 @@ end
 --   collapsed    set of player ids whose groups are collapsed
 --   showDeparted true to include characters who left the guild
 --   now          the current timestamp, for "Left N days ago"
---   search       text to match against character names and aliases,
---                ignoring case; a matching player shows its whole group
+--   search       text to match against character names, aliases and
+--                Discord usernames, ignoring case; a matching player shows
+--                its whole group
 --   onlineOnly   true to show only players with a character online
 -- Returns rows. A player with several characters gets a header row:
---   { kind = "player", id, label, alias, mainName, online, onlineAs,
---     collapsed, count }
--- where `label` is "Alias (Main)", or the main's name without an alias, and
+--   { kind = "player", id, label, alias, discord, mainName, online,
+--     onlineAs, collapsed, count }
+-- where `label` is "Alias (Main)", or the main's name without an alias,
+-- `discord` is the player's Discord username or nil, and
 -- `onlineAs` names the online character (the main if it is online),
 -- followed (unless collapsed) by its character rows:
 --   { kind = "character", key, player, isMain, declared, name, coloredName,
@@ -160,7 +162,8 @@ end
 -- the character left. Departed characters are hidden unless showDeparted;
 -- a player with no visible characters is left out.
 -- A single-character player is just its character row, marked
--- `standalone = true` and carrying the player's `label` and `coloredLabel`.
+-- `standalone = true` and carrying the player's `label`, `coloredLabel` and
+-- `discord`.
 -- Players sort online first, then by label.
 local function trimmedLower(text)
     if type(text) ~= "string" then
@@ -178,7 +181,7 @@ local function shown(group, needle, onlineOnly)
     if onlineOnly and not group.online then
         return false
     end
-    if needle == "" or contains(group.alias, needle) then
+    if needle == "" or contains(group.alias, needle) or contains(group.discord, needle) then
         return true
     end
     local index
@@ -223,6 +226,7 @@ function RosterViewModel.Build(inputs)
                 id = id,
                 label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
                 alias = player.alias,
+                discord = (partition:PlayerProfileText(id, "discord")),
                 mainName = mainName,
                 online = online,
                 onlineAs = onlineAs,
@@ -251,6 +255,7 @@ function RosterViewModel.Build(inputs)
             local row = group.rows[1]
             row.standalone = true
             row.label = group.label
+            row.discord = group.discord
             row.coloredLabel = group.alias and (group.alias .. " (" .. row.coloredName .. ")")
                 or row.coloredName
             table.insert(rows, row)
@@ -260,6 +265,7 @@ function RosterViewModel.Build(inputs)
                 id = group.id,
                 label = group.label,
                 alias = group.alias,
+                discord = group.discord,
                 mainName = group.mainName,
                 online = group.online,
                 onlineAs = group.onlineAs,
@@ -287,6 +293,132 @@ function RosterViewModel.GroupIds(partition)
     end)
     table.sort(ids)
     return ids
+end
+
+-- The windows, in days, players are counted active within.
+RosterViewModel.ACTIVE_DAYS = { 7, 30, 90 }
+
+-- Hours since a character was last online, from the roster's { years,
+-- months, days, hours } (a month taken as 30 days), or nil when unknown.
+local function hoursAway(lastOnline)
+    if type(lastOnline) ~= "table" then
+        return nil
+    end
+    local months = (lastOnline.years or 0) * 12 + (lastOnline.months or 0)
+    return (months * 30 + (lastOnline.days or 0)) * 24 + (lastOnline.hours or 0)
+end
+
+-- How big the guild is, from every player's current characters (departed
+-- ones never count), whatever the roster's search and filters:
+--   { known, unlinked, players, alts, characters, playersOnline,
+--     charactersOnline, withAlias, declared, active = { [days] = n } }
+-- A player is known when they have two or more current characters, an
+-- alias, or a current main that was declared; otherwise their one character
+-- is unlinked, and counts as a player of its own until it's linked.
+-- players = known + unlinked. Alts are each known player's characters after
+-- the first, so players + alts == characters. `members` (live roster facts
+-- keyed by character key) says who is online and when each character was
+-- last online: playersOnline counts players with a character online, and
+-- active[days] players with one online within that many days (see
+-- ACTIVE_DAYS). withAlias and declared count players with an alias, and
+-- with a declared current main.
+function RosterViewModel.Counts(partition, members)
+    members = members or {}
+    local counts = {
+        known = 0, unlinked = 0, players = 0, alts = 0, characters = 0,
+        playersOnline = 0, charactersOnline = 0, withAlias = 0, declared = 0, active = {},
+    }
+    local index
+    for index = 1, #RosterViewModel.ACTIVE_DAYS do
+        counts.active[RosterViewModel.ACTIVE_DAYS[index]] = 0
+    end
+    partition:EachPlayer(function(id, player)
+        local keys = partition:CharactersOf(id)
+        local current, online = 0, 0
+        -- Hours since the player's most recent login; 0 while online.
+        local latest
+        local keyIndex
+        for keyIndex = 1, #keys do
+            if partition:IsInGuild(keys[keyIndex]) then
+                current = current + 1
+                local live = members[keys[keyIndex]]
+                local away
+                if live ~= nil and live.online == true then
+                    online = online + 1
+                    away = 0
+                else
+                    away = hoursAway(live and live.lastOnline)
+                end
+                if away ~= nil and (latest == nil or away < latest) then
+                    latest = away
+                end
+            end
+        end
+        if current == 0 then
+            return
+        end
+        counts.players = counts.players + 1
+        counts.characters = counts.characters + current
+        counts.charactersOnline = counts.charactersOnline + online
+        counts.playersOnline = counts.playersOnline + (online > 0 and 1 or 0)
+        local days
+        for days in pairs(counts.active) do
+            if latest ~= nil and latest < days * 24 then
+                counts.active[days] = counts.active[days] + 1
+            end
+        end
+        local declared = player.main ~= nil and partition:IsInGuild(player.main) and partition:IsDeclared(player.main)
+        if current >= 2 or player.alias ~= nil or declared then
+            counts.known = counts.known + 1
+            counts.alts = counts.alts + current - 1
+            counts.withAlias = counts.withAlias + (player.alias ~= nil and 1 or 0)
+            counts.declared = counts.declared + (declared and 1 or 0)
+        else
+            counts.unlinked = counts.unlinked + 1
+        end
+    end)
+    return counts
+end
+
+-- The roster's counts line: "320 players (27 known + 293 unlinked) · 31 alts
+-- · 351 characters", leaving out the breakdown when none are unlinked.
+function RosterViewModel.CountsText(counts)
+    local players = plural(counts.players, "player")
+    if counts.unlinked > 0 then
+        players = players .. " (" .. counts.known .. " known + " .. counts.unlinked .. " unlinked)"
+    end
+    return table.concat({ players, plural(counts.alts, "alt"), plural(counts.characters, "character") }, " · ")
+end
+
+-- The counts line's tooltip, one string per line: a "Guild size" title,
+-- the players and how many are known, who is active and online, how
+-- complete the Fellowship data is, and (when there are any) what
+-- "unlinked" means.
+function RosterViewModel.CountsTooltip(counts)
+    local lines = { "Guild size" }
+    if counts.unlinked > 0 then
+        table.insert(lines, plural(counts.players, "player") .. ": " .. counts.known .. " known + "
+            .. counts.unlinked .. " unlinked")
+    else
+        table.insert(lines, plural(counts.players, "player") .. ", all known")
+    end
+    local active = {}
+    local index
+    for index = 1, #RosterViewModel.ACTIVE_DAYS do
+        local days = RosterViewModel.ACTIVE_DAYS[index]
+        table.insert(active, (counts.active and counts.active[days] or 0) .. " in " .. days .. " days")
+    end
+    table.insert(lines, "Active players: " .. table.concat(active, ", "))
+    table.insert(lines, counts.playersOnline .. " of " .. plural(counts.players, "player") .. " online")
+    table.insert(lines, counts.charactersOnline .. " of " .. plural(counts.characters, "character") .. " online")
+    table.insert(lines, plural(counts.withAlias, "player") .. " " .. (counts.withAlias == 1 and "has" or "have")
+        .. " an alias")
+    table.insert(lines, plural(counts.declared, "main") .. " declared")
+    if counts.unlinked > 0 then
+        table.insert(lines, "  Unlinked: a lone character with no alias or declared main.")
+        table.insert(lines, "  It counts as a player until it's linked, but may be someone's alt.")
+    end
+    return lines
 end
 
 -- Remembers the last build and returns it again while `stamp` (a value the

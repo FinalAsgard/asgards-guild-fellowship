@@ -111,6 +111,9 @@ local function setup(profile)
         showDelay = function()
             return world.showDelay or 0
         end,
+        inInstance = function()
+            return world.inInstance == true
+        end,
         view = {
             Show = function(_, prompts, handlers)
                 world.shown = {}
@@ -884,4 +887,36 @@ test.test("guild greet: without timers, a prompt shows at once instead of never"
     world.greet:OnPresence("online", world.names.bolt)
 
     test.assertEqual(1, #world.shown)
+end)
+
+test.test("greet: prompts in instances are on by default, and turned off none show inside one", function()
+    local world = setup("Retail")
+    world.inInstance = true
+
+    -- On by default: inside an instance, arrivals are prompted as anywhere.
+    test.assertTrue(world.store:GreetInInstances())
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(1, #world.shown)
+
+    -- Turned off, the waiting prompt closes and new arrivals aren't prompted.
+    test.assertTrue(world.store:SetGreetInInstances(false))
+    world.greet:OnZoneChanged()
+    test.assertEqual(0, #world.shown)
+    world.greet:OnPresence("online", world.names.bishop)
+    test.assertEqual(0, #world.shown)
+
+    -- Out in the world again, arrivals are prompted, and the ones that came
+    -- online inside aren't brought back.
+    world.inInstance = false
+    world.greet:OnZoneChanged()
+    test.assertEqual(0, #world.shown)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertEqual(1, #world.shown)
+
+    -- The setting is kept, and an unusable saved value is left alone.
+    test.assertFalse(world.store:GreetInInstances())
+    world.database.greet.inInstances = "yes"
+    test.assertTrue(world.store:GreetInInstances())
+    test.assertFalse(world.store:SetGreetInInstances(false))
+    test.assertFalse(world.store:SetGreetInInstances("off"))
 end)

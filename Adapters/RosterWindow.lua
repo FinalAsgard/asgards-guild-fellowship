@@ -23,11 +23,14 @@ local Window = {}
 Window.__index = Window
 
 -- Column layout: x offset and width of each text column in a line.
+-- Discord is the player's, so it shows on a player's header (or a lone
+-- character's row), not on each alt.
 local COLUMNS = {
-    { field = "name", header = "Name", x = 8, width = 240 },
-    { field = "level", header = "Level", x = 254, width = 44 },
-    { field = "rank", header = "Rank", x = 302, width = 120 },
-    { field = "location", header = "Zone / Last online", x = 428, width = 180 },
+    { field = "name", header = "Name", x = 8, width = 200 },
+    { field = "level", header = "Level", x = 214, width = 40 },
+    { field = "rank", header = "Rank", x = 258, width = 100 },
+    { field = "discord", header = "Discord", x = 364, width = 120 },
+    { field = "location", header = "Zone / Last online", x = 490, width = 140 },
 }
 
 -- Row backgrounds: a tint for player headers, and a faint stripe on every
@@ -107,6 +110,9 @@ local function cellText(row, field)
         end
         if field == "location" and row.online then
             return "|cff20ff20Online as " .. tostring(row.onlineAs) .. "|r"
+        end
+        if field == "discord" then
+            return row.discord or ""
         end
         return ""
     end
@@ -236,12 +242,13 @@ local function popupEditBox(popup)
     return nil
 end
 
--- A text dialog for "Set alias…". Saving an empty alias clears it.
-local function showAliasDialog(label, current, onSave)
+-- A one-line text dialog, registered as `id`: `prompt` names `label` (%s),
+-- the box starts with `current` and holds at most `maxLetters`.
+local function showTextDialog(id, prompt, maxLetters, label, current, onSave)
     if type(StaticPopupDialogs) ~= "table" or type(StaticPopup_Show) ~= "function" then
         return false
     end
-    local name = addon.Identity.addonName .. "_SET_ALIAS"
+    local name = addon.Identity.addonName .. "_" .. id
     if StaticPopupDialogs[name] == nil then
         local function save(popup, data)
             local box = popupEditBox(popup)
@@ -250,11 +257,11 @@ local function showAliasDialog(label, current, onSave)
             end
         end
         StaticPopupDialogs[name] = {
-            text = "Alias for %s (leave empty to clear):",
+            text = prompt,
             button1 = ACCEPT or "Accept",
             button2 = CANCEL or "Cancel",
             hasEditBox = true,
-            maxLetters = 48,
+            maxLetters = maxLetters,
             OnShow = function(popup, data)
                 local box = popupEditBox(popup)
                 if box ~= nil and data ~= nil then
@@ -278,6 +285,17 @@ local function showAliasDialog(label, current, onSave)
     end
     StaticPopup_Show(name, label, nil, { current = current, onSave = onSave })
     return true
+end
+
+-- A text dialog for "Set alias…". Saving an empty alias clears it.
+local function showAliasDialog(label, current, onSave)
+    return showTextDialog("SET_ALIAS", "Alias for %s (leave empty to clear):", 48, label, current, onSave)
+end
+
+-- A text dialog for "Set Discord…". Saving empty clears it.
+local function showDiscordDialog(label, current, onSave)
+    return showTextDialog("SET_DISCORD", "Discord username for %s (leave empty to clear):",
+        addon.FellowshipStore.PROFILE_FIELDS.discord, label, current, onSave)
 end
 
 local PICKER_WIDTH = 360
@@ -376,10 +394,15 @@ end
 
 local PANEL_WIDTH = 380
 local PANEL_HEIGHT = 440
+-- The action bar along the panel's bottom: its buttons' gap from the edge,
+-- and the room the list leaves for it.
+local PANEL_BAR_MARGIN = 10
+local PANEL_BAR_HEIGHT = 40
 
 -- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
 -- merge)` open the dialogs the right-click menu uses (`merge` titles the
--- picker "Merge into player").
+-- picker "Merge into player"); `actions.openSetDiscord(key, title,
+-- current)` opens the "Set Discord…" dialog.
 local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
     -- Like every panel here, closed only with its close button or Escape.
@@ -389,26 +412,60 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
     local edit = { panel = panel }
 
-    -- The alias, with Set alias… and Merge into player… buttons that open
-    -- the same dialogs as the right-click menu.
+    -- "Don't sync": keep this client's own version of the player.
+    local dontSync = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    dontSync:SetSize(20, 20)
+    dontSync:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -160, -28)
+    local dontSyncLabel = dontSync:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dontSyncLabel:SetPoint("LEFT", dontSync, "RIGHT", 2, 0)
+    dontSync:SetScript("OnClick", function(button)
+        if edit.model ~= nil then
+            options.onSetDontSync(edit.model.main, button:GetChecked() == true)
+        end
+    end)
+    edit.dontSync = dontSync
+    edit.dontSyncLabel = dontSyncLabel
+
+    -- The alias and where it came from, beside "Don't sync".
     local aliasText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     aliasText:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -32)
-    aliasText:SetPoint("RIGHT", panel, "RIGHT", -230, 0)
+    aliasText:SetPoint("RIGHT", dontSync, "LEFT", -8, 0)
     aliasText:SetJustifyH("LEFT")
     aliasText:SetWordWrap(false)
-    local setMain = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    setMain:SetSize(124, 20)
-    setMain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -28)
-    setMain:SetText("Merge into player...")
-    local setAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    setAlias:SetSize(84, 20)
-    setAlias:SetPoint("RIGHT", setMain, "LEFT", -4, 0)
-    setAlias:SetText("Set alias...")
     local aliasSource = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     aliasSource:SetPoint("TOPLEFT", aliasText, "BOTTOMLEFT", 0, -6)
+
+    -- The action bar along the bottom: Set alias… and Merge into player…,
+    -- which open the same dialogs as the right-click menu, with Set
+    -- Discord… between them (official for an officer, a suggestion for a
+    -- member). Its buttons sit left to right in `edit.actions` order.
+    local setAlias = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    setAlias:SetSize(84, 20)
+    setAlias:SetText("Set alias...")
+    local setDiscord = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    setDiscord:SetSize(100, 20)
+    setDiscord:SetText("Set Discord...")
+    local setMain = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    setMain:SetSize(124, 20)
+    setMain:SetText("Merge into player...")
+    edit.actions = { setAlias, setDiscord, setMain }
+    local actionIndex
+    for actionIndex = 1, #edit.actions do
+        local button = edit.actions[actionIndex]
+        if actionIndex == 1 then
+            button:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, PANEL_BAR_MARGIN)
+        else
+            button:SetPoint("LEFT", edit.actions[actionIndex - 1], "RIGHT", 4, 0)
+        end
+    end
     setAlias:SetScript("OnClick", function()
         if edit.model ~= nil then
             actions.openSetAlias(edit.model.main, edit.model.label)
+        end
+    end)
+    setDiscord:SetScript("OnClick", function()
+        if edit.model ~= nil then
+            actions.openSetDiscord(edit.model.main, edit.model.label, edit.model.discord)
         end
     end)
     setMain:SetScript("OnClick", function()
@@ -420,21 +477,7 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.aliasSource = aliasSource
     edit.setMain = setMain
 
-    -- "Don't sync": keep this client's own version of the player.
-    local dontSync = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    dontSync:SetSize(20, 20)
-    dontSync:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -160, -50)
-    local dontSyncLabel = dontSync:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    dontSyncLabel:SetPoint("LEFT", dontSync, "RIGHT", 2, 0)
-    dontSync:SetScript("OnClick", function(button)
-        if edit.model ~= nil then
-            options.onSetDontSync(edit.model.main, button:GetChecked() == true)
-        end
-    end)
-    edit.dontSync = dontSync
-    edit.dontSyncLabel = dontSyncLabel
-
-    local lineAmount = math.floor((PANEL_HEIGHT - 90) / RosterWindow.LINE_HEIGHT)
+    local lineAmount = math.floor((PANEL_HEIGHT - 72 - PANEL_BAR_HEIGHT) / RosterWindow.LINE_HEIGHT)
     local function newLine(scroll, index)
         local line = CreateFrame("Frame", nil, scroll)
         line:SetHeight(RosterWindow.LINE_HEIGHT)
@@ -512,11 +555,12 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         end
     end
     local scroll = framework:CreateScrollBox(panel, frameName .. "PlayerScroll", refreshLines, {},
-        PANEL_WIDTH - 20, PANEL_HEIGHT - 90, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
+        PANEL_WIDTH - 20, PANEL_HEIGHT - 72 - PANEL_BAR_HEIGHT, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
     scroll:ClearAllPoints()
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -72)
-    -- Room on the right for the scroll bar, which sits beside the list.
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 12)
+    -- Room on the right for the scroll bar, which sits beside the list, and
+    -- below for the action bar.
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, PANEL_BAR_HEIGHT)
     scroll:CreateLines(newLine, lineAmount)
     edit.scroll = scroll
     -- Measures text in the lines' font, to wrap the bio to their width.
@@ -845,8 +889,10 @@ end
 -- A list of rows in columns, as the Recruiters leaderboard and the Recent
 -- ads page show them: a heading row in gold naming the columns, rows on
 -- faint stripes, and a grey line when the list is empty (see
--- RosterController:RecruitersView and RecentAdsView).
-local function listLineCreator(columns)
+-- RosterController:RecruitersView and RecentAdsView). A column marked
+-- `action` shows a button instead of text on a row with an `action` (its
+-- label); pressing it runs `onAction(row)`.
+local function listLineCreator(columns, onAction)
     return function(scroll, index)
         local line = CreateFrame("Frame", nil, scroll)
         line:SetHeight(RosterWindow.LINE_HEIGHT)
@@ -864,6 +910,18 @@ local function listLineCreator(columns)
             cell:SetJustifyH("LEFT")
             cell:SetWordWrap(false)
             line.cells[column.field] = cell
+            if column.action then
+                local button = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+                button:SetSize(100, RosterWindow.LINE_HEIGHT)
+                button:SetPoint("LEFT", line, "LEFT", column.x, 0)
+                button:SetScript("OnClick", function()
+                    if line.row ~= nil and onAction ~= nil then
+                        onAction(line.row)
+                    end
+                end)
+                button:Hide()
+                line.button = button
+            end
         end
         return line
     end
@@ -877,6 +935,15 @@ local function listLineRefresher(columns)
             local row = rows[dataIndex]
             if row ~= nil then
                 local line = scroll:GetLine(lineIndex)
+                line.row = row
+                if line.button ~= nil then
+                    line.button:SetText(row.action or "")
+                    if row.action ~= nil then
+                        line.button:Show()
+                    else
+                        line.button:Hide()
+                    end
+                end
                 local columnIndex
                 for columnIndex = 1, #columns do
                     local field = columns[columnIndex].field
@@ -901,15 +968,15 @@ local function listLineRefresher(columns)
 end
 
 -- Draws a titled list of `lines` rows in `columns`, `width` wide, into
--- `parent`. Returns { holder, scroll }.
-local function buildList(framework, parent, scrollName, title, columns, width, lines)
+-- `parent`, its buttons running `onAction(row)`. Returns { holder, scroll }.
+local function buildList(framework, parent, scrollName, title, columns, width, lines, onAction)
     local holder = CreateFrame("Frame", nil, parent)
     holder:SetAllPoints(parent)
     local heading = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     heading:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -4)
     heading:SetText(title)
     local height = lines * RosterWindow.LINE_HEIGHT
-    local createLine = listLineCreator(columns)
+    local createLine = listLineCreator(columns, onAction)
     local scroll = framework:CreateScrollBox(
         holder,
         scrollName,
@@ -951,26 +1018,95 @@ local function buildLeaderboard(framework, parent, frameName)
 end
 
 -- The Recent Guild Advertisements page, for every member: each channel
--- advertised in lately, who posted, and how long ago.
+-- advertised in lately, who posted, and how long ago, then the zones turned
+-- off with Off here, each with a button to turn it back on.
 local AD_COLUMNS = {
     { field = "label", x = 8, width = 270 },
     { field = "by", x = 284, width = 230 },
-    { field = "recent", x = 520, width = 140 },
+    { field = "recent", x = 520, width = 140, action = true },
 }
 
 -- Draws the Recent Guild Advertisements list onto its page, below the
 -- frame's title bar, filling the page (clear of the scroll bar) with as
 -- many lines as it holds; more lines are made as the frame grows.
-local function buildRecentAds(framework, page, frameName)
+local function buildRecentAds(framework, page, frameName, onTurnBackOn)
     local holder = CreateFrame("Frame", nil, page)
     holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
     holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
     local width, height = page:GetSize()
     local lines = math.max(1, math.floor((height - 70) / RosterWindow.LINE_HEIGHT))
     local ads = buildList(framework, holder, frameName .. "RecentAdsScroll", "Recent Guild Advertisements",
-        AD_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines)
+        AD_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines, function(row)
+            if row.zoneKey ~= nil and onTurnBackOn ~= nil then
+                onTurnBackOn(row.zoneKey)
+            end
+        end)
     ads.scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 0)
     return ads
+end
+
+-- The guild-size counts line: its text, and on hover a tooltip with the
+-- breakdown. Made with `environment`'s CreateFrame and GameTooltip, so
+-- specs can draw it with fake frames. Hidden until :Set gives it text.
+local CountsLine = {}
+CountsLine.__index = CountsLine
+
+function RosterWindow.CountsLine(environment, parent)
+    local frame = environment.CreateFrame("Frame", nil, parent)
+    frame:SetHeight(14)
+    frame:EnableMouse(true)
+    local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    text:SetPoint("LEFT", frame, "LEFT", 0, 0)
+    text:SetJustifyH("LEFT")
+    text:SetWordWrap(false)
+    local line = setmetatable({ environment = environment, frame = frame, text = text, lines = {} }, CountsLine)
+    frame:SetScript("OnEnter", function()
+        line.hovering = true
+        line:ShowTooltip()
+    end)
+    frame:SetScript("OnLeave", function()
+        line.hovering = false
+        local tooltip = environment.GameTooltip
+        if tooltip ~= nil then
+            pcall(tooltip.Hide, tooltip)
+        end
+    end)
+    frame:Hide()
+    return line
+end
+
+-- Shows `text` with tooltip `lines` (see RosterViewModel.CountsTooltip), or,
+-- for nil, hides the line. A tooltip already showing is redrawn.
+function CountsLine:Set(text, lines)
+    if text == nil then
+        self.frame:Hide()
+        return
+    end
+    self.text:SetText(text)
+    -- Only the text is hoverable.
+    self.frame:SetWidth((self.text:GetStringWidth() or 0) + 4)
+    self.lines = lines or {}
+    self.frame:Show()
+    if self.hovering then
+        self:ShowTooltip()
+    end
+end
+
+function CountsLine:ShowTooltip()
+    local tooltip = self.environment.GameTooltip
+    if tooltip == nil then
+        return
+    end
+    pcall(function()
+        tooltip:SetOwner(self.frame, "ANCHOR_BOTTOMRIGHT")
+        -- The first line is the tooltip's title.
+        tooltip:AddLine(self.lines[1])
+        local index
+        for index = 2, #self.lines do
+            tooltip:AddLine(self.lines[index], 1, 1, 1)
+        end
+        tooltip:Show()
+    end)
 end
 
 local function build(framework, options)
@@ -1004,7 +1140,7 @@ local function build(framework, options)
     local recentAds
     local adsPage = host:Content("ads")
     if adsPage ~= nil then
-        local built, ads = pcall(buildRecentAds, framework, adsPage, frameName)
+        local built, ads = pcall(buildRecentAds, framework, adsPage, frameName, options.onTurnBackOn)
         recentAds = built and ads or nil
         -- Showing the page brings "how long ago" up to date.
         if options.onRecentAdsShown ~= nil then
@@ -1022,7 +1158,7 @@ local function build(framework, options)
     search:SetAutoFocus(false)
     local placeholder = search:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     placeholder:SetPoint("LEFT", search, "LEFT", 2, 0)
-    placeholder:SetText("Search names and aliases")
+    placeholder:SetText("Search names, aliases and Discord")
     search:SetScript("OnTextChanged", function(box)
         local text = box:GetText()
         if text == "" then
@@ -1064,17 +1200,21 @@ local function build(framework, options)
         options.onExpandAll()
     end)
 
+    -- How big the guild is, under the controls.
+    local counts = RosterWindow.CountsLine(_G, panel)
+    counts.frame:SetPoint("TOPLEFT", panel, "TOPLEFT", 18, -58)
+
     local headerIndex
     for headerIndex = 1, #COLUMNS do
         local column = COLUMNS[headerIndex]
         local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -58)
+        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -76)
         header:SetText(column.header)
     end
 
     -- Enough lines for the frame's restored height.
     local width, height = frame:GetSize()
-    local lineAmount = math.floor((height - 120) / RosterWindow.LINE_HEIGHT)
+    local lineAmount = math.floor((height - 138) / RosterWindow.LINE_HEIGHT)
     local picker = buildPicker(framework, frameName)
     -- "Link as alt of…" links `key` (named `name`) as an alt of the picked
     -- player. From the player panel it's "Merge into player…": the same link,
@@ -1100,6 +1240,13 @@ local function build(framework, options)
     local function openSetAlias(key, title)
         if not showAliasDialog(title, options.aliasOf(key), function(text)
             options.onSetAlias(key, text)
+        end) then
+            options.onMenuUnavailable()
+        end
+    end
+    local function openSetDiscord(key, title, current)
+        if not showDiscordDialog(title, current, function(text)
+            options.onSetDiscord(key, text)
         end) then
             options.onMenuUnavailable()
         end
@@ -1147,14 +1294,14 @@ local function build(framework, options)
         refreshLines,
         {},
         width - 20,
-        height - 120,
+        height - 138,
         lineAmount,
         RosterWindow.LINE_HEIGHT,
         newLine,
         true
     )
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -74)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -92)
     -- The scroll bar is drawn just outside the list's right edge, so the
     -- list stops short of the frame's edge to keep the bar inside it, clear
     -- of the tabs.
@@ -1206,6 +1353,7 @@ local function build(framework, options)
     local conflicts = buildConflictPanel(framework, options, frameName)
     local playerPanel = buildPlayerPanel(framework, options, frameName, frame, {
         openSetAlias = openSetAlias,
+        openSetDiscord = openSetDiscord,
         openSetMain = openSetMain,
     })
     conflictsButton:SetScript("OnClick", function()
@@ -1221,7 +1369,7 @@ local function build(framework, options)
         playerPanel.panel:Hide()
     end)
 
-    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds
+    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts
 end
 
 -- options.navigator is the PageNavigator with the master frame's pages;
@@ -1230,7 +1378,8 @@ end
 -- the Recruitment page's returns a frame LEADERBOARD_HEIGHT tall below its
 -- settings, where the officers' leaderboard is drawn;
 -- options.onHide() runs whenever the frame closes;
--- options.onRecentAdsShown() runs whenever the Recent ads page shows;
+-- options.onRecentAdsShown() runs whenever the Recent ads page shows, and
+-- options.onTurnBackOn(zoneKey) when a zone's "Turn back on" is pressed;
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
 -- options.onToggleGroup(playerId) runs when a player header is clicked;
@@ -1243,6 +1392,7 @@ end
 -- shown, and options.onPurge(key) / onPurgeAll() purge them;
 -- options.menuFor(row) lists a row's organize actions, and onSetMain(key,
 -- playerId), onMakeMain(key), onSetAlias(key, text), onDetach(key),
+-- onSetDiscord(key, text) (from the player panel),
 -- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them;
 -- options.onSearch(text), onToggleOnlineOnly(), onExpandAll(), and
 -- onCollapseAll() drive the controls row; options.onSelectCharacter(key)
@@ -1254,7 +1404,8 @@ function RosterWindow.Create(client, options)
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds = pcall(build, framework, options)
+    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts =
+        pcall(build, framework, options)
     if not ok or host == nil then
         return nil, "the Details! Framework could not build the window"
     end
@@ -1267,6 +1418,7 @@ function RosterWindow.Create(client, options)
         playerPanel = playerPanel,
         recruiters = recruiters,
         recentAds = recentAds,
+        counts = counts,
     }, Window)
 end
 
@@ -1442,6 +1594,12 @@ end
 
 function Window:SetStatus(text)
     self.status:SetText(text or "")
+end
+
+-- Shows the guild-size counts line (see RosterViewModel.CountsText) with
+-- its tooltip `lines`, or, for nil, hides it.
+function Window:SetCounts(text, lines)
+    self.counts:Set(text, lines)
 end
 
 -- Returns false instead of raising when the framework misbehaves.

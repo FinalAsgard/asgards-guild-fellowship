@@ -22,6 +22,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf group` | Opens the window on the **Group Finder** tab (see [Group Finder](#group-finder)), or closes it. |
 | `/agf profile` | Opens the window on the **My Profile** tab (see [My Profile](#my-profile)), or closes it. |
 | `/agf dnd` | Turns Group Finder [Do Not Disturb](#do-not-disturb) on, or back off. |
+| `/agf advertise` | Posts your guild ad to General where you are, now. `/agf advertise trade` posts it to Trade. Works in a macro. Won't post again before your timer allows (see [Guild Recruit](#channels-and-timing)). |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
@@ -65,6 +66,14 @@ The roster is the **Roster** tab of [the add-on's window](#the-add-ons-window).
 - `/agf help` lists the commands with the version, client, and library status.
 
 Opening the window never scans the guild, so it's always quick. The Conflicts window and the player panel open beside the window, and close with it.
+
+### Guild size
+
+A line above the roster gives the guild's size, whatever the search and filters, for example **320 players (27 known + 293 unlinked) · 31 alts · 351 characters**. Departed characters never count.
+
+- A **known** player has two or more linked characters, an alias, or a declared main.
+- An **unlinked** character stands alone, with no link, alias or declared main. It counts as a player of its own until it's linked, though it may be someone's alt. Linking it moves it from players to alts.
+- Hover the line for the breakdown, how many players were active (online, or last online) within 7, 30 and 90 days, who is online now, and how many players have an alias or a declared main.
 
 ### The guild note convention
 
@@ -144,7 +153,8 @@ Changes show up right away and are recorded as manual. An officer's changes then
 
 ### Finding people
 
-- The search box matches character names and aliases.
+- The search box matches character names, aliases and Discord usernames.
+- The **Discord** column shows a player's Discord username, when it's known, on their group's header (or their row, for a player with one character).
 - **Online only** hides players with no character online.
 - **Expand all** and **Collapse all** open and close every group.
 - Online players come first, then everyone else by name. A group shows "online as …" when the player is on an alt.
@@ -246,7 +256,7 @@ Greetings can use these placeholders, in any capitalization:
 | `{character}` | The character that just logged in. |
 | `{characterFirst}`, `{characterLast}` | The first or last part of that character's name. |
 
-First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** settings. Greetings and settings are shared by every character on this game install, and **Greet from this character** turns it off on just the one you're playing, say an alt in another guild (hover its info icon for a reminder).
+First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** settings. Greetings and settings are shared by every character on this game install, and **Greet from this character** turns it off on just the one you're playing, say an alt in another guild (hover its info icon for a reminder). Turn off **Greet while in a dungeon, raid or other instance** to get no greet prompts inside dungeons, raids, battlegrounds, arenas and keystone runs. Guildmates who come online while you're inside aren't prompted for later.
 
 ### Greeting together
 
@@ -277,8 +287,9 @@ Guild Recruit spreads the guild's recruitment ads out: every zone sees the guild
 - **The guild's floor**: officers set the shortest time the guild allows between ads, 30 minutes for General and 10 for Trade by default (never below 15 and 5, at most 4 hours). Nobody's timer goes below it, so officers decide how often the guild can advertise. The Recruitment page shows the current floor.
 - Officers can also pause recruitment for the whole guild, and turn the guild ad off by clearing it.
 - Staying in one place, you're prompted again when a timer runs out.
-- **Not now** hides that channel's prompt for 10 minutes. **Off here** stops prompts in the current zone (its General, and Trade while you're there) until you log out or reload.
+- **Not now** hides that channel's prompt for 10 minutes. **Off here** stops prompts in the current zone (its General, and Trade while you're there), on every character, until you turn it back on: the zone is listed on the **Recent Guild Advertisements** page with a **Turn back on** button.
 - Prompts wait during combat, boss encounters, dungeons, raids, battlegrounds, arenas, and keystone runs, and close when you leave the zone or city they're for.
+- **Advertise on demand**: `/agf advertise` posts your ad to General where you are, and `/agf advertise trade` posts it to Trade. Put either in a macro on your action bar. It works without a prompt, after **Not now** or **Off here**, and in places with no map where you're never prompted (the Deeprun Tram). It counts like any other ad. To prevent spam, it won't post while the guild's last ad in that channel is newer than your timer, and it tells you how long to wait. It also won't post during combat or in an instance, without an ad or invite permission, or while officers have paused recruitment.
 - Ads are posted exactly as written, up to 255 characters. A send the game refuses doesn't count as an ad.
 
 ### Advertising together
@@ -396,7 +407,7 @@ Guildmates running the add-on share where they are, so you can see where the gui
 - **World map**: one marker per continent, over its land (Kalimdor and the Eastern Kingdoms have fixed spots). Point at a continent with a count to list its guildmates under its name.
 - Hover a single guildmate's dot to see their name, alias or main (the same as their [chat tag](#chat-tags)) and level, as `Name (Main) (70)`. A count has no tooltip of its own: its area's list shows everyone there.
 - Guildmates without the add-on, and those whose position hasn't arrived yet, still count on the continent and world maps at zone level, using the zone the guild roster shows. On their zone's own map each gets a dot at the zone's center, since the roster names only the zone; its tooltip ends with **(exact location unknown)**. They never get a dot on the minimap.
-- While you're in a party, guildmates outside it are dimmed on every map and the minimap, so your party members stand out. A marker with nobody from your party is dimmed as a whole.
+- While you're in a party, guildmates outside it are slightly dimmed on every map and the minimap, so your party members stand out. A marker with nobody from your party is dimmed as a whole.
 - Your own characters never show.
 
 Guildmates in your zone move every 10 seconds or so; everyone else updates about every 2 minutes, and promptly after a zone change. Same-zone updates go by whisper to at most the 10 guildmates heard from most recently. If whispers don't work, the add-on falls back to the guild-wide update alone.
