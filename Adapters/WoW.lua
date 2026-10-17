@@ -1208,14 +1208,18 @@ function Client:IsMailboxOpen()
     return ok and shown == true
 end
 
--- Calls onMail(kind) when the mailbox opens ("open") or closes ("close"),
--- and when the game answers a sent mail ("sent" or "failed"). Returns false
--- when the client can't deliver the events.
+-- Calls onMail(kind, ...) when the mailbox opens ("open") or closes
+-- ("close"), when the game answers a sent mail ("sent" or "failed"), and
+-- when it blocks an add-on's protected call ("blocked", with the event's
+-- add-on name and function name). Returns false when the client can't
+-- deliver the events.
 Compatibility.MAIL_EVENTS = {
     MAIL_SHOW = "open",
     MAIL_CLOSED = "close",
     MAIL_SEND_SUCCESS = "sent",
     MAIL_FAILED = "failed",
+    ADDON_ACTION_BLOCKED = "blocked",
+    ADDON_ACTION_FORBIDDEN = "blocked",
 }
 
 function Client:ObserveMail(onMail)
@@ -1223,10 +1227,10 @@ function Client:ObserveMail(onMail)
         return false
     end
     local frame = self:CreateEventFrame()
-    if frame == nil or not self:SetEventHandler(frame, function(_, eventName)
+    if frame == nil or not self:SetEventHandler(frame, function(_, eventName, ...)
         local kind = Compatibility.MAIL_EVENTS[eventName]
         if kind ~= nil then
-            pcall(onMail, kind)
+            pcall(onMail, kind, ...)
         end
     end) then
         return false

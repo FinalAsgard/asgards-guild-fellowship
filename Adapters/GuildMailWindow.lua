@@ -377,6 +377,7 @@ function Window:Render(model)
         self.confirmText:Hide()
         self.confirm:Hide()
         self.cancel:Hide()
+        self.send:SetText(model.sendText or "Send")
         self.send:Show()
         setEnabled(self.send, model.canSend)
     end

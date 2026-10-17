@@ -276,6 +276,117 @@ test.test("guild mail sender: a second start while sending is refused, and nothi
     test.assertEqual(1, #world.sent)
 end)
 
+-- A sender with a timer the spec runs by hand: `world.timers` holds the
+-- callbacks set, with their delays.
+local function newTimedSender()
+    local addon = load()
+    local world = { sent = {}, timers = {} }
+    world.sender = addon.GuildMailSender.Create({
+        send = function(mail)
+            table.insert(world.sent, mail.to)
+            return true
+        end,
+        after = function(seconds, callback)
+            table.insert(world.timers, { seconds = seconds, run = callback })
+            return true
+        end,
+    })
+    -- Runs every timer set so far with this delay.
+    function world.fire(seconds)
+        local due = {}
+        local index
+        for index = 1, #world.timers do
+            if world.timers[index].seconds == seconds then
+                table.insert(due, world.timers[index].run)
+            end
+        end
+        for index = 1, #due do
+            due[index]()
+        end
+    end
+    return addon, world
+end
+
+test.test("guild mail sender: the next mail waits a moment after the game's answer", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+
+    world.sender:OnSent()
+    test.assertEqual("Ann Bell", table.concat(world.sent, ","))
+
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+    test.assertEqual("Ann Bell,Gus Reed", table.concat(world.sent, ","))
+end)
+
+test.test("guild mail sender: no answer in time pauses, and Send next sends it again", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.sender:OnSent()
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+
+    world.fire(addon.GuildMailSender.ANSWER_SECONDS)
+    test.assertTrue(world.sender:IsPaused())
+    test.assertTrue(world.sender:IsSending())
+    test.assertTrue(world.sender:IsManual())
+
+    test.assertTrue(world.sender:Resume())
+    test.assertEqual("Ann Bell,Gus Reed,Gus Reed", table.concat(world.sent, ","))
+    test.assertFalse(world.sender:IsPaused())
+end)
+
+test.test("guild mail sender: after a pause, every mail waits for a click", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.fire(addon.GuildMailSender.ANSWER_SECONDS)
+    world.sender:Resume()
+
+    world.sender:OnSent()
+    test.assertTrue(world.sender:IsPaused())
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+    test.assertEqual("Ann Bell,Ann Bell", table.concat(world.sent, ","))
+
+    world.sender:Resume()
+    test.assertEqual("Ann Bell,Ann Bell,Gus Reed", table.concat(world.sent, ","))
+end)
+
+test.test("guild mail sender: a blocked send pauses at once and never counts as sent", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+
+    test.assertTrue(world.sender:OnBlocked())
+    test.assertTrue(world.sender:IsPaused())
+    -- The player's own mail answered meanwhile isn't this one.
+    test.assertFalse(world.sender:OnSent())
+    test.assertEqual(addon.GuildMailSender.PENDING, (world.sender:Status(1)))
+end)
+
+test.test("guild mail sender: a late answer to a paused mail still counts", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.fire(addon.GuildMailSender.ANSWER_SECONDS)
+
+    test.assertTrue(world.sender:OnSent())
+    test.assertEqual(addon.GuildMailSender.SENT, (world.sender:Status(1)))
+    -- The next one waits for a click; a stray answer doesn't count for it.
+    test.assertTrue(world.sender:IsPaused())
+    test.assertFalse(world.sender:OnSent())
+    test.assertEqual(addon.GuildMailSender.PENDING, (world.sender:Status(2)))
+end)
+
+test.test("guild mail sender: a stale timer does nothing", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.sender:OnSent()
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+    world.sender:OnSent()
+
+    -- The first two mails' answer timers are stale now.
+    local before = #world.sent
+    world.fire(addon.GuildMailSender.ANSWER_SECONDS)
+    test.assertFalse(world.sender:IsPaused())
+    test.assertEqual(before, #world.sent)
+end)
+
 -- Guild Mail ----------------------------------------------------------------
 
 local RANK_NAMES = { "Guild Master", "Officer", "Member", "Initiate" }
@@ -512,6 +623,37 @@ test.test("guild mail: confirmed mails go out one at a time, with progress", fun
     world.mail:OnSent()
     test.assertEqual("Sent 2 of 2. Done.", world.view.model.progressText)
     test.assertEqual(addon.GuildMailSender.SENT, world.view.model.recipients[2].status)
+end)
+
+test.test("guild mail: when the game stalls, Send becomes Send next", function()
+    local addon, world = newMail()
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+
+    test.assertTrue(world.mail:OnBlocked())
+    local model = world.mail:Model()
+    test.assertEqual(addon.GuildMail.SEND_NEXT_TEXT, model.sendText)
+    test.assertTrue(model.canSend)
+    test.assertEqual(addon.GuildMail.HINT_PAUSED, model.hint)
+
+    test.assertTrue(world.mail:RequestSend())
+    test.assertEqual(2, #world.sent)
+    test.assertEqual("Ann Bell", world.sent[2].to)
+    test.assertEqual(addon.GuildMail.SEND_TEXT, world.mail:Model().sendText)
+end)
+
+test.test("guild mail: Send next needs the mailbox open", function()
+    local addon, world = newMail()
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    world.mail:OnBlocked()
+    world.mail:OnMailboxClosed()
+
+    test.assertFalse(world.mail:Model().canSend)
+    test.assertEqual(addon.GuildMail.HINT_NO_MAILBOX, world.mail:Model().hint)
+    test.assertFalse(world.mail:RequestSend())
 end)
 
 test.test("guild mail: ranks and text can't change while sending", function()

@@ -1994,6 +1994,9 @@ if clientProfile.supported then
         send = function(to, subject, body)
             return client:SendMail(to, subject, body)
         end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
         view = guildMailWindow,
     })
     router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()
@@ -2015,10 +2018,14 @@ if clientProfile.supported then
             rosterController:Print("[mailtest] SendMail(" .. item.to .. ") -> " .. tostring(taken))
             return taken
         end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
         onChange = function()
             local progress = mailTestSender:Progress()
             rosterController:Print("[mailtest] sent " .. progress.sent .. ", failed " .. progress.failed ..
-                " of " .. progress.total .. " (" .. progress.state .. ")")
+                " of " .. progress.total .. " (" .. progress.state ..
+                (mailTestSender:IsPaused() and "; type mailtest next to send the next one" or "") .. ")")
         end,
     })
     local mailTestFrame
@@ -2039,6 +2046,12 @@ if clientProfile.supported then
             client:RegisterEvent(mailTestFrame, "UI_ERROR_MESSAGE")
             client:RegisterEvent(mailTestFrame, "ADDON_ACTION_BLOCKED")
             client:RegisterEvent(mailTestFrame, "ADDON_ACTION_FORBIDDEN")
+        end
+        if string.lower(arguments or "") == "next" then
+            if not mailTestSender:Resume() then
+                rosterController:Print("[mailtest] nothing is paused")
+            end
+            return
         end
         local mails = {}
         local name
@@ -2727,7 +2740,20 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     end)
     -- Guild Mail follows the mailbox, and sends its next mail when the game
     -- answers the last. Officers get its button on the mailbox.
-    client:ObserveMail(function(kind)
+    client:ObserveMail(function(kind, blockedAddon, blockedCall)
+        if kind == "blocked" then
+            -- Only a blocked SendMail matters here.
+            if not string.find(tostring(blockedCall), "SendMail", 1, true) then
+                return
+            end
+            -- TEMPORARY for #197.
+            rosterController:Print("[mailtest] blocked: " .. tostring(blockedAddon) .. " " .. tostring(blockedCall))
+            addon.mailTest:OnBlocked()
+            if guildMail:OnBlocked() then
+                rosterController:Print("The game blocked Guild Mail's send. Press Send next for each mail.")
+            end
+            return
+        end
         if kind == "open" then
             guildMail:OnMailboxOpened()
             pcall(guildMailWindow.ShowMailboxButton, guildMailWindow, guildMail:ShowsMailboxButton())

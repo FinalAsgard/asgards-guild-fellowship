@@ -20,12 +20,17 @@ local _, addon = ...
 --               ({ online, lastOnline }), or nil
 --   send        function(to, subject, body) -> true when the client took
 --               the mail
+--   after       function(seconds, callback) -> true when the timer was set
+--               (pacing, and noticing when the game doesn't answer)
 --   view        optional window: Show(fromMailbox), Render(model),
 --               IsShown()
 local GuildMail = {
     OFFICERS_ONLY = "Guild Mail is for officers.",
     NO_GUILD = "Guild Mail needs a guild.",
     HINT_SENDING = "Sending...",
+    HINT_PAUSED = "The game didn't send the last mail on its own. Press Send next for each mail.",
+    SEND_TEXT = "Send",
+    SEND_NEXT_TEXT = "Send next",
     HINT_NO_RANKS = "Tick at least one rank.",
     HINT_NOBODY = "Nobody in those ranks to mail.",
     HINT_NO_SUBJECT = "Write a subject.",
@@ -85,6 +90,7 @@ function GuildMail.Create(options)
         send = function(item)
             return mail.sendMail(item.to, item.subject, item.body)
         end,
+        after = options.after,
         onChange = function()
             mail:refresh()
         end,
@@ -251,6 +257,9 @@ end
 
 -- Why Send can't be pressed now, or nil when it can.
 function Mail:hint(recipients)
+    if self.sender:IsPaused() then
+        return self.mailboxOpen and GuildMail.HINT_PAUSED or GuildMail.HINT_NO_MAILBOX
+    end
     if self.sender:IsSending() then
         return GuildMail.HINT_SENDING
     end
@@ -277,7 +286,12 @@ end
 
 -- Asks for confirmation before sending. Returns false when Send can't be
 -- pressed now.
+-- While sending is paused (the game didn't send a mail on its own), Send
+-- next sends the next mail at once: from a click, the game takes it.
 function Mail:RequestSend()
+    if self.sender:IsPaused() then
+        return self.mailboxOpen and self.sender:Resume()
+    end
     if not self:CanSend() then
         return false
     end
@@ -320,6 +334,11 @@ function Mail:OnFailed(reason)
     return self.sender:OnFailed(reason)
 end
 
+-- The game blocked the add-on's SendMail: wait for Send next.
+function Mail:OnBlocked()
+    return self.sender:OnBlocked()
+end
+
 function Mail:IsSending()
     return self.sender:IsSending()
 end
@@ -356,6 +375,7 @@ end
 --                until a send starts, then "pending", "sent" or "failed"
 --   countText    "12 mails"
 --   canSend      whether Send can be pressed
+--   sendText     "Send", or "Send next" while paused
 --   hint         why it can't, or nil
 --   confirming   whether the confirmation is up, with confirmText
 --   progressText "Sent 3 of 12", or nil before a send
@@ -402,7 +422,9 @@ function Mail:Model()
         body = self.body,
         recipients = rows,
         countText = plural(#rows, "mail", "mails"),
-        canSend = officer and hint == nil and self.batch == nil,
+        canSend = officer and ((hint == nil and self.batch == nil)
+            or (self.sender:IsPaused() and self.mailboxOpen)),
+        sendText = self.sender:IsPaused() and GuildMail.SEND_NEXT_TEXT or GuildMail.SEND_TEXT,
         hint = hint,
         confirming = self.confirming,
         confirmText = "Send " .. plural(#rows, "mail", "mails") .. "?",
