@@ -9,6 +9,11 @@ local _, addon = ...
 -- It holds the window's state and works out what the window shows
 -- (Model); the window only draws that and passes clicks and typing back.
 --
+-- The subject, body, ticked ranks, Send to choice and both skip boxes are
+-- saved as a draft and restored the first time the window opens; recipient
+-- ticks and progress are kept for the session only. A saved rank the guild
+-- no longer has is ignored.
+--
 -- The subject and body may use Guild Greet's placeholders, filled in for
 -- each recipient (GuildMailComposer). A recipient whose filled-in mail is
 -- too long for the game is shown with a warning and can't be ticked.
@@ -32,6 +37,10 @@ local _, addon = ...
 --   money       function() -> the officer's money in copper, or nil
 --   formatMoney function(copper) -> the game's coin text with icons, or
 --               nil to use plain "12s 60c"
+--   loadDraft   function() -> the saved draft ({ subject, body, ranks,
+--               mode, skipDiscord, activeOnly }, `ranks` a list of rank
+--               indexes), or nil
+--   saveDraft   function(draft) saves it, in the same shape
 --   testers     TEMPORARY (#205): character names a "Tester" rank mails,
 --               so Guild Mail can be tried without mailing the guild
 --   view        optional window: Show(fromMailbox), Render(model),
@@ -162,6 +171,11 @@ function GuildMail.Create(options)
         formatMoney = options.formatMoney or function()
             return nil
         end,
+        loadDraft = options.loadDraft or function()
+            return nil
+        end,
+        saveDraft = options.saveDraft or function() end,
+        draftLoaded = false,
         view = options.view,
         testers = options.testers or {},
         ranks = {},
@@ -235,11 +249,71 @@ function Mail:Open(fromMailbox)
     if self.context() == nil then
         return false, GuildMail.NO_GUILD
     end
+    self:restore()
     if self.view ~= nil then
         pcall(self.view.Show, self.view, fromMailbox == true)
     end
     self:refresh()
     return true
+end
+
+-- Puts back the saved draft, once. Nothing is put back over changes
+-- already made.
+function Mail:restore()
+    if self.draftLoaded or self:busy() then
+        return
+    end
+    local draft = self:ask(self.loadDraft)
+    if type(draft) ~= "table" then
+        return
+    end
+    self.draftLoaded = true
+    if type(draft.subject) == "string" then
+        self.subject = draft.subject
+    end
+    if type(draft.body) == "string" then
+        self.body = draft.body
+    end
+    if type(draft.ranks) == "table" then
+        self.ranks = {}
+        local index
+        for index = 1, #draft.ranks do
+            if type(draft.ranks[index]) == "number" then
+                self.ranks[draft.ranks[index]] = true
+            end
+        end
+    end
+    local index
+    for index = 1, #GuildMail.MODES do
+        if GuildMail.MODES[index].id == draft.mode then
+            self.mode = draft.mode
+        end
+    end
+    if type(draft.skipDiscord) == "boolean" then
+        self.skipDiscord = draft.skipDiscord
+    end
+    if type(draft.activeOnly) == "boolean" then
+        self.activeOnly = draft.activeOnly
+    end
+end
+
+-- Saves the draft as it is now.
+function Mail:save()
+    self.draftLoaded = true
+    local ranks = {}
+    local rank
+    for rank in pairs(self.ranks) do
+        table.insert(ranks, rank)
+    end
+    table.sort(ranks)
+    pcall(self.saveDraft, {
+        subject = self.subject,
+        body = self.body,
+        ranks = ranks,
+        mode = self.mode,
+        skipDiscord = self.skipDiscord,
+        activeOnly = self.activeOnly,
+    })
 end
 
 -- Redraws the window, e.g. to put a control back that was clicked to no
@@ -281,6 +355,7 @@ function Mail:SetRank(index, checked)
         return false
     end
     self.ranks[index] = checked
+    self:save()
     self:refresh()
     return true
 end
@@ -296,6 +371,7 @@ function Mail:SetMode(mode)
         return false
     end
     self.mode = mode
+    self:save()
     self:refresh()
     return true
 end
@@ -307,6 +383,7 @@ function Mail:SetSkipDiscord(skip)
         return false
     end
     self.skipDiscord = skip
+    self:save()
     self:refresh()
     return true
 end
@@ -318,6 +395,7 @@ function Mail:SetActiveOnly(active)
         return false
     end
     self.activeOnly = active
+    self:save()
     self:refresh()
     return true
 end
@@ -328,6 +406,7 @@ function Mail:SetSubject(text)
         return false
     end
     self.subject = text
+    self:save()
     self:refresh()
     return true
 end
@@ -338,6 +417,7 @@ function Mail:SetBody(text)
         return false
     end
     self.body = text
+    self:save()
     self:refresh()
     return true
 end
@@ -422,6 +502,20 @@ function Mail:rankList(partition)
     return list
 end
 
+-- The ticked ranks the guild still has, as a set of rank indexes: a saved
+-- rank that's gone is ignored.
+function Mail:chosenRanks(partition)
+    local list = self:rankList(partition)
+    local chosen = {}
+    local index
+    for index = 1, #list do
+        if list[index].checked then
+            chosen[list[index].index] = true
+        end
+    end
+    return chosen
+end
+
 -- Who is on the list now, ticked or not, each with their filled-in mail
 -- (`mail`, from GuildMailComposer.Compose).
 function Mail:Recipients()
@@ -430,8 +524,9 @@ function Mail:Recipients()
         return {}
     end
     local ok, live = pcall(self.live)
+    local ranks = self:chosenRanks(partition)
     local recipients = addon.GuildMailAudience.Recipients(partition, {
-        ranks = self.ranks,
+        ranks = ranks,
         mode = self.mode,
         live = ok and type(live) == "table" and live or nil,
         selfKey = self.selfKey(),
@@ -440,7 +535,7 @@ function Mail:Recipients()
     })
     -- TEMPORARY (#205): the Tester rank mails exactly the testers, first,
     -- whatever Send to says.
-    if self.ranks[GuildMail.TESTER_RANK] then
+    if ranks[GuildMail.TESTER_RANK] then
         local listed = {}
         local index
         for index = 1, #recipients do
@@ -478,7 +573,7 @@ function Mail:hint(recipients)
     if self.sender:IsSending() then
         return GuildMail.HINT_SENDING
     end
-    if next(self.ranks) == nil then
+    if next(self:chosenRanks(self.context())) == nil then
         return GuildMail.HINT_NO_RANKS
     end
     if #recipients == 0 then

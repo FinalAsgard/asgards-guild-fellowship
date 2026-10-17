@@ -802,6 +802,72 @@ function Store:SetRecruitAd(text)
     return true
 end
 
+-- Guild Mail's saved draft, shared by every character on the account:
+--   { subject, body, ranks, mode, skipDiscord, activeOnly }
+-- `ranks` is the list of ticked rank indexes, `mode` the Send to choice's
+-- id. Each field is nil when missing or unusable. Nil when nothing usable
+-- is saved.
+function Store:GuildMailDraft()
+    local saved = type(self.database) == "table" and self.database.guildMail or nil
+    if type(saved) ~= "table" then
+        return nil
+    end
+    local ranks = {}
+    if type(saved.ranks) == "table" then
+        local index
+        for index = 1, #saved.ranks do
+            local rank = saved.ranks[index]
+            if type(rank) == "number" and rank == math.floor(rank) then
+                table.insert(ranks, rank)
+            end
+        end
+    end
+    local function text(value)
+        return type(value) == "string" and value or nil
+    end
+    local function flag(value)
+        if type(value) == "boolean" then
+            return value
+        end
+        return nil
+    end
+    return {
+        subject = text(saved.subject),
+        body = text(saved.body),
+        ranks = ranks,
+        mode = text(saved.mode),
+        skipDiscord = flag(saved.skipDiscord),
+        activeOnly = flag(saved.activeOnly),
+    }
+end
+
+-- Saves Guild Mail's draft (as GuildMailDraft returns it). An unusable
+-- existing value is left alone.
+function Store:SetGuildMailDraft(draft)
+    if type(self.database) ~= "table" or type(draft) ~= "table" then
+        return false
+    end
+    if self.database.guildMail ~= nil and type(self.database.guildMail) ~= "table" then
+        return false
+    end
+    local ranks = {}
+    local index
+    for index = 1, #(draft.ranks or {}) do
+        if type(draft.ranks[index]) == "number" then
+            table.insert(ranks, draft.ranks[index])
+        end
+    end
+    self.database.guildMail = {
+        subject = type(draft.subject) == "string" and draft.subject or "",
+        body = type(draft.body) == "string" and draft.body or "",
+        ranks = ranks,
+        mode = type(draft.mode) == "string" and draft.mode or nil,
+        skipDiscord = draft.skipDiscord == true,
+        activeOnly = draft.activeOnly == true,
+    }
+    return true
+end
+
 -- The user's own ad record (see RecruitStats), shared by every character
 -- on the account and created on first use. Nil when an unusable value is
 -- stored there; it is then left alone.

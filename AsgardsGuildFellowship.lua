@@ -2032,6 +2032,17 @@ if clientProfile.supported then
         formatMoney = function(copper)
             return client:FormatMoney(copper)
         end,
+        -- The draft and filter choices, kept account-wide between sessions.
+        loadDraft = function()
+            local store = rosterController:Store()
+            return store and store:GuildMailDraft() or nil
+        end,
+        saveDraft = function(draft)
+            local store = rosterController:Store()
+            if store then
+                store:SetGuildMailDraft(draft)
+            end
+        end,
         -- TEMPORARY (#205): a Tester rank for trying Guild Mail without
         -- mailing the officers.
         testers = { "Beorn Zelwindran", "Zillatha Zelwindran" },

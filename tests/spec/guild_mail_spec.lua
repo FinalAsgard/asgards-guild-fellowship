@@ -655,8 +655,15 @@ local function newMail(overrides)
             return world.money
         end,
         formatMoney = overrides.formatMoney,
+        loadDraft = function()
+            return world.saved
+        end,
+        saveDraft = function(draft)
+            world.saved = draft
+        end,
         view = world.view,
     })
+    world.saved = overrides.saved
     return addon, world
 end
 
@@ -1613,4 +1620,94 @@ test.test("guild mail: /agf mail tells a non-officer it's for officers", functio
     world.environment.SlashCmdList.AGF("mail")
 
     test.assertContains(world.messages[before + 1], addon.GuildMail.OFFICERS_ONLY)
+end)
+
+-- Saved draft ---------------------------------------------------------------
+
+test.test("guild mail: the draft and filter choices are saved as they change", function()
+    local _, world = newMail()
+    world.mail:Open(false)
+    world.mail:SetRank(2, true)
+    world.mail:SetRank(3, true)
+    world.mail:SetMode("all")
+    world.mail:SetSkipDiscord(true)
+    world.mail:SetActiveOnly(true)
+    world.mail:SetSubject("Launch night")
+    world.mail:SetBody("Hi {name}!")
+
+    test.assertEqual("Launch night", world.saved.subject)
+    test.assertEqual("Hi {name}!", world.saved.body)
+    test.assertEqual("2,3", table.concat(world.saved.ranks, ","))
+    test.assertEqual("all", world.saved.mode)
+    test.assertTrue(world.saved.skipDiscord)
+    test.assertTrue(world.saved.activeOnly)
+end)
+
+test.test("guild mail: the saved draft is back when the window opens", function()
+    local _, world = newMail({
+        saved = {
+            subject = "Launch night", body = "Hi {name}!", ranks = { 2 },
+            mode = "recent", skipDiscord = true, activeOnly = false,
+        },
+    })
+
+    world.mail:Open(false)
+    local model = world.view.model
+
+    test.assertEqual("Launch night", model.subject)
+    test.assertEqual("Hi {name}!", model.body)
+    test.assertTrue(model.ranks[3].checked)
+    test.assertFalse(model.ranks[2].checked)
+    test.assertTrue(model.modes[2].checked)
+    test.assertTrue(model.skipDiscord)
+    test.assertFalse(model.activeOnly)
+end)
+
+test.test("guild mail: the draft is restored once, never over changes", function()
+    local _, world = newMail({ saved = { subject = "Old", ranks = {} } })
+    world.mail:Open(false)
+    world.mail:SetSubject("New")
+    world.saved = { subject = "Old", ranks = {} }
+
+    world.mail:Open(false)
+
+    test.assertEqual("New", world.view.model.subject)
+end)
+
+test.test("guild mail: recipient ticks and progress aren't saved", function()
+    local _, world = newMail()
+    world.mail:Open(false)
+    readyToSend(world)
+    local key = world.view.model.recipients[1].key
+    world.mail:SetRecipient(key, false)
+
+    test.assertEqual("Launch night", world.saved.subject)
+    test.assertEqual(nil, rawget(world.saved, "unticked"))
+    test.assertEqual(nil, rawget(world.saved, "recipients"))
+
+    local _, reloaded = newMail({ saved = world.saved })
+    reloaded.mail:Open(false)
+    test.assertTrue(reloaded.view.model.recipients[1].checked)
+    test.assertEqual(nil, reloaded.view.model.progressText)
+end)
+
+test.test("guild mail: a saved rank the guild no longer has is ignored", function()
+    local addon, world = newMail({ saved = { subject = "Hi", ranks = { 9 } } })
+
+    world.mail:Open(false)
+
+    test.assertEqual(addon.GuildMail.HINT_NO_RANKS, world.view.model.hint)
+    test.assertEqual(0, #world.view.model.recipients)
+    test.assertEqual(4, #world.view.model.ranks)
+
+    world.mail:SetRank(2, true)
+    test.assertTrue(#world.view.model.recipients > 0)
+end)
+
+test.test("guild mail: an unknown saved Send to choice is ignored", function()
+    local _, world = newMail({ saved = { mode = "everyone", ranks = { 2 } } })
+
+    world.mail:Open(false)
+
+    test.assertTrue(world.view.model.modes[1].checked)
 end)
