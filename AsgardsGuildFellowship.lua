@@ -1997,6 +1997,9 @@ if clientProfile.supported then
         after = function(seconds, callback)
             return client:After(seconds, callback)
         end,
+        -- TEMPORARY (#205): a Tester rank for trying Guild Mail without
+        -- mailing the officers.
+        testers = { "Malgen Zelwindran", "Zillatha Zelwindran" },
         view = guildMailWindow,
     })
     router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()

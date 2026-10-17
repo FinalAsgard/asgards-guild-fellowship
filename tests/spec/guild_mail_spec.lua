@@ -685,6 +685,35 @@ test.test("guild mail: a finished send can't go again until something changes", 
     test.assertTrue(world.mail:RequestSend())
 end)
 
+-- TEMPORARY (#205): remove with the Tester rank.
+test.test("guild mail: the temporary Tester rank mails only the testers", function()
+    local addon, partition = setup()
+    local mail = addon.GuildMail.Create({
+        context = function()
+            return partition
+        end,
+        isOfficer = function()
+            return true
+        end,
+        rankNames = function()
+            return RANK_NAMES
+        end,
+        testers = { "Malgen Zelwindran", "Zillatha Zelwindran" },
+    })
+
+    local ranks = mail:Model().ranks
+    test.assertEqual(addon.GuildMail.TESTER_RANK, ranks[1].index)
+    test.assertEqual(5, #ranks)
+
+    mail:SetRank(addon.GuildMail.TESTER_RANK, true)
+    mail:SetMode("all")
+    local rows = mail:Model().recipients
+    test.assertEqual(2, #rows)
+    test.assertEqual("Malgen Zelwindran", rows[1].name)
+    test.assertEqual("Zillatha Zelwindran", rows[2].name)
+    test.assertEqual(addon.GuildMail.TESTER_RANK_NAME, rows[1].rankName)
+end)
+
 test.test("guild mail: retyping the same text changes nothing", function()
     local _, world = newMail()
     readyToSend(world)

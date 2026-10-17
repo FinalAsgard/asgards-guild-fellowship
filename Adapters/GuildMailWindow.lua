@@ -16,7 +16,8 @@ local GuildMailWindow = {
     PADDING = 14,
     RANK_COLUMNS = 2,
     RANK_ROW_HEIGHT = 22,
-    RANK_ROWS = 5,
+    -- Up to 10 guild ranks, plus the temporary Tester rank (#205).
+    RANK_ROWS = 6,
     MODE_ROW_HEIGHT = 20,
     MESSAGE_HEIGHT = 90,
     LIST_HEIGHT = 120,
