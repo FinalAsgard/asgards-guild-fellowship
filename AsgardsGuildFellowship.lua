@@ -1900,6 +1900,14 @@ if clientProfile.supported then
             rosterController:Print(lines[index])
         end
     end)
+    router:Register("advertise", "post the guild ad to General here now (advertise trade: to Trade)", function(arguments)
+        local channel = string.lower(arguments or "") == "trade" and addon.RecruitPolicy.TRADE
+            or addon.RecruitPolicy.GENERAL
+        local sent, reason = guildRecruit:Advertise(channel)
+        if sent == nil then
+            rosterController:Print("Not advertised: " .. tostring(reason) .. ".")
+        end
+    end)
     router:Register("sync", "show guild sync status", function()
         local lines = addon.RosterViewModel.SyncStatusLines(syncSession:Status(), client:Timestamp())
         local index
@@ -1967,6 +1975,26 @@ if clientProfile.supported then
             end
         end,
     })
+    local function recruitLocation()
+        local zone = client:GetZone()
+        if zone == nil then
+            return nil
+        end
+        -- Arriving somewhere, the client can put the player in the new
+        -- zone's General a moment before it reports the new zone. Until
+        -- the two agree there's no General here, so an ad is never sent
+        -- to one zone and counted for another.
+        local general = client:GetGeneralChannel()
+        if general ~= nil and not client:IsChannelOfZone(general, zone.name) then
+            general = nil
+        end
+        return {
+            key = zone.key,
+            name = zone.name,
+            general = general,
+            trade = client:GetTradeChannel(),
+        }
+    end
     -- Guild Recruit keeps its ad times with the current guild.
     guildRecruit = addon.GuildRecruit.Create({
         partition = function()
@@ -1985,25 +2013,21 @@ if clientProfile.supported then
         canInvite = function()
             return client:CanGuildInvite()
         end,
-        location = function()
-            local zone = client:GetZone()
-            if zone == nil then
+        location = recruitLocation,
+        -- Advertising on demand also works where the client can't place the
+        -- player on a map (the Deeprun Tram): the zone is the one General
+        -- is named for.
+        here = function()
+            local location = recruitLocation()
+            if location ~= nil then
+                return location
+            end
+            local general = client:GetGeneralChannel()
+            local name = general and client:ChannelZoneName(general)
+            if name == nil then
                 return nil
             end
-            -- Arriving somewhere, the client can put the player in the new
-            -- zone's General a moment before it reports the new zone. Until
-            -- the two agree there's no General here, so an ad is never sent
-            -- to one zone and counted for another.
-            local general = client:GetGeneralChannel()
-            if general ~= nil and not client:IsChannelOfZone(general, zone.name) then
-                general = nil
-            end
-            return {
-                key = zone.key,
-                name = zone.name,
-                general = general,
-                trade = client:GetTradeChannel(),
-            }
+            return { key = "zone:" .. name, name = name, general = general, trade = client:GetTradeChannel() }
         end,
         after = function(seconds, callback)
             return client:After(seconds, callback)

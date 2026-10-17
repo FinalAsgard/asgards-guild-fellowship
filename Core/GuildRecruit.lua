@@ -84,7 +84,10 @@ Recruit.__index = Recruit
 --               key and name, and the numbers of its General channel and
 --               of Trade (nil where the user isn't in them); nil when the
 --               zone is unknown
---   after       function(seconds, callback) -> false when there's no timer
+--   here        function() -> as location, for advertising on demand,
+--               which may also name a zone the client can't place on a map.
+--               Optional; location otherwise.
+--   after      function(seconds, callback) -> false when there's no timer
 --   inInstance  function() -> true in an instance, battleground or keystone
 --               run, where prompts are held. Optional.
 --   random      function(low, high) -> a whole number. Optional.
@@ -125,6 +128,7 @@ function GuildRecruit.Create(options)
         now = options.now,
         canInvite = options.canInvite,
         location = options.location,
+        here = options.here or options.location,
         send = options.send,
         after = options.after or function()
             return false
@@ -639,9 +643,21 @@ function Recruit:Post(key)
         self:Refresh()
         return nil
     end
+    if not self:sendAd(ad, channelNumber, key, prompt.channel, prompt.zoneName, now) then
+        return nil
+    end
+    self:Refresh()
+    return ad
+end
+
+-- Sends `ad` to the channel numbered `channelNumber`, and on success counts
+-- it as an ad in channel key `key` (`channel` is GENERAL or TRADE, in the
+-- zone named `zoneName`): records the time and poster, adds it to the
+-- user's own record and tells the guild. Returns true when it was sent.
+function Recruit:sendAd(ad, channelNumber, key, channel, zoneName, now)
     local ok, sent = pcall(self.send, ad, channelNumber)
     if not ok or sent ~= true then
-        return nil
+        return false
     end
     if self:Ledger():Record(key, now) then
         local okSelf, selfKey = pcall(self.selfKey)
@@ -656,10 +672,59 @@ function Recruit:Post(key)
         v = GuildRecruit.PROTOCOL,
         t = GuildRecruit.TYPE_ADVERTISED,
         k = key,
-        n = prompt.channel == addon.RecruitPolicy.TRADE and "Trade" or ((prompt.zoneName or "") .. " General"),
+        n = channel == addon.RecruitPolicy.TRADE and "Trade" or ((zoneName or "") .. " General"),
         a = now,
         r = report,
     })
+    return true
+end
+
+-- The user asked to advertise now (`/agf advertise`, which a macro can
+-- press): posts the ad to `channel` here (GENERAL, or TRADE). It works with
+-- no prompt, even after Not now or Off here, or where the zone is unknown
+-- and its General gives the zone's name instead. It's never sent more
+-- often than a prompt would be: not while the guild's last ad there is
+-- still fresh, nor while busy, nor without permission or an ad, nor while
+-- officers have paused recruitment. Returns the text sent, or nil and a
+-- reason a player can read.
+function Recruit:Advertise(channel)
+    local now = self.now()
+    if not self:CanInvite() then
+        return nil, "this character can't invite to the guild"
+    end
+    if self.policy:Paused() then
+        return nil, "officers have paused recruitment"
+    end
+    local ad = self:Ad()
+    if ad == nil then
+        return nil, "there's no ad to post; write one with /agf recruit"
+    end
+    if self:IsBusy() then
+        return nil, "not during combat or in an instance"
+    end
+    local ok, here = pcall(self.here)
+    if not ok or type(here) ~= "table" or type(now) ~= "number" then
+        return nil, "the zone you're in is unknown"
+    end
+    local trade = channel == addon.RecruitPolicy.TRADE
+    local channelNumber = here.general
+    if trade then
+        channelNumber = here.trade
+    end
+    if type(channelNumber) ~= "number" then
+        return nil, trade and "there's no Trade channel here" or "you're not in General here"
+    end
+    local key = trade and addon.RecruitLedger.TRADE_KEY or addon.RecruitLedger.GeneralKey(here.key)
+    local freshFor = self:Ledger():FreshFor(key, now)
+    if freshFor ~= nil then
+        return nil, self:ChannelLabel(key) .. " was advertised lately; again in "
+            .. GuildRecruit.FormatMinutes(math.max(1, math.ceil(freshFor / 60)))
+    end
+    if not self:sendAd(ad, channelNumber, key, trade and addon.RecruitPolicy.TRADE or addon.RecruitPolicy.GENERAL,
+        here.name, now)
+    then
+        return nil, "the game didn't send it"
+    end
     self:Refresh()
     return ad
 end

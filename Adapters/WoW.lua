@@ -546,7 +546,7 @@ end
 -- it. Nil when the client can't say, including while a client whose maps
 -- work hasn't placed the player on one yet (just after a loading screen, or
 -- on a boat), so one zone never goes by two keys. A place with no map at
--- all, whose instance is named for it (the Deeprun Tram), is keyed by name.
+-- all (the Deeprun Tram) is never placed, so it's never prompted.
 function Client:GetZone()
     local name = self:zoneText()
     if name == nil then
@@ -557,12 +557,7 @@ function Client:GetZone()
         return { key = "map:" .. mapId, name = name }
     end
     if unplaced then
-        -- Just after a loading screen the instance is still the continent,
-        -- so its name isn't the zone's.
-        local ok, instanceName = callFunction(self.environment.GetInstanceInfo)
-        if not ok or instanceName ~= name then
-            return nil
-        end
+        return nil
     end
     return { key = "zone:" .. name, name = name }
 end
@@ -768,7 +763,8 @@ function Client:ChannelReport()
     local zone = self:GetZone()
     local text = self:zoneText()
     table.insert(lines, "Zone: " .. (zone and (zone.name .. " (" .. zone.key .. ")")
-        or text and (text .. ", unknown: the game hasn't placed you on a map, so no prompts here")
+        or text and (text .. ", unknown: the game hasn't placed you on a map, so no prompts here;"
+            .. " /agf advertise still posts")
         or "unknown"))
     local listed = self:ListedChannels()
     if listed[1] == nil then
@@ -842,12 +838,19 @@ end
 -- the player just left). True when it's named for that zone, or its name
 -- can't be read or carries no zone, so nothing is ruled out then.
 function Client:IsChannelOfZone(number, zoneName)
+    local zone = self:ChannelZoneName(number)
+    return zone == nil or zone == zoneName
+end
+
+-- The zone the channel numbered `number` is named for ("Booty Bay" for
+-- "General - Booty Bay"), or nil when its name can't be read or carries no
+-- zone.
+function Client:ChannelZoneName(number)
     local ok, _, fullName = callFunction(self.environment.GetChannelName, number)
     if not ok or type(fullName) ~= "string" or self:IsSecretValue(fullName) then
-        return true
+        return nil
     end
-    local zone = string.match(fullName, "^[^-]+ %- (.+)$")
-    return zone == nil or zone == zoneName
+    return string.match(fullName, "^[^-]+ %- (.+)$")
 end
 
 -- The number of the Trade channel, or nil when the player isn't in it or

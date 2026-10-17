@@ -320,14 +320,10 @@ test.test("a zone whose maps work but haven't placed the player yet has no key",
     test.assertEqual(nil, client:GetZone())
 end)
 
-test.test("a place with no map, whose instance is named for it, is keyed by its name", function()
-    local instanceName = "Eastern Kingdoms"
+test.test("a place with no map is unknown, and its General names the zone", function()
     local client = newClient({
         GetRealZoneText = function()
             return "Deeprun Tram"
-        end,
-        GetInstanceInfo = function()
-            return instanceName, "none", 0, "", 0, 0, false, 369, 0
         end,
         C_Map = {
             GetBestMapForUnit = function()
@@ -345,15 +341,12 @@ test.test("a place with no map, whose instance is named for it, is keyed by its 
         end,
     })
 
-    -- Just after the loading screen the instance is still the continent.
     test.assertEqual(nil, client:GetZone())
     test.assertContains(table.concat(client:ChannelReport(), "\n"),
-        "Zone: Deeprun Tram, unknown: the game hasn't placed you on a map, so no prompts here")
-
-    instanceName = "Deeprun Tram"
-    test.assertEqual("zone:Deeprun Tram", client:GetZone().key)
-    test.assertEqual("Deeprun Tram", client:GetZone().name)
-    test.assertContains(table.concat(client:ChannelReport(), "\n"), "Zone: Deeprun Tram (zone:Deeprun Tram)")
+        "Zone: Deeprun Tram, unknown: the game hasn't placed you on a map, so no prompts here;"
+            .. " /agf advertise still posts")
+    test.assertEqual("Deeprun Tram", client:ChannelZoneName(1))
+    test.assertEqual(nil, client:ChannelZoneName(2))
 end)
 
 test.test("a channel is the zone's unless its name says it's another zone's", function()

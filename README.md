@@ -22,6 +22,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf group` | Opens the window on the **Group Finder** tab (see [Group Finder](#group-finder)), or closes it. |
 | `/agf profile` | Opens the window on the **My Profile** tab (see [My Profile](#my-profile)), or closes it. |
 | `/agf dnd` | Turns Group Finder [Do Not Disturb](#do-not-disturb) on, or back off. |
+| `/agf advertise` | Posts your guild ad to General where you are, now. `/agf advertise trade` posts it to Trade. Works in a macro. Won't post again before your timer allows (see [Guild Recruit](#channels-and-timing)). |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
@@ -279,6 +280,7 @@ Guild Recruit spreads the guild's recruitment ads out: every zone sees the guild
 - Staying in one place, you're prompted again when a timer runs out.
 - **Not now** hides that channel's prompt for 10 minutes. **Off here** stops prompts in the current zone (its General, and Trade while you're there), on every character, until you turn it back on: the zone is listed on the **Recent Guild Advertisements** page with a **Turn back on** button.
 - Prompts wait during combat, boss encounters, dungeons, raids, battlegrounds, arenas, and keystone runs, and close when you leave the zone or city they're for.
+- **Advertise on demand**: `/agf advertise` posts your ad to General where you are, and `/agf advertise trade` posts it to Trade. Put either in a macro on your action bar. It works without a prompt, after **Not now** or **Off here**, and in places with no map where you're never prompted (the Deeprun Tram). It counts like any other ad. To prevent spam, it won't post while the guild's last ad in that channel is newer than your timer, and it tells you how long to wait. It also won't post during combat or in an instance, without an ad or invite permission, or while officers have paused recruitment.
 - Ads are posted exactly as written, up to 255 characters. A send the game refuses doesn't count as an ad.
 
 ### Advertising together
