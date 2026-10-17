@@ -4,7 +4,7 @@ local _, addon = ...
 -- recently online character, or every character), two check boxes to skip
 -- players with a Discord name on file and characters not online in 30 days,
 -- a subject and a message, the estimated cost and the officer's money, the list
--- of who will get the mail, and Send (with a confirmation in the window,
+-- of who will get the mail (each with a check box to leave them out), and Send (with a confirmation in the window,
 -- then progress). It only draws GuildMail's model and passes clicks and
 -- typing back. It opens beside the mailbox when opened from there, and can
 -- be dragged anywhere. Officers also get a Guild Mail button beside the
@@ -23,6 +23,7 @@ local GuildMailWindow = {
     MODE_ROW_HEIGHT = 20,
     MESSAGE_HEIGHT = 90,
     LIST_HEIGHT = 120,
+    LIST_ROW_HEIGHT = 18,
     BUTTON_WIDTH = 96,
     BUTTON_HEIGHT = 24,
     MAILBOX_BUTTON_WIDTH = 96,
@@ -44,6 +45,7 @@ Window.__index = Window
 -- handlers (each optional):
 --   onRank(index, checked), onMode(mode), onSubject(text), onBody(text)
 --   onSkipDiscord(checked), onActiveOnly(checked)
+--   onRecipient(key, checked)  a recipient ticked or unticked
 --   onSend()     Send pressed: ask for confirmation
 --   onConfirm()  the confirmation's Send pressed
 --   onCancel()   the confirmation's Cancel pressed
@@ -61,12 +63,14 @@ function GuildMailWindow.Create(client, handlers)
         onActiveOnly = handler("onActiveOnly"),
         onSubject = handler("onSubject"),
         onBody = handler("onBody"),
+        onRecipient = handler("onRecipient"),
         onSend = handler("onSend"),
         onConfirm = handler("onConfirm"),
         onCancel = handler("onCancel"),
         onMailboxButton = handler("onMailboxButton"),
         rankBoxes = {},
         modeButtons = {},
+        recipientRows = {},
     }, Window)
 end
 
@@ -221,12 +225,7 @@ function Window:window()
     list:SetWidth(GuildMailWindow.WIDTH - 2 * padding - 22)
     list:SetHeight(GuildMailWindow.LIST_HEIGHT)
     listScroll:SetScrollChild(list)
-    local listText = list:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    listText:SetPoint("TOPLEFT", list, "TOPLEFT", 6, -4)
-    listText:SetPoint("RIGHT", list, "RIGHT", -6, 0)
-    listText:SetJustifyH("LEFT")
-    listText:SetJustifyV("TOP")
-    self.list, self.listText = list, listText
+    self.list = list
     top = top - 18 - GuildMailWindow.LIST_HEIGHT - 10
 
     local cost = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -312,6 +311,31 @@ function Window:rankBox(position)
     return box
 end
 
+-- The check box and line for the recipient in list position `position`,
+-- made on first use.
+function Window:recipientRow(position)
+    if self.recipientRows[position] ~= nil then
+        return self.recipientRows[position]
+    end
+    local list = self.list
+    local box = self.environment.CreateFrame("CheckButton", nil, list, "UICheckButtonTemplate")
+    box:SetWidth(GuildMailWindow.LIST_ROW_HEIGHT)
+    box:SetHeight(GuildMailWindow.LIST_ROW_HEIGHT)
+    box:SetPoint("TOPLEFT", list, "TOPLEFT", 2, -2 - (position - 1) * GuildMailWindow.LIST_ROW_HEIGHT)
+    local line = list:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    line:SetPoint("LEFT", box, "RIGHT", 2, 0)
+    line:SetPoint("RIGHT", list, "RIGHT", -6, 0)
+    line:SetJustifyH("LEFT")
+    box.line = line
+    box:SetScript("OnClick", function(clicked)
+        if clicked.recipientKey ~= nil then
+            self.onRecipient(clicked.recipientKey, clicked:GetChecked() and true or false)
+        end
+    end)
+    self.recipientRows[position] = box
+    return box
+end
+
 function Window:IsShown()
     return self.frame ~= nil and self.frame:IsShown() == true
 end
@@ -389,7 +413,6 @@ function Window:Render(model)
     setText(self.body, model.body)
 
     self.listLabel:SetText("Recipients (" .. model.countText .. ")")
-    local lines = {}
     for index = 1, #model.recipients do
         local row = model.recipients[index]
         local details = { row.rankName }
@@ -406,10 +429,22 @@ function Window:Render(model)
                 line = line .. " (" .. tostring(row.reason) .. ")"
             end
         end
-        lines[index] = line
+        local box = self:recipientRow(index)
+        box.recipientKey = row.key
+        box.line:SetText(line)
+        -- A box clicked while sending is put back to match the model.
+        box:SetChecked(row.checked ~= false)
+        setEnabled(box, not model.sending)
+        box:Show()
+        box.line:Show()
     end
-    self.listText:SetText(table.concat(lines, "\n"))
-    self.list:SetHeight(math.max(GuildMailWindow.LIST_HEIGHT, #lines * 14 + 8))
+    for index = #model.recipients + 1, #self.recipientRows do
+        self.recipientRows[index].recipientKey = nil
+        self.recipientRows[index]:Hide()
+        self.recipientRows[index].line:Hide()
+    end
+    self.list:SetHeight(math.max(GuildMailWindow.LIST_HEIGHT,
+        #model.recipients * GuildMailWindow.LIST_ROW_HEIGHT + 4))
 
     self.cost:SetText(model.costText or "")
     self.money:SetText(model.moneyText or "")

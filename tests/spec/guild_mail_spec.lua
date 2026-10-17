@@ -823,6 +823,96 @@ test.test("guild mail: a finished send can't go again until something changes", 
     test.assertTrue(world.mail:RequestSend())
 end)
 
+test.test("guild mail: every recipient starts ticked", function()
+    local _, world = newMail()
+    readyToSend(world)
+
+    local rows = world.mail:Model().recipients
+    test.assertEqual("ann bell-camelot", rows[1].key)
+    test.assertTrue(rows[1].checked)
+    test.assertTrue(rows[2].checked)
+end)
+
+test.test("guild mail: unticking a recipient updates the cost and count", function()
+    local addon, world = newMail()
+    world.mail:SetRank(2, true)
+    world.mail:SetRank(3, true)
+    world.mail:SetMode("all")
+    test.assertEqual("5 mails to 3 players · Estimated cost: 1s 50c (30c each)", world.mail:Model().costText)
+
+    test.assertTrue(world.mail:SetRecipient("cog wheel-camelot", false))
+    local model = world.mail:Model()
+    test.assertEqual("4 mails to 3 players · Estimated cost: 1s 20c (30c each)", model.costText)
+    test.assertEqual("4 of 5 mails", model.countText)
+    test.assertEqual(5, #model.recipients)
+    test.assertEqual("Cog Wheel", model.recipients[4].name)
+    test.assertFalse(model.recipients[4].checked)
+
+    world.mail:SetRecipient("ann bell-camelot", false)
+    test.assertEqual("3 mails to 2 players · Estimated cost: 90c (30c each)", world.mail:Model().costText)
+    test.assertFalse(world.mail:SetRecipient("ann bell-camelot", false))
+
+    world.mail:SetRecipient("cog wheel-camelot", true)
+    test.assertEqual("4 mails to 3 players · Estimated cost: 1s 20c (30c each)", world.mail:Model().costText)
+    test.assertEqual(addon.GuildMail.HINT_NO_SUBJECT, world.mail:Model().hint)
+end)
+
+test.test("guild mail: only ticked recipients are sent", function()
+    local _, world = newMail()
+    readyToSend(world)
+    world.mail:SetRecipient("ann bell-camelot", false)
+
+    world.mail:RequestSend()
+    test.assertEqual("Send 1 mail for 30c postage?", world.mail:Model().confirmText)
+    world.mail:Confirm()
+    world.mail:OnSent()
+
+    test.assertEqual(1, #world.sent)
+    test.assertEqual("Gus Reed", world.sent[1].to)
+    test.assertEqual("Sent 1 of 1 · Postage spent: 30c. Done.", world.mail:Model().progressText)
+end)
+
+test.test("guild mail: with everyone unticked, Send waits", function()
+    local addon, world = newMail()
+    readyToSend(world)
+    world.mail:SetRecipient("ann bell-camelot", false)
+    world.mail:SetRecipient("gus reed-camelot", false)
+
+    test.assertEqual(addon.GuildMail.HINT_NONE_TICKED, world.mail:Model().hint)
+    test.assertFalse(world.mail:RequestSend())
+end)
+
+test.test("guild mail: ticks survive the list being rebuilt, and newcomers start ticked", function()
+    local _, world = newMail()
+    world.mail:SetRank(2, true)
+    world.mail:SetRecipient("ann bell-camelot", false)
+
+    world.mail:SetRank(2, false)
+    world.mail:SetRank(3, true)
+    world.mail:SetRank(2, true)
+
+    local checked = {}
+    local rows = world.mail:Model().recipients
+    local index
+    for index = 1, #rows do
+        checked[rows[index].key] = rows[index].checked
+    end
+    test.assertFalse(checked["ann bell-camelot"])
+    test.assertTrue(checked["gus reed-camelot"])
+    test.assertTrue(checked["zed stone-camelot"])
+end)
+
+test.test("guild mail: ticks can't change while sending", function()
+    local _, world = newMail()
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+
+    test.assertFalse(world.mail:SetRecipient("gus reed-camelot", false))
+    world.mail:OnSent()
+    test.assertEqual("Gus Reed", world.sent[2].to)
+end)
+
 -- TEMPORARY (#205): remove with the Tester rank.
 test.test("guild mail: the temporary Tester rank mails only the testers", function()
     local addon, partition = setup()
@@ -967,6 +1057,7 @@ local function newWindow()
         onSkipDiscord = record("skipDiscord"),
         onActiveOnly = record("activeOnly"),
         onSubject = record("subject"),
+        onRecipient = record("recipient"),
         onSend = record("send"),
         onConfirm = record("confirm"),
         onCancel = record("cancel"),
@@ -988,9 +1079,11 @@ local MODEL = {
         { id = "all", label = "Every character", checked = false },
     },
     recipients = {
-        { name = "Ann Bell", rank = 2, rankName = "Member" },
-        { name = "Cog Wheel", playerName = "Annie", rank = 3, rankName = "Initiate", lastSeen = "Online" },
-        { name = "Gus Reed", rank = 2, rankName = "Member", status = "failed", reason = "Mailbox full" },
+        { key = "ann bell-camelot", name = "Ann Bell", rank = 2, rankName = "Member", checked = true },
+        { key = "cog wheel-camelot", name = "Cog Wheel", playerName = "Annie", rank = 3, rankName = "Initiate",
+            lastSeen = "Online", checked = false },
+        { key = "gus reed-camelot", name = "Gus Reed", rank = 2, rankName = "Member", checked = true,
+            status = "failed", reason = "Mailbox full" },
     },
     countText = "3 mails",
     costText = "3 mails to 2 players · Estimated cost: 90c (30c each)",
@@ -1014,9 +1107,35 @@ test.test("guild mail window: draws the ranks, the text and the recipients", fun
     test.assertEqual("Recipients (3 mails)", world.window.listLabel.text)
     test.assertEqual("3 mails to 2 players · Estimated cost: 90c (30c each)", world.window.cost.text)
     test.assertEqual("You have 5g", world.window.money.text)
-    test.assertContains(world.window.listText.text, "Ann Bell")
-    test.assertContains(world.window.listText.text, "Mailbox full")
-    test.assertContains(world.window.listText.text, "Cog Wheel  |cff999999Annie · Initiate · Online|r")
+    local rows = world.window.recipientRows
+    test.assertContains(rows[1].line.text, "Ann Bell")
+    test.assertContains(rows[3].line.text, "Mailbox full")
+    test.assertEqual("Cog Wheel  |cff999999Annie · Initiate · Online|r", rows[2].line.text)
+    test.assertTrue(rows[1]:GetChecked())
+    test.assertFalse(rows[2]:GetChecked())
+end)
+
+test.test("guild mail window: unticking a recipient is passed back, and extra rows hide", function()
+    local _, world = newWindow()
+    world.window:Render(MODEL)
+    local box = world.window.recipientRows[1]
+
+    box:SetChecked(false)
+    box.scripts.OnClick(box)
+    test.assertEqual("recipient", world.calls[1].name)
+    test.assertEqual("ann bell-camelot", world.calls[1].args[1])
+    test.assertFalse(world.calls[1].args[2])
+
+    local shorter = {}
+    local key, value
+    for key, value in pairs(MODEL) do
+        shorter[key] = value
+    end
+    shorter.recipients = { MODEL.recipients[1] }
+    world.window:Render(shorter)
+    test.assertTrue(world.window.recipientRows[1].shown)
+    test.assertFalse(world.window.recipientRows[2].shown)
+    test.assertEqual(nil, rawget(world.window.recipientRows[2], "recipientKey"))
 end)
 
 test.test("guild mail window: the skip boxes are drawn and passed back", function()

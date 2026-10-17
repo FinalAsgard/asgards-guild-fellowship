@@ -1,7 +1,7 @@
 local _, addon = ...
 
 -- Guild Mail: an officer ticks guild ranks, writes a subject and body once,
--- reviews who will get it, confirms, and the mails go out one at a time
+-- reviews who will get it (unticking anyone to leave out), confirms, and the mails go out one at a time
 -- (GuildMailSender). Recipients come from GuildMailAudience. Only officers
 -- can open it, and mail is only sent with a mailbox open; away from one the
 -- officer can still compose and review.
@@ -40,6 +40,7 @@ local GuildMail = {
     SEND_NEXT_TEXT = "Send next",
     HINT_NO_RANKS = "Tick at least one rank.",
     HINT_NOBODY = "Nobody in those ranks to mail.",
+    HINT_NONE_TICKED = "Tick at least one recipient.",
     HINT_NO_SUBJECT = "Write a subject.",
     HINT_NO_MAILBOX = "Open a mailbox to send.",
     HINT_NO_MONEY = "Not enough money for postage.",
@@ -159,6 +160,10 @@ function GuildMail.Create(options)
         activeOnly = false,
         subject = "",
         body = "",
+        -- Recipients unticked in the list, by character key. Kept for the
+        -- session, so a recipient who drops out of the list and comes back
+        -- stays unticked; anyone new starts ticked.
+        unticked = {},
         mailboxOpen = false,
         confirming = false,
         batch = nil,
@@ -321,6 +326,29 @@ function Mail:SetBody(text)
     return true
 end
 
+-- Ticks or unticks the recipient with character `key` in the list.
+function Mail:SetRecipient(key, checked)
+    local unticked = not checked or nil
+    if type(key) ~= "string" or self.unticked[key] == unticked or not self:editable() then
+        return false
+    end
+    self.unticked[key] = unticked
+    self:refresh()
+    return true
+end
+
+-- The recipients in `recipients` that are ticked.
+function Mail:ticked(recipients)
+    local list = {}
+    local index
+    for index = 1, #recipients do
+        if not self.unticked[recipients[index].key] then
+            table.insert(list, recipients[index])
+        end
+    end
+    return list
+end
+
 function Mail:OnMailboxOpened()
     self.mailboxOpen = true
     self:refresh()
@@ -369,7 +397,7 @@ function Mail:rankList(partition)
     return list
 end
 
--- Who would get the mail now.
+-- Who is on the list now, ticked or not.
 function Mail:Recipients()
     local partition = self.context()
     if partition == nil then
@@ -404,7 +432,8 @@ function Mail:Recipients()
     return recipients
 end
 
--- Why Send can't be pressed now, or nil when it can.
+-- Why Send can't be pressed now, or nil when it can. `recipients` is the
+-- list, ticked or not.
 function Mail:hint(recipients)
     if self.sender:IsPaused() then
         return self.mailboxOpen and GuildMail.HINT_PAUSED or GuildMail.HINT_NO_MAILBOX
@@ -418,10 +447,14 @@ function Mail:hint(recipients)
     if #recipients == 0 then
         return GuildMail.HINT_NOBODY
     end
+    local ticked = self:ticked(recipients)
+    if #ticked == 0 then
+        return GuildMail.HINT_NONE_TICKED
+    end
     if blank(self.subject) then
         return GuildMail.HINT_NO_SUBJECT
     end
-    if not self:cost(recipients).affordable then
+    if not self:cost(ticked).affordable then
         return GuildMail.HINT_NO_MONEY
     end
     if not self.mailboxOpen then
@@ -457,7 +490,7 @@ function Mail:Cancel()
     self:refresh()
 end
 
--- Sends to everyone on the list, one mail at a time.
+-- Sends to everyone ticked on the list, one mail at a time.
 function Mail:Confirm()
     if not self.confirming then
         return false
@@ -467,7 +500,7 @@ function Mail:Confirm()
         self:refresh()
         return false
     end
-    local recipients = self:Recipients()
+    local recipients = self:ticked(self:Recipients())
     local mails = {}
     local index
     for index = 1, #recipients do
@@ -530,10 +563,10 @@ end
 --   modes        { id, label, checked } for each Send to choice
 --   skipDiscord, activeOnly   the two skip check boxes
 --   subject, body
---   recipients   { name, playerName, rank, rankName, lastSeen, status,
---                reason }; status is nil
+--   recipients   { key, name, playerName, rank, rankName, lastSeen,
+--                checked, status, reason }; status is nil
 --                until a send starts, then "pending", "sent" or "failed"
---   countText    "12 mails"
+--   countText    "12 mails", or "10 of 12 mails" with some unticked
 --   costText     "42 mails to 38 players · Estimated cost: 12s 60c (30c
 --                each)", in red when the officer can't afford it
 --   moneyText    "You have 152g 3s", or nil when the money isn't known
@@ -553,6 +586,7 @@ function Mail:Model()
         rankNames[ranks[index].index] = ranks[index].name
     end
     local recipients = self.batch or self:Recipients()
+    local ticked = self.batch or self:ticked(recipients)
     local rows = {}
     for index = 1, #recipients do
         local status, reason
@@ -560,18 +594,20 @@ function Mail:Model()
             status, reason = self.sender:Status(index)
         end
         rows[index] = {
+            key = recipients[index].key,
             name = recipients[index].name,
             playerName = recipients[index].playerName,
             lastSeen = lastSeen(recipients[index]),
             rank = recipients[index].rank,
             rankName = rankNames[recipients[index].rank] or ("Rank " .. (recipients[index].rank + 1)),
+            checked = self.batch ~= nil or not self.unticked[recipients[index].key],
             status = status,
             reason = reason,
         }
     end
     local hint = self:hint(recipients)
     local officer = self:IsOfficer()
-    local cost, money = self:cost(recipients)
+    local cost, money = self:cost(ticked)
     local costText = plural(cost.mails, "mail", "mails") .. " to " .. plural(cost.players, "player", "players") ..
         " · Estimated cost: " .. self:coins(cost.total) .. " (" .. self:coins(cost.perMail) .. " each)"
     if not cost.affordable then
@@ -593,7 +629,8 @@ function Mail:Model()
         subject = self.subject,
         body = self.body,
         recipients = rows,
-        countText = plural(#rows, "mail", "mails"),
+        countText = #ticked == #rows and plural(#rows, "mail", "mails")
+            or (#ticked .. " of " .. plural(#rows, "mail", "mails")),
         costText = costText,
         moneyText = type(money) == "number" and ("You have " .. self:coins(money)) or nil,
         affordable = cost.affordable,
@@ -602,7 +639,7 @@ function Mail:Model()
         sendText = self.sender:IsPaused() and GuildMail.SEND_NEXT_TEXT or GuildMail.SEND_TEXT,
         hint = hint,
         confirming = self.confirming,
-        confirmText = "Send " .. plural(#rows, "mail", "mails") .. " for " .. self:coins(cost.total) .. " postage?",
+        confirmText = "Send " .. plural(#ticked, "mail", "mails") .. " for " .. self:coins(cost.total) .. " postage?",
         progressText = self:progressText(),
         sending = self.sender:IsSending(),
     }
