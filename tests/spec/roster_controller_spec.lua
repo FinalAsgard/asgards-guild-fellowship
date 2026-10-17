@@ -375,7 +375,7 @@ local function registerCountsTests(profile)
 
         setup.controller:Toggle()
 
-        test.assertEqual("1 player · 1 alt · 1 unlinked · 3 characters", setup.window.counts)
+        test.assertEqual("2 players (1 known + 1 unlinked) · 1 alt · 3 characters", setup.window.counts)
     end)
 
     test.test(profile .. " the counts line updates after linking an alt", function()
@@ -398,7 +398,7 @@ local function registerCountsTests(profile)
         setup.controller:Rescan()
         setup.controller:OnRosterUpdate()
 
-        test.assertEqual("1 player · 1 alt · 2 unlinked · 4 characters", setup.window.counts)
+        test.assertEqual("3 players (1 known + 2 unlinked) · 1 alt · 4 characters", setup.window.counts)
     end)
 
     test.test(profile .. " the counts ignore search, Online only, Show departed, and collapsed groups", function()
@@ -442,17 +442,19 @@ local function registerCountsTooltipTests(profile)
         -- Only the officer, Tool Box, is online.
         local lines = setup.window.countsTooltip
         test.assertEqual("Guild size", lines[1])
-        test.assertEqual("1 of 1 player online", lines[2])
-        test.assertEqual("1 of 3 characters online", lines[3])
-        test.assertEqual("1 player has an alias", lines[4])
-        test.assertEqual("0 mains declared", lines[5])
-        test.assertEqual("1 unlinked character (0 online)", lines[6])
+        test.assertEqual("2 players: 1 known + 1 unlinked", lines[2])
+        test.assertContains(lines[3], "Active players: ")
+        test.assertEqual("1 of 2 players online", lines[4])
+        test.assertEqual("1 of 3 characters online", lines[5])
+        test.assertEqual("1 player has an alias", lines[6])
+        test.assertEqual("0 mains declared", lines[7])
 
+        -- The unlinked character logs in.
         setup.world.guild.members[3].online = true
         setup.controller:OnRosterUpdate()
 
-        test.assertEqual("2 of 3 characters online", setup.window.countsTooltip[3])
-        test.assertEqual("1 unlinked character (1 online)", setup.window.countsTooltip[6])
+        test.assertEqual("2 of 2 players online", setup.window.countsTooltip[4])
+        test.assertEqual("2 of 3 characters online", setup.window.countsTooltip[5])
     end)
 end
 

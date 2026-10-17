@@ -67,6 +67,14 @@ The roster is the **Roster** tab of [the add-on's window](#the-add-ons-window).
 
 Opening the window never scans the guild, so it's always quick. The Conflicts window and the player panel open beside the window, and close with it.
 
+### Guild size
+
+A line above the roster gives the guild's size, whatever the search and filters, for example **320 players (27 known + 293 unlinked) · 31 alts · 351 characters**. Departed characters never count.
+
+- A **known** player has two or more linked characters, an alias, or a declared main.
+- An **unlinked** character stands alone, with no link, alias or declared main. It counts as a player of its own until it's linked, though it may be someone's alt. Linking it moves it from players to alts.
+- Hover the line for the breakdown, how many players were active (online, or last online) within 7, 30 and 90 days, who is online now, and how many players have an alias or a declared main.
+
 ### The guild note convention
 
 Two markers in a character's **public** note seed the database:
