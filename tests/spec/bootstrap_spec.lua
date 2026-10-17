@@ -18,6 +18,7 @@ local MANIFEST_FILES = {
     "Adapters/GreetingsPage.lua",
     "Adapters/ProfilePage.lua",
     "Adapters/MapPins.lua",
+    "Adapters/GuildMailWindow.lua",
     "Core/Persistence.lua",
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",
@@ -67,6 +68,9 @@ local MANIFEST_FILES = {
     "Core/LocationProtocol.lua",
     "Core/LocationScheduler.lua",
     "Core/LocationBoard.lua",
+    "Core/GuildMailAudience.lua",
+    "Core/GuildMailSender.lua",
+    "Core/GuildMail.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }

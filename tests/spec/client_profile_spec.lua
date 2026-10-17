@@ -126,6 +126,9 @@ test.test("core modules never inspect the client", function()
         "Core/LibraryCheck.lua",
         "Core/CommandRouter.lua",
         "Core/Lifecycle.lua",
+        "Core/GuildMailAudience.lua",
+        "Core/GuildMailSender.lua",
+        "Core/GuildMail.lua",
     }
     local forbidden = { "ClientProfile", "X-Client", "WOW_PROJECT", "clientProfile" }
     local index, termIndex

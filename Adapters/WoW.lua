@@ -1171,6 +1171,77 @@ function Client:GetClassColor(classToken)
     return nil
 end
 
+-- The guild's rank names, a list where entry 1 is rank 0 (the guild
+-- master's), the same numbering as the roster's rank index. Nil when the
+-- client can't say.
+function Client:GetGuildRankNames()
+    local ok, count = callFunction(self.environment.GuildControlGetNumRanks)
+    if not ok or type(count) ~= "number" or count < 1 then
+        return nil
+    end
+    local names = {}
+    local index
+    for index = 1, count do
+        local named, name = callFunction(self.environment.GuildControlGetRankName, index)
+        names[index] = named and type(name) == "string" and name ~= "" and name or ("Rank " .. index)
+    end
+    return names
+end
+
+-- Sends a text-only mail. Only add-on code may do this (the game blocks it
+-- from macros), and only with a mailbox open. The game ignores another mail
+-- until it answers this one with MAIL_SEND_SUCCESS or MAIL_FAILED. Returns
+-- true when the client took the mail.
+function Client:SendMail(to, subject, body)
+    if type(to) ~= "string" or to == "" or type(subject) ~= "string" or subject == "" then
+        return false
+    end
+    return (callFunction(self.environment.SendMail, to, subject, type(body) == "string" and body or ""))
+end
+
+-- True while the game's mailbox is open.
+function Client:IsMailboxOpen()
+    local frame = self.environment.MailFrame
+    local ok, shown = pcall(function()
+        return frame:IsShown()
+    end)
+    return ok and shown == true
+end
+
+-- Calls onMail(kind) when the mailbox opens ("open") or closes ("close"),
+-- and when the game answers a sent mail ("sent" or "failed"). Returns false
+-- when the client can't deliver the events.
+Compatibility.MAIL_EVENTS = {
+    MAIL_SHOW = "open",
+    MAIL_CLOSED = "close",
+    MAIL_SEND_SUCCESS = "sent",
+    MAIL_FAILED = "failed",
+}
+
+function Client:ObserveMail(onMail)
+    if type(onMail) ~= "function" then
+        return false
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil or not self:SetEventHandler(frame, function(_, eventName)
+        local kind = Compatibility.MAIL_EVENTS[eventName]
+        if kind ~= nil then
+            pcall(onMail, kind)
+        end
+    end) then
+        return false
+    end
+    local registered = false
+    local eventName
+    for eventName in pairs(Compatibility.MAIL_EVENTS) do
+        if self:RegisterEvent(frame, eventName) then
+            registered = true
+        end
+    end
+    self.mailFrame = frame
+    return registered
+end
+
 function Client:GetAccountDatabase()
     return self.environment[self.databaseName]
 end

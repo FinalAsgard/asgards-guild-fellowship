@@ -28,6 +28,7 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
+local guildMail, guildMailWindow
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations
@@ -1938,6 +1939,59 @@ if clientProfile.supported then
             rosterController:Print(lines[index])
         end
     end)
+    -- Guild Mail: officers mail the ranks they tick, one mail per player to
+    -- their main, sent from a mailbox one at a time.
+    guildMailWindow = addon.GuildMailWindow.Create(client, {
+        onRank = function(index, checked)
+            guildMail:SetRank(index, checked)
+        end,
+        onSubject = function(text)
+            guildMail:SetSubject(text)
+        end,
+        onBody = function(text)
+            guildMail:SetBody(text)
+        end,
+        onSend = function()
+            guildMail:RequestSend()
+        end,
+        onConfirm = function()
+            guildMail:Confirm()
+        end,
+        onCancel = function()
+            guildMail:Cancel()
+        end,
+        onMailboxButton = function()
+            guildMail:Open(true)
+        end,
+    })
+    guildMail = addon.GuildMail.Create({
+        context = function()
+            local guild, partition = rosterController:QuietContext()
+            return guild and partition or nil
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        isOfficer = function()
+            return officerAuthority:IsOfficer(rosterController:SelfKey())
+        end,
+        rankNames = function()
+            return client:GetGuildRankNames()
+        end,
+        send = function(to, subject, body)
+            return client:SendMail(to, subject, body)
+        end,
+        view = guildMailWindow,
+    })
+    router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()
+        if client:IsMailboxOpen() then
+            guildMail:OnMailboxOpened()
+        end
+        local opened, reason = guildMail:Open(client:IsMailboxOpen())
+        if not opened then
+            rosterController:Print(reason)
+        end
+    end)
     -- Prompts stack from a place the user can move; it's saved account-wide.
     greetPrompts = addon.GreetPrompts.Create(client, {
         loadAnchor = function()
@@ -2603,6 +2657,20 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         -- Guildmates outside the party are dimmed on the maps.
         if mapPins ~= nil then
             mapPins:Refresh()
+        end
+    end)
+    -- Guild Mail follows the mailbox, and sends its next mail when the game
+    -- answers the last. Officers get its button on the mailbox.
+    client:ObserveMail(function(kind)
+        if kind == "open" then
+            guildMail:OnMailboxOpened()
+            pcall(guildMailWindow.ShowMailboxButton, guildMailWindow, guildMail:ShowsMailboxButton())
+        elseif kind == "close" then
+            guildMail:OnMailboxClosed()
+        elseif kind == "sent" then
+            guildMail:OnSent()
+        elseif kind == "failed" then
+            guildMail:OnFailed(nil)
         end
     end)
     -- Without a chat filter API, chat is simply left untagged.
