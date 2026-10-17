@@ -2015,7 +2015,8 @@ if clientProfile.supported then
     -- `/agf mailtest Name One, Name-Realm, Zzqxnotreal` sends a short test
     -- mail to each name through Guild Mail's own sender and client:SendMail,
     -- printing each step and anything the game reports.
-    local mailTestSender = addon.GuildMailSender.Create({
+    local mailTestSender
+    mailTestSender = addon.GuildMailSender.Create({
         send = function(item)
             local taken = client:SendMail(item.to, item.subject, item.body)
             rosterController:Print("[mailtest] SendMail(" .. item.to .. ") -> " .. tostring(taken))
@@ -2744,6 +2745,14 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Guild Mail follows the mailbox, and sends its next mail when the game
     -- answers the last. Officers get its button on the mailbox.
     client:ObserveMail(function(kind, blockedAddon, blockedCall)
+        if kind == "error" then
+            -- The text follows an error number; older clients pass only the
+            -- text.
+            local message = type(blockedCall) == "string" and blockedCall or blockedAddon
+            guildMail:OnError(message)
+            addon.mailTest:OnError(message)
+            return
+        end
         if kind == "blocked" then
             -- Only a blocked SendMail matters here.
             if not string.find(tostring(blockedCall), "SendMail", 1, true) then

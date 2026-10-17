@@ -362,6 +362,11 @@ function Mail:OnFailed(reason)
     return self.sender:OnFailed(reason)
 end
 
+-- The game showed an error: it may be why a mail failed.
+function Mail:OnError(message)
+    return self.sender:OnError(message)
+end
+
 -- The game blocked the add-on's SendMail: wait for Send next.
 function Mail:OnBlocked()
     return self.sender:OnBlocked()

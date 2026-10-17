@@ -373,6 +373,42 @@ test.test("guild mail sender: a late answer to a paused mail still counts", func
     test.assertEqual(addon.GuildMailSender.PENDING, (world.sender:Status(2)))
 end)
 
+test.test("guild mail sender: an error soon after a send fails that mail and moves on", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+
+    test.assertTrue(world.sender:OnError("Please enter a full character name."))
+    local status, reason = world.sender:Status(1)
+    test.assertEqual(addon.GuildMailSender.FAILED, status)
+    test.assertEqual("Please enter a full character name.", reason)
+    test.assertFalse(world.sender:IsManual())
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+    test.assertEqual("Ann Bell,Gus Reed", table.concat(world.sent, ","))
+end)
+
+test.test("guild mail sender: the error after a failure is its reason", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+
+    world.sender:OnFailed(nil)
+    test.assertTrue(world.sender:OnError("Cannot find mail recipient."))
+    local _, reason = world.sender:Status(1)
+    test.assertEqual("Cannot find mail recipient.", reason)
+    -- The next mail isn't touched by it, and a second error is ignored.
+    test.assertEqual(addon.GuildMailSender.PENDING, (world.sender:Status(2)))
+    test.assertFalse(world.sender:OnError("Something else"))
+end)
+
+test.test("guild mail sender: an error long after a send leaves the mail waiting", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.fire(addon.GuildMailSender.ERROR_SECONDS)
+
+    test.assertFalse(world.sender:OnError("Not enough mana"))
+    test.assertEqual(addon.GuildMailSender.PENDING, (world.sender:Status(1)))
+    test.assertTrue(world.sender:OnSent())
+end)
+
 test.test("guild mail sender: a stale timer does nothing", function()
     local addon, world = newTimedSender()
     world.sender:Start(MAILS)

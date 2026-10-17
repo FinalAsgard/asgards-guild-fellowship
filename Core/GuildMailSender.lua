@@ -13,6 +13,12 @@ local _, addon = ...
 -- every later mail also waits for a click, since the game would likely
 -- stall again. An answer that turns up late still counts.
 --
+-- Some mails the game refuses at once with only an error message (a
+-- one-word name on a client with two-part names), never answering
+-- MAIL_FAILED; and a MAIL_FAILED is followed by the error that says why.
+-- OnError takes either: an error soon after a send fails that mail, and one
+-- right after a failure gives its reason.
+--
 -- Pure: the game call and the timer are injected.
 --   send(mail) -> true when the client took the mail; `mail` is one of the
 --                 list given to Start ({ to, subject, body })
@@ -30,6 +36,8 @@ local GuildMailSender = {
     REFUSED = "the game didn't take the mail",
     GAP_SECONDS = 1,
     ANSWER_SECONDS = 10,
+    -- An error this soon after a send is taken to be about that mail.
+    ERROR_SECONDS = 2,
 }
 addon.GuildMailSender = GuildMailSender
 
@@ -52,6 +60,8 @@ function GuildMailSender.Create(options)
         state = GuildMailSender.IDLE,
         current = nil,
         inFlight = false,
+        fresh = false,
+        lastFailed = nil,
         manual = false,
         attempt = 0,
     }, Sender)
@@ -112,12 +122,17 @@ end
 function Sender:sendCurrent()
     while self.current ~= nil and self.current <= #self.mails do
         self.attempt = self.attempt + 1
+        self.lastFailed = nil
         local ok, taken = pcall(self.send, self.mails[self.current])
         if ok and taken then
             self.inFlight = true
+            self.fresh = true
             self.state = GuildMailSender.SENDING
             self:later(GuildMailSender.ANSWER_SECONDS, function()
                 self:pause()
+            end)
+            self:later(GuildMailSender.ERROR_SECONDS, function()
+                self.fresh = false
             end)
             self:changed()
             return
@@ -180,7 +195,11 @@ function Sender:finish(status, reason)
     end
     self.statuses[self.current] = status
     self.reasons[self.current] = reason
+    local finished = self.current
     self:advance()
+    if status == GuildMailSender.FAILED then
+        self.lastFailed = finished
+    end
     return true
 end
 
@@ -203,6 +222,24 @@ function Sender:OnBlocked()
     self.inFlight = false
     self:pause()
     return true
+end
+
+-- The game showed an error `message`. Soon after a send, it fails that
+-- mail with the message as its reason; right after a failure without a
+-- reason, it becomes that failure's reason. Returns true when it was used.
+function Sender:OnError(message)
+    if type(message) ~= "string" or message == "" then
+        return false
+    end
+    if self.inFlight and self.fresh then
+        return self:finish(GuildMailSender.FAILED, message)
+    end
+    if self.lastFailed ~= nil and self.reasons[self.lastFailed] == nil then
+        self.reasons[self.lastFailed] = message
+        self:changed()
+        return true
+    end
+    return false
 end
 
 -- Sends the paused mail now (call it from a click). Returns false when

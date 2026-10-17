@@ -1211,7 +1211,8 @@ end
 -- Calls onMail(kind, ...) when the mailbox opens ("open") or closes
 -- ("close"), when the game answers a sent mail ("sent" or "failed"), and
 -- when it blocks an add-on's protected call ("blocked", with the event's
--- add-on name and function name). Returns false when the client can't
+-- add-on name and function name), and when it shows an error ("error",
+-- with the event's arguments: an error number, then the text). Returns false when the client can't
 -- deliver the events.
 Compatibility.MAIL_EVENTS = {
     MAIL_SHOW = "open",
@@ -1220,6 +1221,7 @@ Compatibility.MAIL_EVENTS = {
     MAIL_FAILED = "failed",
     ADDON_ACTION_BLOCKED = "blocked",
     ADDON_ACTION_FORBIDDEN = "blocked",
+    UI_ERROR_MESSAGE = "error",
 }
 
 function Client:ObserveMail(onMail)
