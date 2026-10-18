@@ -57,8 +57,9 @@ local GuildMail = {
     SEND_NEXT_TEXT = "Send next",
     RESUME_TEXT = "Resume",
     -- About how many different characters the game lets one mail in a
-    -- while; a bigger send is warned that the rest will wait.
-    RECIPIENT_CAP = 19,
+    -- while (in game it stopped after 19, then 20); a send to this many or
+    -- more is warned that the rest will wait.
+    RECIPIENT_CAP = 20,
     CONTINUE_TEXT = "Continue",
     STOP_TEXT = "Stop",
     END_TEXT = "End",
@@ -698,7 +699,7 @@ local function capWarning(recipients)
             count = count + 1
         end
     end
-    if count <= GuildMail.RECIPIENT_CAP then
+    if count < GuildMail.RECIPIENT_CAP then
         return nil
     end
     return "The game lets you mail about " .. GuildMail.RECIPIENT_CAP

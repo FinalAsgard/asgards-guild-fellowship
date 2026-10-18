@@ -1037,10 +1037,11 @@ test.test("guild mail: a send to more characters than the game's limit is warned
     world.mail:RequestSend()
     test.assertEqual(nil, world.mail:Model().confirmWarning)
 
-    addon.GuildMail.RECIPIENT_CAP = 1
-    test.assertEqual("The game lets you mail about 1 different characters at a time."
-        .. " The rest will wait for you to resume them later.", world.mail:Model().confirmWarning)
+    -- Two recipients: warned from a limit of two.
     addon.GuildMail.RECIPIENT_CAP = 2
+    test.assertEqual("The game lets you mail about 2 different characters at a time."
+        .. " The rest will wait for you to resume them later.", world.mail:Model().confirmWarning)
+    addon.GuildMail.RECIPIENT_CAP = 3
     test.assertEqual(nil, world.mail:Model().confirmWarning)
 end)
 
