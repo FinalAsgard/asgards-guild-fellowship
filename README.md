@@ -24,6 +24,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf dnd` | Turns Group Finder [Do Not Disturb](#do-not-disturb) on, or back off. |
 | `/agf advertise` | Posts your guild ad to General where you are, now. `/agf advertise trade` posts it to Trade. Works in a macro. Won't post again before your timer allows (see [Guild Recruit](#channels-and-timing)). |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
+| `/agf mail` | Opens [Guild Mail](#guild-mail), to mail the guild ranks you pick (officers only). |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
@@ -309,6 +310,52 @@ Every post counts toward the player who made it, on all their characters togethe
 Officers also get the **Recruiters** leaderboard on the window's **Recruitment** tab (`/agf recruit`), below the settings. It lists every player who has advertised, by alias or main, ranked by ads in the last 30 days and then all time. Regular members don't see the leaderboard.
 
 Everyone gets the window's **Recent Guild Advertisements** tab. It lists each channel your add-on knows was advertised in lately (for example "Elwynn Forest General" or "Trade"), who posted (by alias or main, like the leaderboard), and how long ago, newest first. When your add-on only heard the time from someone running an older version, the poster shows as "not known". Ad times and posters are kept for 4 hours, across reloads and logouts, so a relog never forgets where the guild just advertised. The list updates as new ads arrive.
+
+## Guild Mail
+
+Guild Mail lets an officer send one mail to many guild members at once: launch plans, "come join our Discord", rule changes. You write it once, choose who gets it, check the list, and the add-on sends the mails one at a time while showing progress. It's only for officers: the guild master's rank, or any rank that can view officer notes.
+
+### Opening it
+
+- At a mailbox, officers get a **Guild Mail** button beside the mail window. It opens Guild Mail next to the mailbox.
+- `/agf mail` opens it anywhere, so you can write and price a mail away from a mailbox. **Send** needs an open mailbox ("Open a mailbox to send"). A non-officer is told that Guild Mail is for officers, and never sees the mailbox button.
+
+### Choosing who gets it
+
+- **Send to these ranks**: tick one or more ranks, in any combination.
+- The line below the ranks sums up the other choices, for example "Send to: Mains only · Skip Discord names · Skip inactive". **Edit** opens a panel beside the window to change them:
+  - **Mains only**: one mail per player, to their main. A player with no main set gets it on the character the roster treats as their main. A player whose main isn't in a ticked rank gets nothing.
+  - **Most recently online character**: one mail per player, to whichever of their characters in a ticked rank was online most recently.
+  - **Every character**: one mail to each character in a ticked rank.
+  - **Skip players with a Discord name on file**: anyone whose My Profile has a Discord name gets nothing. A player who is on Discord but never filled it in still gets the mail.
+  - **Skip characters not online in the last 30 days**.
+- Your own characters are always left out, and so are characters who have left the guild.
+
+### Writing it
+
+The subject and message can use the same [placeholders as Guild Greet](#guild-greet), in any capitalization. Each mail fills them in for its own recipient, and `{character}` is the character the mail is sent to. **Preview**, beside **Message**, opens a panel showing the mail exactly as the first ticked recipient will get it, with the list of placeholders.
+
+A mail's subject can be up to 64 characters and its message up to 500, counted after the placeholders are filled in. A recipient whose mail comes out too long is shown with a red warning (for example "subject too long (69/64)"), unticked, and can't be ticked.
+
+### Checking the list and the cost
+
+- **Recipients (42 mails)** shows how many mails will go out. **Edit** beside it opens the list: each character, their player, rank, and when they were last online, each with a check box. Untick anyone to leave them out; the count then reads "40 of 42 mails". Unticked recipients stay unticked for the session.
+- The cost line shows how many mails and players, and the postage: "42 mails to 38 players · Estimated cost: 12s 60c (30c each)". It updates with every change. At a mailbox it uses the game's own price; away from one it uses the standard 30c.
+- Below it is your money. If it isn't enough, the cost turns red and **Send** waits with "Not enough money for postage".
+
+### Sending
+
+- **Send** asks first: "Send 42 mails for 12s 60c postage?". Then the mails go out one at a time. Each waits for the game to confirm the last one, plus a moment, so the game doesn't drop mails sent too fast. Progress shows as "Sent 17 of 42 · Postage spent: 5s 10c", and each row is marked sent or failed.
+- A mail the game rejects is marked failed with the game's reason (for example "Cannot find mail recipient."), and sending moves on.
+- If the game doesn't answer a mail within 10 seconds, that mail fails ("no response, will try again at the end"), sending moves on, and it's tried once more after the rest. If the game doesn't answer then either, it stays failed.
+- If the game blocks the add-on from sending, **Send** becomes **Send next**, and from then on each mail goes out when you click it.
+- **Stop** halts once the mail in flight is answered. **Continue** then sends to everyone still pending, so nobody gets the mail twice, and **End** gives up on them. Closing the mailbox stops sending the same way; reopen it and Guild Mail to continue.
+- When it's done, the summary reads "Sent 40 · Failed 2 · Postage spent: 12s", with the failures still listed. Change anything to start a new mail.
+- While a send is under way, everything but Send and Stop is locked.
+
+### What's saved
+
+The subject, message, ticked ranks, Send to choice and both skip boxes are saved for every character on your account as you change them, so you can write a mail, log off, and send it later. They come back the first time you open Guild Mail after a reload or relog. A saved rank the guild no longer has is ignored. Recipient ticks and sending progress last only for the session; a send can't be continued after a reload.
 
 ## Group Finder
 

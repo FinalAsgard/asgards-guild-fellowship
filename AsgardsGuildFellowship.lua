@@ -1,4 +1,4 @@
-local _, addon = ...
+local addonName, addon = ...
 
 -- Composition root: builds the modules in order. Besides the adapter, this is
 -- the only place that consults the client profile.
@@ -28,6 +28,7 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
+local guildMail, guildMailWindow
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations
@@ -1938,6 +1939,121 @@ if clientProfile.supported then
             rosterController:Print(lines[index])
         end
     end)
+    -- Guild Mail: officers mail the ranks they tick (to each player's main,
+    -- their most recently online character, or every character), sent from
+    -- a mailbox one at a time.
+    guildMailWindow = addon.GuildMailWindow.Create(client, {
+        onRank = function(index, checked)
+            guildMail:SetRank(index, checked)
+        end,
+        onMode = function(mode)
+            if not guildMail:SetMode(mode) then
+                -- Puts the radio buttons back when nothing changed.
+                guildMail:Refresh()
+            end
+        end,
+        onSkipDiscord = function(checked)
+            if not guildMail:SetSkipDiscord(checked) then
+                guildMail:Refresh()
+            end
+        end,
+        onActiveOnly = function(checked)
+            if not guildMail:SetActiveOnly(checked) then
+                guildMail:Refresh()
+            end
+        end,
+        onStop = function()
+            guildMail:Stop()
+        end,
+        onEnd = function()
+            guildMail:End()
+        end,
+        onRecipient = function(key, checked)
+            if not guildMail:SetRecipient(key, checked) then
+                guildMail:Refresh()
+            end
+        end,
+        onSubject = function(text)
+            guildMail:SetSubject(text)
+        end,
+        onBody = function(text)
+            guildMail:SetBody(text)
+        end,
+        onSend = function()
+            guildMail:RequestSend()
+        end,
+        onConfirm = function()
+            guildMail:Confirm()
+        end,
+        onCancel = function()
+            guildMail:Cancel()
+        end,
+        onMailboxButton = function()
+            guildMail:Open(true)
+        end,
+    })
+    guildMail = addon.GuildMail.Create({
+        context = function()
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return partition, normalizer
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        isOfficer = function()
+            return officerAuthority:IsOfficer(rosterController:SelfKey())
+        end,
+        rankNames = function()
+            return client:GetGuildRankNames()
+        end,
+        -- Who is online, and when the others last were, for "most
+        -- recently online" and the recipient list.
+        live = function()
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and rosterController:LiveMembers(normalizer) or nil
+        end,
+        send = function(to, subject, body)
+            return client:SendMail(to, subject, body)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        -- Postage: the game's own price at a mailbox; away from one Guild
+        -- Mail estimates the standard text-mail price.
+        price = function()
+            return client:GetSendMailPrice()
+        end,
+        money = function()
+            return client:GetMoney()
+        end,
+        formatMoney = function(copper)
+            return client:FormatMoney(copper)
+        end,
+        -- The draft and filter choices, kept account-wide between sessions.
+        loadDraft = function()
+            local store = rosterController:Store()
+            return store and store:GuildMailDraft() or nil
+        end,
+        saveDraft = function(draft)
+            local store = rosterController:Store()
+            if store then
+                store:SetGuildMailDraft(draft)
+            end
+        end,
+        view = guildMailWindow,
+    })
+    router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()
+        if client:IsMailboxOpen() then
+            guildMail:OnMailboxOpened()
+        end
+        local opened, reason = guildMail:Open(client:IsMailboxOpen())
+        if not opened then
+            rosterController:Print(reason)
+        end
+    end)
     -- Prompts stack from a place the user can move; it's saved account-wide.
     greetPrompts = addon.GreetPrompts.Create(client, {
         loadAnchor = function()
@@ -2603,6 +2719,41 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         -- Guildmates outside the party are dimmed on the maps.
         if mapPins ~= nil then
             mapPins:Refresh()
+        end
+    end)
+    -- Guild Mail follows the mailbox, and sends its next mail when the game
+    -- answers the last. Officers get its button on the mailbox.
+    client:ObserveMail(function(kind, blockedAddon, blockedCall)
+        if kind == "error" then
+            -- The text follows an error number; older clients pass only the
+            -- text.
+            local message = type(blockedCall) == "string" and blockedCall or blockedAddon
+            guildMail:OnError(message)
+            return
+        end
+        if kind == "blocked" then
+            -- Only this add-on's blocked SendMail matters here; the event
+            -- fires for every add-on.
+            if blockedAddon ~= addonName or not string.find(tostring(blockedCall), "SendMail", 1, true) then
+                return
+            end
+            if guildMail:OnBlocked() then
+                rosterController:Print("The game blocked Guild Mail's send. Press Send next for each mail.")
+            end
+            return
+        end
+        if kind == "open" then
+            guildMail:OnMailboxOpened()
+            pcall(guildMailWindow.ShowMailboxButton, guildMailWindow, guildMail:ShowsMailboxButton())
+        elseif kind == "close" then
+            guildMail:OnMailboxClosed()
+        elseif kind == "sent" then
+            guildMail:OnSent()
+        elseif kind == "failed" then
+            guildMail:OnFailed(nil)
+        elseif kind == "money" then
+            -- The money line, and whether the postage is affordable.
+            guildMail:Refresh()
         end
     end)
     -- Without a chat filter API, chat is simply left untagged.

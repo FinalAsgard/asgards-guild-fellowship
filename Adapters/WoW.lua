@@ -1171,6 +1171,117 @@ function Client:GetClassColor(classToken)
     return nil
 end
 
+-- The guild's rank names, a list where entry 1 is rank 0 (the guild
+-- master's), the same numbering as the roster's rank index. Nil when the
+-- client can't say.
+function Client:GetGuildRankNames()
+    local ok, count = callFunction(self.environment.GuildControlGetNumRanks)
+    if not ok or type(count) ~= "number" or count < 1 then
+        return nil
+    end
+    local names = {}
+    local index
+    for index = 1, count do
+        local named, name = callFunction(self.environment.GuildControlGetRankName, index)
+        names[index] = named and type(name) == "string" and name ~= "" and name or ("Rank " .. index)
+    end
+    return names
+end
+
+-- Sends a text-only mail. Only add-on code may do this (the game blocks it
+-- from macros), and only with a mailbox open. The game ignores another mail
+-- until it answers this one with MAIL_SEND_SUCCESS or MAIL_FAILED. Returns
+-- true when the client took the mail.
+function Client:SendMail(to, subject, body)
+    if type(to) ~= "string" or to == "" or type(subject) ~= "string" or subject == "" then
+        return false
+    end
+    return (callFunction(self.environment.SendMail, to, subject, type(body) == "string" and body or ""))
+end
+
+-- What the mail being written in the game's send box would cost to send, in
+-- copper (30 for text only), or nil when the client can't say.
+function Client:GetSendMailPrice()
+    local ok, price = callFunction(self.environment.GetSendMailPrice)
+    if not ok or type(price) ~= "number" or price < 0 then
+        return nil
+    end
+    return price
+end
+
+-- The logged-in character's money in copper, or nil.
+function Client:GetMoney()
+    local ok, money = callFunction(self.environment.GetMoney)
+    if not ok or type(money) ~= "number" then
+        return nil
+    end
+    return money
+end
+
+-- `copper` in the game's gold, silver and copper style with coin icons, or
+-- nil when the client can't draw it.
+function Client:FormatMoney(copper)
+    if type(copper) ~= "number" then
+        return nil
+    end
+    local ok, text = callFunction(self.environment.GetCoinTextureString, copper)
+    if ok and type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
+-- True while the game's mailbox is open.
+function Client:IsMailboxOpen()
+    local frame = self.environment.MailFrame
+    local ok, shown = pcall(function()
+        return frame:IsShown()
+    end)
+    return ok and shown == true
+end
+
+-- Calls onMail(kind, ...) when the mailbox opens ("open") or closes
+-- ("close"), when the game answers a sent mail ("sent" or "failed"), and
+-- when it blocks an add-on's protected call ("blocked", with the event's
+-- add-on name and function name), and when it shows an error ("error",
+-- with the event's arguments: an error number, then the text), and when
+-- the character's money changes ("money"). Returns false when the client
+-- can't deliver the events.
+Compatibility.MAIL_EVENTS = {
+    PLAYER_MONEY = "money",
+    MAIL_SHOW = "open",
+    MAIL_CLOSED = "close",
+    MAIL_SEND_SUCCESS = "sent",
+    MAIL_FAILED = "failed",
+    ADDON_ACTION_BLOCKED = "blocked",
+    ADDON_ACTION_FORBIDDEN = "blocked",
+    UI_ERROR_MESSAGE = "error",
+}
+
+function Client:ObserveMail(onMail)
+    if type(onMail) ~= "function" then
+        return false
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil or not self:SetEventHandler(frame, function(_, eventName, ...)
+        local kind = Compatibility.MAIL_EVENTS[eventName]
+        if kind ~= nil then
+            pcall(onMail, kind, ...)
+        end
+    end) then
+        return false
+    end
+    local registered = false
+    local eventName
+    for eventName in pairs(Compatibility.MAIL_EVENTS) do
+        if self:RegisterEvent(frame, eventName) then
+            registered = true
+        end
+    end
+    self.mailFrame = frame
+    return registered
+end
+
 function Client:GetAccountDatabase()
     return self.environment[self.databaseName]
 end

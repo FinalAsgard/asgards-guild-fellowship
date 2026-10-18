@@ -373,6 +373,48 @@ test.test("guild recruit: the ad is account-wide and the opt-in is kept per char
     test.assertFalse(reloaded:RecruitOptedIn("Hammer-Area52"))
 end)
 
+test.test("guild mail: the draft is saved account-wide and read back", function()
+    local database = foundationRoot()
+    local store = newStore(database)
+
+    test.assertEqual(nil, store:GuildMailDraft())
+    test.assertTrue(store:SetGuildMailDraft({
+        subject = "Launch night", body = "Hi {name}!", ranks = { 0, 2 },
+        mode = "recent", skipDiscord = true, activeOnly = false,
+    }))
+
+    local draft = newStore(database):GuildMailDraft()
+    test.assertEqual("Launch night", draft.subject)
+    test.assertEqual("Hi {name}!", draft.body)
+    test.assertEqual("0,2", table.concat(draft.ranks, ","))
+    test.assertEqual("recent", draft.mode)
+    test.assertTrue(draft.skipDiscord)
+    test.assertFalse(draft.activeOnly)
+end)
+
+test.test("guild mail: unusable saved draft fields are dropped", function()
+    local database = foundationRoot()
+    database.guildMail = { subject = 5, body = "Hi", ranks = { 1, "x", 2.5, 3 }, mode = {}, skipDiscord = "yes" }
+
+    local draft = newStore(database):GuildMailDraft()
+
+    test.assertEqual(nil, draft.subject)
+    test.assertEqual("Hi", draft.body)
+    test.assertEqual("1,3", table.concat(draft.ranks, ","))
+    test.assertEqual(nil, draft.mode)
+    test.assertEqual(nil, draft.skipDiscord)
+end)
+
+test.test("guild mail: an unusable saved draft is left alone", function()
+    local database = foundationRoot()
+    database.guildMail = "broken"
+    local store = newStore(database)
+
+    test.assertEqual(nil, store:GuildMailDraft())
+    test.assertFalse(store:SetGuildMailDraft({ subject = "Hi" }))
+    test.assertEqual("broken", database.guildMail)
+end)
+
 test.test("guild recruit: unusable saved recruit state is left alone", function()
     local database = foundationRoot()
     database.recruit = "broken"
