@@ -43,6 +43,8 @@ local _, addon = ...
 --   saveDraft   function(draft) saves it, in the same shape
 --   view        optional window: Show(fromMailbox), Render(model),
 --               IsShown()
+--   capMessage  optional: the client's own text for its cap on unique
+--               mail recipients (GuildMailSender)
 local GuildMail = {
     OFFICERS_ONLY = "Guild Mail is for officers.",
     NO_GUILD = "Guild Mail needs a guild.",
@@ -50,8 +52,13 @@ local GuildMail = {
     HINT_PAUSED = "The game blocked the last mail. Press Send next for each mail.",
     HINT_STOPPING = "Stopping after this mail...",
     HINT_STOPPED = "Stopped. Continue sends to the rest; End gives up on them.",
+    HINT_CAPPED = "Paused: the game's mail limit was reached. Try again later.",
     SEND_TEXT = "Send",
     SEND_NEXT_TEXT = "Send next",
+    RESUME_TEXT = "Resume",
+    -- About how many different characters the game lets one mail in a
+    -- while; a bigger send is warned that the rest will wait.
+    RECIPIENT_CAP = 19,
     CONTINUE_TEXT = "Continue",
     STOP_TEXT = "Stop",
     END_TEXT = "End",
@@ -191,6 +198,7 @@ function GuildMail.Create(options)
             return mail.sendMail(item.to, item.subject, item.body)
         end,
         after = options.after,
+        capMessage = options.capMessage,
         onChange = function()
             mail:refresh()
         end,
@@ -540,6 +548,9 @@ function Mail:hint(recipients)
     if self.sender:IsStopping() then
         return GuildMail.HINT_STOPPING
     end
+    if self.sender:IsCapped() then
+        return GuildMail.HINT_CAPPED
+    end
     if self.sender:IsPaused() then
         return self.mailboxOpen and GuildMail.HINT_PAUSED or GuildMail.HINT_NO_MAILBOX
     end
@@ -674,6 +685,26 @@ local function lastSeen(recipient)
     return addon.RosterViewModel.FormatLastOnline(recipient.lastOnline) or ""
 end
 
+-- The warning for a send to more different characters than the game lets
+-- one mail in a while, or nil.
+local function capWarning(recipients)
+    local names = {}
+    local count = 0
+    local index
+    for index = 1, #recipients do
+        local name = string.lower(tostring(recipients[index].name))
+        if not names[name] then
+            names[name] = true
+            count = count + 1
+        end
+    end
+    if count <= GuildMail.RECIPIENT_CAP then
+        return nil
+    end
+    return "The game lets you mail about " .. GuildMail.RECIPIENT_CAP
+        .. " different characters at a time. The rest will wait for you to resume them later."
+end
+
 -- What the window shows:
 --   ranks        { index, name, checked } for every rank
 --   modes        { id, label, checked } for each Send to choice
@@ -689,13 +720,16 @@ end
 --   moneyText    "You have 152g 3s", or nil when the money isn't known
 --   affordable   whether the officer's money covers the cost
 --   canSend      whether Send can be pressed
---   sendText     "Send", "Send next" while paused, "Continue" after Stop
+--   sendText     "Send", "Send next" while paused, "Resume" when paused
+--                by the game's mail limit, "Continue" after Stop
 --   stopText     "Stop" while sending, "End" after Stop, else nil
 --   canStop      whether that button can be pressed
 --   hint         why Send can't be pressed, or what's happening, or nil
 --   preview      { to, subject, body }: the mail as the first ticked
 --                recipient gets it, or nil when nobody is ticked
---   confirming   whether the confirmation is up, with confirmText
+--   confirming   whether the confirmation is up, with confirmText, and
+--                confirmWarning when there are more recipients than the
+--                game's mail limit, else nil
 --   progressText "Sent 3 of 12", or nil before a send
 --   sending      whether a send is under way (going, paused or stopped),
 --                which locks everything but Send and Stop
@@ -760,6 +794,7 @@ function Mail:Model()
         canSend = officer and ((hint == nil and self.batch == nil)
             or ((self.sender:IsPaused() or self.sender:IsStopped()) and self.mailboxOpen)),
         sendText = (self.sender:IsStopped() and GuildMail.CONTINUE_TEXT)
+            or (self.sender:IsCapped() and GuildMail.RESUME_TEXT)
             or (self.sender:IsPaused() and GuildMail.SEND_NEXT_TEXT) or GuildMail.SEND_TEXT,
         stopText = (self.sender:IsStopped() and GuildMail.END_TEXT)
             or (self.sender:IsSending() and GuildMail.STOP_TEXT) or nil,
@@ -767,6 +802,7 @@ function Mail:Model()
         hint = hint,
         confirming = self.confirming,
         confirmText = "Send " .. plural(#ticked, "mail", "mails") .. " for " .. self:coins(cost.total) .. " postage?",
+        confirmWarning = capWarning(ticked),
         preview = ticked[1] and ticked[1].mail and {
             to = ticked[1].name, subject = ticked[1].mail.subject, body = ticked[1].mail.body,
         } or nil,

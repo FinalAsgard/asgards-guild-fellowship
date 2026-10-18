@@ -526,6 +526,106 @@ test.test("guild mail sender: a stale timer does nothing", function()
     test.assertEqual(before, #world.sent)
 end)
 
+local CAP = "You have reached the in-game cap of unique mail recipients"
+
+test.test("guild mail sender: the recipient cap pauses on that mail and fails nobody", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.sender:OnSent()
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+
+    test.assertTrue(world.sender:OnError(CAP .. "."))
+    test.assertTrue(world.sender:IsPaused())
+    test.assertTrue(world.sender:IsCapped())
+    test.assertFalse(world.sender:IsManual())
+    test.assertEqual(addon.GuildMailSender.PENDING, (world.sender:Status(2)))
+    -- The MAIL_FAILED that may follow doesn't fail it, and nothing more goes.
+    test.assertFalse(world.sender:OnFailed(nil))
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+    world.fire(addon.GuildMailSender.ANSWER_SECONDS)
+    test.assertEqual("Ann Bell,Gus Reed", table.concat(world.sent, ","))
+    test.assertEqual(0, world.sender:Progress().failed)
+end)
+
+test.test("guild mail sender: resuming after the cap retries the refused mail first, and the cap can pause again", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.sender:OnError(CAP)
+
+    test.assertTrue(world.sender:Resume())
+    test.assertFalse(world.sender:IsCapped())
+    test.assertEqual("Ann Bell,Ann Bell", table.concat(world.sent, ","))
+    test.assertTrue(world.sender:OnError(CAP))
+    test.assertTrue(world.sender:IsCapped())
+
+    world.sender:Resume()
+    world.sender:OnSent()
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+    world.sender:OnSent()
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+    world.sender:OnSent()
+    test.assertEqual("Ann Bell,Ann Bell,Ann Bell,Gus Reed,Zed Stone", table.concat(world.sent, ","))
+    test.assertEqual(3, world.sender:Progress().sent)
+    test.assertEqual(0, world.sender:Progress().failed)
+end)
+
+test.test("guild mail sender: the cap after a failure puts that mail back, even the last one", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.sender:OnFailed(nil)
+
+    test.assertTrue(world.sender:OnError(CAP))
+    test.assertTrue(world.sender:IsCapped())
+    test.assertEqual(addon.GuildMailSender.PENDING, (world.sender:Status(1)))
+    world.fire(addon.GuildMailSender.GAP_SECONDS)
+    test.assertEqual("Ann Bell", table.concat(world.sent, ","))
+    world.sender:Resume()
+    test.assertEqual("Ann Bell,Ann Bell", table.concat(world.sent, ","))
+
+    -- The last mail: sending had finished, and isn't any more.
+    _, world = newTimedSender()
+    world.sender:Start({ MAILS[1] })
+    world.sender:OnFailed(nil)
+    test.assertEqual(addon.GuildMailSender.DONE, world.sender:Progress().state)
+    world.sender:OnError(CAP)
+    test.assertTrue(world.sender:IsCapped())
+    world.sender:Resume()
+    world.sender:OnSent()
+    test.assertEqual(1, world.sender:Progress().sent)
+    test.assertEqual(addon.GuildMailSender.DONE, world.sender:Progress().state)
+end)
+
+test.test("guild mail sender: the client's own cap text is recognized; other errors still fail", function()
+    local addon = load()
+    local sent = {}
+    local sender = addon.GuildMailSender.Create({
+        send = function(mail)
+            table.insert(sent, mail.to)
+            return true
+        end,
+        capMessage = "Limite de destinataires atteinte.",
+    })
+    sender:Start(MAILS)
+    test.assertTrue(sender:OnError("Limite de destinataires atteinte."))
+    test.assertTrue(sender:IsCapped())
+
+    sender:Resume()
+    sender:OnError("Cannot find mail recipient.")
+    test.assertEqual(addon.GuildMailSender.FAILED, (sender:Status(1)))
+    test.assertFalse(sender:IsPaused())
+end)
+
+test.test("guild mail sender: Stop while capped stays stopped, and Continue sends the refused mail", function()
+    local _, world = newTimedSender()
+    world.sender:Start(MAILS)
+    world.sender:OnError(CAP)
+
+    test.assertTrue(world.sender:Stop())
+    test.assertTrue(world.sender:IsStopped())
+    test.assertTrue(world.sender:Resume())
+    test.assertEqual("Ann Bell,Ann Bell", table.concat(world.sent, ","))
+end)
+
 -- Guild Mail ----------------------------------------------------------------
 
 local RANK_NAMES = { "Guild Master", "Officer", "Member", "Initiate" }
@@ -910,6 +1010,38 @@ test.test("guild mail: when the game stalls, Send becomes Send next", function()
     test.assertEqual(2, #world.sent)
     test.assertEqual("Ann Bell", world.sent[2].to)
     test.assertEqual(addon.GuildMail.SEND_TEXT, world.mail:Model().sendText)
+end)
+
+test.test("guild mail: at the game's mail limit, sending pauses and Send becomes Resume", function()
+    local addon, world = newMail()
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+
+    test.assertTrue(world.mail:OnError("You have reached the in-game cap of unique mail recipients"))
+    local model = world.mail:Model()
+    test.assertEqual(addon.GuildMail.HINT_CAPPED, model.hint)
+    test.assertEqual(addon.GuildMail.RESUME_TEXT, model.sendText)
+    test.assertTrue(model.canSend)
+    test.assertEqual(addon.GuildMailSender.PENDING, model.recipients[1].status)
+
+    test.assertTrue(world.mail:RequestSend())
+    test.assertEqual(2, #world.sent)
+    test.assertEqual("Ann Bell", world.sent[2].to)
+end)
+
+test.test("guild mail: a send to more characters than the game's limit is warned before it goes", function()
+    local addon, world = newMail()
+    readyToSend(world)
+
+    world.mail:RequestSend()
+    test.assertEqual(nil, world.mail:Model().confirmWarning)
+
+    addon.GuildMail.RECIPIENT_CAP = 1
+    test.assertEqual("The game lets you mail about 1 different characters at a time."
+        .. " The rest will wait for you to resume them later.", world.mail:Model().confirmWarning)
+    addon.GuildMail.RECIPIENT_CAP = 2
+    test.assertEqual(nil, world.mail:Model().confirmWarning)
 end)
 
 test.test("guild mail: Send next needs the mailbox open", function()

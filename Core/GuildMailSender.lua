@@ -26,12 +26,18 @@ local _, addon = ...
 -- OnError takes either: an error soon after a send fails that mail, and one
 -- right after a failure gives its reason.
 --
+-- The game caps how many different characters can be mailed in a while
+-- (about 19). Its cap error, either way it comes, pauses sending instead:
+-- the refused mail stays pending and goes first on Resume, which pauses
+-- again if the cap is still in force. Nobody is failed for it.
+--
 -- Pure: the game call and the timer are injected.
 --   send(mail) -> true when the client took the mail; `mail` is one of the
 --                 list given to Start ({ to, subject, body })
 --   after(seconds, callback) -> true when the timer was set; without a
 --                 timer the next mail goes out at once and nothing times out
 --   onChange() -> called after every change of progress
+--   capMessage    optional: the client's own text for the cap error
 local GuildMailSender = {
     IDLE = "idle",
     SENDING = "sending",
@@ -48,6 +54,9 @@ local GuildMailSender = {
     ANSWER_SECONDS = 10,
     -- An error this soon after a send is taken to be about that mail.
     ERROR_SECONDS = 2,
+    -- The cap error as the English client shows it, for a client that
+    -- doesn't give its own text.
+    CAP_MESSAGE = "You have reached the in-game cap of unique mail recipients",
 }
 addon.GuildMailSender = GuildMailSender
 
@@ -64,6 +73,7 @@ function GuildMailSender.Create(options)
             return false
         end,
         onChange = options.onChange or function() end,
+        capMessage = options.capMessage,
         mails = {},
         -- The mails to send, as indexes into `mails`, in order; a mail
         -- with no answer is added again at the end, once.
@@ -79,6 +89,7 @@ function GuildMailSender.Create(options)
         lastFailed = nil,
         manual = false,
         stopping = false,
+        capped = false,
         attempt = 0,
     }, Sender)
 end
@@ -100,6 +111,11 @@ end
 -- True after Stop while the mail in flight is still to be answered.
 function Sender:IsStopping()
     return self.stopping and self.state == GuildMailSender.SENDING
+end
+
+-- True while paused or stopped by the game's cap on recipients.
+function Sender:IsCapped()
+    return self.capped and (self:IsPaused() or self:IsStopped())
 end
 
 -- Whether every mail now waits for a click (after the game stalled once).
@@ -126,6 +142,7 @@ function Sender:Start(mails)
     self.inFlight = false
     self.manual = false
     self.stopping = false
+    self.capped = false
     self:sendCurrent()
     return true
 end
@@ -321,11 +338,60 @@ function Sender:OnBlocked()
     return true
 end
 
+-- Whether `message` is the game's cap error: its own text when given,
+-- else the English one, ignoring case and a closing full stop.
+function Sender:isCap(message)
+    local texts = { self.capMessage, GuildMailSender.CAP_MESSAGE }
+    local lowered = string.lower(message)
+    local index
+    for index = 1, #texts do
+        if type(texts[index]) == "string" then
+            local text = string.lower(string.gsub(texts[index], "%.%s*$", ""))
+            if text ~= "" and string.find(lowered, text, 1, true) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- The cap refused mail `index`: it's pending again and goes first on
+-- Resume, and sending pauses (or, after Stop, stays stopped).
+function Sender:capReached(index)
+    self.attempt = self.attempt + 1
+    self.inFlight = false
+    self.fresh = false
+    self.lastFailed = nil
+    self.statuses[index] = GuildMailSender.PENDING
+    self.reasons[index] = nil
+    if self.current ~= index then
+        -- Sending already moved past it: put it back in front.
+        local position = self.position or (#self.queue + 1)
+        table.insert(self.queue, position, index)
+        self.position = position
+        self.current = index
+    end
+    self.capped = true
+    self.state = self.stopping and GuildMailSender.STOPPED or GuildMailSender.PAUSED
+    self:changed()
+    return true
+end
+
 -- The game showed an error `message`. Soon after a send, it fails that
 -- mail with the message as its reason; right after a failure without a
--- reason, it becomes that failure's reason. Returns true when it was used.
+-- reason, it becomes that failure's reason. The cap error instead pauses
+-- on that mail. Returns true when it was used.
 function Sender:OnError(message)
     if type(message) ~= "string" or message == "" then
+        return false
+    end
+    if self:isCap(message) then
+        if self.inFlight and self.fresh then
+            return self:capReached(self.current)
+        end
+        if self.lastFailed ~= nil then
+            return self:capReached(self.lastFailed)
+        end
         return false
     end
     if self.inFlight and self.fresh then
@@ -346,6 +412,7 @@ function Sender:Resume()
         return false
     end
     self.stopping = false
+    self.capped = false
     self:sendCurrent()
     return true
 end

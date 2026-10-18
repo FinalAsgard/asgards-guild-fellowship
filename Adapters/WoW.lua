@@ -1240,6 +1240,16 @@ function Client:IsMailboxOpen()
     return ok and shown == true
 end
 
+-- The client's own text for its cap on unique mail recipients, or nil when
+-- it doesn't have one.
+function Client:GetMailCapMessage()
+    local text = self.environment.ERR_MAIL_REACHED_CAP
+    if type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
 -- Calls onMail(kind, ...) when the mailbox opens ("open") or closes
 -- ("close"), when the game answers a sent mail ("sent" or "failed"), and
 -- when it blocks an add-on's protected call ("blocked", with the event's

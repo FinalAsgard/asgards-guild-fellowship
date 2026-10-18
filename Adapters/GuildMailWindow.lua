@@ -618,6 +618,9 @@ function Window:Render(model)
     if model.hint ~= nil then
         table.insert(status, model.hint)
     end
+    if model.confirming and model.confirmWarning ~= nil then
+        table.insert(status, model.confirmWarning)
+    end
     self.status:SetText(table.concat(status, "\n"))
 
     if model.confirming then

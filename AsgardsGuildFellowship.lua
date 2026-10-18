@@ -2021,6 +2021,9 @@ if clientProfile.supported then
         after = function(seconds, callback)
             return client:After(seconds, callback)
         end,
+        -- The cap on unique recipients pauses sending; the client's own
+        -- text for it when it has one.
+        capMessage = client:GetMailCapMessage(),
         -- Postage: the game's own price at a mailbox; away from one Guild
         -- Mail estimates the standard text-mail price.
         price = function()
