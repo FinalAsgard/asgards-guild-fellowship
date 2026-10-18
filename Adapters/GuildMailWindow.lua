@@ -39,9 +39,6 @@ local GuildMailWindow = {
     EDIT_BUTTON_WIDTH = 60,
     BUTTON_HEIGHT = 24,
     MAILBOX_BUTTON_WIDTH = 96,
-    -- The game's limits on a mail's subject and body.
-    SUBJECT_LETTERS = 64,
-    BODY_LETTERS = 500,
     STRATA = "HIGH",
     STATUS_TEXT = {
         pending = "",
@@ -216,7 +213,7 @@ function Window:window()
     subject:SetPoint("TOPLEFT", frame, "TOPLEFT", padding + 6, top - 16)
     subject:SetPoint("RIGHT", frame, "RIGHT", -padding, 0)
     subject:SetAutoFocus(false)
-    subject:SetMaxLetters(GuildMailWindow.SUBJECT_LETTERS)
+    subject:SetMaxLetters(addon.GuildMailComposer.SUBJECT_LETTERS)
     subject:SetScript("OnTextChanged", function(box, typed)
         if typed then
             self.onSubject(box:GetText())
@@ -243,7 +240,7 @@ function Window:window()
     body:SetTextInsets(6, 6, 4, 4)
     body:SetHeight(GuildMailWindow.MESSAGE_HEIGHT)
     body:SetAutoFocus(false)
-    body:SetMaxLetters(GuildMailWindow.BODY_LETTERS)
+    body:SetMaxLetters(addon.GuildMailComposer.BODY_LETTERS)
     messageScroll:SetScrollChild(body)
     messageScroll:SetScript("OnSizeChanged", function(_, width)
         if type(width) == "number" and width > 0 then

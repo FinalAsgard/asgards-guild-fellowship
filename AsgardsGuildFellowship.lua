@@ -2751,6 +2751,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildMail:OnSent()
         elseif kind == "failed" then
             guildMail:OnFailed(nil)
+        elseif kind == "money" then
+            -- The money line, and whether the postage is affordable.
+            guildMail:Refresh()
         end
     end)
     -- Without a chat filter API, chat is simply left untagged.

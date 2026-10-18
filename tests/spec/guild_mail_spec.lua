@@ -434,6 +434,21 @@ test.test("guild mail sender: a mail with no answer is tried only once more", fu
     test.assertEqual(addon.GuildMailSender.DONE, world.sender:Progress().state)
 end)
 
+test.test("guild mail sender: ending after Stop fails for good a mail waiting to be tried again", function()
+    local addon, world = newTimedSender()
+    world.sender:Start(MAILS)
+
+    world.fire(addon.GuildMailSender.ANSWER_SECONDS)
+    test.assertTrue(world.sender:Stop())
+    test.assertTrue(world.sender:End())
+
+    local status, reason = world.sender:Status(1)
+    test.assertEqual(addon.GuildMailSender.FAILED, status)
+    test.assertEqual(addon.GuildMailSender.NO_RESPONSE, reason)
+    test.assertEqual(addon.GuildMailSender.PENDING, (world.sender:Status(2)))
+    test.assertEqual(addon.GuildMailSender.DONE, world.sender:Progress().state)
+end)
+
 test.test("guild mail sender: after a block, every mail waits for a click", function()
     local addon, world = newTimedSender()
     world.sender:Start(MAILS)

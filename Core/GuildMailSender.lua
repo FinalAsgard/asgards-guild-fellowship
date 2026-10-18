@@ -237,13 +237,20 @@ function Sender:Stop()
 end
 
 -- Gives up on the mails still pending after Stop: sending is done, and
--- they stay pending. Returns false when not stopped.
+-- they stay pending. A mail waiting to be tried again won't be, so it
+-- fails for good. Returns false when not stopped.
 function Sender:End()
     if not self:IsStopped() then
         return false
     end
     self.attempt = self.attempt + 1
     self.stopping = false
+    local index
+    for index = 1, #self.mails do
+        if self.reasons[index] == GuildMailSender.NO_RESPONSE_RETRY then
+            self.reasons[index] = GuildMailSender.NO_RESPONSE
+        end
+    end
     self:finishAll()
     return true
 end

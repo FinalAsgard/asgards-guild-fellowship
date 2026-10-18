@@ -648,10 +648,6 @@ function Mail:OnBlocked()
     return self.sender:OnBlocked()
 end
 
-function Mail:IsSending()
-    return self.sender:IsSending()
-end
-
 -- "Sent 3 of 12, 1 failed · Postage spent: 90c" while sending; once done,
 -- the summary "Sent 40 · Failed 2 · Postage spent: 12s".
 function Mail:progressText()
