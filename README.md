@@ -355,7 +355,7 @@ A mail's subject can be up to 64 characters and its message up to 500, counted a
 
 ### What's saved
 
-The subject, message, ticked ranks, Send to choice and both skip boxes are saved for every character on this game install as you change them, so you can write a mail, log off, and send it later. They come back the first time you open Guild Mail after a reload or relog. A saved rank the guild no longer has is ignored. Recipient ticks and sending progress last only for the session; a send can't be continued after a reload.
+The subject, message, ticked ranks, Send to choice and both skip boxes are saved for every character on your account as you change them, so you can write a mail, log off, and send it later. They come back the first time you open Guild Mail after a reload or relog. A saved rank the guild no longer has is ignored. Recipient ticks and sending progress last only for the session; a send can't be continued after a reload.
 
 ## Group Finder
 

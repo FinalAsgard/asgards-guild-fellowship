@@ -1,4 +1,4 @@
-local _, addon = ...
+local addonName, addon = ...
 
 -- Composition root: builds the modules in order. Besides the adapter, this is
 -- the only place that consults the client profile.
@@ -2732,8 +2732,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             return
         end
         if kind == "blocked" then
-            -- Only a blocked SendMail matters here.
-            if not string.find(tostring(blockedCall), "SendMail", 1, true) then
+            -- Only this add-on's blocked SendMail matters here; the event
+            -- fires for every add-on.
+            if blockedAddon ~= addonName or not string.find(tostring(blockedCall), "SendMail", 1, true) then
                 return
             end
             if guildMail:OnBlocked() then

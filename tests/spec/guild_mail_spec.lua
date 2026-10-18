@@ -1682,3 +1682,47 @@ test.test("guild mail: an unknown saved Send to choice is ignored", function()
 
     test.assertTrue(world.view.model.modes[1].checked)
 end)
+
+-- Events during the send call ---------------------------------------------
+
+test.test("guild mail sender: a send the game blocks while SendMail runs pauses for a click", function()
+    local world
+    local _, made = newSender(function()
+        if #world.sent == 1 then
+            world.sender:OnBlocked()
+        end
+        return true
+    end)
+    world = made
+
+    world.sender:Start(MAILS)
+
+    test.assertTrue(world.sender:IsPaused())
+    test.assertTrue(world.sender:IsManual())
+    test.assertEqual(1, #world.sent)
+    -- No late answer is taken for the blocked mail.
+    test.assertFalse(world.sender:OnSent())
+
+    test.assertTrue(world.sender:Resume())
+    test.assertEqual("Ann Bell,Ann Bell", table.concat(world.sent, ","))
+end)
+
+test.test("guild mail sender: an error while SendMail runs fails that mail and moves on", function()
+    local world
+    local addon, made = newSender(function()
+        if #world.sent == 1 then
+            world.sender:OnError("Please enter a full character name.")
+        end
+        return true
+    end)
+    world = made
+
+    world.sender:Start(MAILS)
+
+    local status, reason = world.sender:Status(1)
+    test.assertEqual(addon.GuildMailSender.FAILED, status)
+    test.assertEqual("Please enter a full character name.", reason)
+    test.assertEqual("Ann Bell,Gus Reed", table.concat(world.sent, ","))
+    test.assertTrue(world.sender:OnSent())
+    test.assertEqual(addon.GuildMailSender.SENT, (world.sender:Status(2)))
+end)

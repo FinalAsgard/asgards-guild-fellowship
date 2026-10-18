@@ -151,16 +151,23 @@ end
 function Sender:sendCurrent()
     while self.position ~= nil and self.position <= #self.queue do
         self.current = self.queue[self.position]
-        self.attempt = self.attempt + 1
+        local attempt = self.attempt + 1
+        self.attempt = attempt
         self.lastFailed = nil
+        -- In flight before the call: the game reports a blocked send (and
+        -- some refusals) while SendMail is still running.
+        self.inFlight = true
+        self.fresh = true
+        self.state = GuildMailSender.SENDING
+        -- A mail being tried again is pending once more.
+        self.statuses[self.current] = GuildMailSender.PENDING
+        self.reasons[self.current] = nil
         local ok, taken = pcall(self.send, self.mails[self.current])
+        if self.attempt ~= attempt then
+            -- An event during the call already dealt with this mail.
+            return
+        end
         if ok and taken then
-            self.inFlight = true
-            self.fresh = true
-            self.state = GuildMailSender.SENDING
-            -- A mail being tried again is pending once more.
-            self.statuses[self.current] = GuildMailSender.PENDING
-            self.reasons[self.current] = nil
             self:later(GuildMailSender.ANSWER_SECONDS, function()
                 self:noAnswer()
             end)
@@ -170,6 +177,8 @@ function Sender:sendCurrent()
             self:changed()
             return
         end
+        self.inFlight = false
+        self.fresh = false
         self.statuses[self.current] = GuildMailSender.FAILED
         self.reasons[self.current] = GuildMailSender.REFUSED
         self.position = self.position + 1
