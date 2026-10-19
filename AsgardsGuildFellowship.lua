@@ -103,12 +103,12 @@ if clientProfile.supported then
         onDeclaredChanged = function(key, before)
             syncSession:LocalDeclaredEdit(key, before)
         end,
-        onScanFinished = function(summary)
+        onScanFinished = function(_, result)
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
             -- Characters new to the guild may be due a welcome mail.
-            if guildWelcome ~= nil and type(summary) == "table" then
-                guildWelcome:OnScan(summary.newKeys)
+            if guildWelcome ~= nil and type(result) == "table" then
+                guildWelcome:OnScan(result.newKeys)
             end
         end,
         -- Out-of-date guild notes are worked out again after every scan,
@@ -2903,8 +2903,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             return
         end
         if kind == "open" then
-            guildMail:OnMailboxOpened()
+            -- The tab first, so its title shows the welcomes waiting.
             pcall(mailboxTab.Install, mailboxTab, guildMail:ShowsMailboxTab())
+            guildMail:OnMailboxOpened()
         elseif kind == "close" then
             guildMail:OnMailboxClosed()
         elseif kind == "sent" then

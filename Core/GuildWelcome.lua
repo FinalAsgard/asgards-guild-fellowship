@@ -381,6 +381,9 @@ function Welcome:Due(now)
         local character = partition:GetCharacter(key)
         if type(at) ~= "number" or (character ~= nil and character.departed ~= nil) then
             ledger.seen[key] = nil
+            -- Remembered, so a new player's alt leaving never makes the
+            -- player someone who was here before.
+            ledger.gone[key] = true
         elseif character ~= nil then
             local player = character.player
             players[player] = players[player] or {}
@@ -398,7 +401,7 @@ function Welcome:Due(now)
         local index
         for index = 1, #members do
             local member = members[index]
-            if ledger.welcomed[member] ~= nil or ledger.seen[member] == nil then
+            if ledger.welcomed[member] ~= nil or (ledger.seen[member] == nil and not ledger.gone[member]) then
                 settled = true
             end
         end

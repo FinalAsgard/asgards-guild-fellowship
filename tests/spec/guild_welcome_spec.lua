@@ -340,3 +340,59 @@ test.test("guild welcome newcomers: a welcome is recorded with its player, when 
     world.partition:MarkDeparted("zed stone-camelot", 9000)
     test.assertFalse(world.joined("Zed Stone"))
 end)
+
+test.test("guild welcome newcomers: a new player's alt leaving doesn't cost the player their welcome", function()
+    local _, world = newGuild()
+    world.time = 2000
+    world.scan({ "Zed Stone", "Bo Stone" })
+    world.partition:JoinPlayerOf("bo stone-camelot", "zed stone-camelot", "note")
+    world.partition:MarkDeparted("bo stone-camelot", 2500)
+
+    -- Asked twice: the alt that left is remembered, not taken for an old member.
+    test.assertEqual(0, #world.welcome:Due(2100))
+    test.assertEqual("zed stone-camelot", table.concat(world.welcome:Due(2000 + DAY), ","))
+end)
+
+-- The whole add-on --------------------------------------------------------------
+
+local fixtures = require("tests.client_fixtures")
+
+test.test("guild welcome newcomers: a roster scan in the running add-on notes someone new", function()
+    local world = fixtures.newEnvironment("Retail", {
+        guild = {
+            name = "Knights of Camelot",
+            realm = "Area 52",
+            members = {
+                { name = "Toolbox-Area52", class = "WARRIOR", level = 80, rank = 1, rankName = "Officer",
+                    online = true, zone = "Dornogal" },
+                { name = "Hammer-Area52", class = "PALADIN", level = 70, rank = 3, rankName = "Member",
+                    online = true, zone = "Dornogal" },
+            },
+        },
+        playerName = "Toolbox",
+    })
+    fixtures.loadAddon(world)
+    fixtures.fire(world, "ADDON_LOADED", world.addonName)
+    fixtures.fire(world, "PLAYER_LOGIN")
+    fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 5)
+    local welcome = world.addon.guildWelcome
+    test.assertTrue(welcome:Set({ subject = "Welcome!", on = true }))
+
+    table.insert(world.guild.members, { name = "Newbie-Area52", class = "MAGE", level = 10, rank = 4,
+        rankName = "Initiate", online = true, zone = "Dornogal" })
+    fixtures.slash(world, "rescan")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 5)
+
+    local _, partition = world.addon.rosterController:QuietContext()
+    local seen = partition:GetWelcomeLedger().seen
+    local keys = {}
+    local key
+    for key in pairs(seen) do
+        table.insert(keys, key)
+    end
+    test.assertEqual(1, #keys)
+    test.assertContains(keys[1], "newbie")
+end)

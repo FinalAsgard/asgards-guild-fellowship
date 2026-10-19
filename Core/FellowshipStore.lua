@@ -1505,8 +1505,9 @@ function Partition:GetWelcomeConfig()
 end
 
 -- Guild Mail's welcome ledger (see GuildWelcome): { seen = { [key] = when
--- first seen }, welcomed = { [key] = { main, at, by } } }, created on first
--- use, with either list made when missing or unusable.
+-- first seen }, welcomed = { [key] = { main, at, by } }, gone = { [key] =
+-- true for a noted newcomer who left } }, created on first use, with any
+-- list made when missing or unusable.
 function Partition:GetWelcomeLedger()
     if type(self.data.welcomeLedger) ~= "table" then
         self.data.welcomeLedger = {}
@@ -1517,6 +1518,9 @@ function Partition:GetWelcomeLedger()
     end
     if type(ledger.welcomed) ~= "table" then
         ledger.welcomed = {}
+    end
+    if type(ledger.gone) ~= "table" then
+        ledger.gone = {}
     end
     return ledger
 end

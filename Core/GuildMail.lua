@@ -885,7 +885,7 @@ function Mail:welcomeRecipient(key, partition, normalizer)
     return {
         key = key,
         name = name,
-        rank = type(character) == "table" and type(character.rankIndex) == "number" and character.rankIndex or 0,
+        rank = type(character) == "table" and type(character.rank) == "number" and character.rank or 0,
         subject = mail.subject,
         body = mail.body,
         status = Sender.PENDING,

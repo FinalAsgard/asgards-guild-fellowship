@@ -2609,6 +2609,11 @@ test.test("guild mail welcomes: due welcomes collect in a Welcome mails entry, c
     local entry = welcomeEntry(world)
     test.assertEqual(2, #entry.recipients)
     test.assertEqual("Dan New", entry.recipients[1].name)
+    -- Their rank as the roster has it, shown on the View page.
+    test.assertEqual(3, entry.recipients[1].rank)
+    world.mail:ViewEntry(1)
+    test.assertEqual("Initiate", world.view.model.entry.recipients[1].rankName)
+    world.mail:CloseEntry()
     test.assertEqual("Welcome, Dan New!", entry.recipients[1].subject)
     test.assertEqual("Guild Mail (2)", world.mail:TabTitle())
     local row = world.mail:OutboxModel().entries[1]
