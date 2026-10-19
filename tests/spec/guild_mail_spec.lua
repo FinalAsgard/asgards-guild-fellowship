@@ -3134,3 +3134,39 @@ test.test("guild mail tab: a mail shows when its newest mail went, so a resume a
     world.mail:ViewEntry(1)
     test.assertEqual("last sent 5 min ago", world.view.model.entry.whenText)
 end)
+
+test.test("guild mail window: closing the mailbox hides the window, a sent mail's page included", function()
+    local addon = test.newAddon("Core/NameNormalizer.lua", "Core/FellowshipStore.lua", "Core/PlayerService.lua",
+        "Core/RosterViewModel.lua", "Core/GreetingLibrary.lua", "Core/GuildGreet.lua", "Core/GuildMailAudience.lua",
+        "Core/GuildMailComposer.lua", "Core/GuildMailSender.lua", "Core/GuildMail.lua",
+        "Adapters/GuildMailWindow.lua")
+    local environment = FakeFrames.install({})
+    environment.UIParent = environment.CreateFrame("Frame", nil, nil)
+    local window = addon.GuildMailWindow.Create({ environment = environment }, {})
+    local store = addon.FellowshipStore.Create({ schemaVersion = 1, guilds = {} })
+    local partition = store:Partition({ name = "Knights", realm = "Camelot" })
+    local outbox = { { subject = "Rules", body = "Hi", state = "done", recipients = {} } }
+    local mail = addon.GuildMail.Create({
+        context = function()
+            return partition
+        end,
+        isOfficer = function()
+            return true
+        end,
+        outbox = function()
+            return outbox
+        end,
+        view = window,
+    })
+    mail:OnMailboxOpened()
+    test.assertTrue(mail:ViewEntry(1))
+    rawset(window.frame, "IsShown", function(self)
+        return self.shown
+    end)
+    mail:Refresh()
+    test.assertTrue(window.frame.shown)
+    test.assertTrue(window.entryFrame.shown)
+
+    mail:OnMailboxClosed()
+    test.assertFalse(window.frame.shown)
+end)
