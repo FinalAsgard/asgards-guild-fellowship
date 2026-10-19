@@ -862,7 +862,7 @@ function Window:renderEntry(entry)
     self.entrySubject:SetText("Subject: " .. entry.subject)
     local state = entry.stateText .. " · " .. entry.progressText
     if entry.whenText ~= nil then
-        state = state .. " · sent " .. entry.whenText
+        state = state .. " · " .. entry.whenText
     end
     self.entryState:SetText(state)
     if entry.preview ~= nil then

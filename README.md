@@ -369,7 +369,7 @@ If the game closed while a mail was waiting for its answer, nobody knows whether
 The mailbox's **Guild Mail** tab lists your guild mails:
 
 - Your **draft**, if it has a subject or message, with **Edit** to open it in the window.
-- Every mail you've sent, newest first, with its state (Sending, Paused, Paused at the mail limit, Stopped, Done or Cancelled), its progress ("Sent 19 of 42, 2 failed") and when you sent it.
+- Every mail you've sent, newest first, with its state (Sending, Paused, Paused at the mail limit, Stopped, Done or Cancelled), its progress ("Sent 19 of 42, 2 failed") and when its newest mail went ("last sent 5 min ago"), so you can tell when the mail limit may have worn off.
 - **View** opens the mail in the window, read-only: its text, the mail as its first recipient got it, and every recipient with their status, with Send and Skip on an unconfirmed one.
 - **Resume** carries on with a mail's waiting recipients (at a mailbox). Only one mail sends at a time, so Resume waits while another is going.
 - **Cancel** gives up on a mail's waiting recipients, after asking; nothing more is sent for it. **Remove** takes a finished or cancelled mail off the list, after asking.

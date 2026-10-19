@@ -466,6 +466,11 @@ function Mail:persist()
     for index = 1, #entry.recipients do
         local status, reason = self.sender:Status(index)
         local saved = entry.recipients[index]
+        -- When the newest mail went, to know when the mail limit may
+        -- have worn off.
+        if status == addon.GuildMailSender.SENT and saved.status ~= status then
+            entry.lastSentAt = self:ask(self.now) or entry.lastSentAt
+        end
         saved.status = status
         saved.reason = reason
         saved.inFlight = index == flight or nil
@@ -1165,6 +1170,17 @@ GuildMail.STATE_TEXT = {
     cancelled = "Cancelled",
 }
 
+-- "last sent 5 min ago" once any mail of `entry` went, else "started 2 h
+-- ago", or nil without the times.
+local function entryWhen(now, entry)
+    if type(entry.lastSentAt) == "number" then
+        local text = ago(now, entry.lastSentAt)
+        return text and ("last sent " .. text)
+    end
+    local text = ago(now, entry.at)
+    return text and ("started " .. text)
+end
+
 -- "Sent 19 of 42", with the failed, unconfirmed and skipped when any.
 local function entryProgress(counts)
     local text = "Sent " .. counts.sent .. " of " .. counts.total
@@ -1178,7 +1194,8 @@ end
 
 -- The Guild Mail tab's list:
 --   draft       { subject } when the draft has a subject or message, else nil
---   entries     newest first: { position, subject, whenText, progressText,
+--   entries     newest first: { position, subject, whenText ("last sent
+--               5 min ago", or "started 2 h ago" before any went), progressText,
 --               state, stateText, canResume, canCancel, canRemove,
 --               canReuse }
 --   canNew      whether New can be pressed
@@ -1206,7 +1223,7 @@ function Mail:OutboxModel()
                 position = position,
                 welcome = isWelcome(entry) or nil,
                 subject = subject,
-                whenText = ago(now, entry.at),
+                whenText = entryWhen(now, entry),
                 progressText = entryProgress(self:entryCounts(entry)),
                 state = state,
                 stateText = stateText,
@@ -1273,7 +1290,7 @@ function Mail:entryModel(rankNames)
         subject = type(entry.subject) == "string" and entry.subject or "",
         body = type(entry.body) == "string" and entry.body or "",
         stateText = GuildMail.STATE_TEXT[state] or state,
-        whenText = ago(self:ask(self.now), entry.at),
+        whenText = entryWhen(self:ask(self.now), entry),
         progressText = entryProgress(self:entryCounts(entry)),
         preview = type(first) == "table" and {
             to = tostring(first.name), subject = tostring(first.subject), body = tostring(first.body),

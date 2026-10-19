@@ -1846,7 +1846,7 @@ test.test("guild mail window: a sent mail on view is drawn read-only, with its b
         body = "Hi {name}",
         stateText = "Stopped",
         progressText = "Sent 1 of 2, 1 unconfirmed",
-        whenText = "3 h ago",
+        whenText = "last sent 3 h ago",
         preview = { to = "Ann Bell", subject = "Launch night", body = "Hi Ann Bell" },
         recipients = {
             { name = "Ann Bell", rankName = "Member", status = "sent" },
@@ -1860,7 +1860,7 @@ test.test("guild mail window: a sent mail on view is drawn read-only, with its b
     world.window:Render(model)
     test.assertTrue(world.window.entryFrame.shown)
     test.assertEqual("Subject: Launch night", world.window.entrySubject.text)
-    test.assertEqual("Stopped · Sent 1 of 2, 1 unconfirmed · sent 3 h ago", world.window.entryState.text)
+    test.assertEqual("Stopped · Sent 1 of 2, 1 unconfirmed · last sent 3 h ago", world.window.entryState.text)
     test.assertEqual("Hi Ann Bell", world.window.entryBody.text)
     test.assertContains(world.window.entryRows[1].line.text, "sent")
     test.assertFalse(world.window.entryRows[1].send.shown)
@@ -1930,7 +1930,7 @@ end
 local OUTBOX = {
     draft = { subject = "Raid night" },
     entries = {
-        { position = 2, subject = "Launch night", progressText = "Sent 19 of 42", whenText = "2 h ago",
+        { position = 2, subject = "Launch night", progressText = "Sent 19 of 42", whenText = "last sent 2 h ago",
             state = "paused", stateText = "Paused at the mail limit", canResume = true, canCancel = true },
         { position = 1, subject = "Rules", progressText = "Sent 5 of 5", state = "done", stateText = "Done",
             canRemove = true },
@@ -2079,7 +2079,7 @@ test.test("mailbox tab: lists the draft and the guild mails, newest first, with 
     test.assertEqual("Edit", rows[1].buttons[1].text)
     test.assertFalse(rows[1].buttons[2].shown)
     test.assertEqual("Launch night  |cff999999Paused at the mail limit|r", rows[2].title.text)
-    test.assertEqual("Sent 19 of 42 · 2 h ago", rows[2].detail.text)
+    test.assertEqual("Sent 19 of 42 · last sent 2 h ago", rows[2].detail.text)
     test.assertEqual("View", rows[2].buttons[1].text)
     test.assertEqual("Resume", rows[2].buttons[2].text)
     test.assertEqual("Cancel", rows[2].buttons[3].text)
@@ -2458,9 +2458,9 @@ test.test("guild mail tab: lists the draft, then the mails newest first with the
     test.assertEqual(2, model.entries[1].position)
     test.assertEqual("Stopped", model.entries[1].stateText)
     test.assertEqual("Sent 1 of 2, 1 unconfirmed", model.entries[1].progressText)
-    test.assertEqual("16 min ago", model.entries[1].whenText)
+    test.assertEqual("started 16 min ago", model.entries[1].whenText)
     test.assertEqual("Done", model.entries[2].stateText)
-    test.assertEqual("1 h ago", model.entries[2].whenText)
+    test.assertEqual("started 1 h ago", model.entries[2].whenText)
     test.assertTrue(model.entries[2].canRemove)
     test.assertFalse(model.entries[1].canRemove)
     test.assertTrue(model.entries[1].canCancel)
@@ -3107,4 +3107,30 @@ test.test("guild mail window and tab: Use again on a sent mail is passed back", 
     row.buttons[3].scripts.OnClick(row.buttons[3])
     test.assertEqual("reuse", tabWorld.calls[1].name)
     test.assertEqual(1, tabWorld.calls[1].args[1])
+end)
+
+test.test("guild mail tab: a mail shows when its newest mail went, so a resume after the limit shows then", function()
+    local _, world = newMail()
+    world.time = 1000
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    test.assertEqual("started just now", world.mail:OutboxModel().entries[1].whenText)
+
+    world.time = 1100
+    world.mail:OnSent()
+    world.mail:OnError("You have reached the in-game cap of unique mail recipients")
+    test.assertEqual(1100, world.outbox[1].lastSentAt)
+    world.time = 1100 + 30 * 60
+    test.assertEqual("last sent 30 min ago", world.mail:OutboxModel().entries[1].whenText)
+
+    -- Resumed later: the time moves to the newest mail sent.
+    world.time = 1100 + 2 * 60 * 60
+    world.mail:ResumeEntry(1)
+    world.mail:OnSent()
+    test.assertEqual(1100 + 2 * 60 * 60, world.outbox[1].lastSentAt)
+    world.time = world.time + 5 * 60
+    test.assertEqual("last sent 5 min ago", world.mail:OutboxModel().entries[1].whenText)
+    world.mail:ViewEntry(1)
+    test.assertEqual("last sent 5 min ago", world.view.model.entry.whenText)
 end)
