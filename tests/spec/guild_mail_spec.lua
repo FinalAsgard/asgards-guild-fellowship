@@ -1994,6 +1994,55 @@ test.test("mailbox tab: a client whose tab can't be built gets none, and nothing
     test.assertEqual(nil, world.tab.page)
 end)
 
+-- Records every SetPoint and SetAllPoints on frames made from now on, as
+-- `frame.points`.
+local function recordPoints(environment)
+    local create = environment.CreateFrame
+    environment.CreateFrame = function(...)
+        local frame = create(...)
+        rawset(frame, "points", {})
+        rawset(frame, "SetPoint", function(self, ...)
+            table.insert(self.points, { ... })
+        end)
+        rawset(frame, "SetAllPoints", function(self, target)
+            table.insert(self.points, { "ALL", target })
+        end)
+        return frame
+    end
+end
+
+test.test("mailbox tab: sits level with the game's tabs, and its page stays below the header", function()
+    local _, world = newTab()
+    mailbox(world.environment)
+    local inbox, send = world.environment.MailFrameTab1, world.environment.MailFrameTab2
+    rawset(send, "GetPoint", function()
+        return "TOPLEFT", inbox, "TOPRIGHT", 3, 0
+    end)
+    recordPoints(world.environment)
+    world.tab:Install(true)
+
+    local point = world.tab.tab.points[1]
+    test.assertEqual("TOPLEFT", point[1])
+    test.assertEqual(send, point[2])
+    test.assertEqual("TOPRIGHT", point[3])
+    test.assertEqual(3, point[4])
+    -- No content area here: below the title bar and mail icon.
+    local top = world.tab.page.points[1]
+    test.assertEqual("TOPLEFT", top[1])
+    test.assertEqual(world.environment.InboxFrame, top[2])
+    test.assertEqual(-64, top[5])
+
+    -- A client with the mailbox's content area puts the page in it.
+    local _, other = newTab()
+    mailbox(other.environment)
+    local inset = other.environment.CreateFrame("Frame", nil, other.environment.MailFrame)
+    rawset(other.environment.MailFrame, "Inset", inset)
+    recordPoints(other.environment)
+    other.tab:Install(true)
+    test.assertEqual("ALL", other.tab.page.points[1][1])
+    test.assertEqual(inset, other.tab.page.points[1][2])
+end)
+
 test.test("mailbox tab: lists the draft and the guild mails, newest first, with their buttons", function()
     local _, world = newTab()
     mailbox(world.environment)

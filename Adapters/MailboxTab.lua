@@ -26,6 +26,11 @@ local MailboxTab = {
     LIST_HEIGHT = 300,
     BUTTON_WIDTH = 56,
     BUTTON_HEIGHT = 20,
+    -- Without the mailbox's content area (MailFrame.Inset), the page keeps
+    -- this far inside the inbox's place: clear of the title bar and the
+    -- mail icon at the top left.
+    PAGE_TOP = 64,
+    PAGE_SIDE = 8,
 }
 addon.MailboxTab = MailboxTab
 
@@ -113,11 +118,18 @@ function Tab:build()
     local ok = pcall(function()
         tab = environment.CreateFrame("Button", nil, mailFrame, self:tabTemplate())
         tab:SetText(MailboxTab.TAB_TEXT)
-        -- The same step from Send Mail as Send Mail takes from Inbox.
-        local _, _, _, x, y = sendTab:GetPoint(1)
-        tab:SetPoint("LEFT", sendTab, "RIGHT", type(x) == "number" and x or 0, type(y) == "number" and y or 0)
+        -- Placed from Send Mail exactly as Send Mail is placed from Inbox, so
+        -- it sits level with the game's tabs.
+        local point, _, relativePoint, x, y = sendTab:GetPoint(1)
+        tab:SetPoint(type(point) == "string" and point or "LEFT", sendTab,
+            type(relativePoint) == "string" and relativePoint or "RIGHT",
+            type(x) == "number" and x or 0, type(y) == "number" and y or 0)
         if type(environment.PanelTemplates_TabResize) == "function" then
             pcall(environment.PanelTemplates_TabResize, tab, 0)
+        end
+        -- Drawn as an unselected tab until it's clicked.
+        if type(environment.PanelTemplates_DeselectTab) == "function" then
+            pcall(environment.PanelTemplates_DeselectTab, tab)
         end
         tab:SetScript("OnClick", function()
             self:select()
@@ -160,11 +172,15 @@ function Tab:buildPage(mailFrame)
     local environment = self.environment
     local padding = MailboxTab.PADDING
     local page = environment.CreateFrame("Frame", nil, mailFrame)
-    local inbox = environment.InboxFrame
-    if inbox ~= nil then
-        page:SetAllPoints(inbox)
+    -- The mailbox's content area where the client has one, else the
+    -- inbox's place below the title bar and mail icon.
+    local inset = type(mailFrame.Inset) == "table" and mailFrame.Inset or nil
+    if inset ~= nil then
+        page:SetAllPoints(inset)
     else
-        page:SetAllPoints(mailFrame)
+        local area = environment.InboxFrame or mailFrame
+        page:SetPoint("TOPLEFT", area, "TOPLEFT", MailboxTab.PAGE_SIDE, -MailboxTab.PAGE_TOP)
+        page:SetPoint("BOTTOMRIGHT", area, "BOTTOMRIGHT", -MailboxTab.PAGE_SIDE, MailboxTab.PAGE_SIDE)
     end
     page:SetFrameLevel((mailFrame:GetFrameLevel() or 0) + 5)
     page:EnableMouse(true)
