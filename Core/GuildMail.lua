@@ -10,8 +10,9 @@ local _, addon = ...
 -- (Model); the window only draws that and passes clicks and typing back.
 --
 -- The subject, body, ticked ranks, Send to choice and both skip boxes are
--- saved as a draft and restored the first time the window opens; recipient
--- ticks and progress are kept for the session only. A saved rank the guild
+-- saved as a draft, with the recipients unticked, and restored the first
+-- time the window opens. Once sent, the outbox keeps each recipient's
+-- progress (see Outbox). A saved rank the guild
 -- no longer has is ignored.
 --
 -- The subject and body may use Guild Greet's placeholders, filled in for
@@ -341,6 +342,14 @@ function Mail:restore()
     end
     if type(draft.activeOnly) == "boolean" then
         self.activeOnly = draft.activeOnly
+    end
+    if type(draft.unticked) == "table" then
+        self.unticked = {}
+        for index = 1, #draft.unticked do
+            if type(draft.unticked[index]) == "string" then
+                self.unticked[draft.unticked[index]] = true
+            end
+        end
     end
 end
 
@@ -1218,6 +1227,12 @@ function Mail:save()
         table.insert(ranks, rank)
     end
     table.sort(ranks)
+    local unticked = {}
+    local key
+    for key in pairs(self.unticked) do
+        table.insert(unticked, key)
+    end
+    table.sort(unticked)
     pcall(self.saveDraft, {
         subject = self.subject,
         body = self.body,
@@ -1225,6 +1240,7 @@ function Mail:save()
         mode = self.mode,
         skipDiscord = self.skipDiscord,
         activeOnly = self.activeOnly,
+        unticked = unticked,
     })
 end
 
@@ -1354,6 +1370,7 @@ function Mail:SetRecipient(key, checked)
         return false
     end
     self.unticked[key] = unticked
+    self:save()
     self:refresh()
     return true
 end

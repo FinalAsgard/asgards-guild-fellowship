@@ -339,7 +339,7 @@ A mail's subject can be up to 64 characters and its message up to 500, counted a
 
 ### Checking the list and the cost
 
-- **Recipients (42 mails)** shows how many mails will go out. **Edit** beside it opens the list: each character, their player, rank, and when they were last online, each with a check box. Untick anyone to leave them out; the count then reads "40 of 42 mails". Unticked recipients stay unticked for the session.
+- **Recipients (42 mails)** shows how many mails will go out. **Edit** beside it opens the list: each character, their player, rank, and when they were last online, each with a check box. Untick anyone to leave them out; the count then reads "40 of 42 mails". Unticked recipients stay unticked, across reloads too.
 - The cost line shows how many mails and players, and the postage: "42 mails to 38 players · Estimated cost: 12s 60c (30c each)". It updates with every change. At a mailbox it uses the game's own price; away from one it uses the standard 30c.
 - Below it is your money. If it isn't enough, the cost turns red and **Send** waits with "Not enough money for postage".
 
@@ -356,7 +356,7 @@ A mail's subject can be up to 64 characters and its message up to 500, counted a
 
 ### What's saved
 
-The subject, message, ticked ranks, Send to choice and both skip boxes are saved for every character on your account as you change them, so you can write a mail, log off, and send it later. They come back the first time you open Guild Mail after a reload or relog. A saved rank the guild no longer has is ignored. Recipient ticks last only for the session.
+The subject, message, ticked ranks, Send to choice and both skip boxes are saved for every character on your account as you change them, so you can write a mail, log off, and send it later. They come back the first time you open Guild Mail after a reload or relog. A saved rank the guild no longer has is ignored. Anyone you untick in the recipient list stays unticked too, across reloads, until you tick them again or start a **New** mail.
 
 Every send is saved as it goes, for your whole account: once you press Send the mail is locked, and its recipients and how far it got are kept, mail by mail. After a reload, relog or the game closing, the newest unfinished send comes back when you open Guild Mail or the mailbox, on any of your characters (the one resuming pays the postage), and **Continue** sends to whoever is still waiting, so nobody gets it twice. A send paused at the mail limit comes back paused.
 

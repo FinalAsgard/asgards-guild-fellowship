@@ -2185,7 +2185,7 @@ test.test("guild mail: the draft is restored once, never over changes", function
     test.assertEqual("New", world.view.model.subject)
 end)
 
-test.test("guild mail: recipient ticks and progress aren't saved", function()
+test.test("guild mail: unticked recipients are saved with the draft and come back after a reload", function()
     local _, world = newMail()
     world.mail:Open(false)
     readyToSend(world)
@@ -2193,13 +2193,23 @@ test.test("guild mail: recipient ticks and progress aren't saved", function()
     world.mail:SetRecipient(key, false)
 
     test.assertEqual("Launch night", world.saved.subject)
-    test.assertEqual(nil, rawget(world.saved, "unticked"))
+    test.assertEqual(key, table.concat(world.saved.unticked, ","))
     test.assertEqual(nil, rawget(world.saved, "recipients"))
 
     local _, reloaded = newMail({ saved = world.saved })
     reloaded.mail:Open(false)
-    test.assertTrue(reloaded.view.model.recipients[1].checked)
+    test.assertFalse(reloaded.view.model.recipients[1].checked)
+    test.assertTrue(reloaded.view.model.recipients[2].checked)
+    test.assertEqual("1 of 2 mails", reloaded.view.model.countText)
     test.assertEqual(nil, reloaded.view.model.progressText)
+
+    -- Ticking them again is saved too, and New starts with everyone ticked.
+    reloaded.mail:SetRecipient(key, true)
+    test.assertEqual(0, #reloaded.saved.unticked)
+    reloaded.mail:SetRecipient(key, false)
+    reloaded.mail:RequestNew()
+    reloaded.mail:ConfirmAction()
+    test.assertEqual(0, #reloaded.saved.unticked)
 end)
 
 test.test("guild mail: a saved rank the guild no longer has is ignored", function()
@@ -2879,4 +2889,47 @@ test.test("mailbox tab: the Welcome mails row has Edit, View and Send, and the t
     test.assertEqual("editWelcome", world.calls[1].name)
     test.assertEqual("sendWelcomes", world.calls[2].name)
     test.assertEqual("editWelcome", world.calls[3].name)
+end)
+
+test.test("guild mail: unticked people stay out of a send cut short by the mail limit and a reload", function()
+    local addon, world = newMail()
+    world.mail:Open(true)
+    world.mail:SetRank(2, true)
+    world.mail:SetRank(3, true)
+    world.mail:SetMode("all")
+    world.mail:SetSubject("Launch night")
+    world.mail:OnMailboxOpened()
+    -- Four Members and Initiates (Tool Box's own are always left out);
+    -- leave Cog Wheel out.
+    world.mail:SetRecipient("cog wheel-camelot", false)
+    local wanted = {}
+    local index
+    for index = 1, #world.view.model.recipients do
+        local row = world.view.model.recipients[index]
+        if row.checked then
+            table.insert(wanted, row.name)
+        end
+    end
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    world.mail:OnSent()
+    world.mail:OnError("You have reached the in-game cap of unique mail recipients")
+
+    local _, after = reload(world, { saved = world.saved })
+    after.mail:Open(true)
+    after.mail:RequestSend()
+    while after.mail.sender:InFlight() ~= nil do
+        after.mail:OnSent()
+    end
+    local everyone = { world.sent[1].to }
+    for index = 1, #after.sent do
+        table.insert(everyone, after.sent[index].to)
+    end
+    table.sort(everyone)
+    table.sort(wanted)
+    -- Each wanted recipient exactly once, and never Cog Wheel.
+    test.assertEqual(table.concat(wanted, ","), table.concat(everyone, ","))
+    test.assertEqual(addon.GuildMailSender.DONE, world.outbox[1].state)
+    -- The draft still has Cog Wheel unticked.
+    test.assertEqual("cog wheel-camelot", table.concat(after.saved.unticked, ","))
 end)

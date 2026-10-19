@@ -805,9 +805,9 @@ function Store:SetRecruitAd(text)
 end
 
 -- Guild Mail's saved draft, shared by every character on the account:
---   { subject, body, ranks, mode, skipDiscord, activeOnly }
+--   { subject, body, ranks, mode, skipDiscord, activeOnly, unticked }
 -- `ranks` is the list of ticked rank indexes, `mode` the Send to choice's
--- id. Each field is nil when missing or unusable. Nil when nothing usable
+-- id, `unticked` the character keys left out of the recipient list. Each field is nil when missing or unusable. Nil when nothing usable
 -- is saved.
 function Store:GuildMailDraft()
     local saved = type(self.database) == "table" and self.database.guildMail or nil
@@ -833,6 +833,15 @@ function Store:GuildMailDraft()
         end
         return nil
     end
+    local unticked = {}
+    if type(saved.unticked) == "table" then
+        local index
+        for index = 1, #saved.unticked do
+            if type(saved.unticked[index]) == "string" and saved.unticked[index] ~= "" then
+                table.insert(unticked, saved.unticked[index])
+            end
+        end
+    end
     return {
         subject = text(saved.subject),
         body = text(saved.body),
@@ -840,6 +849,7 @@ function Store:GuildMailDraft()
         mode = text(saved.mode),
         skipDiscord = flag(saved.skipDiscord),
         activeOnly = flag(saved.activeOnly),
+        unticked = unticked,
     }
 end
 
@@ -859,6 +869,12 @@ function Store:SetGuildMailDraft(draft)
             table.insert(ranks, draft.ranks[index])
         end
     end
+    local unticked = {}
+    for index = 1, #(type(draft.unticked) == "table" and draft.unticked or {}) do
+        if type(draft.unticked[index]) == "string" then
+            table.insert(unticked, draft.unticked[index])
+        end
+    end
     self.database.guildMail = {
         subject = type(draft.subject) == "string" and draft.subject or "",
         body = type(draft.body) == "string" and draft.body or "",
@@ -866,6 +882,7 @@ function Store:SetGuildMailDraft(draft)
         mode = type(draft.mode) == "string" and draft.mode or nil,
         skipDiscord = draft.skipDiscord == true,
         activeOnly = draft.activeOnly == true,
+        unticked = unticked,
     }
     return true
 end
