@@ -1961,6 +1961,39 @@ test.test("mailbox tab: clicking it shows its page over the inbox; the game's ta
     test.assertFalse(world.tab:IsShown())
 end)
 
+test.test("mailbox tab: its page hides on the game's own tab clicks, and when the mailbox opens again", function()
+    local _, world = newTab()
+    mailbox(world.environment)
+    world.tab:Install(true)
+
+    world.tab.tab.scripts.OnClick(world.tab.tab)
+    test.assertTrue(world.tab:IsShown())
+    -- Inbox clicked on a client without MailFrameTab_OnClick: the tab's own
+    -- OnClick still hides the page.
+    world.environment.MailFrameTab1.hooks.OnClick(world.environment.MailFrameTab1)
+    test.assertFalse(world.tab:IsShown())
+    test.assertFalse(world.tab.page.shown)
+
+    -- Left up when the mailbox closed: the next opening is on the game's page.
+    world.tab.tab.scripts.OnClick(world.tab.tab)
+    test.assertTrue(world.tab:IsShown())
+    world.tab:Install(true)
+    test.assertFalse(world.tab:IsShown())
+    test.assertFalse(world.tab.page.shown)
+end)
+
+test.test("mailbox tab: a client whose tab can't be built gets none, and nothing half-made", function()
+    local _, world = newTab()
+    mailbox(world.environment)
+    world.environment.MailFrame.GetFrameLevel = function()
+        error("no frame levels here")
+    end
+
+    test.assertFalse(world.tab:Install(true))
+    test.assertEqual(nil, world.tab.tab)
+    test.assertEqual(nil, world.tab.page)
+end)
+
 test.test("mailbox tab: lists the draft and the guild mails, newest first, with their buttons", function()
     local _, world = newTab()
     mailbox(world.environment)

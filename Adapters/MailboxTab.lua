@@ -12,8 +12,8 @@ local _, addon = ...
 --
 -- The tab copies the Send Mail tab's template and spacing; clicking it
 -- hides the Inbox and Send Mail pages and shows this one over the inbox's
--- place, and clicking either of the game's tabs (MailFrameTab_OnClick)
--- hides it again. Nothing of the game's is replaced. It only draws
+-- place, and clicking either of the game's tabs (their OnClick, and
+-- MailFrameTab_OnClick) or the mailbox opening again hides it. Nothing of the game's is replaced. It only draws
 -- GuildMail's OutboxModel and passes clicks back. Frames are made on first
 -- use; a failing frame call leaves things as they were rather than raising.
 local MailboxTab = {
@@ -108,8 +108,10 @@ function Tab:build()
     if mailFrame == nil or sendTab == nil then
         return false
     end
+    -- All or nothing: a tab whose page failed is hidden and not kept.
+    local tab
     local ok = pcall(function()
-        local tab = environment.CreateFrame("Button", nil, mailFrame, self:tabTemplate())
+        tab = environment.CreateFrame("Button", nil, mailFrame, self:tabTemplate())
         tab:SetText(MailboxTab.TAB_TEXT)
         -- The same step from Send Mail as Send Mail takes from Inbox.
         local _, _, _, x, y = sendTab:GetPoint(1)
@@ -120,16 +122,37 @@ function Tab:build()
         tab:SetScript("OnClick", function()
             self:select()
         end)
-        self.tab = tab
         self:buildPage(mailFrame)
-        -- Inbox or Send Mail clicked (or the mailbox opening on Inbox).
-        if type(environment.hooksecurefunc) == "function" then
-            environment.hooksecurefunc("MailFrameTab_OnClick", function()
+    end)
+    if not ok then
+        if tab ~= nil then
+            pcall(tab.Hide, tab)
+        end
+        if self.page ~= nil then
+            pcall(self.page.Hide, self.page)
+            self.page = nil
+        end
+        return false
+    end
+    self.tab = tab
+    -- Inbox or Send Mail clicked: each tab's own click, and the game's
+    -- shared handler where the client has it (the mailbox opening on
+    -- Inbox goes through it too). Either alone is enough.
+    local index
+    for index = 1, 2 do
+        local gameTab = environment["MailFrameTab" .. index]
+        if gameTab ~= nil then
+            pcall(gameTab.HookScript, gameTab, "OnClick", function()
                 self:deselect()
             end)
         end
-    end)
-    return ok and self.tab ~= nil
+    end
+    if type(environment.hooksecurefunc) == "function" then
+        pcall(environment.hooksecurefunc, "MailFrameTab_OnClick", function()
+            self:deselect()
+        end)
+    end
+    return true
 end
 
 -- The page over the inbox's place in the mailbox.
@@ -267,6 +290,9 @@ function Tab:Install(shown)
         return false
     end
     self.tab:Show()
+    -- The mailbox opens on the game's own page, never on this one left up
+    -- from last time.
+    self:deselect()
     return true
 end
 
