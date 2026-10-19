@@ -13,7 +13,10 @@ local function load()
         "Core/GuildMailAudience.lua",
         "Core/GuildMailComposer.lua",
         "Core/GuildMailSender.lua",
-        "Core/GuildMail.lua"
+        "Core/GuildMail.lua",
+        "Core/SyncFacts.lua",
+        "Core/RecruitConfig.lua",
+        "Core/GuildWelcome.lua"
     )
 end
 
@@ -849,6 +852,25 @@ local function newMail(overrides)
             return 5000
         end,
         view = world.view,
+        welcome = addon.GuildWelcome.Create({
+            partition = function()
+                return partition
+            end,
+            selfKey = function()
+                return "tool box-camelot"
+            end,
+            isOfficer = function()
+                return world.officer
+            end,
+            now = function()
+                return 5000
+            end,
+            announce = function(message)
+                world.announced = world.announced or {}
+                table.insert(world.announced, message)
+                return true
+            end,
+        }),
     })
     world.saved = overrides.saved
     world.outbox = overrides.outbox or {}
@@ -1561,6 +1583,12 @@ local function newWindow()
         onCancelEntry = record("cancelEntry"),
         onRemoveEntry = record("removeEntry"),
         onSettle = record("settle"),
+        onWelcome = record("welcome"),
+        onWelcomeSubject = record("welcomeSubject"),
+        onWelcomeBody = record("welcomeBody"),
+        onWelcomeSave = record("welcomeSave"),
+        onWelcomeOn = record("welcomeOn"),
+        onWelcomeBack = record("welcomeBack"),
     })
     return addon, world
 end
@@ -2432,4 +2460,102 @@ test.test("guild mail tab: View shows a saved mail read-only, and its unconfirme
 
     world.mail:CloseEntry()
     test.assertEqual(nil, world.view.model.entry)
+end)
+
+-- Welcome mail page ---------------------------------------------------------
+
+test.test("guild mail welcome: an officer edits the welcome mail on its own page and saves it", function()
+    local addon, world = newMail()
+
+    test.assertTrue(world.mail:OpenWelcome())
+    test.assertTrue(world.view.shown)
+    local welcome = world.view.model.welcome
+    test.assertEqual("", welcome.subject)
+    test.assertFalse(welcome.on)
+    test.assertFalse(welcome.canSave)
+    test.assertEqual(addon.GuildMail.HINT_NO_SUBJECT, welcome.hint)
+    test.assertEqual(addon.GuildWelcome.TYPE_ASK_CONFIG, world.announced[1].t)
+
+    world.mail:SetWelcomeSubject("Welcome, {name}!")
+    world.mail:SetWelcomeBody("Hi {character}, join our Discord.")
+    welcome = world.view.model.welcome
+    test.assertTrue(welcome.canSave)
+    test.assertFalse(welcome.saved)
+    test.assertEqual("Welcome, Tool Box!", welcome.preview.subject)
+    test.assertEqual("Hi Tool Box, join our Discord.", welcome.preview.body)
+    -- Nothing is shared until it's saved.
+    test.assertEqual(1, #world.announced)
+
+    test.assertTrue(world.mail:SaveWelcome())
+    welcome = world.view.model.welcome
+    test.assertTrue(welcome.saved)
+    test.assertFalse(welcome.canSave)
+    test.assertEqual(addon.GuildMail.WELCOME_SAVED, welcome.hint)
+    test.assertEqual(addon.GuildWelcome.TYPE_CONFIG, world.announced[2].t)
+    test.assertEqual("Welcome, {name}!", world.mail.welcome:Subject())
+end)
+
+test.test("guild mail welcome: the switch starts off and changes at once", function()
+    local _, world = newMail()
+    world.mail:OpenWelcome()
+
+    test.assertTrue(world.mail:SetWelcomeOn(true))
+    test.assertTrue(world.view.model.welcome.on)
+    test.assertTrue(world.mail.welcome:IsOn())
+    world.mail:SetWelcomeOn(false)
+    test.assertFalse(world.mail.welcome:IsOn())
+end)
+
+test.test("guild mail welcome: Back drops unsaved typing; a non-officer can't open it", function()
+    local _, world = newMail()
+    world.mail:OpenWelcome()
+    world.mail:SetWelcomeSubject("Draft")
+    world.mail:CloseWelcome()
+    test.assertEqual(nil, world.view.model.welcome)
+    world.mail:OpenWelcome()
+    test.assertEqual("", world.view.model.welcome.subject)
+
+    local _, member = newMail({ officer = false })
+    test.assertFalse(member.mail:OpenWelcome())
+    test.assertEqual(nil, (member.mail:SaveWelcome()))
+end)
+
+test.test("guild mail window: the Welcome mail page is drawn and its typing passed back", function()
+    local _, world = newWindow()
+    local model = {}
+    local key, value
+    for key, value in pairs(MODEL) do
+        model[key] = value
+    end
+    model.welcome = {
+        subject = "Welcome, {name}!", body = "Hi", on = true, canSave = true, hint = "Write a subject.",
+        preview = { to = "Tool Box", subject = "Welcome, Tool Box!", body = "Hi" },
+    }
+
+    world.window:Render(model)
+    test.assertTrue(world.window.welcomeFrame.shown)
+    test.assertTrue(world.window.welcomeOn:GetChecked())
+    test.assertEqual("Welcome, {name}!", world.window.welcomeSubject.text)
+    test.assertEqual("As Tool Box would get it: Welcome, Tool Box!", world.window.welcomePreviewTo.text)
+    test.assertEqual("Write a subject.", world.window.welcomeHint.text)
+
+    world.window.welcomeButton.scripts.OnClick(world.window.welcomeButton)
+    world.window.welcomeSubject:SetText("Hello")
+    world.window.welcomeSubject.scripts.OnTextChanged(world.window.welcomeSubject, true)
+    world.window.welcomeSave.scripts.OnClick(world.window.welcomeSave)
+    world.window.welcomeOn:SetChecked(false)
+    world.window.welcomeOn.scripts.OnClick(world.window.welcomeOn)
+    world.window.welcomeBack.scripts.OnClick(world.window.welcomeBack)
+    local names = {}
+    local index
+    for index = 1, #world.calls do
+        table.insert(names, world.calls[index].name)
+    end
+    test.assertEqual("welcome,welcomeSubject,welcomeSave,welcomeOn,welcomeBack", table.concat(names, ","))
+    test.assertEqual("Hello", world.calls[2].args[1])
+    test.assertFalse(world.calls[4].args[1])
+
+    model.welcome = nil
+    world.window:Render(model)
+    test.assertFalse(world.window.welcomeFrame.shown)
 end)

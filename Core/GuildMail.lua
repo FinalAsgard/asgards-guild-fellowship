@@ -47,6 +47,8 @@ local _, addon = ...
 --               mail recipients (GuildMailSender)
 --   outbox      function() -> the saved outbox list (account-wide), or nil
 --   now         function() -> wall-clock seconds for saved records, or nil
+--   welcome     optional GuildWelcome: the guild's welcome mail, edited on
+--               the window's Welcome mail page
 --
 -- Outbox: Send saves the send as an entry at the end of the outbox list,
 -- locked from then on, and keeps it up to date as each mail is answered:
@@ -84,6 +86,7 @@ local GuildMail = {
     HINT_NOBODY = "Nobody in those ranks to mail.",
     HINT_NONE_TICKED = "Tick at least one recipient.",
     HINT_NO_SUBJECT = "Write a subject.",
+    WELCOME_SAVED = "Saved. Every officer's add-on sends this text.",
     HINT_NO_MAILBOX = "Open a mailbox to send.",
     HINT_NO_MONEY = "Not enough money for postage.",
     -- A text-only mail's postage, used away from a mailbox, where the game
@@ -210,6 +213,10 @@ function GuildMail.Create(options)
         -- The question waiting for Yes or No: { kind, entry, text }, or nil.
         pendingAction = nil,
         tab = options.tab,
+        welcome = options.welcome,
+        -- The Welcome mail page's subject and message as typed, until
+        -- saved: { subject, body }, or nil when the page isn't open.
+        welcomeEdit = nil,
         view = options.view,
         ranks = {},
         mode = addon.GuildMailAudience.MAINS,
@@ -736,6 +743,7 @@ end
 -- (it carries on, and the Guild Mail tab shows it).
 function Mail:compose()
     self.viewing = nil
+    self.welcomeEdit = nil
     self.confirming = false
     if self.batch ~= nil and self:busy() then
         self.batch = nil
@@ -765,6 +773,7 @@ function Mail:ViewEntry(position)
     if entry == nil or not self:IsOfficer() then
         return false
     end
+    self.welcomeEdit = nil
     self.viewing = entry
     return self:Open(self.mailboxOpen)
 end
@@ -773,6 +782,109 @@ end
 function Mail:CloseEntry()
     self:compose()
     self:refresh()
+end
+
+-- The window's Welcome mail page, for officers: it starts from the saved
+-- welcome mail, and asks the other officers' add-ons for a newer one.
+function Mail:OpenWelcome()
+    if self.welcome == nil or not self:IsOfficer() then
+        return false
+    end
+    pcall(self.welcome.AskOnce, self.welcome)
+    self:compose()
+    self.welcomeEdit = { subject = self.welcome:Subject(), body = self.welcome:Body() }
+    return self:Open(self.mailboxOpen)
+end
+
+-- Back from the Welcome mail page to the draft; unsaved typing is dropped.
+function Mail:CloseWelcome()
+    self.welcomeEdit = nil
+    self:refresh()
+end
+
+function Mail:SetWelcomeSubject(text)
+    if self.welcomeEdit == nil or type(text) ~= "string" then
+        return false
+    end
+    self.welcomeEdit.subject = text
+    self:refresh()
+    return true
+end
+
+function Mail:SetWelcomeBody(text)
+    if self.welcomeEdit == nil or type(text) ~= "string" then
+        return false
+    end
+    self.welcomeEdit.body = text
+    self:refresh()
+    return true
+end
+
+-- Saves the typed subject and message as the guild's welcome mail, shared
+-- with the other add-on users. Returns true, or nil and a reason.
+function Mail:SaveWelcome()
+    if self.welcomeEdit == nil then
+        return nil, "the Welcome mail page isn't open"
+    end
+    local ok, reason = self.welcome:Set({ subject = self.welcomeEdit.subject, body = self.welcomeEdit.body })
+    self:refresh()
+    return ok, reason
+end
+
+-- Switches welcome mail on or off for the guild.
+function Mail:SetWelcomeOn(on)
+    if self.welcome == nil then
+        return nil, "welcome mail is unavailable"
+    end
+    local ok, reason = self.welcome:Set({ on = on == true })
+    self:refresh()
+    return ok, reason
+end
+
+-- The guild's welcome mail changed (here or from another officer).
+function Mail:OnWelcomeChanged()
+    self:refresh()
+end
+
+-- The Welcome mail page:
+--   subject, body   as typed
+--   on              whether welcome mail is switched on
+--   saved           whether what's typed is the saved welcome mail
+--   canSave         whether Save can be pressed
+--   hint            why not, or "Saved", or nil
+--   preview         { to, subject, body, warning }: the welcome as the
+--                   officer's own character would get it
+-- Nil when the page isn't open.
+function Mail:welcomeModel(partition, normalizer)
+    local edit = self.welcomeEdit
+    if edit == nil or self.welcome == nil then
+        return nil
+    end
+    local saved = edit.subject == self.welcome:Subject() and edit.body == self.welcome:Body()
+    local hint
+    if blank(edit.subject) then
+        hint = GuildMail.HINT_NO_SUBJECT
+    elseif saved then
+        hint = GuildMail.WELCOME_SAVED
+    end
+    local selfKey = self:ask(self.selfKey)
+    local character = partition and selfKey and partition:GetCharacter(selfKey) or nil
+    local preview
+    if selfKey ~= nil then
+        local name = type(character) == "table" and character.name or selfKey
+        local mail = addon.GuildMailComposer.Compose(edit.subject, edit.body, { key = selfKey, name = name },
+            partition, normalizer)
+        preview = { to = name, subject = mail.subject, body = mail.body, warning = mail.warning }
+    end
+    return {
+        subject = edit.subject,
+        body = edit.body,
+        on = self.welcome:IsOn(),
+        saved = saved,
+        canSave = self:IsOfficer() and not saved and not blank(edit.subject),
+        hint = hint,
+        preview = preview,
+    }
 end
 
 -- "just now", "5 min ago", "3 h ago" or "2 days ago", or nil.
@@ -1380,8 +1492,10 @@ end
 --                stopped), which locks everything but Send and Stop
 --   entry        the outbox entry on view (View in the Guild Mail tab),
 --                shown read-only instead (see entryModel), or nil
+--   welcome      the Welcome mail page, shown instead (see welcomeModel),
+--                or nil
 function Mail:Model()
-    local partition = self.context()
+    local partition, normalizer = self.context()
     local ranks = self:rankList(partition)
     local rankNames = {}
     local index
@@ -1458,5 +1572,6 @@ function Mail:Model()
         progressText = self:progressText(),
         sending = shown and self:busy(),
         entry = self:entryModel(rankNames),
+        welcome = self:welcomeModel(partition, normalizer),
     }
 end

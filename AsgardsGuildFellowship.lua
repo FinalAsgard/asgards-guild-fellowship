@@ -28,7 +28,7 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
-local guildMail, guildMailWindow, mailboxTab
+local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations
@@ -2014,6 +2014,30 @@ if clientProfile.supported then
         onDismissAction = function()
             guildMail:DismissAction()
         end,
+        onWelcome = function()
+            guildMail:OpenWelcome()
+        end,
+        onWelcomeSubject = function(text)
+            guildMail:SetWelcomeSubject(text)
+        end,
+        onWelcomeBody = function(text)
+            guildMail:SetWelcomeBody(text)
+        end,
+        onWelcomeSave = function()
+            local saved, reason = guildMail:SaveWelcome()
+            if not saved and reason ~= nil then
+                rosterController:Print("Welcome mail wasn't saved: " .. reason .. ".")
+            end
+        end,
+        onWelcomeOn = function(checked)
+            local saved, reason = guildMail:SetWelcomeOn(checked)
+            if not saved and reason ~= nil then
+                rosterController:Print("Welcome mail wasn't changed: " .. reason .. ".")
+            end
+        end,
+        onWelcomeBack = function()
+            guildMail:CloseWelcome()
+        end,
     })
     -- Officers' Guild Mail tab on the mailbox: the guild mails, to continue
     -- or manage; Edit, New and View open the Guild Mail window.
@@ -2046,6 +2070,47 @@ if clientProfile.supported then
         end,
         onShown = function()
             guildMail:Refresh()
+        end,
+    })
+    -- The guild's welcome mail: officer settings shared over guild sync.
+    guildWelcome = addon.GuildWelcome.Create({
+        partition = function()
+            local guild, partition = rosterController:QuietContext()
+            return guild and partition or nil
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        senderIsOfficer = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            return key ~= nil and officerAuthority:IsOfficer(key)
+        end,
+        isOwn = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            if key == nil then
+                return nil
+            end
+            return guildGreet:IsOwn(key)
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        announce = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        onChange = function()
+            guildMail:OnWelcomeChanged()
         end,
     })
     guildMail = addon.GuildMail.Create({
@@ -2113,6 +2178,7 @@ if clientProfile.supported then
         end,
         view = guildMailWindow,
         tab = mailboxTab,
+        welcome = guildWelcome,
     })
     router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()
         if client:IsMailboxOpen() then
@@ -2736,6 +2802,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildGreet:OnGreeted(message, sender)
         elseif addon.GuildRecruit.TYPES[message.t] ~= nil then
             guildRecruit:OnMessage(message, sender)
+        elseif addon.GuildWelcome.TYPES[message.t] ~= nil then
+            guildWelcome:OnMessage(message, sender)
         elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
             onGroupFinderMessage(message, sender)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
@@ -2849,6 +2917,7 @@ addon.settingsPanel = settingsPanel
 addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
+addon.guildWelcome = guildWelcome
 addon.groupSession = groupSession
 addon.groupBoard = groupBoard
 addon.groupAvailability = groupAvailability

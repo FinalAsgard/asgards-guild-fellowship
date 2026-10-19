@@ -24,6 +24,10 @@ local _, addon = ...
 -- Skip on an unconfirmed one; Back, Resume, and Cancel or Remove below,
 -- and the question for Cancel or Remove waiting for Yes or No.
 --
+-- The Welcome mail button (officers) opens a page over the window for the
+-- guild's welcome mail: its subject and message, Save, the on/off switch,
+-- and the welcome as the officer's own character would get it.
+--
 -- The frames are made on first use and reused. Like the other adapters, a
 -- failing frame call leaves the window as it was rather than raising.
 local GuildMailWindow = {
@@ -78,6 +82,10 @@ Window.__index = Window
 --   onRemoveEntry(position)    `position` is the entry's place in the outbox
 --   onSettle(index, send)      Send (true) or Skip on recipient `index`
 --   onConfirmAction(), onDismissAction()   Yes and No on the question
+-- and for the welcome mail:
+--   onWelcome()  the Welcome mail button pressed
+--   onWelcomeSubject(text), onWelcomeBody(text)   typed on its page
+--   onWelcomeSave(), onWelcomeOn(checked), onWelcomeBack()
 function GuildMailWindow.Create(client, handlers)
     handlers = handlers or {}
     local function handler(name)
@@ -104,6 +112,12 @@ function GuildMailWindow.Create(client, handlers)
         onSettle = handler("onSettle"),
         onConfirmAction = handler("onConfirmAction"),
         onDismissAction = handler("onDismissAction"),
+        onWelcome = handler("onWelcome"),
+        onWelcomeSubject = handler("onWelcomeSubject"),
+        onWelcomeBody = handler("onWelcomeBody"),
+        onWelcomeSave = handler("onWelcomeSave"),
+        onWelcomeOn = handler("onWelcomeOn"),
+        onWelcomeBack = handler("onWelcomeBack"),
         entryRows = {},
         rankBoxes = {},
         modeButtons = {},
@@ -217,6 +231,10 @@ function Window:window()
     close:SetScript("OnClick", function()
         frame:Hide()
     end)
+    self.welcomeButton = self:button(frame, "Welcome mail", GuildMailWindow.BUTTON_WIDTH + 10, function()
+        self.onWelcome()
+    end)
+    self.welcomeButton:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -8)
 
     local top = -40
     self:label(frame, "Send to these ranks", top)
@@ -339,6 +357,7 @@ function Window:window()
     self:recipientsPanel()
     self:previewPanel()
     self:entryPage()
+    self:welcomePage()
 
     frame:Hide()
     return frame
@@ -553,6 +572,7 @@ end
 function Window:Render(model)
     self:window()
     self:renderEntry(model.entry)
+    self:renderWelcome(model.welcome)
     local index
     for index = 1, #model.ranks do
         local rank = model.ranks[index]
@@ -860,4 +880,133 @@ function Window:renderEntry(entry)
         self.entryNo:Hide()
     end
     self.entryFrame:Show()
+end
+
+-- The Welcome mail page, over the whole window, hidden until it's opened.
+function Window:welcomePage()
+    local frame = self.frame
+    local createFrame = self.environment.CreateFrame
+    local padding = GuildMailWindow.PADDING
+    local page = createFrame("Frame", nil, frame)
+    page:SetAllPoints(frame)
+    page:SetFrameLevel((frame:GetFrameLevel() or 0) + 10)
+    page:EnableMouse(true)
+    local background = page:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(page)
+    background:SetColorTexture(0.05, 0.05, 0.08, 1)
+    local heading = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    heading:SetPoint("TOP", page, "TOP", 0, -10)
+    heading:SetText("Welcome mail")
+    local about = self:label(page, "|cff999999The guild's welcome for newcomers, the same for every officer.|r",
+        -36, "GameFontHighlightSmall")
+    about:SetPoint("RIGHT", page, "RIGHT", -padding, 0)
+
+    self.welcomeOn = self:checkBox(page, "Send the welcome mail to newcomers", -56, function(checked)
+        self.onWelcomeOn(checked)
+    end)
+
+    local top = -88
+    self:label(page, "Subject", top)
+    local subject = createFrame("EditBox", nil, page, "InputBoxTemplate")
+    subject:SetHeight(20)
+    subject:SetPoint("TOPLEFT", page, "TOPLEFT", padding + 6, top - 16)
+    subject:SetPoint("RIGHT", page, "RIGHT", -padding, 0)
+    subject:SetAutoFocus(false)
+    subject:SetMaxLetters(addon.GuildMailComposer.SUBJECT_LETTERS)
+    subject:SetScript("OnTextChanged", function(box, typed)
+        if typed then
+            self.onWelcomeSubject(box:GetText())
+        end
+    end)
+    subject:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    self.welcomeSubject = subject
+    top = top - 46
+
+    self:label(page, "Message", top - 4)
+    local hint = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hint:SetPoint("TOPLEFT", page, "TOPLEFT", padding + 70, top - 6)
+    hint:SetText("|cff999999{name} and Guild Mail's other placeholders work|r")
+    local scroll = self:scrollArea(page, top - 18, GuildMailWindow.MESSAGE_HEIGHT)
+    local body = createFrame("EditBox", nil, scroll)
+    body:SetMultiLine(true)
+    body:SetFontObject("ChatFontNormal")
+    body:SetTextInsets(6, 6, 4, 4)
+    body:SetHeight(GuildMailWindow.MESSAGE_HEIGHT)
+    body:SetAutoFocus(false)
+    body:SetMaxLetters(addon.GuildMailComposer.BODY_LETTERS)
+    scroll:SetScrollChild(body)
+    scroll:SetScript("OnSizeChanged", function(_, width)
+        if type(width) == "number" and width > 0 then
+            body:SetWidth(width)
+        end
+    end)
+    scroll:SetScript("OnMouseDown", function()
+        body:SetFocus()
+    end)
+    body:SetScript("OnTextChanged", function(box, typed)
+        if typed then
+            self.onWelcomeBody(box:GetText())
+        end
+    end)
+    body:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    self.welcomeBody = body
+    top = top - 18 - GuildMailWindow.MESSAGE_HEIGHT - 12
+
+    local function line(at, template)
+        local text = page:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
+        text:SetPoint("TOPLEFT", page, "TOPLEFT", padding, at)
+        text:SetPoint("RIGHT", page, "RIGHT", -padding, 0)
+        text:SetJustifyH("LEFT")
+        text:SetJustifyV("TOP")
+        return text
+    end
+    self.welcomePreviewTo = line(top, "GameFontNormal")
+    self.welcomePreviewBody = line(top - 20, "ChatFontNormal")
+    self.welcomePreviewBody:SetWordWrap(true)
+    self.welcomePreviewBody:SetPoint("BOTTOM", page, "BOTTOM", 0, padding + 52)
+    self.welcomeHint = line(-GuildMailWindow.HEIGHT + padding + 46)
+
+    self.welcomeBack = self:button(page, "Back", GuildMailWindow.EDIT_BUTTON_WIDTH + 10, function()
+        self.onWelcomeBack()
+    end)
+    self.welcomeBack:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", padding, padding)
+    self.welcomeSave = self:button(page, "Save", nil, function()
+        self.onWelcomeSave()
+    end)
+    self.welcomeSave:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -padding, padding)
+    page:Hide()
+    self.welcomeFrame = page
+end
+
+-- Draws the Welcome mail page, or hides it when it isn't open.
+function Window:renderWelcome(welcome)
+    if welcome == nil then
+        self.welcomeFrame:Hide()
+        return
+    end
+    self.preferences:Hide()
+    self.recipients:Hide()
+    self.preview:Hide()
+    self.openPanel = nil
+    self.welcomeOn:SetChecked(welcome.on == true)
+    setText(self.welcomeSubject, welcome.subject)
+    setText(self.welcomeBody, welcome.body)
+    if welcome.preview ~= nil then
+        local to = "As " .. welcome.preview.to .. " would get it: " .. welcome.preview.subject
+        if welcome.preview.warning ~= nil then
+            to = to .. " |cffff4040" .. welcome.preview.warning .. "|r"
+        end
+        self.welcomePreviewTo:SetText(to)
+        self.welcomePreviewBody:SetText(welcome.preview.body)
+    else
+        self.welcomePreviewTo:SetText("")
+        self.welcomePreviewBody:SetText("")
+    end
+    self.welcomeHint:SetText(welcome.hint or "")
+    setEnabled(self.welcomeSave, welcome.canSave)
+    self.welcomeFrame:Show()
 end

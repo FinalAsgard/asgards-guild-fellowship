@@ -73,6 +73,7 @@ local MANIFEST_FILES = {
     "Core/GuildMailComposer.lua",
     "Core/GuildMailSender.lua",
     "Core/GuildMail.lua",
+    "Core/GuildWelcome.lua",
     "Core/Lifecycle.lua",
     "AsgardsGuildFellowship.lua",
 }

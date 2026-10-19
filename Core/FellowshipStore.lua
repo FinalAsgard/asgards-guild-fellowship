@@ -229,6 +229,7 @@ local function validatePartition(data)
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
         "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn", "withdrawals",
+        "welcomeConfig",
     }
     local index
     for index = 1, #containers do
@@ -265,6 +266,7 @@ local function validatePartition(data)
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
         recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true, withdrawals = true,
+        welcomeConfig = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -1491,6 +1493,15 @@ function Partition:GetRecruitConfig()
         self.data.recruitConfig = {}
     end
     return self.data.recruitConfig
+end
+
+-- Guild Mail's welcome mail settings (see GuildWelcome), kept as officer
+-- settings like Guild Recruit's, created on first use.
+function Partition:GetWelcomeConfig()
+    if self.data.welcomeConfig == nil then
+        self.data.welcomeConfig = {}
+    end
+    return self.data.welcomeConfig
 end
 
 -- Guild Recruit's last ad time in each channel (see RecruitLedger), created

@@ -979,7 +979,7 @@ function Recruit:OnConfig(message, sender)
     end
     local changed = false
     local name
-    for name in pairs(addon.RecruitConfig.SETTINGS) do
+    for name in pairs(config.schema) do
         if config:Apply(name, message.s[name]) then
             changed = true
         end

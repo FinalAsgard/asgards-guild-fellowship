@@ -88,5 +88,6 @@ Core/GuildMailAudience.lua
 Core/GuildMailComposer.lua
 Core/GuildMailSender.lua
 Core/GuildMail.lua
+Core/GuildWelcome.lua
 Core/Lifecycle.lua
 AsgardsGuildFellowship.lua

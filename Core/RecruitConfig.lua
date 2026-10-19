@@ -58,9 +58,13 @@ Config.__index = Config
 
 -- `saved` is the table to keep settings in (nil keeps them only in memory).
 -- options.isOfficer(key) -> true when the character is an officer.
+-- options.settings: another set of officer settings, in the shape of
+-- RecruitConfig.SETTINGS ({ default, valid } each), kept the same way (e.g.
+-- Guild Mail's welcome mail, GuildWelcome). Guild Recruit's by default.
 function RecruitConfig.Create(saved, options)
     options = options or {}
     return setmetatable({
+        schema = type(options.settings) == "table" and options.settings or RecruitConfig.SETTINGS,
         settings = type(saved) == "table" and saved or {},
         isOfficer = options.isOfficer or function()
             return false
@@ -75,7 +79,7 @@ end
 -- The saved entry for `name` ({ value, at, by }), or nil when it's unset or
 -- unusable.
 function Config:entry(name)
-    local setting = RecruitConfig.SETTINGS[name]
+    local setting = self.schema[name]
     local entry = self.settings[name]
     if setting == nil or type(entry) ~= "table" or not setting.valid(entry.value) or not isStamp(entry.at, entry.by) then
         return nil
@@ -89,7 +93,7 @@ function Config:Get(name)
     if entry ~= nil then
         return entry.value
     end
-    local setting = RecruitConfig.SETTINGS[name]
+    local setting = self.schema[name]
     return setting and setting.default
 end
 
@@ -98,7 +102,7 @@ end
 -- second still wins everywhere. Returns the saved entry, or nil when the
 -- value is unacceptable or `by` isn't an officer.
 function Config:Set(name, value, at, by)
-    local setting = RecruitConfig.SETTINGS[name]
+    local setting = self.schema[name]
     local ok, officer = pcall(self.isOfficer, by)
     if setting == nil or not setting.valid(value) or not isStamp(at, by) or not ok or officer ~= true then
         return nil
@@ -116,7 +120,7 @@ end
 -- author is an officer, and it's newer than the one held. Returns true when
 -- applied.
 function Config:Apply(name, entry)
-    local setting = RecruitConfig.SETTINGS[name]
+    local setting = self.schema[name]
     if setting == nil or type(entry) ~= "table" or not setting.valid(entry.value) or not isStamp(entry.at, entry.by) then
         return false
     end
@@ -137,7 +141,7 @@ end
 function Config:Changes()
     local changes
     local name
-    for name in pairs(RecruitConfig.SETTINGS) do
+    for name in pairs(self.schema) do
         local entry = self:entry(name)
         if entry ~= nil then
             changes = changes or {}
@@ -155,7 +159,7 @@ function Config:CoveredBy(changes)
         return false
     end
     local name
-    for name in pairs(RecruitConfig.SETTINGS) do
+    for name in pairs(self.schema) do
         local held = self:entry(name)
         local heard = changes[name]
         if held ~= nil and (type(heard) ~= "table" or not isStamp(heard.at, heard.by)
