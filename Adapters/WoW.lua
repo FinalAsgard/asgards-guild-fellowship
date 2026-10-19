@@ -1288,6 +1288,17 @@ function Client:ObserveMail(onMail)
             registered = true
         end
     end
+    -- The mailbox window hiding also means it closed, whatever closed it
+    -- (Escape, its X, walking away): not every client reports MAIL_CLOSED
+    -- then. A second "close" for the same closing is harmless.
+    local mailbox = self.environment.MailFrame
+    if mailbox ~= nil and type(mailbox.HookScript) == "function"
+        and pcall(mailbox.HookScript, mailbox, "OnHide", function()
+            pcall(onMail, "close")
+        end)
+    then
+        registered = true
+    end
     self.mailFrame = frame
     return registered
 end

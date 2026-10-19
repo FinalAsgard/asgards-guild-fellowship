@@ -84,3 +84,34 @@ test.test("adapter reads and writes only the current build's SavedVariables", fu
     test.assertEqual(database, client:GetAccountDatabase())
     test.assertEqual("dev", environment.AsgardsGuildFellowshipDevDB.sentinel)
 end)
+
+test.test("adapter reports the mailbox closed when its window hides, even without MAIL_CLOSED", function()
+    local hooks = {}
+    local eventFrame = { RegisterEvent = function() end, SetScript = function() end }
+    local mailbox = {
+        HookScript = function(_, name, handler)
+            hooks[name] = handler
+        end,
+    }
+    local client = newClient({
+        CreateFrame = function()
+            return eventFrame
+        end,
+        MailFrame = mailbox,
+    })
+    local kinds = {}
+
+    test.assertTrue(client:ObserveMail(function(kind)
+        table.insert(kinds, kind)
+    end))
+    hooks.OnHide(mailbox)
+    test.assertEqual("close", table.concat(kinds, ","))
+
+    -- A client without the mailbox window still observes the events.
+    local plain = newClient({
+        CreateFrame = function()
+            return eventFrame
+        end,
+    })
+    test.assertTrue(plain:ObserveMail(function() end))
+end)
