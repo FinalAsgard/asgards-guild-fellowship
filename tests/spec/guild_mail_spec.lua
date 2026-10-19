@@ -870,13 +870,13 @@ test.test("guild mail: only officers can open it", function()
     test.assertFalse(opened)
     test.assertEqual(addon.GuildMail.OFFICERS_ONLY, reason)
     test.assertFalse(world.view.shown)
-    test.assertFalse(world.mail:ShowsMailboxButton())
+    test.assertFalse(world.mail:ShowsMailboxTab())
 end)
 
 test.test("guild mail: an officer opens it beside the mailbox or anywhere", function()
     local _, world = newMail()
 
-    test.assertTrue(world.mail:ShowsMailboxButton())
+    test.assertTrue(world.mail:ShowsMailboxTab())
     test.assertTrue(world.mail:Open(true))
     test.assertTrue(world.view.shown)
     test.assertTrue(world.view.fromMailbox)
@@ -1556,7 +1556,11 @@ local function newWindow()
         onCancel = record("cancel"),
         onStop = record("stop"),
         onEnd = record("end"),
-        onMailboxButton = record("mailbox"),
+        onBack = record("back"),
+        onResumeEntry = record("resumeEntry"),
+        onCancelEntry = record("cancelEntry"),
+        onRemoveEntry = record("removeEntry"),
+        onSettle = record("settle"),
     })
     return addon, world
 end
@@ -1782,21 +1786,186 @@ test.test("guild mail window: the confirmation replaces Send until answered", fu
     test.assertEqual("confirm", world.calls[1].name)
 end)
 
-test.test("guild mail window: the mailbox button is made only for officers, on the Send Mail tab", function()
+test.test("guild mail window: a sent mail on view is drawn read-only, with its buttons passed back", function()
     local _, world = newWindow()
+    local model = {}
+    local key, value
+    for key, value in pairs(MODEL) do
+        model[key] = value
+    end
+    model.entry = {
+        position = 2,
+        subject = "Launch night",
+        body = "Hi {name}",
+        stateText = "Stopped",
+        progressText = "Sent 1 of 2, 1 unconfirmed",
+        whenText = "3 h ago",
+        preview = { to = "Ann Bell", subject = "Launch night", body = "Hi Ann Bell" },
+        recipients = {
+            { name = "Ann Bell", rankName = "Member", status = "sent" },
+            { name = "Gus Reed", rankName = "Member", status = "unconfirmed", canSettle = true },
+        },
+        canResume = true,
+        canCancel = true,
+        canRemove = false,
+    }
 
-    test.assertFalse(world.window:ShowMailboxButton(true))
-    world.environment.SendMailFrame = world.environment.CreateFrame("Frame", nil, world.environment.UIParent)
-    test.assertFalse(world.window:ShowMailboxButton(false))
-    test.assertEqual(nil, world.window.mailboxButton)
+    world.window:Render(model)
+    test.assertTrue(world.window.entryFrame.shown)
+    test.assertEqual("Subject: Launch night", world.window.entrySubject.text)
+    test.assertEqual("Stopped · Sent 1 of 2, 1 unconfirmed · sent 3 h ago", world.window.entryState.text)
+    test.assertEqual("Hi Ann Bell", world.window.entryBody.text)
+    test.assertContains(world.window.entryRows[1].line.text, "sent")
+    test.assertFalse(world.window.entryRows[1].send.shown)
+    test.assertTrue(world.window.entryRows[2].send.shown)
+    test.assertFalse(world.window.entryRemove.shown)
 
-    test.assertTrue(world.window:ShowMailboxButton(true))
-    test.assertTrue(world.window.mailboxButton.shown)
-    world.window.mailboxButton.scripts.OnClick(world.window.mailboxButton)
-    test.assertEqual("mailbox", world.calls[1].name)
+    world.window.entryRows[2].skip.scripts.OnClick(world.window.entryRows[2].skip)
+    world.window.entryResume.scripts.OnClick(world.window.entryResume)
+    world.window.entryCancel.scripts.OnClick(world.window.entryCancel)
+    world.window.entryBack.scripts.OnClick(world.window.entryBack)
+    test.assertEqual("settle", world.calls[1].name)
+    test.assertEqual(2, world.calls[1].args[1])
+    test.assertFalse(world.calls[1].args[2])
+    test.assertEqual("resumeEntry", world.calls[2].name)
+    test.assertEqual(2, world.calls[2].args[1])
+    test.assertEqual("cancelEntry", world.calls[3].name)
+    test.assertEqual("back", world.calls[4].name)
 
-    world.window:ShowMailboxButton(false)
-    test.assertFalse(world.window.mailboxButton.shown)
+    model.entry = nil
+    world.window:Render(model)
+    test.assertFalse(world.window.entryFrame.shown)
+end)
+
+-- Mailbox tab -----------------------------------------------------------------
+
+local function newTab(environmentOverrides)
+    local addon = test.newAddon("Adapters/MailboxTab.lua")
+    local environment = FakeFrames.install({})
+    environment.UIParent = environment.CreateFrame("Frame", nil, nil)
+    local world = { calls = {}, environment = environment }
+    local key, value
+    for key, value in pairs(environmentOverrides or {}) do
+        environment[key] = value
+    end
+    local function record(name)
+        return function(...)
+            table.insert(world.calls, { name = name, args = { ... } })
+        end
+    end
+    world.tab = addon.MailboxTab.Create({ environment = environment }, {
+        onNew = record("new"),
+        onEdit = record("edit"),
+        onView = record("view"),
+        onResume = record("resume"),
+        onCancel = record("cancel"),
+        onRemove = record("remove"),
+        onConfirm = record("confirm"),
+        onDismiss = record("dismiss"),
+        onShown = record("shown"),
+    })
+    return addon, world
+end
+
+-- A mailbox with its two tabs and pages.
+local function mailbox(environment)
+    environment.MailFrame = environment.CreateFrame("Frame", nil, environment.UIParent)
+    environment.MailFrameTab1 = environment.CreateFrame("Button", nil, environment.MailFrame)
+    environment.MailFrameTab2 = environment.CreateFrame("Button", nil, environment.MailFrame)
+    environment.InboxFrame = environment.CreateFrame("Frame", nil, environment.MailFrame)
+    environment.SendMailFrame = environment.CreateFrame("Frame", nil, environment.MailFrame)
+    environment.hooks = {}
+    environment.hooksecurefunc = function(name, hook)
+        environment.hooks[name] = hook
+    end
+end
+
+local OUTBOX = {
+    draft = { subject = "Raid night" },
+    entries = {
+        { position = 2, subject = "Launch night", progressText = "Sent 19 of 42", whenText = "2 h ago",
+            state = "paused", stateText = "Paused at the mail limit", canResume = true, canCancel = true },
+        { position = 1, subject = "Rules", progressText = "Sent 5 of 5", state = "done", stateText = "Done",
+            canRemove = true },
+    },
+    canNew = true,
+}
+
+test.test("mailbox tab: only officers get it, and only beside the mailbox's tabs", function()
+    local _, world = newTab()
+
+    test.assertFalse(world.tab:Install(true))
+    test.assertTrue(world.tab:Install(false))
+    mailbox(world.environment)
+    test.assertTrue(world.tab:Install(true))
+    test.assertEqual("Guild Mail", world.tab.tab.text)
+    test.assertTrue(world.tab.tab.shown)
+    world.tab:Install(false)
+    test.assertFalse(world.tab.tab.shown)
+end)
+
+test.test("mailbox tab: clicking it shows its page over the inbox; the game's tabs hide it", function()
+    local _, world = newTab()
+    mailbox(world.environment)
+    world.tab:Install(true)
+    test.assertFalse(world.tab:IsShown())
+
+    world.tab.tab.scripts.OnClick(world.tab.tab)
+    test.assertTrue(world.tab:IsShown())
+    test.assertFalse(world.environment.InboxFrame.shown)
+    test.assertFalse(world.environment.SendMailFrame.shown)
+    test.assertEqual("shown", world.calls[1].name)
+
+    world.environment.hooks.MailFrameTab_OnClick()
+    test.assertFalse(world.tab:IsShown())
+end)
+
+test.test("mailbox tab: lists the draft and the guild mails, newest first, with their buttons", function()
+    local _, world = newTab()
+    mailbox(world.environment)
+    world.tab:Install(true)
+    world.tab.tab.scripts.OnClick(world.tab.tab)
+    world.tab:Render(OUTBOX)
+
+    local rows = world.tab.rows
+    test.assertEqual("Raid night", rows[1].title.text)
+    test.assertEqual("Edit", rows[1].buttons[3].text)
+    test.assertFalse(rows[1].buttons[1].shown)
+    test.assertEqual("Launch night  |cff999999Paused at the mail limit|r", rows[2].title.text)
+    test.assertEqual("Sent 19 of 42 · 2 h ago", rows[2].detail.text)
+    test.assertEqual("View", rows[2].buttons[1].text)
+    test.assertEqual("Resume", rows[2].buttons[2].text)
+    test.assertEqual("Cancel", rows[2].buttons[3].text)
+    test.assertEqual("Remove", rows[3].buttons[3].text)
+    test.assertFalse(world.tab.empty.shown)
+    test.assertFalse(world.tab.yes.shown)
+
+    rows[1].buttons[3].scripts.OnClick(rows[1].buttons[3])
+    rows[2].buttons[1].scripts.OnClick(rows[2].buttons[1])
+    rows[2].buttons[2].scripts.OnClick(rows[2].buttons[2])
+    rows[3].buttons[3].scripts.OnClick(rows[3].buttons[3])
+    world.tab.new.scripts.OnClick(world.tab.new)
+    local names = {}
+    local index
+    for index = 2, #world.calls do
+        table.insert(names, world.calls[index].name .. tostring(world.calls[index].args[1] or ""))
+    end
+    test.assertEqual("edit,view2,resume2,remove1,new", table.concat(names, ","))
+end)
+
+test.test("mailbox tab: a question waits for Yes or No, and an empty list says so", function()
+    local _, world = newTab()
+    mailbox(world.environment)
+    world.tab:Install(true)
+
+    world.tab:Render({ entries = {}, canNew = true, actionText = "Discard the current draft?" })
+    test.assertTrue(world.tab.empty.shown)
+    test.assertEqual("Discard the current draft?", world.tab.question.text)
+    test.assertTrue(world.tab.yes.shown)
+    world.tab.yes.scripts.OnClick(world.tab.yes)
+    world.tab.no.scripts.OnClick(world.tab.no)
+    test.assertEqual("confirm", world.calls[1].name)
+    test.assertEqual("dismiss", world.calls[2].name)
 end)
 
 -- Command -----------------------------------------------------------------------
@@ -2101,4 +2270,166 @@ test.test("guild mail outbox: finished and unusable entries aren't put back", fu
     after.mail:Open(true)
     test.assertFalse(after.view.model.sending)
     test.assertEqual(nil, after.view.model.progressText)
+end)
+
+-- Guild Mail tab ----------------------------------------------------------------
+
+-- A saved, stopped send to Ann Bell and Gus Reed: Ann's sent, Gus's was in
+-- flight when the game closed.
+local function savedEntry(subject, at)
+    return {
+        subject = subject, body = "Hi", by = "tool box-camelot", at = at, perMail = 30, state = "sending",
+        recipients = {
+            { key = "ann bell-camelot", name = "Ann Bell", rank = 2, subject = subject, body = "Hi", status = "sent" },
+            { key = "gus reed-camelot", name = "Gus Reed", rank = 2, subject = subject, body = "Hi",
+                status = "pending", inFlight = true },
+        },
+    }
+end
+
+test.test("guild mail tab: lists the draft, then the mails newest first with their progress", function()
+    local addon, world = newMail({ outbox = { savedEntry("Rules", 1400), savedEntry("Launch night", 4000) } })
+    world.mail:SetSubject("Raid night")
+    world.outbox[1].state = "done"
+    world.outbox[1].recipients[2].status = "failed"
+    world.outbox[1].recipients[2].inFlight = nil
+
+    local model = world.mail:OutboxModel()
+    test.assertEqual("Raid night", model.draft.subject)
+    test.assertEqual(2, #model.entries)
+    test.assertEqual("Launch night", model.entries[1].subject)
+    test.assertEqual(2, model.entries[1].position)
+    test.assertEqual("Stopped", model.entries[1].stateText)
+    test.assertEqual("Sent 1 of 2, 1 unconfirmed", model.entries[1].progressText)
+    test.assertEqual("16 min ago", model.entries[1].whenText)
+    test.assertEqual("Done", model.entries[2].stateText)
+    test.assertEqual("1 h ago", model.entries[2].whenText)
+    test.assertTrue(model.entries[2].canRemove)
+    test.assertFalse(model.entries[1].canRemove)
+    test.assertTrue(model.entries[1].canCancel)
+    -- Resume needs a mailbox, and something left to send.
+    test.assertFalse(model.entries[1].canResume)
+    world.mail:OnMailboxOpened()
+    test.assertFalse(world.mail:OutboxModel().entries[1].canResume)
+    test.assertEqual(addon.GuildMailSender.UNCONFIRMED, world.mail:Model().recipients[2].status)
+end)
+
+test.test("guild mail tab: New asks before discarding a draft, then opens a blank mail", function()
+    local _, world = newMail()
+    world.mail:SetSubject("Raid night")
+
+    test.assertTrue(world.mail:RequestNew())
+    test.assertEqual("Discard the current draft?", world.mail:OutboxModel().actionText)
+    world.mail:DismissAction()
+    test.assertEqual("Raid night", world.mail.subject)
+
+    world.mail:RequestNew()
+    test.assertTrue(world.mail:ConfirmAction())
+    test.assertEqual("", world.mail.subject)
+    test.assertEqual("", world.saved.subject)
+    test.assertTrue(world.view.shown)
+    test.assertEqual(nil, world.mail:OutboxModel().draft)
+
+    world.view.shown = false
+    test.assertTrue(world.mail:RequestNew())
+    test.assertTrue(world.view.shown)
+end)
+
+test.test("guild mail tab: a send paused at the limit can be set aside for a new one, then resumed", function()
+    local addon, world = newMail()
+    sendOne(world)
+    world.mail:OnError("You have reached the in-game cap of unique mail recipients")
+
+    -- Edit: the draft is editable again while the send waits.
+    test.assertTrue(world.mail:EditDraft())
+    test.assertTrue(world.mail:SetSubject("Raid night"))
+    test.assertFalse(world.view.model.sending)
+    world.mail:RequestSend()
+    test.assertTrue(world.mail:Confirm())
+    test.assertEqual(2, #world.outbox)
+    test.assertEqual("Raid night", world.sent[3].subject)
+    test.assertEqual("paused", world.outbox[1].state)
+
+    -- One send at a time.
+    local model = world.mail:OutboxModel()
+    test.assertEqual("Paused at the mail limit", model.entries[2].stateText)
+    test.assertFalse(model.entries[2].canResume)
+    world.mail:OnSent()
+    world.mail:OnSent()
+    test.assertTrue(world.mail:OutboxModel().entries[2].canResume)
+
+    test.assertTrue(world.mail:ResumeEntry(1))
+    test.assertEqual("Gus Reed", world.sent[#world.sent].to)
+    test.assertEqual("Launch night", world.sent[#world.sent].subject)
+    world.mail:OnSent()
+    test.assertEqual(addon.GuildMailSender.DONE, world.outbox[1].state)
+    test.assertEqual(2, world.mail:entryCounts(world.outbox[1]).sent)
+end)
+
+test.test("guild mail tab: Cancel asks, then nothing more is sent; a finished mail can be removed", function()
+    local addon, world = newMail()
+    sendOne(world)
+    -- Cancel waits while a mail is waiting for the game's answer, and a
+    -- finished mail has nothing to cancel.
+    test.assertFalse(world.mail:RequestCancelEntry(1))
+    world.mail:OnSent()
+    test.assertFalse(world.mail:RequestCancelEntry(1))
+    test.assertEqual(2, #world.sent)
+
+    -- A cancelled pending mail.
+    local _, other = newMail()
+    readyToSend(other)
+    other.mail:RequestSend()
+    other.mail:Confirm()
+    other.mail:Stop()
+    other.mail:OnSent()
+    test.assertTrue(other.mail:RequestCancelEntry(1))
+    test.assertEqual("Cancel this mail? 1 mail still waiting won't be sent.", other.mail.pendingAction.text)
+    other.mail:ConfirmAction()
+    test.assertEqual(addon.GuildMailSender.CANCELLED, other.outbox[1].recipients[2].status)
+    test.assertFalse(other.mail:ResumeEntry(1))
+    test.assertEqual("Cancelled", other.mail:OutboxModel().entries[1].stateText)
+    test.assertEqual("Sent 1 of 2, 1 cancelled", other.mail:OutboxModel().entries[1].progressText)
+
+    test.assertTrue(other.mail:RequestRemoveEntry(1))
+    test.assertTrue(other.mail:ConfirmAction())
+    test.assertEqual(0, #other.outbox)
+end)
+
+test.test("guild mail tab: a cancelled send never comes back after a reload", function()
+    local _, world = newMail({ outbox = { savedEntry("Launch night", 4000) } })
+    world.mail:RequestCancelEntry(1)
+    world.mail:ConfirmAction()
+
+    local _, after = reload(world)
+    after.mail:Open(true)
+    after.mail:RequestSend()
+    test.assertEqual(0, #after.sent)
+    test.assertFalse(after.view.model.sending)
+end)
+
+test.test("guild mail tab: View shows a saved mail read-only, and its unconfirmed mail can be settled", function()
+    local addon, world = newMail({ outbox = { savedEntry("Rules", 1400), savedEntry("Launch night", 4000) } })
+    world.mail:OnMailboxOpened()
+
+    -- The newest came back in the sender; view the older one.
+    test.assertTrue(world.mail:ViewEntry(1))
+    local entry = world.view.model.entry
+    test.assertEqual(1, entry.position)
+    test.assertEqual("Rules", entry.subject)
+    test.assertEqual("Ann Bell", entry.preview.to)
+    test.assertEqual("Member", entry.recipients[1].rankName)
+    test.assertEqual(addon.GuildMailSender.UNCONFIRMED, entry.recipients[2].status)
+    test.assertTrue(entry.recipients[2].canSettle)
+
+    test.assertTrue(world.mail:Settle(2, true))
+    test.assertEqual("pending", world.outbox[1].recipients[2].status)
+    test.assertEqual(nil, world.outbox[1].recipients[2].inFlight)
+    test.assertTrue(world.view.model.entry.canResume)
+    test.assertTrue(world.mail:ResumeEntry(1))
+    test.assertEqual("Gus Reed", world.sent[1].to)
+    test.assertEqual("Rules", world.sent[1].subject)
+
+    world.mail:CloseEntry()
+    test.assertEqual(nil, world.view.model.entry)
 end)

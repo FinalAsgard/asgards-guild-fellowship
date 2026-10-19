@@ -28,7 +28,7 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
-local guildMail, guildMailWindow
+local guildMail, guildMailWindow, mailboxTab
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations
@@ -1988,8 +1988,64 @@ if clientProfile.supported then
         onCancel = function()
             guildMail:Cancel()
         end,
-        onMailboxButton = function()
-            guildMail:Open(true)
+        -- A sent mail's page (View in the mailbox's Guild Mail tab).
+        onBack = function()
+            guildMail:CloseEntry()
+        end,
+        onResumeEntry = function(position)
+            if not guildMail:ResumeEntry(position) then
+                guildMail:Refresh()
+            end
+        end,
+        onCancelEntry = function(position)
+            guildMail:RequestCancelEntry(position)
+        end,
+        onRemoveEntry = function(position)
+            guildMail:RequestRemoveEntry(position)
+        end,
+        onSettle = function(index, send)
+            if not guildMail:Settle(index, send) then
+                guildMail:Refresh()
+            end
+        end,
+        onConfirmAction = function()
+            guildMail:ConfirmAction()
+        end,
+        onDismissAction = function()
+            guildMail:DismissAction()
+        end,
+    })
+    -- Officers' Guild Mail tab on the mailbox: the guild mails, to continue
+    -- or manage; Edit, New and View open the Guild Mail window.
+    mailboxTab = addon.MailboxTab.Create(client, {
+        onNew = function()
+            guildMail:RequestNew()
+        end,
+        onEdit = function()
+            guildMail:EditDraft()
+        end,
+        onView = function(position)
+            guildMail:ViewEntry(position)
+        end,
+        onResume = function(position)
+            if not guildMail:ResumeEntry(position) then
+                guildMail:Refresh()
+            end
+        end,
+        onCancel = function(position)
+            guildMail:RequestCancelEntry(position)
+        end,
+        onRemove = function(position)
+            guildMail:RequestRemoveEntry(position)
+        end,
+        onConfirm = function()
+            guildMail:ConfirmAction()
+        end,
+        onDismiss = function()
+            guildMail:DismissAction()
+        end,
+        onShown = function()
+            guildMail:Refresh()
         end,
     })
     guildMail = addon.GuildMail.Create({
@@ -2056,6 +2112,7 @@ if clientProfile.supported then
             return client:Timestamp()
         end,
         view = guildMailWindow,
+        tab = mailboxTab,
     })
     router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()
         if client:IsMailboxOpen() then
@@ -2734,7 +2791,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         end
     end)
     -- Guild Mail follows the mailbox, and sends its next mail when the game
-    -- answers the last. Officers get its button on the mailbox.
+    -- answers the last. Officers get its tab on the mailbox.
     client:ObserveMail(function(kind, blockedAddon, blockedCall)
         if kind == "error" then
             -- The text follows an error number; older clients pass only the
@@ -2756,7 +2813,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         end
         if kind == "open" then
             guildMail:OnMailboxOpened()
-            pcall(guildMailWindow.ShowMailboxButton, guildMailWindow, guildMail:ShowsMailboxButton())
+            pcall(mailboxTab.Install, mailboxTab, guildMail:ShowsMailboxTab())
         elseif kind == "close" then
             guildMail:OnMailboxClosed()
         elseif kind == "sent" then

@@ -56,6 +56,8 @@ local GuildMailSender = {
     UNCONFIRMED = "unconfirmed",
     -- An unconfirmed mail the officer chose not to send again.
     SKIPPED = "skipped",
+    -- A mail of a send the officer cancelled before it went: never sent.
+    CANCELLED = "cancelled",
     REFUSED = "the game didn't take the mail",
     NO_RESPONSE = "no response",
     NO_RESPONSE_RETRY = "no response, will try again at the end",
@@ -172,6 +174,7 @@ function Sender:Restore(mails, statuses, reasons, capped)
         local status = type(statuses) == "table" and statuses[index] or nil
         if status ~= GuildMailSender.SENT and status ~= GuildMailSender.FAILED
             and status ~= GuildMailSender.UNCONFIRMED and status ~= GuildMailSender.SKIPPED
+            and status ~= GuildMailSender.CANCELLED
         then
             status = GuildMailSender.PENDING
         end
@@ -225,6 +228,27 @@ function Sender:Settle(index, send)
         table.insert(self.queue, index)
     end
     self:changed()
+    return true
+end
+
+-- Sets the send aside so another can be started or restored (it's saved
+-- by then): halts it, with nothing more sent and no change reported.
+-- Returns false while a mail is waiting for the game's answer.
+function Sender:Reset()
+    if self.inFlight and self.state == GuildMailSender.SENDING then
+        return false
+    end
+    self.attempt = self.attempt + 1
+    self.mails, self.statuses, self.reasons, self.queue, self.retried = {}, {}, {}, {}, {}
+    self.position = nil
+    self.current = nil
+    self.inFlight = false
+    self.fresh = false
+    self.lastFailed = nil
+    self.manual = false
+    self.stopping = false
+    self.capped = false
+    self.state = GuildMailSender.IDLE
     return true
 end
 

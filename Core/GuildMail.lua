@@ -70,6 +70,9 @@ local GuildMail = {
     SEND_TEXT = "Send",
     SEND_NEXT_TEXT = "Send next",
     RESUME_TEXT = "Resume",
+    HINT_OTHER_SENDING = "Another mail is sending. Send this one once it pauses or is done.",
+    -- An outbox entry the officer cancelled (see Outbox).
+    CANCELLED = "cancelled",
     -- About how many different characters the game lets one mail in a
     -- while (in game it stopped after 19, then 20); a send to this many or
     -- more is warned that the rest will wait.
@@ -200,8 +203,13 @@ function GuildMail.Create(options)
             return nil
         end,
         outboxLoaded = false,
-        -- The outbox entry of the send on show, or nil.
+        -- The outbox entry of the send in the sender, or nil.
         entry = nil,
+        -- The outbox entry the window shows read-only (View), or nil.
+        viewing = nil,
+        -- The question waiting for Yes or No: { kind, entry, text }, or nil.
+        pendingAction = nil,
+        tab = options.tab,
         view = options.view,
         ranks = {},
         mode = addon.GuildMailAudience.MAINS,
@@ -262,8 +270,8 @@ function Mail:IsOfficer()
     return ok and officer == true
 end
 
--- Whether the mailbox shows the Guild Mail button: officers only.
-function Mail:ShowsMailboxButton()
+-- Whether the mailbox shows the Guild Mail tab: officers only.
+function Mail:ShowsMailboxTab()
     return self:IsOfficer()
 end
 
@@ -342,8 +350,46 @@ local function savedRecipient(saved)
     }
 end
 
+-- Whether outbox `entry` can still be resumed: saved as sending, paused or
+-- stopped.
+local function unfinished(entry)
+    local state = type(entry) == "table" and entry.state or nil
+    return state == addon.GuildMailSender.SENDING or state == addon.GuildMailSender.PAUSED
+        or state == addon.GuildMailSender.STOPPED
+end
+
+-- Puts outbox `entry` on show and in the sender, as saved. A mail that was
+-- in flight comes back unconfirmed. Returns false, leaving everything as it
+-- was, for an entry with an unusable recipient.
+function Mail:load(entry)
+    if type(entry) ~= "table" or type(entry.recipients) ~= "table" or #entry.recipients == 0 then
+        return false
+    end
+    local recipients, mails, statuses, reasons = {}, {}, {}, {}
+    local index
+    for index = 1, #entry.recipients do
+        local saved = entry.recipients[index]
+        local recipient = savedRecipient(saved)
+        if recipient == nil then
+            return false
+        end
+        recipients[index] = recipient
+        mails[index] = { to = recipient.name, subject = recipient.mail.subject, body = recipient.mail.body }
+        statuses[index] = saved.status
+        reasons[index] = saved.reason
+        -- Nobody knows whether a mail in flight when the game closed went.
+        if saved.inFlight and (saved.status == nil or saved.status == addon.GuildMailSender.PENDING) then
+            statuses[index] = addon.GuildMailSender.UNCONFIRMED
+        end
+    end
+    self.entry = entry
+    self.batch = recipients
+    self.batchPerMail = type(entry.perMail) == "number" and entry.perMail or nil
+    return self.sender:Restore(mails, statuses, reasons, entry.capped == true)
+end
+
 -- Puts back the newest unfinished outbox entry, once, unless a send is
--- already on show. An entry with an unusable recipient is left alone.
+-- already on show.
 function Mail:restoreOutbox()
     if self.outboxLoaded or self.batch ~= nil or self:busy() then
         return
@@ -356,38 +402,29 @@ function Mail:restoreOutbox()
     self.outboxLoaded = true
     local position
     for position = #outbox, 1, -1 do
-        local entry = outbox[position]
-        if type(entry) == "table" and entry.state ~= addon.GuildMailSender.DONE
-            and type(entry.recipients) == "table" and #entry.recipients > 0
-        then
-            local recipients, mails, statuses, reasons = {}, {}, {}, {}
-            local index
-            for index = 1, #entry.recipients do
-                local saved = entry.recipients[index]
-                local recipient = savedRecipient(saved)
-                if recipient == nil then
-                    recipients = nil
-                    break
-                end
-                recipients[index] = recipient
-                mails[index] = { to = recipient.name, subject = recipient.mail.subject, body = recipient.mail.body }
-                statuses[index] = saved.status
-                reasons[index] = saved.reason
-                -- Nobody knows whether a mail in flight when the game
-                -- closed went.
-                if saved.inFlight and (saved.status == nil or saved.status == addon.GuildMailSender.PENDING) then
-                    statuses[index] = addon.GuildMailSender.UNCONFIRMED
-                end
-            end
-            if recipients ~= nil then
-                self.entry = entry
-                self.batch = recipients
-                self.batchPerMail = type(entry.perMail) == "number" and entry.perMail or nil
-                self.sender:Restore(mails, statuses, reasons, entry.capped == true)
-                return
-            end
+        if unfinished(outbox[position]) and self:load(outbox[position]) then
+            return
         end
     end
+end
+
+-- Sets the send in the sender aside (it's saved), so another can go: one
+-- still going is stopped first. Returns false while a mail is waiting for
+-- the game's answer.
+function Mail:park()
+    if self.sender:InFlight() ~= nil then
+        return false
+    end
+    if self.sender:Progress().state == addon.GuildMailSender.SENDING then
+        self.sender:Stop()
+    end
+    self:persist()
+    if not self.sender:Reset() then
+        return false
+    end
+    self.entry = nil
+    self.batch = nil
+    return true
 end
 
 -- Brings the outbox entry on show up to date with the send.
@@ -440,14 +477,441 @@ function Mail:record(recipients, perMail)
     self.entry = entry
 end
 
--- Settles the unconfirmed mail on row `index` of the send on show: `send`
--- makes it pending again, to go on Resume; else it's skipped. Returns false
--- when that row isn't unconfirmed.
-function Mail:Settle(index, send)
-    if self.batch == nil or not self:IsOfficer() then
+local Sender = addon.GuildMailSender
+
+-- The status of recipient `index` of outbox `entry` as the officer sees it:
+-- a mail saved in flight is unconfirmed, unless it's in flight right now.
+function Mail:savedStatus(entry, index)
+    local saved = entry.recipients[index]
+    local status = type(saved) == "table" and saved.status or nil
+    if status == nil then
+        status = Sender.PENDING
+    end
+    if status == Sender.PENDING and saved.inFlight and not (entry == self.entry and self.sender:InFlight() == index) then
+        return Sender.UNCONFIRMED
+    end
+    return status
+end
+
+-- Counts of outbox `entry`'s recipients by status, and its total.
+function Mail:entryCounts(entry)
+    local counts = { pending = 0, sent = 0, failed = 0, unconfirmed = 0, skipped = 0, cancelled = 0 }
+    local index
+    for index = 1, #entry.recipients do
+        local status = self:savedStatus(entry, index)
+        if counts[status] ~= nil then
+            counts[status] = counts[status] + 1
+        end
+    end
+    counts.total = #entry.recipients
+    return counts
+end
+
+-- Outbox `entry`'s state as the officer sees it: "sending", "paused",
+-- "stopped", "done" or "cancelled". Only the send in the sender can be
+-- going; any other saved part way is stopped, or paused at the mail limit.
+function Mail:entryState(entry)
+    if entry == self.entry then
+        local state = self.sender:Progress().state
+        if state ~= Sender.IDLE then
+            return state
+        end
+    end
+    if entry.state == GuildMail.CANCELLED or entry.state == Sender.DONE then
+        return entry.state
+    end
+    if entry.capped then
+        return Sender.PAUSED
+    end
+    return Sender.STOPPED
+end
+
+-- Whether a send is going now (not paused or stopped).
+function Mail:going()
+    return self.sender:Progress().state == Sender.SENDING
+end
+
+function Mail:canResume(entry)
+    local state = self:entryState(entry)
+    if not (self:IsOfficer() and self.mailboxOpen) or state == Sender.SENDING
+        or state == GuildMail.CANCELLED or self:going()
+    then
         return false
     end
-    return self.sender:Settle(index, send == true)
+    if entry == self.entry and (self.sender:IsPaused() or self.sender:IsStopped()) then
+        return true
+    end
+    return self:entryCounts(entry).pending > 0
+end
+
+function Mail:canCancel(entry)
+    local state = self:entryState(entry)
+    if not self:IsOfficer() or state == GuildMail.CANCELLED or state == Sender.DONE then
+        return false
+    end
+    return not (entry == self.entry and self.sender:InFlight() ~= nil)
+end
+
+function Mail:canRemove(entry)
+    local state = self:entryState(entry)
+    return self:IsOfficer() and (state == GuildMail.CANCELLED or state == Sender.DONE)
+end
+
+-- The saved outbox, or an empty list.
+function Mail:outboxList()
+    local outbox = self:ask(self.outbox)
+    return type(outbox) == "table" and outbox or {}
+end
+
+-- The outbox entry at `position`, or nil.
+function Mail:entryAt(position)
+    local entry = type(position) == "number" and self:outboxList()[position] or nil
+    if type(entry) ~= "table" or type(entry.recipients) ~= "table" then
+        return nil
+    end
+    return entry
+end
+
+-- Settles the unconfirmed mail on row `index` of the entry on view, or of
+-- the send on show: `send` makes it pending again, to go on Resume; else
+-- it's skipped. Returns false when that row isn't unconfirmed.
+function Mail:Settle(index, send)
+    local entry = self.viewing or self.entry
+    if entry == nil or not self:IsOfficer() then
+        return false
+    end
+    if entry == self.entry then
+        return self.sender:Settle(index, send == true)
+    end
+    if self:savedStatus(entry, index) ~= Sender.UNCONFIRMED then
+        return false
+    end
+    local saved = entry.recipients[index]
+    saved.inFlight = nil
+    saved.reason = nil
+    if send then
+        saved.status = Sender.PENDING
+        if entry.state == Sender.DONE then
+            entry.state = Sender.STOPPED
+        end
+    else
+        saved.status = Sender.SKIPPED
+    end
+    self:refresh()
+    return true
+end
+
+-- Resumes the outbox entry at `position`: the send on show goes on, or
+-- another is set aside for it. Only one send goes at a time. Returns false
+-- when it can't be resumed now.
+function Mail:ResumeEntry(position)
+    local entry = self:entryAt(position)
+    if entry == nil or not self:canResume(entry) then
+        return false
+    end
+    self.pendingAction = nil
+    if entry ~= self.entry then
+        if not self:park() or not self:load(entry) then
+            self:refresh()
+            return false
+        end
+    end
+    if not self.sender:Resume() then
+        self:refresh()
+        return false
+    end
+    return true
+end
+
+-- Asks before cancelling or removing the outbox entry at `position`, or
+-- before New discards the draft: the answer goes to ConfirmAction or
+-- DismissAction.
+function Mail:RequestCancelEntry(position)
+    local entry = self:entryAt(position)
+    if entry == nil or not self:canCancel(entry) then
+        return false
+    end
+    local waiting = self:entryCounts(entry)
+    self.pendingAction = {
+        kind = "cancel",
+        entry = entry,
+        text = "Cancel this mail? " .. plural(waiting.pending + waiting.unconfirmed, "mail", "mails")
+            .. " still waiting won't be sent.",
+    }
+    self:refresh()
+    return true
+end
+
+function Mail:RequestRemoveEntry(position)
+    local entry = self:entryAt(position)
+    if entry == nil or not self:canRemove(entry) then
+        return false
+    end
+    self.pendingAction = { kind = "remove", entry = entry, text = "Remove this mail from the list?" }
+    self:refresh()
+    return true
+end
+
+-- New: a blank mail in the window, asking first when the draft has text.
+function Mail:RequestNew()
+    if not self:IsOfficer() then
+        return false
+    end
+    if blank(self.subject) and blank(self.body) then
+        return self:newMail()
+    end
+    self.pendingAction = { kind = "discard", text = "Discard the current draft?" }
+    self:refresh()
+    return true
+end
+
+function Mail:DismissAction()
+    self.pendingAction = nil
+    self:refresh()
+end
+
+function Mail:ConfirmAction()
+    local action = self.pendingAction
+    self.pendingAction = nil
+    if action == nil then
+        return false
+    end
+    local done = false
+    if action.kind == "cancel" then
+        done = self:cancelEntry(action.entry)
+    elseif action.kind == "remove" then
+        done = self:removeEntry(action.entry)
+    elseif action.kind == "discard" then
+        done = self:newMail()
+    end
+    self:refresh()
+    return done
+end
+
+-- Gives up on every mail of `entry` still waiting: nothing more is sent.
+function Mail:cancelEntry(entry)
+    if not self:canCancel(entry) then
+        return false
+    end
+    if entry == self.entry and not self:park() then
+        return false
+    end
+    local index
+    for index = 1, #entry.recipients do
+        local status = self:savedStatus(entry, index)
+        if status == Sender.PENDING or status == Sender.UNCONFIRMED then
+            entry.recipients[index].status = Sender.CANCELLED
+            entry.recipients[index].reason = nil
+        end
+        entry.recipients[index].inFlight = nil
+    end
+    entry.state = GuildMail.CANCELLED
+    entry.capped = nil
+    return true
+end
+
+function Mail:removeEntry(entry)
+    if not self:canRemove(entry) then
+        return false
+    end
+    local outbox = self:outboxList()
+    local index
+    for index = #outbox, 1, -1 do
+        if outbox[index] == entry then
+            table.remove(outbox, index)
+        end
+    end
+    if entry == self.entry then
+        self.sender:Reset()
+        self.entry = nil
+        self.batch = nil
+    end
+    if self.viewing == entry then
+        self.viewing = nil
+    end
+    return true
+end
+
+-- The window back on the draft: the send on show is set aside on screen
+-- (it carries on, and the Guild Mail tab shows it).
+function Mail:compose()
+    self.viewing = nil
+    self.confirming = false
+    if self.batch ~= nil and self:busy() then
+        self.batch = nil
+    end
+end
+
+function Mail:newMail()
+    self:compose()
+    self.batch = nil
+    self.subject = ""
+    self.body = ""
+    self.unticked = {}
+    self:save()
+    return self:Open(self.mailboxOpen)
+end
+
+-- Edit: the window on the draft.
+function Mail:EditDraft()
+    self:restore()
+    self:compose()
+    return self:Open(self.mailboxOpen)
+end
+
+-- View: the window showing the outbox entry at `position`, read-only.
+function Mail:ViewEntry(position)
+    local entry = self:entryAt(position)
+    if entry == nil or not self:IsOfficer() then
+        return false
+    end
+    self.viewing = entry
+    return self:Open(self.mailboxOpen)
+end
+
+-- Back from View to the draft.
+function Mail:CloseEntry()
+    self:compose()
+    self:refresh()
+end
+
+-- "just now", "5 min ago", "3 h ago" or "2 days ago", or nil.
+local function ago(now, at)
+    if type(now) ~= "number" or type(at) ~= "number" then
+        return nil
+    end
+    local seconds = math.max(0, now - at)
+    if seconds < 60 then
+        return "just now"
+    end
+    if seconds < 3600 then
+        return math.floor(seconds / 60) .. " min ago"
+    end
+    if seconds < 86400 then
+        return math.floor(seconds / 3600) .. " h ago"
+    end
+    return plural(math.floor(seconds / 86400), "day", "days") .. " ago"
+end
+
+GuildMail.STATE_TEXT = {
+    sending = "Sending",
+    paused = "Paused",
+    stopped = "Stopped",
+    done = "Done",
+    cancelled = "Cancelled",
+}
+
+-- "Sent 19 of 42", with the failed, unconfirmed and skipped when any.
+local function entryProgress(counts)
+    local text = "Sent " .. counts.sent .. " of " .. counts.total
+    for _, key in ipairs({ "failed", "unconfirmed", "skipped", "cancelled" }) do
+        if counts[key] > 0 then
+            text = text .. ", " .. counts[key] .. " " .. key
+        end
+    end
+    return text
+end
+
+-- The Guild Mail tab's list:
+--   draft       { subject } when the draft has a subject or message, else nil
+--   entries     newest first: { position, subject, whenText, progressText,
+--               state, stateText, canResume, canCancel, canRemove }
+--   canNew      whether New can be pressed
+--   actionText  the question waiting for Yes or No, or nil
+function Mail:OutboxModel()
+    self:restore()
+    local outbox = self:outboxList()
+    local now = self:ask(self.now)
+    local entries = {}
+    local position
+    for position = #outbox, 1, -1 do
+        local entry = self:entryAt(position)
+        if entry ~= nil then
+            local state = self:entryState(entry)
+            local stateText = GuildMail.STATE_TEXT[state] or state
+            if state == Sender.PAUSED and (entry == self.entry and self.sender:IsCapped() or entry.capped) then
+                stateText = "Paused at the mail limit"
+            end
+            table.insert(entries, {
+                position = position,
+                subject = type(entry.subject) == "string" and entry.subject ~= "" and entry.subject or "(no subject)",
+                whenText = ago(now, entry.at),
+                progressText = entryProgress(self:entryCounts(entry)),
+                state = state,
+                stateText = stateText,
+                canResume = self:canResume(entry),
+                canCancel = self:canCancel(entry),
+                canRemove = self:canRemove(entry),
+            })
+        end
+    end
+    local draft = nil
+    if not (blank(self.subject) and blank(self.body)) then
+        draft = { subject = blank(self.subject) and "(no subject)" or self.subject }
+    end
+    return {
+        draft = draft,
+        entries = entries,
+        canNew = self:IsOfficer(),
+        actionText = self.pendingAction and self.pendingAction.text or nil,
+    }
+end
+
+-- The entry on view, for the window's read-only page:
+--   position, subject, body, stateText, whenText, progressText,
+--   preview { to, subject, body } (its first recipient's mail),
+--   recipients { name, playerName, rankName, status, reason, canSettle },
+--   canResume, canCancel, canRemove, actionText
+-- Nil when no entry is on view.
+function Mail:entryModel(rankNames)
+    local entry = self.viewing
+    if entry == nil then
+        return nil
+    end
+    local position
+    local outbox = self:outboxList()
+    local index
+    for index = 1, #outbox do
+        if outbox[index] == entry then
+            position = index
+        end
+    end
+    if position == nil then
+        self.viewing = nil
+        return nil
+    end
+    local rows = {}
+    for index = 1, #entry.recipients do
+        local saved = entry.recipients[index]
+        local status = self:savedStatus(entry, index)
+        local rank = type(saved) == "table" and saved.rank or nil
+        rows[index] = {
+            name = type(saved) == "table" and tostring(saved.name) or "?",
+            playerName = type(saved) == "table" and saved.playerName or nil,
+            rankName = rankNames[rank] or (type(rank) == "number" and ("Rank " .. (rank + 1))) or "",
+            status = status,
+            reason = type(saved) == "table" and saved.reason or nil,
+            canSettle = status == Sender.UNCONFIRMED and self:IsOfficer(),
+        }
+    end
+    local first = entry.recipients[1]
+    local state = self:entryState(entry)
+    return {
+        position = position,
+        subject = type(entry.subject) == "string" and entry.subject or "",
+        body = type(entry.body) == "string" and entry.body or "",
+        stateText = GuildMail.STATE_TEXT[state] or state,
+        whenText = ago(self:ask(self.now), entry.at),
+        progressText = entryProgress(self:entryCounts(entry)),
+        preview = type(first) == "table" and {
+            to = tostring(first.name), subject = tostring(first.subject), body = tostring(first.body),
+        } or nil,
+        recipients = rows,
+        canResume = self:canResume(entry),
+        canCancel = self:canCancel(entry),
+        canRemove = self:canRemove(entry),
+        actionText = self.pendingAction and self.pendingAction.text or nil,
+    }
 end
 
 -- Saves the draft as it is now.
@@ -476,12 +940,17 @@ function Mail:Refresh()
 end
 
 function Mail:refresh()
-    if self.view == nil then
-        return
+    if self.view ~= nil then
+        local ok, shown = pcall(self.view.IsShown, self.view)
+        if ok and shown then
+            pcall(self.view.Render, self.view, self:Model())
+        end
     end
-    local ok, shown = pcall(self.view.IsShown, self.view)
-    if ok and shown then
-        pcall(self.view.Render, self.view, self:Model())
+    if self.tab ~= nil then
+        local ok, shown = pcall(self.tab.IsShown, self.tab)
+        if ok and shown then
+            pcall(self.tab.Render, self.tab, self:OutboxModel())
+        end
     end
 end
 
@@ -491,14 +960,18 @@ function Mail:busy()
 end
 
 -- A finished send stays on show until the officer changes something; then
--- the list is worked out afresh. Nothing changes while a send is under
--- way, stopped or not, so continuing it never mails anyone twice.
+-- the list is worked out afresh. Nothing changes while the send on show is
+-- under way, stopped or not, so continuing it never mails anyone twice; a
+-- send set aside (Edit or New in the Guild Mail tab) goes on from its saved
+-- entry.
 function Mail:editable()
-    if self:busy() then
+    if self.batch ~= nil and self:busy() then
         return false
     end
     self.batch = nil
-    self.entry = nil
+    if not self:busy() then
+        self.entry = nil
+    end
     self.confirming = false
     return true
 end
@@ -695,20 +1168,25 @@ end
 -- Why Send can't be pressed now, or nil when it can. `recipients` is the
 -- list, ticked or not.
 function Mail:hint(recipients)
-    if self.sender:IsStopped() then
-        return self.mailboxOpen and GuildMail.HINT_STOPPED or GuildMail.HINT_NO_MAILBOX
-    end
-    if self.sender:IsStopping() then
-        return GuildMail.HINT_STOPPING
-    end
-    if self.sender:IsCapped() then
-        return GuildMail.HINT_CAPPED
-    end
-    if self.sender:IsPaused() then
-        return self.mailboxOpen and GuildMail.HINT_PAUSED or GuildMail.HINT_NO_MAILBOX
-    end
-    if self.sender:IsSending() then
-        return GuildMail.HINT_SENDING
+    if self.batch ~= nil then
+        if self.sender:IsStopped() then
+            return self.mailboxOpen and GuildMail.HINT_STOPPED or GuildMail.HINT_NO_MAILBOX
+        end
+        if self.sender:IsStopping() then
+            return GuildMail.HINT_STOPPING
+        end
+        if self.sender:IsCapped() then
+            return GuildMail.HINT_CAPPED
+        end
+        if self.sender:IsPaused() then
+            return self.mailboxOpen and GuildMail.HINT_PAUSED or GuildMail.HINT_NO_MAILBOX
+        end
+        if self.sender:IsSending() then
+            return GuildMail.HINT_SENDING
+        end
+    elseif self:going() then
+        -- A send set aside in the Guild Mail tab is still going.
+        return GuildMail.HINT_OTHER_SENDING
     end
     if next(self:chosenRanks(self.context())) == nil then
         return GuildMail.HINT_NO_RANKS
@@ -744,7 +1222,7 @@ end
 -- next sends the next mail at once: from a click, the game takes it.
 -- After Stop, Continue sends to the rows still pending.
 function Mail:RequestSend()
-    if self.sender:IsPaused() or self.sender:IsStopped() then
+    if self.batch ~= nil and (self.sender:IsPaused() or self.sender:IsStopped()) then
         return self.mailboxOpen and self.sender:Resume()
     end
     if not self:CanSend() then
@@ -767,6 +1245,11 @@ function Mail:Confirm()
     end
     self.confirming = false
     if not self:CanSend() then
+        self:refresh()
+        return false
+    end
+    -- A send set aside part way is saved; it waits in the outbox.
+    if self:busy() and not self:park() then
         self:refresh()
         return false
     end
@@ -893,8 +1376,10 @@ end
 --                confirmWarning when there are more recipients than the
 --                game's mail limit, else nil
 --   progressText "Sent 3 of 12", or nil before a send
---   sending      whether a send is under way (going, paused or stopped),
---                which locks everything but Send and Stop
+--   sending      whether the send on show is under way (going, paused or
+--                stopped), which locks everything but Send and Stop
+--   entry        the outbox entry on view (View in the Guild Mail tab),
+--                shown read-only instead (see entryModel), or nil
 function Mail:Model()
     local partition = self.context()
     local ranks = self:rankList(partition)
@@ -903,6 +1388,8 @@ function Mail:Model()
     for index = 1, #ranks do
         rankNames[ranks[index].index] = ranks[index].name
     end
+    -- Whether the window shows the send in the sender.
+    local shown = self.batch ~= nil
     local recipients = self.batch or self:Recipients()
     local ticked = self.batch or self:ticked(recipients)
     local rows = {}
@@ -954,13 +1441,13 @@ function Mail:Model()
         moneyText = type(money) == "number" and ("You have " .. self:coins(money)) or nil,
         affordable = cost.affordable,
         canSend = officer and ((hint == nil and self.batch == nil)
-            or ((self.sender:IsPaused() or self.sender:IsStopped()) and self.mailboxOpen)),
-        sendText = (self.sender:IsStopped() and GuildMail.CONTINUE_TEXT)
-            or (self.sender:IsCapped() and GuildMail.RESUME_TEXT)
-            or (self.sender:IsPaused() and GuildMail.SEND_NEXT_TEXT) or GuildMail.SEND_TEXT,
-        stopText = (self.sender:IsStopped() and GuildMail.END_TEXT)
-            or (self.sender:IsSending() and GuildMail.STOP_TEXT) or nil,
-        canStop = self.sender:IsStopped() or (self.sender:IsSending() and not self.sender:IsStopping()),
+            or (shown and (self.sender:IsPaused() or self.sender:IsStopped()) and self.mailboxOpen)),
+        sendText = (shown and self.sender:IsStopped() and GuildMail.CONTINUE_TEXT)
+            or (shown and self.sender:IsCapped() and GuildMail.RESUME_TEXT)
+            or (shown and self.sender:IsPaused() and GuildMail.SEND_NEXT_TEXT) or GuildMail.SEND_TEXT,
+        stopText = (shown and self.sender:IsStopped() and GuildMail.END_TEXT)
+            or (shown and self.sender:IsSending() and GuildMail.STOP_TEXT) or nil,
+        canStop = shown and (self.sender:IsStopped() or (self.sender:IsSending() and not self.sender:IsStopping())),
         hint = hint,
         confirming = self.confirming,
         confirmText = "Send " .. plural(#ticked, "mail", "mails") .. " for " .. self:coins(cost.total) .. " postage?",
@@ -969,6 +1456,7 @@ function Mail:Model()
             to = ticked[1].name, subject = ticked[1].mail.subject, body = ticked[1].mail.body,
         } or nil,
         progressText = self:progressText(),
-        sending = self:busy(),
+        sending = shown and self:busy(),
+        entry = self:entryModel(rankNames),
     }
 end
