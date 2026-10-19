@@ -849,7 +849,7 @@ local function newMail(overrides)
             return world.outbox
         end,
         now = function()
-            return 5000
+            return world.time or 5000
         end,
         view = world.view,
         welcome = addon.GuildWelcome.Create({
@@ -862,8 +862,21 @@ local function newMail(overrides)
             isOfficer = function()
                 return world.officer
             end,
+            -- Ann Bell's add-on is another officer's; Cog Wheel isn't one.
+            senderIsOfficer = function(sender)
+                return sender == "Ann Bell"
+            end,
+            isOwn = function(sender)
+                return sender == "Tool Box"
+            end,
+            keyOf = function(rawName)
+                return string.lower(rawName) .. "-camelot"
+            end,
+            onWelcomed = function(key, main)
+                world.mail:OnWelcomedElsewhere(key, main)
+            end,
             now = function()
-                return 5000
+                return world.time or 5000
             end,
             announce = function(message)
                 world.announced = world.announced or {}
@@ -2558,4 +2571,195 @@ test.test("guild mail window: the Welcome mail page is drawn and its typing pass
     model.welcome = nil
     world.window:Render(model)
     test.assertFalse(world.window.welcomeFrame.shown)
+end)
+
+-- Welcome mails ---------------------------------------------------------------
+
+local WELCOME_DAY = 24 * 60 * 60
+
+-- Welcome mail on since 5000 with "Welcome, {name}!", and Dan New and
+-- Eve New (Initiates) joined at 6000, due a day later, at the mailbox.
+local function welcomesDue()
+    local addon, world = newMail()
+    world.time = 5000
+    world.mail.welcome:Set({ subject = "Welcome, {name}!", body = "Hi {character}.", on = true })
+    world.time = 6000
+    world.partition:RecordCharacter("dan new-camelot", { name = "Dan New", rankIndex = 3 })
+    world.partition:RecordCharacter("eve new-camelot", { name = "Eve New", rankIndex = 3 })
+    world.mail.welcome:OnScan({ "dan new-camelot", "eve new-camelot" })
+    world.time = 6000 + WELCOME_DAY
+    world.mail:OnMailboxOpened()
+    return addon, world
+end
+
+-- The welcome entry in the outbox.
+local function welcomeEntry(world)
+    local index
+    for index = 1, #world.outbox do
+        if world.outbox[index].kind == "welcome" then
+            return world.outbox[index], index
+        end
+    end
+    return nil
+end
+
+test.test("guild mail welcomes: due welcomes collect in a Welcome mails entry, counted on the tab", function()
+    local addon, world = welcomesDue()
+
+    local entry = welcomeEntry(world)
+    test.assertEqual(2, #entry.recipients)
+    test.assertEqual("Dan New", entry.recipients[1].name)
+    test.assertEqual("Welcome, Dan New!", entry.recipients[1].subject)
+    test.assertEqual("Guild Mail (2)", world.mail:TabTitle())
+    local row = world.mail:OutboxModel().entries[1]
+    test.assertEqual("Welcome mails: 2 waiting", row.subject)
+    test.assertTrue(row.welcome)
+    test.assertTrue(row.canResume)
+    -- Collecting again adds nobody twice, and nothing goes without Send.
+    world.mail:CollectWelcomes()
+    test.assertEqual(2, #welcomeEntry(world).recipients)
+    test.assertEqual(0, #world.sent)
+    test.assertEqual(addon.GuildMailSender.STOPPED, entry.state)
+end)
+
+test.test("guild mail welcomes: nobody is due before the day is up", function()
+    local _, world = newMail()
+    world.time = 5000
+    world.mail.welcome:Set({ subject = "Welcome!", on = true })
+    world.time = 6000
+    world.partition:RecordCharacter("dan new-camelot", { name = "Dan New", rankIndex = 3 })
+    world.mail.welcome:OnScan({ "dan new-camelot" })
+    world.time = 6000 + WELCOME_DAY - 1
+    world.mail:OnMailboxOpened()
+
+    test.assertEqual(nil, welcomeEntry(world))
+    test.assertEqual("Guild Mail", world.mail:TabTitle())
+end)
+
+test.test("guild mail welcomes: Send sends each welcome filled in, records it, and tells the others", function()
+    local addon, world = welcomesDue()
+    -- The welcome changed since they were collected: Send uses it as it is now.
+    world.mail.welcome:Set({ subject = "Hello, {name}!" })
+    world.announced = {}
+
+    test.assertTrue(world.mail:SendWelcomes())
+    test.assertEqual("Dan New", world.sent[1].to)
+    test.assertEqual("Hello, Dan New!", world.sent[1].subject)
+    test.assertEqual("Hi Dan New.", world.sent[1].body)
+    world.mail:OnSent()
+    test.assertTrue(world.mail.welcome:IsWelcomed("dan new-camelot"))
+    local message = world.announced[1]
+    test.assertEqual(addon.GuildWelcome.TYPE_WELCOMED, message.t)
+    test.assertEqual("dan new-camelot", message.c)
+    test.assertEqual("dan new-camelot", message.m)
+    test.assertEqual(6000 + WELCOME_DAY, message.a)
+
+    world.mail:OnSent()
+    test.assertEqual("Eve New", world.sent[2].to)
+    test.assertEqual("Guild Mail", world.mail:TabTitle())
+    test.assertEqual(addon.GuildMailSender.DONE, welcomeEntry(world).state)
+    -- Welcomed newcomers aren't due again.
+    world.mail:CollectWelcomes()
+    test.assertEqual(2, #welcomeEntry(world).recipients)
+end)
+
+test.test("guild mail welcomes: another officer's welcome drops that player here; a non-officer's is ignored", function()
+    local addon, world = welcomesDue()
+    local message = { v = addon.GuildWelcome.PROTOCOL, t = addon.GuildWelcome.TYPE_WELCOMED,
+        c = "dan new-camelot", m = "dan new-camelot", a = 7000 }
+
+    test.assertFalse(world.mail.welcome:OnMessage(message, "Cog Wheel"))
+    test.assertEqual("Guild Mail (2)", world.mail:TabTitle())
+    test.assertTrue(world.mail.welcome:OnMessage(message, "Ann Bell"))
+    test.assertEqual("Guild Mail (1)", world.mail:TabTitle())
+    test.assertEqual(addon.GuildMailSender.SKIPPED, welcomeEntry(world).recipients[1].status)
+    test.assertEqual(addon.GuildMail.WELCOMED_ELSEWHERE, welcomeEntry(world).recipients[1].reason)
+    test.assertTrue(world.mail.welcome:IsWelcomed("dan new-camelot"))
+
+    world.mail:SendWelcomes()
+    test.assertEqual("Eve New", world.sent[1].to)
+    test.assertEqual(1, #world.sent)
+end)
+
+test.test("guild mail welcomes: a welcome heard mid-send is skipped before it goes", function()
+    local addon, world = welcomesDue()
+    world.mail:SendWelcomes()
+
+    world.mail.welcome:OnMessage({ v = addon.GuildWelcome.PROTOCOL, t = addon.GuildWelcome.TYPE_WELCOMED,
+        c = "eve new-camelot", a = 7000 }, "Ann Bell")
+    world.mail:OnSent()
+    test.assertEqual(1, #world.sent)
+    test.assertEqual(addon.GuildMailSender.DONE, welcomeEntry(world).state)
+    test.assertEqual(addon.GuildMailSender.SKIPPED, welcomeEntry(world).recipients[2].status)
+end)
+
+test.test("guild mail welcomes: switched off, nothing new is due, and waiting welcomes stay", function()
+    local _, world = welcomesDue()
+    world.mail:SetWelcomeOn(false)
+    world.partition:RecordCharacter("fay new-camelot", { name = "Fay New", rankIndex = 3 })
+    world.mail.welcome:OnScan({ "fay new-camelot" })
+    world.time = world.time + 2 * WELCOME_DAY
+
+    world.mail:CollectWelcomes()
+    test.assertEqual(2, #welcomeEntry(world).recipients)
+    test.assertEqual("Guild Mail (2)", world.mail:TabTitle())
+    test.assertTrue(world.mail:SendWelcomes())
+end)
+
+test.test("guild mail welcomes: waiting welcomes last across a restart, paused at the limit or not", function()
+    local addon, world = welcomesDue()
+    world.mail:SendWelcomes()
+    world.mail:OnError("You have reached the in-game cap of unique mail recipients")
+
+    local _, after = reload(world)
+    after.time = world.time
+    after.mail:Open(true)
+    -- Welcomes wait in the tab; the window opens on the draft.
+    test.assertFalse(after.view.model.sending)
+    test.assertEqual("Guild Mail (2)", after.mail:TabTitle())
+    test.assertEqual("Paused at the mail limit", after.mail:OutboxModel().entries[1].stateText)
+    test.assertTrue(after.mail:SendWelcomes())
+    test.assertEqual("Dan New", after.sent[1].to)
+    test.assertEqual(addon.GuildMailSender.SENDING, welcomeEntry(world).state)
+end)
+
+test.test("guild mail welcomes: cancelling the waiting welcomes means they're not due again", function()
+    local _, world = welcomesDue()
+    local _, position = welcomeEntry(world)
+
+    test.assertTrue(world.mail:RequestCancelEntry(position))
+    test.assertTrue(world.mail:ConfirmAction())
+    test.assertEqual("Guild Mail", world.mail:TabTitle())
+    world.mail:CollectWelcomes()
+    test.assertEqual(nil, world.mail:welcomeEntry())
+    test.assertEqual(0, #world.sent)
+end)
+
+test.test("mailbox tab: the Welcome mails row has Edit, View and Send, and the title shows the count", function()
+    local _, world = newTab()
+    mailbox(world.environment)
+    world.tab:Install(true)
+    world.tab.handlers = nil
+    world.tab.onEditWelcome = function()
+        table.insert(world.calls, { name = "editWelcome", args = {} })
+    end
+    world.tab.onSendWelcomes = function()
+        table.insert(world.calls, { name = "sendWelcomes", args = {} })
+    end
+    world.tab:Render({
+        entries = { { position = 1, welcome = true, subject = "Welcome mails: 3 waiting", progressText = "Sent 0 of 3",
+            state = "stopped", stateText = "Stopped", canResume = true } },
+        canNew = true,
+    })
+    world.tab:SetTitle("Guild Mail (3)")
+
+    local row = world.tab.rows[1]
+    test.assertEqual("Edit", row.buttons[1].text)
+    test.assertEqual("View", row.buttons[2].text)
+    test.assertEqual("Send", row.buttons[3].text)
+    test.assertEqual("Guild Mail (3)", world.tab.tab.text)
+    row.buttons[1].scripts.OnClick(row.buttons[1])
+    row.buttons[3].scripts.OnClick(row.buttons[3])
+    test.assertEqual("editWelcome", world.calls[1].name)
+    test.assertEqual("sendWelcomes", world.calls[2].name)
 end)

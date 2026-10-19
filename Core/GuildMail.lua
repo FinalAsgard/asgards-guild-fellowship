@@ -75,6 +75,10 @@ local GuildMail = {
     HINT_OTHER_SENDING = "Another mail is sending. Send this one once it pauses or is done.",
     -- An outbox entry the officer cancelled (see Outbox).
     CANCELLED = "cancelled",
+    -- The standing outbox entry due welcomes collect in (see Welcome mails).
+    WELCOME_KIND = "welcome",
+    WELCOME_TITLE = "Welcome mails",
+    WELCOMED_ELSEWHERE = "welcomed by another officer",
     -- About how many different characters the game lets one mail in a
     -- while (in game it stopped after 19, then 20); a send to this many or
     -- more is warned that the rest will wait.
@@ -365,6 +369,11 @@ local function unfinished(entry)
         or state == addon.GuildMailSender.STOPPED
 end
 
+-- Whether outbox `entry` is the standing Welcome mails entry.
+local function isWelcome(entry)
+    return type(entry) == "table" and entry.kind == GuildMail.WELCOME_KIND
+end
+
 -- Puts outbox `entry` on show and in the sender, as saved. A mail that was
 -- in flight comes back unconfirmed. Returns false, leaving everything as it
 -- was, for an entry with an unusable recipient.
@@ -409,7 +418,8 @@ function Mail:restoreOutbox()
     self.outboxLoaded = true
     local position
     for position = #outbox, 1, -1 do
-        if unfinished(outbox[position]) and self:load(outbox[position]) then
+        -- Welcome mails wait in the Guild Mail tab for their own Send.
+        if unfinished(outbox[position]) and not isWelcome(outbox[position]) and self:load(outbox[position]) then
             return
         end
     end
@@ -446,9 +456,15 @@ function Mail:persist()
     local index
     for index = 1, #entry.recipients do
         local status, reason = self.sender:Status(index)
-        entry.recipients[index].status = status
-        entry.recipients[index].reason = reason
-        entry.recipients[index].inFlight = index == flight or nil
+        local saved = entry.recipients[index]
+        saved.status = status
+        saved.reason = reason
+        saved.inFlight = index == flight or nil
+        -- A welcome that went is recorded, and the other officers told.
+        if isWelcome(entry) and status == addon.GuildMailSender.SENT and not saved.welcomed and self.welcome ~= nil then
+            saved.welcomed = true
+            pcall(self.welcome.Welcomed, self.welcome, saved.key, self:ask(self.now))
+        end
     end
 end
 
@@ -617,7 +633,7 @@ function Mail:ResumeEntry(position)
         return false
     end
     self.pendingAction = nil
-    if entry ~= self.entry then
+    if entry ~= self.entry or not (self.sender:IsPaused() or self.sender:IsStopped()) then
         if not self:park() or not self:load(entry) then
             self:refresh()
             return false
@@ -709,6 +725,10 @@ function Mail:cancelEntry(entry)
         if status == Sender.PENDING or status == Sender.UNCONFIRMED then
             entry.recipients[index].status = Sender.CANCELLED
             entry.recipients[index].reason = nil
+            -- A cancelled welcome isn't due again.
+            if isWelcome(entry) and self.welcome ~= nil then
+                pcall(self.welcome.Forget, self.welcome, entry.recipients[index].key)
+            end
         end
         entry.recipients[index].inFlight = nil
     end
@@ -841,6 +861,163 @@ function Mail:SetWelcomeOn(on)
     return ok, reason
 end
 
+-- The standing Welcome mails entry: the newest welcome entry not
+-- cancelled, or nil.
+function Mail:welcomeEntry()
+    local outbox = self:outboxList()
+    local position
+    for position = #outbox, 1, -1 do
+        local entry = outbox[position]
+        if isWelcome(entry) and entry.state ~= GuildMail.CANCELLED and type(entry.recipients) == "table" then
+            return entry, position
+        end
+    end
+    return nil
+end
+
+-- A welcome for `key` in `partition`, as the outbox keeps a recipient, with
+-- the welcome mail's text filled in for them now.
+function Mail:welcomeRecipient(key, partition, normalizer)
+    local character = partition:GetCharacter(key)
+    local name = type(character) == "table" and type(character.name) == "string" and character.name or key
+    local mail = addon.GuildMailComposer.Compose(self.welcome:Subject(), self.welcome:Body(),
+        { key = key, name = name }, partition, normalizer)
+    return {
+        key = key,
+        name = name,
+        rank = type(character) == "table" and type(character.rankIndex) == "number" and character.rankIndex or 0,
+        subject = mail.subject,
+        body = mail.body,
+        status = Sender.PENDING,
+    }
+end
+
+-- Adds every newcomer now due a welcome (GuildWelcome) to the Welcome mails
+-- entry, made when first needed. Nothing new is due while welcome mail is
+-- off, and nothing is added while those welcomes are being sent. Returns
+-- how many were added.
+function Mail:CollectWelcomes()
+    local partition, normalizer = self.context()
+    local now = self:ask(self.now)
+    if self.welcome == nil or partition == nil or type(now) ~= "number" or not self:IsOfficer()
+        or not self.welcome:IsOn() or blank(self.welcome:Subject())
+    then
+        return 0
+    end
+    local due = self.welcome:Due(now)
+    if #due == 0 then
+        return 0
+    end
+    local entry = self:welcomeEntry()
+    if entry ~= nil and entry == self.entry then
+        if self:busy() then
+            return 0
+        end
+        -- Done in the sender: it's loaded afresh on Send.
+        self.entry = nil
+    end
+    if entry == nil then
+        entry = {
+            kind = GuildMail.WELCOME_KIND,
+            subject = GuildMail.WELCOME_TITLE,
+            body = "",
+            by = self:ask(self.selfKey),
+            at = now,
+            state = Sender.DONE,
+            recipients = {},
+        }
+        local outbox = self:ask(self.outbox)
+        if type(outbox) ~= "table" then
+            return 0
+        end
+        table.insert(outbox, entry)
+    end
+    local listed = {}
+    local index
+    for index = 1, #entry.recipients do
+        listed[entry.recipients[index].key] = true
+    end
+    local added = 0
+    for index = 1, #due do
+        if not listed[due[index]] then
+            table.insert(entry.recipients, self:welcomeRecipient(due[index], partition, normalizer))
+            added = added + 1
+        end
+    end
+    if added > 0 and entry.state == Sender.DONE then
+        entry.state = Sender.STOPPED
+    end
+    return added
+end
+
+-- How many welcomes wait in the Welcome mails entry.
+function Mail:WelcomesWaiting()
+    local entry = self:welcomeEntry()
+    return entry and self:entryCounts(entry).pending or 0
+end
+
+-- Send on the Welcome mails: each waiting welcome is filled in afresh with
+-- the welcome mail as it is now, and they go out like any other send.
+function Mail:SendWelcomes()
+    local entry, position = self:welcomeEntry()
+    local partition, normalizer = self.context()
+    if entry == nil or partition == nil or not self:canResume(entry) then
+        return false
+    end
+    if entry ~= self.entry or not self:busy() then
+        local index
+        for index = 1, #entry.recipients do
+            if self:savedStatus(entry, index) == Sender.PENDING then
+                local fresh = self:welcomeRecipient(entry.recipients[index].key, partition, normalizer)
+                entry.recipients[index].subject = fresh.subject
+                entry.recipients[index].body = fresh.body
+            end
+        end
+        entry.perMail = self:cost({ entry.recipients[1] }).perMail
+    end
+    return self:ResumeEntry(position)
+end
+
+-- Another officer welcomed `key` (their player's main `main`): they and
+-- anyone else of their player still waiting here are skipped.
+function Mail:OnWelcomedElsewhere(key, main)
+    local entry = self:welcomeEntry()
+    local partition = self.context()
+    if entry == nil then
+        return false
+    end
+    local character = partition and partition:GetCharacter(key)
+    local player = type(character) == "table" and character.player or nil
+    local skipped = false
+    local index
+    for index = 1, #entry.recipients do
+        local saved = entry.recipients[index]
+        local other = partition and partition:GetCharacter(saved.key)
+        local same = saved.key == key or (main ~= nil and saved.key == main)
+            or (player ~= nil and type(other) == "table" and other.player == player)
+        if same and self:savedStatus(entry, index) == Sender.PENDING then
+            if entry == self.entry and self:busy() then
+                skipped = self.sender:Skip(index, GuildMail.WELCOMED_ELSEWHERE) or skipped
+            else
+                saved.status = Sender.SKIPPED
+                saved.reason = GuildMail.WELCOMED_ELSEWHERE
+                skipped = true
+            end
+        end
+    end
+    self:refresh()
+    return skipped
+end
+
+-- The Guild Mail tab's title: with the count of welcomes waiting.
+function Mail:TabTitle()
+    local waiting = self:WelcomesWaiting()
+    if waiting > 0 then
+        return "Guild Mail (" .. waiting .. ")"
+    end
+    return "Guild Mail"
+end
+
 -- The guild's welcome mail changed (here or from another officer).
 function Mail:OnWelcomeChanged()
     self:refresh()
@@ -932,6 +1109,7 @@ end
 --   actionText  the question waiting for Yes or No, or nil
 function Mail:OutboxModel()
     self:restore()
+    self:CollectWelcomes()
     local outbox = self:outboxList()
     local now = self:ask(self.now)
     local entries = {}
@@ -944,9 +1122,14 @@ function Mail:OutboxModel()
             if state == Sender.PAUSED and (entry == self.entry and self.sender:IsCapped() or entry.capped) then
                 stateText = "Paused at the mail limit"
             end
+            local subject = type(entry.subject) == "string" and entry.subject ~= "" and entry.subject or "(no subject)"
+            if isWelcome(entry) then
+                subject = GuildMail.WELCOME_TITLE .. ": " .. self:entryCounts(entry).pending .. " waiting"
+            end
             table.insert(entries, {
                 position = position,
-                subject = type(entry.subject) == "string" and entry.subject ~= "" and entry.subject or "(no subject)",
+                welcome = isWelcome(entry) or nil,
+                subject = subject,
                 whenText = ago(now, entry.at),
                 progressText = entryProgress(self:entryCounts(entry)),
                 state = state,
@@ -1059,6 +1242,9 @@ function Mail:refresh()
         end
     end
     if self.tab ~= nil then
+        if type(self.tab.SetTitle) == "function" then
+            pcall(self.tab.SetTitle, self.tab, self:TabTitle())
+        end
         local ok, shown = pcall(self.tab.IsShown, self.tab)
         if ok and shown then
             pcall(self.tab.Render, self.tab, self:OutboxModel())
@@ -1192,6 +1378,7 @@ end
 function Mail:OnMailboxOpened()
     self.mailboxOpen = true
     self:restoreOutbox()
+    self:CollectWelcomes()
     self:refresh()
 end
 

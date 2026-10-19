@@ -2075,6 +2075,14 @@ if clientProfile.supported then
         onShown = function()
             guildMail:Refresh()
         end,
+        onEditWelcome = function()
+            guildMail:OpenWelcome()
+        end,
+        onSendWelcomes = function()
+            if not guildMail:SendWelcomes() then
+                guildMail:Refresh()
+            end
+        end,
     })
     -- The guild's welcome mail: officer settings shared over guild sync.
     guildWelcome = addon.GuildWelcome.Create({
@@ -2119,6 +2127,10 @@ if clientProfile.supported then
         end,
         onChange = function()
             guildMail:OnWelcomeChanged()
+        end,
+        -- Another officer sent someone's welcome: it's dropped here.
+        onWelcomed = function(key, main)
+            guildMail:OnWelcomedElsewhere(key, main)
         end,
     })
     guildMail = addon.GuildMail.Create({

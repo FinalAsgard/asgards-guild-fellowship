@@ -32,12 +32,18 @@ local _, addon = ...
 --   announce(message) -> sends a message to the guild's add-on users
 --   random(low, high), after(seconds, callback)   for answering an ask
 --   onChange()    called when the welcome mail changed
+--   onWelcomed(key, main)  called when another officer welcomed `key`
+--                 (their player's main `main`)
 local GuildWelcome = {
     PROTOCOL = 1,
     -- { v, t = TYPE_CONFIG, s = { [setting] = { value, at, by } } }
     TYPE_CONFIG = "welcome-config",
     -- { v, t = TYPE_ASK_CONFIG }: who has the welcome mail?
     TYPE_ASK_CONFIG = "ask-welcome-config",
+    -- { v, t = TYPE_WELCOMED, c = the welcomed character's key, m = their
+    -- player's main's key, a = when (wall-clock seconds) }: the sender
+    -- welcomed them, so nobody else does.
+    TYPE_WELCOMED = "welcomed",
     -- An officer's add-on answers an ask after a random wait in this range,
     -- so one answer usually covers everyone.
     ANSWER_DELAY_MIN = 1,
@@ -69,6 +75,7 @@ GuildWelcome.SETTINGS = {
 GuildWelcome.TYPES = {
     [GuildWelcome.TYPE_CONFIG] = "OnConfig",
     [GuildWelcome.TYPE_ASK_CONFIG] = "OnAskConfig",
+    [GuildWelcome.TYPE_WELCOMED] = "OnWelcomed",
 }
 
 local Welcome = {}
@@ -106,6 +113,7 @@ function GuildWelcome.Create(options)
             return false
         end),
         onChange = option("onChange", function() end),
+        onWelcomed = option("onWelcomed", function() end),
         asked = false,
         answering = false,
     }, Welcome)
@@ -400,8 +408,9 @@ function Welcome:Due(now)
             end
         else
             -- The main when it's a noted newcomer, else the first seen.
-            local main = mainOf(partition, keys[1])
-            local target = ledger.seen[main] ~= nil and main or nil
+            local record = partition:GetPlayer(player)
+            local main = record and record.main or nil
+            local target = main ~= nil and ledger.seen[main] ~= nil and main or nil
             if target == nil then
                 table.sort(keys, function(a, b)
                     if ledger.seen[a] ~= ledger.seen[b] then
@@ -440,4 +449,45 @@ end
 function Welcome:IsWelcomed(key)
     local ledger = self:ledger()
     return ledger ~= nil and ledger.welcomed[key] ~= nil
+end
+
+-- This add-on welcomed `key` at `at`: recorded, and the guild's add-on
+-- users are told so they don't welcome them too.
+function Welcome:Welcomed(key, at)
+    if not self:MarkWelcomed(key, at, ask(self.selfKey)) then
+        return false
+    end
+    local ledger = self:ledger()
+    pcall(self.announce, {
+        v = GuildWelcome.PROTOCOL, t = GuildWelcome.TYPE_WELCOMED, c = key, m = ledger.welcomed[key].main, a = at,
+    })
+    return true
+end
+
+-- Another officer's "welcomed": recorded, and Guild Mail drops them (and
+-- their player) from its own Welcome mails. Ignored from a non-officer.
+-- Returns true when recorded.
+function Welcome:OnWelcomed(message, sender)
+    if type(message) ~= "table" or message.v ~= GuildWelcome.PROTOCOL or message.t ~= GuildWelcome.TYPE_WELCOMED
+        or type(message.c) ~= "string" or message.c == "" or type(message.a) ~= "number"
+        or not self:fromOthers(sender) or ask(self.senderIsOfficer, sender) ~= true
+    then
+        return false
+    end
+    if not self:MarkWelcomed(message.c, message.a, ask(self.keyOf, sender)) then
+        return false
+    end
+    local main = type(message.m) == "string" and message.m or nil
+    pcall(self.onWelcomed, message.c, main)
+    return true
+end
+
+-- Forgets the newcomer `key` (their welcome was cancelled): not due again.
+function Welcome:Forget(key)
+    local ledger = self:ledger()
+    if ledger == nil or type(key) ~= "string" then
+        return false
+    end
+    ledger.seen[key] = nil
+    return true
 end

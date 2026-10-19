@@ -252,6 +252,32 @@ function Sender:Reset()
     return true
 end
 
+-- Takes pending mail `index` out of the send, as skipped with `reason`
+-- (someone else already sent it). Returns false for a mail that isn't
+-- pending, or is waiting for the game's answer.
+function Sender:Skip(index, reason)
+    if self.statuses[index] ~= GuildMailSender.PENDING or (self.inFlight and self.current == index) then
+        return false
+    end
+    self.statuses[index] = GuildMailSender.SKIPPED
+    self.reasons[index] = reason
+    local position
+    for position = #self.queue, 1, -1 do
+        if self.queue[position] == index and (self.position == nil or position >= self.position) then
+            table.remove(self.queue, position)
+        end
+    end
+    if self.position ~= nil then
+        if self.position > #self.queue then
+            self:finishAll()
+            return true
+        end
+        self.current = self.queue[self.position]
+    end
+    self:changed()
+    return true
+end
+
 -- The mail waiting for the game's answer, or nil.
 function Sender:InFlight()
     if self.inFlight then

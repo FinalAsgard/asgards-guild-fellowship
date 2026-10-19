@@ -6,7 +6,9 @@ local _, addon = ...
 -- state and View, Resume, Cancel and Remove. New starts a blank mail. A
 -- question (cancel, remove, discard the draft) waits at the bottom for Yes
 -- or No. Edit, New and View open the Guild Mail window, where the mail is
--- managed.
+-- managed. The Welcome mails row (due welcomes, see GuildWelcome) has Edit
+-- (the welcome mail's settings), View and Send, and the tab's title counts
+-- the welcomes waiting: "Guild Mail (3)".
 --
 -- The tab copies the Send Mail tab's template and spacing; clicking it
 -- hides the Inbox and Send Mail pages and shows this one over the inbox's
@@ -35,6 +37,7 @@ Tab.__index = Tab
 --   onCancel(position), onRemove(position)   a row's buttons; `position`
 --                is the entry's place in the outbox
 --   onConfirm(), onDismiss()   Yes and No on the question
+--   onEditWelcome(), onSendWelcomes()   the Welcome mails row's Edit and Send
 --   onShown()    the page was shown (draw it)
 function MailboxTab.Create(client, handlers)
     handlers = handlers or {}
@@ -52,6 +55,8 @@ function MailboxTab.Create(client, handlers)
         onConfirm = handler("onConfirm"),
         onDismiss = handler("onDismiss"),
         onShown = handler("onShown"),
+        onEditWelcome = handler("onEditWelcome"),
+        onSendWelcomes = handler("onSendWelcomes"),
         rows = {},
     }, Tab)
 end
@@ -303,6 +308,18 @@ function Tab:deselect()
 end
 
 -- Whether its page is up: selected while the mailbox is open.
+-- The tab's title, e.g. "Guild Mail (3)".
+function Tab:SetTitle(text)
+    if self.tab == nil or self.title == text then
+        return
+    end
+    self.title = text
+    self.tab:SetText(text)
+    if type(self.environment.PanelTemplates_TabResize) == "function" then
+        pcall(self.environment.PanelTemplates_TabResize, self.tab, 0)
+    end
+end
+
 function Tab:IsShown()
     if not self.selected or self.page == nil then
         return false
@@ -336,7 +353,14 @@ function Tab:Render(model)
                 self.onView(position)
             end },
         }
-        if entry.canRemove then
+        if entry.welcome then
+            table.insert(buttons, 1, { text = "Edit", action = function()
+                self.onEditWelcome()
+            end })
+            table.insert(buttons, { text = "Send", enabled = entry.canResume, action = function()
+                self.onSendWelcomes()
+            end })
+        elseif entry.canRemove then
             table.insert(buttons, { text = "Remove", action = function()
                 self.onRemove(position)
             end })
