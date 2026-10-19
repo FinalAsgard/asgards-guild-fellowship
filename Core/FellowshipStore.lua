@@ -868,6 +868,23 @@ function Store:SetGuildMailDraft(draft)
     return true
 end
 
+-- Guild Mail's outbox: the list of sends, oldest first, shared by every
+-- character on the account, created on first use. Guild Mail keeps each
+-- entry up to date in place (see GuildMail). Nil when an unusable value is
+-- stored there; it is then left alone.
+function Store:GuildMailOutbox()
+    if type(self.database) ~= "table" then
+        return nil
+    end
+    if self.database.guildMailOutbox == nil then
+        self.database.guildMailOutbox = {}
+    end
+    if type(self.database.guildMailOutbox) ~= "table" then
+        return nil
+    end
+    return self.database.guildMailOutbox
+end
+
 -- The user's own ad record (see RecruitStats), shared by every character
 -- on the account and created on first use. Nil when an unusable value is
 -- stored there; it is then left alone.

@@ -16,6 +16,10 @@ local _, addon = ...
 -- from a click. After one pause, every later mail also waits for a click,
 -- since the game would likely block again.
 --
+-- Restore picks up a send saved before a reload: the pending mails wait for
+-- Resume. A mail that was in flight comes back unconfirmed and is passed
+-- over until Settle sends it again (pending once more) or skips it.
+--
 -- Stop halts sending: at once when nothing is in flight, else as soon as
 -- the game answers the mail in flight. Resume then carries on with the
 -- mails still pending, so nobody is mailed twice; End gives up on them.
@@ -47,6 +51,11 @@ local GuildMailSender = {
     PENDING = "pending",
     SENT = "sent",
     FAILED = "failed",
+    -- A restored mail that was waiting for an answer when the game closed:
+    -- nobody knows whether it went, so it's never sent again on its own.
+    UNCONFIRMED = "unconfirmed",
+    -- An unconfirmed mail the officer chose not to send again.
+    SKIPPED = "skipped",
     REFUSED = "the game didn't take the mail",
     NO_RESPONSE = "no response",
     NO_RESPONSE_RETRY = "no response, will try again at the end",
@@ -145,6 +154,86 @@ function Sender:Start(mails)
     self.capped = false
     self:sendCurrent()
     return true
+end
+
+-- Picks up a send saved before a reload: `mails` as given to Start, with
+-- each one's status and reason. Pending mails wait for Resume (a pause
+-- when `capped`, else a stop); unconfirmed ones wait to be settled.
+-- Returns false while a send is under way or with nothing to restore.
+function Sender:Restore(mails, statuses, reasons, capped)
+    if self:IsSending() or type(mails) ~= "table" or #mails == 0 then
+        return false
+    end
+    self.attempt = self.attempt + 1
+    self.mails = mails
+    self.statuses, self.reasons, self.queue, self.retried = {}, {}, {}, {}
+    local index
+    for index = 1, #mails do
+        local status = type(statuses) == "table" and statuses[index] or nil
+        if status ~= GuildMailSender.SENT and status ~= GuildMailSender.FAILED
+            and status ~= GuildMailSender.UNCONFIRMED and status ~= GuildMailSender.SKIPPED
+        then
+            status = GuildMailSender.PENDING
+        end
+        self.statuses[index] = status
+        self.reasons[index] = type(reasons) == "table" and type(reasons[index]) == "string" and reasons[index] or nil
+        if status == GuildMailSender.PENDING then
+            table.insert(self.queue, index)
+        end
+    end
+    self.inFlight = false
+    self.fresh = false
+    self.lastFailed = nil
+    self.manual = false
+    self.stopping = false
+    self.capped = false
+    if #self.queue == 0 then
+        self.current = nil
+        self.position = nil
+        self.state = GuildMailSender.DONE
+    else
+        self.position = 1
+        self.current = self.queue[1]
+        self.capped = capped == true
+        self.state = self.capped and GuildMailSender.PAUSED or GuildMailSender.STOPPED
+    end
+    self:changed()
+    return true
+end
+
+-- Settles unconfirmed mail `index`: `send` makes it pending again, to go
+-- with the rest on Resume (a finished send is stopped again for it); else
+-- it's skipped. Returns false when that mail isn't unconfirmed.
+function Sender:Settle(index, send)
+    if self.statuses[index] ~= GuildMailSender.UNCONFIRMED then
+        return false
+    end
+    if not send then
+        self.statuses[index] = GuildMailSender.SKIPPED
+        self:changed()
+        return true
+    end
+    self.statuses[index] = GuildMailSender.PENDING
+    self.reasons[index] = nil
+    if self.position == nil then
+        self.queue = { index }
+        self.position = 1
+        self.current = index
+        self.stopping = false
+        self.state = GuildMailSender.STOPPED
+    else
+        table.insert(self.queue, index)
+    end
+    self:changed()
+    return true
+end
+
+-- The mail waiting for the game's answer, or nil.
+function Sender:InFlight()
+    if self.inFlight then
+        return self.current
+    end
+    return nil
 end
 
 function Sender:changed()
@@ -417,22 +506,23 @@ function Sender:Resume()
     return true
 end
 
--- { sent, failed, total, state }.
+-- { sent, failed, unconfirmed, skipped, total, state }.
 function Sender:Progress()
-    local sent, failed = 0, 0
+    local counts = { sent = 0, failed = 0, unconfirmed = 0, skipped = 0 }
     local index
     for index = 1, #self.mails do
-        if self.statuses[index] == GuildMailSender.SENT then
-            sent = sent + 1
-        elseif self.statuses[index] == GuildMailSender.FAILED then
-            failed = failed + 1
+        local status = self.statuses[index]
+        if counts[status] ~= nil then
+            counts[status] = counts[status] + 1
         end
     end
-    return { sent = sent, failed = failed, total = #self.mails, state = self.state }
+    counts.total = #self.mails
+    counts.state = self.state
+    return counts
 end
 
--- The status of mail `index` ("pending", "sent" or "failed") and, for a
--- failed one, why.
+-- The status of mail `index` ("pending", "sent", "failed", "unconfirmed"
+-- or "skipped") and, for a failed one, why.
 function Sender:Status(index)
     return self.statuses[index], self.reasons[index]
 end

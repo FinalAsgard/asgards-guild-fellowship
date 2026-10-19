@@ -44,6 +44,8 @@ local GuildMailWindow = {
         pending = "",
         sent = " |cff40ff40sent|r",
         failed = " |cffff4040failed|r",
+        unconfirmed = " |cffffd100unconfirmed|r",
+        skipped = " |cff999999skipped|r",
     },
 }
 addon.GuildMailWindow = GuildMailWindow

@@ -415,6 +415,20 @@ test.test("guild mail: an unusable saved draft is left alone", function()
     test.assertEqual("broken", database.guildMail)
 end)
 
+test.test("guild mail: the outbox is saved account-wide, made on first use", function()
+    local database = foundationRoot()
+    local store = newStore(database)
+
+    local outbox = store:GuildMailOutbox()
+    test.assertEqual(0, #outbox)
+    table.insert(outbox, { subject = "Hi" })
+    test.assertEqual("Hi", newStore(database):GuildMailOutbox()[1].subject)
+
+    database.guildMailOutbox = "broken"
+    test.assertEqual(nil, newStore(database):GuildMailOutbox())
+    test.assertEqual("broken", database.guildMailOutbox)
+end)
+
 test.test("guild recruit: unusable saved recruit state is left alone", function()
     local database = foundationRoot()
     database.recruit = "broken"

@@ -626,6 +626,72 @@ test.test("guild mail sender: Stop while capped stays stopped, and Continue send
     test.assertEqual("Ann Bell,Ann Bell", table.concat(world.sent, ","))
 end)
 
+test.test("guild mail sender: a restored send waits for Resume, then sends only the pending mails", function()
+    local addon, world = newSender()
+    local S = addon.GuildMailSender
+
+    test.assertTrue(world.sender:Restore(MAILS, { S.SENT, S.PENDING, S.FAILED }, { nil, nil, "Mailbox full" }))
+    test.assertTrue(world.sender:IsStopped())
+    test.assertEqual(0, #world.sent)
+    local _, reason = world.sender:Status(3)
+    test.assertEqual("Mailbox full", reason)
+
+    world.sender:Resume()
+    world.sender:OnSent()
+    test.assertEqual("Gus Reed", table.concat(world.sent, ","))
+    test.assertEqual(S.DONE, world.sender:Progress().state)
+    test.assertEqual(2, world.sender:Progress().sent)
+end)
+
+test.test("guild mail sender: a restored cap pause is still a pause", function()
+    local addon, world = newSender()
+    local S = addon.GuildMailSender
+    world.sender:Restore(MAILS, { S.SENT, S.PENDING, S.PENDING }, {}, true)
+
+    test.assertTrue(world.sender:IsPaused())
+    test.assertTrue(world.sender:IsCapped())
+    world.sender:Resume()
+    test.assertEqual("Gus Reed", table.concat(world.sent, ","))
+end)
+
+test.test("guild mail sender: an unconfirmed mail is passed over until it's settled", function()
+    local addon, world = newSender()
+    local S = addon.GuildMailSender
+    world.sender:Restore(MAILS, { S.UNCONFIRMED, S.PENDING, S.UNCONFIRMED }, {})
+
+    world.sender:Resume()
+    world.sender:OnSent()
+    test.assertEqual("Gus Reed", table.concat(world.sent, ","))
+    test.assertEqual(S.DONE, world.sender:Progress().state)
+    test.assertEqual(2, world.sender:Progress().unconfirmed)
+
+    -- Send makes it pending again, and a finished send stops for it.
+    test.assertTrue(world.sender:Settle(1, true))
+    test.assertTrue(world.sender:IsStopped())
+    test.assertTrue(world.sender:Settle(3, false))
+    test.assertEqual(S.SKIPPED, (world.sender:Status(3)))
+    test.assertFalse(world.sender:Settle(2, true))
+
+    world.sender:Resume()
+    world.sender:OnSent()
+    test.assertEqual("Gus Reed,Ann Bell", table.concat(world.sent, ","))
+    local progress = world.sender:Progress()
+    test.assertEqual(2, progress.sent)
+    test.assertEqual(1, progress.skipped)
+    test.assertEqual(0, progress.unconfirmed)
+end)
+
+test.test("guild mail sender: with nothing pending, a restored send is done", function()
+    local addon, world = newSender()
+    local S = addon.GuildMailSender
+
+    test.assertTrue(world.sender:Restore(MAILS, { S.SENT, S.FAILED, S.SENT }, {}))
+    test.assertEqual(S.DONE, world.sender:Progress().state)
+    test.assertFalse(world.sender:Resume())
+    world.sender:Start(MAILS)
+    test.assertFalse(world.sender:Restore(MAILS, {}, {}))
+end)
+
 -- Guild Mail ----------------------------------------------------------------
 
 local RANK_NAMES = { "Guild Master", "Officer", "Member", "Initiate" }
@@ -748,7 +814,7 @@ local function newMail(overrides)
             return partition
         end,
         selfKey = function()
-            return "tool box-camelot"
+            return overrides.selfKey or "tool box-camelot"
         end,
         isOfficer = function()
             return world.officer
@@ -776,9 +842,16 @@ local function newMail(overrides)
         saveDraft = function(draft)
             world.saved = draft
         end,
+        outbox = function()
+            return world.outbox
+        end,
+        now = function()
+            return 5000
+        end,
         view = world.view,
     })
     world.saved = overrides.saved
+    world.outbox = overrides.outbox or {}
     return addon, world
 end
 
@@ -1873,4 +1946,159 @@ test.test("guild mail sender: an error while SendMail runs fails that mail and m
     test.assertEqual("Ann Bell,Gus Reed", table.concat(world.sent, ","))
     test.assertTrue(world.sender:OnSent())
     test.assertEqual(addon.GuildMailSender.SENT, (world.sender:Status(2)))
+end)
+
+-- Outbox --------------------------------------------------------------------
+
+-- Starts a send of the two Members' mails and answers the first.
+local function sendOne(world)
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    world.mail:OnSent()
+end
+
+-- The same account after a reload: a new Guild Mail on the saved outbox.
+local function reload(world, overrides)
+    overrides = overrides or {}
+    overrides.outbox = world.outbox
+    local addon, after = newMail(overrides)
+    after.mail:OnMailboxOpened()
+    return addon, after
+end
+
+test.test("guild mail outbox: Send saves the send, and each answer as it comes", function()
+    local addon, world = newMail()
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+
+    test.assertEqual(1, #world.outbox)
+    local entry = world.outbox[1]
+    test.assertEqual("Launch night", entry.subject)
+    test.assertEqual("Join us on Discord!", entry.body)
+    test.assertEqual("tool box-camelot", entry.by)
+    test.assertEqual(5000, entry.at)
+    test.assertEqual(30, entry.perMail)
+    test.assertEqual(addon.GuildMailSender.SENDING, entry.state)
+    test.assertEqual("Ann Bell", entry.recipients[1].name)
+    test.assertEqual("Join us on Discord!", entry.recipients[1].body)
+    test.assertTrue(entry.recipients[1].inFlight)
+
+    world.mail:OnSent()
+    test.assertEqual(addon.GuildMailSender.SENT, entry.recipients[1].status)
+    test.assertEqual(nil, entry.recipients[1].inFlight)
+    test.assertTrue(entry.recipients[2].inFlight)
+    world.mail:OnFailed("Mailbox full")
+    test.assertEqual(addon.GuildMailSender.FAILED, entry.recipients[2].status)
+    test.assertEqual("Mailbox full", entry.recipients[2].reason)
+    test.assertEqual(addon.GuildMailSender.DONE, entry.state)
+end)
+
+test.test("guild mail outbox: a saved send can't be changed, and a new send gets its own entry", function()
+    local _, world = newMail()
+    sendOne(world)
+    world.mail:OnSent()
+
+    test.assertTrue(world.mail:SetSubject("Raid night"))
+    test.assertEqual("Launch night", world.outbox[1].subject)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    test.assertEqual(2, #world.outbox)
+    test.assertEqual("Raid night", world.outbox[2].subject)
+    test.assertEqual("Launch night", world.outbox[1].subject)
+end)
+
+test.test("guild mail outbox: after a reload the send comes back and continues with nobody mailed twice", function()
+    local _, world = newMail()
+    sendOne(world)
+    -- The game closes after the first answer, between mails.
+    world.outbox[1].recipients[2].inFlight = nil
+
+    local addon, after = reload(world)
+    after.mail:Open(true)
+    local model = after.view.model
+    test.assertEqual(addon.GuildMailSender.SENT, model.recipients[1].status)
+    test.assertEqual(addon.GuildMailSender.PENDING, model.recipients[2].status)
+    test.assertEqual(addon.GuildMail.CONTINUE_TEXT, model.sendText)
+    test.assertEqual(0, #after.sent)
+
+    test.assertTrue(after.mail:RequestSend())
+    after.mail:OnSent()
+    test.assertEqual(1, #after.sent)
+    test.assertEqual("Gus Reed", after.sent[1].to)
+    test.assertEqual("Join us on Discord!", after.sent[1].body)
+    test.assertEqual(addon.GuildMailSender.DONE, world.outbox[1].state)
+end)
+
+test.test("guild mail outbox: another character on the account can resume it", function()
+    local _, world = newMail()
+    sendOne(world)
+
+    local addon, after = reload(world, { selfKey = "hammer smith-camelot" })
+    after.mail:Open(true)
+    test.assertEqual(addon.GuildMailSender.UNCONFIRMED, after.view.model.recipients[2].status)
+    test.assertEqual("tool box-camelot", world.outbox[1].by)
+end)
+
+test.test("guild mail outbox: a mail in flight when the game closed is unconfirmed until settled", function()
+    local _, world = newMail()
+    sendOne(world)
+    -- Gus Reed's mail was waiting for the game's answer.
+    test.assertTrue(world.outbox[1].recipients[2].inFlight)
+
+    local addon, after = reload(world)
+    after.mail:Open(true)
+    test.assertEqual(addon.GuildMailSender.UNCONFIRMED, after.view.model.recipients[2].status)
+    test.assertEqual("Sent 1 · Failed 0, 1 unconfirmed · Postage spent: 30c", after.view.model.progressText)
+    test.assertFalse(after.mail:RequestSend())
+    test.assertEqual(0, #after.sent)
+
+    -- Send makes it pending again, and Continue sends it.
+    test.assertTrue(after.mail:Settle(2, true))
+    test.assertEqual(addon.GuildMailSender.PENDING, world.outbox[1].recipients[2].status)
+    test.assertTrue(after.mail:RequestSend())
+    test.assertEqual("Gus Reed", after.sent[1].to)
+end)
+
+test.test("guild mail outbox: skipping an unconfirmed mail sends nothing", function()
+    local _, world = newMail()
+    sendOne(world)
+
+    local addon, after = reload(world)
+    after.mail:Open(true)
+    test.assertFalse(after.mail:Settle(1, false))
+    test.assertTrue(after.mail:Settle(2, false))
+    test.assertEqual(addon.GuildMailSender.SKIPPED, world.outbox[1].recipients[2].status)
+    test.assertFalse(after.mail:RequestSend())
+    test.assertEqual(0, #after.sent)
+end)
+
+test.test("guild mail outbox: a cap pause survives a restart as a pause", function()
+    local _, world = newMail()
+    readyToSend(world)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    world.mail:OnError("You have reached the in-game cap of unique mail recipients")
+    test.assertTrue(world.outbox[1].capped)
+
+    local addon, after = reload(world)
+    after.mail:Open(true)
+    test.assertEqual(addon.GuildMail.HINT_CAPPED, after.view.model.hint)
+    test.assertEqual(addon.GuildMail.RESUME_TEXT, after.view.model.sendText)
+    after.mail:RequestSend()
+    test.assertEqual("Ann Bell", after.sent[1].to)
+end)
+
+test.test("guild mail outbox: finished and unusable entries aren't put back", function()
+    local _, world = newMail()
+    sendOne(world)
+    world.mail:OnSent()
+    table.insert(world.outbox, { state = "stopped", recipients = { { name = "Ann Bell" } } })
+    table.insert(world.outbox, "broken")
+
+    local _, after = reload(world)
+    after.mail:Open(true)
+    test.assertFalse(after.view.model.sending)
+    test.assertEqual(nil, after.view.model.progressText)
 end)

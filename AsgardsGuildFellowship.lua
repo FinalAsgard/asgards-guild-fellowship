@@ -2046,6 +2046,15 @@ if clientProfile.supported then
                 store:SetGuildMailDraft(draft)
             end
         end,
+        -- Sends are saved as they go, so they survive a reload and can be
+        -- resumed from any character on the account.
+        outbox = function()
+            local store = rosterController:Store()
+            return store and store:GuildMailOutbox() or nil
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
         view = guildMailWindow,
     })
     router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()

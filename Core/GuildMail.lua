@@ -45,6 +45,20 @@ local _, addon = ...
 --               IsShown()
 --   capMessage  optional: the client's own text for its cap on unique
 --               mail recipients (GuildMailSender)
+--   outbox      function() -> the saved outbox list (account-wide), or nil
+--   now         function() -> wall-clock seconds for saved records, or nil
+--
+-- Outbox: Send saves the send as an entry at the end of the outbox list,
+-- locked from then on, and keeps it up to date as each mail is answered:
+--   { subject, body, by, at, perMail, state, capped, recipients }
+-- `subject` and `body` as written, `by` the sending character's key, `at`
+-- when it was sent, `perMail` the postage per mail, `state` the sender's
+-- ("sending", "paused", "stopped" or "done"), `capped` true while paused at
+-- the game's mail limit; each recipient is { key, name, playerName, rank,
+-- subject, body, status, reason, inFlight }, with its filled-in mail and
+-- inFlight true while waiting for the game's answer. After a reload the
+-- newest unfinished entry comes back on any of the account's characters,
+-- and a mail that was in flight comes back unconfirmed (GuildMailSender).
 local GuildMail = {
     OFFICERS_ONLY = "Guild Mail is for officers.",
     NO_GUILD = "Guild Mail needs a guild.",
@@ -179,6 +193,15 @@ function GuildMail.Create(options)
         end,
         saveDraft = options.saveDraft or function() end,
         draftLoaded = false,
+        outbox = options.outbox or function()
+            return nil
+        end,
+        now = options.now or function()
+            return nil
+        end,
+        outboxLoaded = false,
+        -- The outbox entry of the send on show, or nil.
+        entry = nil,
         view = options.view,
         ranks = {},
         mode = addon.GuildMailAudience.MAINS,
@@ -201,6 +224,7 @@ function GuildMail.Create(options)
         after = options.after,
         capMessage = options.capMessage,
         onChange = function()
+            mail:persist()
             mail:refresh()
         end,
     })
@@ -253,6 +277,7 @@ function Mail:Open(fromMailbox)
         return false, GuildMail.NO_GUILD
     end
     self:restore()
+    self:restoreOutbox()
     if self.view ~= nil then
         pcall(self.view.Show, self.view, fromMailbox == true)
     end
@@ -298,6 +323,131 @@ function Mail:restore()
     if type(draft.activeOnly) == "boolean" then
         self.activeOnly = draft.activeOnly
     end
+end
+
+-- A saved recipient as the send needs it, or nil when it's unusable.
+local function savedRecipient(saved)
+    if type(saved) ~= "table" or type(saved.name) ~= "string" or saved.name == ""
+        or type(saved.subject) ~= "string" or type(saved.body) ~= "string"
+        or type(saved.rank) ~= "number"
+    then
+        return nil
+    end
+    return {
+        key = type(saved.key) == "string" and saved.key or saved.name,
+        name = saved.name,
+        playerName = type(saved.playerName) == "string" and saved.playerName or nil,
+        rank = saved.rank,
+        mail = { subject = saved.subject, body = saved.body },
+    }
+end
+
+-- Puts back the newest unfinished outbox entry, once, unless a send is
+-- already on show. An entry with an unusable recipient is left alone.
+function Mail:restoreOutbox()
+    if self.outboxLoaded or self.batch ~= nil or self:busy() then
+        return
+    end
+    -- Tried again later when the saved data isn't there yet.
+    local outbox = self:ask(self.outbox)
+    if type(outbox) ~= "table" then
+        return
+    end
+    self.outboxLoaded = true
+    local position
+    for position = #outbox, 1, -1 do
+        local entry = outbox[position]
+        if type(entry) == "table" and entry.state ~= addon.GuildMailSender.DONE
+            and type(entry.recipients) == "table" and #entry.recipients > 0
+        then
+            local recipients, mails, statuses, reasons = {}, {}, {}, {}
+            local index
+            for index = 1, #entry.recipients do
+                local saved = entry.recipients[index]
+                local recipient = savedRecipient(saved)
+                if recipient == nil then
+                    recipients = nil
+                    break
+                end
+                recipients[index] = recipient
+                mails[index] = { to = recipient.name, subject = recipient.mail.subject, body = recipient.mail.body }
+                statuses[index] = saved.status
+                reasons[index] = saved.reason
+                -- Nobody knows whether a mail in flight when the game
+                -- closed went.
+                if saved.inFlight and (saved.status == nil or saved.status == addon.GuildMailSender.PENDING) then
+                    statuses[index] = addon.GuildMailSender.UNCONFIRMED
+                end
+            end
+            if recipients ~= nil then
+                self.entry = entry
+                self.batch = recipients
+                self.batchPerMail = type(entry.perMail) == "number" and entry.perMail or nil
+                self.sender:Restore(mails, statuses, reasons, entry.capped == true)
+                return
+            end
+        end
+    end
+end
+
+-- Brings the outbox entry on show up to date with the send.
+function Mail:persist()
+    local entry = self.entry
+    if entry == nil then
+        return
+    end
+    entry.state = self.sender:Progress().state
+    entry.capped = self.sender:IsCapped() or nil
+    local flight = self.sender:InFlight()
+    local index
+    for index = 1, #entry.recipients do
+        local status, reason = self.sender:Status(index)
+        entry.recipients[index].status = status
+        entry.recipients[index].reason = reason
+        entry.recipients[index].inFlight = index == flight or nil
+    end
+end
+
+-- Saves a new send at the end of the outbox and puts it on show.
+function Mail:record(recipients, perMail)
+    local saved = {}
+    local index
+    for index = 1, #recipients do
+        local recipient = recipients[index]
+        saved[index] = {
+            key = recipient.key,
+            name = recipient.name,
+            playerName = recipient.playerName,
+            rank = recipient.rank,
+            subject = recipient.mail.subject,
+            body = recipient.mail.body,
+            status = addon.GuildMailSender.PENDING,
+        }
+    end
+    local entry = {
+        subject = self.subject,
+        body = self.body,
+        by = self:ask(self.selfKey),
+        at = self:ask(self.now),
+        perMail = perMail,
+        state = addon.GuildMailSender.SENDING,
+        recipients = saved,
+    }
+    local outbox = self:ask(self.outbox)
+    if type(outbox) == "table" then
+        table.insert(outbox, entry)
+    end
+    self.entry = entry
+end
+
+-- Settles the unconfirmed mail on row `index` of the send on show: `send`
+-- makes it pending again, to go on Resume; else it's skipped. Returns false
+-- when that row isn't unconfirmed.
+function Mail:Settle(index, send)
+    if self.batch == nil or not self:IsOfficer() then
+        return false
+    end
+    return self.sender:Settle(index, send == true)
 end
 
 -- Saves the draft as it is now.
@@ -348,6 +498,7 @@ function Mail:editable()
         return false
     end
     self.batch = nil
+    self.entry = nil
     self.confirming = false
     return true
 end
@@ -455,6 +606,7 @@ end
 
 function Mail:OnMailboxOpened()
     self.mailboxOpen = true
+    self:restoreOutbox()
     self:refresh()
 end
 
@@ -627,6 +779,7 @@ function Mail:Confirm()
     end
     self.batch = recipients
     self.batchPerMail = self:cost(recipients).perMail
+    self:record(recipients, self.batchPerMail)
     return self.sender:Start(mails)
 end
 
@@ -668,14 +821,22 @@ function Mail:progressText()
     end
     local progress = self.sender:Progress()
     local postage = " · Postage spent: " .. self:coins(progress.sent * (self.batchPerMail or 0))
+    -- Unconfirmed and skipped mails are only mentioned when there are any.
+    local extra = ""
+    if progress.unconfirmed > 0 then
+        extra = extra .. ", " .. progress.unconfirmed .. " unconfirmed"
+    end
+    if progress.skipped > 0 then
+        extra = extra .. ", " .. progress.skipped .. " skipped"
+    end
     if progress.state == addon.GuildMailSender.DONE then
-        return "Sent " .. progress.sent .. " · Failed " .. progress.failed .. postage
+        return "Sent " .. progress.sent .. " · Failed " .. progress.failed .. extra .. postage
     end
     local text = "Sent " .. progress.sent .. " of " .. progress.total
     if progress.failed > 0 then
         text = text .. ", " .. progress.failed .. " failed"
     end
-    return text .. postage
+    return text .. extra .. postage
 end
 
 -- "Online", "3 days ago", or "" when the live roster doesn't say.
