@@ -22,7 +22,8 @@ local MailboxTab = {
     -- The game's tab templates, newest client first.
     TAB_TEMPLATES = { "PanelTabButtonTemplate", "FriendsFrameTabTemplate", "CharacterFrameTabButtonTemplate" },
     PADDING = 10,
-    ROW_HEIGHT = 40,
+    -- Two lines of text, then the buttons below them.
+    ROW_HEIGHT = 64,
     -- Rows made up front: the page shows this many; the list scrolls.
     LIST_HEIGHT = 300,
     BUTTON_WIDTH = 56,
@@ -238,8 +239,9 @@ function Tab:buildPage(mailFrame)
     page:Hide()
 end
 
--- Row `position` of the list, made on first use: two lines of text and up
--- to three buttons on the right.
+-- Row `position` of the list, made on first use: the subject line and the
+-- progress line across the whole row, and below them up to three buttons
+-- from the left, so they never cover the text.
 function Tab:row(position)
     if self.rows[position] ~= nil then
         return self.rows[position]
@@ -250,43 +252,45 @@ function Tab:row(position)
     row:SetHeight(MailboxTab.ROW_HEIGHT)
     row:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -(position - 1) * MailboxTab.ROW_HEIGHT)
     row:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+    -- One line each, cut short rather than wrapped.
+    local title = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -4)
+    title:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    title:SetJustifyH("LEFT")
+    title:SetWordWrap(false)
+    row.title = title
+    local detail = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    detail:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -22)
+    detail:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    detail:SetJustifyH("LEFT")
+    detail:SetWordWrap(false)
+    row.detail = detail
     row.buttons = {}
     local index
-    for index = 3, 1, -1 do
+    for index = 1, 3 do
         local button = self:button(row, "", MailboxTab.BUTTON_WIDTH, function(clicked)
             if clicked.action ~= nil then
                 clicked.action()
             end
         end)
-        if index == 3 then
-            button:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+        if index == 1 then
+            button:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -38)
         else
-            button:SetPoint("RIGHT", row.buttons[index + 1], "LEFT", -4, 0)
+            button:SetPoint("LEFT", row.buttons[index - 1], "RIGHT", 4, 0)
         end
         row.buttons[index] = button
     end
-    -- One line each, cut short rather than wrapped; their right edge is
-    -- set to the row's leftmost button shown (setButtons).
-    local title = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetJustifyH("LEFT")
-    title:SetWordWrap(false)
-    row.title = title
-    local detail = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    detail:SetJustifyH("LEFT")
-    detail:SetWordWrap(false)
-    row.detail = detail
     self.rows[position] = row
     return row
 end
 
 -- Sets a row's buttons from `buttons`: { text, enabled, action } each, at
--- most three, filled from the right.
+-- most three, from the left.
 local function setButtons(row, buttons)
-    local first = 3 - #buttons + 1
     local index
     for index = 1, 3 do
         local button = row.buttons[index]
-        local spec = index >= first and buttons[index - first + 1] or nil
+        local spec = buttons[index]
         if spec ~= nil then
             button:SetText(spec.text)
             button.action = spec.action
@@ -295,19 +299,6 @@ local function setButtons(row, buttons)
         else
             button.action = nil
             button:Hide()
-        end
-    end
-    -- The text runs up to the leftmost button shown, or the row's edge.
-    local edge = row.buttons[first]
-    local lines = { { row.title, -4 }, { row.detail, -22 } }
-    for index = 1, 2 do
-        local line, top = lines[index][1], lines[index][2]
-        line:ClearAllPoints()
-        line:SetPoint("TOPLEFT", row, "TOPLEFT", 4, top)
-        if edge ~= nil then
-            line:SetPoint("RIGHT", edge, "LEFT", -6, 0)
-        else
-            line:SetPoint("RIGHT", row, "RIGHT", -4, 0)
         end
     end
 end

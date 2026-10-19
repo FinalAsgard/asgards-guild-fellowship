@@ -2042,32 +2042,22 @@ test.test("mailbox tab: sits level with the game's tabs, and its page stays belo
     test.assertEqual(inset, other.tab.page.points[1][2])
 end)
 
-test.test("mailbox tab: a row's text runs up to its buttons shown, on one line", function()
+test.test("mailbox tab: a row's buttons sit below its text, which has the row's whole width", function()
     local _, world = newTab()
     mailbox(world.environment)
+    recordPoints(world.environment)
     world.tab:Install(true)
     world.tab:Render(OUTBOX)
 
-    -- The text's last anchor is its right edge.
-    local function edge(line)
-        local points = line.points or {}
-        return points[#points] and points[#points][2]
-    end
-    local draft, mail = world.tab.rows[1], world.tab.rows[2]
-    for _, line in ipairs({ draft.title, draft.detail, mail.title }) do
-        rawset(line, "points", {})
-        rawset(line, "SetPoint", function(self, ...)
-            table.insert(self.points, { ... })
-        end)
-    end
-    world.tab:Render(OUTBOX)
-
-    -- The draft has only Edit: its text reaches Edit, not the empty slots.
-    test.assertEqual(draft.buttons[3], edge(draft.title))
-    test.assertEqual(draft.buttons[3], edge(draft.detail))
-    test.assertEqual(mail.buttons[1], edge(mail.title))
-    test.assertFalse(draft.title.wordWrap)
-    test.assertFalse(draft.detail.wordWrap)
+    local row = world.tab.rows[2]
+    -- The text stays on one line.
+    test.assertFalse(row.title.wordWrap)
+    test.assertFalse(row.detail.wordWrap)
+    -- The first button starts below both lines, the others follow it.
+    local first = row.buttons[1].points[1]
+    test.assertEqual("TOPLEFT", first[1])
+    test.assertTrue(first[5] < -22)
+    test.assertEqual(row.buttons[1], row.buttons[2].points[1][2])
 end)
 
 test.test("mailbox tab: lists the draft and the guild mails, newest first, with their buttons", function()
@@ -2079,21 +2069,21 @@ test.test("mailbox tab: lists the draft and the guild mails, newest first, with 
 
     local rows = world.tab.rows
     test.assertEqual("Raid night", rows[1].title.text)
-    test.assertEqual("Edit", rows[1].buttons[3].text)
-    test.assertFalse(rows[1].buttons[1].shown)
+    test.assertEqual("Edit", rows[1].buttons[1].text)
+    test.assertFalse(rows[1].buttons[2].shown)
     test.assertEqual("Launch night  |cff999999Paused at the mail limit|r", rows[2].title.text)
     test.assertEqual("Sent 19 of 42 · 2 h ago", rows[2].detail.text)
     test.assertEqual("View", rows[2].buttons[1].text)
     test.assertEqual("Resume", rows[2].buttons[2].text)
     test.assertEqual("Cancel", rows[2].buttons[3].text)
-    test.assertEqual("Remove", rows[3].buttons[3].text)
+    test.assertEqual("Remove", rows[3].buttons[2].text)
     test.assertFalse(world.tab.empty.shown)
     test.assertFalse(world.tab.yes.shown)
 
-    rows[1].buttons[3].scripts.OnClick(rows[1].buttons[3])
+    rows[1].buttons[1].scripts.OnClick(rows[1].buttons[1])
     rows[2].buttons[1].scripts.OnClick(rows[2].buttons[1])
     rows[2].buttons[2].scripts.OnClick(rows[2].buttons[2])
-    rows[3].buttons[3].scripts.OnClick(rows[3].buttons[3])
+    rows[3].buttons[2].scripts.OnClick(rows[3].buttons[2])
     world.tab.new.scripts.OnClick(world.tab.new)
     local names = {}
     local index
