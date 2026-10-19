@@ -34,7 +34,8 @@ Controller.__index = Controller
 --   onAliasChanged  optional function(key, before): after a manual alias
 --                 change to the player of `key`, with the alias before it
 --                 ("" for none) (for guild sync)
---   onScanFinished  optional function(): after every completed scan
+--   onScanFinished  optional function(summary): after every completed scan,
+--                   with what it found (ReconcileEngine's summary)
 --   onChanged     optional function(): after anything the roster shows
 --                 changed (a scan, sync, manual change, or roster update)
 --   onSyncResumed  optional function(key): after "Don't sync" was turned
@@ -292,7 +293,7 @@ function Controller:OnScanFinished(result, summary)
     end
     self:Invalidate()
     if self.onScanFinished ~= nil then
-        self.onScanFinished()
+        self.onScanFinished(summary)
     end
 end
 

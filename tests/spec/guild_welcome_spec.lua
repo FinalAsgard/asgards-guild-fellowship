@@ -181,3 +181,162 @@ test.test("guild welcome: an officer asks once, and an officer with settings ans
     tool.timers[2]()
     test.assertEqual(count, #tool.sent)
 end)
+
+-- Newcomers -------------------------------------------------------------------
+
+local DAY = 24 * 60 * 60
+
+-- An officer's add-on in a guild with Tool Box (the officer) and Ann Bell,
+-- welcome mail switched on at 1000. `world.joined(name)` and
+-- `world.scan(names)` stand in for the join message and a roster scan.
+local function newGuild()
+    local addon, world = newWelcome("tool box-camelot", { time = 1000 })
+    local partition = world.partition
+    partition:RecordCharacter("tool box-camelot", { name = "Tool Box", rankIndex = 1 })
+    partition:RecordCharacter("ann bell-camelot", { name = "Ann Bell", rankIndex = 2 })
+    world.welcome.keyOf = function(rawName)
+        return string.lower(rawName) .. "-camelot"
+    end
+    world.welcome:Set({ on = true })
+    function world.joined(name)
+        return world.welcome:OnJoined(name)
+    end
+    -- Records the characters, then tells the welcome about them.
+    function world.scan(names)
+        local keys = {}
+        local index
+        for index = 1, #names do
+            local key = string.lower(names[index]) .. "-camelot"
+            partition:RecordCharacter(key, { name = names[index], rankIndex = 3 })
+            table.insert(keys, key)
+        end
+        return world.welcome:OnScan(keys)
+    end
+    return addon, world
+end
+
+test.test("guild welcome newcomers: someone who joins is due 24 hours after being first seen", function()
+    local _, world = newGuild()
+    world.time = 2000
+
+    test.assertTrue(world.joined("Zed Stone"))
+    world.scan({ "Zed Stone" })
+    test.assertEqual(2000, world.partition:GetWelcomeLedger().seen["zed stone-camelot"])
+    test.assertEqual(0, #world.welcome:Due(2000 + DAY - 1))
+    test.assertEqual("zed stone-camelot", table.concat(world.welcome:Due(2000 + DAY), ","))
+end)
+
+test.test("guild welcome newcomers: a scan notes new characters, but not the guild's first scan", function()
+    -- Everyone in this scan is new to the add-on: it's the first look.
+    local _, fresh = newWelcome("tool box-camelot", { time = 1000 })
+    fresh.welcome:Set({ on = true })
+    fresh.partition:RecordCharacter("tool box-camelot", { name = "Tool Box", rankIndex = 1 })
+    test.assertEqual(0, fresh.welcome:OnScan({ "tool box-camelot" }))
+
+    local _, world = newGuild()
+    world.time = 3000
+    test.assertEqual(2, world.scan({ "Zed Stone", "Bo Reed" }))
+    test.assertEqual(2, #world.welcome:Due(3000 + DAY))
+end)
+
+test.test("guild welcome newcomers: nobody is noted while it's off, or before it was switched on", function()
+    local _, world = newGuild()
+    world.welcome:Set({ on = false })
+    world.time = 2000
+    test.assertFalse(world.joined("Zed Stone"))
+    test.assertEqual(0, world.scan({ "Zed Stone" }))
+
+    world.welcome:Set({ on = true })
+    world.time = 2500
+    -- Zed is known now: the rejoin message doesn't make Zed new.
+    test.assertFalse(world.joined("Zed Stone"))
+    test.assertEqual(0, #world.welcome:Due(2500 + 2 * DAY))
+end)
+
+test.test("guild welcome newcomers: someone the add-on already knew is rejoining, not new", function()
+    local _, world = newGuild()
+    world.partition:MarkDeparted("ann bell-camelot", 1500)
+    world.time = 2000
+
+    test.assertFalse(world.joined("Ann Bell"))
+    test.assertEqual(0, #world.welcome:Due(2000 + DAY))
+end)
+
+test.test("guild welcome newcomers: an alt linked during the wait is skipped for good", function()
+    local _, world = newGuild()
+    world.time = 2000
+    world.scan({ "Cog Wheel" })
+    world.partition:JoinPlayerOf("cog wheel-camelot", "ann bell-camelot", "note")
+
+    test.assertEqual(0, #world.welcome:Due(2000 + DAY))
+    test.assertEqual(nil, world.partition:GetWelcomeLedger().seen["cog wheel-camelot"])
+end)
+
+test.test("guild welcome newcomers: a member's new alt never gets it, even after the member left", function()
+    local _, world = newGuild()
+    world.partition:MarkDeparted("ann bell-camelot", 1500)
+    world.time = 2000
+    world.scan({ "Cog Wheel" })
+    world.partition:JoinPlayerOf("cog wheel-camelot", "ann bell-camelot", "note")
+
+    test.assertEqual(0, #world.welcome:Due(2000 + DAY))
+end)
+
+test.test("guild welcome newcomers: a new player with two new characters gets one, on their main", function()
+    local _, world = newGuild()
+    world.time = 2000
+    world.scan({ "Zed Stone" })
+    world.time = 2100
+    world.scan({ "Bo Stone" })
+    world.partition:JoinPlayerOf("zed stone-camelot", "bo stone-camelot", "note")
+
+    -- Bo is the main; Bo was seen later, so it's due a little later.
+    test.assertEqual(0, #world.welcome:Due(2000 + DAY))
+    test.assertEqual("bo stone-camelot", table.concat(world.welcome:Due(2100 + DAY), ","))
+
+    -- Once Bo is welcomed, Zed is done too.
+    test.assertTrue(world.welcome:MarkWelcomed("bo stone-camelot", 2100 + DAY, "tool box-camelot"))
+    test.assertEqual(0, #world.welcome:Due(2100 + 2 * DAY))
+    test.assertEqual(nil, world.partition:GetWelcomeLedger().seen["zed stone-camelot"])
+end)
+
+test.test("guild welcome newcomers: without a main, the first seen of a new player's characters gets it", function()
+    local _, world = newGuild()
+    world.time = 2000
+    world.scan({ "Zed Stone" })
+    world.time = 2100
+    world.scan({ "Bo Stone" })
+    world.partition:JoinPlayerOf("bo stone-camelot", "zed stone-camelot", "note")
+    local zed = world.partition:GetCharacter("zed stone-camelot")
+    world.partition:GetPlayer(zed.player).main = nil
+
+    test.assertEqual("zed stone-camelot", table.concat(world.welcome:Due(2100 + DAY), ","))
+end)
+
+test.test("guild welcome newcomers: someone who leaves before they're due is dropped", function()
+    local _, world = newGuild()
+    world.time = 2000
+    world.scan({ "Zed Stone" })
+    world.partition:MarkDeparted("zed stone-camelot", 2500)
+
+    test.assertEqual(0, #world.welcome:Due(2000 + DAY))
+    test.assertEqual(nil, world.partition:GetWelcomeLedger().seen["zed stone-camelot"])
+end)
+
+test.test("guild welcome newcomers: a welcome is recorded with its player, when and by whom, and kept", function()
+    local addon, world = newGuild()
+    world.time = 2000
+    world.scan({ "Zed Stone" })
+    world.welcome:MarkWelcomed("zed stone-camelot", 2000 + DAY, "tool box-camelot")
+
+    local _, after = newWelcome("tool box-camelot", { addon = addon, partition = world.partition })
+    test.assertTrue(after.welcome:IsWelcomed("zed stone-camelot"))
+    local record = world.partition:GetWelcomeLedger().welcomed["zed stone-camelot"]
+    test.assertEqual("zed stone-camelot", record.main)
+    test.assertEqual(2000 + DAY, record.at)
+    test.assertEqual("tool box-camelot", record.by)
+    test.assertEqual(0, #after.welcome:Due(2000 + 2 * DAY))
+    -- A welcomed character joining again isn't new.
+    world.partition:MarkDeparted("zed stone-camelot", 9000)
+    test.assertFalse(world.joined("Zed Stone"))
+end)

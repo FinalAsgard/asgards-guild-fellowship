@@ -229,7 +229,7 @@ local function validatePartition(data)
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
         "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn", "withdrawals",
-        "welcomeConfig",
+        "welcomeConfig", "welcomeLedger",
     }
     local index
     for index = 1, #containers do
@@ -266,7 +266,7 @@ local function validatePartition(data)
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
         recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true, withdrawals = true,
-        welcomeConfig = true,
+        welcomeConfig = true, welcomeLedger = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -1502,6 +1502,23 @@ function Partition:GetWelcomeConfig()
         self.data.welcomeConfig = {}
     end
     return self.data.welcomeConfig
+end
+
+-- Guild Mail's welcome ledger (see GuildWelcome): { seen = { [key] = when
+-- first seen }, welcomed = { [key] = { main, at, by } } }, created on first
+-- use, with either list made when missing or unusable.
+function Partition:GetWelcomeLedger()
+    if type(self.data.welcomeLedger) ~= "table" then
+        self.data.welcomeLedger = {}
+    end
+    local ledger = self.data.welcomeLedger
+    if type(ledger.seen) ~= "table" then
+        ledger.seen = {}
+    end
+    if type(ledger.welcomed) ~= "table" then
+        ledger.welcomed = {}
+    end
+    return ledger
 end
 
 -- Guild Recruit's last ad time in each channel (see RecruitLedger), created

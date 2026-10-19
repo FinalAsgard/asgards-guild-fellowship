@@ -103,9 +103,13 @@ if clientProfile.supported then
         onDeclaredChanged = function(key, before)
             syncSession:LocalDeclaredEdit(key, before)
         end,
-        onScanFinished = function()
+        onScanFinished = function(summary)
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
+            -- Characters new to the guild may be due a welcome mail.
+            if guildWelcome ~= nil and type(summary) == "table" then
+                guildWelcome:OnScan(summary.newKeys)
+            end
         end,
         -- Out-of-date guild notes are worked out again after every scan,
         -- sync, and manual change.
@@ -2078,6 +2082,10 @@ if clientProfile.supported then
             local guild, partition = rosterController:QuietContext()
             return guild and partition or nil
         end,
+        keyOf = function(rawName)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(rawName) or nil
+        end,
         selfKey = function()
             return rosterController:SelfKey()
         end,
@@ -2828,6 +2836,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Without the system message event, Guild Greet simply never prompts.
     client:ObservePresence(function(kind, name)
         guildGreet:OnPresence(kind, name)
+        if kind == "join" then
+            guildWelcome:OnJoined(name)
+        end
     end)
     -- Prompts wait out combat and boss encounters.
     local busy = client:ObserveCombat(function(inCombat)

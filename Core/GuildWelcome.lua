@@ -10,8 +10,20 @@ local _, addon = ...
 -- "ask-welcome-config". When the switch was last turned on is kept: only
 -- characters first seen after it get the welcome.
 --
+-- Newcomers: a character this add-on first sees in the guild while welcome
+-- mail is on (the "has joined the guild" message, or new in a roster scan)
+-- is noted with when it was seen; one it already knew (a rejoiner), or any
+-- from the first scan of a guild, isn't. A noted character is due
+-- DUE_SECONDS later, so an alt has time to be linked. When due it's
+-- skipped for good if its player has a character that was in the guild
+-- before it, or that has been welcomed. Each player is welcomed once: of a
+-- new player's noted characters, only their main is due (else the first
+-- seen). A noted character that leaves is dropped. Welcomes are recorded
+-- (MarkWelcomed) with the player's main, when, and by whom, and kept.
+--
 -- Pure: the saved data, the clock and messaging are handed in.
 --   partition()   -> the current guild's partition, or nil
+--   keyOf(rawName) -> a character key for a name from a game message
 --   selfKey()     -> the logged-in character's key, or nil
 --   isOfficer(key) -> true when that character is an officer
 --   senderIsOfficer(sender) -> true when a message's sender is an officer
@@ -30,6 +42,8 @@ local GuildWelcome = {
     -- so one answer usually covers everyone.
     ANSWER_DELAY_MIN = 1,
     ANSWER_DELAY_MAX = 5,
+    -- How long after first being seen a newcomer is due a welcome.
+    DUE_SECONDS = 24 * 60 * 60,
 }
 addon.GuildWelcome = GuildWelcome
 
@@ -70,6 +84,7 @@ function GuildWelcome.Create(options)
     end
     return setmetatable({
         partition = option("partition", none),
+        keyOf = option("keyOf", none),
         selfKey = option("selfKey", none),
         isOfficer = option("isOfficer", function()
             return false
@@ -274,4 +289,155 @@ function Welcome:OnMessage(message, sender)
         return false
     end
     return self[handler](self, message, sender)
+end
+
+-- The welcome ledger, or nil outside a guild.
+function Welcome:ledger()
+    local partition = ask(self.partition)
+    if partition == nil then
+        return nil, nil
+    end
+    return partition:GetWelcomeLedger(), partition
+end
+
+-- Notes `key` as first seen now, when welcome mail is on and it's new to
+-- the ledger. Returns true when noted.
+function Welcome:note(key, ledger)
+    local now = ask(self.now)
+    local since = self:OnSince()
+    if type(key) ~= "string" or type(now) ~= "number" or since == nil or now < since
+        or ledger.seen[key] ~= nil or ledger.welcomed[key] ~= nil
+    then
+        return false
+    end
+    ledger.seen[key] = now
+    return true
+end
+
+-- The game said `rawName` joined the guild. A character this add-on already
+-- knew is rejoining and isn't new.
+function Welcome:OnJoined(rawName)
+    local ledger, partition = self:ledger()
+    local key = ask(self.keyOf, rawName)
+    if ledger == nil or key == nil or partition:GetCharacter(key) ~= nil then
+        return false
+    end
+    return self:note(key, ledger)
+end
+
+-- A roster scan found `keys`, characters new to this add-on. A scan that
+-- found every character it knows is the guild's first, so nobody in it is
+-- new to the guild. Returns how many were noted.
+function Welcome:OnScan(keys)
+    local ledger, partition = self:ledger()
+    if ledger == nil or type(keys) ~= "table" or #keys == 0 then
+        return 0
+    end
+    local known = 0
+    partition:EachCharacter(function()
+        known = known + 1
+    end)
+    if known <= #keys then
+        return 0
+    end
+    local noted = 0
+    local index
+    for index = 1, #keys do
+        if self:note(keys[index], ledger) then
+            noted = noted + 1
+        end
+    end
+    return noted
+end
+
+-- The main of `key`'s player (`key` itself without one).
+local function mainOf(partition, key)
+    local character = partition:GetCharacter(key)
+    local player = character and partition:GetPlayer(character.player)
+    return player and player.main or key
+end
+
+-- The noted characters due a welcome at `now`, oldest first: each a
+-- character key. Ones skipped for good, or gone, are dropped from the
+-- ledger.
+function Welcome:Due(now)
+    local ledger, partition = self:ledger()
+    if ledger == nil or type(now) ~= "number" then
+        return {}
+    end
+    -- Noted characters by player, dropping any that left. One the roster
+    -- hasn't shown yet (heard joining, not yet scanned) waits.
+    local players = {}
+    local key, at
+    for key, at in pairs(ledger.seen) do
+        local character = partition:GetCharacter(key)
+        if type(at) ~= "number" or (character ~= nil and character.departed ~= nil) then
+            ledger.seen[key] = nil
+        elseif character ~= nil then
+            local player = character.player
+            players[player] = players[player] or {}
+            table.insert(players[player], key)
+        end
+    end
+    local due = {}
+    local player, keys
+    for player, keys in pairs(players) do
+        -- Anyone of the player's who isn't a noted newcomer was in the guild
+        -- first, even if they've left since, or was welcomed: the whole
+        -- player is skipped for good.
+        local settled = false
+        local members = partition:CharactersOf(player)
+        local index
+        for index = 1, #members do
+            local member = members[index]
+            if ledger.welcomed[member] ~= nil or ledger.seen[member] == nil then
+                settled = true
+            end
+        end
+        if settled then
+            for index = 1, #keys do
+                ledger.seen[keys[index]] = nil
+            end
+        else
+            -- The main when it's a noted newcomer, else the first seen.
+            local main = mainOf(partition, keys[1])
+            local target = ledger.seen[main] ~= nil and main or nil
+            if target == nil then
+                table.sort(keys, function(a, b)
+                    if ledger.seen[a] ~= ledger.seen[b] then
+                        return ledger.seen[a] < ledger.seen[b]
+                    end
+                    return a < b
+                end)
+                target = keys[1]
+            end
+            if ledger.seen[target] + GuildWelcome.DUE_SECONDS <= now then
+                table.insert(due, target)
+            end
+        end
+    end
+    table.sort(due, function(a, b)
+        if ledger.seen[a] ~= ledger.seen[b] then
+            return ledger.seen[a] < ledger.seen[b]
+        end
+        return a < b
+    end)
+    return due
+end
+
+-- Records that `key` was welcomed at `at` by `by` (a character key): it and
+-- every other character of its player are done.
+function Welcome:MarkWelcomed(key, at, by)
+    local ledger, partition = self:ledger()
+    if ledger == nil or type(key) ~= "string" or type(at) ~= "number" then
+        return false
+    end
+    ledger.welcomed[key] = { main = mainOf(partition, key), at = at, by = by }
+    ledger.seen[key] = nil
+    return true
+end
+
+function Welcome:IsWelcomed(key)
+    local ledger = self:ledger()
+    return ledger ~= nil and ledger.welcomed[key] ~= nil
 end

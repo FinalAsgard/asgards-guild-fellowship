@@ -563,7 +563,7 @@ end
 
 -- Commits a plan to the partition. `checkpoint` is called between
 -- characters, as in Plan. Returns counts for reporting:
---   recorded, newCharacters, linked, aliased, conflicts, departed,
+--   recorded, newCharacters (and newKeys, their keys), linked, aliased, conflicts, departed,
 --   rejoined, promoted
 function ReconcileEngine.Apply(partition, plan, checkpoint)
     checkpoint = checkpoint or function() end
@@ -691,6 +691,7 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         aliased = aliased,
         linked = linked,
         newCharacters = #plan.newKeys,
+        newKeys = plan.newKeys,
         recorded = recorded,
         conflicts = #plan.conflicts + #promotions,
         departed = departed,
