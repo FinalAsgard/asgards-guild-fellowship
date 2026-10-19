@@ -1290,10 +1290,17 @@ function Client:ObserveMail(onMail)
     end
     -- The mailbox window hiding also means it closed, whatever closed it
     -- (Escape, its X, walking away): not every client reports MAIL_CLOSED
-    -- then. A second "close" for the same closing is harmless.
+    -- then. Only its own hiding counts: hiding the whole interface (Alt+Z,
+    -- a cinematic) hides it too while the mailbox stays open, and then it
+    -- still says it's shown. A second "close" for the same closing is
+    -- harmless.
     local mailbox = self.environment.MailFrame
     if mailbox ~= nil and type(mailbox.HookScript) == "function"
-        and pcall(mailbox.HookScript, mailbox, "OnHide", function()
+        and pcall(mailbox.HookScript, mailbox, "OnHide", function(hidden)
+            local ok, shown = pcall(hidden.IsShown, hidden)
+            if ok and shown == true then
+                return
+            end
             pcall(onMail, "close")
         end)
     then

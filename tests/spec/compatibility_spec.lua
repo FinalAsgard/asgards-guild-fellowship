@@ -89,8 +89,12 @@ test.test("adapter reports the mailbox closed when its window hides, even withou
     local hooks = {}
     local eventFrame = { RegisterEvent = function() end, SetScript = function() end }
     local mailbox = {
+        shown = false,
         HookScript = function(_, name, handler)
             hooks[name] = handler
+        end,
+        IsShown = function(self)
+            return self.shown
         end,
     }
     local client = newClient({
@@ -104,6 +108,10 @@ test.test("adapter reports the mailbox closed when its window hides, even withou
     test.assertTrue(client:ObserveMail(function(kind)
         table.insert(kinds, kind)
     end))
+    hooks.OnHide(mailbox)
+    test.assertEqual("close", table.concat(kinds, ","))
+    -- The whole interface hiding (Alt+Z) leaves the mailbox shown: not a close.
+    mailbox.shown = true
     hooks.OnHide(mailbox)
     test.assertEqual("close", table.concat(kinds, ","))
 
