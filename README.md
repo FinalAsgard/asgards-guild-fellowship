@@ -317,8 +317,8 @@ Guild Mail lets an officer send one mail to many guild members at once: launch p
 
 ### Opening it
 
-- At a mailbox, officers get a **Guild Mail** button beside the mail window. It opens Guild Mail next to the mailbox.
-- `/agf mail` opens it anywhere, so you can write and price a mail away from a mailbox. **Send** needs an open mailbox ("Open a mailbox to send"). A non-officer is told that Guild Mail is for officers, and never sees the mailbox button.
+- At a mailbox, officers get a third tab, **Guild Mail**, after Inbox and Send Mail. It lists your guild mails (see [The Guild Mail tab](#the-guild-mail-tab)); **New** and **Edit** open the Guild Mail window next to the mailbox.
+- `/agf mail` opens the window anywhere, so you can write and price a mail away from a mailbox. **Send** needs an open mailbox ("Open a mailbox to send"). A non-officer is told that Guild Mail is for officers, and never sees the tab.
 
 ### Choosing who gets it
 
@@ -345,8 +345,9 @@ A mail's subject can be up to 64 characters and its message up to 500, counted a
 
 ### Sending
 
-- **Send** asks first: "Send 42 mails for 12s 60c postage?". Then the mails go out one at a time. Each waits for the game to confirm the last one, plus a moment, so the game doesn't drop mails sent too fast. Progress shows as "Sent 17 of 42 · Postage spent: 5s 10c", and each row is marked sent or failed.
+- **Send** asks first: "Send 42 mails for 12s 60c postage?". With 20 or more different characters it adds: "The game lets you mail about 20 different characters at a time. The rest will wait for you to resume them later." Then the mails go out one at a time. Each waits for the game to confirm the last one, plus a moment, so the game doesn't drop mails sent too fast. Progress shows as "Sent 17 of 42 · Postage spent: 5s 10c", and each row is marked sent or failed.
 - A mail the game rejects is marked failed with the game's reason (for example "Cannot find mail recipient."), and sending moves on.
+- The game only lets you mail about 20 different characters in a while (it's anti-spam, and counts every character on your account). When it says "You have reached the in-game cap of unique mail recipients", sending pauses instead: nobody is marked failed, the window says "Paused: the game's mail limit was reached. Try again later.", and **Send** becomes **Resume**. The limit wears off with time; Resume tries the refused mail first and pauses again if it's still in force.
 - If the game doesn't answer a mail within 10 seconds, that mail fails ("no response, will try again at the end"), sending moves on, and it's tried once more after the rest. If the game doesn't answer then either, it stays failed.
 - If the game blocks the add-on from sending, **Send** becomes **Send next**, and from then on each mail goes out when you click it.
 - **Stop** halts once the mail in flight is answered. **Continue** then sends to everyone still pending, so nobody gets the mail twice, and **End** gives up on them. Closing the mailbox stops sending the same way; reopen it and Guild Mail to continue.
@@ -355,7 +356,32 @@ A mail's subject can be up to 64 characters and its message up to 500, counted a
 
 ### What's saved
 
-The subject, message, ticked ranks, Send to choice and both skip boxes are saved for every character on your account as you change them, so you can write a mail, log off, and send it later. They come back the first time you open Guild Mail after a reload or relog. A saved rank the guild no longer has is ignored. Recipient ticks and sending progress last only for the session; a send can't be continued after a reload.
+The subject, message, ticked ranks, Send to choice and both skip boxes are saved for every character on your account as you change them, so you can write a mail, log off, and send it later. They come back the first time you open Guild Mail after a reload or relog. A saved rank the guild no longer has is ignored. Recipient ticks last only for the session.
+
+Every send is saved as it goes, for your whole account: once you press Send the mail is locked, and its recipients and how far it got are kept, mail by mail. After a reload, relog or the game closing, the newest unfinished send comes back when you open Guild Mail or the mailbox, on any of your characters (the one resuming pays the postage), and **Continue** sends to whoever is still waiting, so nobody gets it twice. A send paused at the mail limit comes back paused.
+
+If the game closed while a mail was waiting for its answer, nobody knows whether it went: that recipient comes back **unconfirmed** and is never sent again on its own. Open the mail with **View** in the Guild Mail tab and press **Send** to send it again, or **Skip** to leave it.
+
+### The Guild Mail tab
+
+The mailbox's **Guild Mail** tab lists your guild mails:
+
+- Your **draft**, if it has a subject or message, with **Edit** to open it in the window.
+- Every mail you've sent, newest first, with its state (Sending, Paused, Paused at the mail limit, Stopped, Done or Cancelled), its progress ("Sent 19 of 42, 2 failed") and when you sent it.
+- **View** opens the mail in the window, read-only: its text, the mail as its first recipient got it, and every recipient with their status, with Send and Skip on an unconfirmed one.
+- **Resume** carries on with a mail's waiting recipients (at a mailbox). Only one mail sends at a time, so Resume waits while another is going.
+- **Cancel** gives up on a mail's waiting recipients, after asking; nothing more is sent for it. **Remove** takes a finished or cancelled mail off the list, after asking.
+- **New** starts a blank mail, asking first ("Discard the current draft?") if the draft has text.
+
+A mail paused at the limit doesn't hold you up: **Edit** your draft and send a new one, and the paused mail waits in the tab to be resumed later.
+
+### Welcome mail
+
+Officers can set up one guild **Welcome mail** for newcomers. **Welcome mail**, at the top left of the Guild Mail window, opens its page: a subject and message (with the same placeholders and limits), **Save**, and **Send the welcome mail to newcomers**, which starts off. The page shows the welcome as your own character would get it. Saved text is shared with every officer's add-on through guild sync, the newest change winning, so whoever sends it sends the guild's current text. Only officers can change it.
+
+While it's on, a character your add-on first sees in the guild (the "has joined the guild" message, or new in a roster scan) is due a welcome **24 hours** later, so there's time to link an alt. When it's due it's left out if it turns out to belong to someone already in the guild, or already welcomed, even if their other character has since left. Each player gets one welcome, on their main if they have one, else on their first character seen. Someone who left before they were due is dropped. A character the add-on already knew is rejoining, not new, and the guild's very first scan never counts.
+
+Due welcomes collect in a **Welcome mails** row in the Guild Mail tab, and the tab's title counts them: **Guild Mail (3)**. The row reads "Welcome mails: 3 waiting", with **Edit** (the welcome mail's page), **View** and **Send**. Send fills each one in with the welcome mail as it is then, and sends them like any other mail, pausing at the limit and kept across reloads. Each welcome that goes is shared with the other officers' add-ons, which drop that player from their own Welcome mails, so nobody is welcomed twice (unless two officers press Send within seconds of each other). Switching welcome mail off adds nobody new; welcomes already waiting stay until sent or cancelled, and cancelled ones aren't due again.
 
 ## Group Finder
 
