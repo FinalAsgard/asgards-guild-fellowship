@@ -2018,9 +2018,6 @@ if clientProfile.supported then
         onDismissAction = function()
             guildMail:DismissAction()
         end,
-        onWelcome = function()
-            guildMail:OpenWelcome()
-        end,
         onWelcomeSubject = function(text)
             guildMail:SetWelcomeSubject(text)
         end,

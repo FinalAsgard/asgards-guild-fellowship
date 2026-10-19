@@ -24,8 +24,8 @@ local _, addon = ...
 -- Skip on an unconfirmed one; Back, Resume, and Cancel or Remove below,
 -- and the question for Cancel or Remove waiting for Yes or No.
 --
--- The Welcome mail button (officers) opens a page over the window for the
--- guild's welcome mail: its subject and message, Save, the on/off switch,
+-- The Guild Mail tab's Welcome mail button (MailboxTab) opens a page over
+-- the window for the guild's welcome mail: its subject and message, Save, the on/off switch,
 -- and the welcome as the officer's own character would get it.
 --
 -- The frames are made on first use and reused. Like the other adapters, a
@@ -83,7 +83,6 @@ Window.__index = Window
 --   onSettle(index, send)      Send (true) or Skip on recipient `index`
 --   onConfirmAction(), onDismissAction()   Yes and No on the question
 -- and for the welcome mail:
---   onWelcome()  the Welcome mail button pressed
 --   onWelcomeSubject(text), onWelcomeBody(text)   typed on its page
 --   onWelcomeSave(), onWelcomeOn(checked), onWelcomeBack()
 function GuildMailWindow.Create(client, handlers)
@@ -112,7 +111,6 @@ function GuildMailWindow.Create(client, handlers)
         onSettle = handler("onSettle"),
         onConfirmAction = handler("onConfirmAction"),
         onDismissAction = handler("onDismissAction"),
-        onWelcome = handler("onWelcome"),
         onWelcomeSubject = handler("onWelcomeSubject"),
         onWelcomeBody = handler("onWelcomeBody"),
         onWelcomeSave = handler("onWelcomeSave"),
@@ -231,10 +229,6 @@ function Window:window()
     close:SetScript("OnClick", function()
         frame:Hide()
     end)
-    self.welcomeButton = self:button(frame, "Welcome mail", GuildMailWindow.BUTTON_WIDTH + 10, function()
-        self.onWelcome()
-    end)
-    self.welcomeButton:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -8)
 
     local top = -40
     self:label(frame, "Send to these ranks", top)

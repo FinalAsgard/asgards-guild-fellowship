@@ -6,7 +6,8 @@ local _, addon = ...
 -- state and View, Resume, Cancel and Remove. New starts a blank mail. A
 -- question (cancel, remove, discard the draft) waits at the bottom for Yes
 -- or No. Edit, New and View open the Guild Mail window, where the mail is
--- managed. The Welcome mails row (due welcomes, see GuildWelcome) has Edit
+-- managed. Welcome mail, beside New, opens the guild's welcome mail
+-- settings (GuildWelcome) in the window. The Welcome mails row (due welcomes, see GuildWelcome) has Edit
 -- (the welcome mail's settings), View and Send, and the tab's title counts
 -- the welcomes waiting: "Guild Mail (3)".
 --
@@ -26,6 +27,7 @@ local MailboxTab = {
     LIST_HEIGHT = 300,
     BUTTON_WIDTH = 56,
     BUTTON_HEIGHT = 20,
+    WELCOME_WIDTH = 96,
     -- Without the mailbox's content area (MailFrame.Inset), the page keeps
     -- this far inside the inbox's place: clear of the title bar and the
     -- mail icon at the top left.
@@ -42,7 +44,8 @@ Tab.__index = Tab
 --   onCancel(position), onRemove(position)   a row's buttons; `position`
 --                is the entry's place in the outbox
 --   onConfirm(), onDismiss()   Yes and No on the question
---   onEditWelcome(), onSendWelcomes()   the Welcome mails row's Edit and Send
+--   onEditWelcome(), onSendWelcomes()   the Welcome mail button (and the
+--                Welcome mails row's Edit), and the row's Send
 --   onShown()    the page was shown (draw it)
 function MailboxTab.Create(client, handlers)
     handlers = handlers or {}
@@ -196,6 +199,10 @@ function Tab:buildPage(mailFrame)
         self.onNew()
     end)
     self.new:SetPoint("TOPRIGHT", page, "TOPRIGHT", -padding, -padding)
+    self.welcome = self:button(page, "Welcome mail", MailboxTab.WELCOME_WIDTH, function()
+        self.onEditWelcome()
+    end)
+    self.welcome:SetPoint("RIGHT", self.new, "LEFT", -6, 0)
 
     local scroll = environment.CreateFrame("ScrollFrame", nil, page, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", page, "TOPLEFT", padding, -padding - 28)
@@ -376,6 +383,7 @@ function Tab:Render(model)
         return
     end
     setEnabled(self.new, model.canNew)
+    setEnabled(self.welcome, model.canNew)
     local items = {}
     if model.draft ~= nil then
         table.insert(items, {

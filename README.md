@@ -372,12 +372,13 @@ The mailbox's **Guild Mail** tab lists your guild mails:
 - **Resume** carries on with a mail's waiting recipients (at a mailbox). Only one mail sends at a time, so Resume waits while another is going.
 - **Cancel** gives up on a mail's waiting recipients, after asking; nothing more is sent for it. **Remove** takes a finished or cancelled mail off the list, after asking.
 - **New** starts a blank mail, asking first ("Discard the current draft?") if the draft has text.
+- **Welcome mail** opens the guild's [welcome mail](#welcome-mail) settings.
 
 A mail paused at the limit doesn't hold you up: **Edit** your draft and send a new one, and the paused mail waits in the tab to be resumed later.
 
 ### Welcome mail
 
-Officers can set up one guild **Welcome mail** for newcomers. **Welcome mail**, at the top left of the Guild Mail window, opens its page: a subject and message (with the same placeholders and limits), **Save**, and **Send the welcome mail to newcomers**, which starts off. The page shows the welcome as your own character would get it. Saved text is shared with every officer's add-on through guild sync, the newest change winning, so whoever sends it sends the guild's current text. Only officers can change it.
+Officers can set up one guild **Welcome mail** for newcomers. **Welcome mail**, beside **New** in the mailbox's Guild Mail tab, opens its page in the Guild Mail window: a subject and message (with the same placeholders and limits), **Save**, and **Send the welcome mail to newcomers**, which starts off. The page shows the welcome as your own character would get it. Saved text is shared with every officer's add-on through guild sync, the newest change winning, so whoever sends it sends the guild's current text. Only officers can change it.
 
 While it's on, a character your add-on first sees in the guild (the "has joined the guild" message, or new in a roster scan) is due a welcome **24 hours** later, so there's time to link an alt. When it's due it's left out if it turns out to belong to someone already in the guild, or already welcomed, even if their other character has since left. Each player gets one welcome, on their main if they have one, else on their first character seen. Someone who left before they were due is dropped. A character the add-on already knew is rejoining, not new, and the guild's very first scan never counts.
 

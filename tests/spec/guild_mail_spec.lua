@@ -1596,7 +1596,6 @@ local function newWindow()
         onCancelEntry = record("cancelEntry"),
         onRemoveEntry = record("removeEntry"),
         onSettle = record("settle"),
-        onWelcome = record("welcome"),
         onWelcomeSubject = record("welcomeSubject"),
         onWelcomeBody = record("welcomeBody"),
         onWelcomeSave = record("welcomeSave"),
@@ -2634,7 +2633,6 @@ test.test("guild mail window: the Welcome mail page is drawn and its typing pass
     test.assertEqual("As Tool Box would get it: Welcome, Tool Box!", world.window.welcomePreviewTo.text)
     test.assertEqual("Write a subject.", world.window.welcomeHint.text)
 
-    world.window.welcomeButton.scripts.OnClick(world.window.welcomeButton)
     world.window.welcomeSubject:SetText("Hello")
     world.window.welcomeSubject.scripts.OnTextChanged(world.window.welcomeSubject, true)
     world.window.welcomeSave.scripts.OnClick(world.window.welcomeSave)
@@ -2646,9 +2644,9 @@ test.test("guild mail window: the Welcome mail page is drawn and its typing pass
     for index = 1, #world.calls do
         table.insert(names, world.calls[index].name)
     end
-    test.assertEqual("welcome,welcomeSubject,welcomeSave,welcomeOn,welcomeBack", table.concat(names, ","))
-    test.assertEqual("Hello", world.calls[2].args[1])
-    test.assertFalse(world.calls[4].args[1])
+    test.assertEqual("welcomeSubject,welcomeSave,welcomeOn,welcomeBack", table.concat(names, ","))
+    test.assertEqual("Hello", world.calls[1].args[1])
+    test.assertFalse(world.calls[3].args[1])
 
     model.welcome = nil
     world.window:Render(model)
@@ -2847,6 +2845,10 @@ test.test("mailbox tab: the Welcome mails row has Edit, View and Send, and the t
     test.assertEqual("Guild Mail (3)", world.tab.tab.text)
     row.buttons[1].scripts.OnClick(row.buttons[1])
     row.buttons[3].scripts.OnClick(row.buttons[3])
+    -- The Welcome mail button beside New opens the same settings.
+    test.assertEqual("Welcome mail", world.tab.welcome.text)
+    world.tab.welcome.scripts.OnClick(world.tab.welcome)
     test.assertEqual("editWelcome", world.calls[1].name)
     test.assertEqual("sendWelcomes", world.calls[2].name)
+    test.assertEqual("editWelcome", world.calls[3].name)
 end)
