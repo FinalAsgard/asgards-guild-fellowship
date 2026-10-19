@@ -11,7 +11,9 @@ local _, addon = ...
 --                30 days
 --   Recipients   the list of who will get the mail, each with a check box
 --                to leave them out, and a warning on any whose mail is too
---                long once the placeholders are filled in
+--                long once the placeholders are filled in; a search box
+--                narrows it, and Check All / Uncheck All tick or untick
+--                everyone it shows
 --   Preview      the mail as the first ticked recipient gets it, and the
 --                placeholders the subject and message can use
 -- It only draws GuildMail's model and passes clicks and typing back. It opens beside the mailbox when opened from there, and can
@@ -71,6 +73,8 @@ Window.__index = Window
 --   onRank(index, checked), onMode(mode), onSubject(text), onBody(text)
 --   onSkipDiscord(checked), onActiveOnly(checked)
 --   onRecipient(key, checked)  a recipient ticked or unticked
+--   onRecipientFilter(text)    typed in the recipient list's search
+--   onCheckAll(), onUncheckAll()   Check All and Uncheck All
 --   onSend()     Send pressed: ask for confirmation
 --   onConfirm()  the confirmation's Send pressed
 --   onCancel()   the confirmation's Cancel pressed
@@ -81,6 +85,7 @@ Window.__index = Window
 --   onResumeEntry(position), onCancelEntry(position),
 --   onRemoveEntry(position)    `position` is the entry's place in the outbox
 --   onSettle(index, send)      Send (true) or Skip on recipient `index`
+--   onReuseEntry(position)     Use again
 --   onConfirmAction(), onDismissAction()   Yes and No on the question
 -- and for the welcome mail:
 --   onWelcomeSubject(text), onWelcomeBody(text)   typed on its page
@@ -99,6 +104,10 @@ function GuildMailWindow.Create(client, handlers)
         onSubject = handler("onSubject"),
         onBody = handler("onBody"),
         onRecipient = handler("onRecipient"),
+        onRecipientFilter = handler("onRecipientFilter"),
+        onCheckAll = handler("onCheckAll"),
+        onUncheckAll = handler("onUncheckAll"),
+        onReuseEntry = handler("onReuseEntry"),
         onSend = handler("onSend"),
         onConfirm = handler("onConfirm"),
         onCancel = handler("onCancel"),
@@ -425,10 +434,37 @@ end
 function Window:recipientsPanel()
     local panel = self:panel("Recipients", GuildMailWindow.HEIGHT)
     self.recipients = panel
-    local listScroll = self:scrollArea(panel, -36, GuildMailWindow.LIST_HEIGHT)
+    local padding = GuildMailWindow.PADDING
+    local search = self.environment.CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    search:SetHeight(20)
+    search:SetPoint("TOPLEFT", panel, "TOPLEFT", padding + 6, -36)
+    search:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
+    search:SetAutoFocus(false)
+    search:SetScript("OnTextChanged", function(box, typed)
+        if typed then
+            self.onRecipientFilter(box:GetText())
+        end
+    end)
+    search:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    self.recipientSearch = search
+    local searchHint = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    searchHint:SetPoint("LEFT", search, "LEFT", 4, 0)
+    searchHint:SetText("Search names")
+    self.recipientSearchHint = searchHint
+    self.checkAll = self:button(panel, "Check All", GuildMailWindow.BUTTON_WIDTH, function()
+        self.onCheckAll()
+    end)
+    self.checkAll:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -62)
+    self.uncheckAll = self:button(panel, "Uncheck All", GuildMailWindow.BUTTON_WIDTH, function()
+        self.onUncheckAll()
+    end)
+    self.uncheckAll:SetPoint("LEFT", self.checkAll, "RIGHT", 6, 0)
+    local listScroll = self:scrollArea(panel, -92, GuildMailWindow.LIST_HEIGHT - 56)
     local list = self.environment.CreateFrame("Frame", nil, listScroll)
     list:SetWidth(GuildMailWindow.PANEL_WIDTH - 2 * GuildMailWindow.PADDING - 22)
-    list:SetHeight(GuildMailWindow.LIST_HEIGHT)
+    list:SetHeight(GuildMailWindow.LIST_HEIGHT - 56)
     listScroll:SetScrollChild(list)
     self.list = list
 end
@@ -646,8 +682,16 @@ function Window:Render(model)
         self.recipientRows[index]:Hide()
         self.recipientRows[index].line:Hide()
     end
-    self.list:SetHeight(math.max(GuildMailWindow.LIST_HEIGHT,
+    self.list:SetHeight(math.max(GuildMailWindow.LIST_HEIGHT - 56,
         #model.recipients * GuildMailWindow.LIST_ROW_HEIGHT + 4))
+    setText(self.recipientSearch, model.recipientFilter or "")
+    if (model.recipientFilter or "") == "" then
+        self.recipientSearchHint:Show()
+    else
+        self.recipientSearchHint:Hide()
+    end
+    setEnabled(self.checkAll, not model.sending)
+    setEnabled(self.uncheckAll, not model.sending)
 
     self.cost:SetText(model.costText or "")
     self.money:SetText(model.moneyText or "")
@@ -749,6 +793,12 @@ function Window:entryPage()
         end
     end)
     self.entryResume:SetPoint("RIGHT", self.entryCancel, "LEFT", -6, 0)
+    self.entryReuse = self:button(page, "Use again", nil, function()
+        if self.entryPosition ~= nil then
+            self.onReuseEntry(self.entryPosition)
+        end
+    end)
+    self.entryReuse:SetPoint("LEFT", self.entryBack, "RIGHT", 6, 0)
 
     local question = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     question:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", padding, padding + 34)
@@ -862,6 +912,11 @@ function Window:renderEntry(entry)
         self.entryResume:Show()
         setEnabled(self.entryCancel, entry.canCancel)
         setEnabled(self.entryResume, entry.canResume)
+    end
+    if entry.canReuse then
+        self.entryReuse:Show()
+    else
+        self.entryReuse:Hide()
     end
     if entry.actionText ~= nil then
         self.entryQuestion:SetText(entry.actionText)

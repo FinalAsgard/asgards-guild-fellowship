@@ -501,6 +501,11 @@ function Mail:record(recipients, perMail)
         perMail = perMail,
         state = addon.GuildMailSender.SENDING,
         recipients = saved,
+        -- The choices it was sent with, for Use again.
+        ranks = self:rankKeys(),
+        mode = self.mode,
+        skipDiscord = self.skipDiscord,
+        activeOnly = self.activeOnly,
     }
     local outbox = self:ask(self.outbox)
     if type(outbox) == "table" then
@@ -715,6 +720,8 @@ function Mail:ConfirmAction()
         done = self:removeEntry(action.entry)
     elseif action.kind == "discard" then
         done = self:newMail()
+    elseif action.kind == "reuse" then
+        done = self:reuseEntry(action.entry)
     end
     self:refresh()
     return done
@@ -785,6 +792,65 @@ function Mail:newMail()
     self.subject = ""
     self.body = ""
     self.unticked = {}
+    self.recipientFilter = ""
+    self:save()
+    return self:Open(self.mailboxOpen)
+end
+
+-- Whether outbox `entry` can be used again: a mail an officer wrote, not
+-- the Welcome mails.
+function Mail:canReuse(entry)
+    return self:IsOfficer() and not isWelcome(entry) and type(entry.subject) == "string"
+end
+
+-- Use again: the sent mail at `position` becomes the draft, to send to
+-- another group, asking first when the draft has text.
+function Mail:RequestReuseEntry(position)
+    local entry = self:entryAt(position)
+    if entry == nil or not self:canReuse(entry) then
+        return false
+    end
+    if blank(self.subject) and blank(self.body) then
+        return self:reuseEntry(entry)
+    end
+    self.pendingAction = { kind = "reuse", entry = entry, text = "Replace the current draft with this mail?" }
+    self:refresh()
+    return true
+end
+
+-- The draft becomes `entry`'s subject and message, with the choices it was
+-- sent with and everyone ticked, and the window opens on it.
+function Mail:reuseEntry(entry)
+    if not self:canReuse(entry) then
+        return false
+    end
+    self:compose()
+    self.batch = nil
+    self.subject = entry.subject
+    self.body = type(entry.body) == "string" and entry.body or ""
+    if type(entry.ranks) == "table" then
+        self.ranks = {}
+        local index
+        for index = 1, #entry.ranks do
+            if type(entry.ranks[index]) == "number" then
+                self.ranks[entry.ranks[index]] = true
+            end
+        end
+    end
+    local index
+    for index = 1, #GuildMail.MODES do
+        if GuildMail.MODES[index].id == entry.mode then
+            self.mode = entry.mode
+        end
+    end
+    if type(entry.skipDiscord) == "boolean" then
+        self.skipDiscord = entry.skipDiscord
+    end
+    if type(entry.activeOnly) == "boolean" then
+        self.activeOnly = entry.activeOnly
+    end
+    self.unticked = {}
+    self.recipientFilter = ""
     self:save()
     return self:Open(self.mailboxOpen)
 end
@@ -1113,7 +1179,8 @@ end
 -- The Guild Mail tab's list:
 --   draft       { subject } when the draft has a subject or message, else nil
 --   entries     newest first: { position, subject, whenText, progressText,
---               state, stateText, canResume, canCancel, canRemove }
+--               state, stateText, canResume, canCancel, canRemove,
+--               canReuse }
 --   canNew      whether New can be pressed
 --   actionText  the question waiting for Yes or No, or nil
 function Mail:OutboxModel()
@@ -1146,6 +1213,7 @@ function Mail:OutboxModel()
                 canResume = self:canResume(entry),
                 canCancel = self:canCancel(entry),
                 canRemove = self:canRemove(entry),
+                canReuse = self:canReuse(entry),
             })
         end
     end
@@ -1165,7 +1233,7 @@ end
 --   position, subject, body, stateText, whenText, progressText,
 --   preview { to, subject, body } (its first recipient's mail),
 --   recipients { name, playerName, rankName, status, reason, canSettle },
---   canResume, canCancel, canRemove, actionText
+--   canResume, canCancel, canRemove, canReuse, actionText
 -- Nil when no entry is on view.
 function Mail:entryModel(rankNames)
     local entry = self.viewing
@@ -1214,19 +1282,26 @@ function Mail:entryModel(rankNames)
         canResume = self:canResume(entry),
         canCancel = self:canCancel(entry),
         canRemove = self:canRemove(entry),
+        canReuse = self:canReuse(entry),
         actionText = self.pendingAction and self.pendingAction.text or nil,
     }
 end
 
--- Saves the draft as it is now.
-function Mail:save()
-    self.draftLoaded = true
+-- The ticked rank indexes, in order.
+function Mail:rankKeys()
     local ranks = {}
     local rank
     for rank in pairs(self.ranks) do
         table.insert(ranks, rank)
     end
     table.sort(ranks)
+    return ranks
+end
+
+-- Saves the draft as it is now.
+function Mail:save()
+    self.draftLoaded = true
+    local ranks = self:rankKeys()
     local unticked = {}
     local key
     for key in pairs(self.unticked) do
@@ -1375,6 +1450,49 @@ function Mail:SetRecipient(key, checked)
     return true
 end
 
+-- The recipient list's search: shows only recipients whose character or
+-- player name holds `text` (any case). Empty shows everyone.
+function Mail:SetRecipientFilter(text)
+    text = type(text) == "string" and text or ""
+    if text == (self.recipientFilter or "") then
+        return false
+    end
+    self.recipientFilter = text
+    self:refresh()
+    return true
+end
+
+-- Whether `recipient` matches the recipient list's search.
+function Mail:matchesFilter(recipient)
+    local filter = string.lower(self.recipientFilter or "")
+    if filter == "" then
+        return true
+    end
+    local function holds(value)
+        return type(value) == "string" and string.find(string.lower(value), filter, 1, true) ~= nil
+    end
+    return holds(recipient.name) or holds(recipient.playerName)
+end
+
+-- Check All / Uncheck All: ticks or unticks every recipient the search
+-- shows (one whose mail is too long stays unticked). Returns false while
+-- the list can't change.
+function Mail:SetAllRecipients(checked)
+    if not self:editable() then
+        return false
+    end
+    local recipients = self:Recipients()
+    local index
+    for index = 1, #recipients do
+        if self:matchesFilter(recipients[index]) then
+            self.unticked[recipients[index].key] = not checked or nil
+        end
+    end
+    self:save()
+    self:refresh()
+    return true
+end
+
 -- Whether `recipient` is ticked: not unticked, and their mail fits.
 function Mail:isTicked(recipient)
     return not self.unticked[recipient.key] and not (recipient.mail and recipient.mail.warning)
@@ -1399,13 +1517,17 @@ function Mail:OnMailboxOpened()
     self:refresh()
 end
 
--- Closing the mailbox stops sending, as Stop does; the list and progress
--- stay for when it's opened again.
+-- Closing the mailbox stops sending, as Stop does, and closes the window;
+-- the list and progress stay for when it's opened again.
 function Mail:OnMailboxClosed()
     self.mailboxOpen = false
     self.confirming = false
     if not self.sender:Stop() then
         self:refresh()
+    end
+    -- Guild Mail's window goes with the mailbox.
+    if self.view ~= nil and type(self.view.Hide) == "function" then
+        pcall(self.view.Hide, self.view)
     end
 end
 
@@ -1676,6 +1798,8 @@ end
 --                the filled-in mail is too long; status is nil
 --                until a send starts, then "pending", "sent" or "failed"
 --   countText    "12 mails", or "10 of 12 mails" with some unticked
+--   recipientFilter  the recipient list's search; `recipients` holds only
+--                the rows it shows
 --   costText     "42 mails to 38 players · Estimated cost: 12s 60c (30c
 --                each)", in red when the officer can't afford it
 --   moneyText    "You have 152g 3s", or nil when the money isn't known
@@ -1716,18 +1840,21 @@ function Mail:Model()
         if self.batch ~= nil then
             status, reason = self.sender:Status(index)
         end
-        rows[index] = {
-            key = recipients[index].key,
-            name = recipients[index].name,
-            playerName = recipients[index].playerName,
-            lastSeen = lastSeen(recipients[index]),
-            rank = recipients[index].rank,
-            rankName = rankNames[recipients[index].rank] or ("Rank " .. (recipients[index].rank + 1)),
-            checked = self.batch ~= nil or self:isTicked(recipients[index]),
-            warning = recipients[index].mail and recipients[index].mail.warning,
-            status = status,
-            reason = reason,
-        }
+        -- The search hides rows while composing; a send shows everyone.
+        if self.batch ~= nil or self:matchesFilter(recipients[index]) then
+            table.insert(rows, {
+                key = recipients[index].key,
+                name = recipients[index].name,
+                playerName = recipients[index].playerName,
+                lastSeen = lastSeen(recipients[index]),
+                rank = recipients[index].rank,
+                rankName = rankNames[recipients[index].rank] or ("Rank " .. (recipients[index].rank + 1)),
+                checked = self.batch ~= nil or self:isTicked(recipients[index]),
+                warning = recipients[index].mail and recipients[index].mail.warning,
+                status = status,
+                reason = reason,
+            })
+        end
     end
     local hint = self:hint(recipients)
     local officer = self:IsOfficer()
@@ -1753,8 +1880,9 @@ function Mail:Model()
         subject = self.subject,
         body = self.body,
         recipients = rows,
-        countText = #ticked == #rows and plural(#rows, "mail", "mails")
-            or (#ticked .. " of " .. plural(#rows, "mail", "mails")),
+        countText = #ticked == #recipients and plural(#recipients, "mail", "mails")
+            or (#ticked .. " of " .. plural(#recipients, "mail", "mails")),
+        recipientFilter = self.recipientFilter or "",
         costText = costText,
         moneyText = type(money) == "number" and ("You have " .. self:coins(money)) or nil,
         affordable = cost.affordable,

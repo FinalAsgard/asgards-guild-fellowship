@@ -804,6 +804,9 @@ local function newMail(overrides)
         IsShown = function(self)
             return self.shown
         end,
+        Hide = function(self)
+            self.shown = false
+        end,
         Render = function(self, model)
             world.renders = world.renders + 1
             self.model = model
@@ -1596,6 +1599,10 @@ local function newWindow()
         onCancelEntry = record("cancelEntry"),
         onRemoveEntry = record("removeEntry"),
         onSettle = record("settle"),
+        onRecipientFilter = record("recipientFilter"),
+        onCheckAll = record("checkAll"),
+        onUncheckAll = record("uncheckAll"),
+        onReuseEntry = record("reuseEntry"),
         onWelcomeSubject = record("welcomeSubject"),
         onWelcomeBody = record("welcomeBody"),
         onWelcomeSave = record("welcomeSave"),
@@ -2922,4 +2929,182 @@ test.test("guild mail: unticked people stay out of a send cut short by the mail 
     test.assertEqual(addon.GuildMailSender.DONE, world.outbox[1].state)
     -- The draft still has Cog Wheel unticked.
     test.assertEqual("cog wheel-camelot", table.concat(after.saved.unticked, ","))
+end)
+
+-- Finding recipients and using a mail again -----------------------------------------
+
+-- The names on the recipient list as the window shows it, ticked ones
+-- marked with a "+".
+local function shownNames(world)
+    local names = {}
+    local index
+    for index = 1, #world.view.model.recipients do
+        local row = world.view.model.recipients[index]
+        table.insert(names, (row.checked and "+" or "") .. row.name)
+    end
+    return table.concat(names, ",")
+end
+
+-- Every Member and Initiate's character.
+local function everyone(world)
+    world.mail:Open(true)
+    world.mail:SetRank(2, true)
+    world.mail:SetRank(3, true)
+    world.mail:SetMode("all")
+    world.mail:SetSubject("Welcome to Initiate!")
+    world.mail:OnMailboxOpened()
+end
+
+test.test("guild mail: closing the mailbox closes Guild Mail's window", function()
+    local _, world = newMail()
+    world.mail:OnMailboxOpened()
+    world.mail:Open(true)
+
+    world.mail:OnMailboxClosed()
+    test.assertFalse(world.view.shown)
+end)
+
+test.test("guild mail: the recipient search shows only matching names; the count stays for everyone", function()
+    local _, world = newMail()
+    everyone(world)
+
+    test.assertTrue(world.mail:SetRecipientFilter("reed"))
+    test.assertEqual("+Gus Reed,+Bo Reed", shownNames(world))
+    test.assertEqual("reed", world.view.model.recipientFilter)
+    test.assertEqual("5 mails", world.view.model.countText)
+    -- Any case, and the player's name counts too: Cog Wheel is Ann's alt.
+    world.mail:SetRecipientFilter("ANN")
+    test.assertEqual("+Ann Bell,+Cog Wheel", shownNames(world))
+    world.mail:SetRecipientFilter("")
+    test.assertEqual(5, #world.view.model.recipients)
+end)
+
+test.test("guild mail: Check All and Uncheck All act on the names the search shows", function()
+    local _, world = newMail()
+    everyone(world)
+
+    test.assertTrue(world.mail:SetAllRecipients(false))
+    test.assertEqual("0 of 5 mails", world.view.model.countText)
+    world.mail:SetRecipientFilter("bo")
+    world.mail:SetAllRecipients(true)
+    world.mail:SetRecipientFilter("")
+    test.assertEqual("1 of 5 mails", world.view.model.countText)
+    -- Saved with the draft: Bo is the only one not unticked.
+    test.assertEqual(4, #world.saved.unticked)
+
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    world.mail:OnSent()
+    test.assertEqual(1, #world.sent)
+    test.assertEqual("Bo Reed", world.sent[1].to)
+    -- Nothing changes while the list is a send.
+    world.mail:RequestSend()
+    test.assertFalse(world.view.model.sending)
+end)
+
+test.test("guild mail: Use again makes a sent mail the draft, with its choices and everyone ticked", function()
+    local _, world = newMail()
+    everyone(world)
+    world.mail:SetAllRecipients(false)
+    world.mail:SetRecipientFilter("bo")
+    world.mail:SetAllRecipients(true)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    world.mail:OnSent()
+    -- A new mail since.
+    world.mail:RequestNew()
+    world.mail:ConfirmAction()
+    world.mail:SetSubject("Raid night")
+
+    local row = world.mail:OutboxModel().entries[1]
+    test.assertTrue(row.canReuse)
+    test.assertTrue(world.mail:RequestReuseEntry(1))
+    test.assertEqual("Replace the current draft with this mail?", world.mail.pendingAction.text)
+    test.assertTrue(world.mail:ConfirmAction())
+    test.assertEqual("Welcome to Initiate!", world.mail.subject)
+    test.assertEqual("Welcome to Initiate!", world.saved.subject)
+    test.assertEqual("all", world.mail.mode)
+    test.assertEqual("5 mails", world.view.model.countText)
+    test.assertEqual("", world.view.model.recipientFilter)
+    test.assertTrue(world.view.shown)
+    -- The sent mail is still there, unchanged, to remove or use again later.
+    test.assertEqual("done", world.outbox[1].state)
+    test.assertEqual(1, #world.outbox)
+
+    -- Next time someone's promoted: just them, and send.
+    world.mail:SetAllRecipients(false)
+    world.mail:SetRecipientFilter("zed")
+    world.mail:SetAllRecipients(true)
+    world.mail:RequestSend()
+    world.mail:Confirm()
+    test.assertEqual("Zed Stone", world.sent[2].to)
+    test.assertEqual("Welcome to Initiate!", world.sent[2].subject)
+end)
+
+test.test("guild mail: with no draft, Use again doesn't ask; Welcome mails can't be used again", function()
+    local _, world = newMail({ outbox = {
+        { subject = "Rules", body = "Read them", state = "done", recipients = {} },
+        { kind = "welcome", subject = "Welcome mails", body = "", state = "done", recipients = {} },
+    } })
+    world.mail:Open(false)
+
+    test.assertTrue(world.mail:RequestReuseEntry(1))
+    test.assertEqual(nil, world.mail.pendingAction)
+    test.assertEqual("Rules", world.mail.subject)
+    test.assertEqual("Read them", world.mail.body)
+    test.assertFalse(world.mail:RequestReuseEntry(2))
+end)
+
+test.test("guild mail window: the recipient search and Check All / Uncheck All are passed back", function()
+    local _, world = newWindow()
+    local model = {}
+    local key, value
+    for key, value in pairs(MODEL) do
+        model[key] = value
+    end
+    model.recipientFilter = "gus"
+    world.window:Render(model)
+    test.assertEqual("gus", world.window.recipientSearch.text)
+    test.assertFalse(world.window.recipientSearchHint.shown)
+
+    world.window.recipientSearch:SetText("ann")
+    world.window.recipientSearch.scripts.OnTextChanged(world.window.recipientSearch, true)
+    world.window.checkAll.scripts.OnClick(world.window.checkAll)
+    world.window.uncheckAll.scripts.OnClick(world.window.uncheckAll)
+    test.assertEqual("recipientFilter", world.calls[1].name)
+    test.assertEqual("ann", world.calls[1].args[1])
+    test.assertEqual("checkAll", world.calls[2].name)
+    test.assertEqual("uncheckAll", world.calls[3].name)
+end)
+
+test.test("guild mail window and tab: Use again on a sent mail is passed back", function()
+    local _, world = newWindow()
+    local model = {}
+    local key, value
+    for key, value in pairs(MODEL) do
+        model[key] = value
+    end
+    model.entry = { position = 3, subject = "Rules", body = "Hi", stateText = "Done", progressText = "Sent 1 of 1",
+        recipients = {}, canRemove = true, canReuse = true }
+    world.window:Render(model)
+    test.assertTrue(world.window.entryReuse.shown)
+    world.window.entryReuse.scripts.OnClick(world.window.entryReuse)
+    test.assertEqual("reuseEntry", world.calls[1].name)
+    test.assertEqual(3, world.calls[1].args[1])
+
+    local _, tabWorld = newTab()
+    mailbox(tabWorld.environment)
+    tabWorld.tab:Install(true)
+    tabWorld.tab.onReuse = function(position)
+        table.insert(tabWorld.calls, { name = "reuse", args = { position } })
+    end
+    tabWorld.tab:Render({ entries = { { position = 1, subject = "Rules", progressText = "Sent 1 of 1", state = "done",
+        stateText = "Done", canRemove = true, canReuse = true } }, canNew = true })
+    local row = tabWorld.tab.rows[1]
+    test.assertEqual("View", row.buttons[1].text)
+    test.assertEqual("Remove", row.buttons[2].text)
+    test.assertEqual("Use again", row.buttons[3].text)
+    row.buttons[3].scripts.OnClick(row.buttons[3])
+    test.assertEqual("reuse", tabWorld.calls[1].name)
+    test.assertEqual(1, tabWorld.calls[1].args[1])
 end)

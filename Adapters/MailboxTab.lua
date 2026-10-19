@@ -27,8 +27,11 @@ local MailboxTab = {
     -- Rows made up front: the page shows this many; the list scrolls.
     LIST_HEIGHT = 300,
     BUTTON_WIDTH = 56,
+    -- Buttons on a row: View, Resume, Cancel and Use again at most.
+    BUTTONS = 4,
     BUTTON_HEIGHT = 20,
     WELCOME_WIDTH = 96,
+    REUSE_WIDTH = 72,
     -- Without the mailbox's content area (MailFrame.Inset), the page keeps
     -- this far inside the inbox's place: clear of the title bar and the
     -- mail icon at the top left.
@@ -45,6 +48,7 @@ Tab.__index = Tab
 --   onCancel(position), onRemove(position)   a row's buttons; `position`
 --                is the entry's place in the outbox
 --   onConfirm(), onDismiss()   Yes and No on the question
+--   onReuse(position)   a sent mail's Use again
 --   onEditWelcome(), onSendWelcomes()   the Welcome mail button (and the
 --                Welcome mails row's Edit), and the row's Send
 --   onShown()    the page was shown (draw it)
@@ -64,6 +68,7 @@ function MailboxTab.Create(client, handlers)
         onConfirm = handler("onConfirm"),
         onDismiss = handler("onDismiss"),
         onShown = handler("onShown"),
+        onReuse = handler("onReuse"),
         onEditWelcome = handler("onEditWelcome"),
         onSendWelcomes = handler("onSendWelcomes"),
         rows = {},
@@ -240,7 +245,7 @@ function Tab:buildPage(mailFrame)
 end
 
 -- Row `position` of the list, made on first use: the subject line and the
--- progress line across the whole row, and below them up to three buttons
+-- progress line across the whole row, and below them up to BUTTONS buttons
 -- from the left, so they never cover the text.
 function Tab:row(position)
     if self.rows[position] ~= nil then
@@ -267,7 +272,7 @@ function Tab:row(position)
     row.detail = detail
     row.buttons = {}
     local index
-    for index = 1, 3 do
+    for index = 1, MailboxTab.BUTTONS do
         local button = self:button(row, "", MailboxTab.BUTTON_WIDTH, function(clicked)
             if clicked.action ~= nil then
                 clicked.action()
@@ -285,14 +290,15 @@ function Tab:row(position)
 end
 
 -- Sets a row's buttons from `buttons`: { text, enabled, action } each, at
--- most three, from the left.
+-- most BUTTONS, from the left.
 local function setButtons(row, buttons)
     local index
-    for index = 1, 3 do
+    for index = 1, MailboxTab.BUTTONS do
         local button = row.buttons[index]
         local spec = buttons[index]
         if spec ~= nil then
             button:SetText(spec.text)
+            button:SetWidth(spec.width or MailboxTab.BUTTON_WIDTH)
             button.action = spec.action
             setEnabled(button, spec.enabled ~= false)
             button:Show()
@@ -424,6 +430,11 @@ function Tab:Render(model)
             end })
             table.insert(buttons, { text = "Cancel", enabled = entry.canCancel, action = function()
                 self.onCancel(position)
+            end })
+        end
+        if entry.canReuse then
+            table.insert(buttons, { text = "Use again", width = MailboxTab.REUSE_WIDTH, action = function()
+                self.onReuse(position)
             end })
         end
         local detail = entry.progressText

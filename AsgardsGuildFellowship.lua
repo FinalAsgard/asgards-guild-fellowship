@@ -1977,6 +1977,18 @@ if clientProfile.supported then
                 guildMail:Refresh()
             end
         end,
+        onRecipientFilter = function(text)
+            guildMail:SetRecipientFilter(text)
+        end,
+        onCheckAll = function()
+            guildMail:SetAllRecipients(true)
+        end,
+        onUncheckAll = function()
+            guildMail:SetAllRecipients(false)
+        end,
+        onReuseEntry = function(position)
+            guildMail:RequestReuseEntry(position)
+        end,
         onSubject = function(text)
             guildMail:SetSubject(text)
         end,
@@ -2074,6 +2086,9 @@ if clientProfile.supported then
         end,
         onEditWelcome = function()
             guildMail:OpenWelcome()
+        end,
+        onReuse = function(position)
+            guildMail:RequestReuseEntry(position)
         end,
         onSendWelcomes = function()
             if not guildMail:SendWelcomes() then

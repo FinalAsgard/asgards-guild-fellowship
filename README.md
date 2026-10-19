@@ -340,6 +340,7 @@ A mail's subject can be up to 64 characters and its message up to 500, counted a
 ### Checking the list and the cost
 
 - **Recipients (42 mails)** shows how many mails will go out. **Edit** beside it opens the list: each character, their player, rank, and when they were last online, each with a check box. Untick anyone to leave them out; the count then reads "40 of 42 mails". Unticked recipients stay unticked, across reloads too.
+- At the top of the list, type in **Search names** to show only characters (or players) whose name holds it. **Check All** and **Uncheck All** tick or untick everyone the search shows. To mail just one or two people: **Uncheck All**, search for them, then tick them.
 - The cost line shows how many mails and players, and the postage: "42 mails to 38 players · Estimated cost: 12s 60c (30c each)". It updates with every change. At a mailbox it uses the game's own price; away from one it uses the standard 30c.
 - Below it is your money. If it isn't enough, the cost turns red and **Send** waits with "Not enough money for postage".
 
@@ -350,6 +351,7 @@ A mail's subject can be up to 64 characters and its message up to 500, counted a
 - The game only lets you mail about 20 different characters in a while (it's anti-spam, and counts every character on your account). When it says "You have reached the in-game cap of unique mail recipients", sending pauses instead: nobody is marked failed, the window says "Paused: the game's mail limit was reached. Try again later.", and **Send** becomes **Resume**. The limit wears off with time; Resume tries the refused mail first and pauses again if it's still in force.
 - If the game doesn't answer a mail within 10 seconds, that mail fails ("no response, will try again at the end"), sending moves on, and it's tried once more after the rest. If the game doesn't answer then either, it stays failed.
 - If the game blocks the add-on from sending, **Send** becomes **Send next**, and from then on each mail goes out when you click it.
+- Closing the mailbox closes the Guild Mail window too.
 - **Stop** halts once the mail in flight is answered. **Continue** then sends to everyone still pending, so nobody gets the mail twice, and **End** gives up on them. Closing the mailbox stops sending the same way; reopen it and Guild Mail to continue.
 - When it's done, the summary reads "Sent 40 · Failed 2 · Postage spent: 12s", with the failures still listed. Change anything to start a new mail.
 - While a send is under way, everything but Send and Stop is locked.
@@ -372,6 +374,7 @@ The mailbox's **Guild Mail** tab lists your guild mails:
 - **Resume** carries on with a mail's waiting recipients (at a mailbox). Only one mail sends at a time, so Resume waits while another is going.
 - **Cancel** gives up on a mail's waiting recipients, after asking; nothing more is sent for it. **Remove** takes a finished or cancelled mail off the list, after asking.
 - **New** starts a blank mail, asking first ("Discard the current draft?") if the draft has text.
+- **Use again** (on the list or on a mail's View page) makes a sent mail your draft: its subject, message, ranks and Send to choices come back with everyone ticked, ready to send to another group. It asks first if your draft has text. The sent mail stays on the list until you **Remove** it, so you can use it again whenever you need it, for example each time someone is promoted to a rank.
 - **Welcome mail** opens the guild's [welcome mail](#welcome-mail) settings.
 
 A mail paused at the limit doesn't hold you up: **Edit** your draft and send a new one, and the paused mail waits in the tab to be resumed later.
