@@ -265,15 +265,15 @@ function Tab:row(position)
         end
         row.buttons[index] = button
     end
+    -- One line each, cut short rather than wrapped; their right edge is
+    -- set to the row's leftmost button shown (setButtons).
     local title = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -4)
-    title:SetPoint("RIGHT", row.buttons[1], "LEFT", -6, 0)
     title:SetJustifyH("LEFT")
+    title:SetWordWrap(false)
     row.title = title
     local detail = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    detail:SetPoint("TOPLEFT", row, "TOPLEFT", 4, -22)
-    detail:SetPoint("RIGHT", row.buttons[1], "LEFT", -6, 0)
     detail:SetJustifyH("LEFT")
+    detail:SetWordWrap(false)
     row.detail = detail
     self.rows[position] = row
     return row
@@ -295,6 +295,19 @@ local function setButtons(row, buttons)
         else
             button.action = nil
             button:Hide()
+        end
+    end
+    -- The text runs up to the leftmost button shown, or the row's edge.
+    local edge = row.buttons[first]
+    local lines = { { row.title, -4 }, { row.detail, -22 } }
+    for index = 1, 2 do
+        local line, top = lines[index][1], lines[index][2]
+        line:ClearAllPoints()
+        line:SetPoint("TOPLEFT", row, "TOPLEFT", 4, top)
+        if edge ~= nil then
+            line:SetPoint("RIGHT", edge, "LEFT", -6, 0)
+        else
+            line:SetPoint("RIGHT", row, "RIGHT", -4, 0)
         end
     end
 end
