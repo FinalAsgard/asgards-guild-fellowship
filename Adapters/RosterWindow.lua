@@ -578,43 +578,69 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     return edit
 end
 
--- The conflict review panel, in two sections. Member changes: one line per
--- player with suggestions, saying how many, with Review (see the bundle
--- review below). Note conflicts: one line per conflict, with Accept and
--- Reject (or Dismiss, when there's nothing to apply). Accept all and Reject
--- all decide everything. A member's own suggestions follow, waiting for an
--- officer.
-local CONFLICT_COLUMNS = {
+-- The conflict review panel, in three sections, each with its own columns.
+-- Changes to Player: one line per player with suggestions, saying how many
+-- and who suggested them, with Review (see the bundle review below). Note
+-- conflicts: one line per conflict, its live note, what it suggests, and
+-- the current state wrapped in one column, with Accept and Reject (or
+-- Dismiss, when there's nothing to apply). A member's own suggestions
+-- follow, waiting for an officer. Accept all and Reject all decide
+-- everything. Each section's heading line names its columns.
+local CONFLICT_DETAILS = {
     { field = "name", header = "Character", x = 8, width = 140 },
-    { field = "note", header = "Note (live)", x = 152, width = 170 },
-    { field = "suggests", header = "Note suggests", x = 326, width = 170 },
-    { field = "current", header = "Currently", x = 500, width = 150 },
-    { field = "source", header = "Source", x = 654, width = 90 },
+    { field = "details", header = "Note (live), suggests, and currently", x = 152, width = 340, wrap = true },
 }
-local CONFLICT_WIDTH = 900
-local CONFLICT_HEIGHT = 360
+local CONFLICT_SECTIONS = {
+    changes = {
+        heading = "Changes to Player",
+        columns = {
+            { field = "name", header = "Player", x = 8, width = 170 },
+            { field = "changes", header = "Changes", x = 182, width = 90 },
+            { field = "suggestedBy", header = "Suggested by", x = 276, width = 216 },
+        },
+    },
+    notes = { heading = "Note conflicts", columns = CONFLICT_DETAILS },
+    yours = { heading = "Your suggestions", columns = CONFLICT_DETAILS },
+}
+local CONFLICT_ORDER = { "changes", "notes", "yours" }
+-- Room for the wrapped column's three lines, and a fourth when one wraps.
+local CONFLICT_LINE_HEIGHT = 44
+local CONFLICT_BUTTONS_X = 498
+local CONFLICT_WIDTH = 680
+local CONFLICT_HEIGHT = 420
+local CONFLICT_TOP = 62
 
 local function createConflictLine(scroll, index, options)
     local line = CreateFrame("Frame", nil, scroll)
-    line:SetHeight(RosterWindow.LINE_HEIGHT)
-    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
-    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
+    line:SetHeight(CONFLICT_LINE_HEIGHT)
+    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * CONFLICT_LINE_HEIGHT)
+    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * CONFLICT_LINE_HEIGHT)
     line.background = line:CreateTexture(nil, "BACKGROUND")
     line.background:SetAllPoints(line)
+    -- One set of cells per section, shown for that section's lines.
     line.cells = {}
-    local columnIndex
-    for columnIndex = 1, #CONFLICT_COLUMNS do
-        local column = CONFLICT_COLUMNS[columnIndex]
-        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
-        cell:SetWidth(column.width)
-        cell:SetJustifyH("LEFT")
-        cell:SetWordWrap(false)
-        line.cells[column.field] = cell
+    local sectionIndex
+    for sectionIndex = 1, #CONFLICT_ORDER do
+        local section = CONFLICT_ORDER[sectionIndex]
+        local columns = CONFLICT_SECTIONS[section].columns
+        line.cells[section] = {}
+        local columnIndex
+        for columnIndex = 1, #columns do
+            local column = columns[columnIndex]
+            local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
+            cell:SetWidth(column.width)
+            cell:SetJustifyH("LEFT")
+            -- No fixed height on the wrapped column, so a long line wraps
+            -- instead of being cut off.
+            cell:SetWordWrap(column.wrap == true)
+            cell:Hide()
+            line.cells[section][column.field] = cell
+        end
     end
     line.accept = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
     line.accept:SetSize(56, 18)
-    line.accept:SetPoint("LEFT", line, "LEFT", 748, 0)
+    line.accept:SetPoint("LEFT", line, "LEFT", CONFLICT_BUTTONS_X, 0)
     line.accept:SetText("Accept")
     line.accept:SetScript("OnClick", function()
         if line.row == nil then
@@ -635,7 +661,7 @@ local function createConflictLine(scroll, index, options)
         end
     end)
     line.waiting = line:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    line.waiting:SetPoint("LEFT", line, "LEFT", 748, 0)
+    line.waiting:SetPoint("LEFT", line, "LEFT", CONFLICT_BUTTONS_X, 0)
     line.waiting:SetText("Waiting for an officer")
     line.waiting:Hide()
     return line
@@ -649,25 +675,36 @@ local function refreshConflictLines(scroll, rows, offset, totalLines)
         if row ~= nil then
             local line = scroll:GetLine(lineIndex)
             line.row = row
-            local columnIndex
-            for columnIndex = 1, #CONFLICT_COLUMNS do
-                local field = CONFLICT_COLUMNS[columnIndex].field
-                local value = row[field]
-                if field == "note" and value == nil then
-                    value = "|cff9d9d9d(not in the roster)|r"
+            local sectionIndex
+            for sectionIndex = 1, #CONFLICT_ORDER do
+                local section = CONFLICT_ORDER[sectionIndex]
+                local columns = CONFLICT_SECTIONS[section].columns
+                local columnIndex
+                for columnIndex = 1, #columns do
+                    local column = columns[columnIndex]
+                    local cell = line.cells[section][column.field]
+                    if section ~= row.section then
+                        cell:Hide()
+                    elseif row.kind == "heading" then
+                        -- The heading names the section over the first
+                        -- column and the other columns over theirs.
+                        local text = columnIndex == 1 and row.name or column.header
+                        cell:SetText("|cffffd100" .. text .. "|r")
+                        cell:Show()
+                    else
+                        local value = row[column.field]
+                        cell:SetText(value ~= nil and tostring(value) or "")
+                        cell:Show()
+                    end
                 end
-                line.cells[field]:SetText(value ~= nil and tostring(value) or "")
             end
             line.waiting:Hide()
             line.reject:Show()
             line.accept:SetText("Accept")
             if row.kind == "heading" then
-                line.cells.name:SetText("|cffffd100" .. row.name .. "|r")
-                line.cells.note:SetText("")
                 line.accept:Hide()
                 line.reject:Hide()
             elseif row.kind == "bundle" then
-                line.cells.note:SetText("")
                 line.accept:SetText("Review")
                 line.accept:Show()
                 line.reject:Hide()
@@ -691,28 +728,35 @@ local function refreshConflictLines(scroll, rows, offset, totalLines)
     end
 end
 
--- The rows the conflict panel lists: Member changes, Note conflicts and
--- the member's own suggestions, each under a heading when there are any.
+-- The rows the conflict panel lists: Changes to Player, Note conflicts and
+-- the member's own suggestions, each under a heading line when there are
+-- any. A row's section comes from ConflictViewModel (`section`), or from
+-- its kind for rows that don't say.
 function RosterWindow.ConflictSections(rows)
-    local sections = {
-        { heading = "Member changes", rows = {} },
-        { heading = "Note conflicts", rows = {} },
-        { heading = "Your suggestions", rows = {} },
-    }
+    local sections = {}
     local index
+    for index = 1, #CONFLICT_ORDER do
+        sections[CONFLICT_ORDER[index]] = {}
+    end
     for index = 1, #rows do
         local row = rows[index]
-        local section = row.kind == "bundle" and 1 or (row.pending and 3 or 2)
-        table.insert(sections[section].rows, row)
+        local section = row.section
+        if sections[section] == nil then
+            section = row.kind == "bundle" and "changes" or (row.pending and "yours" or "notes")
+        end
+        table.insert(sections[section], row)
     end
     local listed = {}
-    for index = 1, #sections do
-        local section = sections[index]
-        if section.rows[1] ~= nil then
-            table.insert(listed, { kind = "heading", name = section.heading })
+    for index = 1, #CONFLICT_ORDER do
+        local section = CONFLICT_ORDER[index]
+        local sectionRows = sections[section]
+        if sectionRows[1] ~= nil then
+            table.insert(listed, { kind = "heading", section = section, name = CONFLICT_SECTIONS[section].heading })
             local rowIndex
-            for rowIndex = 1, #section.rows do
-                table.insert(listed, section.rows[rowIndex])
+            for rowIndex = 1, #sectionRows do
+                local row = sectionRows[rowIndex]
+                row.section = section
+                table.insert(listed, row)
             end
         end
     end
@@ -825,20 +869,12 @@ local function buildConflictPanel(framework, options, frameName)
     explain:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
     explain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -30)
     explain:SetJustifyH("LEFT")
-    explain:SetText("Members' changes, one line per player: Review shows each player before and with their " ..
-        "changes, to approve or deny. Note conflicts: guild notes that disagree with the roster; accepting " ..
-        "applies the note, rejecting keeps the roster. Your own suggestions are listed last until an officer " ..
-        "decides them.")
+    explain:SetText("Changes to Player: Review shows a player before and with the changes, to approve or " ..
+        "deny. Note conflicts: guild notes that disagree with the roster; accepting applies the note, " ..
+        "rejecting keeps the roster. Your suggestions wait here until an officer decides them.")
 
-    local headerIndex
-    for headerIndex = 1, #CONFLICT_COLUMNS do
-        local column = CONFLICT_COLUMNS[headerIndex]
-        local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -50)
-        header:SetText(column.header)
-    end
-
-    local lineAmount = math.floor((CONFLICT_HEIGHT - 110) / RosterWindow.LINE_HEIGHT)
+    local scrollHeight = CONFLICT_HEIGHT - CONFLICT_TOP - 40
+    local lineAmount = math.floor(scrollHeight / CONFLICT_LINE_HEIGHT)
     local function newLine(scrollBox, index)
         return createConflictLine(scrollBox, index, options)
     end
@@ -848,14 +884,14 @@ local function buildConflictPanel(framework, options, frameName)
         refreshConflictLines,
         {},
         CONFLICT_WIDTH - 20,
-        CONFLICT_HEIGHT - 110,
+        scrollHeight,
         lineAmount,
-        RosterWindow.LINE_HEIGHT,
+        CONFLICT_LINE_HEIGHT,
         newLine,
         true
     )
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -66)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -CONFLICT_TOP)
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 40)
     scroll:CreateLines(newLine, lineAmount)
 

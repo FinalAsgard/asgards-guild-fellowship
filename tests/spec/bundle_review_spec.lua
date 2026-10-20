@@ -75,13 +75,13 @@ test.test("members' suggestions are grouped into one bundle per player, before n
     test.assertEqual("bundle", rows[1].kind)
     test.assertEqual("Hammer", rows[1].name)
     test.assertEqual(2, rows[1].count)
-    test.assertEqual("2 changes", rows[1].suggests)
+    test.assertEqual("2 changes", rows[1].changes)
     test.assertEqual("suggested main", rows[1].items[1].kind)
     test.assertEqual("hammer-area52", rows[1].items[1].from)
     test.assertEqual("bolt-area52", rows[1].items[2].from)
     test.assertEqual("bundle", rows[2].kind)
     test.assertEqual("Anvil", rows[2].name)
-    test.assertEqual("1 change", rows[2].suggests)
+    test.assertEqual("1 change", rows[2].changes)
     test.assertEqual("unresolved", rows[3].kind)
     -- Counted once per bundle, plus each note conflict.
     test.assertEqual(3, setup.addon.ConflictViewModel.CountToReview(rows))
@@ -144,12 +144,12 @@ test.test("the review follows a switch of main through every character", functio
     test.assertEqual("Alts: Hammer", review.suggested[2])
 end)
 
-test.test("the conflict window lists Member changes, Note conflicts and your own suggestions under headings", function()
+test.test("the conflict window lists Changes to Player, Note conflicts and your own suggestions under headings", function()
     local addon = test.newAddon("Core/Identity.lua", "Adapters/MasterFrame.lua", "Adapters/RosterWindow.lua")
     local sections = addon.RosterWindow.ConflictSections({
-        { kind = "bundle", name = "Hammer" },
-        { kind = "unresolved", name = "Toolbox" },
-        { kind = "suggested main", name = "Wrench", pending = true },
+        { section = "changes", kind = "bundle", name = "Hammer" },
+        { section = "notes", kind = "unresolved", name = "Toolbox" },
+        { section = "yours", kind = "suggested main", name = "Wrench", pending = true },
     })
 
     local names = {}
@@ -157,9 +157,13 @@ test.test("the conflict window lists Member changes, Note conflicts and your own
     for index = 1, #sections do
         names[index] = sections[index].name
     end
-    test.assertEqual("Member changes, Hammer, Note conflicts, Toolbox, Your suggestions, Wrench",
+    test.assertEqual("Changes to Player, Hammer, Note conflicts, Toolbox, Your suggestions, Wrench",
         table.concat(names, ", "))
     test.assertEqual("heading", sections[1].kind)
+    -- Each heading carries its section, so its line names that section's columns.
+    test.assertEqual("changes", sections[1].section)
+    test.assertEqual("notes", sections[3].section)
+    test.assertEqual("yours", sections[5].section)
     -- Empty sections get no heading.
     test.assertEqual(2, #addon.RosterWindow.ConflictSections({ { kind = "unresolved", name = "Toolbox" } }))
 end)

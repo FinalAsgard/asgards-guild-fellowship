@@ -1137,7 +1137,7 @@ test.test("an officer sees one bundle per member's player, reviews it, and appro
     test.assertEqual(2, #bundles)
     local hammers = bundles[1].name == "Hammer" and bundles[1] or bundles[2]
     test.assertEqual(2, hammers.count)
-    test.assertEqual("2 changes", hammers.suggests)
+    test.assertEqual("2 changes", hammers.changes)
     -- A bundle counts once, for the button and the minimap tooltip.
     test.assertEqual(2, officer.addon.rosterController:PendingConflictCount())
 
