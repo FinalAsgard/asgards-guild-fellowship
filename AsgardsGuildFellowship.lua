@@ -234,6 +234,21 @@ if clientProfile.supported then
                 onGuildLogShown = function()
                     rosterController:RefreshGuildLog()
                 end,
+                onGuildLogSearch = function(text)
+                    rosterController:SetGuildLogSearch(text)
+                end,
+                onGuildLogSort = function(sort)
+                    rosterController:SetGuildLogSort(sort)
+                end,
+                onGuildLogRange = function(days)
+                    rosterController:SetGuildLogRange(days)
+                end,
+                onGuildLogType = function(eventType, shown)
+                    rosterController:SetGuildLogType(eventType, shown)
+                end,
+                onGuildLogPage = function(page)
+                    rosterController:SetGuildLogPage(page)
+                end,
                 onTurnBackOn = function(zoneKey)
                     rosterController:TurnBackOn(zoneKey)
                 end,

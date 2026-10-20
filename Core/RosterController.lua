@@ -1037,9 +1037,67 @@ function Controller:RefreshRecruiters()
     end
 end
 
--- The Guild Log page's rows, for officers: a heading row naming the
--- columns, then every entry newest first, or a line saying there are none
--- yet. Nil for anyone else (see GuildLog).
+-- How the Guild Log page is sorted and filtered now (see GuildLog:Query):
+-- sort ("date" or "name"), types (shown entry types, as a set), range
+-- (days back, or nil for all), search text, and page.
+function Controller:GuildLogFilters()
+    if self.logFilters == nil then
+        local types = {}
+        local index
+        for index = 1, #addon.GuildLog.TYPES do
+            types[addon.GuildLog.TYPES[index]] = true
+        end
+        self.logFilters = { sort = "date", types = types, range = nil, search = "", page = 1 }
+    end
+    return self.logFilters
+end
+
+-- The characters a Guild Log search for `text` matches: every character of
+-- each player whose alias, or any of whose characters' names, contains it,
+-- and characters the roster no longer knows whose logged name contains it.
+-- Nil for no search.
+function Controller:GuildLogSearchSet(text, log, partition, normalizer)
+    local needle = string.lower((string.gsub(text or "", "^%s*(.-)%s*$", "%1")))
+    if needle == "" then
+        return nil
+    end
+    local function contains(value)
+        return type(value) == "string" and string.find(string.lower(value), needle, 1, true) ~= nil
+    end
+    local set = {}
+    if partition ~= nil then
+        partition:EachPlayer(function(id, player)
+            local keys = partition:CharactersOf(id)
+            local matched = contains(player.alias)
+            local index
+            for index = 1, #keys do
+                local character = partition:GetCharacter(keys[index])
+                matched = matched or contains(normalizer:Display(character and character.name or keys[index]))
+            end
+            if matched then
+                for index = 1, #keys do
+                    set[keys[index]] = true
+                end
+            end
+        end)
+    end
+    local entries = log:Entries()
+    local index
+    for index = 1, #entries do
+        local entry = entries[index]
+        local known = partition ~= nil and partition:GetCharacter(entry.character) ~= nil
+        if not known and (contains(entry.name) or contains(entry.character)) then
+            set[entry.character] = true
+        end
+    end
+    return set
+end
+
+-- The Guild Log page, for officers: one page of entries that pass the
+-- filters (see GuildLogFilters), with a heading row naming the columns
+-- first, or a line saying nothing matches. The second result says where
+-- the page is: { page, pages, total, filters }. Nil for anyone else (see
+-- GuildLog).
 --   { kind = "heading" | "entry", date, event, character, player, actor }
 --   { kind = "empty", event }
 function Controller:GuildLogView()
@@ -1048,36 +1106,84 @@ function Controller:GuildLogView()
         return nil
     end
     local guild, partition, normalizer = self:QuietContext()
-    local rows = { {
-        kind = "heading", date = "Date", event = "Event", character = "Character", player = "Player",
-        actor = "By",
-    } }
+    if guild == nil then
+        partition, normalizer = nil, nil
+    end
+    local filters = self:GuildLogFilters()
     local function name(key, given)
         if key == nil then
             return ""
         end
-        local character = guild ~= nil and partition:GetCharacter(key) or nil
+        local character = partition ~= nil and partition:GetCharacter(key) or nil
         local raw = (character and character.name) or given or key
         return normalizer and normalizer:Display(raw) or raw
     end
-    local entries = log:Entries()
+    local now = self.client:Timestamp()
+    local result = log:Query({
+        types = filters.types,
+        from = (filters.range ~= nil and now ~= nil) and (now - filters.range * addon.GuildLog.DAY) or nil,
+        characters = self:GuildLogSearchSet(filters.search, log, partition, normalizer),
+        sort = filters.sort,
+        nameOf = function(entry)
+            return name(entry.character, entry.name)
+        end,
+        page = filters.page,
+    })
+    filters.page = result.page
+    local rows = { {
+        kind = "heading", date = "Date", event = "Event", character = "Character", player = "Player",
+        actor = "By",
+    } }
     local index
-    for index = 1, #entries do
-        local entry = entries[index]
+    for index = 1, #result.entries do
+        local entry = result.entries[index]
         table.insert(rows, {
             kind = "entry",
             date = self.client:FormatDate(entry.at),
             event = addon.GuildLog.Describe(entry, self.rankName),
             character = name(entry.character, entry.name),
-            player = guild ~= nil and self:PosterLabel({ k = entry.character, n = entry.name }, partition,
+            player = partition ~= nil and self:PosterLabel({ k = entry.character, n = entry.name }, partition,
                 normalizer) or "",
             actor = name(entry.actor, entry.actorName),
         })
     end
-    if entries[1] == nil then
-        table.insert(rows, { kind = "empty", event = "Nothing in the guild log yet." })
+    if result.entries[1] == nil then
+        table.insert(rows, { kind = "empty", event = "Nothing in the guild log matches." })
     end
-    return rows
+    return rows, { page = result.page, pages = result.pages, total = result.total, filters = filters }
+end
+
+-- The Guild Log page's controls: each changes the filters, goes back to
+-- the first page, and redraws.
+function Controller:SetGuildLogSort(sort)
+    self:GuildLogFilters().sort = sort == "name" and "name" or "date"
+    self:GuildLogFilters().page = 1
+    self:RefreshGuildLog()
+end
+
+function Controller:SetGuildLogType(eventType, shown)
+    self:GuildLogFilters().types[eventType] = shown == true or nil
+    self:GuildLogFilters().page = 1
+    self:RefreshGuildLog()
+end
+
+-- `days` back (7, 30, or 90), or nil for all.
+function Controller:SetGuildLogRange(days)
+    self:GuildLogFilters().range = type(days) == "number" and days or nil
+    self:GuildLogFilters().page = 1
+    self:RefreshGuildLog()
+end
+
+function Controller:SetGuildLogSearch(text)
+    self:GuildLogFilters().search = type(text) == "string" and text or ""
+    self:GuildLogFilters().page = 1
+    self:RefreshGuildLog()
+end
+
+-- Shows page `page` of the filtered log (kept within the pages there are).
+function Controller:SetGuildLogPage(page)
+    self:GuildLogFilters().page = page
+    self:RefreshGuildLog()
 end
 
 -- Redraws the Guild Log page when the window is open.
@@ -1085,9 +1191,9 @@ function Controller:RefreshGuildLog()
     if self.window == nil or not self.window:IsShown() or type(self.window.SetGuildLog) ~= "function" then
         return
     end
-    local rows = self:GuildLogView()
+    local rows, state = self:GuildLogView()
     if rows ~= nil then
-        self.window:SetGuildLog(rows)
+        self.window:SetGuildLog(rows, state)
     end
 end
 

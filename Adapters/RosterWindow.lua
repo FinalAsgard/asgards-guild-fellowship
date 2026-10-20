@@ -1171,18 +1171,129 @@ local GUILD_LOG_COLUMNS = {
     { field = "actor", x = 528, width = 130 },
 }
 
--- Draws the Guild Log list onto its page, below the frame's title bar,
--- filling the page (clear of the scroll bar).
-local function buildGuildLog(framework, page, frameName)
+-- The Guild Log page's date ranges, in the order its Range button steps
+-- through them: days back, or false for all.
+local GUILD_LOG_RANGES = { false, 7, 30, 90 }
+local GUILD_LOG_TYPE_LABELS = {
+    join = "Join", invite = "Invite", leave = "Leave", kick = "Kick", promote = "Promote", demote = "Demote",
+}
+
+local function smallButton(parent, width, text, onClick)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(width, 20)
+    button:SetText(text)
+    button:SetScript("OnClick", onClick)
+    return button
+end
+
+-- Draws the Guild Log page, below the frame's title bar: a search box, a
+-- sort button, a date range button, and page buttons, then a check box for
+-- each event type, then the list, filling the page (clear of the scroll
+-- bar). Each control calls its `options` handler; SetGuildLog shows where
+-- they stand.
+local function buildGuildLog(framework, page, frameName, options)
     local holder = CreateFrame("Frame", nil, page)
     holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
     holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
+    local controls = {}
+    local search = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+    search:SetSize(160, 20)
+    search:SetPoint("TOPLEFT", holder, "TOPLEFT", 120, -2)
+    search:SetAutoFocus(false)
+    local placeholder = search:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    placeholder:SetPoint("LEFT", search, "LEFT", 2, 0)
+    placeholder:SetText("Name, alias or main")
+    search:SetScript("OnTextChanged", function(box)
+        local text = box:GetText()
+        if text == "" then
+            placeholder:Show()
+        else
+            placeholder:Hide()
+        end
+        if options.onGuildLogSearch ~= nil then
+            options.onGuildLogSearch(text)
+        end
+    end)
+    search:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    search:SetScript("OnEnterPressed", function(box)
+        box:ClearFocus()
+    end)
+    controls.sort = smallButton(holder, 96, "Sort: Date", function()
+        if options.onGuildLogSort ~= nil and controls.state ~= nil then
+            options.onGuildLogSort(controls.state.filters.sort == "name" and "date" or "name")
+        end
+    end)
+    controls.sort:SetPoint("LEFT", search, "RIGHT", 10, 0)
+    controls.range = smallButton(holder, 100, "Range: All", function()
+        if options.onGuildLogRange == nil or controls.state == nil then
+            return
+        end
+        local current = controls.state.filters.range or false
+        local index, nextIndex = 1, 1
+        for index = 1, #GUILD_LOG_RANGES do
+            if GUILD_LOG_RANGES[index] == current then
+                nextIndex = index % #GUILD_LOG_RANGES + 1
+            end
+        end
+        options.onGuildLogRange(GUILD_LOG_RANGES[nextIndex] or nil)
+    end)
+    controls.range:SetPoint("LEFT", controls.sort, "RIGHT", 6, 0)
+    controls.previous = smallButton(holder, 24, "<", function()
+        if options.onGuildLogPage ~= nil and controls.state ~= nil then
+            options.onGuildLogPage(controls.state.page - 1)
+        end
+    end)
+    controls.previous:SetPoint("LEFT", controls.range, "RIGHT", 12, 0)
+    controls.pageText = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    controls.pageText:SetPoint("LEFT", controls.previous, "RIGHT", 6, 0)
+    controls.pageText:SetWidth(120)
+    controls.next = smallButton(holder, 24, ">", function()
+        if options.onGuildLogPage ~= nil and controls.state ~= nil then
+            options.onGuildLogPage(controls.state.page + 1)
+        end
+    end)
+    controls.next:SetPoint("LEFT", controls.pageText, "RIGHT", 6, 0)
+    controls.types = {}
+    local typeIndex
+    for typeIndex = 1, #addon.GuildLog.TYPES do
+        local eventType = addon.GuildLog.TYPES[typeIndex]
+        local check = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
+        check:SetSize(22, 22)
+        check:SetPoint("TOPLEFT", holder, "TOPLEFT", 16 + (typeIndex - 1) * 96, -26)
+        local label = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("LEFT", check, "RIGHT", 2, 0)
+        label:SetText(GUILD_LOG_TYPE_LABELS[eventType])
+        check:SetScript("OnClick", function(box)
+            if options.onGuildLogType ~= nil then
+                options.onGuildLogType(eventType, box:GetChecked() == true)
+            end
+        end)
+        controls.types[eventType] = check
+    end
+    local listHolder = CreateFrame("Frame", nil, holder)
+    listHolder:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, -50)
+    listHolder:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", 0, 0)
     local width, height = page:GetSize()
-    local lines = math.max(1, math.floor((height - 70) / RosterWindow.LINE_HEIGHT))
-    local log = buildList(framework, holder, frameName .. "GuildLogScroll", "Guild Log",
+    local lines = math.max(1, math.floor((height - 120) / RosterWindow.LINE_HEIGHT))
+    local log = buildList(framework, listHolder, frameName .. "GuildLogScroll", "Guild Log",
         GUILD_LOG_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines)
-    log.scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 0)
+    log.scroll:SetPoint("BOTTOMRIGHT", listHolder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 0)
+    log.controls = controls
     return log
+end
+
+-- What the Guild Log page's controls say, from the controller's state
+-- (see RosterController:GuildLogView).
+function RosterWindow.GuildLogControlText(state)
+    local filters = state.filters
+    return {
+        sort = filters.sort == "name" and "Sort: Name" or "Sort: Date",
+        range = filters.range ~= nil and ("Range: " .. filters.range .. " days") or "Range: All",
+        page = "Page " .. state.page .. " of " .. state.pages .. " (" .. state.total ..
+            (state.total == 1 and " entry)" or " entries)"),
+    }
 end
 
 -- The guild-size counts line: its text, and on hover a tooltip with the
@@ -1291,7 +1402,7 @@ local function build(framework, options)
     local guildLog
     local logPage = host:Content("guildlog")
     if logPage ~= nil then
-        local built, log = pcall(buildGuildLog, framework, logPage, frameName)
+        local built, log = pcall(buildGuildLog, framework, logPage, frameName, options)
         guildLog = built and log or nil
         if options.onGuildLogShown ~= nil then
             logPage:HookScript("OnShow", options.onGuildLogShown)
@@ -1682,9 +1793,10 @@ end
 
 -- Shows the Recent ads page's rows (see RosterController:RecentAdsView).
 -- False when the frame has no Recent ads page.
--- Shows the Guild Log page's rows (see RosterController:GuildLogView).
--- False when the frame has no Guild Log page.
-function Window:SetGuildLog(rows)
+-- Shows the Guild Log page's rows and where its controls stand (see
+-- RosterController:GuildLogView). False when the frame has no Guild Log
+-- page.
+function Window:SetGuildLog(rows, state)
     local guildLog = self.guildLog
     if guildLog == nil then
         return false
@@ -1692,6 +1804,29 @@ function Window:SetGuildLog(rows)
     return (pcall(function()
         guildLog.scroll:SetData(rows or {})
         guildLog.scroll:Refresh()
+        local controls = guildLog.controls
+        if state == nil or controls == nil then
+            return
+        end
+        controls.state = state
+        local text = RosterWindow.GuildLogControlText(state)
+        controls.sort:SetText(text.sort)
+        controls.range:SetText(text.range)
+        controls.pageText:SetText(text.page)
+        if state.page > 1 then
+            controls.previous:Enable()
+        else
+            controls.previous:Disable()
+        end
+        if state.page < state.pages then
+            controls.next:Enable()
+        else
+            controls.next:Disable()
+        end
+        local eventType, check
+        for eventType, check in pairs(controls.types) do
+            check:SetChecked(state.filters.types[eventType] == true)
+        end
     end))
 end
 

@@ -249,6 +249,100 @@ test.test("unusable events and saved entries are left out", function()
     test.assertEqual(0, #log:Entries())
 end)
 
+-- Queries ---------------------------------------------------------------------
+
+-- A log of `count` joins by c1, c2, ..., one a day back from NOW, plus a
+-- kick of c2 and a promotion of c3.
+local function queryLog()
+    local log, GuildLog = newLog()
+    local events = {}
+    local index
+    for index = 1, 5 do
+        table.insert(events, { type = "join", character = "c" .. index, at = NOW - index * DAY })
+    end
+    table.insert(events, { type = "kick", character = "c2", actor = "boss", at = NOW - HOUR })
+    table.insert(events, { type = "promote", character = "c3", at = NOW - 40 * DAY })
+    log:RecordBatch(events)
+    return log, GuildLog
+end
+
+local function charactersOf(result)
+    local list = {}
+    local index
+    for index = 1, #result.entries do
+        list[index] = result.entries[index].type .. ":" .. result.entries[index].character
+    end
+    return table.concat(list, ",")
+end
+
+test.test("a query filters by event type", function()
+    local log = queryLog()
+
+    test.assertEqual("kick:c2,promote:c3", charactersOf(log:Query({ types = { kick = true, promote = true } })))
+    test.assertEqual(7, log:Query({}).total)
+end)
+
+test.test("a query filters by date range", function()
+    local log = queryLog()
+
+    local result = log:Query({ from = NOW - 3 * DAY })
+    test.assertEqual("kick:c2,join:c1,join:c2,join:c3", charactersOf(result))
+    test.assertEqual("join:c5,promote:c3", charactersOf(log:Query({ to = NOW - 5 * DAY })))
+end)
+
+test.test("a query filters by a set of characters", function()
+    local log = queryLog()
+
+    test.assertEqual("kick:c2,join:c2,join:c3,promote:c3",
+        charactersOf(log:Query({ characters = { c2 = true, c3 = true } })))
+    test.assertEqual(0, log:Query({ characters = {} }).total)
+end)
+
+test.test("a query sorts newest first, or by name and then newest first", function()
+    local log = queryLog()
+    local names = { c1 = "Zed", c2 = "anvil", c3 = "Bolt", c4 = "Cog", c5 = "Dart" }
+
+    test.assertEqual("kick:c2", charactersOf(log:Query({ pageSize = 1 })))
+    test.assertEqual("kick:c2,join:c2,join:c3,promote:c3,join:c4,join:c5,join:c1", charactersOf(log:Query({
+        sort = "name",
+        nameOf = function(entry)
+            return names[entry.character]
+        end,
+    })))
+end)
+
+test.test("a query returns one page at a time, kept within the pages there are", function()
+    local log = queryLog()
+
+    local first = log:Query({ pageSize = 3 })
+    test.assertEqual("kick:c2,join:c1,join:c2", charactersOf(first))
+    test.assertEqual(1, first.page)
+    test.assertEqual(3, first.pages)
+    test.assertEqual(7, first.total)
+    local last = log:Query({ pageSize = 3, page = 3 })
+    test.assertEqual("promote:c3", charactersOf(last))
+    test.assertEqual(3, log:Query({ pageSize = 3, page = 9 }).page)
+    test.assertEqual(1, log:Query({ pageSize = 3, page = -2 }).page)
+    local empty = log:Query({ types = {} })
+    test.assertEqual(0, #empty.entries)
+    test.assertEqual(1, empty.pages)
+end)
+
+test.test("a query over thousands of entries returns only the page", function()
+    local log = newLog()
+    local events = {}
+    local index
+    for index = 1, 5000 do
+        table.insert(events, { type = "join", character = "c" .. index, at = NOW - index * 3 * HOUR })
+    end
+    log:RecordBatch(events)
+
+    local result = log:Query({ page = 2 })
+    test.assertEqual(100, #result.entries)
+    test.assertEqual(50, result.pages)
+    test.assertEqual("c101", result.entries[1].character)
+end)
+
 -- The probe ---------------------------------------------------------------------
 
 test.test("the probe lists each call, the entry count, the oldest age, and the first entries raw", function()
@@ -476,6 +570,94 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertEqual("Boss", rows[5].actor)
         test.assertEqual(addon.client:FormatDate(world.time - 120 - 2 * DAY), rows[5].date)
         test.assertEqual(5, #world.frame.guildLog)
+    end)
+
+    test.test(profile .. " the Guild Log page filters, searches by name, alias, or main, and pages", function()
+        local world, addon = loggedIn(profile)
+        local _, partition, normalizer = addon.rosterController:QuietContext()
+        local keys = {}
+        partition:EachCharacter(function(key)
+            table.insert(keys, key)
+        end)
+        table.sort(keys)
+        local toolbox = partition:GetPlayer(partition:GetCharacter(addon.rosterController:SelfKey()).player)
+        local alt
+        local index
+        for index = 1, #keys do
+            if keys[index] ~= toolbox.main and partition:GetCharacter(keys[index]).player
+                == partition:GetCharacter(toolbox.main).player
+            then
+                alt = keys[index]
+            end
+        end
+        local other
+        for index = 1, #keys do
+            if keys[index] ~= toolbox.main and keys[index] ~= alt then
+                other = keys[index]
+            end
+        end
+        fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt has joined the guild.")
+        local log = select(1, addon.rosterController.guildLog())
+        log:RecordBatch({
+            { type = "join", character = alt, at = world.time - 2 * DAY },
+            { type = "promote", character = toolbox.main, toRank = 1, at = world.time - 20 * DAY },
+            { type = "kick", character = other, actor = toolbox.main, at = world.time - 100 * DAY },
+        })
+        local controller = addon.rosterController
+        local function events()
+            local rows, state = controller:GuildLogView()
+            local list = {}
+            for index = 2, #rows do
+                list[index - 1] = rows[index].kind == "entry" and rows[index].character or rows[index].event
+            end
+            return table.concat(list, ","), state
+        end
+        local mainName = normalizer:Display(partition:GetCharacter(toolbox.main).name)
+        local altName = normalizer:Display(partition:GetCharacter(alt).name)
+        local otherName = normalizer:Display(partition:GetCharacter(other).name)
+
+        local all, state = events()
+        test.assertEqual("Bolt," .. altName .. "," .. mainName .. "," .. otherName, all)
+        test.assertEqual(4, state.total)
+
+        -- The alias, the main, or the alt find the whole player.
+        controller:SetGuildLogSearch(toolbox.alias)
+        test.assertEqual(altName .. "," .. mainName, (events()))
+        controller:SetGuildLogSearch(string.lower(altName))
+        test.assertEqual(altName .. "," .. mainName, (events()))
+        -- A character the roster doesn't know is found by its logged name.
+        controller:SetGuildLogSearch("bol")
+        test.assertEqual("Bolt", (events()))
+        controller:SetGuildLogSearch("")
+
+        controller:SetGuildLogType("join", false)
+        test.assertEqual(mainName .. "," .. otherName, (events()))
+        controller:SetGuildLogType("join", true)
+        controller:SetGuildLogRange(30)
+        test.assertEqual("Bolt," .. altName .. "," .. mainName, (events()))
+        controller:SetGuildLogRange(7)
+        test.assertEqual("Bolt," .. altName, (events()))
+        controller:SetGuildLogRange(nil)
+        controller:SetGuildLogSort("name")
+        local byName = { "Bolt", altName, mainName, otherName }
+        table.sort(byName, function(a, b)
+            return string.lower(a) < string.lower(b)
+        end)
+        test.assertEqual(table.concat(byName, ","), (events()))
+
+        controller:SetGuildLogType("kick", false)
+        controller:SetGuildLogType("promote", false)
+        controller:SetGuildLogType("join", false)
+        test.assertEqual("Nothing in the guild log matches.", (events()))
+
+        -- The page number stays within the pages there are.
+        controller:SetGuildLogPage(5)
+        local _, paged = events()
+        test.assertEqual(1, paged.page)
+        local text = addon.RosterWindow.GuildLogControlText(paged)
+        test.assertEqual("Sort: Name", text.sort)
+        test.assertEqual("Range: All", text.range)
+        test.assertEqual("Page 1 of 1 (0 entries)", text.page)
     end)
 
     test.test(profile .. " a member's add-on never records or stores the guild log, and has no Guild Log tab", function()

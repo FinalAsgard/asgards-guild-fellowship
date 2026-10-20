@@ -298,6 +298,66 @@ function Log:EntriesFor(character)
     return list
 end
 
+-- One page of entries that pass the filters. options:
+--   types       set of entry types to keep ({ join = true, ... }), or nil
+--               for every type
+--   from, to    keep entries at or after `from` and at or before `to`
+--               (either may be nil)
+--   characters  set of character keys to keep, or nil for everyone
+--   sort        "date" (newest first, the default) or "name" (by
+--               `nameOf(entry)`, then newest first)
+--   nameOf      function(entry) -> the name to sort by (default the key)
+--   page        1-based page number (default 1; past the end gives the
+--               last page)
+--   pageSize    entries per page (default PAGE_SIZE)
+-- Returns { entries, total, page, pages }: `total` entries passed the
+-- filters, over `pages` pages (at least 1).
+GuildLog.PAGE_SIZE = 100
+
+function Log:Query(options)
+    options = options or {}
+    local matches = {}
+    local entryIndex
+    for entryIndex = 1, #self.entries do
+        local entry = self.entries[entryIndex]
+        if valid(entry)
+            and (options.types == nil or options.types[entry.type])
+            and (options.from == nil or entry.at >= options.from)
+            and (options.to == nil or entry.at <= options.to)
+            and (options.characters == nil or options.characters[entry.character])
+        then
+            table.insert(matches, entry)
+        end
+    end
+    if options.sort == "name" then
+        local nameOf = options.nameOf or function(entry)
+            return entry.character
+        end
+        local names = {}
+        for entryIndex = 1, #matches do
+            names[matches[entryIndex]] = string.lower(tostring(nameOf(matches[entryIndex]) or ""))
+        end
+        table.sort(matches, function(a, b)
+            if names[a] ~= names[b] then
+                return names[a] < names[b]
+            end
+            return newestFirst(a, b)
+        end)
+    else
+        table.sort(matches, newestFirst)
+    end
+    local pageSize = type(options.pageSize) == "number" and options.pageSize >= 1 and math.floor(options.pageSize)
+        or GuildLog.PAGE_SIZE
+    local pages = math.max(1, math.ceil(#matches / pageSize))
+    local page = type(options.page) == "number" and math.floor(options.page) or 1
+    page = math.max(1, math.min(page, pages))
+    local entries = {}
+    for entryIndex = (page - 1) * pageSize + 1, math.min(page * pageSize, #matches) do
+        table.insert(entries, matches[entryIndex])
+    end
+    return { entries = entries, total = #matches, page = page, pages = pages }
+end
+
 -- What happened, in words: "Joined", "Invited", "Left", "Kicked",
 -- "Promoted to Officer", "Demoted to Member". `rankName(index)` names a
 -- rank by its index (nil when unknown); the name the game gave is used
