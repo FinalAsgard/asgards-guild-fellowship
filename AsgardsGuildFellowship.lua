@@ -38,6 +38,14 @@ local guildLogSync
 -- Membership dates (see MembershipDates), set up with guild sync below:
 -- what a roster scan saw, and the officer's lines for the player panel.
 local observeMembership, membershipLines = function() end, function() end
+-- The officers' Promotions page (see RankRequirements), set up with guild
+-- sync below: view() gives its model, and the rest edit it.
+local promotions = {
+    view = function()
+        return nil
+    end,
+    askOnce = function() end,
+}
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local guildNoteOverlay
@@ -67,7 +75,10 @@ if clientProfile.supported then
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
-    -- Officers only: it comes and goes with the character's rank.
+    -- Officers only: they come and go with the character's rank.
+    pages:Add("promotions", "Promotions", addon.MasterFrame.ICONS.promotions, function()
+        return guildLogOf() ~= nil
+    end)
     pages:Add("guildlog", "Guild Log", addon.MasterFrame.ICONS.guildlog, function()
         return guildLogOf() ~= nil
     end)
@@ -122,6 +133,8 @@ if clientProfile.supported then
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
             observeMembership()
+            -- Once ranks are known, catch up on promotion requirements.
+            promotions.askOnce()
             -- A scan that saw a promotion or demotion shows or hides the
             -- officers' tabs.
             rosterController:RefreshPages()
@@ -152,6 +165,9 @@ if clientProfile.supported then
         end,
         membership = function(keys)
             return membershipLines(keys)
+        end,
+        promotionsView = function()
+            return promotions.view()
         end,
         groupedWith = function(keys)
             local guild, partition = rosterController:QuietContext()
@@ -242,6 +258,24 @@ if clientProfile.supported then
                 end,
                 onGuildLogShown = function()
                     rosterController:RefreshGuildLog()
+                end,
+                onPromotionsShown = function()
+                    rosterController:RefreshPromotions()
+                end,
+                onPromotionsRank = function(step)
+                    return promotions.rank(step)
+                end,
+                onPromotionsAdd = function(label, needsNote)
+                    return promotions.add(label, needsNote)
+                end,
+                onPromotionsRename = function(id, label)
+                    return promotions.rename(id, label)
+                end,
+                onPromotionsMove = function(id, step)
+                    return promotions.move(id, step)
+                end,
+                onPromotionsDelete = function(id)
+                    return promotions.delete(id)
                 end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
@@ -2013,6 +2047,123 @@ if clientProfile.supported then
         end
         return log, normalizer
     end
+    -- Promotion requirements: officers edit them on the Promotions page;
+    -- every add-on keeps them, shares edits with the guild, and asks for
+    -- them once a session.
+    local function requirementsOf()
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        return addon.RankRequirements.Create(partition:GetRankRequirements(), {
+            isOfficer = function(key)
+                return officerAuthority:IsOfficer(key)
+            end,
+        })
+    end
+    local requirementsSync = addon.RankRequirements.CreateSync({
+        requirements = requirementsOf,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        senderKey = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(sender) or nil
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        announce = function(message)
+            return comm:Broadcast(message)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        onChange = function()
+            rosterController:RefreshPromotions()
+        end,
+    })
+    promotions.sync = requirementsSync
+    promotions.askOnce = function()
+        requirementsSync:AskOnce()
+    end
+    local selectedRank
+    local function rankNames()
+        return client:GetGuildRankNames() or {}
+    end
+    promotions.view = function()
+        local requirements = requirementsOf()
+        if requirements == nil then
+            return nil
+        end
+        local model = addon.PromotionsViewModel.Editor({
+            requirements = requirements,
+            rank = selectedRank,
+            rankNames = rankNames(),
+        })
+        selectedRank = model.rank
+        return model
+    end
+    -- Makes an edit with `change(requirements, author, now)` -> records, or
+    -- nil and why, shares it, and redraws. Returns true, or false and why.
+    local function editRequirements(change)
+        local requirements = requirementsOf()
+        local author = rosterController:SelfKey()
+        local now = client:Timestamp()
+        if requirements == nil or author == nil or now == nil then
+            return false, "saved data is unavailable"
+        end
+        if not selfIsOfficer() then
+            return false, "only officers can change promotion requirements"
+        end
+        local records, reason = change(requirements, author, now)
+        if records == nil then
+            return false, reason
+        end
+        requirementsSync:Share(records)
+        rosterController:RefreshPromotions()
+        return true
+    end
+    promotions.rank = function(step)
+        local requirements = requirementsOf()
+        if requirements == nil then
+            return false, "saved data is unavailable"
+        end
+        local names = rankNames()
+        selectedRank = addon.PromotionsViewModel.StepRank(
+            addon.PromotionsViewModel.PickRank(selectedRank, requirements, names), step, names)
+        rosterController:RefreshPromotions()
+        return true
+    end
+    promotions.add = function(label, needsNote)
+        return editRequirements(function(requirements, author, now)
+            local names = rankNames()
+            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, names)
+            if rank == nil then
+                return nil, "the guild's ranks aren't known yet"
+            end
+            local kind = needsNote and addon.RankRequirements.KIND_CHECK_NOTE or addon.RankRequirements.KIND_CHECK
+            return requirements:Add(rank, label, kind, names[rank + 1], author, now)
+        end)
+    end
+    promotions.rename = function(id, label)
+        return editRequirements(function(requirements, author, now)
+            return requirements:Rename(id, label, author, now)
+        end)
+    end
+    promotions.move = function(id, step)
+        return editRequirements(function(requirements, author, now)
+            return requirements:Move(id, step, author, now)
+        end)
+    end
+    promotions.delete = function(id)
+        return editRequirements(function(requirements, author, now)
+            return requirements:Delete(id, author, now)
+        end)
+    end
     local LOG_REQUEST_SECONDS = 10 * 60
     local logRequestedAt
     requestGuildLog = function()
@@ -3204,6 +3355,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             onGroupFinderMessage(message, sender)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
+        elseif addon.RankRequirements.TYPES[message.t] ~= nil then
+            promotions.sync:OnMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end
@@ -3333,6 +3486,7 @@ addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
 addon.guildWelcome = guildWelcome
+addon.promotions = promotions
 addon.groupSession = groupSession
 addon.groupBoard = groupBoard
 addon.groupAvailability = groupAvailability

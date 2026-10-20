@@ -323,6 +323,15 @@ local function installGuild(world, environment, profile)
         return flags
     end
     environment.C_GuildInfo = { GuildControlGetRankFlags = rankFlags }
+    -- The guild's rank names, the guild master's first (1-based, as the
+    -- game numbers them here): `world.rankNames`.
+    world.rankNames = { "Guild Master", "Officer", "Veteran", "Member", "Initiate" }
+    environment.GuildControlGetNumRanks = function()
+        return #world.rankNames
+    end
+    environment.GuildControlGetRankName = function(index)
+        return world.rankNames[index]
+    end
     if profile == "Retail" then
         environment.C_GuildInfo.GuildRoster = request
         environment.GetNormalizedRealmName = function()

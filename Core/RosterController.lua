@@ -49,6 +49,10 @@ Controller.__index = Controller
 --                 for the player panel ("Tank, DPS"), or nil
 --   groupedWith   optional function(keys) -> how often this user grouped
 --                 with a player, for the player panel, or nil
+--   membership    optional function(keys) -> lines about a player's
+--                 membership dates for the player panel (officers), or nil
+--   promotionsView optional function() -> the Promotions page's model (see
+--                 PromotionsViewModel.Editor)
 --   recruitRecord optional function(keys) -> a player's ad record (see
 --                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
@@ -65,6 +69,7 @@ function RosterController.Create(options)
         rolesOf = options.rolesOf,
         groupedWith = options.groupedWith,
         membership = options.membership,
+        promotionsView = options.promotionsView,
         recruitRecord = options.recruitRecord,
         recentAds = options.recentAds,
         offZones = options.offZones,
@@ -1199,6 +1204,20 @@ function Controller:RefreshGuildLog()
     end
 end
 
+-- Redraws the Promotions page when the window is open (see
+-- PromotionsViewModel.Editor).
+function Controller:RefreshPromotions()
+    if self.window == nil or not self.window:IsShown() or type(self.window.SetPromotions) ~= "function"
+        or self.promotionsView == nil
+    then
+        return
+    end
+    local ok, model = pcall(self.promotionsView)
+    if ok and model ~= nil then
+        self.window:SetPromotions(model)
+    end
+end
+
 -- Shows or hides the tabs whose pages follow the character's rank (see
 -- PageNavigator), falling back to the home page when the page showing is
 -- hidden now. Run when the roster changes, so a promotion or demotion
@@ -1256,6 +1275,7 @@ function Controller:Toggle(entry)
     self.window:Show()
     self:RefreshRecruiters()
     self:RefreshGuildLog()
+    self:RefreshPromotions()
     return true
 end
 

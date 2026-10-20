@@ -1284,6 +1284,169 @@ local function buildGuildLog(framework, page, frameName, options)
     return log
 end
 
+-- The officers' Promotions page, below the frame's title bar: < and >
+-- pick a rank, a warning shows when the rank was set up under another
+-- name, a box adds an item (or renames one), and each item has Up, Down,
+-- Rename and Delete. Delete asks first, in the page itself. Each control
+-- calls its `options` handler, which returns true, or false and why not
+-- (shown under the box); SetPromotions shows the model (see
+-- PromotionsViewModel.Editor).
+local function buildPromotions(page, options)
+    local holder = CreateFrame("Frame", nil, page)
+    holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
+    holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
+    local editor = { rows = {} }
+    local function call(handler, ...)
+        local callback = options[handler]
+        if callback == nil then
+            return
+        end
+        local ok, done, reason = pcall(callback, ...)
+        if ok and done == false then
+            editor.message:SetText("|cffff8040" .. tostring(reason or "That didn't work") .. ".|r")
+        else
+            editor.message:SetText("")
+        end
+        return ok and done ~= false
+    end
+    local previous = smallButton(holder, 24, "<", function()
+        call("onPromotionsRank", -1)
+    end)
+    previous:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -2)
+    editor.rankText = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    editor.rankText:SetPoint("LEFT", previous, "RIGHT", 8, 0)
+    editor.rankText:SetWidth(220)
+    editor.rankText:SetJustifyH("LEFT")
+    local nextButton = smallButton(holder, 24, ">", function()
+        call("onPromotionsRank", 1)
+    end)
+    nextButton:SetPoint("LEFT", editor.rankText, "RIGHT", 8, 0)
+    editor.nextText = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    editor.nextText:SetPoint("LEFT", nextButton, "RIGHT", 12, 0)
+    editor.mismatch = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    editor.mismatch:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -28)
+    editor.mismatch:SetWidth(680)
+    editor.mismatch:SetJustifyH("LEFT")
+
+    local box = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+    box:SetSize(300, 20)
+    box:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -50)
+    box:SetAutoFocus(false)
+    box:SetMaxLetters(addon.RankRequirements.MAX_LABEL)
+    box:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
+    editor.box = box
+    local needsNote = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
+    needsNote:SetSize(22, 22)
+    needsNote:SetPoint("LEFT", box, "RIGHT", 8, 0)
+    local noteLabel = needsNote:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    noteLabel:SetPoint("LEFT", needsNote, "RIGHT", 2, 0)
+    noteLabel:SetText("Needs a note")
+    editor.needsNote = needsNote
+    local function stopRenaming()
+        editor.renaming = nil
+        editor.save:SetText("Add")
+        editor.cancel:Hide()
+        needsNote:Show()
+        box:SetText("")
+    end
+    editor.save = smallButton(holder, 70, "Add", function()
+        local text = box:GetText()
+        local done
+        if editor.renaming ~= nil then
+            done = call("onPromotionsRename", editor.renaming, text)
+        else
+            done = call("onPromotionsAdd", text, needsNote:GetChecked() == true)
+        end
+        if done then
+            stopRenaming()
+            needsNote:SetChecked(false)
+            box:ClearFocus()
+        end
+    end)
+    editor.save:SetPoint("LEFT", needsNote, "RIGHT", 90, 0)
+    box:SetScript("OnEnterPressed", function()
+        editor.save:Click()
+    end)
+    editor.cancel = smallButton(holder, 70, "Cancel", stopRenaming)
+    editor.cancel:SetPoint("LEFT", editor.save, "RIGHT", 6, 0)
+    editor.cancel:Hide()
+    editor.message = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    editor.message:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -74)
+    editor.message:SetWidth(680)
+    editor.message:SetJustifyH("LEFT")
+
+    -- Asking before a delete, in the page.
+    local confirm = CreateFrame("Frame", nil, holder)
+    confirm:SetSize(680, 24)
+    confirm:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -90)
+    confirm.text = confirm:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    confirm.text:SetPoint("LEFT", confirm, "LEFT", 0, 0)
+    confirm.text:SetWidth(470)
+    confirm.text:SetJustifyH("LEFT")
+    local yes = smallButton(confirm, 80, "Delete", function()
+        local id = confirm.id
+        confirm:Hide()
+        if id ~= nil then
+            call("onPromotionsDelete", id)
+        end
+    end)
+    yes:SetPoint("LEFT", confirm.text, "RIGHT", 8, 0)
+    local no = smallButton(confirm, 70, "Cancel", function()
+        confirm:Hide()
+    end)
+    no:SetPoint("LEFT", yes, "RIGHT", 6, 0)
+    confirm:Hide()
+    editor.confirm = confirm
+
+    editor.empty = holder:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    editor.empty:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -120)
+    editor.empty:SetWidth(660)
+    editor.empty:SetJustifyH("LEFT")
+    local index
+    for index = 1, addon.RankRequirements.MAX_ITEMS do
+        local row = CreateFrame("Frame", nil, holder)
+        row:SetSize(700, RosterWindow.LINE_HEIGHT)
+        row:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -118 - (index - 1) * RosterWindow.LINE_HEIGHT)
+        row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.label:SetPoint("LEFT", row, "LEFT", 6, 0)
+        row.label:SetWidth(300)
+        row.label:SetJustifyH("LEFT")
+        row.label:SetWordWrap(false)
+        row.kind = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        row.kind:SetPoint("LEFT", row, "LEFT", 312, 0)
+        row.kind:SetWidth(140)
+        row.kind:SetJustifyH("LEFT")
+        row.up = smallButton(row, 44, "Up", function()
+            call("onPromotionsMove", row.item.id, -1)
+        end)
+        row.up:SetPoint("LEFT", row, "LEFT", 458, 0)
+        row.down = smallButton(row, 50, "Down", function()
+            call("onPromotionsMove", row.item.id, 1)
+        end)
+        row.down:SetPoint("LEFT", row.up, "RIGHT", 2, 0)
+        row.rename = smallButton(row, 64, "Rename", function()
+            editor.renaming = row.item.id
+            box:SetText(row.item.label)
+            box:SetFocus()
+            editor.save:SetText("Save")
+            editor.cancel:Show()
+            needsNote:Hide()
+        end)
+        row.rename:SetPoint("LEFT", row.down, "RIGHT", 2, 0)
+        row.delete = smallButton(row, 60, "Delete", function()
+            confirm.id = row.item.id
+            confirm.text:SetText("Delete \"" .. row.item.label .. "\"? Its ticks are dropped too.")
+            confirm:Show()
+        end)
+        row.delete:SetPoint("LEFT", row.rename, "RIGHT", 2, 0)
+        row:Hide()
+        editor.rows[index] = row
+    end
+    return editor
+end
+
 -- What the Guild Log page's controls say, from the controller's state
 -- (see RosterController:GuildLogView).
 function RosterWindow.GuildLogControlText(state)
@@ -1406,6 +1569,16 @@ local function build(framework, options)
         guildLog = built and log or nil
         if options.onGuildLogShown ~= nil then
             logPage:HookScript("OnShow", options.onGuildLogShown)
+        end
+    end
+    -- The officers' Promotions page, when the frame has one.
+    local promotions
+    local promotionsPage = host:Content("promotions")
+    if promotionsPage ~= nil then
+        local built, editor = pcall(buildPromotions, promotionsPage, options)
+        promotions = built and editor or nil
+        if options.onPromotionsShown ~= nil then
+            promotionsPage:HookScript("OnShow", options.onPromotionsShown)
         end
     end
     if options.onHide ~= nil then
@@ -1680,6 +1853,7 @@ function RosterWindow.Create(client, options)
         recruiters = recruiters,
         recentAds = recentAds,
         guildLog = guildLog,
+        promotions = promotions,
         counts = counts,
     }, Window)
 end
@@ -1793,6 +1967,45 @@ end
 
 -- Shows the Recent ads page's rows (see RosterController:RecentAdsView).
 -- False when the frame has no Recent ads page.
+-- Shows the Promotions page's model (see PromotionsViewModel.Editor).
+-- False when the frame has no Promotions page.
+function Window:SetPromotions(model)
+    local editor = self.promotions
+    if editor == nil or type(model) ~= "table" then
+        return false
+    end
+    return (pcall(function()
+        editor.rankText:SetText(model.rankText or "")
+        editor.nextText:SetText(model.nextText or "")
+        editor.mismatch:SetText(model.mismatch and ("|cffff8040" .. model.mismatch .. "|r") or "")
+        editor.empty:SetText(model.empty or "")
+        if editor.confirm.id ~= nil and editor.confirm:IsShown() then
+            local found = false
+            local itemIndex
+            for itemIndex = 1, #model.items do
+                found = found or model.items[itemIndex].id == editor.confirm.id
+            end
+            if not found then
+                editor.confirm:Hide()
+            end
+        end
+        local index
+        for index = 1, #editor.rows do
+            local row, item = editor.rows[index], model.items[index]
+            row.item = item
+            if item == nil then
+                row:Hide()
+            else
+                row.label:SetText(item.label)
+                row.kind:SetText(item.kindText or "")
+                if item.canUp then row.up:Enable() else row.up:Disable() end
+                if item.canDown then row.down:Enable() else row.down:Disable() end
+                row:Show()
+            end
+        end
+    end))
+end
+
 -- Shows the Guild Log page's rows and where its controls stand (see
 -- RosterController:GuildLogView). False when the frame has no Guild Log
 -- page.
