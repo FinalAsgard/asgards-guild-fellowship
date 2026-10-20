@@ -5,10 +5,12 @@ local _, addon = ...
 --
 -- Two kinds of record, each stamped with when (server time) and by whom (a
 -- character key) it last changed:
---   item  { t = "item", id, rank, label, kind, position, deleted?, at, by }
+--   item  { t = "item", id, rank, label, kind, n?, position, deleted?, at,
+--         by }
 --         `rank` is the 0-based rank index (as the roster numbers ranks) the
---         item belongs to, `kind` an item kind (KINDS), `position` its place
---         in the rank's list. A deleted item stays as a tombstone, so it
+--         item belongs to, `kind` an item kind (KINDS), `n` an automated
+--         kind's number (days, or a level), `position` its place in the
+--         rank's list. A deleted item stays as a tombstone, so it
 --         beats older edits made elsewhere.
 --   rank  { t = "rank", rank, name, at, by }: the rank's name when an
 --         officer last edited its requirements, so the editor can warn when
@@ -33,6 +35,11 @@ local RankRequirements = {
     TYPE_ASK = "reqs-ask",
     KIND_CHECK = "check",
     KIND_CHECK_NOTE = "check-note",
+    -- Automated kinds, checked from the guild's dates and the roster.
+    KIND_CHAR_DAYS = "char-guild-days",
+    KIND_PLAYER_DAYS = "player-guild-days",
+    KIND_RANK_DAYS = "rank-days",
+    KIND_LEVEL = "level",
     MAX_LABEL = 60,
     -- The most items a rank can have.
     MAX_ITEMS = 15,
@@ -55,6 +62,29 @@ addon.RankRequirements = RankRequirements
 RankRequirements.KINDS = {
     [RankRequirements.KIND_CHECK] = "Checkbox",
     [RankRequirements.KIND_CHECK_NOTE] = "Checkbox, needs a note",
+    [RankRequirements.KIND_CHAR_DAYS] = "Character days in guild",
+    [RankRequirements.KIND_PLAYER_DAYS] = "Player days in guild",
+    [RankRequirements.KIND_RANK_DAYS] = "Days at rank",
+    [RankRequirements.KIND_LEVEL] = "Character level",
+}
+
+-- The editor's kinds, in the order its kind button steps through them.
+RankRequirements.KIND_ORDER = {
+    RankRequirements.KIND_CHECK,
+    RankRequirements.KIND_CHECK_NOTE,
+    RankRequirements.KIND_CHAR_DAYS,
+    RankRequirements.KIND_PLAYER_DAYS,
+    RankRequirements.KIND_RANK_DAYS,
+    RankRequirements.KIND_LEVEL,
+}
+
+-- The automated kinds, each with the range of its `n` and the label an
+-- item gets when the officer leaves it blank.
+RankRequirements.AUTOMATED = {
+    [RankRequirements.KIND_CHAR_DAYS] = { low = 1, high = 3650, label = "In the guild %d days" },
+    [RankRequirements.KIND_PLAYER_DAYS] = { low = 1, high = 3650, label = "Player in the guild %d days" },
+    [RankRequirements.KIND_RANK_DAYS] = { low = 1, high = 3650, label = "At this rank %d days" },
+    [RankRequirements.KIND_LEVEL] = { low = 1, high = 100, label = "Level %d" },
 }
 
 RankRequirements.TYPES = {
@@ -89,9 +119,38 @@ function RankRequirements.IsRecord(record)
     if record.t == "rank" then
         return isText(record.name) and #record.name <= RankRequirements.MAX_LABEL
     end
-    return record.t == "item" and isText(record.id) and #record.id <= 80 and isLabel(record.label)
+    if not (record.t == "item" and isText(record.id) and #record.id <= 80 and isLabel(record.label)
         and RankRequirements.KINDS[record.kind] ~= nil and isWhole(record.position, 0, 10000)
-        and (record.deleted == nil or record.deleted == true)
+        and (record.deleted == nil or record.deleted == true))
+    then
+        return false
+    end
+    local automated = RankRequirements.AUTOMATED[record.kind]
+    if automated == nil then
+        return record.n == nil
+    end
+    return isWhole(record.n, automated.low, automated.high)
+end
+
+-- Whether `kind` is checked by the add-on rather than ticked.
+function RankRequirements.IsAutomated(kind)
+    return RankRequirements.AUTOMATED[kind] ~= nil
+end
+
+-- The label an automated item of `kind` gets for `n` when left blank.
+function RankRequirements.DefaultLabel(kind, n)
+    local automated = RankRequirements.AUTOMATED[kind]
+    return automated and string.format(automated.label, n) or nil
+end
+
+-- Why `n` doesn't suit automated `kind`, or nil when it does.
+function RankRequirements.NumberProblem(kind, n)
+    local automated = RankRequirements.AUTOMATED[kind]
+    if automated ~= nil and not isWhole(n, automated.low, automated.high) then
+        return (kind == RankRequirements.KIND_LEVEL and "a level" or "a number of days") .. " needs to be "
+            .. automated.low .. " to " .. automated.high
+    end
+    return nil
 end
 
 local function copy(record)
@@ -260,15 +319,24 @@ local function trimmed(text)
 end
 
 -- An officer adds an item of `kind` labelled `label` to the end of `rank`'s
--- list, stamping the rank's current name `rankName` too. Returns the
--- records to share, or nil and why not.
-function Requirements:Add(rank, label, kind, rankName, author, at)
-    label = trimmed(label)
-    if not isLabel(label) then
-        return nil, "a label needs 1 to " .. RankRequirements.MAX_LABEL .. " characters"
-    end
+-- list, stamping the rank's current name `rankName` too. An automated kind
+-- needs its number `n`, and a blank label becomes DefaultLabel. Returns
+-- the records to share, or nil and why not.
+function Requirements:Add(rank, label, kind, rankName, author, at, n)
     if RankRequirements.KINDS[kind] == nil then
         return nil, "unknown kind of item"
+    end
+    if not RankRequirements.IsAutomated(kind) then
+        n = nil
+    elseif RankRequirements.NumberProblem(kind, n) then
+        return nil, RankRequirements.NumberProblem(kind, n)
+    end
+    label = trimmed(label)
+    if (label == nil or label == "") and n ~= nil then
+        label = RankRequirements.DefaultLabel(kind, n)
+    end
+    if not isLabel(label) then
+        return nil, "a label needs 1 to " .. RankRequirements.MAX_LABEL .. " characters"
     end
     local items = self:Items(rank)
     if #items >= RankRequirements.MAX_ITEMS then
@@ -282,7 +350,8 @@ function Requirements:Add(rank, label, kind, rankName, author, at)
         id = tostring(author) .. ":" .. tostring(at) .. ":" .. suffix
     end
     local records = {
-        self:stamped({ t = "item", id = id, rank = rank, label = label, kind = kind, position = position }, author, at),
+        self:stamped({ t = "item", id = id, rank = rank, label = label, kind = kind, n = n, position = position },
+            author, at),
     }
     table.insert(records, self:nameRecord(rank, rankName, author, at))
     return self:commit(records, author)
@@ -308,6 +377,30 @@ function Requirements:Rename(id, label, author, at)
     end
     return self:change(id, author, at, function(record)
         record.label = label
+    end)
+end
+
+-- An officer changes automated item `id`'s number to `n`. A label still
+-- reading as the old number's default follows the new number.
+function Requirements:SetNumber(id, n, author, at)
+    local item = self:Item(id)
+    if item == nil then
+        return nil, "that item no longer exists"
+    end
+    if not RankRequirements.IsAutomated(item.kind) then
+        return nil, "only an automated item has a number"
+    end
+    if RankRequirements.NumberProblem(item.kind, n) then
+        return nil, RankRequirements.NumberProblem(item.kind, n)
+    end
+    if n == item.n then
+        return {}
+    end
+    return self:change(id, author, at, function(record)
+        if record.label == RankRequirements.DefaultLabel(record.kind, record.n) then
+            record.label = RankRequirements.DefaultLabel(record.kind, n)
+        end
+        record.n = n
     end)
 end
 

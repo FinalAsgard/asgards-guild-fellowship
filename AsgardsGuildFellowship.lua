@@ -272,11 +272,11 @@ if clientProfile.supported then
                 onPromotionsRank = function(step)
                     return promotions.rank(step)
                 end,
-                onPromotionsAdd = function(label, needsNote)
-                    return promotions.add(label, needsNote)
+                onPromotionsAdd = function(label, kind, n)
+                    return promotions.add(label, kind, n)
                 end,
-                onPromotionsRename = function(id, label)
-                    return promotions.rename(id, label)
+                onPromotionsRename = function(id, label, n)
+                    return promotions.rename(id, label, n)
                 end,
                 onPromotionsMove = function(id, step)
                     return promotions.move(id, step)
@@ -2172,6 +2172,8 @@ if clientProfile.supported then
             partition = partition,
             requirements = requirements,
             checks = checks,
+            dates = datesOf(partition),
+            now = client:Timestamp(),
             rankNames = client:GetGuildRankNames() or {},
         }, nameOf)
         return addon.PromotionsViewModel.List(evaluated, {
@@ -2258,20 +2260,53 @@ if clientProfile.supported then
         rosterController:RefreshPromotions()
         return true
     end
-    promotions.add = function(label, needsNote)
+    -- `kind` is an item kind (true for a needs-a-note checkbox, false or
+    -- nil for a plain one); `n` an automated kind's number, as typed.
+    promotions.add = function(label, kind, n)
         return editRequirements(function(requirements, author, now)
             local names = rankNames()
             local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, names)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end
-            local kind = needsNote and addon.RankRequirements.KIND_CHECK_NOTE or addon.RankRequirements.KIND_CHECK
-            return requirements:Add(rank, label, kind, names[rank + 1], author, now)
+            if type(kind) ~= "string" then
+                kind = kind and addon.RankRequirements.KIND_CHECK_NOTE or addon.RankRequirements.KIND_CHECK
+            end
+            return requirements:Add(rank, label, kind, names[rank + 1], author, now, tonumber(n))
         end)
     end
-    promotions.rename = function(id, label)
+    -- Renames item `id`, and for an automated item sets its number `n`
+    -- (as typed) when given.
+    promotions.rename = function(id, label, n)
         return editRequirements(function(requirements, author, now)
-            return requirements:Rename(id, label, author, now)
+            local item = requirements:Item(id)
+            if item == nil then
+                return nil, "that item no longer exists"
+            end
+            local number
+            if n ~= nil and n ~= "" and addon.RankRequirements.IsAutomated(item.kind) then
+                number = tonumber(n)
+                local problem = addon.RankRequirements.NumberProblem(item.kind, number)
+                if problem ~= nil then
+                    return nil, problem
+                end
+            end
+            local records = {}
+            if label ~= nil and string.gsub(label, "^%s*(.-)%s*$", "%1") ~= item.label then
+                local renamed, reason = requirements:Rename(id, label, author, now)
+                if renamed == nil then
+                    return nil, reason
+                end
+                records = renamed
+            end
+            if number ~= nil then
+                local changed = requirements:SetNumber(id, number, author, now) or {}
+                local index
+                for index = 1, #changed do
+                    table.insert(records, changed[index])
+                end
+            end
+            return records
         end)
     end
     promotions.move = function(id, step)

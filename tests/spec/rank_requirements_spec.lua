@@ -175,6 +175,46 @@ test.test("the editor shows the picked rank, what it promotes to, and a clear me
     test.assertEqual(Model.NO_RANKS, Model.Editor({ requirements = requirements, rankNames = {} }).empty)
 end)
 
+test.test("automated items carry their number, which an officer can change", function()
+    local requirements, addon = newRequirements()
+    local Requirements = addon.RankRequirements
+
+    local _, reason = requirements:Add(4, "", "rank-days", "Initiate", OFFICER, NOW)
+    test.assertEqual("a number of days needs to be 1 to 3650", reason)
+    test.assertEqual("a level needs to be 1 to 100",
+        select(2, requirements:Add(4, "", "level", "Initiate", OFFICER, NOW, 101)))
+    local days = requirements:Add(4, "", "char-guild-days", "Initiate", OFFICER, NOW, 7)[1]
+    local named = requirements:Add(4, "Two weeks at rank", "rank-days", "Initiate", OFFICER, NOW, 14)[1]
+    local player = requirements:Add(4, "", "player-guild-days", "Initiate", OFFICER, NOW, 30)[1]
+    local level = requirements:Add(4, "", "level", "Initiate", OFFICER, NOW, 50)[1]
+    local plain = requirements:Add(4, "Read the rules", "check", "Initiate", OFFICER, NOW, 9)[1]
+    test.assertEqual("In the guild 7 days", days.label)
+    test.assertEqual("Player in the guild 30 days", player.label)
+    test.assertEqual("Level 50", level.label)
+    test.assertEqual(nil, plain.n, "a checkbox has no number")
+    test.assertTrue(Requirements.IsAutomated("level"))
+    test.assertFalse(Requirements.IsAutomated("check-note"))
+
+    test.assertTrue(requirements:SetNumber(days.id, 10, OFFICER, NOW) ~= nil)
+    test.assertEqual(10, requirements:Item(days.id).n)
+    test.assertEqual("In the guild 10 days", requirements:Item(days.id).label, "a default label follows the number")
+    requirements:SetNumber(named.id, 21, OFFICER, NOW)
+    test.assertEqual("Two weeks at rank", requirements:Item(named.id).label, "a label the officer typed stays")
+    test.assertEqual("only an automated item has a number", select(2, requirements:SetNumber(plain.id, 3, OFFICER, NOW)))
+    test.assertEqual(nil, (requirements:SetNumber(level.id, 0, OFFICER, NOW)))
+    test.assertEqual(nil, (requirements:SetNumber(level.id, 60, MEMBER, NOW)), "officers only")
+
+    -- A record without its number, or a checkbox with one, is refused.
+    test.assertFalse(Requirements.IsRecord({ t = "item", id = "x", rank = 4, label = "Level", kind = "level",
+        position = 9, at = NOW, by = OFFICER }))
+    test.assertFalse(Requirements.IsRecord({ t = "item", id = "x", rank = 4, label = "Read", kind = "check", n = 3,
+        position = 9, at = NOW, by = OFFICER }))
+
+    local model = addon.PromotionsViewModel.Editor({ requirements = requirements, rank = 4, rankNames = RANKS })
+    test.assertEqual("Character days in guild: 10", model.items[1].kindText)
+    test.assertEqual(10, model.items[1].n)
+end)
+
 -- Sharing -----------------------------------------------------------------------
 
 -- Add-ons named in `names` on one fake guild channel; timers wait for

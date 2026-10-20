@@ -9,16 +9,89 @@ local _, addon = ...
 --                 ranks and players, who is in the guild)
 --   requirements  the guild's RankRequirements
 --   checks        the guild's PromotionChecks
+--   dates         the guild's MembershipDates (for the automated kinds)
+--   now           the server time now
 --   rankNames     the game's rank names, the guild master's first
-local PromotionPolicy = {}
+local PromotionPolicy = {
+    DAY = 24 * 60 * 60,
+}
 addon.PromotionPolicy = PromotionPolicy
 
--- How each kind of item is judged for `key`: true when met, plus the tick
--- record (manual items) when there is one.
+local function days(inputs, time)
+    return math.max(0, math.floor(((inputs.now or time) - time) / PromotionPolicy.DAY))
+end
+
+-- A time check against `record` (a join or rank-since date, or an earliest
+-- join): before tracking passes any N; an approximate date says so.
+local function daysCheck(inputs, record, n, unknown)
+    if record == nil then
+        return false, unknown
+    end
+    if record.beforeTracking or record.source == addon.MembershipDates.BEFORE_TRACKING then
+        return true, "before tracking"
+    end
+    local count = days(inputs, record.time)
+    local approximate = record.approximate or record.source == addon.MembershipDates.FIRST_SEEN
+        or record.source == addon.MembershipDates.SEEN
+    local text
+    if count >= n then
+        text = count .. " days (needs " .. n .. ")"
+    else
+        text = count .. " of " .. n .. " days"
+    end
+    return count >= n, text .. (approximate and " (approx.)" or "")
+end
+
+-- The characters of `key`'s player now in the guild (just `key` when it
+-- has no player).
+local function playerCharacters(partition, key, character)
+    if character.player == nil then
+        return { key }
+    end
+    local keys = {}
+    local all = partition:CharactersOf(character.player)
+    local index
+    for index = 1, #all do
+        if partition:IsInGuild(all[index]) then
+            table.insert(keys, all[index])
+        end
+    end
+    if keys[1] == nil then
+        keys[1] = key
+    end
+    return keys
+end
+
+-- How each kind of item is judged for `key` (whose record is `character`):
+-- true when met, and for an automated kind the detail ("5 of 7 days").
+-- Manual kinds are met by an officer's tick; any failed automated kind can
+-- be overridden by one (see Evaluate).
 PromotionPolicy.STATUS = {
     check = function(inputs, key, item)
         local record = inputs.checks:Record(key, item.id)
-        return record ~= nil and record.ticked, record
+        return record ~= nil and record.ticked
+    end,
+    ["char-guild-days"] = function(inputs, key, item)
+        local joined = inputs.dates and inputs.dates:Joined(key)
+        return daysCheck(inputs, joined, item.n, "join date unknown")
+    end,
+    ["player-guild-days"] = function(inputs, key, item, character)
+        local earliest = inputs.dates and inputs.dates:EarliestJoin(playerCharacters(inputs.partition, key, character))
+        return daysCheck(inputs, earliest, item.n, "join date unknown")
+    end,
+    ["rank-days"] = function(inputs, key, item, character)
+        local since = inputs.dates and inputs.dates:RankSince(key, character.rank)
+        return daysCheck(inputs, since, item.n, "rank date unknown")
+    end,
+    level = function(inputs, key, item, character)
+        local level = character.level
+        if type(level) ~= "number" then
+            return false, "level unknown"
+        end
+        if level >= item.n then
+            return true, "level " .. level .. " (needs " .. item.n .. ")"
+        end
+        return false, "level " .. level .. " of " .. item.n
     end,
 }
 PromotionPolicy.STATUS["check-note"] = PromotionPolicy.STATUS.check
@@ -45,9 +118,12 @@ end
 -- requirements:
 --   { key, rank, rankName, nextRank, nextRankName, items, met, total, ready,
 --     highestRank, highestRankName }
--- where each item is { id, label, kind, met, record }. `highestRank` is
--- the player's highest rank when it's higher than this character's, else
--- nil.
+-- where each item is { id, label, kind, automated, met, detail,
+-- overridden, record }: `record` is the officer's tick (or override) when
+-- there is one, `detail` an automated item's status in words, and
+-- `overridden` true when an officer's override is what meets a failed
+-- automated item. `highestRank` is the player's highest rank when it's
+-- higher than this character's, else nil.
 function PromotionPolicy.Evaluate(inputs, key, itemsOf)
     local partition = inputs.partition
     local character = partition:GetCharacter(key)
@@ -74,12 +150,19 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
     for index = 1, #items do
         local item = items[index]
         local judge = PromotionPolicy.STATUS[item.kind]
-        local met, record = false, nil
+        local met, detail = false, nil
         if judge ~= nil then
-            met, record = judge(inputs, key, item)
+            met, detail = judge(inputs, key, item, character)
         end
-        table.insert(result.items, { id = item.id, label = item.label, kind = item.kind, met = met == true,
-            record = record })
+        met = met == true
+        local record = inputs.checks:Record(key, item.id)
+        local automated = addon.RankRequirements.IsAutomated(item.kind)
+        local overridden = false
+        if automated and not met and record ~= nil and record.ticked then
+            met, overridden = true, true
+        end
+        table.insert(result.items, { id = item.id, label = item.label, kind = item.kind, automated = automated,
+            met = met, detail = detail, overridden = overridden, record = record })
         if met then
             result.met = result.met + 1
         end

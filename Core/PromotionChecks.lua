@@ -6,7 +6,9 @@ local _, addon = ...
 --   { t = "tick", character, rank, item, ticked, note?, at, by }
 -- `rank` is the character's rank (0-based) when the tick was made,
 -- `item` the requirement item's id, `ticked` false for an untick, and
--- `note` what the officer typed for an item that needs one. The newest
+-- `note` what the officer typed for an item that needs one. On an
+-- automated item (RankRequirements.IsAutomated) a tick is an officer's
+-- override of a failed check, and `note` its optional reason. The newest
 -- record wins per character and item, with sync's tie-break, and only
 -- officers' records are accepted. Unticking is stamped too, so it beats
 -- older ticks everywhere.

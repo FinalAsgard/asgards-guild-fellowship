@@ -19,6 +19,7 @@ local function load()
         "Core/NoteParser.lua",
         "Core/FellowshipStore.lua",
         "Core/SyncFacts.lua",
+        "Core/MembershipDates.lua",
         "Core/RankRequirements.lua",
         "Core/PromotionChecks.lua",
         "Core/PromotionPolicy.lua",
@@ -44,14 +45,18 @@ local function newGuild(characters)
             return record and partition:IsInGuild(character) and record.rank or nil
         end,
     })
-    local inputs = { partition = partition, requirements = requirements, checks = checks, rankNames = RANKS }
+    local dates = addon.MembershipDates.Create({}, { isOfficer = isOfficer })
+    local inputs = { partition = partition, requirements = requirements, checks = checks, dates = dates, now = NOW,
+        rankNames = RANKS }
     return inputs, addon
 end
 
-local function addItem(inputs, rank, label, kind)
-    local records = inputs.requirements:Add(rank, label, kind or "check", RANKS[rank + 1], OFFICER, NOW)
+local function addItem(inputs, rank, label, kind, n)
+    local records = inputs.requirements:Add(rank, label, kind or "check", RANKS[rank + 1], OFFICER, NOW, n)
     return records[1]
 end
+
+local DAY = 24 * 60 * 60
 
 -- Ticks -------------------------------------------------------------------------
 
@@ -205,6 +210,149 @@ test.test("the list rows show each character, its checklist when open, and who t
     test.assertEqual(Model.NOBODY, Model.List({}, { anyRequirements = true })[2].character)
 end)
 
+-- Automated items -------------------------------------------------------------------
+
+local function itemOf(row, id)
+    local index
+    for index = 1, #row.items do
+        if row.items[index].id == id then
+            return row.items[index]
+        end
+    end
+end
+
+test.test("character days in guild count from the join, with before tracking passing and first-seen approximate",
+    function()
+    local inputs, addon = newGuild({ bolt = 4, nail = 4, rivet = 4, screw = 4 })
+    local item = addItem(inputs, 4, "", "char-guild-days", 7)
+    test.assertEqual("In the guild 7 days", item.label, "a blank label says what the check is")
+    inputs.dates:Offer("bolt", "joined", { time = NOW - 5 * DAY - 60, source = "log" })
+    inputs.dates:Offer("nail", "joined", { time = NOW - 9 * DAY, source = "log" })
+    inputs.dates:Offer("rivet", "joined", { time = NOW - 2 * DAY, source = "before-tracking" })
+
+    local bolt = itemOf(addon.PromotionPolicy.Evaluate(inputs, "bolt"), item.id)
+    test.assertFalse(bolt.met)
+    test.assertTrue(bolt.automated)
+    test.assertEqual("5 of 7 days", bolt.detail)
+    local nail = itemOf(addon.PromotionPolicy.Evaluate(inputs, "nail"), item.id)
+    test.assertTrue(nail.met)
+    test.assertEqual("9 days (needs 7)", nail.detail)
+    local rivet = itemOf(addon.PromotionPolicy.Evaluate(inputs, "rivet"), item.id)
+    test.assertTrue(rivet.met)
+    test.assertEqual("before tracking", rivet.detail)
+    local screw = itemOf(addon.PromotionPolicy.Evaluate(inputs, "screw"), item.id)
+    test.assertFalse(screw.met)
+    test.assertEqual("join date unknown", screw.detail)
+    inputs.dates:Offer("screw", "joined", { time = NOW - 3 * DAY, source = "first-seen" })
+    test.assertEqual("3 of 7 days (approx.)", itemOf(addon.PromotionPolicy.Evaluate(inputs, "screw"), item.id).detail)
+end)
+
+test.test("player days in guild count from the earliest join among the player's characters still in the guild",
+    function()
+    local inputs, addon = newGuild({ main = 2, alt = 4, gone = 4 })
+    local item = addItem(inputs, 4, "", "player-guild-days", 30)
+    inputs.partition:JoinPlayerOf("alt", "main", "manual")
+    inputs.partition:JoinPlayerOf("gone", "main", "manual")
+    inputs.dates:Offer("alt", "joined", { time = NOW - 1 * DAY, source = "live" })
+    inputs.dates:Offer("main", "joined", { time = NOW - 40 * DAY, source = "log" })
+    inputs.dates:Offer("gone", "joined", { time = NOW - 400 * DAY, source = "log" })
+    inputs.partition:MarkDeparted("gone", NOW)
+
+    local alt = itemOf(addon.PromotionPolicy.Evaluate(inputs, "alt"), item.id)
+    test.assertTrue(alt.met)
+    test.assertEqual("40 days (needs 30)", alt.detail, "the main's join, not the departed character's")
+    inputs.partition:MarkDeparted("main", NOW)
+    alt = itemOf(addon.PromotionPolicy.Evaluate(inputs, "alt"), item.id)
+    test.assertFalse(alt.met)
+    test.assertEqual("1 of 30 days", alt.detail)
+    inputs.dates:Offer("alt", "joined", { time = NOW - 1 * DAY, source = "before-tracking" })
+    test.assertEqual("1 of 30 days", itemOf(addon.PromotionPolicy.Evaluate(inputs, "alt"), item.id).detail,
+        "a before-tracking mark doesn't replace a real join")
+end)
+
+test.test("days at rank count only the record for the character's current rank", function()
+    local inputs, addon = newGuild({ bolt = 4, nail = 4 })
+    local item = addItem(inputs, 4, "", "rank-days", 14)
+    inputs.dates:Offer("bolt", "rankSince", { time = NOW - 3 * DAY, rank = 4, source = "log" })
+    inputs.dates:Offer("nail", "rankSince", { time = NOW - 30 * DAY, rank = 3, source = "log" })
+
+    local bolt = itemOf(addon.PromotionPolicy.Evaluate(inputs, "bolt"), item.id)
+    test.assertFalse(bolt.met)
+    test.assertEqual("3 of 14 days", bolt.detail)
+    local nail = itemOf(addon.PromotionPolicy.Evaluate(inputs, "nail"), item.id)
+    test.assertFalse(nail.met, "a date for another rank doesn't count")
+    test.assertEqual("rank date unknown", nail.detail)
+    inputs.dates:Offer("nail", "rankSince", { time = NOW - 2 * DAY, rank = 4, source = "seen" })
+    test.assertEqual("2 of 14 days (approx.)", itemOf(addon.PromotionPolicy.Evaluate(inputs, "nail"), item.id).detail)
+    inputs.dates = addon.MembershipDates.Create({}, {})
+    inputs.dates:Offer("bolt", "rankSince", { time = NOW, rank = 4, source = "before-tracking" })
+    bolt = itemOf(addon.PromotionPolicy.Evaluate(inputs, "bolt"), item.id)
+    test.assertTrue(bolt.met)
+    test.assertEqual("before tracking", bolt.detail)
+end)
+
+test.test("a level item compares the character's level", function()
+    local inputs, addon = newGuild({ bolt = 4, nail = 4, rivet = 4 })
+    local item = addItem(inputs, 4, "", "level", 50)
+    test.assertEqual("Level 50", item.label)
+    inputs.partition:RecordCharacter("bolt", { level = 42 })
+    inputs.partition:RecordCharacter("nail", { level = 60 })
+
+    local bolt = itemOf(addon.PromotionPolicy.Evaluate(inputs, "bolt"), item.id)
+    test.assertFalse(bolt.met)
+    test.assertEqual("level 42 of 50", bolt.detail)
+    test.assertEqual("level 60 (needs 50)", itemOf(addon.PromotionPolicy.Evaluate(inputs, "nail"), item.id).detail)
+    test.assertEqual("level unknown", itemOf(addon.PromotionPolicy.Evaluate(inputs, "rivet"), item.id).detail)
+end)
+
+test.test("an officer overrides a failed automated item with an optional reason, and can remove it", function()
+    local inputs, addon = newGuild({ bolt = 4 })
+    local item = addItem(inputs, 4, "", "level", 50)
+    inputs.partition:RecordCharacter("bolt", { level = 42 })
+    local checks = inputs.checks
+
+    test.assertEqual(nil, (checks:Set("bolt", item, true, "Old friend", MEMBER, NOW)), "officers only")
+    test.assertTrue(checks:Set("bolt", item, true, "  Old friend ", OFFICER, NOW) ~= nil)
+    local row = addon.PromotionPolicy.Evaluate(inputs, "bolt")
+    local status = itemOf(row, item.id)
+    test.assertTrue(status.met)
+    test.assertTrue(status.overridden)
+    test.assertEqual("level 42 of 50", status.detail, "the detail still says what the data shows")
+    test.assertTrue(row.ready)
+
+    local Model = addon.PromotionsViewModel
+    local rows = Model.List({ row }, {
+        expanded = { bolt = true },
+        nameOf = function(key)
+            return key == OFFICER and "Toolbox" or key
+        end,
+        formatDate = function()
+            return "2026-10-20"
+        end,
+    })
+    test.assertEqual("level 42 of 50", rows[3].ranks)
+    test.assertEqual("overridden", rows[3].progress)
+    test.assertEqual("Undo override", rows[3].action)
+    test.assertEqual("Overridden by Toolbox on 2026-10-20", rows[3].tooltip[1])
+    test.assertEqual("Reason: Old friend", rows[3].tooltip[2])
+
+    test.assertTrue(checks:Set("bolt", item, false, nil, OTHER_OFFICER, NOW) ~= nil)
+    row = addon.PromotionPolicy.Evaluate(inputs, "bolt")
+    test.assertFalse(itemOf(row, item.id).met)
+    rows = Model.List({ row }, { expanded = { bolt = true } })
+    test.assertEqual("Override", rows[3].action)
+    test.assertTrue(rows[3].askReason)
+    test.assertContains(rows[3].tooltip[1], "Override removed by")
+
+    -- No reason is needed, and a met item offers no override.
+    test.assertTrue(checks:Set("bolt", item, true, nil, OFFICER, NOW) ~= nil)
+    test.assertTrue(itemOf(addon.PromotionPolicy.Evaluate(inputs, "bolt"), item.id).overridden)
+    checks:Set("bolt", item, false, nil, OFFICER, NOW)
+    inputs.partition:RecordCharacter("bolt", { level = 55 })
+    rows = Model.List({ addon.PromotionPolicy.Evaluate(inputs, "bolt") }, { expanded = { bolt = true } })
+    test.assertEqual(nil, rows[3].action)
+end)
+
 -- In the composed add-on -----------------------------------------------------------
 
 local NAMES = {
@@ -309,5 +457,43 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertEqual(nil, characterRow(promotions.listRows(), "Bolt"))
         local _, partition = tool.addon.rosterController:QuietContext()
         test.assertEqual(0, #tool.addon.PromotionChecks.Create(partition:GetPromotionChecks(), {}):Snapshot())
+    end)
+
+    test.test(profile .. " an officer adds a level item, overrides it for a low character, then lowers its level",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local hammer = login(profile, channel, names[2])
+        settle(channel, 5)
+        local promotions = tool.addon.promotions
+
+        local ok, reason = promotions.add("", "level", "")
+        test.assertFalse(ok)
+        test.assertEqual("a level needs to be 1 to 100", reason)
+        test.assertTrue(promotions.add("", "level", "50"))
+        local itemId = promotions.view().items[1].id
+        test.assertEqual("Level 50", promotions.view().items[1].label)
+        local bolt = characterRow(promotions.listRows(), "Bolt")
+        test.assertEqual("0 of 1", bolt.progress)
+        promotions.expand(bolt.key)
+        local rows = promotions.listRows()
+        local _, at = characterRow(rows, "Bolt")
+        test.assertEqual("level 12 of 50", rows[at + 1].ranks)
+        test.assertEqual("Override", rows[at + 1].action)
+
+        test.assertTrue(promotions.tick(bolt.key, itemId, true, "Raid leader on another server"))
+        settle(channel, 5)
+        local memberBolt = characterRow(hammer.addon.promotions.listRows(), "Bolt")
+        test.assertEqual("1 of 1", memberBolt.progress, "the override reaches members")
+        test.assertContains(memberBolt.character, "Ready")
+
+        test.assertTrue(promotions.tick(bolt.key, itemId, false))
+        test.assertEqual("0 of 1", characterRow(promotions.listRows(), "Bolt").progress)
+        test.assertTrue(promotions.rename(itemId, "Level 50", "10"))
+        test.assertEqual("Level 10", promotions.view().items[1].label)
+        test.assertEqual("1 of 1", characterRow(promotions.listRows(), "Bolt").progress)
+        settle(channel, 5)
+        test.assertEqual("Level 10", hammer.addon.promotions.view().items[1].label)
+        test.assertEqual("1 of 1", characterRow(hammer.addon.promotions.listRows(), "Bolt").progress)
     end)
 end

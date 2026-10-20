@@ -56,6 +56,15 @@ function PromotionsViewModel.StepRank(rank, step, rankNames)
     return ranks[1]
 end
 
+-- An item's kind in words, with its number: "Days at rank: 14".
+function PromotionsViewModel.KindText(item)
+    local text = addon.RankRequirements.KINDS[item.kind] or tostring(item.kind)
+    if item.n ~= nil then
+        text = text .. ": " .. item.n
+    end
+    return text
+end
+
 -- inputs: requirements, rank (the one the officer picked, or nil),
 -- rankNames (the game's rank names, the guild master's first).
 -- Returns { rank, rankText, nextText, mismatch, items, empty }:
@@ -63,7 +72,7 @@ end
 --   rankText  "Veteran (rank 3)"
 --   nextText  "Promotes to Officer"
 --   mismatch  a warning when the rank was set up under another name, or nil
---   items     { id, label, kindText, canUp, canDown } in order
+--   items     { id, label, kindText, n, canUp, canDown } in order
 --   empty     what to say instead of items, or nil
 function PromotionsViewModel.Editor(inputs)
     local requirements, names = inputs.requirements, inputs.rankNames or {}
@@ -88,7 +97,8 @@ function PromotionsViewModel.Editor(inputs)
         table.insert(model.items, {
             id = items[index].id,
             label = items[index].label,
-            kindText = addon.RankRequirements.KINDS[items[index].kind],
+            kindText = PromotionsViewModel.KindText(items[index]),
+            n = items[index].n,
             canUp = index > 1,
             canDown = index < #items,
         })
@@ -103,8 +113,53 @@ end
 PromotionsViewModel.NOBODY = "Nobody is at a rank with requirements."
 PromotionsViewModel.NO_REQUIREMENTS = "No rank has promotion requirements yet. Use Edit requirements to add some."
 
+-- One checklist item's row under character `key` (see List).
+function PromotionsViewModel.ItemRow(key, item, nameOf, formatDate)
+    local record = item.record
+    local ticked = record ~= nil and record.ticked
+    local verb = item.automated and "Overridden" or "Ticked"
+    local tooltip
+    if ticked then
+        tooltip = { verb .. " by " .. tostring(nameOf(record.by)) .. " on " .. formatDate(record.at) }
+        if record.note ~= nil then
+            table.insert(tooltip, (item.automated and "Reason: " or "Note: ") .. record.note)
+        end
+    elseif record ~= nil then
+        tooltip = { (item.automated and "Override removed by " or "Unticked by ") .. tostring(nameOf(record.by))
+            .. " on " .. formatDate(record.at) }
+    end
+    local row = {
+        kind = "item",
+        key = key,
+        item = item.id,
+        character = "    " .. (item.met and "|cff40ff40[x]|r " or "[ ] ") .. item.label,
+        highest = "",
+        ticked = ticked == true,
+        label = item.label,
+        tooltip = tooltip,
+    }
+    if item.automated then
+        row.ranks = item.detail or ""
+        row.progress = item.overridden and "overridden" or ""
+        if ticked then
+            row.action = "Undo override"
+        elseif not item.met then
+            row.action = "Override"
+            row.askReason = true
+        end
+        return row
+    end
+    row.needsNote = item.kind == addon.RankRequirements.KIND_CHECK_NOTE
+    row.ranks = row.needsNote and "Needs a note" or ""
+    row.progress = ticked and record.note and ("\"" .. record.note .. "\"") or ""
+    row.action = ticked and "Untick" or "Tick"
+    return row
+end
+
 -- The Promotions list's rows from PromotionPolicy.List's `evaluated`, for
--- the page's list. options:
+-- the page's list. An automated item's row shows its detail; a failed one
+-- offers Override (`askReason`: the officer may give a reason), and an
+-- overridden one Undo override. options:
 --   expanded      set of character keys whose checklist is open
 --   nameOf(key)   a character's (or officer's) name to show
 --   formatDate(time)
@@ -112,10 +167,10 @@ PromotionsViewModel.NO_REQUIREMENTS = "No rank has promotion requirements yet. U
 -- Rows: a heading, then per character
 --   { kind = "character", key, character, ranks, progress, highest, action }
 -- and, under an open one, per item
---   { kind = "item", key, item, character, ranks, ticked, needsNote, action,
---     tooltip }
--- where `tooltip` lists who ticked it, when, and the note. With no
--- characters, one { kind = "empty" } row says why.
+--   { kind = "item", key, item, character, ranks, ticked, needsNote,
+--     askReason, action, tooltip }
+-- where `tooltip` lists who ticked (or overrode) it, when, and the note
+-- (or reason). With no characters, one { kind = "empty" } row says why.
 function PromotionsViewModel.List(evaluated, options)
     options = options or {}
     local expanded = options.expanded or {}
@@ -140,33 +195,7 @@ function PromotionsViewModel.List(evaluated, options)
         if open then
             local itemIndex
             for itemIndex = 1, #row.items do
-                local item = row.items[itemIndex]
-                local record = item.record
-                local ticked = record ~= nil and record.ticked
-                local tooltip
-                if ticked then
-                    tooltip = { "Ticked by " .. tostring(nameOf(record.by)) .. " on " .. formatDate(record.at) }
-                    if record.note ~= nil then
-                        table.insert(tooltip, "Note: " .. record.note)
-                    end
-                elseif record ~= nil then
-                    tooltip = { "Unticked by " .. tostring(nameOf(record.by)) .. " on " .. formatDate(record.at) }
-                end
-                local needsNote = item.kind == addon.RankRequirements.KIND_CHECK_NOTE
-                table.insert(rows, {
-                    kind = "item",
-                    key = row.key,
-                    item = item.id,
-                    character = "    " .. (item.met and "|cff40ff40[x]|r " or "[ ] ") .. item.label,
-                    ranks = needsNote and "Needs a note" or "",
-                    progress = ticked and record.note and ("\"" .. record.note .. "\"") or "",
-                    highest = "",
-                    ticked = ticked == true,
-                    needsNote = needsNote,
-                    label = item.label,
-                    action = ticked and "Untick" or "Tick",
-                    tooltip = tooltip,
-                })
+                table.insert(rows, PromotionsViewModel.ItemRow(row.key, row.items[itemIndex], nameOf, formatDate))
             end
         end
     end
