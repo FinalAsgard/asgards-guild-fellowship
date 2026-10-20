@@ -211,11 +211,64 @@ test.test("automated items carry their number, which an officer can change", fun
         position = 9, at = NOW, by = OFFICER }))
 
     local model = addon.PromotionsViewModel.Editor({ requirements = requirements, rank = 4, rankNames = RANKS })
-    test.assertEqual("Character days in guild: 10", model.items[1].kindText)
-    test.assertEqual(10, model.items[1].n)
-    test.assertEqual("Days", model.items[1].numberText, "the editor names the number box")
-    test.assertEqual("Level", model.items[4].numberText)
-    test.assertEqual(nil, model.items[5].numberText, "a checkbox has no number box")
+    test.assertEqual(1, #model.items, "only custom requirements are listed as items")
+    test.assertEqual("Read the rules", model.items[1].label)
+    test.assertFalse(model.items[1].needsNote)
+    test.assertEqual(5, #model.automated, "every automatic check is listed, on or off")
+    test.assertEqual("char-guild-days", model.automated[1].kind)
+    test.assertEqual("Character days in guild", model.automated[1].text)
+    test.assertTrue(model.automated[1].enabled)
+    test.assertEqual(10, model.automated[1].n)
+    test.assertEqual("Days", model.automated[1].numberText)
+    test.assertEqual(21, model.automated[3].n)
+    test.assertEqual("Level", model.automated[4].numberText)
+    test.assertEqual("addon", model.automated[5].kind)
+    test.assertEqual("Has the Guild Fellowship Addon", model.automated[5].text)
+    test.assertFalse(model.automated[5].enabled)
+    test.assertEqual(nil, model.automated[5].numberText, "the add-on check has no number")
+    test.assertEqual("Character days in guild: 10", addon.PromotionsViewModel.KindText(requirements:Item(days.id)))
+end)
+
+test.test("automatic checks turn on and off, one per rank, and a checkbox can be made to need a note", function()
+    local requirements, addon = newRequirements()
+
+    test.assertEqual("a number of days needs to be 1 to 3650",
+        select(2, requirements:SetAutomated(4, "rank-days", true, nil, "Initiate", OFFICER, NOW)))
+    local records = requirements:SetAutomated(4, "rank-days", true, 14, "Initiate", OFFICER, NOW)
+    test.assertEqual("At this rank 14 days", records[1].label)
+    local id = records[1].id
+    requirements:SetAutomated(4, "rank-days", true, 30, "Initiate", OFFICER, NOW + 1)
+    test.assertEqual(1, #requirements:Items(4), "turning a check on again sets its number")
+    test.assertEqual(30, requirements:Item(id).n)
+    test.assertEqual(nil, (requirements:SetAutomated(4, "rank-days", true, 30, "Initiate", MEMBER, NOW + 2)))
+
+    local flag = requirements:SetAutomated(4, "addon", true, nil, "Initiate", OFFICER, NOW + 2)[1]
+    test.assertEqual(nil, flag.n, "the add-on check takes no number")
+    test.assertEqual("Has the Guild Fellowship Addon", flag.label)
+    -- One made when it took a number of days still loads.
+    test.assertTrue(addon.RankRequirements.IsRecord({ t = "item", id = "old", rank = 4,
+        label = "Has the add-on (seen in 30 days)", kind = "addon", n = 30, position = 9, at = NOW, by = OFFICER }))
+
+    test.assertTrue(#requirements:SetAutomated(4, "rank-days", false, nil, "Initiate", OFFICER, NOW + 3) == 1)
+    test.assertEqual(nil, requirements:Item(id), "turning a check off deletes it")
+    test.assertEqual(0, #requirements:SetAutomated(4, "level", false, nil, "Initiate", OFFICER, NOW + 3))
+
+    local plain = requirements:Add(4, "Write a guide", "check", "Initiate", OFFICER, NOW + 4)[1]
+    test.assertTrue(requirements:SetNeedsNote(plain.id, true, OFFICER, NOW + 5) ~= nil)
+    test.assertEqual("check-note", requirements:Item(plain.id).kind)
+    test.assertEqual(0, #requirements:SetNeedsNote(plain.id, true, OFFICER, NOW + 6))
+    test.assertEqual("only a checkbox can need a note", select(2, requirements:SetNeedsNote(flag.id, true, OFFICER, NOW)))
+end)
+
+test.test("custom requirements move past the automatic checks, which the editor lists apart", function()
+    local requirements = newRequirements()
+    local first = requirements:Add(4, "Read the rules", "check", "Initiate", OFFICER, NOW)[1]
+    requirements:SetAutomated(4, "level", true, 20, "Initiate", OFFICER, NOW + 1)
+    local second = requirements:Add(4, "Attend an event", "check", "Initiate", OFFICER, NOW + 2)[1]
+    test.assertTrue(requirements:Move(second.id, -1, OFFICER, NOW + 3) ~= nil)
+    local items = requirements:Items(4)
+    test.assertEqual(second.id, items[1].id, "one click moves it above the next custom requirement")
+    test.assertEqual(first.id, items[3].id)
 end)
 
 -- Sharing -----------------------------------------------------------------------

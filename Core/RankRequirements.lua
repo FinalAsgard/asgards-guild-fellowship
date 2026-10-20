@@ -9,7 +9,9 @@ local _, addon = ...
 --         by }
 --         `rank` is the 0-based rank index (as the roster numbers ranks) the
 --         item belongs to, `kind` an item kind (KINDS), `n` an automated
---         kind's number (days, or a level), `position` its place in the
+--         kind's number (days, or a level; the add-on check has none, and
+--         one made when it took days keeps them, unused), `position` its
+--         place in the
 --         rank's list. A deleted item stays as a tombstone, so it
 --         beats older edits made elsewhere.
 --   rank  { t = "rank", rank, name, at, by }: the rank's name when an
@@ -66,13 +68,12 @@ RankRequirements.KINDS = {
     [RankRequirements.KIND_PLAYER_DAYS] = "Player days in guild",
     [RankRequirements.KIND_RANK_DAYS] = "Days at rank",
     [RankRequirements.KIND_LEVEL] = "Character level",
-    [RankRequirements.KIND_ADDON] = "Has the add-on (days)",
+    [RankRequirements.KIND_ADDON] = "Has the Guild Fellowship Addon",
 }
 
--- The editor's kinds, in the order its kind button steps through them.
-RankRequirements.KIND_ORDER = {
-    RankRequirements.KIND_CHECK,
-    RankRequirements.KIND_CHECK_NOTE,
+-- The automated kinds, in the order the editor lists them. A rank has at
+-- most one item of each (see SetAutomated).
+RankRequirements.AUTOMATED_ORDER = {
     RankRequirements.KIND_CHAR_DAYS,
     RankRequirements.KIND_PLAYER_DAYS,
     RankRequirements.KIND_RANK_DAYS,
@@ -82,16 +83,15 @@ RankRequirements.KIND_ORDER = {
 
 -- The automated kinds, each with the range of its `n`, the label an item
 -- gets when the officer leaves it blank, and what `n` is called in the
--- editor.
+-- editor. A kind without a range (the add-on check) has no number.
 RankRequirements.AUTOMATED = {
     [RankRequirements.KIND_CHAR_DAYS] = { low = 1, high = 3650, label = "In the guild %d days", number = "Days" },
     [RankRequirements.KIND_PLAYER_DAYS] = { low = 1, high = 3650, label = "Player in the guild %d days",
         number = "Days" },
     [RankRequirements.KIND_RANK_DAYS] = { low = 1, high = 3650, label = "At this rank %d days", number = "Days" },
     [RankRequirements.KIND_LEVEL] = { low = 1, high = 100, label = "Level %d", number = "Level" },
-    -- Any of the player's characters heard on add-on sync within N days.
-    [RankRequirements.KIND_ADDON] = { low = 1, high = 365, default = 30,
-        label = "Has the add-on (seen in %d days)", number = "Days" },
+    -- Any of the player's characters ever heard on add-on sync.
+    [RankRequirements.KIND_ADDON] = { label = "Has the Guild Fellowship Addon" },
 }
 
 RankRequirements.TYPES = {
@@ -136,12 +136,23 @@ function RankRequirements.IsRecord(record)
     if automated == nil then
         return record.n == nil
     end
+    if automated.low == nil then
+        -- An add-on check made when it took a number of days keeps it,
+        -- unused.
+        return record.n == nil or isWhole(record.n, 0, 10000)
+    end
     return isWhole(record.n, automated.low, automated.high)
 end
 
 -- Whether `kind` is checked by the add-on rather than ticked.
 function RankRequirements.IsAutomated(kind)
     return RankRequirements.AUTOMATED[kind] ~= nil
+end
+
+-- Whether automated `kind` takes a number.
+function RankRequirements.HasNumber(kind)
+    local automated = RankRequirements.AUTOMATED[kind]
+    return automated ~= nil and automated.low ~= nil
 end
 
 -- The label an automated item of `kind` gets for `n` when left blank.
@@ -153,7 +164,7 @@ end
 -- Why `n` doesn't suit automated `kind`, or nil when it does.
 function RankRequirements.NumberProblem(kind, n)
     local automated = RankRequirements.AUTOMATED[kind]
-    if automated ~= nil and not isWhole(n, automated.low, automated.high) then
+    if automated ~= nil and automated.low ~= nil and not isWhole(n, automated.low, automated.high) then
         return (kind == RankRequirements.KIND_LEVEL and "a level" or "a number of days") .. " needs to be "
             .. automated.low .. " to " .. automated.high
     end
@@ -338,15 +349,13 @@ function Requirements:Add(rank, label, kind, rankName, author, at, n)
     if RankRequirements.KINDS[kind] == nil then
         return nil, "unknown kind of item"
     end
-    if not RankRequirements.IsAutomated(kind) then
+    if not RankRequirements.HasNumber(kind) then
         n = nil
-    elseif n == nil and RankRequirements.AUTOMATED[kind].default ~= nil then
-        n = RankRequirements.AUTOMATED[kind].default
     elseif RankRequirements.NumberProblem(kind, n) then
         return nil, RankRequirements.NumberProblem(kind, n)
     end
     label = trimmed(label)
-    if (label == nil or label == "") and n ~= nil then
+    if (label == nil or label == "") and RankRequirements.IsAutomated(kind) then
         label = RankRequirements.DefaultLabel(kind, n)
     end
     if not isLabel(label) then
@@ -401,7 +410,7 @@ function Requirements:SetNumber(id, n, author, at)
     if item == nil then
         return nil, "that item no longer exists"
     end
-    if not RankRequirements.IsAutomated(item.kind) then
+    if not RankRequirements.HasNumber(item.kind) then
         return nil, "only an automated item has a number"
     end
     if RankRequirements.NumberProblem(item.kind, n) then
@@ -418,11 +427,79 @@ function Requirements:SetNumber(id, n, author, at)
     end)
 end
 
+-- An officer sets whether checkbox item `id` needs a note when ticked.
+-- Ticks on it are kept.
+function Requirements:SetNeedsNote(id, needsNote, author, at)
+    local item = self:Item(id)
+    if item == nil then
+        return nil, "that item no longer exists"
+    end
+    if RankRequirements.IsAutomated(item.kind) then
+        return nil, "only a checkbox can need a note"
+    end
+    local kind = needsNote and RankRequirements.KIND_CHECK_NOTE or RankRequirements.KIND_CHECK
+    if kind == item.kind then
+        return {}
+    end
+    return self:change(id, author, at, function(record)
+        record.kind = kind
+    end)
+end
+
 -- An officer deletes item `id`, leaving a tombstone.
 function Requirements:Delete(id, author, at)
     return self:change(id, author, at, function(record)
         record.deleted = true
     end)
+end
+
+-- `rank`'s item of automated `kind`, or nil.
+function Requirements:ItemOfKind(rank, kind)
+    local items = self:Items(rank)
+    local index
+    for index = 1, #items do
+        if items[index].kind == kind then
+            return items[index]
+        end
+    end
+    return nil
+end
+
+-- An officer turns automated check `kind` on (with its number `n`, when it
+-- takes one) or off for `rank`. Turning on a check already on sets its
+-- number; turning one off deletes every item of that kind at the rank.
+-- Returns the records to share, or nil and why not.
+function Requirements:SetAutomated(rank, kind, enabled, n, rankName, author, at)
+    if not RankRequirements.IsAutomated(kind) then
+        return nil, "unknown kind of check"
+    end
+    local ok, officer = pcall(self.isOfficer, author)
+    if not ok or officer ~= true then
+        return nil, "only officers can change promotion requirements"
+    end
+    local held = self:ItemOfKind(rank, kind)
+    if not enabled then
+        local records = {}
+        local items = self:Items(rank)
+        local index
+        for index = 1, #items do
+            if items[index].kind == kind then
+                local deleted, reason = self:Delete(items[index].id, author, at)
+                if deleted == nil then
+                    return nil, reason
+                end
+                table.insert(records, deleted[1])
+            end
+        end
+        return records
+    end
+    if held == nil then
+        return self:Add(rank, "", kind, rankName, author, at, n)
+    end
+    if RankRequirements.HasNumber(kind) then
+        return self:SetNumber(held.id, n, author, at)
+    end
+    return {}
 end
 
 -- An officer moves item `id` one place up (`step` -1) or down (1) in its
@@ -441,7 +518,14 @@ function Requirements:Move(id, step, author, at)
             from = index
         end
     end
-    local to = from + (step < 0 and -1 or 1)
+    -- An item moves past the next one of its own group (checkboxes, or
+    -- automated checks), as the editor lists the groups apart.
+    local automated = RankRequirements.IsAutomated(item.kind)
+    local direction = step < 0 and -1 or 1
+    local to = from + direction
+    while items[to] ~= nil and RankRequirements.IsAutomated(items[to].kind) ~= automated do
+        to = to + direction
+    end
     if to < 1 or to > #items then
         return nil, "it can't move further"
     end

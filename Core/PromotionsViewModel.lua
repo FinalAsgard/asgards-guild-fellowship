@@ -5,6 +5,7 @@ local _, addon = ...
 local PromotionsViewModel = {
     NONE_ANYWHERE = "No rank has promotion requirements yet. Pick a rank and add the first item.",
     NONE_HERE = "This rank has no requirements.",
+    NO_CUSTOM = "No custom requirements at this rank.",
     NO_RANKS = "The guild's ranks aren't known yet.",
 }
 addon.PromotionsViewModel = PromotionsViewModel
@@ -59,7 +60,7 @@ end
 -- An item's kind in words, with its number: "Days at rank: 14".
 function PromotionsViewModel.KindText(item)
     local text = addon.RankRequirements.KINDS[item.kind] or tostring(item.kind)
-    if item.n ~= nil then
+    if item.n ~= nil and addon.RankRequirements.HasNumber(item.kind) then
         text = text .. ": " .. item.n
     end
     return text
@@ -67,19 +68,22 @@ end
 
 -- inputs: requirements, rank (the one the officer picked, or nil),
 -- rankNames (the game's rank names, the guild master's first).
--- Returns { rank, rankText, nextText, mismatch, items, empty }:
+-- Returns { rank, rankText, nextText, mismatch, items, automated, empty }:
 --   rank      the rank shown (nil when no rank can be edited)
 --   rankText  "Veteran (rank 3)"
 --   nextText  "Promotes to Officer"
 --   mismatch  a warning when the rank was set up under another name, or nil
---   items     { id, label, kindText, n, numberText, canUp, canDown } in
---             order, `numberText` what `n` is called ("Days"), or nil
---   empty     what to say instead of items, or nil
+--   items     the custom (checkbox) items in order:
+--             { id, label, needsNote, kindText, canUp, canDown }
+--   automated one line per automated check, in AUTOMATED_ORDER:
+--             { kind, text, enabled, id?, n?, numberText? }, `numberText`
+--             what `n` is called ("Days"), nil for a check without one
+--   empty     what to say instead of custom items, or nil
 function PromotionsViewModel.Editor(inputs)
     local requirements, names = inputs.requirements, inputs.rankNames or {}
     local rank = PromotionsViewModel.PickRank(inputs.rank, requirements, names)
     if rank == nil then
-        return { items = {}, empty = PromotionsViewModel.NO_RANKS }
+        return { items = {}, automated = {}, empty = PromotionsViewModel.NO_RANKS }
     end
     local name = names[rank + 1]
     local model = {
@@ -87,28 +91,48 @@ function PromotionsViewModel.Editor(inputs)
         rankText = tostring(name) .. " (rank " .. rank .. ")",
         nextText = "Promotes to " .. tostring(names[rank]),
         items = {},
+        automated = {},
     }
     if requirements:Mismatch(rank, name) then
         model.mismatch = "Set up when rank " .. rank .. " was called \"" .. requirements:RankName(rank) ..
             "\"; the game now calls it \"" .. tostring(name) .. "\". Check these still belong here."
     end
+    local Requirements = addon.RankRequirements
     local items = requirements:Items(rank)
+    local custom = {}
     local index
     for index = 1, #items do
-        local automated = addon.RankRequirements.AUTOMATED[items[index].kind]
+        if not Requirements.IsAutomated(items[index].kind) then
+            table.insert(custom, items[index])
+        end
+    end
+    for index = 1, #custom do
         table.insert(model.items, {
-            id = items[index].id,
-            label = items[index].label,
-            kindText = PromotionsViewModel.KindText(items[index]),
-            n = items[index].n,
-            numberText = automated and automated.number or nil,
+            id = custom[index].id,
+            label = custom[index].label,
+            needsNote = custom[index].kind == Requirements.KIND_CHECK_NOTE,
+            kindText = PromotionsViewModel.KindText(custom[index]),
             canUp = index > 1,
-            canDown = index < #items,
+            canDown = index < #custom,
+        })
+    end
+    for index = 1, #Requirements.AUTOMATED_ORDER do
+        local kind = Requirements.AUTOMATED_ORDER[index]
+        local held = requirements:ItemOfKind(rank, kind)
+        table.insert(model.automated, {
+            kind = kind,
+            text = Requirements.KINDS[kind],
+            enabled = held ~= nil,
+            id = held and held.id or nil,
+            n = held and Requirements.HasNumber(kind) and held.n or nil,
+            numberText = Requirements.AUTOMATED[kind].number,
         })
     end
     if items[1] == nil then
         model.empty = requirements:Ranks()[1] == nil and PromotionsViewModel.NONE_ANYWHERE
             or PromotionsViewModel.NONE_HERE
+    elseif custom[1] == nil then
+        model.empty = PromotionsViewModel.NO_CUSTOM
     end
     return model
 end

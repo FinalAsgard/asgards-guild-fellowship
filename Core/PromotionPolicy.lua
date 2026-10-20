@@ -93,8 +93,8 @@ PromotionPolicy.STATUS = {
         end
         return false, "level " .. level .. " of " .. item.n
     end,
-    -- Player-wide: any of the player's characters in the guild heard on
-    -- add-on sync within N days.
+    -- Player-wide: any of the player's characters in the guild ever heard
+    -- on add-on sync.
     addon = function(inputs, key, item, character)
         local heard = inputs.dates and inputs.dates:LastHeard(playerCharacters(inputs.partition, key, character))
         if heard == nil then
@@ -102,7 +102,7 @@ PromotionPolicy.STATUS = {
         end
         local count = days(inputs, heard)
         local text = count == 0 and "seen today" or ("seen " .. count .. (count == 1 and " day ago" or " days ago"))
-        return count <= item.n, text
+        return true, text
     end,
 }
 PromotionPolicy.STATUS["check-note"] = PromotionPolicy.STATUS.check

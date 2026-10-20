@@ -353,12 +353,12 @@ test.test("an officer overrides a failed automated item with an optional reason,
     test.assertEqual(nil, rows[3].action)
 end)
 
-test.test("the add-on check passes when any of the player's characters was heard within N days", function()
+test.test("the add-on check passes when any of the player's characters was ever heard", function()
     local inputs, addon = newGuild({ main = 2, alt = 4, solo = 4, quiet = 4 })
     local records = inputs.requirements:Add(4, "", "addon", RANKS[5], OFFICER, NOW)
     local item = records[1]
-    test.assertEqual(30, item.n, "the window defaults to 30 days")
-    test.assertEqual("Has the add-on (seen in 30 days)", item.label)
+    test.assertEqual(nil, item.n, "a yes or no check, with no number")
+    test.assertEqual("Has the Guild Fellowship Addon", item.label)
     inputs.partition:JoinPlayerOf("alt", "main", "manual")
     inputs.dates:Heard("main", NOW - 3 * DAY - 60)
     inputs.dates:Heard("solo", NOW - 45 * DAY)
@@ -367,7 +367,7 @@ test.test("the add-on check passes when any of the player's characters was heard
     test.assertTrue(alt.met, "the alt counts its main's add-on")
     test.assertEqual("seen 3 days ago", alt.detail)
     local solo = itemOf(addon.PromotionPolicy.Evaluate(inputs, "solo"), item.id)
-    test.assertFalse(solo.met)
+    test.assertTrue(solo.met, "however long ago")
     test.assertEqual("seen 45 days ago", solo.detail)
     local quiet = itemOf(addon.PromotionPolicy.Evaluate(inputs, "quiet"), item.id)
     test.assertFalse(quiet.met)
@@ -742,12 +742,14 @@ for profileIndex = 1, #fixtures.PROFILES do
         settle(channel, 5)
         local promotions = tool.addon.promotions
 
-        local ok, reason = promotions.add("", "level", "")
+        local ok, reason = promotions.automated("level", true, "")
         test.assertFalse(ok)
         test.assertEqual("a level needs to be 1 to 100", reason)
-        test.assertTrue(promotions.add("", "level", "50"))
-        local itemId = promotions.view().items[1].id
-        test.assertEqual("Level 50", promotions.view().items[1].label)
+        test.assertTrue(promotions.automated("level", true, "50"))
+        local level = promotions.view().automated[4]
+        test.assertTrue(level.enabled)
+        test.assertEqual(50, level.n)
+        local itemId = level.id
         local bolt = characterRow(promotions.listRows(), "Bolt")
         test.assertEqual("0 of 1", bolt.progress)
         promotions.expand(bolt.key)
@@ -764,11 +766,11 @@ for profileIndex = 1, #fixtures.PROFILES do
 
         test.assertTrue(promotions.tick(bolt.key, itemId, false))
         test.assertEqual("0 of 1", characterRow(promotions.listRows(), "Bolt").progress)
-        test.assertTrue(promotions.rename(itemId, "Level 50", "10"))
-        test.assertEqual("Level 10", promotions.view().items[1].label)
+        test.assertTrue(promotions.automated("level", true, "10"))
+        test.assertEqual(10, promotions.view().automated[4].n)
         test.assertEqual("1 of 1", characterRow(promotions.listRows(), "Bolt").progress)
         settle(channel, 5)
-        test.assertEqual("Level 10", hammer.addon.promotions.view().items[1].label)
+        test.assertEqual(10, hammer.addon.promotions.view().automated[4].n)
         test.assertEqual("1 of 1", characterRow(hammer.addon.promotions.listRows(), "Bolt").progress)
     end)
 
@@ -916,14 +918,14 @@ for profileIndex = 1, #fixtures.PROFILES do
         local promotions = tool.addon.promotions
 
         test.assertTrue(promotions.rank(-1))
-        test.assertTrue(promotions.add("", "addon", ""))
-        test.assertEqual("Has the add-on (seen in 30 days)", promotions.view().items[1].label)
+        test.assertTrue(promotions.automated("addon", true))
+        test.assertTrue(promotions.view().automated[5].enabled)
         local hammerRow = characterRow(promotions.listRows(), "Hammer")
         test.assertEqual("1 of 1", hammerRow.progress, "the officer heard Hammer's add-on")
 
         -- Bolt, at another rank, has never been heard.
         promotions.rank(1)
-        test.assertTrue(promotions.add("", "addon", "7"))
+        test.assertTrue(promotions.automated("addon", true))
         promotions.expand(characterRow(promotions.listRows(), "Bolt").key)
         local rows = promotions.listRows()
         local _, at = characterRow(rows, "Bolt")

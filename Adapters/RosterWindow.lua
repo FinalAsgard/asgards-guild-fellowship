@@ -1389,11 +1389,11 @@ local PROMOTION_COLUMNS = {
 -- (asking for an optional reason) or Undo override, and hovering a tick or
 -- override says who made it, when, and the note or reason. Edit
 -- requirements switches to the editor: < and > pick a rank, a warning
--- shows when the rank was set up under another name, a labelled box adds
--- an item (its Requirement Type button steps through the kinds; an
--- automated kind takes a number, labelled Days or Level) or edits one's
--- label and number, and each item has Up, Down,
--- Edit and Delete. Delete asks first, in the page itself. Each control calls
+-- shows when the rank was set up under another name, the automatic checks
+-- are listed with a check box each (and a number box for one that takes
+-- days or a level), and below them a box adds a custom requirement (with
+-- whether it needs a note) or edits one, and each custom requirement has
+-- Up, Down, Edit and Delete. Delete asks first, in the page itself. Each control calls
 -- its `options` handler, which returns true, or false and why not (shown
 -- in the page); SetPromotions shows the models (see
 -- PromotionsViewModel.Editor and List).
@@ -1440,9 +1440,67 @@ local function buildPromotions(framework, page, frameName, options)
     editor.mismatch:SetWidth(680)
     editor.mismatch:SetJustifyH("LEFT")
 
+    -- The automated checks, two to a line: a check box turns each on or
+    -- off, and one that takes a number (days, or a level) has its box. A
+    -- number typed for a check that's on is saved on Enter, or on leaving
+    -- the box.
+    local section = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    section:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -48)
+    section:SetText("Automatic checks")
+    editor.automated = {}
+    local automatedIndex
+    for automatedIndex = 1, #addon.RankRequirements.AUTOMATED_ORDER do
+        local kind = addon.RankRequirements.AUTOMATED_ORDER[automatedIndex]
+        local line = {}
+        local x = 16 + ((automatedIndex - 1) % 2) * 350
+        local y = -66 - math.floor((automatedIndex - 1) / 2) * RosterWindow.LINE_HEIGHT
+        line.check = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
+        line.check:SetSize(22, 22)
+        line.check:SetPoint("TOPLEFT", holder, "TOPLEFT", x, y)
+        line.text = line.check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        line.text:SetPoint("LEFT", line.check, "RIGHT", 2, 0)
+        line.text:SetWidth(200)
+        line.text:SetJustifyH("LEFT")
+        line.text:SetText(addon.RankRequirements.KINDS[kind])
+        if addon.RankRequirements.HasNumber(kind) then
+            line.number = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+            line.number:SetSize(40, 20)
+            line.number:SetPoint("LEFT", line.check, "RIGHT", 232, 0)
+            line.number:SetAutoFocus(false)
+            line.number:SetMaxLetters(4)
+            line.number:SetNumeric(true)
+            local function save()
+                local entry = line.entry
+                if entry ~= nil and entry.enabled and tonumber(line.number:GetText()) ~= entry.n then
+                    call("onPromotionsAutomated", kind, true, line.number:GetText())
+                end
+            end
+            line.number:SetScript("OnEnterPressed", function(self)
+                self:ClearFocus()
+            end)
+            line.number:SetScript("OnEscapePressed", function(self)
+                self:ClearFocus()
+            end)
+            line.number:SetScript("OnEditFocusLost", save)
+        end
+        line.check:SetScript("OnClick", function(self)
+            local checked = self:GetChecked() == true
+            local done = call("onPromotionsAutomated", kind, checked, line.number and line.number:GetText() or nil)
+            if not done then
+                self:SetChecked(not checked)
+            end
+        end)
+        editor.automated[kind] = line
+    end
+
+    -- The custom requirements: a box for the text, whether ticking it
+    -- needs a note, and Add (or Save and Cancel while editing one).
+    local custom = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    custom:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -138)
+    custom:SetText("Custom requirements")
     local box = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
     box:SetSize(240, 20)
-    box:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -64)
+    box:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -172)
     box:SetAutoFocus(false)
     box:SetMaxLetters(addon.RankRequirements.MAX_LABEL)
     box:SetScript("OnEscapePressed", function(self)
@@ -1451,72 +1509,36 @@ local function buildPromotions(framework, page, frameName, options)
     editor.box = box
     local boxLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     boxLabel:SetPoint("BOTTOMLEFT", box, "TOPLEFT", -4, 2)
-    boxLabel:SetText("Requirement")
-    -- The new item's kind: each click steps to the next one. An automated
-    -- kind shows the number box (its days, or the level). Each control's
-    -- label is its child, so it hides with it.
-    local kindIndex = 1
-    local numberBox = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
-    numberBox:SetSize(40, 20)
-    numberBox:SetAutoFocus(false)
-    numberBox:SetMaxLetters(4)
-    numberBox:SetNumeric(true)
-    numberBox:SetScript("OnEscapePressed", function(self)
-        self:ClearFocus()
-    end)
-    editor.numberBox = numberBox
-    numberBox.label = numberBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    numberBox.label:SetPoint("BOTTOMLEFT", numberBox, "TOPLEFT", -4, 2)
-    local kindButton = smallButton(holder, 170, "", nil)
-    kindButton:SetPoint("LEFT", box, "RIGHT", 8, 0)
-    local kindLabel = kindButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    kindLabel:SetPoint("BOTTOMLEFT", kindButton, "TOPLEFT", 0, 4)
-    kindLabel:SetText("Requirement Type")
-    numberBox:SetPoint("LEFT", kindButton, "RIGHT", 10, 0)
-    local function showKind()
-        local kind = addon.RankRequirements.KIND_ORDER[kindIndex]
-        kindButton:SetText(addon.RankRequirements.KINDS[kind])
-        if addon.RankRequirements.IsAutomated(kind) then
-            numberBox.label:SetText(addon.RankRequirements.AUTOMATED[kind].number)
-            numberBox:Show()
-        else
-            numberBox:Hide()
-        end
-    end
-    kindButton:SetScript("OnClick", function()
-        kindIndex = kindIndex % #addon.RankRequirements.KIND_ORDER + 1
-        showKind()
-    end)
-    showKind()
-    editor.kindButton = kindButton
+    boxLabel:SetText("Requirement text")
+    local noteCheck = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
+    noteCheck:SetSize(22, 22)
+    noteCheck:SetPoint("LEFT", box, "RIGHT", 8, 0)
+    local noteLabel = noteCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    noteLabel:SetPoint("LEFT", noteCheck, "RIGHT", 2, 0)
+    noteLabel:SetText("Needs a note")
+    editor.noteCheck = noteCheck
     local function stopRenaming()
         editor.renaming = nil
         editor.save:SetText("Add")
         editor.cancel:Hide()
-        kindButton:Show()
-        showKind()
         box:SetText("")
-        numberBox:SetText("")
+        noteCheck:SetChecked(false)
     end
     editor.save = smallButton(holder, 70, "Add", function()
         local text = box:GetText()
-        local number = numberBox:IsShown() and numberBox:GetText() or nil
+        local needsNote = noteCheck:GetChecked() == true
         local done
         if editor.renaming ~= nil then
-            done = call("onPromotionsRename", editor.renaming, text, number)
+            done = call("onPromotionsRename", editor.renaming, text, needsNote)
         else
-            done = call("onPromotionsAdd", text, addon.RankRequirements.KIND_ORDER[kindIndex], number)
+            done = call("onPromotionsAdd", text, needsNote)
         end
         if done then
             stopRenaming()
             box:ClearFocus()
-            numberBox:ClearFocus()
         end
     end)
-    editor.save:SetPoint("LEFT", kindButton, "RIGHT", 58, 0)
-    numberBox:SetScript("OnEnterPressed", function()
-        editor.save:Click()
-    end)
+    editor.save:SetPoint("LEFT", noteCheck, "RIGHT", 90, 0)
     box:SetScript("OnEnterPressed", function()
         editor.save:Click()
     end)
@@ -1524,14 +1546,14 @@ local function buildPromotions(framework, page, frameName, options)
     editor.cancel:SetPoint("LEFT", editor.save, "RIGHT", 6, 0)
     editor.cancel:Hide()
     editor.message = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    editor.message:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -88)
+    editor.message:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -196)
     editor.message:SetWidth(680)
     editor.message:SetJustifyH("LEFT")
 
     -- Asking before a delete, in the page.
     local confirm = CreateFrame("Frame", nil, holder)
     confirm:SetSize(680, 24)
-    confirm:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -104)
+    confirm:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -210)
     confirm.text = confirm:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     confirm.text:SetPoint("LEFT", confirm, "LEFT", 0, 0)
     confirm.text:SetWidth(470)
@@ -1552,14 +1574,14 @@ local function buildPromotions(framework, page, frameName, options)
     editor.confirm = confirm
 
     editor.empty = holder:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    editor.empty:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -134)
+    editor.empty:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -240)
     editor.empty:SetWidth(660)
     editor.empty:SetJustifyH("LEFT")
     local index
     for index = 1, addon.RankRequirements.MAX_ITEMS do
         local row = CreateFrame("Frame", nil, holder)
         row:SetSize(700, RosterWindow.LINE_HEIGHT)
-        row:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -132 - (index - 1) * RosterWindow.LINE_HEIGHT)
+        row:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -236 - (index - 1) * RosterWindow.LINE_HEIGHT)
         row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.label:SetPoint("LEFT", row, "LEFT", 6, 0)
         row.label:SetWidth(260)
@@ -1581,16 +1603,9 @@ local function buildPromotions(framework, page, frameName, options)
             editor.renaming = row.item.id
             box:SetText(row.item.label)
             box:SetFocus()
+            noteCheck:SetChecked(row.item.needsNote == true)
             editor.save:SetText("Save")
             editor.cancel:Show()
-            kindButton:Hide()
-            if row.item.n ~= nil then
-                numberBox.label:SetText(row.item.numberText or "")
-                numberBox:SetText(tostring(row.item.n))
-                numberBox:Show()
-            else
-                numberBox:Hide()
-            end
         end)
         row.rename:SetPoint("LEFT", row.down, "RIGHT", 2, 0)
         row.delete = smallButton(row, 60, "Delete", function()
@@ -2372,6 +2387,22 @@ function Window:SetPromotions(model, rows, state)
                 editor.confirm:Hide()
             end
         end
+        local rankChanged = editor.shownRank ~= model.rank
+        editor.shownRank = model.rank
+        local automatedIndex
+        for automatedIndex = 1, #(model.automated or {}) do
+            local entry = model.automated[automatedIndex]
+            local line = editor.automated[entry.kind]
+            if line ~= nil then
+                line.entry = entry
+                line.check:SetChecked(entry.enabled)
+                -- A number typed for a check that's off stays until the
+                -- rank changes; one being typed is left alone.
+                if line.number ~= nil and not line.number:HasFocus() and (entry.enabled or rankChanged) then
+                    line.number:SetText(entry.n ~= nil and tostring(entry.n) or "")
+                end
+            end
+        end
         local index
         for index = 1, #editor.rows do
             local row, item = editor.rows[index], model.items[index]
@@ -2380,7 +2411,7 @@ function Window:SetPromotions(model, rows, state)
                 row:Hide()
             else
                 row.label:SetText(item.label)
-                row.kind:SetText(item.kindText or "")
+                row.kind:SetText(item.needsNote and "Needs a note" or "")
                 if item.canUp then row.up:Enable() else row.up:Disable() end
                 if item.canDown then row.down:Enable() else row.down:Disable() end
                 row:Show()

@@ -392,15 +392,15 @@ Each guild rank can have **promotion requirements**: what a character at that ra
 Every rank starts with no requirements, so nothing changes until your guild sets them up. On the Promotions tab, **Edit requirements** opens the editor; **Back to list** returns to the list.
 
 - `<` and `>` pick the rank, for example **Member (rank 4)**, with the rank it promotes to beside it. The guild master's rank has no rank above it, so it isn't offered.
-- Type the item's name, click the kind button to step through the kinds, type the number for an automated kind, and press **Add** (or Enter). The kinds are:
-  - **Checkbox**: an officer ticks it.
-  - **Checkbox, needs a note**: ticking it asks for a note (up to 100 characters), such as which event the member attended.
+- **Automatic checks** lists every check the add-on works out for itself, each with a check box to turn it on or off for the rank. A check that takes a number has a box beside it; type the number before turning the check on, and change it later by typing a new one and pressing Enter:
   - **Character days in guild**: this character has been in the guild at least N days.
   - **Player days in guild**: the player has, counted from the earliest join among their characters still in the guild, so a long-time member's new alt doesn't have to wait.
   - **Days at rank**: the character has held its current rank at least N days.
-  - **Has the add-on (days)**: any of the player's characters was heard on the add-on within the last N days.
   - **Character level**: the character is at least level N.
-- Each item has **Up** and **Down** to reorder it, **Edit** to rename it or change its number (ticks are kept, and everyone is checked again at once), and **Delete**, which asks first because it drops the item's ticks too.
+  - **Has the Guild Fellowship Addon**: any of the player's characters has been heard on the add-on. It's a simple yes or no, with no number.
+- Turning a check off deletes it, along with any overrides on it.
+- **Custom requirements** are the ones an officer ticks. Type the **Requirement text**, tick **Needs a note** if ticking it should ask for a note (up to 100 characters, such as which event the member attended), and press **Add** (or Enter).
+- Each custom requirement has **Up** and **Down** to reorder it, **Edit** to change its text or whether it needs a note (ticks are kept), and **Delete**, which asks first because it drops the requirement's ticks too.
 - If the guild master inserts or removes a rank, requirements stay with their rank's position, and the editor warns when the rank there now has a different name, so you can check they still belong.
 
 Requirements reach every add-on in the guild through [guild sync](#guild-sync). When two officers edit the same item, the newest edit wins everywhere. Changes are only taken from an officer's add-on, so nobody else can send one, even in an officer's name. An add-on that logs in catches up from an officer online.
