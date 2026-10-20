@@ -1240,6 +1240,16 @@ function Client:IsMailboxOpen()
     return ok and shown == true
 end
 
+-- The client's own text for its cap on unique mail recipients, or nil when
+-- it doesn't have one.
+function Client:GetMailCapMessage()
+    local text = self.environment.ERR_MAIL_REACHED_CAP
+    if type(text) == "string" and text ~= "" then
+        return text
+    end
+    return nil
+end
+
 -- Calls onMail(kind, ...) when the mailbox opens ("open") or closes
 -- ("close"), when the game answers a sent mail ("sent" or "failed"), and
 -- when it blocks an add-on's protected call ("blocked", with the event's
@@ -1277,6 +1287,24 @@ function Client:ObserveMail(onMail)
         if self:RegisterEvent(frame, eventName) then
             registered = true
         end
+    end
+    -- The mailbox window hiding also means it closed, whatever closed it
+    -- (Escape, its X, walking away): not every client reports MAIL_CLOSED
+    -- then. Only its own hiding counts: hiding the whole interface (Alt+Z,
+    -- a cinematic) hides it too while the mailbox stays open, and then it
+    -- still says it's shown. A second "close" for the same closing is
+    -- harmless.
+    local mailbox = self.environment.MailFrame
+    if mailbox ~= nil and type(mailbox.HookScript) == "function"
+        and pcall(mailbox.HookScript, mailbox, "OnHide", function(hidden)
+            local ok, shown = pcall(hidden.IsShown, hidden)
+            if ok and shown == true then
+                return
+            end
+            pcall(onMail, "close")
+        end)
+    then
+        registered = true
     end
     self.mailFrame = frame
     return registered

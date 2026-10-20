@@ -11,12 +11,24 @@ local _, addon = ...
 --                30 days
 --   Recipients   the list of who will get the mail, each with a check box
 --                to leave them out, and a warning on any whose mail is too
---                long once the placeholders are filled in
+--                long once the placeholders are filled in; a search box
+--                narrows it, and Check All / Uncheck All tick or untick
+--                everyone it shows
 --   Preview      the mail as the first ticked recipient gets it, and the
 --                placeholders the subject and message can use
 -- It only draws GuildMail's model and passes clicks and typing back. It opens beside the mailbox when opened from there, and can
--- be dragged anywhere. Officers also get a Guild Mail button beside the
--- mailbox's Send Mail tab.
+-- be dragged anywhere. Officers open it from the mailbox's Guild Mail tab
+-- (MailboxTab) or with /agf mail.
+--
+-- View in the Guild Mail tab shows a sent mail read-only on a page over the
+-- window: its subject and message, state and progress, the first
+-- recipient's mail, and every recipient with their status, with Send and
+-- Skip on an unconfirmed one; Back, Resume, and Cancel or Remove below,
+-- and the question for Cancel or Remove waiting for Yes or No.
+--
+-- The Guild Mail tab's Welcome mail button (MailboxTab) opens a page over
+-- the window for the guild's welcome mail: its subject and message, Save, the on/off switch,
+-- and the welcome as the officer's own character would get it.
 --
 -- The frames are made on first use and reused. Like the other adapters, a
 -- failing frame call leaves the window as it was rather than raising.
@@ -38,12 +50,18 @@ local GuildMailWindow = {
     BUTTON_WIDTH = 96,
     EDIT_BUTTON_WIDTH = 60,
     BUTTON_HEIGHT = 24,
-    MAILBOX_BUTTON_WIDTH = 96,
+    ENTRY_BODY_HEIGHT = 150,
+    ENTRY_LIST_HEIGHT = 250,
+    ENTRY_ROW_HEIGHT = 22,
+    SMALL_BUTTON_WIDTH = 50,
     STRATA = "HIGH",
     STATUS_TEXT = {
         pending = "",
         sent = " |cff40ff40sent|r",
         failed = " |cffff4040failed|r",
+        unconfirmed = " |cffffd100unconfirmed|r",
+        skipped = " |cff999999skipped|r",
+        cancelled = " |cff999999cancelled|r",
     },
 }
 addon.GuildMailWindow = GuildMailWindow
@@ -55,12 +73,23 @@ Window.__index = Window
 --   onRank(index, checked), onMode(mode), onSubject(text), onBody(text)
 --   onSkipDiscord(checked), onActiveOnly(checked)
 --   onRecipient(key, checked)  a recipient ticked or unticked
+--   onRecipientFilter(text)    typed in the recipient list's search
+--   onCheckAll(), onUncheckAll()   Check All and Uncheck All
 --   onSend()     Send pressed: ask for confirmation
 --   onConfirm()  the confirmation's Send pressed
 --   onCancel()   the confirmation's Cancel pressed
 --   onStop()     Stop pressed while sending
 --   onEnd()      End pressed after Stop
---   onMailboxButton()  the mailbox's Guild Mail button pressed
+-- and on a sent mail's page (View):
+--   onBack()     Back pressed
+--   onResumeEntry(position), onCancelEntry(position),
+--   onRemoveEntry(position)    `position` is the entry's place in the outbox
+--   onSettle(index, send)      Send (true) or Skip on recipient `index`
+--   onReuseEntry(position)     Use again
+--   onConfirmAction(), onDismissAction()   Yes and No on the question
+-- and for the welcome mail:
+--   onWelcomeSubject(text), onWelcomeBody(text)   typed on its page
+--   onWelcomeSave(), onWelcomeOn(checked), onWelcomeBack()
 function GuildMailWindow.Create(client, handlers)
     handlers = handlers or {}
     local function handler(name)
@@ -75,12 +104,28 @@ function GuildMailWindow.Create(client, handlers)
         onSubject = handler("onSubject"),
         onBody = handler("onBody"),
         onRecipient = handler("onRecipient"),
+        onRecipientFilter = handler("onRecipientFilter"),
+        onCheckAll = handler("onCheckAll"),
+        onUncheckAll = handler("onUncheckAll"),
+        onReuseEntry = handler("onReuseEntry"),
         onSend = handler("onSend"),
         onConfirm = handler("onConfirm"),
         onCancel = handler("onCancel"),
         onStop = handler("onStop"),
         onEnd = handler("onEnd"),
-        onMailboxButton = handler("onMailboxButton"),
+        onBack = handler("onBack"),
+        onResumeEntry = handler("onResumeEntry"),
+        onCancelEntry = handler("onCancelEntry"),
+        onRemoveEntry = handler("onRemoveEntry"),
+        onSettle = handler("onSettle"),
+        onConfirmAction = handler("onConfirmAction"),
+        onDismissAction = handler("onDismissAction"),
+        onWelcomeSubject = handler("onWelcomeSubject"),
+        onWelcomeBody = handler("onWelcomeBody"),
+        onWelcomeSave = handler("onWelcomeSave"),
+        onWelcomeOn = handler("onWelcomeOn"),
+        onWelcomeBack = handler("onWelcomeBack"),
+        entryRows = {},
         rankBoxes = {},
         modeButtons = {},
         recipientRows = {},
@@ -314,6 +359,8 @@ function Window:window()
     self:preferencesPanel()
     self:recipientsPanel()
     self:previewPanel()
+    self:entryPage()
+    self:welcomePage()
 
     frame:Hide()
     return frame
@@ -387,10 +434,37 @@ end
 function Window:recipientsPanel()
     local panel = self:panel("Recipients", GuildMailWindow.HEIGHT)
     self.recipients = panel
-    local listScroll = self:scrollArea(panel, -36, GuildMailWindow.LIST_HEIGHT)
+    local padding = GuildMailWindow.PADDING
+    local search = self.environment.CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    search:SetHeight(20)
+    search:SetPoint("TOPLEFT", panel, "TOPLEFT", padding + 6, -36)
+    search:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
+    search:SetAutoFocus(false)
+    search:SetScript("OnTextChanged", function(box, typed)
+        if typed then
+            self.onRecipientFilter(box:GetText())
+        end
+    end)
+    search:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    self.recipientSearch = search
+    local searchHint = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    searchHint:SetPoint("LEFT", search, "LEFT", 4, 0)
+    searchHint:SetText("Search names")
+    self.recipientSearchHint = searchHint
+    self.checkAll = self:button(panel, "Check All", GuildMailWindow.BUTTON_WIDTH, function()
+        self.onCheckAll()
+    end)
+    self.checkAll:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -62)
+    self.uncheckAll = self:button(panel, "Uncheck All", GuildMailWindow.BUTTON_WIDTH, function()
+        self.onUncheckAll()
+    end)
+    self.uncheckAll:SetPoint("LEFT", self.checkAll, "RIGHT", 6, 0)
+    local listScroll = self:scrollArea(panel, -92, GuildMailWindow.LIST_HEIGHT - 56)
     local list = self.environment.CreateFrame("Frame", nil, listScroll)
     list:SetWidth(GuildMailWindow.PANEL_WIDTH - 2 * GuildMailWindow.PADDING - 22)
-    list:SetHeight(GuildMailWindow.LIST_HEIGHT)
+    list:SetHeight(GuildMailWindow.LIST_HEIGHT - 56)
     listScroll:SetScrollChild(list)
     self.list = list
 end
@@ -527,6 +601,8 @@ end
 -- Draws GuildMail's model.
 function Window:Render(model)
     self:window()
+    self:renderEntry(model.entry)
+    self:renderWelcome(model.welcome)
     local index
     for index = 1, #model.ranks do
         local rank = model.ranks[index]
@@ -606,8 +682,16 @@ function Window:Render(model)
         self.recipientRows[index]:Hide()
         self.recipientRows[index].line:Hide()
     end
-    self.list:SetHeight(math.max(GuildMailWindow.LIST_HEIGHT,
+    self.list:SetHeight(math.max(GuildMailWindow.LIST_HEIGHT - 56,
         #model.recipients * GuildMailWindow.LIST_ROW_HEIGHT + 4))
+    setText(self.recipientSearch, model.recipientFilter or "")
+    if (model.recipientFilter or "") == "" then
+        self.recipientSearchHint:Show()
+    else
+        self.recipientSearchHint:Hide()
+    end
+    setEnabled(self.checkAll, not model.sending)
+    setEnabled(self.uncheckAll, not model.sending)
 
     self.cost:SetText(model.costText or "")
     self.money:SetText(model.moneyText or "")
@@ -617,6 +701,9 @@ function Window:Render(model)
     end
     if model.hint ~= nil then
         table.insert(status, model.hint)
+    end
+    if model.confirming and model.confirmWarning ~= nil then
+        table.insert(status, model.confirmWarning)
     end
     self.status:SetText(table.concat(status, "\n"))
 
@@ -645,25 +732,330 @@ function Window:Render(model)
     end
 end
 
--- Shows or hides the Guild Mail button beside the mailbox's Send Mail tab
--- (made on first use; only officers get it).
-function Window:ShowMailboxButton(shown)
-    local parent = self.environment.SendMailFrame
-    if self.mailboxButton == nil then
-        if not shown or parent == nil then
-            return false
+-- The page for a sent mail (View), over the whole window, hidden until an
+-- entry is on view.
+function Window:entryPage()
+    local frame = self.frame
+    local createFrame = self.environment.CreateFrame
+    local padding = GuildMailWindow.PADDING
+    local page = createFrame("Frame", nil, frame)
+    page:SetAllPoints(frame)
+    page:SetFrameLevel((frame:GetFrameLevel() or 0) + 10)
+    page:EnableMouse(true)
+    local background = page:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(page)
+    background:SetColorTexture(0.05, 0.05, 0.08, 1)
+    local heading = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    heading:SetPoint("TOP", page, "TOP", 0, -10)
+    heading:SetText("Sent Guild Mail")
+    local function line(top, template)
+        local text = page:CreateFontString(nil, "OVERLAY", template or "GameFontHighlight")
+        text:SetPoint("TOPLEFT", page, "TOPLEFT", padding, top)
+        text:SetPoint("RIGHT", page, "RIGHT", -padding, 0)
+        text:SetJustifyH("LEFT")
+        text:SetJustifyV("TOP")
+        return text
+    end
+    self.entrySubject = line(-40, "GameFontNormal")
+    self.entryState = line(-60, "GameFontHighlightSmall")
+    self.entryTo = line(-82, "GameFontHighlightSmall")
+    self.entryBody = line(-100, "ChatFontNormal")
+    self.entryBody:SetHeight(GuildMailWindow.ENTRY_BODY_HEIGHT)
+    self.entryBody:SetWordWrap(true)
+    local listTop = -100 - GuildMailWindow.ENTRY_BODY_HEIGHT - 10
+    line(listTop, "GameFontNormal"):SetText("Recipients")
+    local scroll = self:scrollArea(page, listTop - 18, GuildMailWindow.ENTRY_LIST_HEIGHT)
+    local list = createFrame("Frame", nil, scroll)
+    list:SetWidth(GuildMailWindow.WIDTH - 2 * padding - 22)
+    list:SetHeight(GuildMailWindow.ENTRY_LIST_HEIGHT)
+    scroll:SetScrollChild(list)
+    self.entryList = list
+
+    self.entryBack = self:button(page, "Back", GuildMailWindow.EDIT_BUTTON_WIDTH + 10, function()
+        self.onBack()
+    end)
+    self.entryBack:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", padding, padding)
+    self.entryRemove = self:button(page, "Remove", nil, function()
+        if self.entryPosition ~= nil then
+            self.onRemoveEntry(self.entryPosition)
         end
-        local button = self:button(parent, "Guild Mail", GuildMailWindow.MAILBOX_BUTTON_WIDTH, function()
-            self.onMailboxButton()
-        end)
-        local mailFrame = self.environment.MailFrame or parent
-        button:SetPoint("TOPLEFT", mailFrame, "TOPRIGHT", 4, -30)
-        self.mailboxButton = button
+    end)
+    self.entryRemove:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -padding, padding)
+    self.entryCancel = self:button(page, "Cancel", nil, function()
+        if self.entryPosition ~= nil then
+            self.onCancelEntry(self.entryPosition)
+        end
+    end)
+    self.entryCancel:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -padding, padding)
+    self.entryResume = self:button(page, "Resume", nil, function()
+        if self.entryPosition ~= nil then
+            self.onResumeEntry(self.entryPosition)
+        end
+    end)
+    self.entryResume:SetPoint("RIGHT", self.entryCancel, "LEFT", -6, 0)
+    self.entryReuse = self:button(page, "Use again", nil, function()
+        if self.entryPosition ~= nil then
+            self.onReuseEntry(self.entryPosition)
+        end
+    end)
+    self.entryReuse:SetPoint("LEFT", self.entryBack, "RIGHT", 6, 0)
+
+    local question = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    question:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", padding, padding + 34)
+    question:SetPoint("RIGHT", page, "RIGHT", -padding - 2 * GuildMailWindow.EDIT_BUTTON_WIDTH - 12, 0)
+    question:SetJustifyH("LEFT")
+    self.entryQuestion = question
+    self.entryNo = self:button(page, "No", GuildMailWindow.EDIT_BUTTON_WIDTH, function()
+        self.onDismissAction()
+    end)
+    self.entryNo:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -padding, padding + 30)
+    self.entryYes = self:button(page, "Yes", GuildMailWindow.EDIT_BUTTON_WIDTH, function()
+        self.onConfirmAction()
+    end)
+    self.entryYes:SetPoint("RIGHT", self.entryNo, "LEFT", -6, 0)
+    page:Hide()
+    self.entryFrame = page
+end
+
+-- The line and Send and Skip buttons for recipient `position` on a sent
+-- mail's page, made on first use.
+function Window:entryRow(position)
+    if self.entryRows[position] ~= nil then
+        return self.entryRows[position]
     end
-    if shown then
-        self.mailboxButton:Show()
+    local list = self.entryList
+    local row = self.environment.CreateFrame("Frame", nil, list)
+    row:SetHeight(GuildMailWindow.ENTRY_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -(position - 1) * GuildMailWindow.ENTRY_ROW_HEIGHT)
+    row:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+    row.skip = self:button(row, "Skip", GuildMailWindow.SMALL_BUTTON_WIDTH, function()
+        self.onSettle(row.index, false)
+    end)
+    row.skip:SetHeight(GuildMailWindow.ENTRY_ROW_HEIGHT - 2)
+    row.skip:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+    row.send = self:button(row, "Send", GuildMailWindow.SMALL_BUTTON_WIDTH, function()
+        self.onSettle(row.index, true)
+    end)
+    row.send:SetHeight(GuildMailWindow.ENTRY_ROW_HEIGHT - 2)
+    row.send:SetPoint("RIGHT", row.skip, "LEFT", -4, 0)
+    local line = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    line:SetPoint("LEFT", row, "LEFT", 4, 0)
+    line:SetPoint("RIGHT", row.send, "LEFT", -6, 0)
+    line:SetJustifyH("LEFT")
+    row.line = line
+    self.entryRows[position] = row
+    return row
+end
+
+-- Draws the sent mail on view, or hides its page when there's none.
+function Window:renderEntry(entry)
+    if entry == nil then
+        self.entryPosition = nil
+        self.entryFrame:Hide()
+        return
+    end
+    self.entryPosition = entry.position
+    self.preferences:Hide()
+    self.recipients:Hide()
+    self.preview:Hide()
+    self.openPanel = nil
+    self.entrySubject:SetText("Subject: " .. entry.subject)
+    local state = entry.stateText .. " · " .. entry.progressText
+    if entry.whenText ~= nil then
+        state = state .. " · " .. entry.whenText
+    end
+    self.entryState:SetText(state)
+    if entry.preview ~= nil then
+        self.entryTo:SetText("As " .. entry.preview.to .. " gets it: " .. entry.preview.subject)
+        self.entryBody:SetText(entry.preview.body)
     else
-        self.mailboxButton:Hide()
+        self.entryTo:SetText("")
+        self.entryBody:SetText(entry.body)
     end
-    return true
+    local index
+    for index = 1, #entry.recipients do
+        local recipient = entry.recipients[index]
+        local details = { recipient.rankName }
+        if recipient.playerName ~= nil and recipient.playerName ~= recipient.name then
+            table.insert(details, 1, recipient.playerName)
+        end
+        local text = recipient.name .. "  |cff999999" .. table.concat(details, " · ") .. "|r"
+            .. (GuildMailWindow.STATUS_TEXT[recipient.status] or "")
+        if recipient.reason ~= nil then
+            text = text .. " (" .. tostring(recipient.reason) .. ")"
+        end
+        local row = self:entryRow(index)
+        row.index = index
+        row.line:SetText(text)
+        if recipient.canSettle then
+            row.send:Show()
+            row.skip:Show()
+        else
+            row.send:Hide()
+            row.skip:Hide()
+        end
+        row:Show()
+    end
+    for index = #entry.recipients + 1, #self.entryRows do
+        self.entryRows[index].index = nil
+        self.entryRows[index]:Hide()
+    end
+    self.entryList:SetHeight(math.max(GuildMailWindow.ENTRY_LIST_HEIGHT,
+        #entry.recipients * GuildMailWindow.ENTRY_ROW_HEIGHT))
+    if entry.canRemove then
+        self.entryRemove:Show()
+        self.entryCancel:Hide()
+        self.entryResume:Hide()
+    else
+        self.entryRemove:Hide()
+        self.entryCancel:Show()
+        self.entryResume:Show()
+        setEnabled(self.entryCancel, entry.canCancel)
+        setEnabled(self.entryResume, entry.canResume)
+    end
+    if entry.canReuse then
+        self.entryReuse:Show()
+    else
+        self.entryReuse:Hide()
+    end
+    if entry.actionText ~= nil then
+        self.entryQuestion:SetText(entry.actionText)
+        self.entryQuestion:Show()
+        self.entryYes:Show()
+        self.entryNo:Show()
+    else
+        self.entryQuestion:Hide()
+        self.entryYes:Hide()
+        self.entryNo:Hide()
+    end
+    self.entryFrame:Show()
+end
+
+-- The Welcome mail page, over the whole window, hidden until it's opened.
+function Window:welcomePage()
+    local frame = self.frame
+    local createFrame = self.environment.CreateFrame
+    local padding = GuildMailWindow.PADDING
+    local page = createFrame("Frame", nil, frame)
+    page:SetAllPoints(frame)
+    page:SetFrameLevel((frame:GetFrameLevel() or 0) + 10)
+    page:EnableMouse(true)
+    local background = page:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(page)
+    background:SetColorTexture(0.05, 0.05, 0.08, 1)
+    local heading = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    heading:SetPoint("TOP", page, "TOP", 0, -10)
+    heading:SetText("Welcome mail")
+    local about = self:label(page, "|cff999999The guild's welcome for newcomers, the same for every officer.|r",
+        -36, "GameFontHighlightSmall")
+    about:SetPoint("RIGHT", page, "RIGHT", -padding, 0)
+
+    self.welcomeOn = self:checkBox(page, "Send the welcome mail to newcomers", -56, function(checked)
+        self.onWelcomeOn(checked)
+    end)
+
+    local top = -88
+    self:label(page, "Subject", top)
+    local subject = createFrame("EditBox", nil, page, "InputBoxTemplate")
+    subject:SetHeight(20)
+    subject:SetPoint("TOPLEFT", page, "TOPLEFT", padding + 6, top - 16)
+    subject:SetPoint("RIGHT", page, "RIGHT", -padding, 0)
+    subject:SetAutoFocus(false)
+    subject:SetMaxLetters(addon.GuildMailComposer.SUBJECT_LETTERS)
+    subject:SetScript("OnTextChanged", function(box, typed)
+        if typed then
+            self.onWelcomeSubject(box:GetText())
+        end
+    end)
+    subject:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    self.welcomeSubject = subject
+    top = top - 46
+
+    self:label(page, "Message", top - 4)
+    local hint = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hint:SetPoint("TOPLEFT", page, "TOPLEFT", padding + 70, top - 6)
+    hint:SetText("|cff999999{name} and Guild Mail's other placeholders work|r")
+    local scroll = self:scrollArea(page, top - 18, GuildMailWindow.MESSAGE_HEIGHT)
+    local body = createFrame("EditBox", nil, scroll)
+    body:SetMultiLine(true)
+    body:SetFontObject("ChatFontNormal")
+    body:SetTextInsets(6, 6, 4, 4)
+    body:SetHeight(GuildMailWindow.MESSAGE_HEIGHT)
+    body:SetAutoFocus(false)
+    body:SetMaxLetters(addon.GuildMailComposer.BODY_LETTERS)
+    scroll:SetScrollChild(body)
+    scroll:SetScript("OnSizeChanged", function(_, width)
+        if type(width) == "number" and width > 0 then
+            body:SetWidth(width)
+        end
+    end)
+    scroll:SetScript("OnMouseDown", function()
+        body:SetFocus()
+    end)
+    body:SetScript("OnTextChanged", function(box, typed)
+        if typed then
+            self.onWelcomeBody(box:GetText())
+        end
+    end)
+    body:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    self.welcomeBody = body
+    top = top - 18 - GuildMailWindow.MESSAGE_HEIGHT - 12
+
+    local function line(at, template)
+        local text = page:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
+        text:SetPoint("TOPLEFT", page, "TOPLEFT", padding, at)
+        text:SetPoint("RIGHT", page, "RIGHT", -padding, 0)
+        text:SetJustifyH("LEFT")
+        text:SetJustifyV("TOP")
+        return text
+    end
+    self.welcomePreviewTo = line(top, "GameFontNormal")
+    self.welcomePreviewBody = line(top - 20, "ChatFontNormal")
+    self.welcomePreviewBody:SetWordWrap(true)
+    self.welcomePreviewBody:SetPoint("BOTTOM", page, "BOTTOM", 0, padding + 52)
+    self.welcomeHint = line(-GuildMailWindow.HEIGHT + padding + 46)
+
+    self.welcomeBack = self:button(page, "Back", GuildMailWindow.EDIT_BUTTON_WIDTH + 10, function()
+        self.onWelcomeBack()
+    end)
+    self.welcomeBack:SetPoint("BOTTOMLEFT", page, "BOTTOMLEFT", padding, padding)
+    self.welcomeSave = self:button(page, "Save", nil, function()
+        self.onWelcomeSave()
+    end)
+    self.welcomeSave:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", -padding, padding)
+    page:Hide()
+    self.welcomeFrame = page
+end
+
+-- Draws the Welcome mail page, or hides it when it isn't open.
+function Window:renderWelcome(welcome)
+    if welcome == nil then
+        self.welcomeFrame:Hide()
+        return
+    end
+    self.preferences:Hide()
+    self.recipients:Hide()
+    self.preview:Hide()
+    self.openPanel = nil
+    self.welcomeOn:SetChecked(welcome.on == true)
+    setText(self.welcomeSubject, welcome.subject)
+    setText(self.welcomeBody, welcome.body)
+    if welcome.preview ~= nil then
+        local to = "As " .. welcome.preview.to .. " would get it: " .. welcome.preview.subject
+        if welcome.preview.warning ~= nil then
+            to = to .. " |cffff4040" .. welcome.preview.warning .. "|r"
+        end
+        self.welcomePreviewTo:SetText(to)
+        self.welcomePreviewBody:SetText(welcome.preview.body)
+    else
+        self.welcomePreviewTo:SetText("")
+        self.welcomePreviewBody:SetText("")
+    end
+    self.welcomeHint:SetText(welcome.hint or "")
+    setEnabled(self.welcomeSave, welcome.canSave)
+    self.welcomeFrame:Show()
 end

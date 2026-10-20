@@ -28,7 +28,7 @@ end
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
-local guildMail, guildMailWindow
+local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations
@@ -103,9 +103,13 @@ if clientProfile.supported then
         onDeclaredChanged = function(key, before)
             syncSession:LocalDeclaredEdit(key, before)
         end,
-        onScanFinished = function()
+        onScanFinished = function(_, result)
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
+            -- Characters new to the guild may be due a welcome mail.
+            if guildWelcome ~= nil and type(result) == "table" then
+                guildWelcome:OnScan(result.newKeys)
+            end
         end,
         -- Out-of-date guild notes are worked out again after every scan,
         -- sync, and manual change.
@@ -1973,6 +1977,18 @@ if clientProfile.supported then
                 guildMail:Refresh()
             end
         end,
+        onRecipientFilter = function(text)
+            guildMail:SetRecipientFilter(text)
+        end,
+        onCheckAll = function()
+            guildMail:SetAllRecipients(true)
+        end,
+        onUncheckAll = function()
+            guildMail:SetAllRecipients(false)
+        end,
+        onReuseEntry = function(position)
+            guildMail:RequestReuseEntry(position)
+        end,
         onSubject = function(text)
             guildMail:SetSubject(text)
         end,
@@ -1988,8 +2004,145 @@ if clientProfile.supported then
         onCancel = function()
             guildMail:Cancel()
         end,
-        onMailboxButton = function()
-            guildMail:Open(true)
+        -- A sent mail's page (View in the mailbox's Guild Mail tab).
+        onBack = function()
+            guildMail:CloseEntry()
+        end,
+        onResumeEntry = function(position)
+            if not guildMail:ResumeEntry(position) then
+                guildMail:Refresh()
+            end
+        end,
+        onCancelEntry = function(position)
+            guildMail:RequestCancelEntry(position)
+        end,
+        onRemoveEntry = function(position)
+            guildMail:RequestRemoveEntry(position)
+        end,
+        onSettle = function(index, send)
+            if not guildMail:Settle(index, send) then
+                guildMail:Refresh()
+            end
+        end,
+        onConfirmAction = function()
+            guildMail:ConfirmAction()
+        end,
+        onDismissAction = function()
+            guildMail:DismissAction()
+        end,
+        onWelcomeSubject = function(text)
+            guildMail:SetWelcomeSubject(text)
+        end,
+        onWelcomeBody = function(text)
+            guildMail:SetWelcomeBody(text)
+        end,
+        onWelcomeSave = function()
+            local saved, reason = guildMail:SaveWelcome()
+            if not saved and reason ~= nil then
+                rosterController:Print("Welcome mail wasn't saved: " .. reason .. ".")
+            end
+        end,
+        onWelcomeOn = function(checked)
+            local saved, reason = guildMail:SetWelcomeOn(checked)
+            if not saved and reason ~= nil then
+                rosterController:Print("Welcome mail wasn't changed: " .. reason .. ".")
+            end
+        end,
+        onWelcomeBack = function()
+            guildMail:CloseWelcome()
+        end,
+    })
+    -- Officers' Guild Mail tab on the mailbox: the guild mails, to continue
+    -- or manage; Edit, New and View open the Guild Mail window.
+    mailboxTab = addon.MailboxTab.Create(client, {
+        onNew = function()
+            guildMail:RequestNew()
+        end,
+        onEdit = function()
+            guildMail:EditDraft()
+        end,
+        onView = function(position)
+            guildMail:ViewEntry(position)
+        end,
+        onResume = function(position)
+            if not guildMail:ResumeEntry(position) then
+                guildMail:Refresh()
+            end
+        end,
+        onCancel = function(position)
+            guildMail:RequestCancelEntry(position)
+        end,
+        onRemove = function(position)
+            guildMail:RequestRemoveEntry(position)
+        end,
+        onConfirm = function()
+            guildMail:ConfirmAction()
+        end,
+        onDismiss = function()
+            guildMail:DismissAction()
+        end,
+        onShown = function()
+            guildMail:Refresh()
+        end,
+        onEditWelcome = function()
+            guildMail:OpenWelcome()
+        end,
+        onReuse = function(position)
+            guildMail:RequestReuseEntry(position)
+        end,
+        onSendWelcomes = function()
+            if not guildMail:SendWelcomes() then
+                guildMail:Refresh()
+            end
+        end,
+    })
+    -- The guild's welcome mail: officer settings shared over guild sync.
+    guildWelcome = addon.GuildWelcome.Create({
+        partition = function()
+            local guild, partition = rosterController:QuietContext()
+            return guild and partition or nil
+        end,
+        keyOf = function(rawName)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(rawName) or nil
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        senderIsOfficer = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            return key ~= nil and officerAuthority:IsOfficer(key)
+        end,
+        isOwn = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            if key == nil then
+                return nil
+            end
+            return guildGreet:IsOwn(key)
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        announce = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        onChange = function()
+            guildMail:OnWelcomeChanged()
+        end,
+        -- Another officer sent someone's welcome: it's dropped here.
+        onWelcomed = function(key, main)
+            guildMail:OnWelcomedElsewhere(key, main)
         end,
     })
     guildMail = addon.GuildMail.Create({
@@ -2021,6 +2174,9 @@ if clientProfile.supported then
         after = function(seconds, callback)
             return client:After(seconds, callback)
         end,
+        -- The cap on unique recipients pauses sending; the client's own
+        -- text for it when it has one.
+        capMessage = client:GetMailCapMessage(),
         -- Postage: the game's own price at a mailbox; away from one Guild
         -- Mail estimates the standard text-mail price.
         price = function()
@@ -2043,7 +2199,18 @@ if clientProfile.supported then
                 store:SetGuildMailDraft(draft)
             end
         end,
+        -- Sends are saved as they go, so they survive a reload and can be
+        -- resumed from any character on the account.
+        outbox = function()
+            local store = rosterController:Store()
+            return store and store:GuildMailOutbox() or nil
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
         view = guildMailWindow,
+        tab = mailboxTab,
+        welcome = guildWelcome,
     })
     router:Register("mail", "open Guild Mail, to mail guild ranks (officers)", function()
         if client:IsMailboxOpen() then
@@ -2667,6 +2834,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildGreet:OnGreeted(message, sender)
         elseif addon.GuildRecruit.TYPES[message.t] ~= nil then
             guildRecruit:OnMessage(message, sender)
+        elseif addon.GuildWelcome.TYPES[message.t] ~= nil then
+            guildWelcome:OnMessage(message, sender)
         elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
             onGroupFinderMessage(message, sender)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
@@ -2691,6 +2860,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Without the system message event, Guild Greet simply never prompts.
     client:ObservePresence(function(kind, name)
         guildGreet:OnPresence(kind, name)
+        if kind == "join" then
+            guildWelcome:OnJoined(name)
+        end
     end)
     -- Prompts wait out combat and boss encounters.
     local busy = client:ObserveCombat(function(inCombat)
@@ -2722,7 +2894,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         end
     end)
     -- Guild Mail follows the mailbox, and sends its next mail when the game
-    -- answers the last. Officers get its button on the mailbox.
+    -- answers the last. Officers get its tab on the mailbox.
     client:ObserveMail(function(kind, blockedAddon, blockedCall)
         if kind == "error" then
             -- The text follows an error number; older clients pass only the
@@ -2743,8 +2915,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             return
         end
         if kind == "open" then
+            -- The tab first, so its title shows the welcomes waiting.
+            pcall(mailboxTab.Install, mailboxTab, guildMail:ShowsMailboxTab())
             guildMail:OnMailboxOpened()
-            pcall(guildMailWindow.ShowMailboxButton, guildMailWindow, guildMail:ShowsMailboxButton())
         elseif kind == "close" then
             guildMail:OnMailboxClosed()
         elseif kind == "sent" then
@@ -2780,6 +2953,7 @@ addon.settingsPanel = settingsPanel
 addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
+addon.guildWelcome = guildWelcome
 addon.groupSession = groupSession
 addon.groupBoard = groupBoard
 addon.groupAvailability = groupAvailability

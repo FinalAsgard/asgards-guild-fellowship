@@ -229,6 +229,7 @@ local function validatePartition(data)
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
         "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn", "withdrawals",
+        "welcomeConfig", "welcomeLedger",
     }
     local index
     for index = 1, #containers do
@@ -265,6 +266,7 @@ local function validatePartition(data)
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
         recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true, withdrawals = true,
+        welcomeConfig = true, welcomeLedger = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -803,9 +805,9 @@ function Store:SetRecruitAd(text)
 end
 
 -- Guild Mail's saved draft, shared by every character on the account:
---   { subject, body, ranks, mode, skipDiscord, activeOnly }
+--   { subject, body, ranks, mode, skipDiscord, activeOnly, unticked }
 -- `ranks` is the list of ticked rank indexes, `mode` the Send to choice's
--- id. Each field is nil when missing or unusable. Nil when nothing usable
+-- id, `unticked` the character keys left out of the recipient list. Each field is nil when missing or unusable. Nil when nothing usable
 -- is saved.
 function Store:GuildMailDraft()
     local saved = type(self.database) == "table" and self.database.guildMail or nil
@@ -831,6 +833,15 @@ function Store:GuildMailDraft()
         end
         return nil
     end
+    local unticked = {}
+    if type(saved.unticked) == "table" then
+        local index
+        for index = 1, #saved.unticked do
+            if type(saved.unticked[index]) == "string" and saved.unticked[index] ~= "" then
+                table.insert(unticked, saved.unticked[index])
+            end
+        end
+    end
     return {
         subject = text(saved.subject),
         body = text(saved.body),
@@ -838,6 +849,7 @@ function Store:GuildMailDraft()
         mode = text(saved.mode),
         skipDiscord = flag(saved.skipDiscord),
         activeOnly = flag(saved.activeOnly),
+        unticked = unticked,
     }
 end
 
@@ -857,6 +869,12 @@ function Store:SetGuildMailDraft(draft)
             table.insert(ranks, draft.ranks[index])
         end
     end
+    local unticked = {}
+    for index = 1, #(type(draft.unticked) == "table" and draft.unticked or {}) do
+        if type(draft.unticked[index]) == "string" then
+            table.insert(unticked, draft.unticked[index])
+        end
+    end
     self.database.guildMail = {
         subject = type(draft.subject) == "string" and draft.subject or "",
         body = type(draft.body) == "string" and draft.body or "",
@@ -864,8 +882,26 @@ function Store:SetGuildMailDraft(draft)
         mode = type(draft.mode) == "string" and draft.mode or nil,
         skipDiscord = draft.skipDiscord == true,
         activeOnly = draft.activeOnly == true,
+        unticked = unticked,
     }
     return true
+end
+
+-- Guild Mail's outbox: the list of sends, oldest first, shared by every
+-- character on the account, created on first use. Guild Mail keeps each
+-- entry up to date in place (see GuildMail). Nil when an unusable value is
+-- stored there; it is then left alone.
+function Store:GuildMailOutbox()
+    if type(self.database) ~= "table" then
+        return nil
+    end
+    if self.database.guildMailOutbox == nil then
+        self.database.guildMailOutbox = {}
+    end
+    if type(self.database.guildMailOutbox) ~= "table" then
+        return nil
+    end
+    return self.database.guildMailOutbox
 end
 
 -- The user's own ad record (see RecruitStats), shared by every character
@@ -1474,6 +1510,36 @@ function Partition:GetRecruitConfig()
         self.data.recruitConfig = {}
     end
     return self.data.recruitConfig
+end
+
+-- Guild Mail's welcome mail settings (see GuildWelcome), kept as officer
+-- settings like Guild Recruit's, created on first use.
+function Partition:GetWelcomeConfig()
+    if self.data.welcomeConfig == nil then
+        self.data.welcomeConfig = {}
+    end
+    return self.data.welcomeConfig
+end
+
+-- Guild Mail's welcome ledger (see GuildWelcome): { seen = { [key] = when
+-- first seen }, welcomed = { [key] = { main, at, by } }, gone = { [key] =
+-- true for a noted newcomer who left } }, created on first use, with any
+-- list made when missing or unusable.
+function Partition:GetWelcomeLedger()
+    if type(self.data.welcomeLedger) ~= "table" then
+        self.data.welcomeLedger = {}
+    end
+    local ledger = self.data.welcomeLedger
+    if type(ledger.seen) ~= "table" then
+        ledger.seen = {}
+    end
+    if type(ledger.welcomed) ~= "table" then
+        ledger.welcomed = {}
+    end
+    if type(ledger.gone) ~= "table" then
+        ledger.gone = {}
+    end
+    return ledger
 end
 
 -- Guild Recruit's last ad time in each channel (see RecruitLedger), created
