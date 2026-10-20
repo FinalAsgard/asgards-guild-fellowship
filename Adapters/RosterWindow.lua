@@ -2130,7 +2130,7 @@ local function build(framework, options)
         playerPanel.panel:Hide()
     end)
 
-    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts
+    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts, guildLog, promotions
 end
 
 -- options.navigator is the PageNavigator with the master frame's pages;
@@ -2165,7 +2165,7 @@ function RosterWindow.Create(client, options)
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts =
+    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts, guildLog, promotions =
         pcall(build, framework, options)
     if not ok or host == nil then
         return nil, "the Details! Framework could not build the window"

@@ -2509,8 +2509,16 @@ if clientProfile.supported then
             return false, "the game didn't accept the promotion"
         end
         recordPromotion(partition, key, rank)
+        -- Only full scans read known characters' ranks again, so the new
+        -- rank is recorded now, as a scan would: its time at rank starts,
+        -- and the old rank's ticks go. A scan corrects it if the game
+        -- didn't make the change after all.
+        partition:RecordCharacter(key, { rankIndex = rank })
+        observeMembership()
+        promotions.prune()
         rosterController:Print("Promoted " .. name .. " to " .. rankName .. ".")
         client:RequestGuildRoster()
+        rosterController:Invalidate()
         rosterController:RefreshPromotions()
         return true
     end

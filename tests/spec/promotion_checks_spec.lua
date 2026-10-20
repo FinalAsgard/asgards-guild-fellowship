@@ -731,7 +731,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         fixtures.runTimers(tool, 5)
         test.assertEqual(nil, characterRow(promotions.listRows(), "Bolt"))
         local _, partition = tool.addon.rosterController:QuietContext()
-        test.assertEqual(0, #tool.addon.PromotionChecks.Create(partition:GetPromotionChecks(), {}):Snapshot())
+        test.assertEqual(nil, next(partition:GetPromotionChecks().records or {}), "the stale ticks were pruned")
     end)
 
     test.test(profile .. " an officer adds a level item, overrides it for a low character, then lowers its level",
@@ -846,8 +846,8 @@ for profileIndex = 1, #fixtures.PROFILES do
         local last = dates:LastPromotion(bolt.key)
         test.assertEqual(toolKey, last.promoter)
         test.assertEqual(3, last.rank)
-        test.assertEqual(0, #tool.addon.PromotionChecks.Create(partition:GetPromotionChecks(), {}):Snapshot(),
-            "only the date and promoter stay")
+        test.assertEqual(3, partition:GetCharacter(bolt.key).rank, "the roster has the new rank at once")
+        test.assertEqual(nil, next(partition:GetPromotionChecks().records or {}), "only the date and promoter stay")
         local _, memberPartition = hammer.addon.rosterController:QuietContext()
         test.assertEqual(toolKey, memberPartition:GetMembershipDates().characters[bolt.key].lastPromotion.promoter)
     end)
