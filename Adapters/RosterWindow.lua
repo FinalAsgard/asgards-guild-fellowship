@@ -1137,10 +1137,13 @@ local function listLineRefresher(columns)
                 for columnIndex = 1, #columns do
                     local field = columns[columnIndex].field
                     local text = tostring(row[field] or "")
+                    local color = columns[columnIndex].color
                     if row.kind == "heading" then
                         text = "|cffffd100" .. text .. "|r"
                     elseif row.kind == "empty" then
                         text = "|cff9d9d9d" .. text .. "|r"
+                    elseif color ~= nil and color(row) ~= nil then
+                        text = "|cff" .. color(row) .. text .. "|r"
                     end
                     line.cells[field]:SetText(text)
                 end
@@ -1234,11 +1237,21 @@ local function buildRecentAds(framework, page, frameName, onTurnBackOn)
     return ads
 end
 
+-- Each Guild Log event type's color (hex RGB), on its entries' Event
+-- column and its filter check box: arrivals green, departures orange and
+-- red, rank changes blue and purple.
+local GUILD_LOG_TYPE_COLORS = {
+    join = "40ff40", invite = "40e0d0", leave = "ff9933", kick = "ff4040", promote = "66b3ff", demote = "d080ff",
+}
+
 -- The officers' Guild Log page: every entry newest first, with its date,
--- what happened, the character, its player, and who did it.
+-- what happened (in its type's color), the character, its player, and who
+-- did it.
 local GUILD_LOG_COLUMNS = {
     { field = "date", x = 8, width = 84 },
-    { field = "event", x = 96, width = 170 },
+    { field = "event", x = 96, width = 170, color = function(row)
+        return GUILD_LOG_TYPE_COLORS[row.eventType]
+    end },
     { field = "character", x = 270, width = 130 },
     { field = "player", x = 404, width = 120 },
     { field = "actor", x = 528, width = 130 },
@@ -1337,7 +1350,7 @@ local function buildGuildLog(framework, page, frameName, options)
         check:SetPoint("TOPLEFT", holder, "TOPLEFT", 16 + (typeIndex - 1) * 96, -26)
         local label = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         label:SetPoint("LEFT", check, "RIGHT", 2, 0)
-        label:SetText(GUILD_LOG_TYPE_LABELS[eventType])
+        label:SetText("|cff" .. GUILD_LOG_TYPE_COLORS[eventType] .. GUILD_LOG_TYPE_LABELS[eventType] .. "|r")
         check:SetScript("OnClick", function(box)
             if options.onGuildLogType ~= nil then
                 options.onGuildLogType(eventType, box:GetChecked() == true)

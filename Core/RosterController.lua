@@ -1115,7 +1115,8 @@ end
 -- first, or a line saying nothing matches. The second result says where
 -- the page is: { page, pages, total, filters }. Nil for anyone else (see
 -- GuildLog).
---   { kind = "heading" | "entry", date, event, character, player, actor }
+--   { kind = "heading" | "entry", date, event, eventType, character, player,
+--     actor }, `eventType` an entry's GuildLog type
 --   { kind = "empty", event }
 function Controller:GuildLogView()
     local ok, log = pcall(self.guildLog or function() return nil end)
@@ -1158,6 +1159,7 @@ function Controller:GuildLogView()
             kind = "entry",
             date = self.client:FormatDate(entry.at),
             event = addon.GuildLog.Describe(entry, self.rankName),
+            eventType = entry.type,
             character = name(entry.character, entry.name),
             player = partition ~= nil and self:PosterLabel({ k = entry.character, n = entry.name }, partition,
                 normalizer) or "",

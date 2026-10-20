@@ -463,8 +463,8 @@ Officers who know better can set a date by hand: `/agf setdate join Toolbox 2025
 Officers' add-ons keep a long-term **Guild Log** of the guild's membership: joins, invites (with who invited), leaves, kicks (with who removed them), and promotions and demotions (with who did it, and to which rank). It's read from the game's guild event log, which turns its "3 days ago" ages into dates, and from events the add-on sees as they happen. The same event read more than once, or by several officers, is kept once. Entries are kept forever.
 
 - Officers' add-ons share the log with each other over the officer channel, and catch up when an officer logs in. Members' add-ons never receive or keep it.
-- The **Guild Log** tab lists entries newest first: the date, what happened, the character, its player, and who did it.
-- **Sort** switches between date and name. **Range** steps through all, the last 7, 30 and 90 days. A check box for each event type (Join, Invite, Leave, Kick, Promote, Demote) shows or hides it.
+- The **Guild Log** tab lists entries newest first: the date, what happened, the character, its player, and who did it. What happened is colored by event type: joins green, invites teal, leaves orange, kicks red, promotions blue and demotions purple.
+- **Sort** switches between date and name. **Range** steps through all, the last 7, 30 and 90 days. A check box for each event type (Join, Invite, Leave, Kick, Promote, Demote) shows or hides it; each label is in its type's color.
 - Search by character name, alias or main: all of a player's characters show together.
 - Long logs come in pages (`<` and `>`), so even thousands of entries stay smooth.
 
