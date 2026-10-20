@@ -1313,7 +1313,9 @@ local PROMOTION_COLUMNS = {
 }
 
 -- The officers' Promotions page, below the frame's title bar. It opens on
--- the list: each character at a rank with requirements, its ranks,
+-- the list, one page at a time, under a search box, Ready and In progress
+-- filters, page buttons, and a filter per rank: each character at a rank
+-- with requirements, its ranks,
 -- progress and its player's highest rank; Open shows its checklist, where
 -- Tick and Untick work each item (an item that needs a note asks for one
 -- first, in the page), an automated item shows its detail with Override
@@ -1522,12 +1524,91 @@ local function buildPromotions(framework, page, frameName, options)
         editor.rows[index] = row
     end
 
+    -- The list's controls: a search box, Ready and In progress check
+    -- boxes, page buttons, and below them a check box per rank with
+    -- requirements (made as SetPromotions names them).
+    local controls = { ranks = {} }
+    editor.controls = controls
+    local search = CreateFrame("EditBox", nil, listHolder, "InputBoxTemplate")
+    search:SetSize(150, 20)
+    search:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 22, -2)
+    search:SetAutoFocus(false)
+    local placeholder = search:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    placeholder:SetPoint("LEFT", search, "LEFT", 2, 0)
+    placeholder:SetText("Name, alias or main")
+    search:SetScript("OnTextChanged", function(box)
+        local text = box:GetText()
+        if text == "" then
+            placeholder:Show()
+        else
+            placeholder:Hide()
+        end
+        call("onPromotionsSearch", text)
+    end)
+    search:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    search:SetScript("OnEnterPressed", function(box)
+        box:ClearFocus()
+    end)
+    controls.search = search
+    local function filterBox(text, x, y, onClick)
+        local check = CreateFrame("CheckButton", nil, listHolder, "UICheckButtonTemplate")
+        check:SetSize(22, 22)
+        check:SetPoint("TOPLEFT", listHolder, "TOPLEFT", x, y)
+        check.text = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        check.text:SetPoint("LEFT", check, "RIGHT", 2, 0)
+        check.text:SetWidth(64)
+        check.text:SetJustifyH("LEFT")
+        check.text:SetWordWrap(false)
+        check.text:SetText(text)
+        check:SetScript("OnClick", onClick)
+        return check
+    end
+    controls.ready = filterBox("Ready", 184, -1, function(box)
+        call("onPromotionsFilter", "ready", box:GetChecked() == true)
+    end)
+    controls.progress = filterBox("In progress", 254, -1, function(box)
+        call("onPromotionsFilter", "progress", box:GetChecked() == true)
+    end)
+    controls.previous = smallButton(listHolder, 24, "<", function()
+        if controls.state ~= nil then
+            call("onPromotionsPage", controls.state.page - 1)
+        end
+    end)
+    controls.previous:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 350, -2)
+    controls.pageText = listHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    controls.pageText:SetPoint("LEFT", controls.previous, "RIGHT", 6, 0)
+    controls.pageText:SetWidth(150)
+    controls.next = smallButton(listHolder, 24, ">", function()
+        if controls.state ~= nil then
+            call("onPromotionsPage", controls.state.page + 1)
+        end
+    end)
+    controls.next:SetPoint("LEFT", controls.pageText, "RIGHT", 6, 0)
+    -- The check box for the `index`th rank, made the first time it's needed.
+    controls.rankBox = function(index)
+        if controls.ranks[index] == nil then
+            local check
+            check = filterBox("", 16 + (index - 1) * 86, -24, function(box)
+                if check.rank ~= nil then
+                    call("onPromotionsFilter", check.rank, box:GetChecked() == true)
+                end
+            end)
+            controls.ranks[index] = check
+        end
+        return controls.ranks[index]
+    end
+
     -- The list, with the note prompt above it.
+    local listArea = CreateFrame("Frame", nil, listHolder)
+    listArea:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 0, -46)
+    listArea:SetPoint("BOTTOMRIGHT", listHolder, "BOTTOMRIGHT", 0, 0)
     local width, height = page:GetSize()
-    local lines = math.max(1, math.floor((height - 110) / RosterWindow.LINE_HEIGHT))
-    local noteBar = CreateFrame("Frame", nil, listHolder)
+    local lines = math.max(1, math.floor((height - 156) / RosterWindow.LINE_HEIGHT))
+    local noteBar = CreateFrame("Frame", nil, listArea)
     noteBar:SetSize(560, 24)
-    noteBar:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 120, 0)
+    noteBar:SetPoint("TOPLEFT", listArea, "TOPLEFT", 120, 0)
     noteBar.text = noteBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     noteBar.text:SetPoint("LEFT", noteBar, "LEFT", 0, 0)
     noteBar.text:SetWidth(150)
@@ -1557,9 +1638,9 @@ local function buildPromotions(framework, page, frameName, options)
     noteBar:Hide()
     editor.noteBar = noteBar
     -- Asking before promoting a character with unmet items, in the page.
-    local promoteBar = CreateFrame("Frame", nil, listHolder)
+    local promoteBar = CreateFrame("Frame", nil, listArea)
     promoteBar:SetSize(560, 24)
-    promoteBar:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 120, 0)
+    promoteBar:SetPoint("TOPLEFT", listArea, "TOPLEFT", 120, 0)
     promoteBar.text = promoteBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     promoteBar.text:SetPoint("LEFT", promoteBar, "LEFT", 0, 0)
     promoteBar.text:SetWidth(380)
@@ -1579,7 +1660,7 @@ local function buildPromotions(framework, page, frameName, options)
     promoteNo:SetPoint("LEFT", promoteYes, "RIGHT", 4, 0)
     promoteBar:Hide()
     editor.promoteBar = promoteBar
-    editor.list = buildList(framework, listHolder, frameName .. "PromotionsScroll", "Promotions",
+    editor.list = buildList(framework, listArea, frameName .. "PromotionsScroll", "Promotions",
         PROMOTION_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines, function(row)
             if row.kind == "character" then
                 call("onPromotionsExpand", row.key)
@@ -1612,7 +1693,7 @@ local function buildPromotions(framework, page, frameName, options)
                 end
             end
         end)
-    editor.list.scroll:SetPoint("BOTTOMRIGHT", listHolder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 24)
+    editor.list.scroll:SetPoint("BOTTOMRIGHT", listArea, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 24)
     editor.listMessage = listHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     editor.listMessage:SetPoint("BOTTOMLEFT", listHolder, "BOTTOMLEFT", 16, 4)
     editor.listMessage:SetWidth(680)
@@ -2159,10 +2240,11 @@ end
 
 -- Shows the Recent ads page's rows (see RosterController:RecentAdsView).
 -- False when the frame has no Recent ads page.
--- Shows the Promotions page's editor model and list rows (see
--- PromotionsViewModel.Editor and List). False when the frame has no
--- Promotions page.
-function Window:SetPromotions(model, rows)
+-- Shows the Promotions page's editor model, list rows, and where the list's
+-- controls stand, with the ready count on its tab (see
+-- PromotionsViewModel.Editor, List and Controls). False when the frame has
+-- no Promotions page.
+function Window:SetPromotions(model, rows, state)
     local editor = self.promotions
     if editor == nil or type(model) ~= "table" then
         return false
@@ -2171,6 +2253,31 @@ function Window:SetPromotions(model, rows)
         if rows ~= nil then
             editor.list.scroll:SetData(rows)
             editor.list.scroll:Refresh()
+        end
+        local controls = editor.controls
+        if state ~= nil and controls ~= nil then
+            controls.state = state
+            controls.ready:SetChecked(state.ready)
+            controls.progress:SetChecked(state.progress)
+            controls.pageText:SetText(state.pageText)
+            if state.page > 1 then controls.previous:Enable() else controls.previous:Disable() end
+            if state.page < state.pages then controls.next:Enable() else controls.next:Disable() end
+            local index
+            for index = 1, math.max(#state.ranks, #controls.ranks) do
+                local rank = state.ranks[index]
+                if rank == nil then
+                    controls.ranks[index]:Hide()
+                else
+                    local check = controls.rankBox(index)
+                    check.rank = rank.rank
+                    check.text:SetText(rank.name)
+                    check:SetChecked(rank.shown)
+                    check:Show()
+                end
+            end
+            if self.host ~= nil and type(self.host.SetLabel) == "function" then
+                self.host:SetLabel("promotions", state.tabLabel, state.badge)
+            end
         end
         editor.rankText:SetText(model.rankText or "")
         editor.nextText:SetText(model.nextText or "")

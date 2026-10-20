@@ -135,17 +135,62 @@ end
 -- `overridden` true when an officer's override is what meets a failed
 -- automated item. `highestRank` is the player's highest rank when it's
 -- higher than this character's, else nil.
-function PromotionPolicy.Evaluate(inputs, key, itemsOf)
+-- `key`'s record and its rank's items, or nil when it has no checklist.
+local function checklistOf(inputs, key, itemsOf)
     local partition = inputs.partition
     local character = partition:GetCharacter(key)
     if character == nil or not partition:IsInGuild(key) or type(character.rank) ~= "number" or character.rank < 1 then
         return nil
     end
-    local rank = character.rank
-    local items = itemsOf and itemsOf(rank) or inputs.requirements:Items(rank)
+    local items = itemsOf and itemsOf(character.rank) or inputs.requirements:Items(character.rank)
     if items[1] == nil then
         return nil
     end
+    return character, items
+end
+
+-- One item's status for `key`: met, detail, the officer's record, whether
+-- the kind is automated, and whether an override is what meets it.
+local function judgeItem(inputs, key, item, character)
+    local judge = PromotionPolicy.STATUS[item.kind]
+    local met, detail = false, nil
+    if judge ~= nil then
+        met, detail = judge(inputs, key, item, character)
+    end
+    met = met == true
+    local record = inputs.checks:Record(key, item.id)
+    local automated = addon.RankRequirements.IsAutomated(item.kind)
+    local overridden = false
+    if automated and not met and record ~= nil and record.ticked then
+        met, overridden = true, true
+    end
+    return met, detail, record, automated, overridden
+end
+
+-- Just enough of `key`'s status to filter and order the list (see Query):
+-- { key, rank, met, total, ready }, or nil as for Evaluate.
+function PromotionPolicy.Summarize(inputs, key, itemsOf)
+    local character, items = checklistOf(inputs, key, itemsOf)
+    if character == nil then
+        return nil
+    end
+    local met = 0
+    local index
+    for index = 1, #items do
+        if judgeItem(inputs, key, items[index], character) then
+            met = met + 1
+        end
+    end
+    return { key = key, rank = character.rank, met = met, total = #items, ready = met == #items }
+end
+
+function PromotionPolicy.Evaluate(inputs, key, itemsOf)
+    local partition = inputs.partition
+    local character, items = checklistOf(inputs, key, itemsOf)
+    if character == nil then
+        return nil
+    end
+    local rank = character.rank
     local names = inputs.rankNames or {}
     local result = {
         key = key,
@@ -160,18 +205,7 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
     local index
     for index = 1, #items do
         local item = items[index]
-        local judge = PromotionPolicy.STATUS[item.kind]
-        local met, detail = false, nil
-        if judge ~= nil then
-            met, detail = judge(inputs, key, item, character)
-        end
-        met = met == true
-        local record = inputs.checks:Record(key, item.id)
-        local automated = addon.RankRequirements.IsAutomated(item.kind)
-        local overridden = false
-        if automated and not met and record ~= nil and record.ticked then
-            met, overridden = true, true
-        end
+        local met, detail, record, automated, overridden = judgeItem(inputs, key, item, character)
         table.insert(result.items, { id = item.id, label = item.label, kind = item.kind, automated = automated,
             met = met, detail = detail, overridden = overridden, record = record })
         if met then
@@ -187,15 +221,34 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
     return result
 end
 
--- Every character at a rank with requirements, evaluated: ready ones
--- first, then by rank (the highest first), then by name (`nameOf(key)`).
-function PromotionPolicy.List(inputs, nameOf)
-    local ranks = {}
+-- Ready ones first, then by rank (the highest first), then by name.
+local function listOrder(a, b)
+    if a.ready ~= b.ready then
+        return a.ready
+    end
+    if a.rank ~= b.rank then
+        return a.rank < b.rank
+    end
+    local left, right = string.lower(a.name), string.lower(b.name)
+    if left ~= right then
+        return left < right
+    end
+    return a.key < b.key
+end
+
+-- Calls `visit(key, character, itemsOf)` for each character at a rank with
+-- requirements; `itemsOf(rank)` reads each rank's items once. Returns the
+-- ranks with requirements (not the top one), highest first.
+local function eachCandidate(inputs, visit)
+    local ranks, listed = {}, {}
     local itemsByRank = {}
     local withItems = inputs.requirements:Ranks()
     local index
     for index = 1, #withItems do
         ranks[withItems[index]] = true
+        if withItems[index] >= 1 then
+            table.insert(listed, withItems[index])
+        end
     end
     local function itemsOf(rank)
         if itemsByRank[rank] == nil then
@@ -203,27 +256,114 @@ function PromotionPolicy.List(inputs, nameOf)
         end
         return itemsByRank[rank]
     end
-    local rows = {}
     inputs.partition:EachCharacter(function(key, character)
         if ranks[character.rank] then
-            local row = PromotionPolicy.Evaluate(inputs, key, itemsOf)
-            if row ~= nil then
-                row.name = nameOf and nameOf(key) or key
-                table.insert(rows, row)
+            visit(key, character, itemsOf)
+        end
+    end)
+    return listed
+end
+
+-- Every character at a rank with requirements, evaluated, in list order
+-- (`nameOf(key)` gives the names it sorts by).
+function PromotionPolicy.List(inputs, nameOf)
+    local rows = {}
+    eachCandidate(inputs, function(key, character, itemsOf)
+        local row = PromotionPolicy.Evaluate(inputs, key, itemsOf)
+        if row ~= nil then
+            row.name = nameOf and nameOf(key) or key
+            table.insert(rows, row)
+        end
+    end)
+    table.sort(rows, listOrder)
+    return rows
+end
+
+-- The characters a search for `text` matches, as a set: every character of
+-- each player whose alias, or any of whose characters' names (their main's
+-- among them), contains it, and each character with no player whose name
+-- does. `display(name)` gives the name shown. Nil for no search.
+function PromotionPolicy.Matches(partition, text, display)
+    local needle = string.lower((string.gsub(text or "", "^%s*(.-)%s*$", "%1")))
+    if needle == "" then
+        return nil
+    end
+    display = display or tostring
+    local function contains(value)
+        return type(value) == "string" and string.find(string.lower(value), needle, 1, true) ~= nil
+    end
+    local set = {}
+    partition:EachPlayer(function(id, player)
+        local keys = partition:CharactersOf(id)
+        local matched = contains(player.alias)
+        local index
+        for index = 1, #keys do
+            local character = partition:GetCharacter(keys[index])
+            matched = matched or contains(display(character and character.name or keys[index]))
+        end
+        if matched then
+            for index = 1, #keys do
+                set[keys[index]] = true
             end
         end
     end)
-    table.sort(rows, function(a, b)
-        if a.ready ~= b.ready then
-            return a.ready
+    partition:EachCharacter(function(key, character)
+        if character.player == nil and contains(display(character.name or key)) then
+            set[key] = true
         end
-        if a.rank ~= b.rank then
-            return a.rank < b.rank
-        end
-        if string.lower(a.name) ~= string.lower(b.name) then
-            return string.lower(a.name) < string.lower(b.name)
-        end
-        return a.key < b.key
     end)
-    return rows
+    return set
+end
+
+PromotionPolicy.PAGE_SIZE = 50
+
+-- The Promotions list for a guild of any size: every candidate is
+-- summarized (see Summarize) to filter and order it, and only the page
+-- shown is evaluated in full. options:
+--   nameOf(key)  the name to sort by
+--   filters      { ready, progress, hiddenRanks }: ready and in-progress
+--                characters each show only when theirs is true; a rank in
+--                the hiddenRanks set doesn't show
+--   matches      the search's set of keys (see Matches), or nil for all
+--   page, pageSize
+-- Returns { rows, page, pages, total, all, ready, ranks }: rows evaluated
+-- (see Evaluate) with `name`, `total` how many pass the filters, `all`
+-- how many have a checklist, `ready` how many of those are ready, and
+-- `ranks` the ranks with requirements, highest first.
+function PromotionPolicy.Query(inputs, options)
+    options = options or {}
+    local filters = options.filters or { ready = true }
+    local hidden = filters.hiddenRanks or {}
+    local nameOf = options.nameOf or tostring
+    local summaries = {}
+    local all, ready = 0, 0
+    local itemsFor
+    local ranks = eachCandidate(inputs, function(key, character, itemsOf)
+        itemsFor = itemsOf
+        local summary = PromotionPolicy.Summarize(inputs, key, itemsOf)
+        if summary == nil then
+            return
+        end
+        all = all + 1
+        if summary.ready then
+            ready = ready + 1
+        end
+        local shown = summary.ready and filters.ready or (not summary.ready and filters.progress)
+        if shown and not hidden[summary.rank] and (options.matches == nil or options.matches[key]) then
+            summary.name = nameOf(key)
+            table.insert(summaries, summary)
+        end
+    end)
+    table.sort(summaries, listOrder)
+    local size = options.pageSize or PromotionPolicy.PAGE_SIZE
+    local pages = math.max(1, math.ceil(#summaries / size))
+    local page = math.min(math.max(1, math.floor(tonumber(options.page) or 1)), pages)
+    local rows = {}
+    local index
+    for index = (page - 1) * size + 1, math.min(#summaries, page * size) do
+        local row = PromotionPolicy.Evaluate(inputs, summaries[index].key, itemsFor)
+        row.name = summaries[index].name
+        table.insert(rows, row)
+    end
+    return { rows = rows, page = page, pages = pages, total = #summaries, all = all, ready = ready, ranks = ranks }
 end

@@ -52,8 +52,8 @@ Controller.__index = Controller
 --   membership    optional function(keys) -> lines about a player's
 --                 membership dates for the player panel (officers), or nil
 --   promotionsView optional function() -> the Promotions page's editor
---                 model and list rows (see PromotionsViewModel.Editor and
---                 List)
+--                 model, list rows and list controls (see
+--                 PromotionsViewModel.Editor, List and Controls)
 --   recruitRecord optional function(keys) -> a player's ad record (see
 --                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
@@ -1205,17 +1205,17 @@ function Controller:RefreshGuildLog()
     end
 end
 
--- Redraws the Promotions page when the window is open (see
--- PromotionsViewModel.Editor).
+-- Redraws the Promotions page, and its tab's ready count, when the window
+-- is open (see PromotionsViewModel.Editor and Controls).
 function Controller:RefreshPromotions()
     if self.window == nil or not self.window:IsShown() or type(self.window.SetPromotions) ~= "function"
         or self.promotionsView == nil
     then
         return
     end
-    local ok, model, rows = pcall(self.promotionsView)
+    local ok, model, rows, controls = pcall(self.promotionsView)
     if ok and model ~= nil then
-        self.window:SetPromotions(model, rows)
+        self.window:SetPromotions(model, rows, controls)
     end
 end
 

@@ -191,6 +191,25 @@ function Host:Content(id)
     return self.contents[id]
 end
 
+-- Renames page `id`'s tab (its mouseover name) and shows `badge`, a short
+-- count, in its corner (nil or "" for none).
+function Host:SetLabel(id, label, badge)
+    local index
+    for index = 1, #self.tabs do
+        local tab = self.tabs[index]
+        if tab.pageId == id then
+            tab.label = label
+            if tab.badge == nil and badge ~= nil and badge ~= "" then
+                tab.badge = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                tab.badge:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -2, 2)
+            end
+            if tab.badge ~= nil then
+                tab.badge:SetText(badge or "")
+            end
+        end
+    end
+end
+
 -- Selects the page `id` (an unknown or hidden id keeps the current page,
 -- or the home page when that one is hidden now), then shows only its
 -- content, only the tabs of visible pages, stacked in order, and marks only

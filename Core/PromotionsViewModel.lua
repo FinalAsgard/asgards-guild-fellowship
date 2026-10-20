@@ -199,6 +199,8 @@ end
 --   anyRequirements  whether any rank has requirements
 --   promoteAction(key) -> "Promote", "Mark as promoted", or nil when this
 --                 officer can't promote that character
+--   filtered      true when characters have checklists but the filters or
+--                 search hide them all
 -- Rows: a heading, then per character
 --   { kind = "character", key, character, ranks, progress, highest, action }
 -- and, under an open one, per item
@@ -240,10 +242,51 @@ function PromotionsViewModel.List(evaluated, options)
         end
     end
     if evaluated[1] == nil then
-        table.insert(rows, {
-            kind = "empty",
-            character = options.anyRequirements and PromotionsViewModel.NOBODY or PromotionsViewModel.NO_REQUIREMENTS,
-        })
+        local text = PromotionsViewModel.NO_REQUIREMENTS
+        if options.filtered then
+            text = PromotionsViewModel.NO_MATCH
+        elseif options.anyRequirements then
+            text = PromotionsViewModel.NOBODY
+        end
+        table.insert(rows, { kind = "empty", character = text })
     end
     return rows
+end
+
+PromotionsViewModel.NO_MATCH = "Nobody matches. Tick In progress to see everyone working toward a rank."
+
+-- The tab's name with how many characters are ready: "Promotions (4)".
+function PromotionsViewModel.TabLabel(ready)
+    if type(ready) == "number" and ready > 0 then
+        return "Promotions (" .. ready .. ")"
+    end
+    return "Promotions"
+end
+
+-- Where the list's controls stand, from PromotionPolicy.Query's result and
+-- the filters: { pageText, page, pages, ready, progress, ranks, tabLabel,
+-- badge (the ready count, or "") },
+-- `ranks` being { rank, name, shown } for each rank with requirements.
+function PromotionsViewModel.Controls(result, filters, rankNames)
+    filters = filters or {}
+    local hidden = filters.hiddenRanks or {}
+    local names = rankNames or {}
+    local controls = {
+        page = result.page,
+        pages = result.pages,
+        pageText = "Page " .. result.page .. " of " .. result.pages .. " (" .. result.total ..
+            (result.total == 1 and " character)" or " characters)"),
+        ready = filters.ready == true,
+        progress = filters.progress == true,
+        ranks = {},
+        tabLabel = PromotionsViewModel.TabLabel(result.ready),
+        badge = (result.ready or 0) > 0 and tostring(result.ready) or "",
+    }
+    local index
+    for index = 1, #(result.ranks or {}) do
+        local rank = result.ranks[index]
+        table.insert(controls.ranks, { rank = rank, name = names[rank + 1] or ("Rank " .. rank),
+            shown = not hidden[rank] })
+    end
+    return controls
 end

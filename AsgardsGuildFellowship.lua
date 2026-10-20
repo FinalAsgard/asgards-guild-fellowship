@@ -49,6 +49,7 @@ local promotions = {
     askOnce = function() end,
     prune = function() end,
     observe = function() end,
+    shown = function() end,
     listRows = function()
         return nil
     end,
@@ -178,7 +179,8 @@ if clientProfile.supported then
             return membershipLines(keys)
         end,
         promotionsView = function()
-            return promotions.view(), promotions.listRows()
+            local rows, controls = promotions.listRows()
+            return promotions.view(), rows, controls
         end,
         groupedWith = function(keys)
             local guild, partition = rosterController:QuietContext()
@@ -271,7 +273,16 @@ if clientProfile.supported then
                     rosterController:RefreshGuildLog()
                 end,
                 onPromotionsShown = function()
-                    rosterController:RefreshPromotions()
+                    promotions.shown()
+                end,
+                onPromotionsFilter = function(name, shown)
+                    return promotions.filter(name, shown)
+                end,
+                onPromotionsSearch = function(text)
+                    return promotions.search(text)
+                end,
+                onPromotionsPage = function(page)
+                    return promotions.page(page)
                 end,
                 onPromotionsRank = function(step)
                     return promotions.rank(step)
@@ -2221,6 +2232,14 @@ if clientProfile.supported then
         end
     end
     local expandedPromotions = {}
+    -- The list's filters (ready only, at first), search and page; this
+    -- session only.
+    local promotionFilters = { ready = true, progress = false, hiddenRanks = {} }
+    local promotionSearch, promotionPage = "", 1
+    -- One page of the Promotions list's rows, and where its controls stand
+    -- (see PromotionsViewModel.Controls). Every change redraws it once; the
+    -- day-based checks also catch up while the page is open (see
+    -- promotions.shown).
     promotions.listRows = function()
         local guild, partition, normalizer = rosterController:QuietContext()
         local requirements, checks = requirementsOf(), checksOf()
@@ -2231,26 +2250,83 @@ if clientProfile.supported then
             local character = partition:GetCharacter(key)
             return (character and normalizer:Display(character.name)) or key
         end
-        local evaluated = addon.PromotionPolicy.List({
+        local rankNames = client:GetGuildRankNames() or {}
+        local result = addon.PromotionPolicy.Query({
             partition = partition,
             requirements = requirements,
             checks = checks,
             dates = datesOf(partition),
             now = client:Timestamp(),
-            rankNames = client:GetGuildRankNames() or {},
-        }, nameOf)
-        return addon.PromotionsViewModel.List(evaluated, {
+            rankNames = rankNames,
+        }, {
+            nameOf = nameOf,
+            filters = promotionFilters,
+            matches = addon.PromotionPolicy.Matches(partition, promotionSearch, function(name)
+                return normalizer:Display(name)
+            end),
+            page = promotionPage,
+        })
+        promotionPage = result.page
+        local rows = addon.PromotionsViewModel.List(result.rows, {
             expanded = expandedPromotions,
             nameOf = nameOf,
             formatDate = function(timestamp)
                 return client:FormatDate(timestamp)
             end,
             anyRequirements = requirements:Ranks()[1] ~= nil,
+            filtered = result.all > 0,
             promoteAction = function(key)
                 local mode = promotions.mode(key)
                 return mode == "promote" and "Promote" or mode == "mark" and "Mark as promoted" or nil
             end,
         })
+        return rows, addon.PromotionsViewModel.Controls(result, promotionFilters, rankNames)
+    end
+    -- The list's controls: `name` is "ready", "progress", or a rank, shown
+    -- or not. Each goes back to the first page.
+    promotions.filter = function(name, shown)
+        if name == "ready" or name == "progress" then
+            promotionFilters[name] = shown == true
+        elseif type(name) == "number" then
+            promotionFilters.hiddenRanks[name] = not shown or nil
+        else
+            return false, "unknown filter"
+        end
+        promotionPage = 1
+        rosterController:RefreshPromotions()
+        return true
+    end
+    promotions.search = function(text)
+        promotionSearch = type(text) == "string" and text or ""
+        promotionPage = 1
+        rosterController:RefreshPromotions()
+        return true
+    end
+    promotions.page = function(page)
+        promotionPage = tonumber(page) or 1
+        rosterController:RefreshPromotions()
+        return true
+    end
+    -- The page opened: redraw it now (day-based checks count from now), then
+    -- every PROMOTIONS_REFRESH_SECONDS while it stays open.
+    local PROMOTIONS_REFRESH_SECONDS = 300
+    local refreshingPromotions = false
+    local function promotionsOpen()
+        local window = rosterController.window
+        return window ~= nil and window:IsShown() and pages:Current() == "promotions"
+    end
+    local function refreshOpenPromotions()
+        refreshingPromotions = false
+        if promotionsOpen() then
+            rosterController:RefreshPromotions()
+            refreshingPromotions = client:After(PROMOTIONS_REFRESH_SECONDS, refreshOpenPromotions) and true or false
+        end
+    end
+    promotions.shown = function()
+        rosterController:RefreshPromotions()
+        if not refreshingPromotions then
+            refreshingPromotions = client:After(PROMOTIONS_REFRESH_SECONDS, refreshOpenPromotions) and true or false
+        end
     end
     -- How this officer can promote `key`: "promote" when the game's calls
     -- exist and allow it, "mark" when the calls are missing (the officer

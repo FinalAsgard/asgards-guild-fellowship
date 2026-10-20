@@ -378,6 +378,141 @@ test.test("the add-on check passes when any of the player's characters was heard
     test.assertEqual("seen 1 day ago", itemOf(addon.PromotionPolicy.Evaluate(inputs, "solo"), item.id).detail)
 end)
 
+-- The list at scale ------------------------------------------------------------------
+
+local function keysOf(rows)
+    local keys = {}
+    local index
+    for index = 1, #rows do
+        table.insert(keys, rows[index].key)
+    end
+    return table.concat(keys, ",")
+end
+
+test.test("the list shows ready characters at first, and in progress and each rank only when ticked", function()
+    local inputs, addon = newGuild({ bolt = 4, nail = 4, rivet = 3, screw = 3, vet = 2 })
+    local initiate = addItem(inputs, 4, "Read the rules")
+    local member = addItem(inputs, 3, "Attend an event")
+    inputs.checks:Set("nail", initiate, true, nil, OFFICER, NOW)
+    inputs.checks:Set("screw", member, true, nil, OFFICER, NOW)
+    local Query = addon.PromotionPolicy.Query
+
+    local result = Query(inputs)
+    test.assertEqual("screw,nail", keysOf(result.rows), "ready only, the higher rank first")
+    test.assertEqual(2, result.ready)
+    test.assertEqual(4, result.all)
+    test.assertEqual("3,4", table.concat(result.ranks, ","), "ranks with requirements, highest first")
+
+    result = Query(inputs, { filters = { ready = true, progress = true } })
+    test.assertEqual("screw,nail,rivet,bolt", keysOf(result.rows), "ready first, then rank, then name")
+    result = Query(inputs, { filters = { progress = true } })
+    test.assertEqual("rivet,bolt", keysOf(result.rows))
+    result = Query(inputs, { filters = { ready = true, progress = true, hiddenRanks = { [3] = true } } })
+    test.assertEqual("nail,bolt", keysOf(result.rows))
+    test.assertEqual(2, result.ready, "the ready count ignores the filters")
+    result = Query(inputs, { filters = {} })
+    test.assertEqual(0, #result.rows)
+    test.assertEqual(1, result.pages)
+end)
+
+test.test("a search matches a character's name, its player's alias, or any of the player's characters", function()
+    local inputs, addon = newGuild({ main = 1, bolt = 4, nail = 4, solo = 4 })
+    addItem(inputs, 4, "Read the rules")
+    inputs.partition:JoinPlayerOf("bolt", "main", "manual")
+    inputs.partition:SetAlias(inputs.partition:GetCharacter("main").player, "Sparky", "manual")
+    local Matches = addon.PromotionPolicy.Matches
+    local all = { filters = { ready = true, progress = true } }
+
+    test.assertEqual(nil, Matches(inputs.partition, "  "))
+    local function search(text)
+        all.matches = Matches(inputs.partition, text)
+        return keysOf(addon.PromotionPolicy.Query(inputs, all).rows)
+    end
+    test.assertEqual("bolt", search("BOL"))
+    test.assertEqual("bolt", search("spark"), "the alias")
+    test.assertEqual("bolt", search("main"), "the main's name")
+    test.assertEqual("solo", search("sol"), "a character with no player")
+    test.assertEqual("", search("nobody"))
+end)
+
+test.test("the list comes a page at a time, kept within the pages there are", function()
+    local characters = {}
+    local index
+    for index = 1, 7 do
+        characters["char" .. index] = 4
+    end
+    local inputs, addon = newGuild(characters)
+    addItem(inputs, 4, "Read the rules")
+    local options = { filters = { progress = true }, pageSize = 3, page = 2 }
+
+    local result = addon.PromotionPolicy.Query(inputs, options)
+    test.assertEqual(3, result.pages)
+    test.assertEqual(2, result.page)
+    test.assertEqual(7, result.total)
+    test.assertEqual("char4,char5,char6", keysOf(result.rows))
+    test.assertEqual(1, #result.rows[1].items, "each row on the page is evaluated in full")
+    options.page = 9
+    result = addon.PromotionPolicy.Query(inputs, options)
+    test.assertEqual(3, result.page)
+    test.assertEqual("char7", keysOf(result.rows))
+    options.page = 0
+    test.assertEqual(1, addon.PromotionPolicy.Query(inputs, options).page)
+end)
+
+test.test("a 1,000-character guild lists within its time budget, evaluating only the page in full", function()
+    local characters = {}
+    local index
+    for index = 1, 1000 do
+        characters[string.format("char%04d", index)] = 2 + index % 3
+    end
+    local inputs, addon = newGuild(characters)
+    local rank
+    for rank = 2, 4 do
+        local check = addItem(inputs, rank, "Read the rules")
+        addItem(inputs, rank, "", "char-guild-days", 7)
+        addItem(inputs, rank, "", "level", 10)
+        local key
+        for key in pairs(characters) do
+            if characters[key] == rank and tonumber(string.sub(key, 5)) % 4 == 0 then
+                inputs.checks:Set(key, check, true, nil, OFFICER, NOW)
+            end
+        end
+    end
+    local full = 0
+    local evaluate = addon.PromotionPolicy.Evaluate
+    addon.PromotionPolicy.Evaluate = function(...)
+        full = full + 1
+        return evaluate(...)
+    end
+
+    local started = os.clock()
+    local result = addon.PromotionPolicy.Query(inputs, { filters = { ready = true, progress = true } })
+    local elapsed = os.clock() - started
+    test.assertEqual(1000, result.total)
+    test.assertEqual(addon.PromotionPolicy.PAGE_SIZE, #result.rows)
+    test.assertEqual(addon.PromotionPolicy.PAGE_SIZE, full, "only the page shown is evaluated in full")
+    test.assertTrue(elapsed < 1, "took " .. elapsed .. " seconds")
+end)
+
+test.test("the controls show the page, the filters, a box per rank, and the ready count for the tab", function()
+    local _, addon = newGuild({})
+    local Model = addon.PromotionsViewModel
+    local controls = Model.Controls({ page = 2, pages = 3, total = 120, ready = 4, ranks = { 3, 4 } },
+        { ready = true, hiddenRanks = { [4] = true } }, RANKS)
+
+    test.assertEqual("Page 2 of 3 (120 characters)", controls.pageText)
+    test.assertTrue(controls.ready)
+    test.assertFalse(controls.progress)
+    test.assertEqual("Member", controls.ranks[1].name)
+    test.assertTrue(controls.ranks[1].shown)
+    test.assertFalse(controls.ranks[2].shown)
+    test.assertEqual("Promotions (4)", controls.tabLabel)
+    test.assertEqual("4", controls.badge)
+    test.assertEqual("Promotions", Model.TabLabel(0))
+    local rows = Model.List({}, { anyRequirements = true, filtered = true })
+    test.assertEqual(Model.NO_MATCH, rows[2].character)
+end)
+
 -- In the composed add-on -----------------------------------------------------------
 
 local NAMES = {
@@ -413,6 +548,9 @@ local function login(profile, channel, playerName)
     fixtures.fire(world, "PLAYER_ENTERING_WORLD")
     fixtures.fire(world, "GUILD_ROSTER_UPDATE")
     fixtures.runTimers(world)
+    -- The list shows only ready characters at first; these tests follow
+    -- everyone's progress.
+    world.addon.promotions.filter("progress", true)
     return world
 end
 
@@ -687,5 +825,71 @@ for profileIndex = 1, #fixtures.PROFILES do
         local seen = partition:GetMembershipDates().characters[hammerKey].addonSeen
         test.assertEqual(toolKey, seen.by)
         test.assertEqual("1 of 1", characterRow(hammer.addon.promotions.listRows(), "Hammer").progress)
+    end)
+
+    test.test(profile .. " the list shows ready characters at first, filters and searches, and counts the ready",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local promotions = tool.addon.promotions
+        local Model = tool.addon.PromotionsViewModel
+        test.assertTrue(promotions.filter("progress", false))
+        test.assertTrue(promotions.add("Read the rules", false))
+
+        local rows, controls = promotions.listRows()
+        test.assertEqual(nil, characterRow(rows, "Bolt"), "in progress is hidden at first")
+        test.assertEqual(Model.NO_MATCH, rows[2].character)
+        test.assertEqual("Promotions", controls.tabLabel)
+        test.assertEqual("Initiate", controls.ranks[1].name)
+
+        test.assertTrue(promotions.filter("progress", true))
+        local bolt = characterRow(promotions.listRows(), "Bolt")
+        promotions.expand(bolt.key)
+        rows = promotions.listRows()
+        local _, at = characterRow(rows, "Bolt")
+        test.assertTrue(promotions.tick(bolt.key, rows[at + 1].item, true))
+        test.assertTrue(promotions.filter("progress", false))
+        rows, controls = promotions.listRows()
+        test.assertContains(characterRow(rows, "Bolt").character, "Ready")
+        test.assertEqual("Promotions (1)", controls.tabLabel)
+        test.assertEqual("Page 1 of 1 (1 character)", controls.pageText)
+
+        promotions.search("nobody")
+        test.assertEqual(nil, characterRow(promotions.listRows(), "Bolt"))
+        promotions.search("bol")
+        test.assertTrue(characterRow(promotions.listRows(), "Bolt") ~= nil)
+        promotions.filter(4, false)
+        rows, controls = promotions.listRows()
+        test.assertEqual(nil, characterRow(rows, "Bolt"))
+        test.assertFalse(controls.ranks[1].shown)
+        test.assertEqual("Promotions (1)", controls.tabLabel, "the count ignores the filters")
+        test.assertFalse(promotions.filter("junk", true))
+    end)
+
+    test.test(profile .. " the open Promotions page redraws now and every few minutes, and stops once closed",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local drawn = {}
+        tool.addon.rosterController.window = {
+            IsShown = function()
+                return true
+            end,
+            ShowPage = function() end,
+            SetPromotions = function(_, model, rows, controls)
+                table.insert(drawn, controls)
+            end,
+        }
+        tool.addon.pages:Select("promotions")
+        tool.addon.promotions.shown()
+        test.assertEqual(1, #drawn)
+        test.assertEqual("Promotions", drawn[1].tabLabel)
+        fixtures.runTimers(tool, 301)
+        test.assertEqual(2, #drawn, "day-based checks catch up while it's open")
+        tool.addon.pages:Select("roster")
+        fixtures.runTimers(tool, 301)
+        tool.addon.pages:Select("promotions")
+        fixtures.runTimers(tool, 601)
+        test.assertEqual(2, #drawn, "closed, it stops")
     end)
 end
