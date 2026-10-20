@@ -156,6 +156,39 @@ function PromotionsViewModel.ItemRow(key, item, nameOf, formatDate)
     return row
 end
 
+-- The row under an open checklist that promotes `row` (an evaluated
+-- character): `action` is "Promote" or "Mark as promoted", `unmet` the
+-- labels of the items not met (asked about first), and `confirm` the
+-- question to ask then.
+function PromotionsViewModel.PromoteRow(row, action)
+    local unmet = {}
+    local index
+    for index = 1, #row.items do
+        if not row.items[index].met then
+            table.insert(unmet, row.items[index].label)
+        end
+    end
+    local promote = {
+        kind = "promote",
+        key = row.key,
+        character = "    Promote to " .. tostring(row.nextRankName),
+        ranks = "",
+        progress = "",
+        highest = "",
+        action = action,
+        unmet = unmet,
+        name = row.name,
+    }
+    if unmet[1] ~= nil then
+        promote.confirm = "Promote " .. tostring(row.name) .. "? Not met: " .. table.concat(unmet, ", ")
+        promote.tooltip = { "Not met:" }
+        for index = 1, #unmet do
+            table.insert(promote.tooltip, unmet[index])
+        end
+    end
+    return promote
+end
+
 -- The Promotions list's rows from PromotionPolicy.List's `evaluated`, for
 -- the page's list. An automated item's row shows its detail; a failed one
 -- offers Override (`askReason`: the officer may give a reason), and an
@@ -164,13 +197,16 @@ end
 --   nameOf(key)   a character's (or officer's) name to show
 --   formatDate(time)
 --   anyRequirements  whether any rank has requirements
+--   promoteAction(key) -> "Promote", "Mark as promoted", or nil when this
+--                 officer can't promote that character
 -- Rows: a heading, then per character
 --   { kind = "character", key, character, ranks, progress, highest, action }
 -- and, under an open one, per item
 --   { kind = "item", key, item, character, ranks, ticked, needsNote,
 --     askReason, action, tooltip }
--- where `tooltip` lists who ticked (or overrode) it, when, and the note
--- (or reason). With no characters, one { kind = "empty" } row says why.
+-- then its PromoteRow when promoteAction names one. `tooltip` lists who
+-- ticked (or overrode) it, when, and the note (or reason). With no
+-- characters, one { kind = "empty" } row says why.
 function PromotionsViewModel.List(evaluated, options)
     options = options or {}
     local expanded = options.expanded or {}
@@ -196,6 +232,10 @@ function PromotionsViewModel.List(evaluated, options)
             local itemIndex
             for itemIndex = 1, #row.items do
                 table.insert(rows, PromotionsViewModel.ItemRow(row.key, row.items[itemIndex], nameOf, formatDate))
+            end
+            local promote = options.promoteAction and options.promoteAction(row.key)
+            if promote ~= nil then
+                table.insert(rows, PromotionsViewModel.PromoteRow(row, promote))
             end
         end
     end

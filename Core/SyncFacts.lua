@@ -40,6 +40,9 @@ local _, addon = ...
 --   { kind = "joined"|"rankSince", character = key, time = seconds,
 --     source = text, tolerance? = seconds, rank? = index, at, by }
 --   { kind = "tracking", character = key, time = seconds, at, by }
+--   { kind = "addonSeen", character = key, time = seconds, source = "heard", at, by }
+--   { kind = "lastPromotion", character = key, time = seconds, rank = index,
+--     promoter = key, source = "addon"|"log", tolerance?, at, by }
 --
 -- "character joined (or has held rank since) time, by that source", and
 -- "tracking started in this guild at time" (`character` is the officer who
@@ -133,9 +136,13 @@ function SyncFacts.DateValue(fact)
     if type(fact) ~= "table" or not isDateKind(fact.kind) then
         return nil
     end
-    return table.concat({
+    local value = table.concat({
         tostring(fact.time), tostring(fact.source), tostring(fact.rank), tostring(fact.tolerance),
     }, ":")
+    if fact.promoter ~= nil then
+        value = value .. ":" .. tostring(fact.promoter)
+    end
+    return value
 end
 
 -- options.isOfficer(key) -> boolean, from OfficerAuthority.

@@ -48,6 +48,7 @@ local promotions = {
     end,
     askOnce = function() end,
     prune = function() end,
+    observe = function() end,
     listRows = function()
         return nil
     end,
@@ -142,6 +143,7 @@ if clientProfile.supported then
             -- Once ranks are known, catch up on promotion requirements and
             -- ticks; a rank change makes a character's ticks stale.
             promotions.prune()
+            promotions.observe()
             promotions.askOnce()
             rosterController:RefreshPromotions()
             -- A scan that saw a promotion or demotion shows or hides the
@@ -291,6 +293,9 @@ if clientProfile.supported then
                 end,
                 onPromotionsTick = function(key, item, ticked, note)
                     return promotions.tick(key, item, ticked, note)
+                end,
+                onPromotionsPromote = function(key)
+                    return promotions.promote(key)
                 end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
@@ -2241,7 +2246,89 @@ if clientProfile.supported then
                 return client:FormatDate(timestamp)
             end,
             anyRequirements = requirements:Ranks()[1] ~= nil,
+            promoteAction = function(key)
+                local mode = promotions.mode(key)
+                return mode == "promote" and "Promote" or mode == "mark" and "Mark as promoted" or nil
+            end,
         })
+    end
+    -- How this officer can promote `key`: "promote" when the game's calls
+    -- exist and allow it, "mark" when the calls are missing (the officer
+    -- changes the rank in the game's guild window and the add-on records
+    -- it once a scan sees it), or nil when they can't.
+    promotions.mode = function(key)
+        local guild, partition = rosterController:QuietContext()
+        local character = guild and partition:GetCharacter(key)
+        if character == nil or not partition:IsInGuild(key) or type(character.rank) ~= "number"
+            or character.rank < 1 or not selfIsOfficer()
+        then
+            return nil
+        end
+        if client:CanUsePromote() then
+            return client:CanPromoteMember(character.rank) and "promote" or nil
+        end
+        local own = client:GetPlayerGuildRankIndex()
+        if own ~= nil and character.rank - 1 <= own then
+            return nil
+        end
+        return "mark"
+    end
+    -- Promotions this officer marked, waiting for a scan to see the new
+    -- rank: key -> the rank it goes to.
+    local markedPromotions = {}
+    local function recordPromotion(partition, key, rank)
+        local author, now = rosterController:SelfKey(), client:Timestamp()
+        local fact = author and now and datesOf(partition):Promoted(key, rank, author, now)
+        if fact ~= nil then
+            shareDates({ fact })
+        end
+    end
+    -- After a scan: a marked character seen at its new rank is recorded as
+    -- promoted by the officer who marked it.
+    promotions.observe = function()
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return
+        end
+        local key, rank
+        for key, rank in pairs(markedPromotions) do
+            local character = partition:GetCharacter(key)
+            if character ~= nil and character.rank == rank then
+                markedPromotions[key] = nil
+                recordPromotion(partition, key, rank)
+            end
+        end
+    end
+    -- Promotes `key` one rank (or marks it, see mode). Its checklist goes
+    -- with the old rank: the next scan sees the new one and drops it.
+    promotions.promote = function(key)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local character = guild and partition:GetCharacter(key)
+        if character == nil then
+            return false, "that character isn't in the roster"
+        end
+        local mode = promotions.mode(key)
+        if mode == nil then
+            return false, "you can't promote that character"
+        end
+        local rank = character.rank - 1
+        local names = client:GetGuildRankNames() or {}
+        local name = normalizer:Display(character.name) or key
+        local rankName = names[rank + 1] or ("rank " .. rank)
+        if mode == "mark" then
+            markedPromotions[key] = rank
+            rosterController:Print("Change " .. name .. "'s rank to " .. rankName .. " in the game's guild window;" ..
+                " the add-on records the promotion when it sees the change.")
+            return true
+        end
+        if not client:PromoteMember(character.name) then
+            return false, "the game didn't accept the promotion"
+        end
+        recordPromotion(partition, key, rank)
+        rosterController:Print("Promoted " .. name .. " to " .. rankName .. ".")
+        client:RequestGuildRoster()
+        rosterController:RefreshPromotions()
+        return true
     end
     promotions.expand = function(key)
         expandedPromotions[key] = not expandedPromotions[key] or nil
@@ -2492,18 +2579,54 @@ if clientProfile.supported then
             report()
         end
     end
+    -- A dry run of Promote for the member named `name`: which calls exist,
+    -- and whether this officer may promote them. Changes no rank.
+    local function probePromote(name)
+        if not selfIsOfficer() then
+            rosterController:Print("Only officers can probe promoting.")
+            return
+        end
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local key = guild and name ~= "" and normalizer:Key(name)
+        local character = key and partition:GetCharacter(key)
+        if character == nil then
+            rosterController:Print("Use " .. addon.Identity.slashCommand ..
+                " probe promote <character>, naming someone in the roster.")
+            return
+        end
+        rosterController:Print("Promote probe (dry run, no rank changed):")
+        local calls = client:PromoteCalls()
+        local index
+        for index = 1, #addon.Compatibility.PROMOTE_CALLS do
+            local call = addon.Compatibility.PROMOTE_CALLS[index]
+            client:Print("  " .. call .. ": " .. (calls[call] and "present" or "missing"))
+        end
+        local allowed = client:CanPromoteMember(character.rank)
+        client:Print("  Your rank: " .. tostring(client:GetPlayerGuildRankIndex()) .. "; " ..
+            (normalizer:Display(character.name) or key) .. "'s rank: " .. tostring(character.rank))
+        client:Print("  May promote: " .. (allowed == nil and "unknown" or allowed and "yes" or "no"))
+        local mode = promotions.mode(key)
+        client:Print("  The button would be: " ..
+            (mode == "promote" and "Promote" or mode == "mark" and "Mark as promoted" or "not shown"))
+    end
     router:Register("probe",
         "check what the game reports to the add-on (probe log: the guild event log; probe officer: the" ..
-        " officer channel; officers)",
+        " officer channel; probe promote <character>: a dry run of Promote; officers)",
         function(arguments)
-            local what = string.lower(arguments or "")
+            local what, rest = string.match(arguments or "", "^%s*(%S*)%s*(.-)%s*$")
+            what = string.lower(what or "")
             if what == "officer" then
                 probeOfficerChannel()
                 return
             end
+            if what == "promote" then
+                probePromote(rest or "")
+                return
+            end
             if what ~= "log" then
-                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe log or " ..
-                    addon.Identity.slashCommand .. " probe officer.")
+                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe log, " ..
+                    addon.Identity.slashCommand .. " probe officer or " .. addon.Identity.slashCommand ..
+                    " probe promote <character>.")
                 return
             end
             if guildLogOf() == nil then

@@ -291,6 +291,53 @@ test.test("every add-on keeps when it last heard each character; an officer's sh
         { time = NOW - 1, source = "heard", at = NOW + 5, by = OFFICER }), "the newest time wins, not the stamp")
 end)
 
+test.test("a promotion with the add-on keeps when, to which rank, and by whom; the log fills in game-UI ones", function()
+    local dates = newDates()
+
+    local fact = dates:Promoted("bolt", 3, OFFICER, NOW)
+    test.assertEqual("lastPromotion", fact.kind)
+    test.assertEqual(OFFICER, fact.promoter)
+    test.assertEqual(3, dates:LastPromotion("bolt").rank)
+    test.assertEqual(nil, dates:Promoted("bolt", 12, OFFICER, NOW))
+
+    -- The log's record of the same promotion doesn't replace the add-on's;
+    -- a later one, done in the game's guild UI, does.
+    local facts = dates:FromLog({ logged("promote", "bolt", NOW - 600, { actor = OTHER_OFFICER, toRank = 3 }) },
+        OTHER_OFFICER, NOW)
+    test.assertEqual(1, #facts, "only the rank date")
+    test.assertEqual("rankSince", facts[1].kind)
+    test.assertEqual(OFFICER, dates:LastPromotion("bolt").promoter)
+    facts = dates:FromLog({ logged("promote", "bolt", NOW + 10 * DAY, { actor = OTHER_OFFICER, toRank = 2 }) },
+        OTHER_OFFICER, NOW + 10 * DAY)
+    test.assertEqual(2, #facts)
+    test.assertEqual(OTHER_OFFICER, dates:LastPromotion("bolt").promoter)
+    test.assertEqual("log", dates:LastPromotion("bolt").source)
+    test.assertEqual(2, dates:LastPromotion("bolt").rank)
+    -- A logged promotion with nobody named, and a demotion, aren't promotions to record.
+    facts = dates:FromLog({ logged("promote", "nail", NOW, { toRank = 3 }),
+        logged("demote", "rivet", NOW, { actor = OFFICER, toRank = 4 }) }, OFFICER, NOW)
+    test.assertEqual(nil, dates:LastPromotion("nail"))
+    test.assertEqual(nil, dates:LastPromotion("rivet"))
+end)
+
+test.test("a relayed promotion record is accepted only from an officer and keeps its promoter", function()
+    local facts, _, addon = newSync({ OFFICER, MEMBER, "bolt-area52" })
+    local function promoted(by, promoter, at)
+        return { kind = "lastPromotion", character = "bolt-area52", time = at or NOW, rank = 2,
+            promoter = promoter, source = "addon", at = at or NOW, by = by }
+    end
+
+    test.assertEqual("not an officer", facts:Refusal(promoted(MEMBER, MEMBER)))
+    test.assertEqual("malformed", facts:Refusal(promoted(OFFICER, nil)))
+    test.assertEqual(1, facts:ApplyAll({ promoted(OFFICER, OFFICER, NOW - DAY) }))
+    test.assertEqual(OFFICER, facts:Dates():LastPromotion("bolt-area52").promoter)
+    local shared = facts:OfficerFacts()
+    test.assertEqual("lastPromotion", shared[#shared].kind)
+    test.assertEqual(OFFICER, shared[#shared].promoter)
+    test.assertContains(addon.SyncFacts.DateValue(shared[#shared]), OFFICER,
+        "the digest and ledger see who promoted, so a forged promoter shows as different")
+end)
+
 test.test("a relayed last-heard time is accepted only from an officer, and only when newer", function()
     local facts = newSync({ OFFICER, MEMBER, "bolt-area52" })
     local function heard(time, by)

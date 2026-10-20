@@ -64,6 +64,10 @@ local MembershipDates = {
     -- counts days, so a day's precision is enough, and it keeps the traffic
     -- to about one fact per character a day.
     HEARD_SHARE_SECONDS = 24 * 3600,
+    -- The character's last promotion: when, to which rank, and by whom.
+    KIND_LAST_PROMOTION = "lastPromotion",
+    -- Promoted with the add-on's Promote (or Mark as promoted) button.
+    ADDON = "addon",
 }
 addon.MembershipDates = MembershipDates
 
@@ -72,6 +76,12 @@ MembershipDates.KINDS = {
     [MembershipDates.KIND_RANK_SINCE] = true,
     [MembershipDates.KIND_TRACKING] = true,
     [MembershipDates.KIND_ADDON_SEEN] = true,
+    [MembershipDates.KIND_LAST_PROMOTION] = true,
+}
+
+local PROMOTION_SOURCES = {
+    addon = 2,
+    log = 1,
 }
 
 local JOIN_SOURCES = {
@@ -120,6 +130,13 @@ local function isRecord(kind, record)
     if kind == MembershipDates.KIND_ADDON_SEEN then
         return record.source == MembershipDates.HEARD and record.rank == nil
     end
+    if kind == MembershipDates.KIND_LAST_PROMOTION then
+        return PROMOTION_SOURCES[record.source] ~= nil and isRank(record.rank) and isText(record.promoter)
+            and #record.promoter <= 80
+    end
+    if record.promoter ~= nil then
+        return false
+    end
     return RANK_SOURCES[record.source] ~= nil and isRank(record.rank)
 end
 
@@ -149,6 +166,19 @@ function MembershipDates.Replaces(kind, held, new)
     if kind == MembershipDates.KIND_ADDON_SEEN then
         if new.time ~= held.time then
             return new.time > held.time
+        end
+        return new.by ~= nil and (held.by == nil or newerStamp(new, held))
+    end
+    -- A later promotion wins; two records of the same one (same rank, close
+    -- in time) prefer the add-on's own record over the log's, then the
+    -- newer stamp.
+    if kind == MembershipDates.KIND_LAST_PROMOTION then
+        local window = math.max(MembershipDates.SAME_JOIN_SECONDS, tolerance(new), tolerance(held))
+        if new.rank ~= held.rank or math.abs(new.time - held.time) > window then
+            return new.time > held.time
+        end
+        if PROMOTION_SOURCES[new.source] ~= PROMOTION_SOURCES[held.source] then
+            return PROMOTION_SOURCES[new.source] > PROMOTION_SOURCES[held.source]
         end
         return new.by ~= nil and (held.by == nil or newerStamp(new, held))
     end
@@ -347,6 +377,7 @@ function Dates:FactOf(key, kind)
         source = record.source,
         tolerance = record.tolerance,
         rank = record.rank,
+        promoter = record.promoter,
         at = record.at,
         by = record.by,
     }
@@ -363,29 +394,63 @@ end
 
 -- An officer's add-on read `entries` (guild log entries, as GuildLog
 -- returns them) into its log: joins and logged rank changes become dates,
+-- and a logged promotion that names who did it the last promotion too,
 -- stamped as `author`'s at `now`. Returns the facts to share.
 function Dates:FromLog(entries, author, now)
     local facts = {}
+    if not isText(author) or not isTime(now) then
+        return facts
+    end
     local index
     for index = 1, #(entries or {}) do
         local entry = entries[index]
-        local kind, record
+        local records = {}
         if entry.type == addon.GuildLog.JOIN then
-            kind = MembershipDates.KIND_JOINED
-            record = {
+            records[MembershipDates.KIND_JOINED] = {
                 time = entry.at,
                 tolerance = entry.tolerance,
                 source = entry.source == addon.GuildLog.SOURCE_LOG and MembershipDates.LOG or MembershipDates.LIVE,
             }
         elseif (entry.type == addon.GuildLog.PROMOTE or entry.type == addon.GuildLog.DEMOTE) and isRank(entry.toRank) then
-            kind = MembershipDates.KIND_RANK_SINCE
-            record = { time = entry.at, tolerance = entry.tolerance, rank = entry.toRank, source = MembershipDates.LOG }
+            records[MembershipDates.KIND_RANK_SINCE] =
+                { time = entry.at, tolerance = entry.tolerance, rank = entry.toRank, source = MembershipDates.LOG }
+            if entry.type == addon.GuildLog.PROMOTE and isText(entry.actor) then
+                records[MembershipDates.KIND_LAST_PROMOTION] = { time = entry.at, tolerance = entry.tolerance,
+                    rank = entry.toRank, promoter = entry.actor, source = MembershipDates.LOG }
+            end
         end
-        if record ~= nil and isText(author) and isTime(now) and self:Offer(entry.character, kind, record) then
-            table.insert(facts, self:stamp(entry.character, kind, author, now))
+        local _, kind
+        for _, kind in ipairs({ MembershipDates.KIND_JOINED, MembershipDates.KIND_RANK_SINCE,
+            MembershipDates.KIND_LAST_PROMOTION })
+        do
+            if records[kind] ~= nil and self:Offer(entry.character, kind, records[kind]) then
+                table.insert(facts, self:stamp(entry.character, kind, author, now))
+            end
         end
     end
     return facts
+end
+
+-- An officer (`author`) promoted `key` to `rank` with the add-on at `now`
+-- (`promoter` is who did it: the author). Returns its fact, or nil.
+function Dates:Promoted(key, rank, author, now)
+    if not isText(key) or not isText(author) or not isTime(now) or not isRank(rank) then
+        return nil
+    end
+    local held = self:held(key, MembershipDates.KIND_LAST_PROMOTION)
+    local record = { time = now, rank = rank, promoter = author, source = MembershipDates.ADDON, at = now, by = author }
+    if held ~= nil and held.at ~= nil and held.at >= now then
+        record.at = held.at + 1
+    end
+    if not self:Offer(key, MembershipDates.KIND_LAST_PROMOTION, record) then
+        return nil
+    end
+    return self:FactOf(key, MembershipDates.KIND_LAST_PROMOTION)
+end
+
+-- `key`'s last promotion { time, rank, promoter, source }, or nil.
+function Dates:LastPromotion(key)
+    return self:held(key, MembershipDates.KIND_LAST_PROMOTION)
 end
 
 -- An officer (`author`) sets `key`'s `kind` date ("joined" or
@@ -497,7 +562,7 @@ function MembershipDates.IsFact(fact)
     end
     return MembershipDates.KINDS[fact.kind] == true and isRecord(fact.kind, {
         time = fact.time, source = fact.source, tolerance = fact.tolerance, rank = fact.rank,
-        at = fact.at, by = fact.by,
+        promoter = fact.promoter, at = fact.at, by = fact.by,
     })
 end
 
@@ -507,6 +572,7 @@ local function recordOf(fact)
         source = fact.source,
         tolerance = fact.tolerance,
         rank = fact.rank,
+        promoter = fact.promoter,
         at = fact.at,
         by = fact.by,
     }
@@ -568,7 +634,7 @@ function Dates:Facts(checkpoint)
     for index = 1, #keys do
         local _, kind
         for _, kind in ipairs({ MembershipDates.KIND_JOINED, MembershipDates.KIND_RANK_SINCE,
-            MembershipDates.KIND_ADDON_SEEN })
+            MembershipDates.KIND_ADDON_SEEN, MembershipDates.KIND_LAST_PROMOTION })
         do
             local fact = self:FactOf(keys[index], kind)
             if fact ~= nil and self.isOfficer(fact.by) then

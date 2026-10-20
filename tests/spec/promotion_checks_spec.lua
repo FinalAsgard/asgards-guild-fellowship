@@ -522,6 +522,140 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertEqual("1 of 1", characterRow(hammer.addon.promotions.listRows(), "Bolt").progress)
     end)
 
+    test.test(profile .. " adapter: the promote permission check and call, and a client without them", function()
+        local world = fixtures.newEnvironment(profile, { guild = guild(profile), playerName = names[1] })
+        local client = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua").Compatibility
+            .Create(world.environment)
+
+        test.assertTrue(client:CanUsePromote())
+        test.assertTrue(client:PromoteCalls().GuildPromote)
+        -- The officer is rank 1: they may promote rank 4 and 3, not rank 2
+        -- (that would make it their own rank).
+        test.assertTrue(client:CanPromoteMember(4))
+        test.assertTrue(client:CanPromoteMember(3))
+        test.assertFalse(client:CanPromoteMember(2))
+        test.assertEqual(nil, client:CanPromoteMember(nil))
+        world.canPromote = false
+        test.assertFalse(client:CanPromoteMember(4))
+        test.assertTrue(client:PromoteMember(names[3]))
+        test.assertEqual(names[3], world.promoted[1])
+        test.assertEqual(3, world.guild.members[3].rank)
+        test.assertFalse(client:PromoteMember(""))
+
+        world.environment.CanGuildPromote = function()
+            error("not allowed")
+        end
+        test.assertEqual(nil, client:CanPromoteMember(4))
+        world.environment.GuildPromote = function()
+            error("protected")
+        end
+        test.assertFalse(client:PromoteMember(names[3]))
+        world.environment.CanGuildPromote = nil
+        world.environment.GuildPromote = nil
+        test.assertFalse(client:CanUsePromote())
+        test.assertFalse(client:PromoteCalls().CanGuildPromote)
+        test.assertEqual(nil, client:CanPromoteMember(4))
+        test.assertFalse(client:PromoteMember(names[3]))
+    end)
+
+    test.test(profile .. " an officer promotes with a confirmation, the date and promoter are kept, the checklist goes",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local hammer = login(profile, channel, names[2])
+        settle(channel, 5)
+        local promotions = tool.addon.promotions
+        test.assertTrue(promotions.add("Read the rules", false))
+        test.assertTrue(promotions.add("Attend an event", false))
+        local bolt = characterRow(promotions.listRows(), "Bolt")
+        promotions.expand(bolt.key)
+        local rows = promotions.listRows()
+        local _, at = characterRow(rows, "Bolt")
+        test.assertTrue(promotions.tick(bolt.key, rows[at + 1].item, true))
+        rows = promotions.listRows()
+        local promote = rows[at + 3]
+        test.assertEqual("promote", promote.kind)
+        test.assertEqual("Promote", promote.action)
+        test.assertEqual("    Promote to Member", promote.character)
+        test.assertContains(promote.confirm, "Not met: Attend an event")
+        -- Members never get a Promote row.
+        hammer.addon.promotions.expand(bolt.key)
+        settle(channel, 5)
+        local memberRows = hammer.addon.promotions.listRows()
+        local _, memberAt = characterRow(memberRows, "Bolt")
+        test.assertEqual("item", memberRows[memberAt + 2].kind)
+        test.assertEqual(nil, memberRows[memberAt + 3])
+
+        test.assertTrue(promotions.promote(bolt.key))
+        test.assertEqual(names[3], tool.promoted[1])
+        fixtures.fire(tool, "GUILD_ROSTER_UPDATE")
+        settle(channel, 10)
+        local toolKey = tool.addon.rosterController:SelfKey()
+        local _, partition = tool.addon.rosterController:QuietContext()
+        local dates = tool.addon.MembershipDates.Create(partition:GetMembershipDates())
+        local last = dates:LastPromotion(bolt.key)
+        test.assertEqual(toolKey, last.promoter)
+        test.assertEqual(3, last.rank)
+        test.assertEqual(0, #tool.addon.PromotionChecks.Create(partition:GetPromotionChecks(), {}):Snapshot(),
+            "only the date and promoter stay")
+        local _, memberPartition = hammer.addon.rosterController:QuietContext()
+        test.assertEqual(toolKey, memberPartition:GetMembershipDates().characters[bolt.key].lastPromotion.promoter)
+    end)
+
+    test.test(profile .. " without the game's promote calls, Mark as promoted records the rank change once seen",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        settle(channel, 5)
+        tool.environment.CanGuildPromote = nil
+        tool.environment.GuildPromote = nil
+        local promotions = tool.addon.promotions
+        test.assertTrue(promotions.add("Read the rules", false))
+        local bolt = characterRow(promotions.listRows(), "Bolt")
+        promotions.expand(bolt.key)
+        local rows = promotions.listRows()
+        local _, at = characterRow(rows, "Bolt")
+        test.assertEqual("Mark as promoted", rows[at + 2].action)
+
+        tool.messages = {}
+        test.assertTrue(promotions.promote(bolt.key))
+        test.assertContains(table.concat(tool.messages, "\n"), "in the game's guild window")
+        local _, partition = tool.addon.rosterController:QuietContext()
+        local dates = tool.addon.MembershipDates.Create(partition:GetMembershipDates())
+        test.assertEqual(nil, dates:LastPromotion(bolt.key), "nothing is recorded before the rank changes")
+
+        -- The officer changes the rank in the game's guild window.
+        tool.guild.members[3].rank = 3
+        tool.guild.members[3].rankName = "Member"
+        tool.addon.rosterController:Rescan()
+        fixtures.fire(tool, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(tool, 5)
+        local last = dates:LastPromotion(bolt.key)
+        test.assertEqual(tool.addon.rosterController:SelfKey(), last.promoter)
+        test.assertEqual("addon", last.source)
+    end)
+
+    test.test(profile .. " /agf probe promote is a dry run naming the calls and whether this officer may promote",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local hammer = login(profile, channel, names[2])
+        tool.messages = {}
+        fixtures.slash(tool, "probe promote " .. names[3])
+        local printed = table.concat(tool.messages, "\n")
+        test.assertContains(printed, "dry run")
+        test.assertContains(printed, "GuildPromote: present")
+        test.assertContains(printed, "May promote: yes")
+        test.assertContains(printed, "The button would be: Promote")
+        test.assertEqual(0, #tool.promoted, "no rank changed")
+        tool.messages = {}
+        fixtures.slash(tool, "probe promote " .. names[1])
+        test.assertContains(table.concat(tool.messages, "\n"), "May promote: no")
+        hammer.messages = {}
+        fixtures.slash(hammer, "probe promote " .. names[3])
+        test.assertContains(table.concat(hammer.messages, "\n"), "Only officers")
+    end)
+
     test.test(profile .. " the add-on check passes for a member whose add-on was heard, and the officer shares it",
         function()
         local channel = fixtures.newChannel()

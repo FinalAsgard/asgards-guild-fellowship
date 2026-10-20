@@ -1556,11 +1556,45 @@ local function buildPromotions(framework, page, frameName, options)
     cancelNote:SetPoint("LEFT", tick, "RIGHT", 4, 0)
     noteBar:Hide()
     editor.noteBar = noteBar
+    -- Asking before promoting a character with unmet items, in the page.
+    local promoteBar = CreateFrame("Frame", nil, listHolder)
+    promoteBar:SetSize(560, 24)
+    promoteBar:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 120, 0)
+    promoteBar.text = promoteBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    promoteBar.text:SetPoint("LEFT", promoteBar, "LEFT", 0, 0)
+    promoteBar.text:SetWidth(380)
+    promoteBar.text:SetJustifyH("LEFT")
+    promoteBar.text:SetWordWrap(false)
+    local promoteYes = smallButton(promoteBar, 110, "Promote", function()
+        local key = promoteBar.key
+        promoteBar:Hide()
+        if key ~= nil then
+            call("onPromotionsPromote", key)
+        end
+    end)
+    promoteYes:SetPoint("LEFT", promoteBar.text, "RIGHT", 6, 0)
+    local promoteNo = smallButton(promoteBar, 60, "Cancel", function()
+        promoteBar:Hide()
+    end)
+    promoteNo:SetPoint("LEFT", promoteYes, "RIGHT", 4, 0)
+    promoteBar:Hide()
+    editor.promoteBar = promoteBar
     editor.list = buildList(framework, listHolder, frameName .. "PromotionsScroll", "Promotions",
         PROMOTION_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines, function(row)
             if row.kind == "character" then
                 call("onPromotionsExpand", row.key)
+            elseif row.kind == "promote" then
+                noteBar:Hide()
+                if row.confirm ~= nil then
+                    promoteBar.key = row.key
+                    promoteBar.text:SetText(row.confirm)
+                    promoteYes:SetText(row.action)
+                    promoteBar:Show()
+                else
+                    call("onPromotionsPromote", row.key)
+                end
             elseif row.kind == "item" then
+                promoteBar:Hide()
                 if not row.ticked and (row.needsNote or row.askReason) then
                     noteBar.row = row
                     if row.askReason then
