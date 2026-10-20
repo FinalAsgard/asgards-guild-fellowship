@@ -1144,9 +1144,13 @@ test.test("an officer sees one bundle per member's player, reviews it, and appro
     test.assertTrue(officer.addon.rosterController:ReviewBundle(hammers.group))
     local review = officer.addon.rosterController.window.review
     test.assertEqual("Review: Hammer", review.title)
-    test.assertEqual("Alts: none", review.before[2])
-    test.assertEqual("Alts: Wrench", review.suggested[2])
-    test.assertEqual("Alias: Hammers", review.suggested[3])
+    test.assertEqual("Suggested by Hammer", review.suggestedBy)
+    local hammerBlock = review.players[1]
+    test.assertEqual("Alts: none", hammerBlock.before[4].text)
+    test.assertEqual("removed", hammerBlock.before[4].mark)
+    test.assertEqual("Alias: Hammers", hammerBlock.after[2].text)
+    test.assertEqual("added", hammerBlock.after[2].mark)
+    test.assertEqual("Alt: Wrench", hammerBlock.after[4].text)
     test.assertEqual(2, #review.items)
 
     test.assertEqual(2, officer.addon.rosterController:DecideBundle(hammers.group, true))
@@ -1209,7 +1213,8 @@ test.test("an officer's declared main reaches everyone; a member's waits in thei
     local group = bundleRows(officer)[1].group
     officer.addon.rosterController:ReviewBundle(group)
     local review = officer.addon.rosterController.window.review
-    test.assertEqual("Main: Hammer (declared)", review.suggested[1])
+    test.assertEqual("Main: Hammer (declared)", review.players[1].after[1].text)
+    test.assertEqual("added", review.players[1].after[1].mark)
     local found
     local index
     for index = 1, #review.items do

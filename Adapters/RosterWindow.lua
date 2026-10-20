@@ -763,11 +763,90 @@ function RosterWindow.ConflictSections(rows)
     return listed
 end
 
--- The bundle review: one member's player before and with their changes,
--- one line per change with Approve and Deny, and Approve all / Deny all.
-local REVIEW_WIDTH = 560
-local REVIEW_HEIGHT = 380
+-- The bundle review: who suggested it, a before/after block for every
+-- player it changes (removed lines in red, added lines in green), the live
+-- guild note of each character involved, then one line per change with
+-- Approve and Deny, and Approve all / Deny all.
+local REVIEW_WIDTH = 620
+local REVIEW_HEIGHT = 520
 local REVIEW_LINES = 8
+local REVIEW_LIST_TOP = 66
+local REVIEW_LIST_HEIGHT = 216
+local REVIEW_LIST_LINE_HEIGHT = 16
+local REVIEW_SIDE_WIDTH = 280
+local REVIEW_COLORS = { added = "|cff40ff40", removed = "|cffff4040" }
+
+local function reviewText(line)
+    local color = REVIEW_COLORS[line.mark]
+    if color ~= nil then
+        return color .. line.text .. "|r"
+    end
+    return line.text
+end
+
+-- The lines of the review's list (see BundleReviewViewModel): each player's
+-- name in gold over its before and after sides, then the guild notes.
+-- Each line is { before, after } text, colored by mark.
+function RosterWindow.ReviewLines(model)
+    local lines = {}
+    local index
+    for index = 1, #(model.players or {}) do
+        local block = model.players[index]
+        table.insert(lines, { before = "|cffffd100" .. block.name .. "|r", after = "" })
+        local count = math.max(#block.before, #block.after)
+        local lineIndex
+        for lineIndex = 1, count do
+            local before = block.before[lineIndex]
+            local after = block.after[lineIndex]
+            local beforeText = before and reviewText(before) or ""
+            if lineIndex == 1 and before == nil then
+                beforeText = "|cff9d9d9d(not a player of its own yet)|r"
+            end
+            table.insert(lines, { before = beforeText, after = after and reviewText(after) or "" })
+        end
+    end
+    if model.notes ~= nil and model.notes[1] ~= nil then
+        table.insert(lines, { before = "|cffffd100Guild notes|r", after = "" })
+        for index = 1, #model.notes do
+            local note = model.notes[index]
+            table.insert(lines, {
+                before = note.name .. ": " .. (note.note or "|cff9d9d9d(not in the roster)|r"),
+                after = "",
+            })
+        end
+    end
+    return lines
+end
+
+local function createReviewListLine(scroll, index)
+    local line = CreateFrame("Frame", nil, scroll)
+    line:SetHeight(REVIEW_LIST_LINE_HEIGHT)
+    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * REVIEW_LIST_LINE_HEIGHT)
+    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * REVIEW_LIST_LINE_HEIGHT)
+    local function side(x)
+        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        cell:SetPoint("LEFT", line, "LEFT", x, 0)
+        cell:SetWidth(REVIEW_SIDE_WIDTH)
+        cell:SetJustifyH("LEFT")
+        cell:SetWordWrap(false)
+        return cell
+    end
+    line.before = side(4)
+    line.after = side(REVIEW_SIDE_WIDTH + 12)
+    return line
+end
+
+local function refreshReviewListLines(scroll, rows, offset, totalLines)
+    local lineIndex
+    for lineIndex = 1, totalLines do
+        local row = rows[lineIndex + offset]
+        if row ~= nil then
+            local line = scroll:GetLine(lineIndex)
+            line.before:SetText(row.before)
+            line.after:SetText(row.after)
+        end
+    end
+end
 
 local function buildReviewPanel(framework, options, frameName, anchor)
     local panel = framework:CreateSimplePanel(UIParent, REVIEW_WIDTH, REVIEW_HEIGHT, "Review", frameName .. "Review")
@@ -776,28 +855,29 @@ local function buildReviewPanel(framework, options, frameName, anchor)
     panel:SetFrameStrata("DIALOG")
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 8, 0)
-    local review = { panel = panel, before = {}, suggested = {}, lines = {} }
-    local function column(x, title, target)
-        local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        header:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -32)
-        header:SetText(title)
-        local index
-        for index = 1, 3 do
-            local text = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            text:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -34 - index * 16)
-            text:SetWidth(REVIEW_WIDTH / 2 - 24)
-            text:SetJustifyH("LEFT")
-            text:SetWordWrap(false)
-            target[index] = text
-        end
+    local review = { panel = panel, lines = {} }
+    review.suggestedBy = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    review.suggestedBy:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
+    local function header(x, title)
+        local text = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        text:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -50)
+        text:SetText(title)
     end
-    column(12, "Before", review.before)
-    column(REVIEW_WIDTH / 2, "Suggested", review.suggested)
+    header(14, "Before")
+    header(REVIEW_SIDE_WIDTH + 22, "After")
+    local listLines = math.floor(REVIEW_LIST_HEIGHT / REVIEW_LIST_LINE_HEIGHT)
+    local list = framework:CreateScrollBox(panel, frameName .. "ReviewScroll", refreshReviewListLines, {},
+        REVIEW_WIDTH - 20, REVIEW_LIST_HEIGHT, listLines, REVIEW_LIST_LINE_HEIGHT, createReviewListLine, true)
+    list:ClearAllPoints()
+    list:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -REVIEW_LIST_TOP)
+    list:CreateLines(createReviewListLine, listLines)
+    review.list = list
+    local itemsTop = REVIEW_LIST_TOP + REVIEW_LIST_HEIGHT + 10
     local index
     for index = 1, REVIEW_LINES do
         local line = CreateFrame("Frame", nil, panel)
         line:SetHeight(RosterWindow.LINE_HEIGHT)
-        line:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -110 - (index - 1) * RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -itemsTop - (index - 1) * RosterWindow.LINE_HEIGHT)
         line:SetPoint("RIGHT", panel, "RIGHT", -10, 0)
         line.text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         line.text:SetPoint("LEFT", line, "LEFT", 4, 0)
@@ -825,7 +905,7 @@ local function buildReviewPanel(framework, options, frameName, anchor)
         review.lines[index] = line
     end
     review.more = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    review.more:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -114 - REVIEW_LINES * RosterWindow.LINE_HEIGHT)
+    review.more:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -itemsTop - 4 - REVIEW_LINES * RosterWindow.LINE_HEIGHT)
     local approveAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     approveAll:SetSize(100, 22)
     approveAll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 10)
@@ -1510,7 +1590,8 @@ function Window:SetConflicts(rows)
 end
 
 -- Shows the bundle review (see BundleReviewViewModel) beside the conflict
--- panel.
+-- panel: who suggested it, each changed player before and after, the guild
+-- notes, and its changes.
 function Window:ShowReview(model)
     return (pcall(function()
         local review = self.conflicts.review
@@ -1520,11 +1601,10 @@ function Window:ShowReview(model)
         elseif review.panel.Title ~= nil then
             review.panel.Title:SetText(model.title)
         end
+        review.suggestedBy:SetText(model.suggestedBy or "")
+        review.list:SetData(RosterWindow.ReviewLines(model))
+        review.list:Refresh()
         local index
-        for index = 1, 3 do
-            review.before[index]:SetText(model.before[index] or "")
-            review.suggested[index]:SetText(model.suggested[index] or "")
-        end
         for index = 1, #review.lines do
             local line = review.lines[index]
             local item = model.items[index]

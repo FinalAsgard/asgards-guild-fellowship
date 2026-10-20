@@ -407,9 +407,10 @@ function Controller:ReviewBundle(group)
     return true
 end
 
--- Redraws the bundle under review from `rows` (ConflictViewModel rows), or
--- closes the review once that bundle is all decided.
-function Controller:RedrawReview(rows, normalizer)
+-- Redraws the bundle under review from `rows` (ConflictViewModel rows) and
+-- `members` (live roster facts, for the guild notes), or closes the review
+-- once that bundle is all decided.
+function Controller:RedrawReview(rows, normalizer, members)
     if self.reviewing == nil or type(self.window.ShowReview) ~= "function" then
         return
     end
@@ -420,6 +421,7 @@ function Controller:RedrawReview(rows, normalizer)
                 partition = self.current.partition,
                 normalizer = normalizer,
                 bundle = rows[index],
+                members = members,
             }))
             return
         end
@@ -884,7 +886,7 @@ function Controller:Redraw()
             pending = self.current.partition:GetSuggestions(),
         })
         self.window:SetConflicts(conflictRows)
-        self:RedrawReview(conflictRows, normalizer)
+        self:RedrawReview(conflictRows, normalizer, members)
         self:RedrawPanel()
     end
     self:RefreshRecruiters()
