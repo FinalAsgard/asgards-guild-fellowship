@@ -255,6 +255,59 @@ test.test("dates travel as officer facts: only officers' are accepted, and the b
     test.assertTrue(partition.data.membershipDates ~= nil)
 end)
 
+-- Add-on seen --------------------------------------------------------------------
+
+test.test("every add-on keeps when it last heard each character; an officer's shares it about once a day", function()
+    local dates, MembershipDates, saved = newDates()
+
+    test.assertEqual(nil, dates:LastHeard({ "bolt" }))
+    test.assertTrue(dates:Heard("bolt", NOW - 3 * DAY))
+    test.assertFalse(dates:Heard("bolt", NOW - 4 * DAY), "an older hearing changes nothing")
+    test.assertEqual(NOW - 3 * DAY, dates:LastHeard({ "bolt" }))
+    test.assertEqual(nil, saved.characters.bolt.addonSeen, "what this add-on heard stays local")
+    test.assertEqual(0, #dates:Facts())
+
+    -- An officer's add-on makes it a fact the first time, then not again
+    -- until it's a day newer than what the guild has.
+    local fact = dates:ShareHeard("bolt", OFFICER, NOW - 3 * DAY)
+    test.assertEqual("addonSeen", fact.kind)
+    test.assertEqual(NOW - 3 * DAY, fact.time)
+    test.assertEqual(OFFICER, fact.by)
+    dates:Heard("bolt", NOW - 3 * DAY + HOUR)
+    test.assertEqual(nil, dates:ShareHeard("bolt", OFFICER, NOW - 3 * DAY + HOUR))
+    dates:Heard("bolt", NOW)
+    test.assertEqual(NOW, dates:ShareHeard("bolt", OFFICER, NOW).time)
+    test.assertEqual(nil, dates:ShareHeard("nail", OFFICER, NOW), "never heard")
+    test.assertEqual(1, #dates:Facts())
+
+    -- Player-wide: the newest of the characters given, heard here or shared.
+    dates:Apply({ kind = "addonSeen", character = "nail", time = NOW + 60, source = "heard", at = NOW + 60,
+        by = OTHER_OFFICER })
+    test.assertEqual(NOW + 60, dates:LastHeard({ "bolt", "nail" }))
+    test.assertEqual(NOW, dates:LastHeard({ "bolt", "rivet" }))
+    test.assertTrue(MembershipDates.Replaces("addonSeen", { time = NOW, source = "heard" },
+        { time = NOW + 1, source = "heard" }))
+    test.assertFalse(MembershipDates.Replaces("addonSeen", { time = NOW, source = "heard" },
+        { time = NOW - 1, source = "heard", at = NOW + 5, by = OFFICER }), "the newest time wins, not the stamp")
+end)
+
+test.test("a relayed last-heard time is accepted only from an officer, and only when newer", function()
+    local facts = newSync({ OFFICER, MEMBER, "bolt-area52" })
+    local function heard(time, by)
+        return { kind = "addonSeen", character = "bolt-area52", time = time, source = "heard", at = time, by = by }
+    end
+
+    test.assertEqual("not an officer", facts:Refusal(heard(NOW - DAY, MEMBER)))
+    test.assertEqual(1, facts:ApplyAll({ heard(NOW - DAY, OFFICER) }))
+    test.assertEqual(NOW - DAY, facts:Dates():LastHeard({ "bolt-area52" }))
+    test.assertEqual("not newer", facts:Refusal(heard(NOW - 2 * DAY, OTHER_OFFICER)))
+    test.assertEqual(1, facts:ApplyAll({ heard(NOW - HOUR, OTHER_OFFICER) }))
+    test.assertEqual(NOW - HOUR, facts:Dates():LastHeard({ "bolt-area52" }))
+    test.assertEqual("from the future", facts:Refusal(heard(NOW + DAY, OFFICER)))
+    test.assertEqual("malformed", facts:Refusal({ kind = "addonSeen", character = "bolt-area52", time = NOW,
+        source = "log", at = NOW, by = OFFICER }))
+end)
+
 -- In the composed add-on -------------------------------------------------------------
 
 local NAMES = {

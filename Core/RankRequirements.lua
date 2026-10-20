@@ -40,6 +40,7 @@ local RankRequirements = {
     KIND_PLAYER_DAYS = "player-guild-days",
     KIND_RANK_DAYS = "rank-days",
     KIND_LEVEL = "level",
+    KIND_ADDON = "addon",
     MAX_LABEL = 60,
     -- The most items a rank can have.
     MAX_ITEMS = 15,
@@ -66,6 +67,7 @@ RankRequirements.KINDS = {
     [RankRequirements.KIND_PLAYER_DAYS] = "Player days in guild",
     [RankRequirements.KIND_RANK_DAYS] = "Days at rank",
     [RankRequirements.KIND_LEVEL] = "Character level",
+    [RankRequirements.KIND_ADDON] = "Has the add-on (days)",
 }
 
 -- The editor's kinds, in the order its kind button steps through them.
@@ -76,6 +78,7 @@ RankRequirements.KIND_ORDER = {
     RankRequirements.KIND_PLAYER_DAYS,
     RankRequirements.KIND_RANK_DAYS,
     RankRequirements.KIND_LEVEL,
+    RankRequirements.KIND_ADDON,
 }
 
 -- The automated kinds, each with the range of its `n` and the label an
@@ -85,6 +88,9 @@ RankRequirements.AUTOMATED = {
     [RankRequirements.KIND_PLAYER_DAYS] = { low = 1, high = 3650, label = "Player in the guild %d days" },
     [RankRequirements.KIND_RANK_DAYS] = { low = 1, high = 3650, label = "At this rank %d days" },
     [RankRequirements.KIND_LEVEL] = { low = 1, high = 100, label = "Level %d" },
+    -- Any of the player's characters heard on add-on sync within N days.
+    [RankRequirements.KIND_ADDON] = { low = 1, high = 365, default = 30,
+        label = "Has the add-on (seen in %d days)" },
 }
 
 RankRequirements.TYPES = {
@@ -328,6 +334,8 @@ function Requirements:Add(rank, label, kind, rankName, author, at, n)
     end
     if not RankRequirements.IsAutomated(kind) then
         n = nil
+    elseif n == nil and RankRequirements.AUTOMATED[kind].default ~= nil then
+        n = RankRequirements.AUTOMATED[kind].default
     elseif RankRequirements.NumberProblem(kind, n) then
         return nil, RankRequirements.NumberProblem(kind, n)
     end

@@ -52,11 +52,17 @@ function Endpoint:Start(onMessage, onWhisper, onOfficer)
         local receive = distribution == Comm.DISTRIBUTION and onMessage
             or distribution == Comm.WHISPER and onWhisper
             or distribution == Comm.OFFICER and onOfficer or nil
-        if type(receive) ~= "function" or type(text) ~= "string" or type(sender) ~= "string" then
+        if type(text) ~= "string" or type(sender) ~= "string" then
             return
         end
         local decoded, success, message = pcall(serializer.Deserialize, serializer, text)
-        if decoded and success and type(message) == "table" then
+        if not (decoded and success and type(message) == "table") then
+            return
+        end
+        if type(self.onHeard) == "function" then
+            pcall(self.onHeard, sender)
+        end
+        if type(receive) == "function" then
             pcall(receive, message, sender)
         end
     end)
@@ -66,6 +72,13 @@ function Endpoint:Start(onMessage, onWhisper, onOfficer)
     self.endpoint = endpoint
     self.serializer = serializer
     return true
+end
+
+-- Calls onHeard(sender) for every add-on message with this prefix heard
+-- from anyone, on any channel, before it's handled: proof that sender has
+-- the add-on. Set it before or after Start.
+function Endpoint:OnHeard(onHeard)
+    self.onHeard = onHeard
 end
 
 -- Sends `message` to the guild at `priority` (BULK when nil). Returns false

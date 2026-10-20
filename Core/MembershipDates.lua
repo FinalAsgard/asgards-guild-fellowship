@@ -14,6 +14,10 @@ local _, addon = ...
 --              the rank it applies to. `source` is officer, log (a logged
 --              promotion or demotion), seen (when a roster scan saw the
 --              rank change) or before-tracking.
+--   addonSeen  when an officer's add-on last heard the character's add-on
+--              (`source` heard). The newest time wins, and like every date
+--              fact it's accepted only from officers. Each add-on also keeps
+--              the time it heard the character itself (`heard`, local).
 -- `tolerance` is how far off a logged time may be. `at` and `by` stamp a
 -- record an officer's add-on wrote: those are officer facts and travel to
 -- every add-on with guild sync (see SyncFacts). Records worked out from
@@ -34,8 +38,9 @@ local _, addon = ...
 -- officer's mark is shared; the earliest wins.
 --
 -- Stored in the table it's given: { tracking = { time, at?, by? },
--- characters = { [key] = { joined, rankSince, left? } } }, where `left` is
--- when a scan last found the character gone (so its return is a rejoin).
+-- characters = { [key] = { joined, rankSince, addonSeen, heard?, left? } } },
+-- where `left` is when a scan last found the character gone (so its return
+-- is a rejoin).
 --
 -- Pure: the caller passes the saved table and the facts.
 local MembershipDates = {
@@ -51,6 +56,14 @@ local MembershipDates = {
     -- Two records of a join closer than this (or than either's tolerance)
     -- are the same join.
     SAME_JOIN_SECONDS = 2 * 3600,
+    -- When the character's add-on was last heard (see Heard).
+    KIND_ADDON_SEEN = "addonSeen",
+    HEARD = "heard",
+    -- An officer's add-on shares a character's last-heard time once it's
+    -- this much newer than the one the guild already has: the add-on check
+    -- counts days, so a day's precision is enough, and it keeps the traffic
+    -- to about one fact per character a day.
+    HEARD_SHARE_SECONDS = 24 * 3600,
 }
 addon.MembershipDates = MembershipDates
 
@@ -58,6 +71,7 @@ MembershipDates.KINDS = {
     [MembershipDates.KIND_JOINED] = true,
     [MembershipDates.KIND_RANK_SINCE] = true,
     [MembershipDates.KIND_TRACKING] = true,
+    [MembershipDates.KIND_ADDON_SEEN] = true,
 }
 
 local JOIN_SOURCES = {
@@ -103,6 +117,9 @@ local function isRecord(kind, record)
     if kind == MembershipDates.KIND_JOINED then
         return JOIN_SOURCES[record.source] ~= nil
     end
+    if kind == MembershipDates.KIND_ADDON_SEEN then
+        return record.source == MembershipDates.HEARD and record.rank == nil
+    end
     return RANK_SOURCES[record.source] ~= nil and isRank(record.rank)
 end
 
@@ -127,6 +144,13 @@ function MembershipDates.Replaces(kind, held, new)
     end
     if held == nil then
         return true
+    end
+    -- The newest time heard wins; the same time, the newer stamp.
+    if kind == MembershipDates.KIND_ADDON_SEEN then
+        if new.time ~= held.time then
+            return new.time > held.time
+        end
+        return new.by ~= nil and (held.by == nil or newerStamp(new, held))
     end
     if new.source == MembershipDates.BEFORE_TRACKING then
         return false
@@ -394,6 +418,63 @@ function Dates:SetByOfficer(key, kind, time, rank, author, now)
     return self:FactOf(key, kind)
 end
 
+-- An add-on message was heard directly from `key` at `now`. Every add-on
+-- keeps the newest time it heard each character itself, locally (`heard`
+-- on the character's entry); only officers' add-ons pass it on (see
+-- ShareHeard). Returns true when the time moved on.
+function Dates:Heard(key, now)
+    if not isText(key) or not isTime(now) then
+        return false
+    end
+    local entry = self:entry(key, true)
+    if isTime(entry.heard) and entry.heard >= now then
+        return false
+    end
+    entry.heard = now
+    return true
+end
+
+-- On an officer's (`author`'s) add-on: when it heard `key` at least
+-- HEARD_SHARE_SECONDS later than the last-heard time the guild has, that
+-- time becomes `author`'s fact at `now`, to share. Returns it, or nil.
+function Dates:ShareHeard(key, author, now)
+    local entry = self:entry(key)
+    if entry == nil or not isTime(entry.heard) or not isText(author) or not isTime(now) then
+        return nil
+    end
+    local held = self:held(key, MembershipDates.KIND_ADDON_SEEN)
+    if held ~= nil and entry.heard - held.time < MembershipDates.HEARD_SHARE_SECONDS then
+        return nil
+    end
+    entry[MembershipDates.KIND_ADDON_SEEN] = {
+        time = entry.heard,
+        source = MembershipDates.HEARD,
+        at = math.max(now, held and held.at and held.at + 1 or 0),
+        by = author,
+    }
+    return self:FactOf(key, MembershipDates.KIND_ADDON_SEEN)
+end
+
+-- When any of `keys`' add-ons was last heard, by this add-on or by an
+-- officer's, or nil when never.
+function Dates:LastHeard(keys)
+    local best
+    local index
+    for index = 1, #keys do
+        local entry = self:entry(keys[index])
+        if entry ~= nil then
+            if isTime(entry.heard) and (best == nil or entry.heard > best) then
+                best = entry.heard
+            end
+            local shared = self:held(keys[index], MembershipDates.KIND_ADDON_SEEN)
+            if shared ~= nil and (best == nil or shared.time > best) then
+                best = shared.time
+            end
+        end
+    end
+    return best
+end
+
 -- A tracking-start mark this officer's add-on set (ObserveScan), stamped
 -- as `author`'s at `now`, as a fact to share; nil when there's none to
 -- share.
@@ -486,7 +567,9 @@ function Dates:Facts(checkpoint)
     local index
     for index = 1, #keys do
         local _, kind
-        for _, kind in ipairs({ MembershipDates.KIND_JOINED, MembershipDates.KIND_RANK_SINCE }) do
+        for _, kind in ipairs({ MembershipDates.KIND_JOINED, MembershipDates.KIND_RANK_SINCE,
+            MembershipDates.KIND_ADDON_SEEN })
+        do
             local fact = self:FactOf(keys[index], kind)
             if fact ~= nil and self.isOfficer(fact.by) then
                 table.insert(facts, fact)

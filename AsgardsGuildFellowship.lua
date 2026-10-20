@@ -38,6 +38,8 @@ local guildLogSync
 -- Membership dates (see MembershipDates), set up with guild sync below:
 -- what a roster scan saw, and the officer's lines for the player panel.
 local observeMembership, membershipLines = function() end, function() end
+-- An add-on message was heard from a character (see MembershipDates:Heard).
+local heardFrom = function() end
 -- The officers' Promotions page (see RankRequirements), set up with guild
 -- sync below: view() gives its model, and the rest edit it.
 local promotions = {
@@ -1982,6 +1984,62 @@ if clientProfile.supported then
             shareDates({ dates:StampTracking(rosterController:SelfKey(), now) })
         end
     end
+    -- Every add-on message heard proves its sender has the add-on. Writes
+    -- are throttled per character, so busy sync costs a table lookup. An
+    -- officer's add-on notes who it heard and, every few minutes, makes
+    -- and shares their last-heard facts together, not one message per
+    -- character; until then its digest is unchanged.
+    local HEARD_THROTTLE_SECONDS = 60
+    local HEARD_FLUSH_SECONDS = 300
+    local lastHeard = {}
+    local heardKeys, heardFlushing = {}, false
+    local function flushHeard()
+        heardFlushing = false
+        local keys = heardKeys
+        heardKeys = {}
+        local guild, partition = rosterController:QuietContext()
+        local author, now = rosterController:SelfKey(), client:Timestamp()
+        if guild == nil or author == nil or now == nil or not selfIsOfficer() then
+            return
+        end
+        local dates = datesOf(partition)
+        local sorted = {}
+        local key
+        for key in pairs(keys) do
+            table.insert(sorted, key)
+        end
+        table.sort(sorted)
+        local facts = {}
+        local index
+        for index = 1, #sorted do
+            local fact = dates:ShareHeard(sorted[index], author, now)
+            if fact ~= nil then
+                table.insert(facts, fact)
+            end
+        end
+        shareDates(facts)
+    end
+    heardFrom = function(sender)
+        local now = client:Timestamp()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local key = guild and normalizer:Key(sender)
+        if key == nil or now == nil or (lastHeard[key] ~= nil and now - lastHeard[key] < HEARD_THROTTLE_SECONDS)
+            or partition:GetCharacter(key) == nil
+        then
+            return
+        end
+        lastHeard[key] = now
+        datesOf(partition):Heard(key, now)
+        if selfIsOfficer() then
+            heardKeys[key] = true
+            if not heardFlushing then
+                heardFlushing = true
+                if not client:After(HEARD_FLUSH_SECONDS, flushHeard) then
+                    flushHeard()
+                end
+            end
+        end
+    end
     -- The player panel's dates, for officers only: the player's earliest
     -- current join, then each character's join and time at its rank.
     membershipLines = function(keys)
@@ -3499,6 +3557,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     rosterController:OnSavedDataReady()
     -- Without the comm libraries, sync simply stays off, and Guild Greet and
     -- Guild Recruit work uncoordinated.
+    comm:OnHeard(function(sender)
+        heardFrom(sender)
+    end)
     if comm:Start(function(message, sender)
         if message.t == addon.GuildGreet.TYPE_GREETED then
             guildGreet:OnGreeted(message, sender)
