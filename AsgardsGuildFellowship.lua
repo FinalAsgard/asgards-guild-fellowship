@@ -45,6 +45,10 @@ local promotions = {
         return nil
     end,
     askOnce = function() end,
+    prune = function() end,
+    listRows = function()
+        return nil
+    end,
 }
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
@@ -133,8 +137,11 @@ if clientProfile.supported then
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
             observeMembership()
-            -- Once ranks are known, catch up on promotion requirements.
+            -- Once ranks are known, catch up on promotion requirements and
+            -- ticks; a rank change makes a character's ticks stale.
+            promotions.prune()
             promotions.askOnce()
+            rosterController:RefreshPromotions()
             -- A scan that saw a promotion or demotion shows or hides the
             -- officers' tabs.
             rosterController:RefreshPages()
@@ -167,7 +174,7 @@ if clientProfile.supported then
             return membershipLines(keys)
         end,
         promotionsView = function()
-            return promotions.view()
+            return promotions.view(), promotions.listRows()
         end,
         groupedWith = function(keys)
             local guild, partition = rosterController:QuietContext()
@@ -276,6 +283,12 @@ if clientProfile.supported then
                 end,
                 onPromotionsDelete = function(id)
                     return promotions.delete(id)
+                end,
+                onPromotionsExpand = function(key)
+                    return promotions.expand(key)
+                end,
+                onPromotionsTick = function(key, item, ticked, note)
+                    return promotions.tick(key, item, ticked, note)
                 end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
@@ -2062,7 +2075,7 @@ if clientProfile.supported then
         })
     end
     local requirementsSync = addon.RankRequirements.CreateSync({
-        requirements = requirementsOf,
+        store = requirementsOf,
         selfKey = function()
             return rosterController:SelfKey()
         end,
@@ -2087,8 +2100,115 @@ if clientProfile.supported then
         end,
     })
     promotions.sync = requirementsSync
+    -- Officers' ticks: shared the same way.
+    local function checksOf()
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        return addon.PromotionChecks.Create(partition:GetPromotionChecks(), {
+            isOfficer = function(key)
+                return officerAuthority:IsOfficer(key)
+            end,
+            rankOf = function(key)
+                local character = partition:GetCharacter(key)
+                if character == nil or not partition:IsInGuild(key) then
+                    return nil
+                end
+                return character.rank
+            end,
+        })
+    end
+    local ticksSync = addon.RankRequirements.CreateSync({
+        store = checksOf,
+        stateType = addon.PromotionChecks.TYPE_STATE,
+        askType = addon.PromotionChecks.TYPE_ASK,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        senderKey = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(sender) or nil
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        announce = function(message)
+            return comm:Broadcast(message)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        onChange = function()
+            rosterController:RefreshPromotions()
+        end,
+    })
+    promotions.ticks = ticksSync
     promotions.askOnce = function()
         requirementsSync:AskOnce()
+        ticksSync:AskOnce()
+    end
+    promotions.prune = function()
+        local checks = checksOf()
+        if checks ~= nil then
+            checks:Prune()
+        end
+    end
+    local expandedPromotions = {}
+    promotions.listRows = function()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local requirements, checks = requirementsOf(), checksOf()
+        if guild == nil or requirements == nil or checks == nil then
+            return nil
+        end
+        local function nameOf(key)
+            local character = partition:GetCharacter(key)
+            return (character and normalizer:Display(character.name)) or key
+        end
+        local evaluated = addon.PromotionPolicy.List({
+            partition = partition,
+            requirements = requirements,
+            checks = checks,
+            rankNames = client:GetGuildRankNames() or {},
+        }, nameOf)
+        return addon.PromotionsViewModel.List(evaluated, {
+            expanded = expandedPromotions,
+            nameOf = nameOf,
+            formatDate = function(timestamp)
+                return client:FormatDate(timestamp)
+            end,
+            anyRequirements = requirements:Ranks()[1] ~= nil,
+        })
+    end
+    promotions.expand = function(key)
+        expandedPromotions[key] = not expandedPromotions[key] or nil
+        rosterController:RefreshPromotions()
+        return true
+    end
+    promotions.tick = function(key, itemId, ticked, note)
+        local requirements, checks = requirementsOf(), checksOf()
+        local author = rosterController:SelfKey()
+        local now = client:Timestamp()
+        if requirements == nil or checks == nil or author == nil or now == nil then
+            return false, "saved data is unavailable"
+        end
+        if not selfIsOfficer() then
+            return false, "only officers can tick promotion requirements"
+        end
+        local item = requirements:Item(itemId)
+        if item == nil then
+            return false, "that requirement no longer exists"
+        end
+        local records, reason = checks:Set(key, item, ticked, note, author, now)
+        if records == nil then
+            return false, reason
+        end
+        ticksSync:Share(records)
+        rosterController:RefreshPromotions()
+        return true
     end
     local selectedRank
     local function rankNames()
@@ -3357,6 +3477,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             onLocationMessage(message, sender)
         elseif addon.RankRequirements.TYPES[message.t] ~= nil then
             promotions.sync:OnMessage(message, sender)
+        elseif addon.PromotionChecks.TYPES[message.t] ~= nil then
+            promotions.ticks:OnMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end

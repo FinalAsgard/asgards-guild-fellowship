@@ -51,8 +51,9 @@ Controller.__index = Controller
 --                 with a player, for the player panel, or nil
 --   membership    optional function(keys) -> lines about a player's
 --                 membership dates for the player panel (officers), or nil
---   promotionsView optional function() -> the Promotions page's model (see
---                 PromotionsViewModel.Editor)
+--   promotionsView optional function() -> the Promotions page's editor
+--                 model and list rows (see PromotionsViewModel.Editor and
+--                 List)
 --   recruitRecord optional function(keys) -> a player's ad record (see
 --                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
@@ -1212,9 +1213,9 @@ function Controller:RefreshPromotions()
     then
         return
     end
-    local ok, model = pcall(self.promotionsView)
+    local ok, model, rows = pcall(self.promotionsView)
     if ok and model ~= nil then
-        self.window:SetPromotions(model)
+        self.window:SetPromotions(model, rows)
     end
 end
 

@@ -99,3 +99,82 @@ function PromotionsViewModel.Editor(inputs)
     end
     return model
 end
+
+PromotionsViewModel.NOBODY = "Nobody is at a rank with requirements."
+PromotionsViewModel.NO_REQUIREMENTS = "No rank has promotion requirements yet. Use Edit requirements to add some."
+
+-- The Promotions list's rows from PromotionPolicy.List's `evaluated`, for
+-- the page's list. options:
+--   expanded      set of character keys whose checklist is open
+--   nameOf(key)   a character's (or officer's) name to show
+--   formatDate(time)
+--   anyRequirements  whether any rank has requirements
+-- Rows: a heading, then per character
+--   { kind = "character", key, character, ranks, progress, highest, action }
+-- and, under an open one, per item
+--   { kind = "item", key, item, character, ranks, ticked, needsNote, action,
+--     tooltip }
+-- where `tooltip` lists who ticked it, when, and the note. With no
+-- characters, one { kind = "empty" } row says why.
+function PromotionsViewModel.List(evaluated, options)
+    options = options or {}
+    local expanded = options.expanded or {}
+    local nameOf = options.nameOf or tostring
+    local formatDate = options.formatDate or tostring
+    local rows = {
+        { kind = "heading", character = "Character", ranks = "Rank", progress = "Progress", highest = "Player's highest" },
+    }
+    local index
+    for index = 1, #evaluated do
+        local row = evaluated[index]
+        local open = expanded[row.key] == true
+        table.insert(rows, {
+            kind = "character",
+            key = row.key,
+            character = (row.ready and "|cff40ff40Ready|r " or "") .. tostring(row.name),
+            ranks = row.rankName .. " -> " .. row.nextRankName,
+            progress = row.met .. " of " .. row.total,
+            highest = row.highestRankName or "",
+            action = open and "Close" or "Open",
+        })
+        if open then
+            local itemIndex
+            for itemIndex = 1, #row.items do
+                local item = row.items[itemIndex]
+                local record = item.record
+                local ticked = record ~= nil and record.ticked
+                local tooltip
+                if ticked then
+                    tooltip = { "Ticked by " .. tostring(nameOf(record.by)) .. " on " .. formatDate(record.at) }
+                    if record.note ~= nil then
+                        table.insert(tooltip, "Note: " .. record.note)
+                    end
+                elseif record ~= nil then
+                    tooltip = { "Unticked by " .. tostring(nameOf(record.by)) .. " on " .. formatDate(record.at) }
+                end
+                local needsNote = item.kind == addon.RankRequirements.KIND_CHECK_NOTE
+                table.insert(rows, {
+                    kind = "item",
+                    key = row.key,
+                    item = item.id,
+                    character = "    " .. (item.met and "|cff40ff40[x]|r " or "[ ] ") .. item.label,
+                    ranks = needsNote and "Needs a note" or "",
+                    progress = ticked and record.note and ("\"" .. record.note .. "\"") or "",
+                    highest = "",
+                    ticked = ticked == true,
+                    needsNote = needsNote,
+                    label = item.label,
+                    action = ticked and "Untick" or "Tick",
+                    tooltip = tooltip,
+                })
+            end
+        end
+    end
+    if evaluated[1] == nil then
+        table.insert(rows, {
+            kind = "empty",
+            character = options.anyRequirements and PromotionsViewModel.NOBODY or PromotionsViewModel.NO_REQUIREMENTS,
+        })
+    end
+    return rows
+end

@@ -406,7 +406,10 @@ end
 -- Sharing -------------------------------------------------------------------------
 
 -- options:
---   requirements() -> this guild's RankRequirements, or nil
+--   store()        -> this guild's RankRequirements (or another store with
+--                     the same Apply, Snapshot and CoveredBy), or nil
+--   stateType, askType  the message types (TYPE_STATE and TYPE_ASK by
+--                     default)
 --   selfKey()      -> the logged-in character's key, or nil
 --   senderKey(sender) -> a character key for a message's sender
 --   isOfficer(key) -> boolean
@@ -419,7 +422,9 @@ Sync.__index = Sync
 
 function RankRequirements.CreateSync(options)
     return setmetatable({
-        requirements = options.requirements,
+        requirements = options.store,
+        stateType = options.stateType or RankRequirements.TYPE_STATE,
+        askType = options.askType or RankRequirements.TYPE_ASK,
         selfKey = options.selfKey,
         senderKey = options.senderKey,
         isOfficer = options.isOfficer,
@@ -439,7 +444,7 @@ end
 -- Sends `records` (from an edit) to the guild.
 function Sync:Share(records)
     if type(records) == "table" and records[1] ~= nil then
-        self.announce({ v = RankRequirements.PROTOCOL, t = RankRequirements.TYPE_STATE, r = records })
+        self.announce({ v = RankRequirements.PROTOCOL, t = self.stateType, r = records })
     end
 end
 
@@ -452,7 +457,7 @@ function Sync:AskOnce()
     self.asked = true
     local function ask()
         if self.requirements() ~= nil then
-            self.announce({ v = RankRequirements.PROTOCOL, t = RankRequirements.TYPE_ASK })
+            self.announce({ v = RankRequirements.PROTOCOL, t = self.askType })
         end
     end
     if not self.after(RankRequirements.ASK_DELAY + self.random(0, RankRequirements.ASK_SPREAD), ask) then
@@ -473,11 +478,11 @@ function Sync:OnMessage(message, sender)
     if requirements == nil or senderKey == nil or senderKey == selfKey then
         return false
     end
-    if message.t == RankRequirements.TYPE_ASK then
+    if message.t == self.askType then
         self:Answer(requirements, selfKey)
         return false
     end
-    if message.t ~= RankRequirements.TYPE_STATE or type(message.r) ~= "table" then
+    if message.t ~= self.stateType or type(message.r) ~= "table" then
         return false
     end
     if self.answering and requirements:CoveredBy(message.r) then

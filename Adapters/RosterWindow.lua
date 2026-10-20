@@ -1017,6 +1017,25 @@ local function listLineCreator(columns, onAction)
         line.background = line:CreateTexture(nil, "BACKGROUND")
         line.background:SetAllPoints(line)
         line.cells = {}
+        -- A row with `tooltip` lines shows them on hover.
+        line:EnableMouse(true)
+        line:SetScript("OnEnter", function(self)
+            local lines = self.row and self.row.tooltip
+            if type(lines) ~= "table" or GameTooltip == nil then
+                return
+            end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            local lineIndex
+            for lineIndex = 1, #lines do
+                GameTooltip:AddLine(lines[lineIndex], 1, 1, 1, true)
+            end
+            GameTooltip:Show()
+        end)
+        line:SetScript("OnLeave", function()
+            if GameTooltip ~= nil then
+                GameTooltip:Hide()
+            end
+        end)
         local columnIndex
         for columnIndex = 1, #columns do
             local column = columns[columnIndex]
@@ -1284,17 +1303,34 @@ local function buildGuildLog(framework, page, frameName, options)
     return log
 end
 
--- The officers' Promotions page, below the frame's title bar: < and >
--- pick a rank, a warning shows when the rank was set up under another
--- name, a box adds an item (or renames one), and each item has Up, Down,
--- Rename and Delete. Delete asks first, in the page itself. Each control
--- calls its `options` handler, which returns true, or false and why not
--- (shown under the box); SetPromotions shows the model (see
--- PromotionsViewModel.Editor).
-local function buildPromotions(page, options)
+-- The Promotions list's columns.
+local PROMOTION_COLUMNS = {
+    { field = "character", x = 8, width = 230 },
+    { field = "ranks", x = 242, width = 160 },
+    { field = "progress", x = 406, width = 80 },
+    { field = "highest", x = 490, width = 120 },
+    { field = "button", x = 614, width = 1, action = true },
+}
+
+-- The officers' Promotions page, below the frame's title bar. It opens on
+-- the list: each character at a rank with requirements, its ranks,
+-- progress and its player's highest rank; Open shows its checklist, where
+-- Tick and Untick work each item (an item that needs a note asks for one
+-- first, in the page) and hovering a tick says who ticked it, when, and
+-- the note. Edit requirements switches to the editor: < and > pick a
+-- rank, a warning shows when the rank was set up under another name, a
+-- box adds an item (or renames one), and each item has Up, Down, Rename
+-- and Delete. Delete asks first, in the page itself. Each control calls
+-- its `options` handler, which returns true, or false and why not (shown
+-- in the page); SetPromotions shows the models (see
+-- PromotionsViewModel.Editor and List).
+local function buildPromotions(framework, page, frameName, options)
     local holder = CreateFrame("Frame", nil, page)
     holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
     holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
+    local listHolder = CreateFrame("Frame", nil, page)
+    listHolder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
+    listHolder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
     local editor = { rows = {} }
     local function call(handler, ...)
         local callback = options[handler]
@@ -1302,10 +1338,13 @@ local function buildPromotions(page, options)
             return
         end
         local ok, done, reason = pcall(callback, ...)
+        local text = ""
         if ok and done == false then
-            editor.message:SetText("|cffff8040" .. tostring(reason or "That didn't work") .. ".|r")
-        else
-            editor.message:SetText("")
+            text = "|cffff8040" .. tostring(reason or "That didn't work") .. ".|r"
+        end
+        editor.message:SetText(text)
+        if editor.listMessage ~= nil then
+            editor.listMessage:SetText(text)
         end
         return ok and done ~= false
     end
@@ -1444,6 +1483,81 @@ local function buildPromotions(page, options)
         row:Hide()
         editor.rows[index] = row
     end
+
+    -- The list, with the note prompt above it.
+    local width, height = page:GetSize()
+    local lines = math.max(1, math.floor((height - 110) / RosterWindow.LINE_HEIGHT))
+    local noteBar = CreateFrame("Frame", nil, listHolder)
+    noteBar:SetSize(560, 24)
+    noteBar:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 120, 0)
+    noteBar.text = noteBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    noteBar.text:SetPoint("LEFT", noteBar, "LEFT", 0, 0)
+    noteBar.text:SetWidth(150)
+    noteBar.text:SetJustifyH("LEFT")
+    noteBar.text:SetWordWrap(false)
+    local noteBox = CreateFrame("EditBox", nil, noteBar, "InputBoxTemplate")
+    noteBox:SetSize(240, 20)
+    noteBox:SetPoint("LEFT", noteBar.text, "RIGHT", 8, 0)
+    noteBox:SetAutoFocus(false)
+    noteBox:SetMaxLetters(addon.PromotionChecks.MAX_NOTE)
+    local function tickWithNote()
+        local row = noteBar.row
+        if row ~= nil and call("onPromotionsTick", row.key, row.item, true, noteBox:GetText()) then
+            noteBar:Hide()
+        end
+    end
+    noteBox:SetScript("OnEnterPressed", tickWithNote)
+    noteBox:SetScript("OnEscapePressed", function()
+        noteBar:Hide()
+    end)
+    local tick = smallButton(noteBar, 50, "Tick", tickWithNote)
+    tick:SetPoint("LEFT", noteBox, "RIGHT", 6, 0)
+    local cancelNote = smallButton(noteBar, 60, "Cancel", function()
+        noteBar:Hide()
+    end)
+    cancelNote:SetPoint("LEFT", tick, "RIGHT", 4, 0)
+    noteBar:Hide()
+    editor.noteBar = noteBar
+    editor.list = buildList(framework, listHolder, frameName .. "PromotionsScroll", "Promotions",
+        PROMOTION_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines, function(row)
+            if row.kind == "character" then
+                call("onPromotionsExpand", row.key)
+            elseif row.kind == "item" then
+                if not row.ticked and row.needsNote then
+                    noteBar.row = row
+                    noteBar.text:SetText("Note for " .. tostring(row.label) .. ":")
+                    noteBox:SetText("")
+                    noteBar:Show()
+                    noteBox:SetFocus()
+                else
+                    call("onPromotionsTick", row.key, row.item, not row.ticked)
+                end
+            end
+        end)
+    editor.list.scroll:SetPoint("BOTTOMRIGHT", listHolder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 24)
+    editor.listMessage = listHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    editor.listMessage:SetPoint("BOTTOMLEFT", listHolder, "BOTTOMLEFT", 16, 4)
+    editor.listMessage:SetWidth(680)
+    editor.listMessage:SetJustifyH("LEFT")
+
+    -- Switching between the list and the editor.
+    local mode = smallButton(page, 130, "Edit requirements", nil)
+    mode:SetPoint("TOPRIGHT", page, "TOPRIGHT", -20, -30)
+    local function showList(list)
+        if list then
+            holder:Hide()
+            listHolder:Show()
+            mode:SetText("Edit requirements")
+        else
+            listHolder:Hide()
+            holder:Show()
+            mode:SetText("Back to list")
+        end
+    end
+    mode:SetScript("OnClick", function()
+        showList(not listHolder:IsShown())
+    end)
+    showList(true)
     return editor
 end
 
@@ -1575,7 +1689,7 @@ local function build(framework, options)
     local promotions
     local promotionsPage = host:Content("promotions")
     if promotionsPage ~= nil then
-        local built, editor = pcall(buildPromotions, promotionsPage, options)
+        local built, editor = pcall(buildPromotions, framework, promotionsPage, frameName, options)
         promotions = built and editor or nil
         if options.onPromotionsShown ~= nil then
             promotionsPage:HookScript("OnShow", options.onPromotionsShown)
@@ -1967,14 +2081,19 @@ end
 
 -- Shows the Recent ads page's rows (see RosterController:RecentAdsView).
 -- False when the frame has no Recent ads page.
--- Shows the Promotions page's model (see PromotionsViewModel.Editor).
--- False when the frame has no Promotions page.
-function Window:SetPromotions(model)
+-- Shows the Promotions page's editor model and list rows (see
+-- PromotionsViewModel.Editor and List). False when the frame has no
+-- Promotions page.
+function Window:SetPromotions(model, rows)
     local editor = self.promotions
     if editor == nil or type(model) ~= "table" then
         return false
     end
     return (pcall(function()
+        if rows ~= nil then
+            editor.list.scroll:SetData(rows)
+            editor.list.scroll:Refresh()
+        end
         editor.rankText:SetText(model.rankText or "")
         editor.nextText:SetText(model.nextText or "")
         editor.mismatch:SetText(model.mismatch and ("|cffff8040" .. model.mismatch .. "|r") or "")

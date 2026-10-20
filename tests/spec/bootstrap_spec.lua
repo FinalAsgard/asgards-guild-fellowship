@@ -70,6 +70,8 @@ local MANIFEST_FILES = {
     "Core/GuildLogSync.lua",
     "Core/MembershipDates.lua",
     "Core/RankRequirements.lua",
+    "Core/PromotionChecks.lua",
+    "Core/PromotionPolicy.lua",
     "Core/PromotionsViewModel.lua",
     "Core/LocationProtocol.lua",
     "Core/LocationScheduler.lua",

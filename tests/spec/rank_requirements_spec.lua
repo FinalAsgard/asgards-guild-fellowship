@@ -189,7 +189,7 @@ local function newHub(names)
             return addon.RankRequirements.Create(node.saved, { isOfficer = isOfficer })
         end
         node.sync = addon.RankRequirements.CreateSync({
-            requirements = node.requirements,
+            store = node.requirements,
             selfKey = function()
                 return node.key
             end,

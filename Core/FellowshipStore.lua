@@ -230,7 +230,7 @@ local function validatePartition(data)
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
         "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn", "withdrawals",
         "welcomeConfig", "welcomeLedger", "guildLog", "membershipDates",
-        "rankRequirements",
+        "rankRequirements", "promotionChecks",
     }
     local index
     for index = 1, #containers do
@@ -268,7 +268,7 @@ local function validatePartition(data)
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
         recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true, withdrawals = true,
         welcomeConfig = true, welcomeLedger = true, guildLog = true, membershipDates = true,
-        rankRequirements = true,
+        rankRequirements = true, promotionChecks = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -1560,6 +1560,15 @@ function Partition:GetRankRequirements()
         self.data.rankRequirements = {}
     end
     return self.data.rankRequirements
+end
+
+-- Officers' ticks on promotion checklists (see PromotionChecks), created
+-- on first use.
+function Partition:GetPromotionChecks()
+    if self.data.promotionChecks == nil then
+        self.data.promotionChecks = {}
+    end
+    return self.data.promotionChecks
 end
 
 -- The guild's membership dates (see MembershipDates), created on first use.
