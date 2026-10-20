@@ -198,14 +198,19 @@ end
 
 -- Applies a record received from another add-on (or made here): when it
 -- has the right shape, its author is an officer, and it's newer than the
--- one held. Returns true when applied.
-function Requirements:Apply(record)
+-- one held. `fromOfficer` is true when an officer's add-on sent it: then
+-- its author need only have been an officer when they made it, so an item
+-- by an officer since demoted isn't left out of a catch-up. Returns true
+-- when applied.
+function Requirements:Apply(record, fromOfficer)
     if not RankRequirements.IsRecord(record) then
         return false
     end
-    local ok, officer = pcall(self.isOfficer, record.by)
-    if not ok or officer ~= true then
-        return false
+    if fromOfficer ~= true then
+        local ok, officer = pcall(self.isOfficer, record.by)
+        if not ok or officer ~= true then
+            return false
+        end
     end
     local held = self:heldOf(record)
     if held ~= nil and RankRequirements.IsRecord(held)
@@ -591,7 +596,7 @@ function Sync:OnMessage(message, sender)
     local changed = false
     local index
     for index = 1, #message.r do
-        if requirements:Apply(message.r[index]) then
+        if requirements:Apply(message.r[index], true) then
             changed = true
         end
     end

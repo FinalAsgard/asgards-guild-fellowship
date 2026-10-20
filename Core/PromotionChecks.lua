@@ -99,14 +99,18 @@ end
 
 -- Applies a record received from another add-on (or made here): when it
 -- has the right shape, is for the character's current rank, its author is
--- an officer, and it's newer than the one held. Returns true when applied.
-function Checks:Apply(record)
+-- an officer, and it's newer than the one held. `fromOfficer` is true when
+-- an officer's add-on sent it: then its author need only have been an
+-- officer when they ticked it. Returns true when applied.
+function Checks:Apply(record, fromOfficer)
     if not PromotionChecks.IsRecord(record) or not self:current(record) then
         return false
     end
-    local ok, officer = pcall(self.isOfficer, record.by)
-    if not ok or officer ~= true then
-        return false
+    if fromOfficer ~= true then
+        local ok, officer = pcall(self.isOfficer, record.by)
+        if not ok or officer ~= true then
+            return false
+        end
     end
     local held = self.saved.records[keyOf(record)]
     if PromotionChecks.IsRecord(held) and self:current(held)

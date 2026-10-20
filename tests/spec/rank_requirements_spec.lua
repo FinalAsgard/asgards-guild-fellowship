@@ -313,6 +313,24 @@ test.test("records are taken only from officers' add-ons, so a member can't send
     test.assertEqual("", labels(hub.nodes["other-area52"].requirements(), 3))
 end)
 
+test.test("a catch-up from an officer keeps items made by an officer since demoted", function()
+    local hub = newHub({ OFFICER, "late-area52" })
+    -- The officer's add-on holds two items; one is by a former officer.
+    hub.nodes[OFFICER].saved.items = {
+        a = { t = "item", id = "a", rank = 3, label = "Hi", kind = "check", position = 1, at = NOW, by = OFFICER },
+        b = { t = "item", id = "b", rank = 3, label = "Raid", kind = "check", position = 2, at = NOW,
+            by = "former-area52" },
+    }
+
+    hub.nodes["late-area52"].sync:AskOnce()
+    hub:runTimers()
+
+    test.assertEqual("Hi,Raid", labels(hub.nodes["late-area52"].requirements(), 3), "the whole checklist arrives")
+    -- Taken directly, a record still needs its author to be an officer now.
+    test.assertFalse(hub.nodes["late-area52"].requirements():Apply({ t = "item", id = "c", rank = 3, label = "New",
+        kind = "check", position = 3, at = NOW, by = "former-area52" }))
+end)
+
 -- In the composed add-on -----------------------------------------------------------
 
 local NAMES = {
