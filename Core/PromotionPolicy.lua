@@ -315,6 +315,18 @@ function PromotionPolicy.Matches(partition, text, display)
     return set
 end
 
+-- The characters who meet every requirement, as a set of keys.
+function PromotionPolicy.ReadySet(inputs)
+    local ready = {}
+    eachCandidate(inputs, function(key, character, itemsOf)
+        local summary = PromotionPolicy.Summarize(inputs, key, itemsOf)
+        if summary ~= nil and summary.ready then
+            ready[key] = true
+        end
+    end)
+    return ready
+end
+
 PromotionPolicy.PAGE_SIZE = 50
 
 -- The Promotions list for a guild of any size: every candidate is

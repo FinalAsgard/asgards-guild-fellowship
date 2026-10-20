@@ -50,6 +50,12 @@ local promotions = {
     prune = function() end,
     observe = function() end,
     shown = function() end,
+    readyKeys = function()
+        return nil
+    end,
+    panelRows = function()
+        return nil
+    end,
     listRows = function()
         return nil
     end,
@@ -182,6 +188,12 @@ if clientProfile.supported then
             local rows, controls = promotions.listRows()
             return promotions.view(), rows, controls
         end,
+        promotion = function(keys, playerId)
+            return promotions.panelRows(keys, playerId)
+        end,
+        readyKeys = function()
+            return promotions.readyKeys()
+        end,
         groupedWith = function(keys)
             local guild, partition = rosterController:QuietContext()
             if guild == nil then
@@ -307,6 +319,9 @@ if clientProfile.supported then
                 end,
                 onPromotionsPromote = function(key)
                     return promotions.promote(key)
+                end,
+                onPromotionsFocus = function(key)
+                    return promotions.focus(key)
                 end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
@@ -2327,6 +2342,99 @@ if clientProfile.supported then
         if not refreshingPromotions then
             refreshingPromotions = client:After(PROMOTIONS_REFRESH_SECONDS, refreshOpenPromotions) and true or false
         end
+    end
+    -- What the rules engine reads, or nil before the guild is known.
+    local function promotionInputs()
+        local guild, partition = rosterController:QuietContext()
+        local requirements, checks = requirementsOf(), checksOf()
+        if guild == nil or requirements == nil or checks == nil then
+            return nil
+        end
+        return {
+            partition = partition,
+            requirements = requirements,
+            checks = checks,
+            dates = datesOf(partition),
+            now = client:Timestamp(),
+            rankNames = client:GetGuildRankNames() or {},
+        }
+    end
+    -- The characters ready for promotion, as a set, for the roster's marker:
+    -- officers only.
+    promotions.readyKeys = function()
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        return addon.PromotionPolicy.ReadySet(inputs)
+    end
+    -- The player panel's Promotion section (see PromotionsViewModel.PanelRows):
+    -- an officer's for anyone, a member's for their own player only, and
+    -- nil for everyone else.
+    promotions.panelRows = function(keys, playerId)
+        local inputs = promotionInputs()
+        if inputs == nil then
+            return nil
+        end
+        local partition = inputs.partition
+        local _, _, normalizer = rosterController:QuietContext()
+        local officer = selfIsOfficer()
+        local selfKey = rosterController:SelfKey()
+        local own = selfKey ~= nil and partition:GetCharacter(selfKey) ~= nil
+            and partition:GetCharacter(selfKey).player == playerId
+        if not officer and not own then
+            return nil
+        end
+        local function nameOf(key)
+            local character = partition:GetCharacter(key)
+            return (character and normalizer:Display(character.name)) or key
+        end
+        local dates = inputs.dates
+        local characters = {}
+        local index
+        for index = 1, #keys do
+            local key = keys[index]
+            local character = partition:GetCharacter(key)
+            if character ~= nil and partition:IsInGuild(key) and type(character.rank) == "number" then
+                local mode = officer and promotions.mode(key) or nil
+                table.insert(characters, {
+                    key = key,
+                    name = nameOf(key),
+                    rankName = inputs.rankNames[character.rank + 1] or ("Rank " .. character.rank),
+                    evaluated = addon.PromotionPolicy.Evaluate(inputs, key),
+                    lastPromotion = dates and dates:LastPromotion(key) or nil,
+                    promoteAction = mode == "promote" and "Promote" or mode == "mark" and "Mark as promoted" or nil,
+                })
+            end
+        end
+        local highest = addon.PromotionPolicy.HighestRank(partition, playerId)
+        return addon.PromotionsViewModel.PanelRows(characters, {
+            officer = officer,
+            highestRankName = highest and (inputs.rankNames[highest + 1] or ("Rank " .. highest)) or nil,
+            nameOf = nameOf,
+            formatDate = function(timestamp)
+                return client:FormatDate(timestamp)
+            end,
+        })
+    end
+    -- Shows `key` on the Promotions tab, its checklist open: for a note, a
+    -- reason or a confirmation the panel has no room for.
+    promotions.focus = function(key)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local character = guild and partition:GetCharacter(key)
+        if character == nil or not selfIsOfficer() then
+            return false, "only officers can work promotions"
+        end
+        promotionFilters.ready, promotionFilters.progress = true, true
+        if type(character.rank) == "number" then
+            promotionFilters.hiddenRanks[character.rank] = nil
+        end
+        promotionSearch = normalizer:Display(character.name) or key
+        promotionPage = 1
+        expandedPromotions[key] = true
+        rosterController:ShowPage("promotions")
+        rosterController:RefreshPromotions()
+        return true
     end
     -- How this officer can promote `key`: "promote" when the game's calls
     -- exist and allow it, "mark" when the calls are missing (the officer

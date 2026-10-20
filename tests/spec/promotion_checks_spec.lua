@@ -513,6 +513,118 @@ test.test("the controls show the page, the filters, a box per rank, and the read
     test.assertEqual(Model.NO_MATCH, rows[2].character)
 end)
 
+-- The player panel and the roster -------------------------------------------------------
+
+local function panelFor(inputs, addon, keys, options)
+    local characters = {}
+    local index
+    for index = 1, #keys do
+        local character = inputs.partition:GetCharacter(keys[index])
+        table.insert(characters, {
+            key = keys[index],
+            name = keys[index],
+            rankName = RANKS[character.rank + 1],
+            evaluated = addon.PromotionPolicy.Evaluate(inputs, keys[index]),
+            lastPromotion = options.lastPromotion,
+            promoteAction = options.promoteAction,
+        })
+    end
+    return addon.PromotionsViewModel.PanelRows(characters, options)
+end
+
+local function rowWith(rows, text)
+    local index
+    for index = 1, #rows do
+        if rows[index].text ~= nil and string.find(rows[index].text, text, 1, true) then
+            return rows[index]
+        end
+    end
+    return nil
+end
+
+test.test("an officer's panel shows each character's checklist with its buttons, who ticked, and Promote", function()
+    local inputs, addon = newGuild({ main = 2, bolt = 4 })
+    local noted = addItem(inputs, 4, "Attend an event", "check-note")
+    addItem(inputs, 4, "", "level", 10)
+    inputs.checks:Set("bolt", noted, true, "Raid night", OFFICER, NOW)
+
+    local rows = panelFor(inputs, addon, { "main", "bolt" }, {
+        officer = true,
+        highestRankName = "Veteran",
+        promoteAction = "Promote",
+        lastPromotion = { time = NOW, rank = 4, promoter = OFFICER },
+        nameOf = function(key)
+            return key == OFFICER and "Toolbox" or key
+        end,
+        formatDate = function()
+            return "2026-10-20"
+        end,
+    })
+    test.assertEqual("Promotion", rows[1].text)
+    test.assertEqual("Highest rank: Veteran", rows[2].text)
+    test.assertContains(rowWith(rows, "main: Veteran").text, "no requirements")
+    test.assertContains(rowWith(rows, "bolt: Initiate -> Member, 1 of 2").text, "1 of 2")
+    test.assertContains(rowWith(rows, "Promoted on 2026-10-20").text, "by Toolbox")
+    local ticked = rowWith(rows, "Attend an event")
+    test.assertEqual("Untick", ticked.action)
+    test.assertContains(ticked.text, "Raid night")
+    test.assertContains(ticked.tooltip[1], "Ticked by Toolbox")
+    local level = rowWith(rows, "Level 10")
+    test.assertEqual("Override", level.action)
+    test.assertTrue(level.askReason)
+    test.assertContains(level.text, "level unknown")
+    local promote = rowWith(rows, "Promote to Member")
+    test.assertTrue(promote.promote)
+    test.assertEqual("Promote...", promote.action, "unmet items ask first, on the Promotions tab")
+    test.assertContains(promote.confirm, "Not met: Level 10")
+end)
+
+test.test("a member's own panel shows progress and details read-only, without notes, names, or Promote", function()
+    local inputs, addon = newGuild({ bolt = 4 })
+    local noted = addItem(inputs, 4, "Attend an event", "check-note")
+    addItem(inputs, 4, "", "level", 10)
+    inputs.checks:Set("bolt", noted, true, "Raid night", OFFICER, NOW)
+
+    local rows = panelFor(inputs, addon, { "bolt" }, {
+        officer = false,
+        highestRankName = "Veteran",
+        promoteAction = "Promote",
+        lastPromotion = { time = NOW, rank = 4, promoter = OFFICER },
+    })
+    test.assertEqual(nil, rowWith(rows, "Highest rank"))
+    test.assertEqual(nil, rowWith(rows, "Promoted on"))
+    test.assertEqual(nil, rowWith(rows, "Promote to"))
+    local ticked = rowWith(rows, "Attend an event")
+    test.assertContains(ticked.text, "[x]")
+    test.assertFalse(string.find(ticked.text, "Raid night", 1, true) ~= nil, "no notes")
+    test.assertEqual(nil, ticked.action)
+    test.assertEqual(nil, ticked.tooltip)
+    test.assertContains(rowWith(rows, "Level 10").text, "level unknown")
+    local index
+    for index = 1, #rows do
+        test.assertEqual(nil, rows[index].action)
+    end
+end)
+
+test.test("the roster marks ready characters' rows, and clears marks that no longer apply", function()
+    local inputs, addon = newGuild({ bolt = 4, nail = 4 })
+    local item = addItem(inputs, 4, "Read the rules")
+    inputs.checks:Set("bolt", item, true, nil, OFFICER, NOW)
+    local Roster = test.newAddon("Core/RosterViewModel.lua").RosterViewModel
+    local ready = addon.PromotionPolicy.ReadySet(inputs)
+    test.assertTrue(ready.bolt)
+    test.assertEqual(nil, ready.nail)
+
+    local rows = { { kind = "player" }, { kind = "character", key = "bolt" }, { kind = "character", key = "nail" } }
+    test.assertTrue(Roster.MarkReady(rows, ready))
+    test.assertTrue(rows[2].ready)
+    test.assertEqual(nil, rows[3].ready)
+    test.assertEqual(nil, rows[1].ready)
+    test.assertFalse(Roster.MarkReady(rows, ready), "nothing changed")
+    test.assertTrue(Roster.MarkReady(rows, nil))
+    test.assertEqual(nil, rows[2].ready)
+end)
+
 -- In the composed add-on -----------------------------------------------------------
 
 local NAMES = {
@@ -891,5 +1003,72 @@ for profileIndex = 1, #fixtures.PROFILES do
         tool.addon.pages:Select("promotions")
         fixtures.runTimers(tool, 601)
         test.assertEqual(2, #drawn, "closed, it stops")
+    end)
+
+    test.test(profile .. " the player panel works promotions for officers, agrees with the tab, and only a member's own",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local hammer = login(profile, channel, names[2])
+        settle(channel, 5)
+        local promotions = tool.addon.promotions
+        test.assertTrue(promotions.add("Read the rules", false))
+        test.assertTrue(promotions.rank(-1))
+        test.assertTrue(promotions.add("Help a new member", false))
+        settle(channel, 10)
+        local bolt = characterRow(promotions.listRows(), "Bolt")
+        local _, partition = tool.addon.rosterController:QuietContext()
+        local boltPlayer = partition:GetCharacter(bolt.key).player
+        local boltKeys = partition:CharactersOf(boltPlayer)
+
+        local panel = promotions.panelRows(boltKeys, boltPlayer)
+        local item = rowWith(panel, "Read the rules")
+        test.assertEqual("Tick", item.action)
+        test.assertTrue(rowWith(panel, "Promote to Member") ~= nil)
+        test.assertTrue(promotions.tick(item.key, item.item, true))
+        panel = promotions.panelRows(boltKeys, boltPlayer)
+        test.assertEqual("Untick", rowWith(panel, "Read the rules").action)
+        test.assertContains(rowWith(panel, "Initiate -> Member").text, "1 of 1")
+        test.assertEqual("1 of 1", characterRow(promotions.listRows(), "Bolt").progress, "the tab agrees")
+        test.assertTrue(promotions.readyKeys()[bolt.key])
+
+        -- The roster marks Bolt's row once the window redraws.
+        local controller = tool.addon.rosterController
+        local drawnRows
+        controller.window = {
+            IsShown = function()
+                return true
+            end,
+            ShowPage = function() end,
+            SetRows = function(_, rows)
+                drawnRows = rows
+            end,
+            SetPromotions = function() end,
+        }
+        controller.rosterRows = { { kind = "character", key = bolt.key } }
+        controller:RefreshPromotions()
+        test.assertTrue(drawnRows[1].ready)
+
+        -- Members: nothing about others, nor a ready marker; their own,
+        -- read-only.
+        settle(channel, 10)
+        test.assertEqual(nil, hammer.addon.promotions.readyKeys())
+        test.assertEqual(nil, hammer.addon.promotions.panelRows(boltKeys, boltPlayer))
+        local hammerKey = hammer.addon.rosterController:SelfKey()
+        local _, memberPartition = hammer.addon.rosterController:QuietContext()
+        local hammerPlayer = memberPartition:GetCharacter(hammerKey).player
+        local own = hammer.addon.promotions.panelRows(memberPartition:CharactersOf(hammerPlayer), hammerPlayer)
+        local help = rowWith(own, "Help a new member")
+        test.assertContains(help.text, "[ ]")
+        test.assertEqual(nil, help.action)
+        test.assertFalse(hammer.addon.promotions.focus(hammerKey))
+
+        -- A note or a confirmation opens the character on the tab.
+        test.assertTrue(promotions.focus(bolt.key))
+        test.assertEqual("promotions", tool.addon.pages:Current())
+        local rows, controls = promotions.listRows()
+        local _, at = characterRow(rows, "Bolt")
+        test.assertEqual("item", rows[at + 1].kind, "its checklist is open")
+        test.assertEqual("Page 1 of 1 (1 character)", controls.pageText, "searched by its name")
     end)
 end

@@ -171,7 +171,9 @@ end
 -- -> the character's role preferences as text, or nil), groupedWith
 -- (optional function(keys) -> how often this user grouped with the player,
 -- or nil), membership (optional function(keys) -> lines about the
--- player's membership dates, or nil; only officers get them), wrap
+-- player's membership dates, or nil; only officers get them), promotion
+-- (optional function(keys, playerId) -> the promotion section's rows, see
+-- PromotionsViewModel.PanelRows, or nil), wrap
 -- (optional function(text) -> an About entry's lines as they fit the
 -- panel; by default, lines of at most BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
@@ -185,6 +187,7 @@ end
 --   { kind = "stat", text }  (the player's ad count, then how often you
 --                             grouped with them, then membership dates,
 --                             first, when there are any)
+--   then the promotion section's rows, when there are any
 --   { kind = "section", text }
 --   { kind = "about", text }  (under an About heading: "Discord: name",
 --                              "Location: text", then the bio's lines;
@@ -227,6 +230,14 @@ function PlayerPanelViewModel.Build(inputs)
                 if type(lines[index]) == "string" then
                     table.insert(rows, { kind = "stat", text = lines[index] })
                 end
+            end
+        end
+    end
+    if inputs.promotion ~= nil then
+        local ok, promotion = pcall(inputs.promotion, keys, inputs.playerId)
+        if ok and type(promotion) == "table" then
+            for index = 1, #promotion do
+                table.insert(rows, promotion[index])
             end
         end
     end

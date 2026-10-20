@@ -54,6 +54,10 @@ Controller.__index = Controller
 --   promotionsView optional function() -> the Promotions page's editor
 --                 model, list rows and list controls (see
 --                 PromotionsViewModel.Editor, List and Controls)
+--   promotion     optional function(keys, playerId) -> the player panel's
+--                 promotion rows (officers, or a member's own player), or nil
+--   readyKeys     optional function() -> the set of characters ready for
+--                 promotion, for the roster's marker (officers), or nil
 --   recruitRecord optional function(keys) -> a player's ad record (see
 --                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
@@ -71,6 +75,8 @@ function RosterController.Create(options)
         groupedWith = options.groupedWith,
         membership = options.membership,
         promotionsView = options.promotionsView,
+        promotion = options.promotion,
+        readyKeys = options.readyKeys,
         recruitRecord = options.recruitRecord,
         recentAds = options.recentAds,
         offZones = options.offZones,
@@ -762,6 +768,7 @@ function Controller:RedrawPanel()
         rolesOf = self.rolesOf,
         groupedWith = self.groupedWith,
         membership = self.membership,
+        promotion = self.promotion,
         -- The window wraps the bio to the panel's width, when it can
         -- measure text.
         wrap = self.window.WrapAbout and function(text)
@@ -886,6 +893,8 @@ function Controller:Redraw()
             search = self.search,
             now = self.client:Timestamp(),
         }, stamp)
+        self.rosterRows = rows
+        self:MarkReady(false)
         self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
         self.window:SetRows(rows)
         self:RedrawCounts(members)
@@ -1205,12 +1214,29 @@ function Controller:RefreshGuildLog()
     end
 end
 
+-- Marks the roster's rows of characters ready for promotion (see
+-- RosterViewModel.MarkReady; only officers get any), redrawing the roster
+-- when that changed and `redraw` is set.
+function Controller:MarkReady(redraw)
+    if self.rosterRows == nil or self.readyKeys == nil then
+        return
+    end
+    local ok, ready = pcall(self.readyKeys)
+    if addon.RosterViewModel.MarkReady(self.rosterRows, ok and ready or nil) and redraw and self.window ~= nil then
+        self.window:SetRows(self.rosterRows)
+    end
+end
+
 -- Redraws the Promotions page, and its tab's ready count, when the window
--- is open (see PromotionsViewModel.Editor and Controls).
+-- is open (see PromotionsViewModel.Editor and Controls), with the roster's
+-- ready markers and the player panel's promotion section.
 function Controller:RefreshPromotions()
-    if self.window == nil or not self.window:IsShown() or type(self.window.SetPromotions) ~= "function"
-        or self.promotionsView == nil
-    then
+    if self.window == nil or not self.window:IsShown() then
+        return
+    end
+    self:MarkReady(true)
+    self:RedrawPanel()
+    if type(self.window.SetPromotions) ~= "function" or self.promotionsView == nil then
         return
     end
     local ok, model, rows, controls = pcall(self.promotionsView)

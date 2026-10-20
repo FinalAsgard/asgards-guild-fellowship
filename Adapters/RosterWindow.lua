@@ -136,6 +136,11 @@ local function cellText(row, field)
     if row.departed and field == "location" then
         return "|cff7f7f7f" .. tostring(row.location) .. "|r"
     end
+    -- Officers see who is ready for promotion (see RosterViewModel.MarkReady).
+    if field == "rank" and row.ready then
+        -- First, so a long rank name never hides it.
+        return "|cff40ff40Ready|r " .. tostring(row.rank or "")
+    end
     local value = row[field]
     return value ~= nil and tostring(value) or ""
 end
@@ -506,6 +511,46 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 options.onDetach(line.row.key)
             end
         end)
+        -- A promotion row's button: Tick, Untick, Override and Undo override
+        -- work here; a note, a reason, or a promotion with unmet items opens
+        -- the character on the Promotions tab instead.
+        line.act = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+        line.act:SetSize(96, 18)
+        line.act:SetPoint("RIGHT", line, "RIGHT", -2, 0)
+        line.act:SetScript("OnClick", function()
+            local row = line.row
+            if row == nil or row.kind ~= "promotion" then
+                return
+            end
+            local function call(handler, ...)
+                if options[handler] ~= nil then
+                    pcall(options[handler], ...)
+                end
+            end
+            if row.promote then
+                call(row.confirm and "onPromotionsFocus" or "onPromotionsPromote", row.key)
+            elseif not row.ticked and (row.needsNote or row.askReason) then
+                call("onPromotionsFocus", row.key)
+            else
+                call("onPromotionsTick", row.key, row.item, not row.ticked)
+            end
+        end)
+        line.act:SetScript("OnEnter", function(self)
+            local tooltip = line.row and line.row.tooltip
+            if tooltip ~= nil and GameTooltip ~= nil then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                local index
+                for index = 1, #tooltip do
+                    GameTooltip:AddLine(tooltip[index], 1, 1, 1, true)
+                end
+                GameTooltip:Show()
+            end
+        end)
+        line.act:SetScript("OnLeave", function()
+            if GameTooltip ~= nil then
+                GameTooltip:Hide()
+            end
+        end)
         return line
     end
     local function refreshLines(scroll, rows, offset, totalLines)
@@ -534,13 +579,22 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 elseif row.kind == "history" then
                     text = "  " .. row.name .. "  |cff9d9d9d" .. row.role .. ", " .. row.reason ..
                         (row.dates ~= "" and (", " .. row.dates) or "") .. "|r"
+                elseif row.kind == "promotion" then
+                    text = "  " .. row.text
                 end
-                -- Only character rows have buttons; the others' text uses
-                -- the line's full width.
+                -- Only character rows and promotion rows with an action have
+                -- buttons; the others' text uses the line's full width.
+                local acts = row.kind == "promotion" and row.action ~= nil
                 line.text:ClearAllPoints()
                 line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
-                line.text:SetPoint("RIGHT", line, "RIGHT", row.kind == "character" and -128 or -6, 0)
+                line.text:SetPoint("RIGHT", line, "RIGHT", row.kind == "character" and -128 or (acts and -100 or -6), 0)
                 line.text:SetText(text)
+                if acts then
+                    line.act:SetText(row.action)
+                    line.act:Show()
+                else
+                    line.act:Hide()
+                end
                 if row.kind == "character" and row.canMakeMain then
                     line.makeMain:Show()
                 else

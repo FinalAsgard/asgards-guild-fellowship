@@ -253,7 +253,88 @@ function PromotionsViewModel.List(evaluated, options)
     return rows
 end
 
-PromotionsViewModel.NO_MATCH = "Nobody matches. Tick In progress to see everyone working toward a rank."
+-- The player panel's Promotion section, from the same evaluation as the
+-- Promotions tab (so the two always agree). `characters` lists the
+-- player's characters in the guild:
+--   { key, name, rankName, evaluated (PromotionPolicy.Evaluate, or nil
+--     when its rank has no requirements), lastPromotion (a MembershipDates
+--     record, or nil), promoteAction ("Promote", "Mark as promoted", nil) }
+-- options: officer (true for an officer's view: tick, override and promote
+-- buttons, who ticked, notes and reasons; false for a member's own view,
+-- read-only, with just each item's status and detail), highestRankName,
+-- nameOf(key), formatDate(time).
+-- Rows: { kind = "section" }, then { kind = "stat", text } lines, and
+--   { kind = "promotion", text, key, item?, action?, ticked, needsNote,
+--     askReason, promote?, confirm?, tooltip? }
+-- where `action` names the row's button (officers only).
+function PromotionsViewModel.PanelRows(characters, options)
+    options = options or {}
+    local nameOf = options.nameOf or tostring
+    local formatDate = options.formatDate or tostring
+    local rows = { { kind = "section", text = "Promotion" } }
+    if options.officer and options.highestRankName ~= nil then
+        table.insert(rows, { kind = "stat", text = "Highest rank: " .. options.highestRankName })
+    end
+    local index
+    for index = 1, #characters do
+        local character = characters[index]
+        local evaluated = character.evaluated
+        local text = tostring(character.name) .. ": " .. tostring(character.rankName)
+        if evaluated == nil then
+            text = text .. "  |cff9d9d9dno requirements|r"
+        else
+            text = text .. " -> " .. evaluated.nextRankName .. ", " .. evaluated.met .. " of " .. evaluated.total ..
+                (evaluated.ready and "  |cff40ff40Ready|r" or "")
+        end
+        table.insert(rows, { kind = "promotion", key = character.key, text = text })
+        local last = character.lastPromotion
+        if options.officer and last ~= nil then
+            table.insert(rows, { kind = "promotion", key = character.key, text = "    |cff9d9d9dPromoted on " ..
+                formatDate(last.time) .. (last.promoter and (" by " .. tostring(nameOf(last.promoter))) or "") .. "|r" })
+        end
+        local itemIndex
+        for itemIndex = 1, #(evaluated and evaluated.items or {}) do
+            local item = PromotionsViewModel.ItemRow(character.key, evaluated.items[itemIndex], nameOf, formatDate)
+            local detail = item.ranks ~= "" and item.ranks or nil
+            local row = {
+                kind = "promotion",
+                key = character.key,
+                item = item.item,
+                ticked = item.ticked,
+                text = item.character .. (detail and ("  |cff9d9d9d" .. detail .. "|r") or ""),
+            }
+            if options.officer then
+                if item.progress ~= "" then
+                    row.text = row.text .. "  |cff9d9d9d" .. item.progress .. "|r"
+                end
+                row.action = item.action
+                row.needsNote = item.needsNote
+                row.askReason = item.askReason
+                row.tooltip = item.tooltip
+            end
+            table.insert(rows, row)
+        end
+        if options.officer and evaluated ~= nil and character.promoteAction ~= nil then
+            evaluated.name = evaluated.name or character.name
+            local promote = PromotionsViewModel.PromoteRow(evaluated, character.promoteAction)
+            table.insert(rows, {
+                kind = "promotion",
+                key = character.key,
+                promote = true,
+                text = promote.character,
+                action = promote.confirm and (character.promoteAction .. "...") or character.promoteAction,
+                confirm = promote.confirm,
+                tooltip = promote.tooltip,
+            })
+        end
+    end
+    if characters[1] == nil then
+        table.insert(rows, { kind = "empty", text = "No characters in the guild" })
+    end
+    return rows
+end
+
+PromotionsViewModel.NO_MATCH ="Nobody matches. Tick In progress to see everyone working toward a rank."
 
 -- The tab's name with how many characters are ready: "Promotions (4)".
 function PromotionsViewModel.TabLabel(ready)
