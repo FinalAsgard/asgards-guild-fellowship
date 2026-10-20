@@ -291,6 +291,28 @@ test.test("a change reaches every add-on, and one that logs in later catches up"
     test.assertFalse(late.nodes["late-area52"].sync:AskOnce(), "once a session")
 end)
 
+test.test("records are taken only from officers' add-ons, so a member can't send one in an officer's name", function()
+    local hub = newHub({ OFFICER, MEMBER, "other-area52" })
+    local member = hub.nodes[MEMBER]
+
+    -- A forged item, in the officer's name, sent from the member's add-on.
+    member.sync:Share({ { t = "item", id = "forged", rank = 3, label = "Forged", kind = "check", position = 1,
+        at = NOW, by = OFFICER } })
+    hub:deliver()
+    test.assertEqual("", labels(hub.nodes[OFFICER].requirements(), 3))
+    test.assertEqual("", labels(hub.nodes["other-area52"].requirements(), 3))
+
+    -- A member holding requirements doesn't answer an ask: no one takes
+    -- them from it.
+    member.saved.items = { a = { t = "item", id = "a", rank = 3, label = "Hi", kind = "check", position = 1,
+        at = NOW, by = OFFICER } }
+    local sent = hub.sent
+    hub.nodes["other-area52"].sync:AskOnce()
+    hub:runTimers()
+    test.assertEqual(sent + 1, hub.sent, "only the ask went out")
+    test.assertEqual("", labels(hub.nodes["other-area52"].requirements(), 3))
+end)
+
 -- In the composed add-on -----------------------------------------------------------
 
 local NAMES = {

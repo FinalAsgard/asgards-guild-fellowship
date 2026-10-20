@@ -403,7 +403,7 @@ Every rank starts with no requirements, so nothing changes until your guild sets
 - Each item has **Up** and **Down** to reorder it, **Edit** to rename it or change its number (ticks are kept, and everyone is checked again at once), and **Delete**, which asks first because it drops the item's ticks too.
 - If the guild master inserts or removes a rank, requirements stay with their rank's position, and the editor warns when the rank there now has a different name, so you can check they still belong.
 
-Requirements reach every add-on in the guild through [guild sync](#guild-sync). When two officers edit the same item, the newest edit wins everywhere. Changes from anyone who isn't an officer are ignored.
+Requirements reach every add-on in the guild through [guild sync](#guild-sync). When two officers edit the same item, the newest edit wins everywhere. Changes are only taken from an officer's add-on, so nobody else can send one, even in an officer's name. An add-on that logs in catches up from an officer online.
 
 ### The Promotions list
 
@@ -423,7 +423,7 @@ Click a character to open its checklist:
 - **Override** passes a failed automated item for this character, with an optional reason. **Undo override** removes it.
 - Hover an item to see who ticked or overrode it, when, and the note or reason.
 
-Ticks, notes and overrides reach every officer's add-on through guild sync, including officers who were offline, who catch up when they log in. Only officers' changes are accepted.
+Ticks, notes and overrides reach every officer's add-on through guild sync, including officers who were offline, who catch up when they log in. They're only taken from an officer's add-on, so nobody can tick their own items, even in an officer's name.
 
 ### Promoting
 

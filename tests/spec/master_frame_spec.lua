@@ -287,6 +287,9 @@ end)
 
 -- The specs stand in for RosterWindow.Create, so the real window's parts are
 -- checked in its source: every part Create keeps must come back from build.
+-- The patterns read RosterWindow.lua's layout: build's one-line
+-- "    return host, scroll, ..." and Create's "local ok, host, ... = pcall(build,".
+-- A failure on "found build's return" means that layout changed, not a part.
 test.test("the roster window keeps every part build makes, the Guild Log and Promotions pages included", function()
     local handle = assert(io.open("Adapters/RosterWindow.lua", "r"))
     local source = handle:read("*a")

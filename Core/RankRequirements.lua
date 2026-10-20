@@ -22,9 +22,10 @@ local _, addon = ...
 -- are refused.
 --
 -- Sharing (CreateSync): a change goes to the guild at once; at login an
--- add-on asks, and one add-on that holds requirements answers with all of
--- them (officers first), unless someone else's answer already covered what
--- it holds.
+-- add-on asks, and one officer's add-on that holds requirements answers
+-- with all of them, unless another officer's answer already covered what
+-- it holds. Records are taken only from officers' add-ons: a record names
+-- its officer, and a member could otherwise send one in an officer's name.
 --
 -- Pure: the caller passes the saved table, the clock and messaging.
 local RankRequirements = {
@@ -46,11 +47,9 @@ local RankRequirements = {
     MAX_ITEMS = 15,
     MAX_RANK = 9,
     -- An officer's add-on answers an ask after OFFICER_ANSWER_MIN to
-    -- OFFICER_ANSWER_MAX seconds, others after ANSWER_MIN to ANSWER_MAX.
+    -- OFFICER_ANSWER_MAX seconds.
     OFFICER_ANSWER_MIN = 1,
     OFFICER_ANSWER_MAX = 2,
-    ANSWER_MIN = 3,
-    ANSWER_MAX = 5,
     -- The ask goes out ASK_DELAY to ASK_DELAY + ASK_SPREAD seconds after
     -- ranks are first known, so logging in stays quiet and a guild logging
     -- in together doesn't ask all at once.
@@ -583,7 +582,7 @@ function Sync:OnMessage(message, sender)
         self:Answer(requirements, selfKey)
         return false
     end
-    if message.t ~= self.stateType or type(message.r) ~= "table" then
+    if message.t ~= self.stateType or type(message.r) ~= "table" or self.isOfficer(senderKey) ~= true then
         return false
     end
     if self.answering and requirements:CoveredBy(message.r) then
@@ -602,16 +601,15 @@ function Sync:OnMessage(message, sender)
     return changed
 end
 
--- Answers an ask with everything held, after a random short wait, unless
--- an answer covering it is heard first.
+-- An officer's add-on answers an ask with everything held, after a random
+-- short wait, unless an answer covering it is heard first. Members don't
+-- answer: no one takes records from them.
 function Sync:Answer(requirements, selfKey)
-    if self.answering or requirements:Snapshot()[1] == nil then
+    if self.answering or selfKey == nil or self.isOfficer(selfKey) ~= true or requirements:Snapshot()[1] == nil then
         return
     end
     self.answering = true
-    local officer = selfKey ~= nil and self.isOfficer(selfKey)
-    local delay = officer and self.random(RankRequirements.OFFICER_ANSWER_MIN, RankRequirements.OFFICER_ANSWER_MAX)
-        or self.random(RankRequirements.ANSWER_MIN, RankRequirements.ANSWER_MAX)
+    local delay = self.random(RankRequirements.OFFICER_ANSWER_MIN, RankRequirements.OFFICER_ANSWER_MAX)
     local function answer()
         if not self.answering then
             return
