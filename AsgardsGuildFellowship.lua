@@ -27,6 +27,12 @@ end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
+-- The officers' guild log for the current guild, or nil for everyone else
+-- (set up with guild sync below).
+local guildLogOf = function()
+    return nil
+end
+local requestGuildLog, readGuildLog, recordLiveMembership = function() end, function() end, function() end
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local guildNoteOverlay
@@ -56,6 +62,10 @@ if clientProfile.supported then
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
+    -- Officers only: it comes and goes with the character's rank.
+    pages:Add("guildlog", "Guild Log", addon.MasterFrame.ICONS.guildlog, function()
+        return guildLogOf() ~= nil
+    end)
     pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
     -- This install has logged in on this character: My Profile can offer it
     -- to the player's other characters as an alt. Recorded once per session
@@ -106,6 +116,9 @@ if clientProfile.supported then
         onScanFinished = function(_, result)
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
+            -- A scan that saw a promotion or demotion shows or hides the
+            -- officers' tabs.
+            rosterController:RefreshPages()
             -- Characters new to the guild may be due a welcome mail.
             if guildWelcome ~= nil and type(result) == "table" then
                 guildWelcome:OnScan(result.newKeys)
@@ -145,6 +158,13 @@ if clientProfile.supported then
         end,
         recentAds = function()
             return guildRecruit:KnownAds()
+        end,
+        guildLog = function()
+            return (guildLogOf())
+        end,
+        rankName = function(index)
+            local names = client:GetGuildRankNames()
+            return names and names[index + 1] or nil
         end,
         offZones = function()
             return guildRecruit:OffZones()
@@ -210,6 +230,9 @@ if clientProfile.supported then
                 end,
                 onRecentAdsShown = function()
                     rosterController:RefreshRecruiters()
+                end,
+                onGuildLogShown = function()
+                    rosterController:RefreshGuildLog()
                 end,
                 onTurnBackOn = function(zoneKey)
                     rosterController:TurnBackOn(zoneKey)
@@ -1833,6 +1856,109 @@ if clientProfile.supported then
             return comm:RankCanViewOfficerNotes(rank)
         end,
     })
+    -- The officers' guild log (see GuildLog): only an officer's add-on
+    -- records or stores it. It's read from the game's guild event log
+    -- (asked for again at most every LOG_REQUEST_SECONDS, as the roster
+    -- updates) and from joins and leaves seen live. A client without the
+    -- event log keeps only the live events.
+    -- The character's own rank is read live, so a promotion or demotion
+    -- counts at once, not after the next full scan.
+    local function selfIsOfficer()
+        local rank = client:GetPlayerGuildRankIndex()
+        if rank == nil then
+            return officerAuthority:IsOfficer(rosterController:SelfKey())
+        end
+        return officerAuthority:IsOfficerRank(rank)
+    end
+    local guildLogs = {}
+    guildLogOf = function()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil or not selfIsOfficer() then
+            return nil
+        end
+        local log = guildLogs[partition.key]
+        if log == nil then
+            log = addon.GuildLog.Create(partition:GetGuildLog())
+            guildLogs[partition.key] = log
+        end
+        return log, normalizer
+    end
+    local LOG_REQUEST_SECONDS = 10 * 60
+    local logRequestedAt
+    requestGuildLog = function()
+        local now = client:Timestamp()
+        if guildLogOf() == nil or now == nil
+            or (logRequestedAt ~= nil and now - logRequestedAt < LOG_REQUEST_SECONDS)
+        then
+            return
+        end
+        logRequestedAt = now
+        client:RequestGuildEventLog()
+    end
+    readGuildLog = function()
+        local log, normalizer = guildLogOf()
+        local raw = log ~= nil and client:ReadGuildEventLog() or nil
+        if raw == nil then
+            return
+        end
+        local rankNames = client:GetGuildRankNames() or {}
+        local events = addon.GuildLog.FromGameEntries(raw, client:Timestamp(), function(name)
+            return normalizer:Key(name)
+        end, function(rank)
+            local index
+            for index = 1, #rankNames do
+                if rankNames[index] == rank then
+                    return index - 1
+                end
+            end
+            return nil
+        end)
+        if log:RecordBatch(events) > 0 then
+            rosterController:RefreshGuildLog()
+        end
+    end
+    recordLiveMembership = function(kind, name)
+        local log, normalizer = guildLogOf()
+        local key = log ~= nil and normalizer:Key(name) or nil
+        local now = client:Timestamp()
+        if key == nil or now == nil then
+            return
+        end
+        local eventType = kind == "join" and addon.GuildLog.JOIN or addon.GuildLog.LEAVE
+        if log:RecordLive(eventType, key, now, name) then
+            rosterController:RefreshGuildLog()
+        end
+    end
+    router:Register("probe", "check what the game reports to the add-on (probe log: the guild event log, officers)",
+        function(arguments)
+            if string.lower(arguments or "") ~= "log" then
+                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe log.")
+                return
+            end
+            if guildLogOf() == nil then
+                rosterController:Print("Only officers can probe the guild event log.")
+                return
+            end
+            client:RequestGuildEventLog()
+            local function report()
+                local present = client:GuildEventLogCalls()
+                local calls = {}
+                local index
+                for index = 1, #addon.Compatibility.EVENT_LOG_CALLS do
+                    local name = addon.Compatibility.EVENT_LOG_CALLS[index]
+                    table.insert(calls, { name = name, present = present[name] })
+                end
+                rosterController:Print("Guild event log probe:")
+                local lines = addon.GuildLog.ProbeLines(calls, client:ReadGuildEventLog(), 5)
+                for index = 1, #lines do
+                    client:Print("  " .. lines[index])
+                end
+            end
+            -- The log the game sends back takes a moment to arrive.
+            if not client:After(2, report) then
+                report()
+            end
+        end)
     syncSession = addon.SyncSession.Create({
         comm = comm,
         context = function()
@@ -2410,6 +2536,10 @@ if clientProfile.supported then
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
         recordOwnCharacter()
+        -- A promotion or demotion shows or hides the officers' tabs, and an
+        -- officer's add-on keeps the guild log up to date.
+        rosterController:RefreshPages()
+        requestGuildLog()
         -- Who is online decides the Group Finder's Invite buttons.
         if groupFinder ~= nil then
             groupFinder:Refresh()
@@ -2858,7 +2988,13 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Settings show saved values, so the panel waits for saved data too.
     settingsPanel:Register()
     -- Without the system message event, Guild Greet simply never prompts.
+    client:ObserveGuildEventLog(function()
+        readGuildLog()
+    end)
     client:ObservePresence(function(kind, name)
+        if kind == "join" or kind == "leave" then
+            recordLiveMembership(kind, name)
+        end
         guildGreet:OnPresence(kind, name)
         if kind == "join" then
             guildWelcome:OnJoined(name)

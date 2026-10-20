@@ -68,6 +68,8 @@ function RosterController.Create(options)
         recentAds = options.recentAds,
         offZones = options.offZones,
         turnBackOn = options.turnBackOn,
+        guildLog = options.guildLog,
+        rankName = options.rankName,
         isOfficer = options.isOfficer or function()
             return false
         end,
@@ -1035,6 +1037,70 @@ function Controller:RefreshRecruiters()
     end
 end
 
+-- The Guild Log page's rows, for officers: a heading row naming the
+-- columns, then every entry newest first, or a line saying there are none
+-- yet. Nil for anyone else (see GuildLog).
+--   { kind = "heading" | "entry", date, event, character, player, actor }
+--   { kind = "empty", event }
+function Controller:GuildLogView()
+    local ok, log = pcall(self.guildLog or function() return nil end)
+    if not ok or log == nil then
+        return nil
+    end
+    local guild, partition, normalizer = self:QuietContext()
+    local rows = { {
+        kind = "heading", date = "Date", event = "Event", character = "Character", player = "Player",
+        actor = "By",
+    } }
+    local function name(key, given)
+        if key == nil then
+            return ""
+        end
+        local character = guild ~= nil and partition:GetCharacter(key) or nil
+        local raw = (character and character.name) or given or key
+        return normalizer and normalizer:Display(raw) or raw
+    end
+    local entries = log:Entries()
+    local index
+    for index = 1, #entries do
+        local entry = entries[index]
+        table.insert(rows, {
+            kind = "entry",
+            date = self.client:FormatDate(entry.at),
+            event = addon.GuildLog.Describe(entry, self.rankName),
+            character = name(entry.character, entry.name),
+            player = guild ~= nil and self:PosterLabel({ k = entry.character, n = entry.name }, partition,
+                normalizer) or "",
+            actor = name(entry.actor, entry.actorName),
+        })
+    end
+    if entries[1] == nil then
+        table.insert(rows, { kind = "empty", event = "Nothing in the guild log yet." })
+    end
+    return rows
+end
+
+-- Redraws the Guild Log page when the window is open.
+function Controller:RefreshGuildLog()
+    if self.window == nil or not self.window:IsShown() or type(self.window.SetGuildLog) ~= "function" then
+        return
+    end
+    local rows = self:GuildLogView()
+    if rows ~= nil then
+        self.window:SetGuildLog(rows)
+    end
+end
+
+-- Shows or hides the tabs whose pages follow the character's rank (see
+-- PageNavigator), falling back to the home page when the page showing is
+-- hidden now. Run when the roster changes, so a promotion or demotion
+-- needs no reload.
+function Controller:RefreshPages()
+    if self.window ~= nil and type(self.window.ShowPage) == "function" then
+        self.window:ShowPage(nil)
+    end
+end
+
 -- Selects the page `entry` opens (see PageNavigator:PageFor) and shows it
 -- in the window.
 function Controller:ShowPage(entry)
@@ -1081,6 +1147,7 @@ function Controller:Toggle(entry)
     self:ShowPage(entry)
     self.window:Show()
     self:RefreshRecruiters()
+    self:RefreshGuildLog()
     return true
 end
 

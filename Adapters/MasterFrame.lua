@@ -28,6 +28,7 @@ local MasterFrame = {
         recruitment = "Interface\\Icons\\INV_Scroll_03",
         ads = "Interface\\Icons\\INV_Misc_PocketWatch_01",
         greetings = "Interface\\Icons\\INV_Letter_15",
+        guildlog = "Interface\\Icons\\INV_Misc_Note_01",
         settings = "Interface\\Icons\\INV_Misc_Gear_01",
     },
 }
@@ -78,11 +79,16 @@ end
 
 -- One picture tab: a dark square with the page's icon, a glow while its
 -- page is showing, and the page's name on mouseover.
+local function placeTab(tab, panel, index)
+    tab:ClearAllPoints()
+    tab:SetPoint("TOPLEFT", panel, "TOPRIGHT", 2, -28 - (index - 1) * (MasterFrame.TAB_SIZE + MasterFrame.TAB_GAP))
+end
+
 local function createTab(panel, index, onClick)
     local size = MasterFrame.TAB_SIZE
     local tab = CreateFrame("Button", nil, panel)
     tab:SetSize(size, size)
-    tab:SetPoint("TOPLEFT", panel, "TOPRIGHT", 2, -28 - (index - 1) * (size + MasterFrame.TAB_GAP))
+    placeTab(tab, panel, index)
     tab.background = tab:CreateTexture(nil, "BACKGROUND")
     tab.background:SetAllPoints(tab)
     tab.background:SetColorTexture(0, 0, 0, 0.75)
@@ -144,7 +150,9 @@ function MasterFrame.Build(framework, options)
         tabs = {},
     }, Host)
 
-    local pages = host.navigator:Tabs()
+    -- A content frame and a tab for every page; ShowPage shows the tabs of
+    -- the pages visible now.
+    local pages = host.navigator:Pages()
     local index
     for index = 1, #pages do
         local page = pages[index]
@@ -182,10 +190,14 @@ function Host:Content(id)
     return self.contents[id]
 end
 
--- Selects the page `id` (an unknown id keeps the current page), then shows
--- only its content and marks only its tab as selected.
+-- Selects the page `id` (an unknown or hidden id keeps the current page,
+-- or the home page when that one is hidden now), then shows only its
+-- content, only the tabs of visible pages, stacked in order, and marks only
+-- its tab as selected.
 function Host:ShowPage(id)
-    self.navigator:Select(id)
+    if id ~= nil then
+        self.navigator:Select(id)
+    end
     local current = self.navigator:Current()
     local pageId, content
     for pageId, content in pairs(self.contents) do
@@ -196,8 +208,16 @@ function Host:ShowPage(id)
         end
     end
     local index
+    local shown = 0
     for index = 1, #self.tabs do
         local tab = self.tabs[index]
+        if self.navigator:IsVisible(tab.pageId) then
+            shown = shown + 1
+            placeTab(tab, self.panel, shown)
+            tab:Show()
+        else
+            tab:Hide()
+        end
         if tab.pageId == current then
             tab.selectedGlow:Show()
             tab.icon:SetAlpha(1)

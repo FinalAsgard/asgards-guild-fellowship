@@ -229,7 +229,7 @@ local function validatePartition(data)
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
         "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn", "withdrawals",
-        "welcomeConfig", "welcomeLedger",
+        "welcomeConfig", "welcomeLedger", "guildLog",
     }
     local index
     for index = 1, #containers do
@@ -266,7 +266,7 @@ local function validatePartition(data)
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
         recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true, withdrawals = true,
-        welcomeConfig = true, welcomeLedger = true,
+        welcomeConfig = true, welcomeLedger = true, guildLog = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -1540,6 +1540,15 @@ function Partition:GetWelcomeLedger()
         ledger.gone = {}
     end
     return ledger
+end
+
+-- The officers' long-term guild log (see GuildLog), created on first use,
+-- so only an officer's add-on ever stores one.
+function Partition:GetGuildLog()
+    if self.data.guildLog == nil then
+        self.data.guildLog = {}
+    end
+    return self.data.guildLog
 end
 
 -- Guild Recruit's last ad time in each channel (see RecruitLedger), created

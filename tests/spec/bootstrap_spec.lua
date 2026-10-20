@@ -66,6 +66,7 @@ local MANIFEST_FILES = {
     "Core/GroupCandidates.lua",
     "Core/JoinRequests.lua",
     "Core/GroupHistory.lua",
+    "Core/GuildLog.lua",
     "Core/LocationProtocol.lua",
     "Core/LocationScheduler.lua",
     "Core/LocationBoard.lua",

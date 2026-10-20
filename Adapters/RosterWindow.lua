@@ -1161,6 +1161,30 @@ local function buildRecentAds(framework, page, frameName, onTurnBackOn)
     return ads
 end
 
+-- The officers' Guild Log page: every entry newest first, with its date,
+-- what happened, the character, its player, and who did it.
+local GUILD_LOG_COLUMNS = {
+    { field = "date", x = 8, width = 84 },
+    { field = "event", x = 96, width = 170 },
+    { field = "character", x = 270, width = 130 },
+    { field = "player", x = 404, width = 120 },
+    { field = "actor", x = 528, width = 130 },
+}
+
+-- Draws the Guild Log list onto its page, below the frame's title bar,
+-- filling the page (clear of the scroll bar).
+local function buildGuildLog(framework, page, frameName)
+    local holder = CreateFrame("Frame", nil, page)
+    holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
+    holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
+    local width, height = page:GetSize()
+    local lines = math.max(1, math.floor((height - 70) / RosterWindow.LINE_HEIGHT))
+    local log = buildList(framework, holder, frameName .. "GuildLogScroll", "Guild Log",
+        GUILD_LOG_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines)
+    log.scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 0)
+    return log
+end
+
 -- The guild-size counts line: its text, and on hover a tooltip with the
 -- breakdown. Made with `environment`'s CreateFrame and GameTooltip, so
 -- specs can draw it with fake frames. Hidden until :Set gives it text.
@@ -1261,6 +1285,16 @@ local function build(framework, options)
         -- Showing the page brings "how long ago" up to date.
         if options.onRecentAdsShown ~= nil then
             adsPage:HookScript("OnShow", options.onRecentAdsShown)
+        end
+    end
+    -- The officers' Guild Log page, when the frame has one.
+    local guildLog
+    local logPage = host:Content("guildlog")
+    if logPage ~= nil then
+        local built, log = pcall(buildGuildLog, framework, logPage, frameName)
+        guildLog = built and log or nil
+        if options.onGuildLogShown ~= nil then
+            logPage:HookScript("OnShow", options.onGuildLogShown)
         end
     end
     if options.onHide ~= nil then
@@ -1534,6 +1568,7 @@ function RosterWindow.Create(client, options)
         playerPanel = playerPanel,
         recruiters = recruiters,
         recentAds = recentAds,
+        guildLog = guildLog,
         counts = counts,
     }, Window)
 end
@@ -1647,6 +1682,19 @@ end
 
 -- Shows the Recent ads page's rows (see RosterController:RecentAdsView).
 -- False when the frame has no Recent ads page.
+-- Shows the Guild Log page's rows (see RosterController:GuildLogView).
+-- False when the frame has no Guild Log page.
+function Window:SetGuildLog(rows)
+    local guildLog = self.guildLog
+    if guildLog == nil then
+        return false
+    end
+    return (pcall(function()
+        guildLog.scroll:SetData(rows or {})
+        guildLog.scroll:Refresh()
+    end))
+end
+
 function Window:SetRecentAds(rows)
     local recentAds = self.recentAds
     if recentAds == nil then
