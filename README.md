@@ -26,6 +26,8 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf mail` | Opens [Guild Mail](#guild-mail), to mail the guild ranks you pick (officers only). |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
+| `/agf setdate join\|rank <character> <YYYY-MM-DD>` | Sets a character's join date, or the date it reached its current rank, when you know better than the add-on (officers only; see [Dates behind the checks](#dates-behind-the-checks)). |
+| `/agf probe log`, `/agf probe officer`, `/agf probe promote <character>` | Reports what the game gives the add-on: the guild event log, the officer channel, or a dry run of **Promote** for one character (officers only). |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
@@ -38,6 +40,8 @@ Everything the add-on does is in one window, with picture tabs down its right ed
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
+- **Promotions** (officers only): who is ready to move up a rank, each character's checklist, and each rank's requirements (see [Promotions](#promotions)). Its tab shows how many characters are ready.
+- **Guild Log** (officers only): the guild's long-term record of joins, invites, leaves, kicks, promotions and demotions (see [Guild Log](#guild-log)).
 - **Settings**: everything else (General, Chat Tags, Guild Map, and the Group Finder's Do Not Disturb), and the version you're running.
 
 The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf group`, `/agf profile`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
@@ -110,7 +114,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 
 - On the first scan, note markers are applied directly to any character the database doesn't know about.
 - After that, a note that disagrees with the database never overwrites it. The difference goes to the **conflict queue** instead. One exception: a note's alias is filled in for a player with no alias, as long as nobody ever set or cleared one by hand or through sync. An alias someone deliberately removed is never brought back by a note, and a note naming a different alias than the player has is still a conflict. A conflict like this left over from an earlier version is filled in the next time you use **Rescan**, or you can accept it. You'll also find in the queue any note naming a character that doesn't exist or matches more than one, and any note that loops back on itself.
-- **Conflicts (N)** at the bottom of the window opens the queue. Note conflicts are listed under **Note conflicts**: each shows the note and what it suggests next to what the database says. Accept or reject each one, or all at once. Members' changes are listed above them, one line per player (see [Suggestions](#suggestions)).
+- **Conflicts (N)** at the bottom of the window opens the queue. Note conflicts are listed under **Note conflicts**: each shows the character, then one wrapped column with the note, what it suggests and what the database says. Accept or reject each one, or all at once. Members' changes are listed above them under **Changes to Player**, one line per player (see [Suggestions](#suggestions)).
 - A rejected suggestion stays away until that note changes again.
 - Officer data from [guild sync](#guild-sync) beats guild notes. On a new install, notes fill in the roster first, and officer edits replace them where the two disagree. After an officer edit arrives, the next scan checks the notes it affects again. A note that disagrees goes to the conflict queue, and a pending conflict the edit already settled disappears.
 
@@ -180,8 +184,8 @@ Members know their own alts best, so a member's edits become suggestions for the
 
 - When you're not an officer, **Link as alt of…**, **Merge into player…**, **Make this the main**, **Split off as own player**, and **Set alias…** still change your roster at once. Each change is also kept as a suggestion.
 - Suggestions go to the guild as soon as an officer is online. If none is, they wait, and are sent when an officer logs in.
-- Officers find them in their **Conflicts** window under **Member changes**, above **Note conflicts**: one line per player with changes waiting, with how many there are and a **Review** button. Suggestions from members on older versions of the add-on are grouped the same way. The Conflicts button and the minimap tooltip count each player's changes once, plus each note conflict.
-- **Review** opens a panel beside the window. It shows the player as they are now (**Before**) and as they'd be with every change (**Suggested**): main, alts and alias. Below, each change has its own line in plain words, for example "Bolt: Alt of Toolbox → Alt of Hammer", with **Approve** and **Deny**. **Approve all** and **Deny all** decide the whole player at once, and Accept all and Reject all at the bottom of the Conflicts window still decide everything.
+- Officers find them in their **Conflicts** window under **Changes to Player**, above **Note conflicts**: one line per player with changes waiting, with how many there are, **Suggested by** (the character that suggested them, with its player's alias or main when that differs, for example "Bolt (Hammer)") and a **Review** button. Suggestions from members on older versions of the add-on are grouped the same way. The Conflicts button and the minimap tooltip count each player's changes once, plus each note conflict.
+- **Review** opens a panel beside the window. Its header says who suggested the changes. For every player the changes touch (a member linking their character under someone else's main touches both players), it shows the player as they are now (**Before**) and as they'd be with every change (**Suggested**): main (and whether it's declared), alias, Discord, and each alt on a line of its own. Lines that change are colored: the old value red, the new one green. The live guild note of each character involved is shown below for context. Then each change has its own line in plain words, for example "Bolt: Alt of Toolbox → Alt of Hammer", with **Approve** and **Deny**. **Approve all** and **Deny all** decide the whole player at once, and Accept all and Reject all at the bottom of the Conflicts window still decide everything.
 - The first officer to decide settles the suggestion for every officer, and it disappears from the other officers' queues. Accepting makes it an official edit under that officer's name, which reaches everyone.
 - Denying puts your roster back the way the officers have it, so you stay on the same data as everyone else. If no officer ever set that character or alias, it goes back to what the guild notes and the roster say.
 - Until then, your edit stays in your roster unless a newer officer edit about the same character or alias arrives.
@@ -378,6 +382,93 @@ The mailbox's **Guild Mail** tab lists your guild mails:
 - **Welcome mail** opens the guild's [welcome mail](#welcome-mail) settings.
 
 A mail paused at the limit doesn't hold you up: **Edit** your draft and send a new one, and the paused mail waits in the tab to be resumed later.
+
+## Promotions
+
+Each guild rank can have **promotion requirements**: what a character at that rank must do to move up to the next one. Officers set them up and work through them on the window's **Promotions** tab; the rest of the guild only sees their own progress (see [Your own progress](#your-own-progress)). The Promotions and [Guild Log](#guild-log) tabs are only shown to officers (the guild master's rank, or any rank that can view officer notes), and appear or disappear without a reload when someone is promoted or demoted.
+
+### Setting up requirements
+
+Every rank starts with no requirements, so nothing changes until your guild sets them up. On the Promotions tab, **Edit requirements** opens the editor; **Back to list** returns to the list.
+
+- `<` and `>` pick the rank, for example **Member (rank 4)**, with the rank it promotes to beside it. The guild master's rank has no rank above it, so it isn't offered.
+- Type the item's name, click the kind button to step through the kinds, type the number for an automated kind, and press **Add** (or Enter). The kinds are:
+  - **Checkbox**: an officer ticks it.
+  - **Checkbox, needs a note**: ticking it asks for a note (up to 100 characters), such as which event the member attended.
+  - **Character days in guild**: this character has been in the guild at least N days.
+  - **Player days in guild**: the player has, counted from the earliest join among their characters still in the guild, so a long-time member's new alt doesn't have to wait.
+  - **Days at rank**: the character has held its current rank at least N days.
+  - **Has the add-on (days)**: any of the player's characters was heard on the add-on within the last N days.
+  - **Character level**: the character is at least level N.
+- Each item has **Up** and **Down** to reorder it, **Edit** to rename it or change its number (ticks are kept, and everyone is checked again at once), and **Delete**, which asks first because it drops the item's ticks too.
+- If the guild master inserts or removes a rank, requirements stay with their rank's position, and the editor warns when the rank there now has a different name, so you can check they still belong.
+
+Requirements reach every add-on in the guild through [guild sync](#guild-sync). When two officers edit the same item, the newest edit wins everywhere. Changes from anyone who isn't an officer are ignored.
+
+### The Promotions list
+
+The list shows the characters at ranks that have requirements: each with its rank and the rank it would move to, its progress ("3 of 4"), and its player's highest rank on any character when that's higher, so you can see "this is an alt of a rank-5 member" at a glance.
+
+- By default it shows only characters who are **Ready** (every requirement met). Tick **In progress** to add everyone else, and untick a rank's box to hide that rank.
+- Search by character name, alias or main. Searching a player shows all their characters.
+- Ready characters come first, then by rank, then by name. Long lists come in pages of 50 (`<` and `>`).
+- The tab's label shows how many are ready, as **Promotions (4)**, and the tab's icon shows the count too.
+- When nobody matches, or no rank has requirements yet, the list says so.
+- While the tab is open, it's checked again every 5 minutes, so day-based items catch up.
+
+Click a character to open its checklist:
+
+- **Tick** and **Untick** a checkbox item. A needs-a-note item asks for the note above the list first.
+- Automated items show whether they're met and how close the character is: "5 of 7 days", "level 42 of 50", "seen 3 days ago", or "before tracking". An approximate date is marked "(approx.)".
+- **Override** passes a failed automated item for this character, with an optional reason. **Undo override** removes it.
+- Hover an item to see who ticked or overrode it, when, and the note or reason.
+
+Ticks, notes and overrides reach every officer's add-on through guild sync, including officers who were offline, who catch up when they log in. Only officers' changes are accepted.
+
+### Promoting
+
+The last line of an open checklist promotes the character one rank, if the game lets you promote them.
+
+- When every item is met, **Promote** promotes at once.
+- When some aren't, the button reads **Promote...** and asks first, in the window, listing what isn't met. Hover it to see the list.
+- The add-on records the date and who promoted. Promotions made in the game's own guild window are recorded too, with the promoter from the guild event log when it has one.
+- Any rank change, up or down, from the add-on or the game, clears that character's ticks, notes and overrides. Only the last promotion's date and promoter are kept.
+- Where the game doesn't let add-ons promote, the button reads **Mark as promoted**: change the rank in the game's guild window, and the add-on records the promotion when it sees the new rank.
+
+`/agf probe promote <character>` shows whether you may promote a character and what the button would be, without promoting.
+
+### In the player panel and the roster
+
+An officer's player panel has a **Promotion** section: the player's highest rank and earliest join, and for each character its join date, the date it reached its rank, its rank and next rank with progress (and **Ready**), its last promotion ("Promoted on <date> by Thunderer"), and its checklist. **Tick**, **Untick**, **Override**, **Undo override** and **Promote** work from the panel as on the tab. A needs-a-note item, or a promotion that needs confirming, opens the character on the Promotions tab instead, where there's room to type or confirm. The panel and the tab always agree.
+
+On officers' rosters, a character who meets every requirement shows **Ready** before its rank. Members never see it.
+
+### Your own progress
+
+A member sees the Promotion section in their own player panel only: each of their characters' items toward the next rank, with whether each is met and the automated items' progress ("5 of 7 days"). It's read-only, and it never shows notes, who ticked what, or anyone else's progress.
+
+### Dates behind the checks
+
+The automated items use a few dates the add-on keeps for each character, shared with the whole guild so members' own progress is accurate:
+
+- **Joined**: from the guild log when it has the join, else from when the add-on first saw the character in the guild, marked approximate. A character that leaves and comes back counts from its newest join.
+- **At this rank since**: from logged promotions and demotions, or from when a scan saw the rank change.
+- **Before tracking**: characters already in the guild the first time the add-on scans it count as older than any number of days, so long-standing members don't look like newcomers on day one. A join found in the guild event log replaces it.
+- **Add-on heard**: the last time any add-on message came from the character.
+
+Officers who know better can set a date by hand: `/agf setdate join Toolbox 2025-03-14` or `/agf setdate rank Toolbox 2026-09-01`. A date set by an officer wins over the others.
+
+## Guild Log
+
+Officers' add-ons keep a long-term **Guild Log** of the guild's membership: joins, invites (with who invited), leaves, kicks (with who removed them), and promotions and demotions (with who did it, and to which rank). It's read from the game's guild event log, which turns its "3 days ago" ages into dates, and from events the add-on sees as they happen. The same event read more than once, or by several officers, is kept once. Entries are kept forever.
+
+- Officers' add-ons share the log with each other over the officer channel, and catch up when an officer logs in. Members' add-ons never receive or keep it.
+- The **Guild Log** tab lists entries newest first: the date, what happened, the character, its player, and who did it.
+- **Sort** switches between date and name. **Range** steps through all, the last 7, 30 and 90 days. A check box for each event type (Join, Invite, Leave, Kick, Promote, Demote) shows or hides it.
+- Search by character name, alias or main: all of a player's characters show together.
+- Long logs come in pages (`<` and `>`), so even thousands of entries stay smooth.
+
+Where the game's guild event log can't be read, everything still works from live events, roster scans, sync and hand-set dates. `/agf probe log` reports what the game's event log gives the add-on, and `/agf probe officer` checks the officer channel.
 
 ### Welcome mail
 
