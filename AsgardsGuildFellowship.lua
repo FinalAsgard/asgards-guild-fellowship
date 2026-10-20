@@ -33,6 +33,8 @@ local guildLogOf = function()
     return nil
 end
 local requestGuildLog, readGuildLog, recordLiveMembership = function() end, function() end, function() end
+-- Shares the officers' guild log between officers (see GuildLogSync).
+local guildLogSync
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local guildNoteOverlay
@@ -1928,8 +1930,10 @@ if clientProfile.supported then
             end
             return nil
         end)
-        if log:RecordBatch(events) > 0 then
+        local _, changed = log:RecordBatch(events)
+        if changed[1] ~= nil then
             rosterController:RefreshGuildLog()
+            guildLogSync:Share(changed)
         end
     end
     recordLiveMembership = function(kind, name)
@@ -1940,14 +1944,87 @@ if clientProfile.supported then
             return
         end
         local eventType = kind == "join" and addon.GuildLog.JOIN or addon.GuildLog.LEAVE
-        if log:RecordLive(eventType, key, now, name) then
+        local _, changed = log:RecordLive(eventType, key, now, name)
+        if changed[1] ~= nil then
             rosterController:RefreshGuildLog()
+            guildLogSync:Share(changed)
         end
     end
-    router:Register("probe", "check what the game reports to the add-on (probe log: the guild event log, officers)",
+    -- The other officers online: { key, name, rank }, as the live roster
+    -- reports them.
+    local function onlineOfficers()
+        local guild, _, normalizer = rosterController:QuietContext()
+        local count = client:GetGuildRosterCount()
+        local officers = {}
+        if guild == nil or count == nil then
+            return officers
+        end
+        local selfKey = rosterController:SelfKey()
+        local index
+        for index = 1, count do
+            local member = client:GetGuildMember(index)
+            local key = member and member.online and normalizer:Key(member.name)
+            if key and key ~= selfKey and officerAuthority:IsOfficer(key) then
+                table.insert(officers, { key = key, name = member.name, rank = member.rankIndex })
+            end
+        end
+        return officers
+    end
+    -- Guild log messages go to the add-on officer channel. Officers whose
+    -- rank can't listen to officer chat are whispered too, and every
+    -- officer online is when this character's rank can't speak in it (or
+    -- it can't be sent): the add-on's officer rule (viewing officer notes)
+    -- and officer chat are separate rank permissions.
+    local function sendToOfficers(message)
+        local canSpeak = comm:RankHasFlag(client:GetPlayerGuildRankIndex(), addon.Comm.OFFICER_CHAT_SPEAK_FLAG)
+        local sent = canSpeak ~= false and comm:SendOfficers(message)
+        local officers = onlineOfficers()
+        local index
+        for index = 1, #officers do
+            if not sent or comm:RankHasFlag(officers[index].rank, addon.Comm.OFFICER_CHAT_LISTEN_FLAG) == false then
+                comm:Whisper(message, officers[index].name)
+            end
+        end
+    end
+    -- Pings the officer channel only, so the officers it misses show.
+    local function probeOfficerChannel()
+        if guildLogOf() == nil then
+            rosterController:Print("Only officers can probe the officer channel.")
+            return
+        end
+        local id, sent = guildLogSync:Ping()
+        if not sent then
+            rosterController:Print("The officer channel couldn't be sent from here; guild log entries are" ..
+                " whispered to each officer online instead.")
+            return
+        end
+        rosterController:Print("Pinged the officer channel; answers in a few seconds.")
+        local function report()
+            local _, normalizer = guildLogOf()
+            local lines = addon.GuildLogSync.ProbeLines(guildLogSync:Answers(id), onlineOfficers(), function(name)
+                return normalizer and normalizer:Key(name)
+            end)
+            local index
+            for index = 1, #lines do
+                rosterController:Print(lines[index])
+            end
+        end
+        if not client:After(addon.GuildLogSync.PROBE_SECONDS, report) then
+            report()
+        end
+    end
+    router:Register("probe",
+        "check what the game reports to the add-on (probe log: the guild event log; probe officer: the" ..
+        " officer channel; officers)",
         function(arguments)
-            if string.lower(arguments or "") ~= "log" then
-                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe log.")
+            local what = string.lower(arguments or "")
+            if what == "officer" then
+                probeOfficerChannel()
+                return
+            end
+            if what ~= "log" then
+                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe log or " ..
+                    addon.Identity.slashCommand .. " probe officer.")
                 return
             end
             if guildLogOf() == nil then
@@ -2061,6 +2138,32 @@ if clientProfile.supported then
             rosterController:UpdateStatus()
         end,
         rolesOf = rolesOf,
+    })
+    guildLogSync = addon.GuildLogSync.Create({
+        send = sendToOfficers,
+        probe = function(message)
+            return comm:SendOfficers(message)
+        end,
+        log = function()
+            return guildLogOf()
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        -- Within guild sync's frame budget, and never while busy.
+        worker = syncSession,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        onMerged = function()
+            rosterController:RefreshGuildLog()
+        end,
     })
     router:Register("channels", "show the chat channels Guild Recruit sees here", function()
         local lines = client:ChannelReport()
@@ -2989,12 +3092,21 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             syncSession:Receive(message, sender)
         end
     end, function(message, sender)
-        -- Only guild map updates are whispered.
+        -- Only guild map updates and, to officers who miss the officer
+        -- channel, guild log messages are whispered.
         if addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
+        elseif addon.GuildLogSync.TYPES[message.t] ~= nil then
+            guildLogSync:Receive(message, sender)
+        end
+    end, function(message, sender)
+        -- Only guild log messages go to the officer channel.
+        if addon.GuildLogSync.TYPES[message.t] ~= nil then
+            guildLogSync:Receive(message, sender)
         end
     end) then
         syncSession:Start()
+        guildLogSync:Start()
         startLocations()
     end
     -- The minimap button needs saved data for its position.

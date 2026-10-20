@@ -304,9 +304,11 @@ local function installGuild(world, environment, profile)
         return unpack(entry, 1, 8)
     end
     -- Rank permission flags, as C_GuildInfo.GuildControlGetRankFlags reports
-    -- them for a 1-based rank order; flag 11 is "view officer note". Ranks
-    -- listed in `world.officerRanks` (0-based, like roster rank indexes)
-    -- have it. WoW Forever is assumed to match Retail here.
+    -- them for a 1-based rank order; flag 11 is "view officer note", 3 and
+    -- 4 listening and speaking in officer chat. Ranks listed in
+    -- `world.officerRanks` (0-based, like roster rank indexes) have flag
+    -- 11, and those in `world.officerChatRanks` (the same, when nil) flags
+    -- 3 and 4. WoW Forever is assumed to match Retail here.
     world.officerRanks = { [0] = true, [1] = true }
     local function rankFlags(rankOrder)
         local flags = {}
@@ -315,6 +317,9 @@ local function installGuild(world, environment, profile)
             flags[index] = false
         end
         flags[11] = world.officerRanks[rankOrder - 1] == true
+        local chat = world.officerChatRanks or world.officerRanks
+        flags[3] = chat[rankOrder - 1] == true
+        flags[4] = chat[rankOrder - 1] == true
         return flags
     end
     environment.C_GuildInfo = { GuildControlGetRankFlags = rankFlags }
@@ -643,7 +648,10 @@ end
 
 -- A guild add-on channel shared by several worlds: what one sends reaches
 -- them all, the sender included (the game echoes guild add-on messages), once
--- Fixtures.deliver runs. Returns the channel.
+-- Fixtures.deliver runs. What's sent to the officer channel reaches only
+-- worlds whose character's rank can listen to officer chat (see
+-- `world.officerChatRanks`), and only from one whose rank can speak in it.
+-- Returns the channel.
 function Fixtures.newChannel(worlds)
     local channel = { queue = {}, worlds = worlds or {} }
     local index
@@ -651,6 +659,13 @@ function Fixtures.newChannel(worlds)
         channel.worlds[index].channel = channel
     end
     return channel
+end
+
+-- Whether `world`'s character's rank can use officer chat.
+function Fixtures.inOfficerChat(world)
+    local member = world.playerMember and world.playerMember()
+    local chat = world.officerChatRanks or world.officerRanks or {}
+    return member ~= nil and chat[member.rank] == true
 end
 
 function Fixtures.joinChannel(channel, world)
@@ -671,6 +686,11 @@ function Fixtures.deliver(channel)
             local handler = receiver.commHandlers[message.prefix]
             if message.distribution == "WHISPER"
                 and message.recipient ~= (receiver.playerName or (receiver.guild and receiver.guild.members[1].name))
+            then
+                handler = nil
+            end
+            if message.distribution == "OFFICER"
+                and not (Fixtures.inOfficerChat(message.from) and Fixtures.inOfficerChat(receiver))
             then
                 handler = nil
             end

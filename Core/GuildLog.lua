@@ -196,28 +196,55 @@ end
 
 -- Adds what `event` knows that `entry` doesn't, and takes its time when
 -- it's the more precise one.
-local function merge(entry, event)
-    entry.name = entry.name or event.name
-    entry.actor = entry.actor or event.actor
-    entry.actorName = entry.actorName or event.actorName
-    entry.fromRank = entry.fromRank or event.fromRank
-    entry.toRank = entry.toRank or event.toRank
-    entry.rankName = entry.rankName or event.rankName
+-- Of two records of one event, whether `event`'s time is the better one:
+-- the more precise, then a live one over one from the game log, then the
+-- earlier. Every add-on picks the same, so officers' logs settle on one
+-- time for each event.
+local function betterTime(event, entry)
     local tolerance = event.tolerance or GuildLog.LIVE_TOLERANCE
-    if tolerance < (entry.tolerance or GuildLog.LIVE_TOLERANCE) then
-        entry.at = event.at
-        entry.tolerance = tolerance
-        entry.source = event.source
+    local held = entry.tolerance or GuildLog.LIVE_TOLERANCE
+    if tolerance ~= held then
+        return tolerance < held
     end
+    local live, heldLive = event.source == GuildLog.SOURCE_LIVE, entry.source == GuildLog.SOURCE_LIVE
+    if live ~= heldLive then
+        return live
+    end
+    return event.at < entry.at
+end
+
+-- Adds what `event` knows that `entry` doesn't, and takes its time when
+-- it's the better one. True when `entry` changed.
+local function merge(entry, event)
+    local changed = false
+    local fields = { "name", "actor", "actorName", "fromRank", "toRank", "rankName" }
+    local fieldIndex
+    for fieldIndex = 1, #fields do
+        local field = fields[fieldIndex]
+        if entry[field] == nil and event[field] ~= nil then
+            entry[field] = event[field]
+            changed = true
+        end
+    end
+    if betterTime(event, entry) then
+        entry.at = event.at
+        entry.tolerance = event.tolerance or GuildLog.LIVE_TOLERANCE
+        entry.source = event.source or GuildLog.SOURCE_LIVE
+        changed = true
+    end
+    return changed
 end
 
 -- Records the events of one reading (a read of the game log, or one live
 -- event): each is stored unless it repeats a stored entry, which it then
 -- fills in. Events of the same reading never repeat each other, and each
 -- stored entry is repeated by at most one of them, so a leave and a rejoin
--- in one read stay two entries. Returns how many entries were added.
-function Log:RecordBatch(events)
+-- in one read stay two entries. `checkpoint`, when given, is called after
+-- each event so a scheduler can spread the work across frames. Returns how
+-- many entries were added, and the entries added or changed.
+function Log:RecordBatch(events, checkpoint)
     local added = 0
+    local changed = {}
     local used = {}
     local eventIndex
     for eventIndex = 1, #(events or {}) do
@@ -225,7 +252,9 @@ function Log:RecordBatch(events)
         if valid(event) then
             local entry = self:match(event, used)
             if entry ~= nil then
-                merge(entry, event)
+                if merge(entry, event) then
+                    table.insert(changed, entry)
+                end
                 used[entry] = true
             else
                 entry = {
@@ -245,23 +274,29 @@ function Log:RecordBatch(events)
                 self:index(entry)
                 used[entry] = true
                 added = added + 1
+                table.insert(changed, entry)
             end
         end
+        if checkpoint ~= nil then
+            checkpoint()
+        end
     end
-    return added
+    return added, changed
 end
 
 -- Records one live event about `character` (named `name` by the game),
--- seen at `at`. True when it was added.
+-- seen at `at`. True when it was added, and the entries added or changed
+-- (as RecordBatch).
 function Log:RecordLive(eventType, character, at, name)
-    return self:RecordBatch({ {
+    local added, changed = self:RecordBatch({ {
         type = eventType,
         character = character,
         name = name,
         at = at,
         tolerance = GuildLog.LIVE_TOLERANCE,
         source = GuildLog.SOURCE_LIVE,
-    } }) == 1
+    } })
+    return added == 1, changed
 end
 
 local function newestFirst(a, b)
@@ -356,6 +391,217 @@ function Log:Query(options)
         table.insert(entries, matches[entryIndex])
     end
     return { entries = entries, total = #matches, page = page, pages = pages }
+end
+
+-- Sharing between officers -------------------------------------------------------
+
+-- Officers compare their logs the way guild sync compares facts (see
+-- SyncDigest), in buckets of MONTH by entry time: an officer who was away
+-- a week differs in the latest month or two, so catching up sends only
+-- those months' entries. A month's checksum is the sum of its entries'
+-- hashes, over what officers' logs settle on for an entry (see merge), so
+-- two officers who hold the same entries agree.
+GuildLog.MONTH = 30 * GuildLog.DAY
+-- The most months a digest from another officer may name (a century).
+GuildLog.MAX_MONTHS = 1200
+-- The longest text an entry from another officer may carry.
+GuildLog.MAX_TEXT = 64
+-- The highest rank index the game has.
+GuildLog.MAX_RANK = 9
+
+local MODULUS = 4294967296
+local SEPARATOR = "\31"
+
+-- The same string hash as SyncDigest's.
+local function hash(text)
+    local value = 5381
+    local position
+    for position = 1, #text do
+        value = (value * 33 + string.byte(text, position)) % MODULUS
+    end
+    return value
+end
+
+-- Which month `at` falls in.
+function GuildLog.MonthOf(at)
+    return math.floor(at / GuildLog.MONTH)
+end
+
+function GuildLog.HashOf(entry)
+    return hash(table.concat({
+        tostring(entry.type), tostring(entry.character), tostring(entry.actor or ""),
+        tostring(entry.toRank or ""), tostring(math.floor(entry.at)),
+    }, SEPARATOR))
+end
+
+-- The checksum of each month that holds an entry: { [month] = checksum }.
+-- `checkpoint`, as for RecordBatch.
+function Log:Digest(checkpoint)
+    local digest = {}
+    local entryIndex
+    for entryIndex = 1, #self.entries do
+        local entry = self.entries[entryIndex]
+        if valid(entry) then
+            local month = GuildLog.MonthOf(entry.at)
+            digest[month] = ((digest[month] or 0) + GuildLog.HashOf(entry)) % MODULUS
+        end
+        if checkpoint ~= nil then
+            checkpoint()
+        end
+    end
+    return digest
+end
+
+local function isWhole(value, low, high)
+    return type(value) == "number" and value == math.floor(value) and value >= low and value <= high
+end
+
+-- True when `digest` has the shape of a digest (it came from another
+-- officer).
+function GuildLog.IsDigest(digest)
+    if type(digest) ~= "table" then
+        return false
+    end
+    local months = 0
+    local month, checksum
+    for month, checksum in pairs(digest) do
+        months = months + 1
+        if months > GuildLog.MAX_MONTHS or not isWhole(month, 0, math.huge) or not isWhole(checksum, 0, MODULUS - 1) then
+            return false
+        end
+    end
+    return true
+end
+
+-- The months where two valid digests differ, oldest first. Empty when they
+-- agree.
+function GuildLog.DifferingMonths(mine, theirs)
+    local months = {}
+    local month, checksum
+    for month, checksum in pairs(mine) do
+        if theirs[month] ~= checksum then
+            table.insert(months, month)
+        end
+    end
+    for month in pairs(theirs) do
+        if mine[month] == nil then
+            table.insert(months, month)
+        end
+    end
+    table.sort(months)
+    return months
+end
+
+-- True when `months` is a list of months (it came from another officer).
+function GuildLog.IsMonthList(months)
+    if type(months) ~= "table" or #months > GuildLog.MAX_MONTHS then
+        return false
+    end
+    local monthIndex
+    for monthIndex = 1, #months do
+        if not isWhole(months[monthIndex], 0, math.huge) then
+            return false
+        end
+    end
+    return true
+end
+
+-- An entry as it travels: only its fields, in a new table.
+local function copy(entry)
+    return {
+        type = entry.type,
+        character = entry.character,
+        name = entry.name,
+        actor = entry.actor,
+        actorName = entry.actorName,
+        fromRank = entry.fromRank,
+        toRank = entry.toRank,
+        rankName = entry.rankName,
+        at = entry.at,
+        tolerance = entry.tolerance,
+        source = entry.source,
+    }
+end
+GuildLog.Copy = copy
+
+-- Copies of the entries that lie in any of `months`. `checkpoint`, as for
+-- RecordBatch.
+function Log:EntriesInMonths(months, checkpoint)
+    local wanted = {}
+    local monthIndex
+    for monthIndex = 1, #months do
+        wanted[months[monthIndex]] = true
+    end
+    local found = {}
+    local entryIndex
+    for entryIndex = 1, #self.entries do
+        local entry = self.entries[entryIndex]
+        if valid(entry) and wanted[GuildLog.MonthOf(entry.at)] then
+            table.insert(found, copy(entry))
+        end
+        if checkpoint ~= nil then
+            checkpoint()
+        end
+    end
+    return found
+end
+
+local function text(value)
+    if type(value) == "string" and value ~= "" and #value <= GuildLog.MAX_TEXT then
+        return value
+    end
+    return nil
+end
+
+local function rank(value)
+    if isWhole(value, 0, GuildLog.MAX_RANK) then
+        return value
+    end
+    return nil
+end
+
+-- An entry from another officer, cleaned: only known fields of the right
+-- kind, or nil when it isn't an entry at all.
+function GuildLog.Clean(entry)
+    if type(entry) ~= "table" or not KNOWN[entry.type] or text(entry.character) == nil
+        or not isWhole(entry.at, 0, math.huge)
+    then
+        return nil
+    end
+    local tolerance = entry.tolerance
+    if not isWhole(tolerance, 0, 100 * 365 * GuildLog.DAY) then
+        tolerance = GuildLog.LIVE_TOLERANCE
+    end
+    return {
+        type = entry.type,
+        character = entry.character,
+        name = text(entry.name),
+        actor = text(entry.actor),
+        actorName = text(entry.actorName),
+        fromRank = rank(entry.fromRank),
+        toRank = rank(entry.toRank),
+        rankName = text(entry.rankName),
+        at = entry.at,
+        tolerance = tolerance,
+        source = entry.source == GuildLog.SOURCE_LOG and GuildLog.SOURCE_LOG or GuildLog.SOURCE_LIVE,
+    }
+end
+
+-- Merges `entries` received from another officer: each is cleaned (those
+-- that aren't entries are dropped) and recorded as one reading, so it
+-- fills in the entry it repeats rather than adding a second. `checkpoint`,
+-- as for RecordBatch. Returns how many were added, and the entries added
+-- or changed.
+function Log:Merge(entries, checkpoint)
+    local events = {}
+    local entryIndex
+    for entryIndex = 1, #(type(entries) == "table" and entries or {}) do
+        local event = GuildLog.Clean(entries[entryIndex])
+        if event ~= nil then
+            table.insert(events, event)
+        end
+    end
+    return self:RecordBatch(events, checkpoint)
 end
 
 -- What happened, in words: "Joined", "Invited", "Left", "Kicked",

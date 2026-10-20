@@ -719,3 +719,117 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertContains(printed, "1: type=promote actor=Boss target=Bolt rank=Veteran")
     end)
 end
+
+-- Sharing between officers ------------------------------------------------------
+
+local MONTH = 30 * DAY
+
+test.test("a digest has one checksum per month of entries, whatever order they were recorded in", function()
+    local log, GuildLog = newLog()
+    local other = GuildLog.Create({})
+    local events = {
+        { type = "join", character = "bolt", at = NOW - 2 * DAY },
+        { type = "kick", character = "nail", actor = "boss", at = NOW - 3 * DAY },
+        { type = "promote", character = "anvil", actor = "boss", toRank = 2, at = NOW - 2 * MONTH },
+    }
+    log:RecordBatch(events)
+    other:RecordBatch({ events[3], events[1], events[2] })
+
+    local digest = log:Digest()
+    local months = 0
+    local month
+    for month in pairs(digest) do
+        months = months + 1
+    end
+    test.assertTrue(GuildLog.MonthOf(NOW - 2 * DAY) ~= GuildLog.MonthOf(NOW - 2 * MONTH))
+    test.assertTrue(months == 2 or months == 3, "entries land in the months they happened in")
+    test.assertTrue(digest[GuildLog.MonthOf(NOW - 2 * MONTH)] ~= nil)
+    test.assertEqual(0, #GuildLog.DifferingMonths(digest, other:Digest()))
+    test.assertTrue(GuildLog.IsDigest(digest))
+
+    -- A new entry changes only its own month.
+    other:RecordLive("leave", "bolt", NOW)
+    local differing = GuildLog.DifferingMonths(digest, other:Digest())
+    test.assertEqual(1, #differing)
+    test.assertEqual(GuildLog.MonthOf(NOW), differing[1])
+    -- A month only one side has differs too.
+    test.assertEqual(1, #GuildLog.DifferingMonths({}, { [5] = 1 }))
+end)
+
+test.test("a month's entries come as copies, and only that month's", function()
+    local log, GuildLog = newLog()
+    log:RecordBatch({
+        { type = "join", character = "bolt", name = "Bolt", at = NOW - DAY },
+        { type = "join", character = "anvil", at = NOW - 3 * MONTH },
+    })
+
+    local found = log:EntriesInMonths({ GuildLog.MonthOf(NOW - 3 * MONTH) })
+    test.assertEqual(1, #found)
+    test.assertEqual("anvil", found[1].character)
+    found[1].character = "changed"
+    test.assertEqual("anvil", log:EntriesFor("anvil")[1].character)
+    test.assertEqual(0, #log:EntriesInMonths({}))
+end)
+
+test.test("another officer's entries merge without duplicates, and both logs settle on the same digest", function()
+    local mine, GuildLog = newLog()
+    local theirs = GuildLog.Create({})
+    -- Both read the same invite from the game log an hour apart; each
+    -- also saw something the other didn't.
+    mine:RecordBatch(fromGame(GuildLog, { raw("invite", "Boss", "Bolt", nil, age(0, 0, 3, 0)) }, NOW))
+    theirs:RecordBatch(fromGame(GuildLog, { raw("invite", "Boss", "Bolt", nil, age(0, 0, 3, 0)) }, NOW + HOUR))
+    mine:RecordLive("join", "nail", NOW - DAY, "Nail")
+    theirs:RecordLive("leave", "anvil", NOW - 2 * DAY, "Anvil")
+
+    local added, changed = mine:Merge(theirs:EntriesInMonths(GuildLog.DifferingMonths(mine:Digest(), theirs:Digest())))
+    test.assertEqual(1, added)
+    test.assertEqual(3, #mine:Entries())
+    test.assertTrue(#changed >= 1)
+    theirs:Merge(mine:EntriesInMonths(GuildLog.DifferingMonths(mine:Digest(), theirs:Digest())))
+    test.assertEqual(3, #theirs:Entries())
+    test.assertEqual(0, #GuildLog.DifferingMonths(mine:Digest(), theirs:Digest()))
+    -- Merging the same entries again changes nothing.
+    local again, unchanged = mine:Merge(theirs:EntriesInMonths({ GuildLog.MonthOf(NOW) }))
+    test.assertEqual(0, again)
+    test.assertEqual(0, #unchanged)
+end)
+
+test.test("a more precise time from another officer replaces a vaguer one", function()
+    local mine, GuildLog = newLog()
+    mine:RecordBatch(fromGame(GuildLog, { raw("join", "Bolt", nil, nil, age(0, 2, 0, 0)) }, NOW))
+    local entry = mine:EntriesFor("bolt")[1]
+    local exact = NOW - 61 * DAY
+
+    local added = mine:Merge({ { type = "join", character = "bolt", at = exact, tolerance = 2 * HOUR, source = "live" } })
+    test.assertEqual(0, added)
+    test.assertEqual(exact, entry.at)
+    test.assertEqual("live", entry.source)
+end)
+
+test.test("entries from another officer that aren't entries are dropped, and odd fields are left out", function()
+    local log, GuildLog = newLog()
+    local long = string.rep("x", 65)
+
+    local added = log:Merge({
+        "junk",
+        { type = "dance", character = "bolt", at = NOW },
+        { type = "join", character = long, at = NOW },
+        { type = "join", character = "bolt", at = "soon" },
+        { type = "promote", character = "nail", at = NOW, toRank = 99, name = long, actor = 5, tolerance = -1,
+            source = "rumour" },
+    })
+    test.assertEqual(1, added)
+    local entry = log:EntriesFor("nail")[1]
+    test.assertEqual(nil, entry.toRank)
+    test.assertEqual(nil, entry.name)
+    test.assertEqual(nil, entry.actor)
+    test.assertEqual(2 * HOUR, entry.tolerance)
+    test.assertEqual("live", entry.source)
+    test.assertEqual(0, (log:Merge("junk")))
+
+    test.assertFalse(GuildLog.IsDigest("junk"))
+    test.assertFalse(GuildLog.IsDigest({ [1.5] = 1 }))
+    test.assertFalse(GuildLog.IsDigest({ [3] = -1 }))
+    test.assertTrue(GuildLog.IsMonthList({ 1, 2 }))
+    test.assertFalse(GuildLog.IsMonthList({ "a" }))
+end)
