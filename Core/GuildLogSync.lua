@@ -42,8 +42,8 @@ local _, addon = ...
 --   worker             { Queue(work), Checkpoint() }
 --   after(seconds, callback) -> false when there are no timers
 --   random(low, high)  -> a whole number from low to high
---   onMerged(count)    called after entries from another officer changed
---                      this log
+--   onMerged(entries)  called with the entries that entries from another
+--                      officer added to or changed in this log
 local GuildLogSync = {
     PROTOCOL = 1,
     TYPE_DIGEST = "logdigest",
@@ -350,7 +350,7 @@ function Sync:Process(message, sender)
     end
     local added, changed = log:Merge(message.entries, self:checkpoint())
     if changed[1] ~= nil then
-        self.onMerged(#changed)
+        self.onMerged(changed)
     end
     if type(message.re) == "string" then
         -- Someone answered that announcement, so this add-on doesn't.

@@ -35,6 +35,19 @@ local _, addon = ...
 -- local counters, so facts only ever name characters, and each client
 -- rebuilds its own players from them.
 --
+-- Membership dates (MembershipDates) are officer facts too:
+--
+--   { kind = "joined"|"rankSince", character = key, time = seconds,
+--     source = text, tolerance? = seconds, rank? = index, at, by }
+--   { kind = "tracking", character = key, time = seconds, at, by }
+--
+-- "character joined (or has held rank since) time, by that source", and
+-- "tracking started in this guild at time" (`character` is the officer who
+-- set it). They're accepted only from officers, like officer facts, but a
+-- received one replaces what's held by MembershipDates' own rule (the
+-- newest join, the most precise source, the earliest tracking mark), not
+-- by its stamp alone.
+--
 -- Pure: works on a FellowshipStore partition and never touches the game.
 local SyncFacts = {
     KIND_MAIN = "main",
@@ -75,10 +88,18 @@ local function isTimestamp(value)
     return type(value) == "number" and value > 0 and value == math.floor(value)
 end
 
+local function isDateKind(kind)
+    return addon.MembershipDates ~= nil and addon.MembershipDates.KINDS[kind] == true
+end
+SyncFacts.IsDateKind = isDateKind
+
 -- True when `fact` has the shape of a main-link, alias or roles fact.
 function SyncFacts.IsValid(fact)
     if type(fact) ~= "table" or not isText(fact.character) or not isTimestamp(fact.at) or not isText(fact.by) then
         return false
+    end
+    if isDateKind(fact.kind) then
+        return addon.MembershipDates.IsFact(fact)
     end
     if fact.kind == SyncFacts.KIND_MAIN then
         return isText(fact.main)
@@ -106,6 +127,17 @@ function SyncFacts.IsNewer(at, by, heldAt, heldBy)
     return by > (heldBy or "")
 end
 
+-- The value a date fact carries, as one string, for the officer ledger and
+-- the digest; nil for other facts.
+function SyncFacts.DateValue(fact)
+    if type(fact) ~= "table" or not isDateKind(fact.kind) then
+        return nil
+    end
+    return table.concat({
+        tostring(fact.time), tostring(fact.source), tostring(fact.rank), tostring(fact.tolerance),
+    }, ":")
+end
+
 -- options.isOfficer(key) -> boolean, from OfficerAuthority.
 -- options.now() -> timestamp, used for acting-main history dates.
 function SyncFacts.Create(partition, options)
@@ -119,6 +151,14 @@ function SyncFacts.Create(partition, options)
             return 0
         end,
     }, Facts)
+end
+
+-- This guild's membership dates (MembershipDates).
+function Facts:Dates()
+    if self.dates == nil then
+        self.dates = addon.MembershipDates.Create(self.partition:GetMembershipDates(), { isOfficer = self.isOfficer })
+    end
+    return self.dates
 end
 
 -- The main-link fact for `key` as this client holds it, or nil.
@@ -347,6 +387,9 @@ function Facts:Refusal(fact)
     if SyncFacts.PROFILE_KINDS[fact.kind] then
         return self:ProfileRefusal(fact)
     end
+    if isDateKind(fact.kind) then
+        return self:DateRefusal(fact)
+    end
     if not self.isOfficer(fact.by) then
         return "not an officer"
     end
@@ -366,6 +409,25 @@ function Facts:Refusal(fact)
     end
     local heldAt, heldBy = self:HeldStamp(fact)
     if not SyncFacts.IsNewer(fact.at, fact.by, heldAt, heldBy) then
+        return "not newer"
+    end
+    return nil
+end
+
+-- Refusal for a valid date fact: only an officer may write one, it can't
+-- be dated ahead (stamp or date), and it must win over the date held.
+function Facts:DateRefusal(fact)
+    if not self.isOfficer(fact.by) then
+        return "not an officer"
+    end
+    local now = self.now()
+    if now > 0 and (fact.at > now + SyncFacts.MAX_FUTURE_SECONDS or fact.time > now + SyncFacts.MAX_FUTURE_SECONDS) then
+        return "from the future"
+    end
+    if fact.kind ~= addon.MembershipDates.KIND_TRACKING and self.partition:GetCharacter(fact.character) == nil then
+        return "unknown character"
+    end
+    if not self:Dates():Wins(fact) then
         return "not newer"
     end
     return nil
@@ -440,6 +502,10 @@ end
 -- Makes the roster agree with one accepted fact. Officer data beats guild
 -- notes.
 function Facts:Change(fact)
+    if isDateKind(fact.kind) then
+        self:Dates():Apply(fact)
+        return
+    end
     if fact.kind == SyncFacts.KIND_ROLES then
         self.partition:SetRoles(fact.character, fact.roles, fact.at, fact.by)
         return
@@ -513,7 +579,8 @@ end
 
 -- Every officer fact this client holds, which it can pass on to others:
 -- main links, sorted by character, then aliases, sorted by main, then
--- declared mains, sorted by character. Facts
+-- declared mains, sorted by character, then membership dates (see
+-- MembershipDates:Facts). Facts
 -- nobody stamped, and edits by authors who aren't officers now, aren't
 -- officer data, and "Don't sync" players are this client's own business.
 -- `checkpoint`, when given, is called after each character and player so a
@@ -555,6 +622,12 @@ function Facts:OfficerFacts(checkpoint)
     for index = 1, #declared do
         table.insert(facts, self:DeclaredFactOf(declared[index]))
         checkpoint()
+    end
+    if addon.MembershipDates ~= nil then
+        local dates = self:Dates():Facts(checkpoint)
+        for index = 1, #dates do
+            table.insert(facts, dates[index])
+        end
     end
     return facts
 end

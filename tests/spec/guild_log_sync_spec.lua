@@ -70,8 +70,8 @@ local function newHub(names, officers)
                 table.insert(hub.timers, callback)
                 return true
             end,
-            onMerged = function(count)
-                node.merged = node.merged + count
+            onMerged = function(entries)
+                node.merged = node.merged + #entries
             end,
         })
         hub.nodes[names[index]] = node

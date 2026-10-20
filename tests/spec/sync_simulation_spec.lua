@@ -149,6 +149,9 @@ test.test("an officer's edit reaches every online member and only sends main lin
     local officer = login(channel, "Toolbox-Area52")
     local hammer = login(channel, "Hammer-Area52")
     local wrench = login(channel, "Wrench-Area52")
+    -- The officer's first scan shared the guild's tracking-start mark.
+    fixtures.deliver(channel)
+    officer.sentMessages = {}
 
     linkAlt(officer, "hammer-area52", "toolbox-area52")
     fixtures.deliver(channel)

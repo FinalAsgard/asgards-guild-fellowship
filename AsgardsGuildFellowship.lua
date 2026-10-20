@@ -35,6 +35,9 @@ end
 local requestGuildLog, readGuildLog, recordLiveMembership = function() end, function() end, function() end
 -- Shares the officers' guild log between officers (see GuildLogSync).
 local guildLogSync
+-- Membership dates (see MembershipDates), set up with guild sync below:
+-- what a roster scan saw, and the officer's lines for the player panel.
+local observeMembership, membershipLines = function() end, function() end
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local guildNoteOverlay
@@ -118,6 +121,7 @@ if clientProfile.supported then
         onScanFinished = function(_, result)
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
+            observeMembership()
             -- A scan that saw a promotion or demotion shows or hides the
             -- officers' tabs.
             rosterController:RefreshPages()
@@ -145,6 +149,9 @@ if clientProfile.supported then
         rolesOf = function(key)
             local roles = rolesOf(key)
             return roles and addon.RoleCatalog.Describe(roles) or nil
+        end,
+        membership = function(keys)
+            return membershipLines(keys)
         end,
         groupedWith = function(keys)
             local guild, partition = rosterController:QuietContext()
@@ -1887,6 +1894,112 @@ if clientProfile.supported then
         end
         return officerAuthority:IsOfficerRank(rank)
     end
+    -- Membership dates: every add-on works them out from its own roster
+    -- scans; an officer's add-on also from the guild log, and shares those
+    -- (and dates set by hand) with the guild as officer facts.
+    local function datesOf(partition)
+        return addon.MembershipDates.Create(partition:GetMembershipDates(), {
+            isOfficer = function(key)
+                return officerAuthority:IsOfficer(key)
+            end,
+        })
+    end
+    local function shareDates(facts)
+        if facts ~= nil and facts[1] ~= nil then
+            syncSession:ShareOfficerFacts(facts)
+        end
+    end
+    -- Dates from guild log entries this officer's add-on just recorded.
+    local function datesFromLog(entries)
+        local guild, partition = rosterController:QuietContext()
+        local now = client:Timestamp()
+        if guild == nil or now == nil or not selfIsOfficer() then
+            return
+        end
+        shareDates(datesOf(partition):FromLog(entries, rosterController:SelfKey(), now))
+    end
+    observeMembership = function()
+        local guild, partition = rosterController:QuietContext()
+        local now = client:Timestamp()
+        if guild == nil or now == nil then
+            return
+        end
+        local present = {}
+        partition:EachCharacter(function(key, character)
+            if partition:IsInGuild(key) then
+                present[key] = character.rank or false
+            end
+        end)
+        local dates = datesOf(partition)
+        if dates:ObserveScan(present, now) and selfIsOfficer() then
+            shareDates({ dates:StampTracking(rosterController:SelfKey(), now) })
+        end
+    end
+    -- The player panel's dates, for officers only: the player's earliest
+    -- current join, then each character's join and time at its rank.
+    membershipLines = function(keys)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil or not selfIsOfficer() then
+            return nil
+        end
+        local dates = datesOf(partition)
+        local function formatDate(timestamp)
+            return client:FormatDate(timestamp)
+        end
+        local current = {}
+        local index
+        for index = 1, #keys do
+            if partition:IsInGuild(keys[index]) then
+                table.insert(current, keys[index])
+            end
+        end
+        local lines = {
+            "Earliest join: " .. addon.MembershipDates.Describe(dates:EarliestJoin(current), formatDate),
+        }
+        for index = 1, #current do
+            local character = partition:GetCharacter(current[index])
+            table.insert(lines, (normalizer:Display(character.name) or current[index]) .. ": joined " ..
+                addon.MembershipDates.Describe(dates:Joined(current[index]), formatDate) .. ", at this rank since " ..
+                addon.MembershipDates.Describe(dates:RankSince(current[index], character.rank), formatDate))
+        end
+        return lines
+    end
+    router:Register("setdate",
+        "set a character's join or rank date (officers): setdate join|rank <character> <YYYY-MM-DD>",
+        function(arguments)
+            local which, name, text = string.match(arguments or "", "^%s*(%S+)%s+(.-)%s+(%S+)%s*$")
+            local kind = which and ({ join = addon.MembershipDates.KIND_JOINED,
+                rank = addon.MembershipDates.KIND_RANK_SINCE })[string.lower(which)]
+            local time = addon.MembershipDates.ParseDate(text)
+            if kind == nil or name == nil or name == "" or time == nil then
+                rosterController:Print("Use " .. addon.Identity.slashCommand ..
+                    " setdate join|rank <character> <YYYY-MM-DD>.")
+                return
+            end
+            local guild, partition, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(name)
+            local character = key and partition:GetCharacter(key)
+            if character == nil then
+                rosterController:Print("No character named " .. name .. " in the roster.")
+                return
+            end
+            local author = rosterController:SelfKey()
+            if not selfIsOfficer() or author == nil then
+                rosterController:Print("Only officers can set dates.")
+                return
+            end
+            local fact, reason = datesOf(partition):SetByOfficer(key, kind, time, character.rank, author,
+                client:Timestamp())
+            if fact == nil then
+                rosterController:Print("Date not set: " .. tostring(reason) .. ".")
+                return
+            end
+            shareDates({ fact })
+            rosterController:Print("Set " .. (normalizer:Display(character.name) or key) ..
+                (kind == addon.MembershipDates.KIND_JOINED and "'s join date" or "'s rank date") ..
+                " to " .. client:FormatDate(time) .. ".")
+            rosterController:Invalidate()
+        end)
     local guildLogs = {}
     guildLogOf = function()
         local guild, partition, normalizer = rosterController:QuietContext()
@@ -1934,6 +2047,7 @@ if clientProfile.supported then
         if changed[1] ~= nil then
             rosterController:RefreshGuildLog()
             guildLogSync:Share(changed)
+            datesFromLog(changed)
         end
     end
     recordLiveMembership = function(kind, name)
@@ -1948,6 +2062,7 @@ if clientProfile.supported then
         if changed[1] ~= nil then
             rosterController:RefreshGuildLog()
             guildLogSync:Share(changed)
+            datesFromLog(changed)
         end
     end
     -- The other officers online: { key, name, rank }, as the live roster
@@ -2161,8 +2276,9 @@ if clientProfile.supported then
         random = function(low, high)
             return client:Random(low, high)
         end,
-        onMerged = function()
+        onMerged = function(entries)
             rosterController:RefreshGuildLog()
+            datesFromLog(entries)
         end,
     })
     router:Register("channels", "show the chat channels Guild Recruit sees here", function()
