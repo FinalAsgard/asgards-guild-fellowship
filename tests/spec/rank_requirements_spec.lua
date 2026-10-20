@@ -213,6 +213,9 @@ test.test("automated items carry their number, which an officer can change", fun
     local model = addon.PromotionsViewModel.Editor({ requirements = requirements, rank = 4, rankNames = RANKS })
     test.assertEqual("Character days in guild: 10", model.items[1].kindText)
     test.assertEqual(10, model.items[1].n)
+    test.assertEqual("Days", model.items[1].numberText, "the editor names the number box")
+    test.assertEqual("Level", model.items[4].numberText)
+    test.assertEqual(nil, model.items[5].numberText, "a checkbox has no number box")
 end)
 
 -- Sharing -----------------------------------------------------------------------

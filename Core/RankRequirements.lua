@@ -80,16 +80,18 @@ RankRequirements.KIND_ORDER = {
     RankRequirements.KIND_ADDON,
 }
 
--- The automated kinds, each with the range of its `n` and the label an
--- item gets when the officer leaves it blank.
+-- The automated kinds, each with the range of its `n`, the label an item
+-- gets when the officer leaves it blank, and what `n` is called in the
+-- editor.
 RankRequirements.AUTOMATED = {
-    [RankRequirements.KIND_CHAR_DAYS] = { low = 1, high = 3650, label = "In the guild %d days" },
-    [RankRequirements.KIND_PLAYER_DAYS] = { low = 1, high = 3650, label = "Player in the guild %d days" },
-    [RankRequirements.KIND_RANK_DAYS] = { low = 1, high = 3650, label = "At this rank %d days" },
-    [RankRequirements.KIND_LEVEL] = { low = 1, high = 100, label = "Level %d" },
+    [RankRequirements.KIND_CHAR_DAYS] = { low = 1, high = 3650, label = "In the guild %d days", number = "Days" },
+    [RankRequirements.KIND_PLAYER_DAYS] = { low = 1, high = 3650, label = "Player in the guild %d days",
+        number = "Days" },
+    [RankRequirements.KIND_RANK_DAYS] = { low = 1, high = 3650, label = "At this rank %d days", number = "Days" },
+    [RankRequirements.KIND_LEVEL] = { low = 1, high = 100, label = "Level %d", number = "Level" },
     -- Any of the player's characters heard on add-on sync within N days.
     [RankRequirements.KIND_ADDON] = { low = 1, high = 365, default = 30,
-        label = "Has the add-on (seen in %d days)" },
+        label = "Has the add-on (seen in %d days)", number = "Days" },
 }
 
 RankRequirements.TYPES = {

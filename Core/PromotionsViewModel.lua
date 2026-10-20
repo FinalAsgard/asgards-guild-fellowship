@@ -72,7 +72,8 @@ end
 --   rankText  "Veteran (rank 3)"
 --   nextText  "Promotes to Officer"
 --   mismatch  a warning when the rank was set up under another name, or nil
---   items     { id, label, kindText, n, canUp, canDown } in order
+--   items     { id, label, kindText, n, numberText, canUp, canDown } in
+--             order, `numberText` what `n` is called ("Days"), or nil
 --   empty     what to say instead of items, or nil
 function PromotionsViewModel.Editor(inputs)
     local requirements, names = inputs.requirements, inputs.rankNames or {}
@@ -94,11 +95,13 @@ function PromotionsViewModel.Editor(inputs)
     local items = requirements:Items(rank)
     local index
     for index = 1, #items do
+        local automated = addon.RankRequirements.AUTOMATED[items[index].kind]
         table.insert(model.items, {
             id = items[index].id,
             label = items[index].label,
             kindText = PromotionsViewModel.KindText(items[index]),
             n = items[index].n,
+            numberText = automated and automated.number or nil,
             canUp = index > 1,
             canDown = index < #items,
         })

@@ -1376,9 +1376,10 @@ local PROMOTION_COLUMNS = {
 -- (asking for an optional reason) or Undo override, and hovering a tick or
 -- override says who made it, when, and the note or reason. Edit
 -- requirements switches to the editor: < and > pick a rank, a warning
--- shows when the rank was set up under another name, a box adds an item
--- (its kind button steps through the kinds; an automated kind takes a
--- number) or edits one's label and number, and each item has Up, Down,
+-- shows when the rank was set up under another name, a labelled box adds
+-- an item (its Requirement Type button steps through the kinds; an
+-- automated kind takes a number, labelled Days or Level) or edits one's
+-- label and number, and each item has Up, Down,
 -- Edit and Delete. Delete asks first, in the page itself. Each control calls
 -- its `options` handler, which returns true, or false and why not (shown
 -- in the page); SetPromotions shows the models (see
@@ -1428,15 +1429,19 @@ local function buildPromotions(framework, page, frameName, options)
 
     local box = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
     box:SetSize(240, 20)
-    box:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -50)
+    box:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -64)
     box:SetAutoFocus(false)
     box:SetMaxLetters(addon.RankRequirements.MAX_LABEL)
     box:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
     end)
     editor.box = box
+    local boxLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    boxLabel:SetPoint("BOTTOMLEFT", box, "TOPLEFT", -4, 2)
+    boxLabel:SetText("Requirement")
     -- The new item's kind: each click steps to the next one. An automated
-    -- kind shows the number box (its days, or the level).
+    -- kind shows the number box (its days, or the level). Each control's
+    -- label is its child, so it hides with it.
     local kindIndex = 1
     local numberBox = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
     numberBox:SetSize(40, 20)
@@ -1447,13 +1452,19 @@ local function buildPromotions(framework, page, frameName, options)
         self:ClearFocus()
     end)
     editor.numberBox = numberBox
+    numberBox.label = numberBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    numberBox.label:SetPoint("BOTTOMLEFT", numberBox, "TOPLEFT", -4, 2)
     local kindButton = smallButton(holder, 170, "", nil)
     kindButton:SetPoint("LEFT", box, "RIGHT", 8, 0)
+    local kindLabel = kindButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    kindLabel:SetPoint("BOTTOMLEFT", kindButton, "TOPLEFT", 0, 4)
+    kindLabel:SetText("Requirement Type")
     numberBox:SetPoint("LEFT", kindButton, "RIGHT", 10, 0)
     local function showKind()
         local kind = addon.RankRequirements.KIND_ORDER[kindIndex]
         kindButton:SetText(addon.RankRequirements.KINDS[kind])
         if addon.RankRequirements.IsAutomated(kind) then
+            numberBox.label:SetText(addon.RankRequirements.AUTOMATED[kind].number)
             numberBox:Show()
         else
             numberBox:Hide()
@@ -1500,14 +1511,14 @@ local function buildPromotions(framework, page, frameName, options)
     editor.cancel:SetPoint("LEFT", editor.save, "RIGHT", 6, 0)
     editor.cancel:Hide()
     editor.message = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    editor.message:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -74)
+    editor.message:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -88)
     editor.message:SetWidth(680)
     editor.message:SetJustifyH("LEFT")
 
     -- Asking before a delete, in the page.
     local confirm = CreateFrame("Frame", nil, holder)
     confirm:SetSize(680, 24)
-    confirm:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -90)
+    confirm:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -104)
     confirm.text = confirm:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     confirm.text:SetPoint("LEFT", confirm, "LEFT", 0, 0)
     confirm.text:SetWidth(470)
@@ -1528,14 +1539,14 @@ local function buildPromotions(framework, page, frameName, options)
     editor.confirm = confirm
 
     editor.empty = holder:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    editor.empty:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -120)
+    editor.empty:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -134)
     editor.empty:SetWidth(660)
     editor.empty:SetJustifyH("LEFT")
     local index
     for index = 1, addon.RankRequirements.MAX_ITEMS do
         local row = CreateFrame("Frame", nil, holder)
         row:SetSize(700, RosterWindow.LINE_HEIGHT)
-        row:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -118 - (index - 1) * RosterWindow.LINE_HEIGHT)
+        row:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -132 - (index - 1) * RosterWindow.LINE_HEIGHT)
         row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.label:SetPoint("LEFT", row, "LEFT", 6, 0)
         row.label:SetWidth(260)
@@ -1561,6 +1572,7 @@ local function buildPromotions(framework, page, frameName, options)
             editor.cancel:Show()
             kindButton:Hide()
             if row.item.n ~= nil then
+                numberBox.label:SetText(row.item.numberText or "")
                 numberBox:SetText(tostring(row.item.n))
                 numberBox:Show()
             else
