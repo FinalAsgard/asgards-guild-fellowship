@@ -58,9 +58,12 @@ local GuildNoteOverlay = {
     LINE_GAP = 3,
     LINE_HEIGHT = 12,
     IGNORE_SIZE = { 64, 18 },
-    -- The promotion panel, as wide as the profile panel: its lines this
-    -- tall, at most this many (a longer list ends with a pointer to the
-    -- add-on's panel).
+    -- The promotion panel: this wide (wider than the detail panel, to fit
+    -- requirement titles), its lines this tall, at most this many (a longer
+    -- list ends with a pointer to the add-on's panel), and this much more
+    -- room under its last line.
+    PROMOTION_WIDTH = 380,
+    PROMOTION_BOTTOM = 8,
     PROMOTION_LINE_HEIGHT = 20,
     PROMOTION_LINES = 18,
     PROMOTION_TITLE = "Promotion",
@@ -341,8 +344,8 @@ function Overlay:ShowProfile(name)
     profile:Show()
 end
 
--- Builds the promotion panel, hung under the detail panel like the profile
--- panel (which then hangs under it; see StackProfile): a title over
+-- Builds the promotion panel, hung under the detail panel's left edge like
+-- the profile panel (which then hangs under it; see StackProfile): a title over
 -- PROMOTION_LINES lines drawn by PromotionLines, made a child of the detail
 -- panel so it shows and hides with it.
 function Overlay:BuildPromotion(detail)
@@ -350,7 +353,7 @@ function Overlay:BuildPromotion(detail)
     local ok, promotion = pcall(function()
         local created = self:Box(detail)
         created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.PROFILE_SHIFT, 0)
-        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.PROFILE_SHIFT, 0)
+        created:SetWidth(GuildNoteOverlay.PROMOTION_WIDTH)
         created.title = created:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         created.title:SetPoint("TOPLEFT", created, "TOPLEFT", padding, -padding)
         created.title:SetText(GuildNoteOverlay.PROMOTION_TITLE)
@@ -390,8 +393,8 @@ function Overlay:BuildPromotion(detail)
     self.promotion = ok and promotion or nil
 end
 
--- Hangs the profile panel under the promotion panel while that shows, else
--- under the detail panel.
+-- Hangs the profile panel under the promotion panel's left edge while that
+-- shows, still as wide as the detail panel; else under the detail panel.
 function Overlay:StackProfile()
     local profile = self.profile
     local detail = self:FindDetailFrame()
@@ -402,7 +405,12 @@ function Overlay:StackProfile()
     local promotion = self.promotion
     if promotion ~= nil and promotion:IsShown() then
         profile:SetPoint("TOPLEFT", promotion, "BOTTOMLEFT", 0, 0)
-        profile:SetPoint("TOPRIGHT", promotion, "BOTTOMRIGHT", 0, 0)
+        local ok, width = pcall(detail.GetWidth, detail)
+        if ok and type(width) == "number" and width > 0 then
+            profile:SetWidth(width)
+        else
+            profile:SetPoint("TOPRIGHT", promotion, "BOTTOMRIGHT", 0, 0)
+        end
     else
         profile:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.PROFILE_SHIFT, 0)
         profile:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.PROFILE_SHIFT, 0)
@@ -446,7 +454,8 @@ function Overlay:ShowPromotion(name)
         end
     end
     promotion:SetHeight(2 * GuildNoteOverlay.PANEL_PADDING + GuildNoteOverlay.LINE_HEIGHT
-        + GuildNoteOverlay.LINE_GAP + #shown * GuildNoteOverlay.PROMOTION_LINE_HEIGHT)
+        + GuildNoteOverlay.LINE_GAP + #shown * GuildNoteOverlay.PROMOTION_LINE_HEIGHT
+        + GuildNoteOverlay.PROMOTION_BOTTOM)
     promotion:Show()
     self:StackProfile()
 end

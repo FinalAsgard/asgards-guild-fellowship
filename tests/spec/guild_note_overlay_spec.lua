@@ -48,6 +48,7 @@ local function promotionWidget()
     function methods:HasFocus() return false end
     function methods:SetScript(name, handler) self.scripts[name] = handler end
     function methods:SetHeight(height) self.height = height end
+    function methods:SetWidth(width) self.width = width end
     function methods:CreateFontString()
         local text = promotionWidget()
         table.insert(self.children, text)
@@ -332,6 +333,7 @@ local function registerProfileTests(profile)
         function()
         local world = fixtures.newEnvironment(profile)
         local detail = installGuildRoster(world.environment)
+        function detail:GetWidth() return 250 end
         local rows = {
             { kind = "promotion", key = "bolt", text = "[-] Bolt: Initiate -> Member, 0 of 2", toggle = true },
             { kind = "promotion", key = "bolt", item = "rules", text = "Read the rules", check = true,
@@ -348,16 +350,19 @@ local function registerProfileTests(profile)
         local promotion = detail.promotion
         test.assertTrue(promotion.shown)
         test.assertEqual("Promotion", promotion.title.text)
-        -- Hung under the detail panel, as wide as the mini profile, which
-        -- then hangs under it.
+        -- Hung under the detail panel's left edge, wide enough for
+        -- requirement titles; the mini profile hangs under it, still as
+        -- wide as the details.
         test.assertEqual(detail, promotion.points[1][2])
         test.assertEqual("BOTTOMLEFT", promotion.points[1][3])
         test.assertEqual(6, promotion.points[1][4])
-        test.assertEqual("BOTTOMRIGHT", promotion.points[2][3])
+        test.assertEqual(380, promotion.width)
         test.assertEqual(promotion, detail.profile.points[1][2])
         test.assertEqual("BOTTOMLEFT", detail.profile.points[1][3])
         test.assertEqual(0, detail.profile.points[1][4])
-        test.assertEqual("BOTTOMRIGHT", detail.profile.points[2][3])
+        test.assertEqual(250, detail.profile.width)
+        -- Padding under the last of its four lines.
+        test.assertEqual(2 * 8 + 12 + 3 + 4 * 20 + 8, promotion.height)
         local lines = promotion.lines
         test.assertTrue(lines[1].shown)
         test.assertContains(lines[1].text.text, "Bolt: Initiate -> Member")
