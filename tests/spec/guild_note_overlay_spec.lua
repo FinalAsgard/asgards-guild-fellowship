@@ -360,6 +360,7 @@ local function registerProfileTests(profile)
         test.assertEqual(promotion, detail.profile.points[1][2])
         test.assertEqual("BOTTOMLEFT", detail.profile.points[1][3])
         test.assertEqual(0, detail.profile.points[1][4])
+        test.assertEqual(-6, detail.profile.points[1][5], "a gap between the two panels")
         test.assertEqual(250, detail.profile.width)
         -- Padding under the last of its four lines.
         test.assertEqual(2 * 8 + 12 + 3 + 4 * 20 + 8, promotion.height)

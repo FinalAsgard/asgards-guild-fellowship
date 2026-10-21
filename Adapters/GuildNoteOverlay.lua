@@ -64,6 +64,8 @@ local GuildNoteOverlay = {
     -- room under its last line.
     PROMOTION_WIDTH = 380,
     PROMOTION_BOTTOM = 8,
+    -- The gap between the promotion panel and the profile panel under it.
+    PROMOTION_GAP = 6,
     PROMOTION_LINE_HEIGHT = 20,
     PROMOTION_LINES = 18,
     PROMOTION_TITLE = "Promotion",
@@ -394,7 +396,8 @@ function Overlay:BuildPromotion(detail)
 end
 
 -- Hangs the profile panel under the promotion panel's left edge while that
--- shows, still as wide as the detail panel; else under the detail panel.
+-- shows, PROMOTION_GAP below it and still as wide as the detail panel;
+-- else under the detail panel.
 function Overlay:StackProfile()
     local profile = self.profile
     local detail = self:FindDetailFrame()
@@ -404,12 +407,12 @@ function Overlay:StackProfile()
     pcall(profile.ClearAllPoints, profile)
     local promotion = self.promotion
     if promotion ~= nil and promotion:IsShown() then
-        profile:SetPoint("TOPLEFT", promotion, "BOTTOMLEFT", 0, 0)
+        profile:SetPoint("TOPLEFT", promotion, "BOTTOMLEFT", 0, -GuildNoteOverlay.PROMOTION_GAP)
         local ok, width = pcall(detail.GetWidth, detail)
         if ok and type(width) == "number" and width > 0 then
             profile:SetWidth(width)
         else
-            profile:SetPoint("TOPRIGHT", promotion, "BOTTOMRIGHT", 0, 0)
+            profile:SetPoint("TOPRIGHT", promotion, "BOTTOMRIGHT", 0, -GuildNoteOverlay.PROMOTION_GAP)
         end
     else
         profile:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.PROFILE_SHIFT, 0)
