@@ -476,6 +476,39 @@ local function registerRowTests(profile)
         test.assertEqual("Rows with a Ready flag now: 0", lines[2])
     end)
 
+    test.test(profile .. ": the Ready flag sits just after the row's rank, within the rank column", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local list = detail.memberList
+        list.rows = { fakeRow("Bolt"), fakeRow("Nail") }
+        -- The row's rank text: "Initiate" is 46 wide; a long rank is cut at
+        -- the column's 80.
+        local function rank(text, column)
+            local widget = fakeWidget()
+            function widget:GetStringWidth() return text end
+            function widget:GetWidth() return column end
+            return widget
+        end
+        list.rows[1].Rank = rank(46, 80)
+        list.rows[2].Rank = rank(120, 80)
+        local overlay = build(world, { ready = { Bolt = true, Nail = true } })
+        overlay:AttachRows()
+
+        local point = list.rows[1].readyMarker.points[1]
+        test.assertEqual("LEFT", point[1])
+        test.assertEqual(list.rows[1].Rank, point[2])
+        test.assertEqual(50, point[4], "4 past the rank's text")
+        test.assertEqual(84, list.rows[2].readyMarker.points[1][4], "no further than the rank column's edge")
+        test.assertEqual(1, #list.rows[1].readyMarker.points, "placed afresh on each redraw")
+        test.assertContains(overlay:ReadyProbeLines()[3], "Flags next to the rank: 2")
+
+        -- With the rank column hidden, it falls back to the row's edge.
+        list.rows[1].Rank.shown = false
+        overlay:Refresh()
+        test.assertEqual("RIGHT", list.rows[1].readyMarker.points[1][1])
+        test.assertContains(overlay:ReadyProbeLines()[3], "at the row's right edge (no rank text found): 1")
+    end)
+
     test.test(profile .. ": before the guild roster opens, the probe says its rows aren't followed yet", function()
         local world = fixtures.newEnvironment(profile)
         local overlay = build(world, { ready = { Bolt = true } })

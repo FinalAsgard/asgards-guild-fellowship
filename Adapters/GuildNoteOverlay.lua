@@ -1,7 +1,7 @@
 local _, addon = ...
 
 -- Adds to the game's own guild roster: for officers, which members are
--- ready for promotion (an up arrow on their rows: add-ons can't promote,
+-- ready for promotion (an up arrow beside their rank: add-ons can't promote,
 -- so the officer promotes them in the game's window), which members' public
 -- notes are out of date (a marker on their rows) and what a selected
 -- member's note should say (see NoteAudit), in a small panel to the right
@@ -31,10 +31,14 @@ local GuildNoteOverlay = {
     -- The small marker on a roster row whose member's note is out of date.
     MARKER_TEXTURE = "Interface\\COMMON\\Indicator-Yellow",
     MARKER_SIZE = 12,
-    -- The flag on a roster row whose member is ready for promotion, left
-    -- of the note marker: the game's up arrow, on both clients.
+    -- The flag on a roster row whose member is ready for promotion: the
+    -- game's up arrow, on both clients, READY_GAP after the row's rank text.
+    -- A row with no rank text shown (best guess: the Communities row's
+    -- `Rank` font string; see /agf probe ready) gets it left of the note
+    -- marker instead, READY_OFFSET in from its right edge.
     READY_TEXTURE = "Interface\\Buttons\\Arrow-Up-Up",
     READY_SIZE = 16,
+    READY_GAP = 4,
     READY_OFFSET = -20,
     -- The overlay's panels: their edge, the room inside them, and the gap
     -- between lines. The note panel is this wide; the profile panel is as
@@ -452,11 +456,51 @@ function Overlay:MarkRow(row)
             ok, ready = pcall(check, name)
         end
         if ok and ready == true then
+            self:PlaceReady(row, readyMarker)
             readyMarker:Show()
         else
             readyMarker:Hide()
         end
     end
+end
+
+-- `row`'s rank text, when the row has one shown.
+local function rankText(row)
+    local rank = row.Rank
+    if type(rank) ~= "table" or type(rank.GetStringWidth) ~= "function" then
+        return nil
+    end
+    if type(rank.IsShown) == "function" then
+        local ok, shown = pcall(rank.IsShown, rank)
+        if ok and shown == false then
+            return nil
+        end
+    end
+    return rank
+end
+
+-- Puts `row`'s Ready flag just after its rank text (no further than the
+-- rank column's edge), or, with no rank text, left of the note marker.
+-- Remembers where, for /agf probe ready.
+function Overlay:PlaceReady(row, marker)
+    local rank = rankText(row)
+    pcall(marker.ClearAllPoints, marker)
+    self.readyPlaces = self.readyPlaces or setmetatable({}, { __mode = "k" })
+    if rank ~= nil then
+        local okText, text = pcall(rank.GetStringWidth, rank)
+        local width = okText and type(text) == "number" and text or 0
+        if type(rank.GetWidth) == "function" then
+            local okColumn, column = pcall(rank.GetWidth, rank)
+            if okColumn and type(column) == "number" and column > 0 then
+                width = math.min(width, column)
+            end
+        end
+        marker:SetPoint("LEFT", rank, "LEFT", width + GuildNoteOverlay.READY_GAP, 0)
+        self.readyPlaces[row] = "rank"
+        return
+    end
+    marker:SetPoint("RIGHT", row, "RIGHT", GuildNoteOverlay.READY_OFFSET, 0)
+    self.readyPlaces[row] = "edge"
 end
 
 -- Marks every row the member list shows now, with the ready check worked
@@ -478,7 +522,7 @@ function Overlay:ReadyProbeLines()
         return { "Guild roster rows followed: no (open the game's guild roster, then probe again)" }
     end
     self:MarkRows()
-    local shown, rows = 0, 0
+    local shown, rows, byRank = 0, 0, 0
     pcall(eachRow, self.memberList, function(row)
         rows = rows + 1
         local readyMarker = self.readyMarkers and self.readyMarkers[row]
@@ -487,11 +531,16 @@ function Overlay:ReadyProbeLines()
         end)
         if ok and isShown then
             shown = shown + 1
+            if self.readyPlaces and self.readyPlaces[row] == "rank" then
+                byRank = byRank + 1
+            end
         end
     end)
     return {
         "Guild roster rows followed: yes (" .. rows .. " shown)",
         "Rows with a Ready flag now: " .. shown,
+        "Flags next to the rank: " .. byRank .. "; at the row's right edge (no rank text found): " ..
+            (shown - byRank),
     }
 end
 

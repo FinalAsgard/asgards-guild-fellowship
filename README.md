@@ -409,7 +409,7 @@ Requirements reach every add-on in the guild through [guild sync](#guild-sync). 
 
 Officers see who's ready in three places:
 
-- **The game's guild roster:** a ready member's row shows an up arrow at its right edge (beside the yellow out-of-date note marker, when there is one). Promote them in that window. `/agf probe ready` says how many are ready and whether the roster's rows are being followed (open the guild roster first).
+- **The game's guild roster:** a ready member's row shows an up arrow just after their rank. Promote them in that window. `/agf probe ready` says how many are ready, whether the roster's rows are being followed, and how many flags sit next to the rank (open the guild roster first). A row whose rank isn't shown gets the arrow at its right edge instead, beside the yellow out-of-date note marker.
 - **The add-on's roster:** a ready character shows **Ready** before its rank.
 - **The player panel's Promotion tab:** a ready character's line says **Ready for promotion**.
 
