@@ -403,8 +403,7 @@ local PANEL_HEIGHT = 440
 -- and the room the list leaves for it.
 local PANEL_BAR_MARGIN = 10
 local PANEL_BAR_HEIGHT = 40
--- The Profile and Promotion tab buttons, and the list's top below them.
-local PANEL_TABS_TOP = 70
+-- The list's top, with the Profile and Promotion tabs sitting on it.
 local PANEL_LIST_TOP = 96
 
 -- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
@@ -488,17 +487,47 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     -- The tabs above the list: Profile (the player's details and
     -- characters) and Promotion (each character's checklist, for an
     -- officer, or a member's own player). Without a Promotion tab, both
-    -- are hidden and the list shows the profile.
+    -- are hidden and the list shows the profile. They're the game's own
+    -- top tabs: Retail's template, else Forever's, else a plain button
+    -- (lit while selected) when neither exists.
     edit.tab = "profile"
     edit.tabs = {}
+    local TAB_TEMPLATES = { "PanelTopTabButtonTemplate", "TabButtonTemplate" }
     local tabNames = { { "profile", "Profile" }, { "promotion", "Promotion" } }
+    local previousTab
     local tabIndex
     for tabIndex = 1, #tabNames do
         local name = tabNames[tabIndex][1]
-        local tab = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        tab:SetSize(90, 20)
+        local tab
+        local templateIndex
+        for templateIndex = 1, #TAB_TEMPLATES do
+            if tab == nil then
+                local tabName = frameName .. "PlayerTab" .. tabIndex .. "T" .. templateIndex
+                local ok, made = pcall(CreateFrame, "Button", tabName, panel, TAB_TEMPLATES[templateIndex])
+                -- A client without the template may still make a bare
+                -- button: only one with the tab's edge texture counts.
+                if ok and made ~= nil and (made.Left ~= nil or _G[tabName .. "Left"] ~= nil) then
+                    tab = made
+                    tab.gameTab = true
+                elseif ok and made ~= nil then
+                    made:Hide()
+                end
+            end
+        end
+        if tab == nil then
+            tab = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+            tab:SetSize(90, 20)
+        end
         tab:SetText(tabNames[tabIndex][2])
-        tab:SetPoint("TOPLEFT", panel, "TOPLEFT", 12 + (tabIndex - 1) * 94, -PANEL_TABS_TOP)
+        if tab.gameTab then
+            pcall(PanelTemplates_TabResize, tab, 0)
+        end
+        if previousTab == nil then
+            tab:SetPoint("BOTTOMLEFT", panel, "TOPLEFT", 12, -PANEL_LIST_TOP)
+        else
+            tab:SetPoint("LEFT", previousTab, "RIGHT", 2, 0)
+        end
+        previousTab = tab
         tab:SetScript("OnClick", function()
             edit.tab = name
             if edit.show ~= nil then
@@ -507,6 +536,66 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         end)
         tab:Hide()
         edit.tabs[name] = tab
+    end
+    -- Marks `tab` selected or not, the game's way when it's a game tab.
+    function edit.selectTab(tab, selected)
+        if tab.gameTab then
+            local ok = pcall(selected and PanelTemplates_SelectTab or PanelTemplates_DeselectTab, tab)
+            if ok then
+                return
+            end
+        end
+        if selected then
+            tab:LockHighlight()
+        else
+            tab:UnlockHighlight()
+        end
+    end
+
+    -- Notes typed on the Promotion tab's note lines, by character and
+    -- item, kept while the list redraws; and the items whose box was
+    -- ticked before a note was typed.
+    edit.notes = {}
+    edit.noteNeeded = {}
+    local function noteId(row)
+        return tostring(row.key) .. "\31" .. tostring(row.item)
+    end
+    local function call(handler, ...)
+        if options[handler] ~= nil then
+            local ok, done = pcall(options[handler], ...)
+            return ok and done ~= false
+        end
+        return false
+    end
+    local function showTooltip(owner, tooltip)
+        if tooltip ~= nil and GameTooltip ~= nil then
+            GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+            local index
+            for index = 1, #tooltip do
+                GameTooltip:AddLine(tooltip[index], 1, 1, 1, true)
+            end
+            GameTooltip:Show()
+        end
+    end
+    local function hideTooltip()
+        if GameTooltip ~= nil then
+            GameTooltip:Hide()
+        end
+    end
+    -- Ticks an officer's needs-a-note item with the note typed under it,
+    -- or, with none typed yet, asks for one.
+    local function tickWithNote(row)
+        local id = noteId(row)
+        local note = edit.notes[id]
+        if note == nil or string.find(note, "%S") == nil then
+            edit.noteNeeded[id] = true
+            edit.scroll:Refresh()
+            return
+        end
+        if call("onPromotionsTick", row.key, row.item, true, note) then
+            edit.notes[id] = nil
+            edit.noteNeeded[id] = nil
+        end
     end
 
     local lineAmount = math.floor((PANEL_HEIGHT - PANEL_LIST_TOP - PANEL_BAR_HEIGHT) / RosterWindow.LINE_HEIGHT)
@@ -538,8 +627,68 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 options.onDetach(line.row.key)
             end
         end)
-        -- A promotion row's button: Tick, Untick, Override and Undo override
-        -- work here; a note, a reason, or a promotion with unmet items opens
+        -- A checklist item's box: an officer ticks a custom item with it
+        -- (a needs-a-note item with the note typed on the line below);
+        -- otherwise it only shows whether the item is met.
+        line.check = CreateFrame("CheckButton", nil, line, "UICheckButtonTemplate")
+        line.check:SetSize(20, 20)
+        line.check:SetPoint("LEFT", line, "LEFT", 14, 0)
+        line.check:SetScript("OnClick", function(self)
+            local row = line.row
+            if row == nil or not row.canCheck then
+                self:SetChecked(row ~= nil and row.checked)
+                return
+            end
+            -- The box shows the item's state until the change is saved.
+            self:SetChecked(row.checked)
+            if not row.ticked and row.needsNote then
+                tickWithNote(row)
+            else
+                call("onPromotionsTick", row.key, row.item, not row.ticked)
+            end
+        end)
+        line.check:SetScript("OnEnter", function(self)
+            showTooltip(self, line.row and line.row.tooltip)
+        end)
+        line.check:SetScript("OnLeave", hideTooltip)
+        line.check:Hide()
+        -- A needs-a-note item's note, typed on the line under it: Enter
+        -- ticks the item with it.
+        line.note = CreateFrame("EditBox", nil, line, "InputBoxTemplate")
+        line.note:SetHeight(18)
+        line.note:SetPoint("LEFT", line, "LEFT", 44, 0)
+        line.note:SetPoint("RIGHT", line, "RIGHT", -8, 0)
+        line.note:SetAutoFocus(false)
+        line.note:SetMaxLetters(addon.PromotionChecks.MAX_NOTE)
+        line.note.placeholder = line.note:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        line.note.placeholder:SetPoint("LEFT", line.note, "LEFT", 2, 0)
+        line.note:SetScript("OnTextChanged", function(self, userInput)
+            local row = line.row
+            if row == nil or not row.noteInput then
+                return
+            end
+            local text = self:GetText()
+            if userInput then
+                edit.notes[noteId(row)] = text
+            end
+            if text == "" then
+                self.placeholder:Show()
+            else
+                self.placeholder:Hide()
+            end
+        end)
+        line.note:SetScript("OnEnterPressed", function(self)
+            self:ClearFocus()
+            if line.row ~= nil and line.row.noteInput then
+                tickWithNote(line.row)
+            end
+        end)
+        line.note:SetScript("OnEscapePressed", function(self)
+            self:ClearFocus()
+        end)
+        line.note:Hide()
+        -- A promotion row's button: Override and Undo override work here,
+        -- as does Promote; a reason, or a promotion with unmet items, opens
         -- the character on the Promotions tab instead.
         line.act = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
         line.act:SetSize(96, 18)
@@ -549,35 +698,18 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
             if row == nil or row.kind ~= "promotion" then
                 return
             end
-            local function call(handler, ...)
-                if options[handler] ~= nil then
-                    pcall(options[handler], ...)
-                end
-            end
             if row.promote then
                 call(row.confirm and "onPromotionsFocus" or "onPromotionsPromote", row.key)
-            elseif not row.ticked and (row.needsNote or row.askReason) then
+            elseif not row.ticked and row.askReason then
                 call("onPromotionsFocus", row.key)
             else
                 call("onPromotionsTick", row.key, row.item, not row.ticked)
             end
         end)
         line.act:SetScript("OnEnter", function(self)
-            local tooltip = line.row and line.row.tooltip
-            if tooltip ~= nil and GameTooltip ~= nil then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                local index
-                for index = 1, #tooltip do
-                    GameTooltip:AddLine(tooltip[index], 1, 1, 1, true)
-                end
-                GameTooltip:Show()
-            end
+            showTooltip(self, line.row and line.row.tooltip)
         end)
-        line.act:SetScript("OnLeave", function()
-            if GameTooltip ~= nil then
-                GameTooltip:Hide()
-            end
-        end)
+        line.act:SetScript("OnLeave", hideTooltip)
         -- Clicking a character's line on the Promotion tab opens or closes
         -- its checklist.
         line:EnableMouse(true)
@@ -615,16 +747,51 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 elseif row.kind == "history" then
                     text = "  " .. row.name .. "  |cff9d9d9d" .. row.role .. ", " .. row.reason ..
                         (row.dates ~= "" and (", " .. row.dates) or "") .. "|r"
-                elseif row.kind == "promotion" then
-                    text = "  " .. row.text
+                elseif row.kind == "promotion" and not row.noteInput then
+                    text = (row.check and "" or "  ") .. row.text
                 end
                 -- Only character rows and promotion rows with an action have
-                -- buttons; the others' text uses the line's full width.
+                -- buttons; the others' text uses the line's full width. An
+                -- item's text starts after its check box.
                 local acts = row.kind == "promotion" and row.action ~= nil
                 line.text:ClearAllPoints()
-                line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
+                if row.check then
+                    line.text:SetPoint("LEFT", line.check, "RIGHT", 2, 0)
+                else
+                    line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
+                end
                 line.text:SetPoint("RIGHT", line, "RIGHT", row.kind == "character" and -128 or (acts and -100 or -6), 0)
                 line.text:SetText(text)
+                if row.check then
+                    line.check:SetChecked(row.checked == true)
+                    if row.canCheck then
+                        line.check:Enable()
+                    else
+                        line.check:Disable()
+                    end
+                    line.check:Show()
+                else
+                    line.check:Hide()
+                end
+                if row.noteInput then
+                    local id = noteId(row)
+                    if not line.note:HasFocus() then
+                        line.note:SetText(edit.notes[id] or "")
+                    end
+                    line.note.placeholder:SetText(edit.noteNeeded[id] and "|cffff8040Type a note, then tick the box|r"
+                        or "Note (needed to tick it)")
+                    if line.note:GetText() == "" then
+                        line.note.placeholder:Show()
+                    else
+                        line.note.placeholder:Hide()
+                    end
+                    line.note:Show()
+                else
+                    if line.note:HasFocus() then
+                        line.note:ClearFocus()
+                    end
+                    line.note:Hide()
+                end
                 if acts then
                     line.act:SetText(row.action)
                     line.act:Show()
@@ -2560,11 +2727,7 @@ function Window:ShowPlayer(model)
                 else
                     tab:Hide()
                 end
-                if name == edit.tab then
-                    tab:LockHighlight()
-                else
-                    tab:UnlockHighlight()
-                end
+                edit.selectTab(tab, name == edit.tab)
             end
             edit.scroll:SetData(edit.tab == "promotion" and current.promotionRows or current.rows)
             edit.scroll:Refresh()

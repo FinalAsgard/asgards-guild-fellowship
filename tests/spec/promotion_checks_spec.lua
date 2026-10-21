@@ -567,7 +567,15 @@ test.test("an officer's panel shows each character's checklist with its buttons,
     test.assertContains(rowWith(rows, "bolt: Initiate -> Member, 1 of 2").text, "1 of 2")
     test.assertContains(rowWith(rows, "Promoted on 2026-10-20").text, "by Toolbox")
     local ticked = rowWith(rows, "Attend an event")
-    test.assertEqual("Untick", ticked.action)
+    test.assertEqual(nil, ticked.action, "a check box, not a button")
+    test.assertTrue(ticked.check)
+    test.assertTrue(ticked.checked)
+    test.assertTrue(ticked.canCheck)
+    local index
+    for index = 1, #rows do
+        test.assertFalse(rows[index].noteInput == true and rows[index].item == noted.id,
+            "a ticked item needs no note line")
+    end
     test.assertContains(ticked.text, "Raid night")
     test.assertContains(ticked.tooltip[1], "Ticked by Toolbox")
     local level = rowWith(rows, "Level 10")
@@ -597,7 +605,9 @@ test.test("a member's own panel shows progress and details read-only, without no
     test.assertEqual(nil, rowWith(rows, "Promoted on"))
     test.assertEqual(nil, rowWith(rows, "Promote to"))
     local ticked = rowWith(rows, "Attend an event")
-    test.assertContains(ticked.text, "[x]")
+    test.assertTrue(ticked.check)
+    test.assertTrue(ticked.checked)
+    test.assertEqual(nil, ticked.canCheck, "read-only")
     test.assertFalse(string.find(ticked.text, "Raid night", 1, true) ~= nil, "no notes")
     test.assertEqual(nil, ticked.action)
     test.assertEqual(nil, ticked.tooltip)
@@ -621,10 +631,34 @@ test.test("the panel's Promotion tab shows one line per character, each opening 
     test.assertEqual(nil, rowWith(rows, "main: Veteran").toggle, "nothing to open without requirements")
     test.assertEqual(nil, rowWith(rows, "Attend an event"))
 
+    local noted = addItem(inputs, 4, "Write a guide", "check-note")
+    rows = panelFor(inputs, addon, { "main", "bolt" }, { officer = true, promoteAction = "Promote",
+        expanded = { bolt = true } })
+    local at
+    local index
+    for index = 1, #rows do
+        if rows[index].item == noted.id and not rows[index].noteInput then
+            at = index
+        end
+    end
+    test.assertTrue(rows[at].needsNote)
+    test.assertTrue(rows[at + 1].noteInput, "the note is typed on the line under the item")
+    test.assertEqual(noted.id, rows[at + 1].item)
+    inputs.checks:Set("bolt", noted, true, "The raid guide", OFFICER, NOW)
+    rows = panelFor(inputs, addon, { "bolt" }, { officer = true, expanded = { bolt = true } })
+    for index = 1, #rows do
+        test.assertEqual(nil, rows[index].noteInput, "no note line once ticked")
+    end
+    local member = panelFor(inputs, addon, { "bolt" }, { officer = false, expanded = { bolt = true } })
+    for index = 1, #member do
+        test.assertEqual(nil, member[index].noteInput, "members get no note line")
+    end
     rows = panelFor(inputs, addon, { "main", "bolt" }, { officer = true, promoteAction = "Promote",
         expanded = { bolt = true } })
     test.assertTrue(rowWith(rows, "bolt: Initiate").expanded)
-    test.assertEqual("Tick", rowWith(rows, "Attend an event").action)
+    local item = rowWith(rows, "Attend an event")
+    test.assertTrue(item.canCheck)
+    test.assertFalse(item.checked)
     test.assertTrue(rowWith(rows, "Promote to Member") ~= nil)
 end)
 
@@ -1051,11 +1085,12 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertTrue(promotions.togglePanel(bolt.key))
         panel = promotions.panelRows(boltKeys, boltPlayer)
         local item = rowWith(panel, "Read the rules")
-        test.assertEqual("Tick", item.action)
+        test.assertTrue(item.canCheck)
+        test.assertFalse(item.checked)
         test.assertTrue(rowWith(panel, "Promote to Member") ~= nil)
         test.assertTrue(promotions.tick(item.key, item.item, true))
         panel = promotions.panelRows(boltKeys, boltPlayer)
-        test.assertEqual("Untick", rowWith(panel, "Read the rules").action)
+        test.assertTrue(rowWith(panel, "Read the rules").checked)
         test.assertContains(rowWith(panel, "Initiate -> Member").text, "1 of 1")
         test.assertEqual("1 of 1", characterRow(promotions.listRows(), "Bolt").progress, "the tab agrees")
         test.assertTrue(promotions.readyKeys()[bolt.key])
@@ -1088,7 +1123,8 @@ for profileIndex = 1, #fixtures.PROFILES do
         hammer.addon.promotions.togglePanel(hammerKey)
         local own = hammer.addon.promotions.panelRows(memberPartition:CharactersOf(hammerPlayer), hammerPlayer)
         local help = rowWith(own, "Help a new member")
-        test.assertContains(help.text, "[ ]")
+        test.assertFalse(help.checked)
+        test.assertEqual(nil, help.canCheck)
         test.assertEqual(nil, help.action)
         test.assertFalse(hammer.addon.promotions.focus(hammerKey))
 

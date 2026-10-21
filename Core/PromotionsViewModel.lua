@@ -297,7 +297,12 @@ end
 --   it has a checklist (or a promotion date) to open, and when open
 --   { kind = "promotion", text, key, item?, action?, ticked, needsNote,
 --     askReason, promote?, confirm?, tooltip? }
--- where `action` names the row's button (officers only).
+-- where `action` names the row's button (officers only). An item row has
+-- `check` (drawn with a check box), `checked` (met) and, for an officer's
+-- custom item, `canCheck` (ticking the box ticks it). An officer's
+-- unticked needs-a-note item is followed by
+--   { kind = "promotion", key, item, noteInput = true }
+-- the line the note is typed on.
 function PromotionsViewModel.PanelRows(characters, options)
     options = options or {}
     local nameOf = options.nameOf or tostring
@@ -335,25 +340,37 @@ function PromotionsViewModel.PanelRows(characters, options)
         end
         local itemIndex
         for itemIndex = 1, #(evaluated and evaluated.items or {}) do
-            local item = PromotionsViewModel.ItemRow(character.key, evaluated.items[itemIndex], nameOf, formatDate)
+            local evaluatedItem = evaluated.items[itemIndex]
+            local item = PromotionsViewModel.ItemRow(character.key, evaluatedItem, nameOf, formatDate)
             local detail = item.ranks ~= "" and item.ranks or nil
             local row = {
                 kind = "promotion",
                 key = character.key,
                 item = item.item,
                 ticked = item.ticked,
-                text = item.character .. (detail and ("  |cff9d9d9d" .. detail .. "|r") or ""),
+                check = true,
+                checked = evaluatedItem.met == true,
+                text = item.label .. (detail and ("  |cff9d9d9d" .. detail .. "|r") or ""),
             }
             if options.officer then
                 if item.progress ~= "" then
                     row.text = row.text .. "  |cff9d9d9d" .. item.progress .. "|r"
                 end
-                row.action = item.action
                 row.needsNote = item.needsNote
-                row.askReason = item.askReason
                 row.tooltip = item.tooltip
+                if evaluatedItem.automated then
+                    -- An automated item's box shows whether it's met;
+                    -- Override and Undo override are its button.
+                    row.action = item.action
+                    row.askReason = item.askReason
+                else
+                    row.canCheck = true
+                end
             end
             table.insert(rows, row)
+            if row.canCheck and row.needsNote and not row.ticked then
+                table.insert(rows, { kind = "promotion", key = character.key, item = item.item, noteInput = true })
+            end
         end
         if options.officer and evaluated ~= nil and character.promoteAction ~= nil then
             evaluated.name = evaluated.name or character.name
