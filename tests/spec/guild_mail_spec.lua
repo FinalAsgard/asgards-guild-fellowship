@@ -286,6 +286,59 @@ test.test("guild mail sender: only one mail is in flight; the next waits for the
     test.assertEqual("Ann Bell,Gus Reed", table.concat(world.sent, ","))
 end)
 
+test.test("guild mail sender: a recipient who left the guild by the time their mail is due is skipped", function()
+    local addon = load()
+    local sent, gone = {}, {}
+    local sender = addon.GuildMailSender.Create({
+        send = function(mail)
+            table.insert(sent, mail.to)
+            return true
+        end,
+        isMember = function(mail)
+            return not gone[mail.to]
+        end,
+    })
+    sender:Start(MAILS)
+    -- Gus leaves while Ann's mail is in flight.
+    gone["Gus Reed"] = true
+    sender:OnSent()
+    test.assertEqual("Ann Bell,Zed Stone", table.concat(sent, ","), "never mailed")
+    local status, reason = sender:Status(2)
+    test.assertEqual(addon.GuildMailSender.SKIPPED, status)
+    test.assertEqual(addon.GuildMailSender.LEFT_GUILD, reason)
+    -- The last one gone too: the send ends.
+    sent, gone = {}, { ["Zed Stone"] = true }
+    local last = addon.GuildMailSender.Create({
+        send = function(mail)
+            table.insert(sent, mail.to)
+            return true
+        end,
+        isMember = function(mail)
+            return not gone[mail.to]
+        end,
+    })
+    last:Start(MAILS)
+    last:OnSent()
+    last:OnSent()
+    test.assertEqual("Ann Bell,Gus Reed", table.concat(sent, ","))
+    test.assertFalse(last:IsSending())
+    test.assertEqual(addon.GuildMailSender.SKIPPED, (last:Status(3)))
+
+    -- A check that can't answer doesn't stop the mail.
+    sent = {}
+    local unsure = addon.GuildMailSender.Create({
+        send = function(mail)
+            table.insert(sent, mail.to)
+            return true
+        end,
+        isMember = function()
+            error("roster unavailable")
+        end,
+    })
+    unsure:Start(MAILS)
+    test.assertEqual("Ann Bell", table.concat(sent, ","))
+end)
+
 test.test("guild mail sender: it carries on after a success and after a failure", function()
     local addon, world = newSender()
     world.sender:Start(MAILS)
@@ -794,6 +847,8 @@ end)
 local function newMail(overrides)
     overrides = overrides or {}
     local addon, partition = setup()
+    -- The same guild's saved data, after a reload.
+    partition = overrides.partition or partition
     local world = { sent = {}, renders = 0, officer = overrides.officer ~= false, partition = partition }
     world.view = {
         shown = false,
@@ -2288,6 +2343,7 @@ end
 local function reload(world, overrides)
     overrides = overrides or {}
     overrides.outbox = world.outbox
+    overrides.partition = world.partition
     local addon, after = newMail(overrides)
     after.mail:OnMailboxOpened()
     return addon, after
@@ -2354,6 +2410,22 @@ test.test("guild mail outbox: after a reload the send comes back and continues w
     test.assertEqual(1, #after.sent)
     test.assertEqual("Gus Reed", after.sent[1].to)
     test.assertEqual("Join us on Discord!", after.sent[1].body)
+    test.assertEqual(addon.GuildMailSender.DONE, world.outbox[1].state)
+end)
+
+test.test("guild mail outbox: a send resumed days later skips whoever has left the guild since", function()
+    local _, world = newMail()
+    sendOne(world)
+    world.outbox[1].recipients[2].inFlight = nil
+
+    local addon, after = reload(world)
+    -- Gus left the guild before the send was resumed.
+    after.partition:MarkDeparted(world.outbox[1].recipients[2].key, 9000)
+    after.mail:Open(true)
+    test.assertTrue(after.mail:RequestSend())
+    test.assertEqual(0, #after.sent, "nobody else was due")
+    test.assertEqual(addon.GuildMailSender.SKIPPED, world.outbox[1].recipients[2].status)
+    test.assertEqual(addon.GuildMailSender.LEFT_GUILD, world.outbox[1].recipients[2].reason)
     test.assertEqual(addon.GuildMailSender.DONE, world.outbox[1].state)
 end)
 
