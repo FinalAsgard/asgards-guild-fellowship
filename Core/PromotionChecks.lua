@@ -15,8 +15,11 @@ local _, addon = ...
 --
 -- A record made for another rank than the character's current one is
 -- stale: a promotion, a demotion, or a rank change made in the game's own
--- guild UI clears the checklist with no message of its own. Stale records
--- are ignored, pruned (Prune), and never sent.
+-- guild UI clears the checklist with no message of its own. So is one made
+-- before the character's current stint at its rank began (`stintStart`):
+-- promoted and then demoted back, it starts that rank's checklist afresh,
+-- even on an add-on that never saw it at the other rank. Stale records are
+-- ignored, pruned (Prune), and never sent.
 --
 -- Pure: the caller passes the saved table and the facts.
 local PromotionChecks = {
@@ -75,6 +78,10 @@ end
 --   isOfficer(key) -> boolean
 --   rankOf(key)    -> the character's current rank (0-based), or nil when
 --                     it isn't in the guild
+--   stintStart(key) -> the earliest a record for the character's current
+--                     rank can be and still be current (when its stint at
+--                     that rank began, less any doubt), or nil when that
+--                     isn't known for sure
 function PromotionChecks.Create(saved, options)
     if type(saved.records) ~= "table" then
         saved.records = {}
@@ -88,13 +95,21 @@ function PromotionChecks.Create(saved, options)
         rankOf = options.rankOf or function()
             return nil
         end,
+        stintStart = options.stintStart or function()
+            return nil
+        end,
     }, Checks)
 end
 
--- Whether `record` is for the character's current rank.
+-- Whether `record` is for the character's current rank, and made during
+-- its current stint there.
 function Checks:current(record)
     local ok, rank = pcall(self.rankOf, record.character)
-    return ok and rank ~= nil and rank == record.rank
+    if not ok or rank == nil or rank ~= record.rank then
+        return false
+    end
+    local okStart, start = pcall(self.stintStart, record.character)
+    return not okStart or type(start) ~= "number" or record.at >= start
 end
 
 -- Applies a record received from another add-on (or made here): when it

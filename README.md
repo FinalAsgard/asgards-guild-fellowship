@@ -413,7 +413,7 @@ Officers see who's ready in three places:
 - **The add-on's roster:** a ready character shows **Ready** before its rank.
 - **The player panel's Promotion tab:** a ready character's line says **Ready for promotion**.
 
-Any rank change, up or down, clears that character's ticks, notes and overrides. The last promotion's date and promoter are kept, from the guild event log when it names who did it.
+Any rank change, up or down, clears that character's ticks, notes and overrides. A character promoted and later demoted back to a rank starts that rank's checklist afresh. That holds even on an officer's add-on that was offline the whole time, once the guild log (or an officer's date) shows when it came back to the rank. The last promotion's date and promoter are kept, from the guild event log when it names who did it.
 
 ### In the player panel and the roster
 

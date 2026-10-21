@@ -121,6 +121,42 @@ test.test("any rank change makes a character's ticks stale: ignored, pruned, and
     test.assertTrue(checks:IsTicked("nail", item.id))
 end)
 
+test.test("demoted back to a rank, a character starts its checklist afresh, even where the move wasn't seen",
+    function()
+    local addon = load()
+    local ranks = { bolt = 4, nail = 4 }
+    local starts = {}
+    local checks = addon.PromotionChecks.Create({}, {
+        isOfficer = isOfficer,
+        rankOf = function(key)
+            return ranks[key]
+        end,
+        stintStart = function(key)
+            return starts[key]
+        end,
+    })
+    local item = { id = "rules", rank = 4, kind = "check" }
+    checks:Set("bolt", item, true, nil, OFFICER, NOW)
+    checks:Set("nail", item, true, nil, OFFICER, NOW)
+
+    -- This add-on never saw Bolt promoted; the guild log says it was
+    -- demoted back to rank 4 a day later, so its old tick is from before.
+    starts.bolt = NOW + 24 * 3600
+    test.assertFalse(checks:IsTicked("bolt", item.id))
+    test.assertTrue(checks:IsTicked("nail", item.id))
+    test.assertEqual(1, #checks:Snapshot(), "an old stint's tick is never sent")
+    test.assertFalse(checks:Apply({ t = "tick", character = "bolt", rank = 4, item = "rules", ticked = true,
+        at = NOW + 60, by = OTHER_OFFICER }), "nor taken from another add-on")
+    test.assertEqual(1, checks:Prune())
+    test.assertTrue(checks:Set("bolt", item, true, nil, OFFICER, NOW + 25 * 3600) ~= nil)
+    test.assertTrue(checks:IsTicked("bolt", item.id), "a tick in the new stint counts")
+
+    -- No sure start (a roster scan's date, or before tracking): only the
+    -- rank decides.
+    starts.nail = nil
+    test.assertTrue(checks:IsTicked("nail", item.id))
+end)
+
 test.test("a snapshot covers what's held only with every current tick, as new or newer", function()
     local inputs = newGuild({ bolt = 4 })
     local other = newGuild({ bolt = 4 })
@@ -741,6 +777,35 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertContains(bolt.text, "no requirements")
         local _, partition = tool.addon.rosterController:QuietContext()
         test.assertEqual(nil, next(partition:GetPromotionChecks().records or {}), "the stale ticks were pruned")
+    end)
+
+    test.test(profile .. " a logged demotion back to a rank resets the checklist, and a scan's date alone doesn't",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        settle(channel, 5)
+        local promotions = tool.addon.promotions
+        test.assertTrue(promotions.add("Read the rules", false))
+        local boltKey = keyOf(tool, names[3])
+        test.assertTrue(promotions.tick(boltKey, promotions.view().items[1].id, true))
+        test.assertContains(select(2, panelOf(tool, names[3])).text, "1 of 1")
+
+        local _, partition = tool.addon.rosterController:QuietContext()
+        local dates = tool.addon.MembershipDates.Create(partition:GetMembershipDates())
+        local toolKey = tool.addon.rosterController:SelfKey()
+        local function rankSince(source, time)
+            partition:GetMembershipDates().characters[boltKey].rankSince =
+                { time = time, rank = 4, source = source, at = time, by = toolKey }
+        end
+        -- A roster scan only saw the rank by a later time: the tick stays.
+        rankSince("seen", tool.time + 6 * 3600)
+        test.assertContains(select(2, panelOf(tool, names[3])).text, "1 of 1")
+        -- The guild log says Bolt came back to this rank after the tick:
+        -- promoted, then demoted back.
+        rankSince("log", tool.time + 6 * 3600)
+        test.assertEqual(tool.time + 6 * 3600, dates:RankSince(boltKey, 4).time)
+        test.assertContains(select(2, panelOf(tool, names[3])).text, "0 of 1")
+        test.assertEqual(nil, promotions.readyKeys()[boltKey])
     end)
 
     test.test(profile .. " an officer adds a level item, overrides it for a low character, then lowers its level",

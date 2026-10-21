@@ -2190,6 +2190,21 @@ if clientProfile.supported then
                 end
                 return character.rank
             end,
+            -- When the character's current stint at its rank began, from
+            -- the guild log (or an officer's date), less the log's doubt and
+            -- SAME_JOIN_SECONDS: ticks made before it are from an earlier
+            -- stint (promoted, then demoted back). A roster scan's date
+            -- only says the change happened by then, so it decides nothing.
+            stintStart = function(key)
+                local character = partition:GetCharacter(key)
+                local since = character and datesOf(partition):RankSince(key, character.rank)
+                if since == nil or (since.source ~= addon.MembershipDates.LOG
+                    and since.source ~= addon.MembershipDates.OFFICER)
+                then
+                    return nil
+                end
+                return since.time - math.max(since.tolerance or 0, addon.MembershipDates.SAME_JOIN_SECONDS)
+            end,
         })
     end
     local ticksSync = addon.RankRequirements.CreateSync({
