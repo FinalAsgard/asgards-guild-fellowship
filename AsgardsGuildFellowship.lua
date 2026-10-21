@@ -2247,9 +2247,9 @@ if clientProfile.supported then
         end
     end
     -- The game guild roster's promotion panel, for the member named `name`
-    -- selected there: their player's rows (as panelRows), with that
-    -- member's checklist open at first. Its own open checklists, kept while
-    -- the same member stays selected.
+    -- selected there: that character's rows only (as panelRows, so who may
+    -- see them is decided by its player), its checklist open at first. Its
+    -- own open checklists, kept while the same member stays selected.
     local rosterExpanded, rosterSelected = {}, nil
     promotions.rosterRows = function(name)
         local guild, partition, normalizer = rosterController:QuietContext()
@@ -2262,7 +2262,7 @@ if clientProfile.supported then
             rosterSelected = key
             rosterExpanded = { [key] = true }
         end
-        return promotions.panelRows(partition:CharactersOf(character.player), character.player, rosterExpanded)
+        return promotions.panelRows({ key }, character.player, rosterExpanded)
     end
     promotions.toggleRoster = function(key)
         rosterExpanded[key] = not rosterExpanded[key] or nil

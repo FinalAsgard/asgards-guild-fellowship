@@ -736,9 +736,24 @@ local function registerRowTests(profile)
         detail:DisplayMember(1, { name = world.guild.members[3].name })
         test.assertFalse(detail.promotion.shown, "never someone else's")
         detail:DisplayMember(1, { name = world.guild.members[2].name })
-        test.assertTrue(detail.promotion.shown, "their own player's characters")
-        local item
+        test.assertTrue(detail.promotion.shown, "their own character")
+        local headers = 0
         local index
+        for index = 1, #detail.promotion.lines do
+            local line = detail.promotion.lines[index]
+            if line.shown and line.row ~= nil and line.row.toggle then
+                headers = headers + 1
+                test.assertContains(line.text.text, "Member", "the selected character, not its player's others")
+            end
+        end
+        test.assertEqual(1, headers, "only the selected character")
+        local other = string.match(world.guild.members[1].name, "^[^%- ]+")
+        for index = 1, #detail.promotion.lines do
+            local line = detail.promotion.lines[index]
+            test.assertFalse(line.shown and string.find(line.text.text or "", other, 1, true) ~= nil,
+                "not its player's other characters")
+        end
+        local item
         for index = 1, #detail.promotion.lines do
             local line = detail.promotion.lines[index]
             if line.shown and line.row ~= nil and line.row.check then

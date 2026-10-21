@@ -425,10 +425,10 @@ On officers' rosters, a character who meets every requirement shows **Ready** be
 
 ### In the game's guild roster
 
-Select a member in the game's guild roster and a **Promotion** panel opens to the right of the [mini profile](#mini-profile-in-the-guild-roster). It shows the same lines as the player panel's Promotion tab for that member's player, with the selected member's checklist open:
+Select a member in the game's guild roster and a **Promotion** panel opens to the right of the [mini profile](#mini-profile-in-the-guild-roster). It's for that character only (the add-on's player panel shows all of a player's characters), with its checklist open:
 
 - Officers see anyone's, and work on it there: tick and untick, notes, overrides with a reason, opening and closing each character's checklist.
-- Members see it only for their own characters, read-only, and never anyone else's.
+- Members see it only when they select one of their own characters, read-only, and never for anyone else's.
 - A long list shows its first 18 lines; the add-on's player panel has the rest.
 
 ### Your own progress
