@@ -138,7 +138,7 @@ What a note should say:
 
 ### Mini profile in the guild roster
 
-Select any member in the game's guild roster and, if the add-on knows their player, a small panel under the game's member details shows that player in brief, under their alias and main as the title: their main, then their Discord and location, then their alts one per line, then their bio under **Personal Bio**. Anything they haven't set is left blank. Levels follow each character's name. On your own characters the panel has an **Edit** button that opens [My Profile](#my-profile). Everyone sees it, not just officers.
+Select any member in the game's guild roster and, if the add-on knows their player, a small panel under the game's member details (under the [Promotion](#in-the-games-guild-roster) panel, when that shows) shows that player in brief, under their alias and main as the title: their main, then their Discord and location, then their alts one per line, then their bio under **Personal Bio**. Anything they haven't set is left blank. Levels follow each character's name. On your own characters the panel has an **Edit** button that opens [My Profile](#my-profile). Everyone sees it, not just officers.
 
 ### Mains, alts, and departures
 
@@ -426,7 +426,7 @@ On officers' rosters, a character who meets every requirement shows **Ready** be
 
 ### In the game's guild roster
 
-Select a member in the game's guild roster and a **Promotion** panel opens to the right of the [mini profile](#mini-profile-in-the-guild-roster). It's for that character only (the add-on's player panel shows all of a player's characters), with its checklist open:
+Select a member in the game's guild roster and a **Promotion** panel opens right under the game's member details, above the [mini profile](#mini-profile-in-the-guild-roster) and as wide as it. It's for that character only (the add-on's player panel shows all of a player's characters), with its checklist open:
 
 - Officers see anyone's, and work on it there: tick and untick, notes, overrides with a reason, opening and closing each character's checklist.
 - Members see it only when they select one of their own characters, read-only, and never for anyone else's.

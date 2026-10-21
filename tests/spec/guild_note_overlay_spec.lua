@@ -32,8 +32,10 @@ end
 -- shown and checked, its scripts and children; any other method does
 -- nothing.
 local function promotionWidget()
-    local widget = { shown = true, scripts = {}, children = {} }
+    local widget = { shown = true, scripts = {}, children = {}, points = {} }
     local methods = {}
+    function methods:SetPoint(...) table.insert(self.points, { ... }) end
+    function methods:ClearAllPoints() self.points = {} end
     function methods:SetText(text) self.text = text end
     function methods:GetText() return self.text or "" end
     function methods:Show() self.shown = true end
@@ -326,7 +328,7 @@ local function registerProfileTests(profile)
         test.assertEqual(-120, panel.points[1][5])
     end)
 
-    test.test(profile .. ": a selected member's promotion status shows right of the mini profile, to work on",
+    test.test(profile .. ": a selected member's promotion status shows between the details and the mini profile, to work on",
         function()
         local world = fixtures.newEnvironment(profile)
         local detail = installGuildRoster(world.environment)
@@ -346,6 +348,16 @@ local function registerProfileTests(profile)
         local promotion = detail.promotion
         test.assertTrue(promotion.shown)
         test.assertEqual("Promotion", promotion.title.text)
+        -- Hung under the detail panel, as wide as the mini profile, which
+        -- then hangs under it.
+        test.assertEqual(detail, promotion.points[1][2])
+        test.assertEqual("BOTTOMLEFT", promotion.points[1][3])
+        test.assertEqual(6, promotion.points[1][4])
+        test.assertEqual("BOTTOMRIGHT", promotion.points[2][3])
+        test.assertEqual(promotion, detail.profile.points[1][2])
+        test.assertEqual("BOTTOMLEFT", detail.profile.points[1][3])
+        test.assertEqual(0, detail.profile.points[1][4])
+        test.assertEqual("BOTTOMRIGHT", detail.profile.points[2][3])
         local lines = promotion.lines
         test.assertTrue(lines[1].shown)
         test.assertContains(lines[1].text.text, "Bolt: Initiate -> Member")
@@ -368,9 +380,12 @@ local function registerProfileTests(profile)
         lines[1].scripts.OnMouseUp(lines[1])
         test.assertEqual("bolt", options.toggled[1])
 
-        -- Someone this user may not see: no panel.
+        -- Someone this user may not see: no panel, and the mini profile
+        -- moves back up under the details.
         detail:DisplayMember(1, { name = "Nail" })
         test.assertFalse(promotion.shown)
+        test.assertEqual(detail, detail.profile.points[1][2])
+        test.assertEqual(6, detail.profile.points[1][4])
     end)
 
     test.test(profile .. ": a long promotion list ends with a pointer to the add-on's player panel", function()

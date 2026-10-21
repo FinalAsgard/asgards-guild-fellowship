@@ -5,12 +5,12 @@ local _, addon = ...
 -- so the officer promotes them in the game's window), which members' public
 -- notes are out of date (a marker on their rows) and what a selected
 -- member's note should say (see NoteAudit), in a small panel to the right
--- of the member detail panel, level with its note; for everyone, a mini
--- profile of the selected member's player (alias, Discord, location, bio,
--- main and alts) in a panel hung under it; and to the right of that, the
--- selected member's player's promotion status (see
+-- of the member detail panel, level with its note; under the detail panel,
+-- the selected member's player's promotion status (see
 -- PromotionsViewModel.PanelRows): an officer's for anyone, to work on, and
--- a member's for their own player only, read-only. Forever and Retail share
+-- a member's for their own player only, read-only; and for everyone, under
+-- that (or straight under the detail panel), a mini profile of the selected
+-- member's player (alias, Discord, location, bio, main and alts). Forever and Retail share
 -- the Communities guild roster, so one overlay serves both.
 --
 -- It only adds its own child frames and follows the game's frames with
@@ -58,9 +58,9 @@ local GuildNoteOverlay = {
     LINE_GAP = 3,
     LINE_HEIGHT = 12,
     IGNORE_SIZE = { 64, 18 },
-    -- The promotion panel: this wide, its lines this tall, at most this
-    -- many (a longer list ends with a pointer to the add-on's panel).
-    PROMOTION_WIDTH = 380,
+    -- The promotion panel, as wide as the profile panel: its lines this
+    -- tall, at most this many (a longer list ends with a pointer to the
+    -- add-on's panel).
     PROMOTION_LINE_HEIGHT = 20,
     PROMOTION_LINES = 18,
     PROMOTION_TITLE = "Promotion",
@@ -341,20 +341,16 @@ function Overlay:ShowProfile(name)
     profile:Show()
 end
 
--- Builds the promotion panel, to the right of the profile panel (or of the
--- detail panel, without one): a title over PROMOTION_LINES lines drawn by
--- PromotionLines, made a child of the detail panel so it shows and hides
--- with it.
+-- Builds the promotion panel, hung under the detail panel like the profile
+-- panel (which then hangs under it; see StackProfile): a title over
+-- PROMOTION_LINES lines drawn by PromotionLines, made a child of the detail
+-- panel so it shows and hides with it.
 function Overlay:BuildPromotion(detail)
     local padding = GuildNoteOverlay.PANEL_PADDING
     local ok, promotion = pcall(function()
         local created = self:Box(detail)
-        if self.profile ~= nil then
-            created:SetPoint("TOPLEFT", self.profile, "TOPRIGHT", 0, 0)
-        else
-            created:SetPoint("TOPLEFT", detail, "BOTTOMRIGHT", GuildNoteOverlay.PROFILE_SHIFT, 0)
-        end
-        created:SetWidth(GuildNoteOverlay.PROMOTION_WIDTH)
+        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.PROFILE_SHIFT, 0)
+        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.PROFILE_SHIFT, 0)
         created.title = created:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         created.title:SetPoint("TOPLEFT", created, "TOPLEFT", padding, -padding)
         created.title:SetText(GuildNoteOverlay.PROMOTION_TITLE)
@@ -394,6 +390,25 @@ function Overlay:BuildPromotion(detail)
     self.promotion = ok and promotion or nil
 end
 
+-- Hangs the profile panel under the promotion panel while that shows, else
+-- under the detail panel.
+function Overlay:StackProfile()
+    local profile = self.profile
+    local detail = self:FindDetailFrame()
+    if profile == nil or detail == nil then
+        return
+    end
+    pcall(profile.ClearAllPoints, profile)
+    local promotion = self.promotion
+    if promotion ~= nil and promotion:IsShown() then
+        profile:SetPoint("TOPLEFT", promotion, "BOTTOMLEFT", 0, 0)
+        profile:SetPoint("TOPRIGHT", promotion, "BOTTOMRIGHT", 0, 0)
+    else
+        profile:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.PROFILE_SHIFT, 0)
+        profile:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.PROFILE_SHIFT, 0)
+    end
+end
+
 -- Shows the promotion status of the player of the member named `name`, or
 -- hides it when this user may not see it.
 function Overlay:ShowPromotion(name)
@@ -408,6 +423,7 @@ function Overlay:ShowPromotion(name)
     end
     if rows == nil then
         promotion:Hide()
+        self:StackProfile()
         return
     end
     local cap = GuildNoteOverlay.PROMOTION_LINES
@@ -432,6 +448,7 @@ function Overlay:ShowPromotion(name)
     promotion:SetHeight(2 * GuildNoteOverlay.PANEL_PADDING + GuildNoteOverlay.LINE_HEIGHT
         + GuildNoteOverlay.LINE_GAP + #shown * GuildNoteOverlay.PROMOTION_LINE_HEIGHT)
     promotion:Show()
+    self:StackProfile()
 end
 
 -- The panel's height for the lines it shows now: each line as tall as its
