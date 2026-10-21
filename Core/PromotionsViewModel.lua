@@ -300,9 +300,9 @@ end
 -- where `action` names the row's button (officers only). An item row has
 -- `check` (drawn with a check box), `checked` (met) and, for an officer's
 -- custom item, `canCheck` (ticking the box ticks it). An officer's
--- unticked needs-a-note item is followed by
---   { kind = "promotion", key, item, noteInput = true }
--- the line the note is typed on.
+-- needs-a-note item (with `note`, its saved note while ticked) is followed
+-- by the line its note is typed on, and shown on once saved:
+--   { kind = "promotion", key, item, noteInput = true, ticked, note? }
 function PromotionsViewModel.PanelRows(characters, options)
     options = options or {}
     local nameOf = options.nameOf or tostring
@@ -353,7 +353,8 @@ function PromotionsViewModel.PanelRows(characters, options)
                 text = item.label .. (detail and ("  |cff9d9d9d" .. detail .. "|r") or ""),
             }
             if options.officer then
-                if item.progress ~= "" then
+                -- A custom item's note is on its own line, below.
+                if item.progress ~= "" and evaluatedItem.automated then
                     row.text = row.text .. "  |cff9d9d9d" .. item.progress .. "|r"
                 end
                 row.needsNote = item.needsNote
@@ -368,8 +369,11 @@ function PromotionsViewModel.PanelRows(characters, options)
                 end
             end
             table.insert(rows, row)
-            if row.canCheck and row.needsNote and not row.ticked then
-                table.insert(rows, { kind = "promotion", key = character.key, item = item.item, noteInput = true })
+            if row.canCheck and row.needsNote then
+                local record = evaluatedItem.record
+                row.note = row.ticked and record ~= nil and record.note or nil
+                table.insert(rows, { kind = "promotion", key = character.key, item = item.item, noteInput = true,
+                    ticked = row.ticked, note = row.note })
             end
         end
         if options.officer and evaluated ~= nil and character.promoteAction ~= nil then

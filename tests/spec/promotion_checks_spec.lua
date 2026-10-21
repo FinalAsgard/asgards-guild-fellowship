@@ -571,12 +571,17 @@ test.test("an officer's panel shows each character's checklist with its buttons,
     test.assertTrue(ticked.check)
     test.assertTrue(ticked.checked)
     test.assertTrue(ticked.canCheck)
+    test.assertEqual("Raid night", ticked.note)
+    test.assertFalse(string.find(ticked.text, "Raid night", 1, true) ~= nil, "the note is on its own line")
+    local noteLine
     local index
     for index = 1, #rows do
-        test.assertFalse(rows[index].noteInput == true and rows[index].item == noted.id,
-            "a ticked item needs no note line")
+        if rows[index].noteInput and rows[index].item == noted.id then
+            noteLine = rows[index]
+        end
     end
-    test.assertContains(ticked.text, "Raid night")
+    test.assertEqual("Raid night", noteLine.note, "a ticked item's note shows on its line")
+    test.assertTrue(noteLine.ticked)
     test.assertContains(ticked.tooltip[1], "Ticked by Toolbox")
     local level = rowWith(rows, "Level 10")
     test.assertEqual("Override", level.action)
@@ -646,9 +651,23 @@ test.test("the panel's Promotion tab shows one line per character, each opening 
     test.assertEqual(noted.id, rows[at + 1].item)
     inputs.checks:Set("bolt", noted, true, "The raid guide", OFFICER, NOW)
     rows = panelFor(inputs, addon, { "bolt" }, { officer = true, expanded = { bolt = true } })
+    local saved
     for index = 1, #rows do
-        test.assertEqual(nil, rows[index].noteInput, "no note line once ticked")
+        if rows[index].noteInput then
+            saved = rows[index]
+        end
     end
+    test.assertEqual("The raid guide", saved.note, "once ticked, the line shows the note")
+    test.assertTrue(saved.ticked)
+    inputs.checks:Set("bolt", noted, false, nil, OFFICER, NOW + 1)
+    rows = panelFor(inputs, addon, { "bolt" }, { officer = true, expanded = { bolt = true } })
+    for index = 1, #rows do
+        if rows[index].noteInput then
+            saved = rows[index]
+        end
+    end
+    test.assertFalse(saved.ticked)
+    test.assertEqual(nil, saved.note, "unticked, the window keeps what was typed")
     local member = panelFor(inputs, addon, { "bolt" }, { officer = false, expanded = { bolt = true } })
     for index = 1, #member do
         test.assertEqual(nil, member[index].noteInput, "members get no note line")
