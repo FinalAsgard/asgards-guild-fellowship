@@ -133,23 +133,47 @@ local function playerLabel(inputs, from)
     return player.alias or displayName(inputs, player.main)
 end
 
+-- Who suggested a bundle: the suggesting character, plus its player's alias
+-- or main when that names someone else ("Bolt (Hammer)").
+local function suggestedByText(inputs, from)
+    local name = displayName(inputs, from)
+    local label = playerLabel(inputs, from)
+    if label ~= name then
+        return name .. " (" .. label .. ")"
+    end
+    return name
+end
+
+-- The one wrapped column of a note conflict or a pending suggestion: the live
+-- note, what it suggests, and the current state, one per line.
+local function detailsText(row)
+    return "Note: " .. (row.note or "(not in the roster)") ..
+        "\nSuggests: " .. tostring(row.suggests) ..
+        "\nCurrently: " .. tostring(row.current)
+end
+
 -- inputs: partition, members (live roster facts by key), normalizer, and
 -- pending (this member's own pending suggestions, as stored: SyncFacts
 -- facts).
--- Returns rows, members' suggestions first, then note conflicts, then this
--- member's own pending suggestions:
---   { kind = "bundle", group, name, count, suggests, source, canAccept,
---     items }
---   { character, kind, name, note, suggests, current, source, canAccept,
---     from?, suggestion?, pending? }
+-- Returns rows in three sections, each with its own fields, members'
+-- suggestions first, then note conflicts, then this member's own pending
+-- suggestions:
+--   Changes to Player: { section = "changes", kind = "bundle", group, name,
+--     count, changes, suggestedBy, canAccept, items }
+--   Note conflicts: { section = "notes", character, kind, name, details,
+--     note, suggests, current, source, canAccept }
+--   Your suggestions: { section = "yours", character, kind, name, details,
+--     note, suggests, current, source, canAccept = false, pending = true }
 -- Members' suggestions are grouped into one bundle per submitting player
 -- (see GroupOf): `name` is that player, `count` how many changes it asks
--- for, and `items` the suggestion rows themselves, each with `from` (the
+-- for (`changes` says so in words), `suggestedBy` the member who sent them,
+-- and `items` the suggestion rows themselves, each with `from` (the
 -- member's key), its `suggestion`, no note, and "Suggested by <member>" as
--- its source. `note` is the live public note, or nil when the character
--- isn't in the current roster. This member's own pending suggestions come
--- last, with `pending` set: they wait for an officer and can't be accepted
--- or rejected here.
+-- its source. `details` is the one wrapped column of the other sections:
+-- the live note, what it suggests, and the current state. `note` is the
+-- live public note, or nil when the character isn't in the current roster.
+-- This member's own pending suggestions wait for an officer and can't be
+-- accepted or rejected here.
 function ConflictViewModel.Build(inputs)
     inputs.members = inputs.members or {}
     local rows = {}
@@ -210,10 +234,11 @@ function ConflictViewModel.Build(inputs)
             local bundle = bundleOf[group]
             if bundle == nil then
                 bundle = {
+                    section = "changes",
                     kind = "bundle",
                     group = group,
                     name = playerLabel(inputs, conflict.from),
-                    source = row.source,
+                    suggestedBy = suggestedByText(inputs, conflict.from),
                     canAccept = true,
                     items = {},
                 }
@@ -222,13 +247,15 @@ function ConflictViewModel.Build(inputs)
             end
             table.insert(bundle.items, row)
         else
+            row.section = "notes"
+            row.details = detailsText(row)
             table.insert(rows, row)
         end
     end
     for index = #bundles, 1, -1 do
         local bundle = bundles[index]
         bundle.count = #bundle.items
-        bundle.suggests = bundle.count == 1 and "1 change" or (bundle.count .. " changes")
+        bundle.changes = bundle.count == 1 and "1 change" or (bundle.count .. " changes")
         table.insert(rows, 1, bundle)
     end
     local pending = inputs.pending or {}
@@ -249,7 +276,8 @@ function ConflictViewModel.Build(inputs)
             and (kind ~= "suggested main" or type(fact.main) == "string")
         then
             local live = inputs.members[fact.character]
-            table.insert(rows, {
+            local row = {
+                section = "yours",
                 character = fact.character,
                 kind = kind,
                 name = displayName(inputs, fact.character),
@@ -259,7 +287,9 @@ function ConflictViewModel.Build(inputs)
                 source = "Your suggestion",
                 canAccept = false,
                 pending = true,
-            })
+            }
+            row.details = detailsText(row)
+            table.insert(rows, row)
         end
     end
     return rows

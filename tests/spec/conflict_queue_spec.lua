@@ -9,7 +9,8 @@ local function load()
         "Core/ReconcileEngine.lua",
         "Core/PlayerService.lua",
         "Core/ConflictViewModel.lua",
-        "Core/SyncFacts.lua"
+        "Core/SyncFacts.lua",
+        "Core/SuggestionService.lua"
     )
 end
 
@@ -600,4 +601,98 @@ test.test("the panel says an ambiguous alias is held by several players, and nam
     test.assertEqual("Alias \"Tinker\" is held by several players: Hammer, Toolbox", found.suggests)
     test.assertEqual("Healer >Tinker", found.note)
     test.assertFalse(found.canAccept)
+end)
+
+-- Each section's own fields ------------------------------------------------
+
+-- A member's suggestion, as SuggestionService queues it for an officer.
+local function suggested(character, main, from)
+    return { character = character, kind = "suggested main", suggestion = { main = main }, from = from,
+        at = 1790000000 }
+end
+
+local function rowsOf(state, members, pending)
+    return state.addon.ConflictViewModel.Build({
+        partition = state.partition,
+        members = members,
+        normalizer = state.normalizer,
+        pending = pending,
+    })
+end
+
+test.test("a Changes to Player row gives the player, the change count, and Suggested by, with no note columns", function()
+    local state = seeded()
+    state.partition:SetConflicts({
+        suggested("visitor-area52", "toolbox-area52", "toolbox-area52"),
+        suggested("wrench-area52", "toolbox-area52", "toolbox-area52"),
+    })
+
+    local row = rowsOf(state)[1]
+
+    test.assertEqual("changes", row.section)
+    test.assertEqual("bundle", row.kind)
+    test.assertEqual("TheTool", row.name)
+    test.assertEqual(2, row.count)
+    test.assertEqual("2 changes", row.changes)
+    -- Toolbox is its player's main, but the player goes by an alias.
+    test.assertEqual("Toolbox (TheTool)", row.suggestedBy)
+    test.assertEqual(nil, row.note)
+    test.assertEqual(nil, row.suggests)
+    test.assertEqual(nil, row.current)
+    test.assertEqual(nil, row.source)
+end)
+
+test.test("Suggested by names a main alone and an alt with its player's main", function()
+    local state = setup()
+    state.scan({
+        { "Hammer-Area52", "" },
+        { "Bolt-Area52", ">Hammer" },
+        { "Visitor-Area52", "" },
+    }, "initial")
+
+    state.partition:SetConflicts({ suggested("visitor-area52", "hammer-area52", "hammer-area52") })
+    local fromMain = rowsOf(state)[1]
+    test.assertEqual("Hammer", fromMain.suggestedBy)
+    test.assertEqual("1 change", fromMain.changes)
+    test.assertEqual(1, fromMain.count)
+
+    state.partition:SetConflicts({ suggested("visitor-area52", "hammer-area52", "bolt-area52") })
+    local fromAlt = rowsOf(state)[1]
+    test.assertEqual("Hammer", fromAlt.name)
+    test.assertEqual("Bolt (Hammer)", fromAlt.suggestedBy)
+end)
+
+test.test("a note conflict row wraps its live note, suggestion, and current state into one column", function()
+    local state = seeded()
+    local _, members = state.scan({
+        { "Toolbox-Area52", "@TheTool" },
+        { "Hammer-Area52", "healer >Visitor" },
+        { "Visitor-Area52", "" },
+    })
+
+    local row = rowsOf(state, members)[1]
+
+    test.assertEqual("notes", row.section)
+    test.assertEqual("Hammer", row.name)
+    test.assertEqual("Note: healer >Visitor\nSuggests: Alt of Visitor\nCurrently: Alt of Toolbox", row.details)
+    test.assertTrue(row.canAccept)
+
+    row = rowsOf(state)[1]
+    test.assertEqual("Note: (not in the roster)\nSuggests: Alt of Visitor\nCurrently: Alt of Toolbox", row.details)
+end)
+
+test.test("your own suggestions keep their content in their own section", function()
+    local state = seeded()
+
+    local row = rowsOf(state, nil, {
+        { kind = "main", character = "visitor-area52", main = "toolbox-area52", at = 5, by = "visitor-area52" },
+    })[1]
+
+    test.assertEqual("yours", row.section)
+    test.assertEqual("Visitor", row.name)
+    test.assertEqual("Alt of Toolbox", row.suggests)
+    test.assertEqual("Own player", row.current)
+    test.assertEqual("Your suggestion", row.source)
+    test.assertEqual("Note: (not in the roster)\nSuggests: Alt of Toolbox\nCurrently: Own player", row.details)
+    test.assertTrue(row.pending)
 end)

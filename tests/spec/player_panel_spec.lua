@@ -459,3 +459,25 @@ test.test("the mini profile leaves Alts blank for a player without alts, and is 
     local addon = state.addon
     test.assertEqual(nil, addon.PlayerPanelViewModel.Summary({ partition = state.partition, playerId = "nobody" }))
 end)
+
+test.test("promotion rows go to the panel's Promotion tab, not the profile list", function()
+    local context = setup()
+    local promotion = { { kind = "promotion", key = "toolbox-area52", text = "Toolbox: Member", toggle = true } }
+    local normalizer = context.addon.NameNormalizer.Create(RULES)
+    local model = context.addon.PlayerPanelViewModel.Build({
+        partition = context.partition,
+        playerId = context.playerId,
+        normalizer = normalizer,
+        promotion = function()
+            return promotion
+        end,
+    })
+    test.assertEqual(promotion, model.promotionRows)
+    local index
+    for index = 1, #model.rows do
+        test.assertTrue(model.rows[index].kind ~= "promotion")
+    end
+    model = context.addon.PlayerPanelViewModel.Build({ partition = context.partition, playerId = context.playerId,
+        normalizer = normalizer })
+    test.assertEqual(nil, model.promotionRows, "no tab without promotion rows")
+end)

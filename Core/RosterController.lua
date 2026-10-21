@@ -49,6 +49,14 @@ Controller.__index = Controller
 --                 for the player panel ("Tank, DPS"), or nil
 --   groupedWith   optional function(keys) -> how often this user grouped
 --                 with a player, for the player panel, or nil
+--   membership    optional function(keys) -> lines about a player's
+--                 membership dates for the player panel (officers), or nil
+--   promotionsView optional function() -> the Promotions page's editor
+--                 model (see PromotionsViewModel.Editor)
+--   promotion     optional function(keys, playerId) -> the player panel's
+--                 promotion rows (officers, or a member's own player), or nil
+--   readyKeys     optional function() -> the set of characters ready for
+--                 promotion, for the roster's marker (officers), or nil
 --   recruitRecord optional function(keys) -> a player's ad record (see
 --                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
@@ -64,10 +72,16 @@ function RosterController.Create(options)
         adStats = options.adStats,
         rolesOf = options.rolesOf,
         groupedWith = options.groupedWith,
+        membership = options.membership,
+        promotionsView = options.promotionsView,
+        promotion = options.promotion,
+        readyKeys = options.readyKeys,
         recruitRecord = options.recruitRecord,
         recentAds = options.recentAds,
         offZones = options.offZones,
         turnBackOn = options.turnBackOn,
+        guildLog = options.guildLog,
+        rankName = options.rankName,
         isOfficer = options.isOfficer or function()
             return false
         end,
@@ -407,9 +421,10 @@ function Controller:ReviewBundle(group)
     return true
 end
 
--- Redraws the bundle under review from `rows` (ConflictViewModel rows), or
--- closes the review once that bundle is all decided.
-function Controller:RedrawReview(rows, normalizer)
+-- Redraws the bundle under review from `rows` (ConflictViewModel rows) and
+-- `members` (live roster facts, for the guild notes), or closes the review
+-- once that bundle is all decided.
+function Controller:RedrawReview(rows, normalizer, members)
     if self.reviewing == nil or type(self.window.ShowReview) ~= "function" then
         return
     end
@@ -420,6 +435,7 @@ function Controller:RedrawReview(rows, normalizer)
                 partition = self.current.partition,
                 normalizer = normalizer,
                 bundle = rows[index],
+                members = members,
             }))
             return
         end
@@ -750,6 +766,8 @@ function Controller:RedrawPanel()
         adStats = self.adStats,
         rolesOf = self.rolesOf,
         groupedWith = self.groupedWith,
+        membership = self.membership,
+        promotion = self.promotion,
         -- The window wraps the bio to the panel's width, when it can
         -- measure text.
         wrap = self.window.WrapAbout and function(text)
@@ -874,6 +892,8 @@ function Controller:Redraw()
             search = self.search,
             now = self.client:Timestamp(),
         }, stamp)
+        self.rosterRows = rows
+        self:MarkReady(false)
         self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
         self.window:SetRows(rows)
         self:RedrawCounts(members)
@@ -884,7 +904,7 @@ function Controller:Redraw()
             pending = self.current.partition:GetSuggestions(),
         })
         self.window:SetConflicts(conflictRows)
-        self:RedrawReview(conflictRows, normalizer)
+        self:RedrawReview(conflictRows, normalizer, members)
         self:RedrawPanel()
     end
     self:RefreshRecruiters()
@@ -1033,6 +1053,209 @@ function Controller:RefreshRecruiters()
     end
 end
 
+-- How the Guild Log page is sorted and filtered now (see GuildLog:Query):
+-- sort ("date" or "name"), types (shown entry types, as a set), range
+-- (days back, or nil for all), search text, and page.
+function Controller:GuildLogFilters()
+    if self.logFilters == nil then
+        local types = {}
+        local index
+        for index = 1, #addon.GuildLog.TYPES do
+            types[addon.GuildLog.TYPES[index]] = true
+        end
+        self.logFilters = { sort = "date", types = types, range = nil, search = "", page = 1 }
+    end
+    return self.logFilters
+end
+
+-- The characters a Guild Log search for `text` matches: every character of
+-- each player whose alias, or any of whose characters' names, contains it,
+-- and characters the roster no longer knows whose logged name contains it.
+-- Nil for no search.
+function Controller:GuildLogSearchSet(text, log, partition, normalizer)
+    local needle = string.lower((string.gsub(text or "", "^%s*(.-)%s*$", "%1")))
+    if needle == "" then
+        return nil
+    end
+    local function contains(value)
+        return type(value) == "string" and string.find(string.lower(value), needle, 1, true) ~= nil
+    end
+    local set = {}
+    if partition ~= nil then
+        partition:EachPlayer(function(id, player)
+            local keys = partition:CharactersOf(id)
+            local matched = contains(player.alias)
+            local index
+            for index = 1, #keys do
+                local character = partition:GetCharacter(keys[index])
+                matched = matched or contains(normalizer:Display(character and character.name or keys[index]))
+            end
+            if matched then
+                for index = 1, #keys do
+                    set[keys[index]] = true
+                end
+            end
+        end)
+    end
+    local entries = log:Entries()
+    local index
+    for index = 1, #entries do
+        local entry = entries[index]
+        local known = partition ~= nil and partition:GetCharacter(entry.character) ~= nil
+        if not known and (contains(entry.name) or contains(entry.character)) then
+            set[entry.character] = true
+        end
+    end
+    return set
+end
+
+-- The Guild Log page, for officers: one page of entries that pass the
+-- filters (see GuildLogFilters), with a heading row naming the columns
+-- first, or a line saying nothing matches. The second result says where
+-- the page is: { page, pages, total, filters }. Nil for anyone else (see
+-- GuildLog).
+--   { kind = "heading" | "entry", date, event, eventType, character, player,
+--     actor }, `eventType` an entry's GuildLog type
+--   { kind = "empty", event }
+function Controller:GuildLogView()
+    local ok, log = pcall(self.guildLog or function() return nil end)
+    if not ok or log == nil then
+        return nil
+    end
+    local guild, partition, normalizer = self:QuietContext()
+    if guild == nil then
+        partition, normalizer = nil, nil
+    end
+    local filters = self:GuildLogFilters()
+    local function name(key, given)
+        if key == nil then
+            return ""
+        end
+        local character = partition ~= nil and partition:GetCharacter(key) or nil
+        local raw = (character and character.name) or given or key
+        return normalizer and normalizer:Display(raw) or raw
+    end
+    local now = self.client:Timestamp()
+    local result = log:Query({
+        types = filters.types,
+        from = (filters.range ~= nil and now ~= nil) and (now - filters.range * addon.GuildLog.DAY) or nil,
+        characters = self:GuildLogSearchSet(filters.search, log, partition, normalizer),
+        sort = filters.sort,
+        nameOf = function(entry)
+            return name(entry.character, entry.name)
+        end,
+        page = filters.page,
+    })
+    filters.page = result.page
+    local rows = { {
+        kind = "heading", date = "Date", event = "Event", character = "Character", player = "Player",
+        actor = "By",
+    } }
+    local index
+    for index = 1, #result.entries do
+        local entry = result.entries[index]
+        table.insert(rows, {
+            kind = "entry",
+            date = self.client:FormatDate(entry.at),
+            event = addon.GuildLog.Describe(entry, self.rankName),
+            eventType = entry.type,
+            character = name(entry.character, entry.name),
+            player = partition ~= nil and self:PosterLabel({ k = entry.character, n = entry.name }, partition,
+                normalizer) or "",
+            actor = name(entry.actor, entry.actorName),
+        })
+    end
+    if result.entries[1] == nil then
+        table.insert(rows, { kind = "empty", event = "Nothing in the guild log matches." })
+    end
+    return rows, { page = result.page, pages = result.pages, total = result.total, filters = filters }
+end
+
+-- The Guild Log page's controls: each changes the filters, goes back to
+-- the first page, and redraws.
+function Controller:SetGuildLogSort(sort)
+    self:GuildLogFilters().sort = sort == "name" and "name" or "date"
+    self:GuildLogFilters().page = 1
+    self:RefreshGuildLog()
+end
+
+function Controller:SetGuildLogType(eventType, shown)
+    self:GuildLogFilters().types[eventType] = shown == true or nil
+    self:GuildLogFilters().page = 1
+    self:RefreshGuildLog()
+end
+
+-- `days` back (7, 30, or 90), or nil for all.
+function Controller:SetGuildLogRange(days)
+    self:GuildLogFilters().range = type(days) == "number" and days or nil
+    self:GuildLogFilters().page = 1
+    self:RefreshGuildLog()
+end
+
+function Controller:SetGuildLogSearch(text)
+    self:GuildLogFilters().search = type(text) == "string" and text or ""
+    self:GuildLogFilters().page = 1
+    self:RefreshGuildLog()
+end
+
+-- Shows page `page` of the filtered log (kept within the pages there are).
+function Controller:SetGuildLogPage(page)
+    self:GuildLogFilters().page = page
+    self:RefreshGuildLog()
+end
+
+-- Redraws the Guild Log page when the window is open.
+function Controller:RefreshGuildLog()
+    if self.window == nil or not self.window:IsShown() or type(self.window.SetGuildLog) ~= "function" then
+        return
+    end
+    local rows, state = self:GuildLogView()
+    if rows ~= nil then
+        self.window:SetGuildLog(rows, state)
+    end
+end
+
+-- Marks the roster's rows of characters ready for promotion (see
+-- RosterViewModel.MarkReady; only officers get any), redrawing the roster
+-- when that changed and `redraw` is set.
+function Controller:MarkReady(redraw)
+    if self.rosterRows == nil or self.readyKeys == nil then
+        return
+    end
+    local ok, ready = pcall(self.readyKeys)
+    if addon.RosterViewModel.MarkReady(self.rosterRows, ok and ready or nil) and redraw and self.window ~= nil then
+        self.window:SetRows(self.rosterRows)
+    end
+end
+
+-- Redraws the Promotions page (the requirements editor, see
+-- PromotionsViewModel.Editor) when the window is open, with the roster's
+-- ready markers and the player panel's Promotion tab.
+function Controller:RefreshPromotions()
+    if self.window == nil or not self.window:IsShown() then
+        return
+    end
+    self:MarkReady(true)
+    self:RedrawPanel()
+    if type(self.window.SetPromotions) ~= "function" or self.promotionsView == nil then
+        return
+    end
+    local ok, model = pcall(self.promotionsView)
+    if ok and model ~= nil then
+        self.window:SetPromotions(model)
+    end
+end
+
+-- Shows or hides the tabs whose pages follow the character's rank (see
+-- PageNavigator), falling back to the home page when the page showing is
+-- hidden now. Run when the roster changes, so a promotion or demotion
+-- needs no reload.
+function Controller:RefreshPages()
+    if self.window ~= nil and type(self.window.ShowPage) == "function" then
+        self.window:ShowPage(nil)
+    end
+end
+
 -- Selects the page `entry` opens (see PageNavigator:PageFor) and shows it
 -- in the window.
 function Controller:ShowPage(entry)
@@ -1079,6 +1302,8 @@ function Controller:Toggle(entry)
     self:ShowPage(entry)
     self.window:Show()
     self:RefreshRecruiters()
+    self:RefreshGuildLog()
+    self:RefreshPromotions()
     return true
 end
 

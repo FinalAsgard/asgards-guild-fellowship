@@ -42,6 +42,10 @@ local _, addon = ...
 --                 timer the next mail goes out at once and nothing times out
 --   onChange() -> called after every change of progress
 --   capMessage    optional: the client's own text for the cap error
+--   isMember(mail) -> false when the mail's recipient is no longer in the
+--                 guild: asked just before each mail goes out, since a send
+--                 can resume days after its list was made. Such a mail is
+--                 skipped (LEFT_GUILD), never sent.
 local GuildMailSender = {
     IDLE = "idle",
     SENDING = "sending",
@@ -59,6 +63,7 @@ local GuildMailSender = {
     -- A mail of a send the officer cancelled before it went: never sent.
     CANCELLED = "cancelled",
     REFUSED = "the game didn't take the mail",
+    LEFT_GUILD = "no longer in the guild",
     NO_RESPONSE = "no response",
     NO_RESPONSE_RETRY = "no response, will try again at the end",
     GAP_SECONDS = 1,
@@ -85,6 +90,9 @@ function GuildMailSender.Create(options)
         end,
         onChange = options.onChange or function() end,
         capMessage = options.capMessage,
+        isMember = options.isMember or function()
+            return true
+        end,
         mails = {},
         -- The mails to send, as indexes into `mails`, in order; a mail
         -- with no answer is added again at the end, once.
@@ -302,42 +310,51 @@ function Sender:later(seconds, callback)
     return ok and set == true
 end
 
--- Sends the current mail. One the client won't take is marked failed at
--- once and the next one is tried.
+-- Sends the current mail. One whose recipient has left the guild is
+-- skipped, and one the client won't take is marked failed at once; either
+-- way the next one is tried.
 function Sender:sendCurrent()
     while self.position ~= nil and self.position <= #self.queue do
         self.current = self.queue[self.position]
-        local attempt = self.attempt + 1
-        self.attempt = attempt
-        self.lastFailed = nil
-        -- In flight before the call: the game reports a blocked send (and
-        -- some refusals) while SendMail is still running.
-        self.inFlight = true
-        self.fresh = true
-        self.state = GuildMailSender.SENDING
-        -- A mail being tried again is pending once more.
-        self.statuses[self.current] = GuildMailSender.PENDING
-        self.reasons[self.current] = nil
-        local ok, taken = pcall(self.send, self.mails[self.current])
-        if self.attempt ~= attempt then
-            -- An event during the call already dealt with this mail.
-            return
-        end
-        if ok and taken then
-            self:later(GuildMailSender.ANSWER_SECONDS, function()
-                self:noAnswer()
-            end)
-            self:later(GuildMailSender.ERROR_SECONDS, function()
-                self.fresh = false
-            end)
+        local okMember, member = pcall(self.isMember, self.mails[self.current])
+        if okMember and member == false then
+            self.statuses[self.current] = GuildMailSender.SKIPPED
+            self.reasons[self.current] = GuildMailSender.LEFT_GUILD
+            self.position = self.position + 1
             self:changed()
-            return
+        else
+            local attempt = self.attempt + 1
+            self.attempt = attempt
+            self.lastFailed = nil
+            -- In flight before the call: the game reports a blocked send (and
+            -- some refusals) while SendMail is still running.
+            self.inFlight = true
+            self.fresh = true
+            self.state = GuildMailSender.SENDING
+            -- A mail being tried again is pending once more.
+            self.statuses[self.current] = GuildMailSender.PENDING
+            self.reasons[self.current] = nil
+            local ok, taken = pcall(self.send, self.mails[self.current])
+            if self.attempt ~= attempt then
+                -- An event during the call already dealt with this mail.
+                return
+            end
+            if ok and taken then
+                self:later(GuildMailSender.ANSWER_SECONDS, function()
+                    self:noAnswer()
+                end)
+                self:later(GuildMailSender.ERROR_SECONDS, function()
+                    self.fresh = false
+                end)
+                self:changed()
+                return
+            end
+            self.inFlight = false
+            self.fresh = false
+            self.statuses[self.current] = GuildMailSender.FAILED
+            self.reasons[self.current] = GuildMailSender.REFUSED
+            self.position = self.position + 1
         end
-        self.inFlight = false
-        self.fresh = false
-        self.statuses[self.current] = GuildMailSender.FAILED
-        self.reasons[self.current] = GuildMailSender.REFUSED
-        self.position = self.position + 1
     end
     self:finishAll()
 end

@@ -173,6 +173,16 @@ function Client:GetGuildIdentity()
     return { name = name, realm = realm }
 end
 
+-- The logged-in character's 0-based guild rank index, read live (the
+-- guild master's is 0), or nil when the client can't say.
+function Client:GetPlayerGuildRankIndex()
+    local ok, name, _, rankIndex = callFunction(self.environment.GetGuildInfo, "player")
+    if not ok or type(name) ~= "string" or name == "" or type(rankIndex) ~= "number" then
+        return nil
+    end
+    return rankIndex
+end
+
 -- The logged-in character as "Name-Realm", or nil while the client can't
 -- say. UnitFullName may leave out the realm (early at login, or on older
 -- clients), so the player's own realm fills it in.
@@ -328,6 +338,7 @@ Compatibility.PRESENCE_FORMATS = {
     { kind = "online", global = "ERR_FRIEND_ONLINE_SS", fallback = "|Hplayer:%s|h[%s]|h has come online." },
     { kind = "offline", global = "ERR_FRIEND_OFFLINE_S", fallback = "%s has gone offline." },
     { kind = "join", global = "ERR_GUILD_JOIN_S", fallback = "%s has joined the guild." },
+    { kind = "leave", global = "ERR_GUILD_LEAVE_S", fallback = "%s has left the guild." },
 }
 
 -- A Lua pattern matching a client format string, capturing each "%s" (or
@@ -343,7 +354,7 @@ function Compatibility.PatternFor(format)
 end
 
 -- Calls onPresence(kind, name) for every system message saying someone came
--- online, went offline, or joined the guild, with the name as the message gives it (from the
+-- online, went offline, joined the guild, or left it, with the name as the message gives it (from the
 -- player link when there is one). Messages the client hides from add-ons
 -- are skipped. Returns false when the client can't deliver the event.
 function Client:ObservePresence(onPresence)
@@ -1186,6 +1197,96 @@ function Client:GetGuildRankNames()
         names[index] = named and type(name) == "string" and name ~= "" and name or ("Rank " .. index)
     end
     return names
+end
+
+-- The game's guild event log calls, in the order they're used: ask for
+-- the log, count its entries, read one.
+Compatibility.EVENT_LOG_CALLS = { "QueryGuildEventLog", "GetNumGuildEvents", "GetGuildEventInfo" }
+
+-- Whether this client has each guild event log call, by name, for `/agf
+-- probe log`.
+function Client:GuildEventLogCalls()
+    local calls = {}
+    local index
+    for index = 1, #Compatibility.EVENT_LOG_CALLS do
+        local name = Compatibility.EVENT_LOG_CALLS[index]
+        calls[name] = type(self.environment[name]) == "function"
+    end
+    return calls
+end
+
+-- Whether this client can read the guild event log at all.
+function Client:HasGuildEventLog()
+    local calls = self:GuildEventLogCalls()
+    local index
+    for index = 1, #Compatibility.EVENT_LOG_CALLS do
+        if not calls[Compatibility.EVENT_LOG_CALLS[index]] then
+            return false
+        end
+    end
+    return true
+end
+
+-- Asks the client for the guild event log. GUILD_EVENT_LOG_UPDATE follows.
+-- False when the client can't.
+function Client:RequestGuildEventLog()
+    return (callFunction(self.environment.QueryGuildEventLog))
+end
+
+-- Calls onUpdate() on every GUILD_EVENT_LOG_UPDATE. Returns false when the
+-- client has no event log or can't deliver the event.
+function Client:ObserveGuildEventLog(onUpdate)
+    if type(onUpdate) ~= "function" or not self:HasGuildEventLog() then
+        return false
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil
+        or not self:SetEventHandler(frame, function()
+            onUpdate()
+        end)
+        or not self:RegisterEvent(frame, "GUILD_EVENT_LOG_UPDATE")
+    then
+        return false
+    end
+    self.eventLogFrame = frame
+    return true
+end
+
+-- The guild event log as the client holds it now, a list of { type, actor,
+-- target, rank, age = { years, months, days, hours } }: `type` the game's
+-- ("invite", "join", "promote", "demote", "remove", "quit"), `actor` and
+-- `target` the first and second player named, `rank` the rank name for a
+-- rank change. Nil, with "unavailable", when the client has no event log;
+-- entries it can't read are left out.
+function Client:ReadGuildEventLog()
+    if not self:HasGuildEventLog() then
+        return nil, "unavailable"
+    end
+    local ok, total = callFunction(self.environment.GetNumGuildEvents)
+    if not ok or type(total) ~= "number" or total < 0 then
+        return nil, "unavailable"
+    end
+    local entries = {}
+    local index
+    for index = 1, total do
+        local read, kind, actor, target, rank, years, months, days, hours =
+            callFunction(self.environment.GetGuildEventInfo, index)
+        if read and type(kind) == "string" then
+            table.insert(entries, {
+                type = kind,
+                actor = type(actor) == "string" and actor ~= "" and actor or nil,
+                target = type(target) == "string" and target ~= "" and target or nil,
+                rank = type(rank) == "string" and rank ~= "" and rank or nil,
+                age = {
+                    years = type(years) == "number" and years or 0,
+                    months = type(months) == "number" and months or 0,
+                    days = type(days) == "number" and days or 0,
+                    hours = type(hours) == "number" and hours or 0,
+                },
+            })
+        end
+    end
+    return entries
 end
 
 -- Sends a text-only mail. Only add-on code may do this (the game blocks it

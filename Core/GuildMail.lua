@@ -243,6 +243,16 @@ function GuildMail.Create(options)
         end,
         after = options.after,
         capMessage = options.capMessage,
+        -- A send can resume days after its list was made: a recipient who
+        -- has since left the guild (going by the last roster scan) is
+        -- skipped. Without a guild to ask, everyone is sent to.
+        isMember = function(item)
+            local ok, partition = pcall(mail.context)
+            if not ok or partition == nil or item.key == nil then
+                return true
+            end
+            return partition:IsInGuild(item.key)
+        end,
         onChange = function()
             mail:persist()
             mail:refresh()
@@ -399,7 +409,8 @@ function Mail:load(entry)
             return false
         end
         recipients[index] = recipient
-        mails[index] = { to = recipient.name, subject = recipient.mail.subject, body = recipient.mail.body }
+        mails[index] = { to = recipient.name, key = recipient.key, subject = recipient.mail.subject,
+            body = recipient.mail.body }
         statuses[index] = saved.status
         reasons[index] = saved.reason
         -- Nobody knows whether a mail in flight when the game closed went.
@@ -1713,7 +1724,8 @@ function Mail:Confirm()
     local index
     for index = 1, #recipients do
         local mail = recipients[index].mail
-        mails[index] = { to = recipients[index].name, subject = mail.subject, body = mail.body }
+        mails[index] = { to = recipients[index].name, key = recipients[index].key, subject = mail.subject,
+            body = mail.body }
     end
     self.batch = recipients
     self.batchPerMail = self:cost(recipients).perMail

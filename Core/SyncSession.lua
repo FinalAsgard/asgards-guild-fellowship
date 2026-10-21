@@ -297,7 +297,9 @@ function Session:SendWhenAcceptable(facts, now)
         for index = 1, #facts do
             local fact = facts[index]
             local held
-            if addon.SyncFacts.PROFILE_KINDS[fact.kind] then
+            if addon.SyncFacts.IsDateKind(fact.kind) then
+                held = own:Dates():FactOf(fact.character, fact.kind)
+            elseif addon.SyncFacts.PROFILE_KINDS[fact.kind] then
                 held = own:ProfileFactOf(fact.character, fact.kind)
             elseif fact.kind == addon.SyncFacts.KIND_ALIAS then
                 held = own:AliasFactOf(fact.character)
@@ -407,6 +409,24 @@ function Session:StampAndSend(stamp, changed, priorOf)
     addon.SyncLedger.Create(partition):Record(facts, now)
     self:Send({ t = SyncSession.TYPE_FACTS, facts = facts })
     return facts
+end
+
+-- After this officer's add-on stamped `facts` of its own (membership
+-- dates it worked out or an officer set): records them in the officer's
+-- ledger and sends them to the guild. A member's add-on sends nothing.
+-- Returns whether they were sent.
+function Session:ShareOfficerFacts(facts)
+    local partition = self.context()
+    local author = self.selfKey()
+    local now = self.now()
+    if partition == nil or author == nil or now == nil or type(facts) ~= "table" or facts[1] == nil
+        or not self.isOfficer(author)
+    then
+        return false
+    end
+    addon.SyncLedger.Create(partition):Record(facts, now)
+    self:SendWhenAcceptable(facts, now)
+    return true
 end
 
 -- After this user changed the logged-in character's role preferences:
@@ -751,8 +771,14 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
             forged = forged + 1
             ledger:LogForgery(fact, relayer, now)
             local at = math.max(now, fact.at + 1)
+            if addon.SyncFacts.IsDateKind(fact.kind) then
+                -- This officer's own date, as they hold it.
+                local restamped = own:Dates():Restamp(fact.character, fact.kind, officer, at)
+                if restamped ~= nil then
+                    table.insert(corrections, restamped)
+                end
             -- A "Don't sync" player is this officer's own business.
-            if partition:GetCharacter(fact.character) ~= nil and not own:IsPinned(fact.character) then
+            elseif partition:GetCharacter(fact.character) ~= nil and not own:IsPinned(fact.character) then
                 if fact.kind == addon.SyncFacts.KIND_ALIAS then
                     table.insert(corrections, own:StampAlias(fact.character, officer, at))
                 elseif fact.kind == addon.SyncFacts.KIND_DECLARED then

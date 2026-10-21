@@ -32,7 +32,12 @@ function Authority:IsOfficer(key)
     if type(key) ~= "string" then
         return false
     end
-    local rank = self.rankOf(key)
+    return self:IsOfficerRank(self.rankOf(key))
+end
+
+-- True only for an officer rank: the guild master's, or one that can view
+-- officer notes. For a rank read live, such as the logged-in character's.
+function Authority:IsOfficerRank(rank)
     if type(rank) ~= "number" then
         return false
     end

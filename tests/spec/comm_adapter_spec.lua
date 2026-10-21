@@ -60,6 +60,53 @@ test.test("whispers go to one character at BULK, and whispered messages only to 
     test.assertEqual("Hammer-Area52", whispered[1].sender)
 end)
 
+test.test("officer channel messages go out at BULK, and only to the officer receiver", function()
+    local world, comm = build()
+    local guild, officer = {}, {}
+    test.assertTrue(comm:Start(function(message)
+        table.insert(guild, message)
+    end, nil, function(message, sender)
+        table.insert(officer, { message = message, sender = sender })
+    end))
+    local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
+
+    test.assertTrue(comm:SendOfficers({ v = 1, t = "logping" }))
+    test.assertEqual("OFFICER", world.sentMessages[1].distribution)
+    test.assertEqual("BULK", world.sentMessages[1].priority)
+    test.assertFalse(comm:SendOfficers("text"))
+
+    world.commHandlers.AGFSync("AGFSync", serializer:Serialize({ v = 1, t = "logping" }), "OFFICER", "Anvil-Area52")
+    test.assertEqual(0, #guild)
+    test.assertEqual(1, #officer)
+    test.assertEqual("Anvil-Area52", officer[1].sender)
+end)
+
+test.test("every add-on message heard, on any channel, reports its sender first", function()
+    local world, comm = build()
+    local heard, guild = {}, {}
+    comm:OnHeard(function(sender)
+        table.insert(heard, sender)
+        error("a failing hook doesn't stop the message")
+    end)
+    comm:Start(function(message)
+        table.insert(guild, message)
+    end)
+    local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
+    local handler = world.commHandlers.AGFSync
+
+    handler("AGFSync", serializer:Serialize({ v = 1 }), "GUILD", "Hammer-Area52")
+    handler("AGFSync", serializer:Serialize({ v = 1 }), "WHISPER", "Anvil-Area52")
+    handler("AGFSync", serializer:Serialize({ v = 1 }), "OFFICER", "Tongs-Area52")
+    handler("AGFSync", "garbage", "GUILD", "Bolt-Area52")
+    handler("AGFSync", serializer:Serialize("text"), "GUILD", "Bolt-Area52")
+
+    test.assertEqual(3, #heard, "only messages that are really this add-on's")
+    test.assertEqual("Hammer-Area52", heard[1])
+    test.assertEqual("Anvil-Area52", heard[2], "even on a channel with no receiver")
+    test.assertEqual("Tongs-Area52", heard[3])
+    test.assertEqual(1, #guild)
+end)
+
 test.test("a whisper that fails returns false without raising", function()
     local world, comm = build()
     comm:Start(function() end)
@@ -85,6 +132,8 @@ test.test("rank permissions come from the rank flags, or nil when the client can
     test.assertTrue(comm:RankCanViewOfficerNotes(1))
     test.assertFalse(comm:RankCanViewOfficerNotes(3))
     test.assertEqual(nil, comm:RankCanViewOfficerNotes(nil))
+    test.assertTrue(comm:RankHasFlag(1, 4))
+    test.assertFalse(comm:RankHasFlag(3, 3))
 
     world.environment.C_GuildInfo.GuildControlGetRankFlags = function()
         error("not allowed")

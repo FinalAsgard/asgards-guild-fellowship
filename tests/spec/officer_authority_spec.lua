@@ -64,3 +64,12 @@ test.test("promotion and demotion change authority with nothing to set up", func
     rank = 2
     test.assertFalse(authority:IsOfficer("hammer-area52"))
 end)
+
+test.test("a rank read live is judged by the same rule", function()
+    local authority = newAuthority({ [1] = true, [3] = false })
+
+    test.assertTrue(authority:IsOfficerRank(0))
+    test.assertTrue(authority:IsOfficerRank(1))
+    test.assertFalse(authority:IsOfficerRank(3))
+    test.assertFalse(authority:IsOfficerRank(nil))
+end)

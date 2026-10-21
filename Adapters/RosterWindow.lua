@@ -136,6 +136,11 @@ local function cellText(row, field)
     if row.departed and field == "location" then
         return "|cff7f7f7f" .. tostring(row.location) .. "|r"
     end
+    -- Officers see who is ready for promotion (see RosterViewModel.MarkReady).
+    if field == "rank" and row.ready then
+        -- First, so a long rank name never hides it.
+        return "|cff40ff40Ready|r " .. tostring(row.rank or "")
+    end
     local value = row[field]
     return value ~= nil and tostring(value) or ""
 end
@@ -398,6 +403,8 @@ local PANEL_HEIGHT = 440
 -- and the room the list leaves for it.
 local PANEL_BAR_MARGIN = 10
 local PANEL_BAR_HEIGHT = 40
+-- The list's top, with the Profile and Promotion tabs sitting on it.
+local PANEL_LIST_TOP = 96
 
 -- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
 -- merge)` open the dialogs the right-click menu uses (`merge` titles the
@@ -408,6 +415,18 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     -- Like every panel here, closed only with its close button or Escape.
     panel.DontRightClickClose = true
     panel:SetFrameStrata("HIGH")
+    -- In the window's strata, but a top-level window like it: whichever was
+    -- clicked last is in front, all of it (its tabs, boxes and text, which
+    -- sit at higher levels than its background, included). It opens in
+    -- front.
+    if type(panel.SetToplevel) == "function" then
+        panel:SetToplevel(true)
+    end
+    panel:HookScript("OnShow", function(self)
+        if type(self.Raise) == "function" then
+            self:Raise()
+        end
+    end)
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
     local edit = { panel = panel }
@@ -477,7 +496,96 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.aliasSource = aliasSource
     edit.setMain = setMain
 
-    local lineAmount = math.floor((PANEL_HEIGHT - 72 - PANEL_BAR_HEIGHT) / RosterWindow.LINE_HEIGHT)
+    -- The tabs above the list: Profile (the player's details and
+    -- characters) and Promotion (each character's checklist, for an
+    -- officer, or a member's own player). Without a Promotion tab, both
+    -- are hidden and the list shows the profile. They're the game's own
+    -- top tabs: Retail's template, else Forever's, else a plain button
+    -- (lit while selected) when neither exists.
+    edit.tab = "profile"
+    edit.tabs = {}
+    local TAB_TEMPLATES = { "PanelTopTabButtonTemplate", "TabButtonTemplate" }
+    local tabNames = { { "profile", "Profile" }, { "promotion", "Promotion" } }
+    local previousTab
+    local tabIndex
+    for tabIndex = 1, #tabNames do
+        local name = tabNames[tabIndex][1]
+        local tab
+        local templateIndex
+        for templateIndex = 1, #TAB_TEMPLATES do
+            if tab == nil then
+                local tabName = frameName .. "PlayerTab" .. tabIndex .. "T" .. templateIndex
+                local ok, made = pcall(CreateFrame, "Button", tabName, panel, TAB_TEMPLATES[templateIndex])
+                -- A client without the template may still make a bare
+                -- button: only one with the tab's edge texture counts.
+                if ok and made ~= nil and (made.Left ~= nil or _G[tabName .. "Left"] ~= nil) then
+                    tab = made
+                    tab.gameTab = true
+                elseif ok and made ~= nil then
+                    made:Hide()
+                end
+            end
+        end
+        if tab == nil then
+            tab = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+            tab:SetSize(90, 20)
+        end
+        tab:SetText(tabNames[tabIndex][2])
+        if tab.gameTab then
+            pcall(PanelTemplates_TabResize, tab, 0)
+        end
+        if previousTab == nil then
+            tab:SetPoint("BOTTOMLEFT", panel, "TOPLEFT", 12, -PANEL_LIST_TOP)
+        else
+            tab:SetPoint("LEFT", previousTab, "RIGHT", 2, 0)
+        end
+        previousTab = tab
+        tab:SetScript("OnClick", function()
+            edit.tab = name
+            if edit.show ~= nil then
+                edit.show()
+            end
+        end)
+        tab:Hide()
+        edit.tabs[name] = tab
+    end
+    -- Marks `tab` selected or not, the game's way when it's a game tab.
+    function edit.selectTab(tab, selected)
+        if tab.gameTab then
+            local ok = pcall(selected and PanelTemplates_SelectTab or PanelTemplates_DeselectTab, tab)
+            if ok then
+                return
+            end
+        end
+        if selected then
+            tab:LockHighlight()
+        else
+            tab:UnlockHighlight()
+        end
+    end
+
+    -- The Promotion tab's lines: their typed notes and actions (see
+    -- PromotionLines).
+    edit.promotionLines = addon.PromotionLines.State({
+        createFrame = CreateFrame,
+        tooltip = GameTooltip,
+        tick = function(key, item, ticked, note)
+            if options.onPromotionsTick == nil then
+                return false
+            end
+            return options.onPromotionsTick(key, item, ticked, note)
+        end,
+        toggle = function(key)
+            if options.onPanelPromotionToggle ~= nil then
+                options.onPanelPromotionToggle(key)
+            end
+        end,
+        redraw = function()
+            edit.scroll:Refresh()
+        end,
+    })
+
+    local lineAmount = math.floor((PANEL_HEIGHT - PANEL_LIST_TOP - PANEL_BAR_HEIGHT) / RosterWindow.LINE_HEIGHT)
     local function newLine(scroll, index)
         local line = CreateFrame("Frame", nil, scroll)
         line:SetHeight(RosterWindow.LINE_HEIGHT)
@@ -506,6 +614,9 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 options.onDetach(line.row.key)
             end
         end)
+        -- A Promotion row's check box, note box and button (see
+        -- PromotionLines).
+        addon.PromotionLines.Attach(line, edit.promotionLines)
         return line
     end
     local function refreshLines(scroll, rows, offset, totalLines)
@@ -536,11 +647,16 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                         (row.dates ~= "" and (", " .. row.dates) or "") .. "|r"
                 end
                 -- Only character rows have buttons; the others' text uses
-                -- the line's full width.
-                line.text:ClearAllPoints()
-                line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
-                line.text:SetPoint("RIGHT", line, "RIGHT", row.kind == "character" and -128 or -6, 0)
-                line.text:SetText(text)
+                -- the line's full width. Promotion rows draw themselves.
+                if row.kind == "promotion" then
+                    addon.PromotionLines.Draw(line, row, edit.promotionLines)
+                else
+                    addon.PromotionLines.Hide(line)
+                    line.text:ClearAllPoints()
+                    line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
+                    line.text:SetPoint("RIGHT", line, "RIGHT", row.kind == "character" and -128 or -6, 0)
+                    line.text:SetText(text)
+                end
                 if row.kind == "character" and row.canMakeMain then
                     line.makeMain:Show()
                 else
@@ -555,9 +671,10 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         end
     end
     local scroll = framework:CreateScrollBox(panel, frameName .. "PlayerScroll", refreshLines, {},
-        PANEL_WIDTH - 20, PANEL_HEIGHT - 72 - PANEL_BAR_HEIGHT, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
+        PANEL_WIDTH - 20, PANEL_HEIGHT - PANEL_LIST_TOP - PANEL_BAR_HEIGHT, lineAmount, RosterWindow.LINE_HEIGHT,
+        newLine, true)
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -72)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -PANEL_LIST_TOP)
     -- Room on the right for the scroll bar, which sits beside the list, and
     -- below for the action bar.
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, PANEL_BAR_HEIGHT)
@@ -578,43 +695,69 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     return edit
 end
 
--- The conflict review panel, in two sections. Member changes: one line per
--- player with suggestions, saying how many, with Review (see the bundle
--- review below). Note conflicts: one line per conflict, with Accept and
--- Reject (or Dismiss, when there's nothing to apply). Accept all and Reject
--- all decide everything. A member's own suggestions follow, waiting for an
--- officer.
-local CONFLICT_COLUMNS = {
+-- The conflict review panel, in three sections, each with its own columns.
+-- Changes to Player: one line per player with suggestions, saying how many
+-- and who suggested them, with Review (see the bundle review below). Note
+-- conflicts: one line per conflict, its live note, what it suggests, and
+-- the current state wrapped in one column, with Accept and Reject (or
+-- Dismiss, when there's nothing to apply). A member's own suggestions
+-- follow, waiting for an officer. Accept all and Reject all decide
+-- everything. Each section's heading line names its columns.
+local CONFLICT_DETAILS = {
     { field = "name", header = "Character", x = 8, width = 140 },
-    { field = "note", header = "Note (live)", x = 152, width = 170 },
-    { field = "suggests", header = "Note suggests", x = 326, width = 170 },
-    { field = "current", header = "Currently", x = 500, width = 150 },
-    { field = "source", header = "Source", x = 654, width = 90 },
+    { field = "details", header = "Note (live), suggests, and currently", x = 152, width = 340, wrap = true },
 }
-local CONFLICT_WIDTH = 900
-local CONFLICT_HEIGHT = 360
+local CONFLICT_SECTIONS = {
+    changes = {
+        heading = "Changes to Player",
+        columns = {
+            { field = "name", header = "Player", x = 8, width = 170 },
+            { field = "changes", header = "Changes", x = 182, width = 90 },
+            { field = "suggestedBy", header = "Suggested by", x = 276, width = 216 },
+        },
+    },
+    notes = { heading = "Note conflicts", columns = CONFLICT_DETAILS },
+    yours = { heading = "Your suggestions", columns = CONFLICT_DETAILS },
+}
+local CONFLICT_ORDER = { "changes", "notes", "yours" }
+-- Room for the wrapped column's three lines, and a fourth when one wraps.
+local CONFLICT_LINE_HEIGHT = 44
+local CONFLICT_BUTTONS_X = 498
+local CONFLICT_WIDTH = 680
+local CONFLICT_HEIGHT = 420
+local CONFLICT_TOP = 62
 
 local function createConflictLine(scroll, index, options)
     local line = CreateFrame("Frame", nil, scroll)
-    line:SetHeight(RosterWindow.LINE_HEIGHT)
-    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * RosterWindow.LINE_HEIGHT)
-    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * RosterWindow.LINE_HEIGHT)
+    line:SetHeight(CONFLICT_LINE_HEIGHT)
+    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * CONFLICT_LINE_HEIGHT)
+    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * CONFLICT_LINE_HEIGHT)
     line.background = line:CreateTexture(nil, "BACKGROUND")
     line.background:SetAllPoints(line)
+    -- One set of cells per section, shown for that section's lines.
     line.cells = {}
-    local columnIndex
-    for columnIndex = 1, #CONFLICT_COLUMNS do
-        local column = CONFLICT_COLUMNS[columnIndex]
-        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
-        cell:SetWidth(column.width)
-        cell:SetJustifyH("LEFT")
-        cell:SetWordWrap(false)
-        line.cells[column.field] = cell
+    local sectionIndex
+    for sectionIndex = 1, #CONFLICT_ORDER do
+        local section = CONFLICT_ORDER[sectionIndex]
+        local columns = CONFLICT_SECTIONS[section].columns
+        line.cells[section] = {}
+        local columnIndex
+        for columnIndex = 1, #columns do
+            local column = columns[columnIndex]
+            local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            cell:SetPoint("LEFT", line, "LEFT", column.x, 0)
+            cell:SetWidth(column.width)
+            cell:SetJustifyH("LEFT")
+            -- No fixed height on the wrapped column, so a long line wraps
+            -- instead of being cut off.
+            cell:SetWordWrap(column.wrap == true)
+            cell:Hide()
+            line.cells[section][column.field] = cell
+        end
     end
     line.accept = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
     line.accept:SetSize(56, 18)
-    line.accept:SetPoint("LEFT", line, "LEFT", 748, 0)
+    line.accept:SetPoint("LEFT", line, "LEFT", CONFLICT_BUTTONS_X, 0)
     line.accept:SetText("Accept")
     line.accept:SetScript("OnClick", function()
         if line.row == nil then
@@ -635,7 +778,7 @@ local function createConflictLine(scroll, index, options)
         end
     end)
     line.waiting = line:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    line.waiting:SetPoint("LEFT", line, "LEFT", 748, 0)
+    line.waiting:SetPoint("LEFT", line, "LEFT", CONFLICT_BUTTONS_X, 0)
     line.waiting:SetText("Waiting for an officer")
     line.waiting:Hide()
     return line
@@ -649,25 +792,36 @@ local function refreshConflictLines(scroll, rows, offset, totalLines)
         if row ~= nil then
             local line = scroll:GetLine(lineIndex)
             line.row = row
-            local columnIndex
-            for columnIndex = 1, #CONFLICT_COLUMNS do
-                local field = CONFLICT_COLUMNS[columnIndex].field
-                local value = row[field]
-                if field == "note" and value == nil then
-                    value = "|cff9d9d9d(not in the roster)|r"
+            local sectionIndex
+            for sectionIndex = 1, #CONFLICT_ORDER do
+                local section = CONFLICT_ORDER[sectionIndex]
+                local columns = CONFLICT_SECTIONS[section].columns
+                local columnIndex
+                for columnIndex = 1, #columns do
+                    local column = columns[columnIndex]
+                    local cell = line.cells[section][column.field]
+                    if section ~= row.section then
+                        cell:Hide()
+                    elseif row.kind == "heading" then
+                        -- The heading names the section over the first
+                        -- column and the other columns over theirs.
+                        local text = columnIndex == 1 and row.name or column.header
+                        cell:SetText("|cffffd100" .. text .. "|r")
+                        cell:Show()
+                    else
+                        local value = row[column.field]
+                        cell:SetText(value ~= nil and tostring(value) or "")
+                        cell:Show()
+                    end
                 end
-                line.cells[field]:SetText(value ~= nil and tostring(value) or "")
             end
             line.waiting:Hide()
             line.reject:Show()
             line.accept:SetText("Accept")
             if row.kind == "heading" then
-                line.cells.name:SetText("|cffffd100" .. row.name .. "|r")
-                line.cells.note:SetText("")
                 line.accept:Hide()
                 line.reject:Hide()
             elseif row.kind == "bundle" then
-                line.cells.note:SetText("")
                 line.accept:SetText("Review")
                 line.accept:Show()
                 line.reject:Hide()
@@ -691,39 +845,125 @@ local function refreshConflictLines(scroll, rows, offset, totalLines)
     end
 end
 
--- The rows the conflict panel lists: Member changes, Note conflicts and
--- the member's own suggestions, each under a heading when there are any.
+-- The rows the conflict panel lists: Changes to Player, Note conflicts and
+-- the member's own suggestions, each under a heading line when there are
+-- any. A row's section comes from ConflictViewModel (`section`), or from
+-- its kind for rows that don't say.
 function RosterWindow.ConflictSections(rows)
-    local sections = {
-        { heading = "Member changes", rows = {} },
-        { heading = "Note conflicts", rows = {} },
-        { heading = "Your suggestions", rows = {} },
-    }
+    local sections = {}
     local index
+    for index = 1, #CONFLICT_ORDER do
+        sections[CONFLICT_ORDER[index]] = {}
+    end
     for index = 1, #rows do
         local row = rows[index]
-        local section = row.kind == "bundle" and 1 or (row.pending and 3 or 2)
-        table.insert(sections[section].rows, row)
+        local section = row.section
+        if sections[section] == nil then
+            section = row.kind == "bundle" and "changes" or (row.pending and "yours" or "notes")
+        end
+        table.insert(sections[section], row)
     end
     local listed = {}
-    for index = 1, #sections do
-        local section = sections[index]
-        if section.rows[1] ~= nil then
-            table.insert(listed, { kind = "heading", name = section.heading })
+    for index = 1, #CONFLICT_ORDER do
+        local section = CONFLICT_ORDER[index]
+        local sectionRows = sections[section]
+        if sectionRows[1] ~= nil then
+            table.insert(listed, { kind = "heading", section = section, name = CONFLICT_SECTIONS[section].heading })
             local rowIndex
-            for rowIndex = 1, #section.rows do
-                table.insert(listed, section.rows[rowIndex])
+            for rowIndex = 1, #sectionRows do
+                local row = sectionRows[rowIndex]
+                row.section = section
+                table.insert(listed, row)
             end
         end
     end
     return listed
 end
 
--- The bundle review: one member's player before and with their changes,
--- one line per change with Approve and Deny, and Approve all / Deny all.
-local REVIEW_WIDTH = 560
-local REVIEW_HEIGHT = 380
+-- The bundle review: who suggested it, a before/after block for every
+-- player it changes (removed lines in red, added lines in green), the live
+-- guild note of each character involved, then one line per change with
+-- Approve and Deny, and Approve all / Deny all.
+local REVIEW_WIDTH = 620
+local REVIEW_HEIGHT = 520
 local REVIEW_LINES = 8
+local REVIEW_LIST_TOP = 66
+local REVIEW_LIST_HEIGHT = 216
+local REVIEW_LIST_LINE_HEIGHT = 16
+local REVIEW_SIDE_WIDTH = 280
+local REVIEW_COLORS = { added = "|cff40ff40", removed = "|cffff4040" }
+
+local function reviewText(line)
+    local color = REVIEW_COLORS[line.mark]
+    if color ~= nil then
+        return color .. line.text .. "|r"
+    end
+    return line.text
+end
+
+-- The lines of the review's list (see BundleReviewViewModel): each player's
+-- name in gold over its before and after sides, then the guild notes.
+-- Each line is { before, after } text, colored by mark.
+function RosterWindow.ReviewLines(model)
+    local lines = {}
+    local index
+    for index = 1, #(model.players or {}) do
+        local block = model.players[index]
+        table.insert(lines, { before = "|cffffd100" .. block.name .. "|r", after = "" })
+        local count = math.max(#block.before, #block.after)
+        local lineIndex
+        for lineIndex = 1, count do
+            local before = block.before[lineIndex]
+            local after = block.after[lineIndex]
+            local beforeText = before and reviewText(before) or ""
+            if lineIndex == 1 and before == nil then
+                beforeText = "|cff9d9d9d(not a player of its own yet)|r"
+            end
+            table.insert(lines, { before = beforeText, after = after and reviewText(after) or "" })
+        end
+    end
+    if model.notes ~= nil and model.notes[1] ~= nil then
+        table.insert(lines, { before = "|cffffd100Guild notes|r", after = "" })
+        for index = 1, #model.notes do
+            local note = model.notes[index]
+            table.insert(lines, {
+                before = note.name .. ": " .. (note.note or "|cff9d9d9d(not in the roster)|r"),
+                after = "",
+            })
+        end
+    end
+    return lines
+end
+
+local function createReviewListLine(scroll, index)
+    local line = CreateFrame("Frame", nil, scroll)
+    line:SetHeight(REVIEW_LIST_LINE_HEIGHT)
+    line:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(index - 1) * REVIEW_LIST_LINE_HEIGHT)
+    line:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -20, -(index - 1) * REVIEW_LIST_LINE_HEIGHT)
+    local function side(x)
+        local cell = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        cell:SetPoint("LEFT", line, "LEFT", x, 0)
+        cell:SetWidth(REVIEW_SIDE_WIDTH)
+        cell:SetJustifyH("LEFT")
+        cell:SetWordWrap(false)
+        return cell
+    end
+    line.before = side(4)
+    line.after = side(REVIEW_SIDE_WIDTH + 12)
+    return line
+end
+
+local function refreshReviewListLines(scroll, rows, offset, totalLines)
+    local lineIndex
+    for lineIndex = 1, totalLines do
+        local row = rows[lineIndex + offset]
+        if row ~= nil then
+            local line = scroll:GetLine(lineIndex)
+            line.before:SetText(row.before)
+            line.after:SetText(row.after)
+        end
+    end
+end
 
 local function buildReviewPanel(framework, options, frameName, anchor)
     local panel = framework:CreateSimplePanel(UIParent, REVIEW_WIDTH, REVIEW_HEIGHT, "Review", frameName .. "Review")
@@ -732,28 +972,29 @@ local function buildReviewPanel(framework, options, frameName, anchor)
     panel:SetFrameStrata("DIALOG")
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 8, 0)
-    local review = { panel = panel, before = {}, suggested = {}, lines = {} }
-    local function column(x, title, target)
-        local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        header:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -32)
-        header:SetText(title)
-        local index
-        for index = 1, 3 do
-            local text = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            text:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -34 - index * 16)
-            text:SetWidth(REVIEW_WIDTH / 2 - 24)
-            text:SetJustifyH("LEFT")
-            text:SetWordWrap(false)
-            target[index] = text
-        end
+    local review = { panel = panel, lines = {} }
+    review.suggestedBy = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    review.suggestedBy:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
+    local function header(x, title)
+        local text = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        text:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -50)
+        text:SetText(title)
     end
-    column(12, "Before", review.before)
-    column(REVIEW_WIDTH / 2, "Suggested", review.suggested)
+    header(14, "Before")
+    header(REVIEW_SIDE_WIDTH + 22, "After")
+    local listLines = math.floor(REVIEW_LIST_HEIGHT / REVIEW_LIST_LINE_HEIGHT)
+    local list = framework:CreateScrollBox(panel, frameName .. "ReviewScroll", refreshReviewListLines, {},
+        REVIEW_WIDTH - 20, REVIEW_LIST_HEIGHT, listLines, REVIEW_LIST_LINE_HEIGHT, createReviewListLine, true)
+    list:ClearAllPoints()
+    list:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -REVIEW_LIST_TOP)
+    list:CreateLines(createReviewListLine, listLines)
+    review.list = list
+    local itemsTop = REVIEW_LIST_TOP + REVIEW_LIST_HEIGHT + 10
     local index
     for index = 1, REVIEW_LINES do
         local line = CreateFrame("Frame", nil, panel)
         line:SetHeight(RosterWindow.LINE_HEIGHT)
-        line:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -110 - (index - 1) * RosterWindow.LINE_HEIGHT)
+        line:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -itemsTop - (index - 1) * RosterWindow.LINE_HEIGHT)
         line:SetPoint("RIGHT", panel, "RIGHT", -10, 0)
         line.text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         line.text:SetPoint("LEFT", line, "LEFT", 4, 0)
@@ -781,7 +1022,7 @@ local function buildReviewPanel(framework, options, frameName, anchor)
         review.lines[index] = line
     end
     review.more = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    review.more:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -114 - REVIEW_LINES * RosterWindow.LINE_HEIGHT)
+    review.more:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -itemsTop - 4 - REVIEW_LINES * RosterWindow.LINE_HEIGHT)
     local approveAll = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     approveAll:SetSize(100, 22)
     approveAll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 10)
@@ -825,20 +1066,12 @@ local function buildConflictPanel(framework, options, frameName)
     explain:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -30)
     explain:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -30)
     explain:SetJustifyH("LEFT")
-    explain:SetText("Members' changes, one line per player: Review shows each player before and with their " ..
-        "changes, to approve or deny. Note conflicts: guild notes that disagree with the roster; accepting " ..
-        "applies the note, rejecting keeps the roster. Your own suggestions are listed last until an officer " ..
-        "decides them.")
+    explain:SetText("Changes to Player: Review shows a player before and with the changes, to approve or " ..
+        "deny. Note conflicts: guild notes that disagree with the roster; accepting applies the note, " ..
+        "rejecting keeps the roster. Your suggestions wait here until an officer decides them.")
 
-    local headerIndex
-    for headerIndex = 1, #CONFLICT_COLUMNS do
-        local column = CONFLICT_COLUMNS[headerIndex]
-        local header = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        header:SetPoint("TOPLEFT", panel, "TOPLEFT", 10 + column.x, -50)
-        header:SetText(column.header)
-    end
-
-    local lineAmount = math.floor((CONFLICT_HEIGHT - 110) / RosterWindow.LINE_HEIGHT)
+    local scrollHeight = CONFLICT_HEIGHT - CONFLICT_TOP - 40
+    local lineAmount = math.floor(scrollHeight / CONFLICT_LINE_HEIGHT)
     local function newLine(scrollBox, index)
         return createConflictLine(scrollBox, index, options)
     end
@@ -848,14 +1081,14 @@ local function buildConflictPanel(framework, options, frameName)
         refreshConflictLines,
         {},
         CONFLICT_WIDTH - 20,
-        CONFLICT_HEIGHT - 110,
+        scrollHeight,
         lineAmount,
-        RosterWindow.LINE_HEIGHT,
+        CONFLICT_LINE_HEIGHT,
         newLine,
         true
     )
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -66)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -CONFLICT_TOP)
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 40)
     scroll:CreateLines(newLine, lineAmount)
 
@@ -901,6 +1134,25 @@ local function listLineCreator(columns, onAction)
         line.background = line:CreateTexture(nil, "BACKGROUND")
         line.background:SetAllPoints(line)
         line.cells = {}
+        -- A row with `tooltip` lines shows them on hover.
+        line:EnableMouse(true)
+        line:SetScript("OnEnter", function(self)
+            local lines = self.row and self.row.tooltip
+            if type(lines) ~= "table" or GameTooltip == nil then
+                return
+            end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            local lineIndex
+            for lineIndex = 1, #lines do
+                GameTooltip:AddLine(lines[lineIndex], 1, 1, 1, true)
+            end
+            GameTooltip:Show()
+        end)
+        line:SetScript("OnLeave", function()
+            if GameTooltip ~= nil then
+                GameTooltip:Hide()
+            end
+        end)
         local columnIndex
         for columnIndex = 1, #columns do
             local column = columns[columnIndex]
@@ -948,10 +1200,13 @@ local function listLineRefresher(columns)
                 for columnIndex = 1, #columns do
                     local field = columns[columnIndex].field
                     local text = tostring(row[field] or "")
+                    local color = columns[columnIndex].color
                     if row.kind == "heading" then
                         text = "|cffffd100" .. text .. "|r"
                     elseif row.kind == "empty" then
                         text = "|cff9d9d9d" .. text .. "|r"
+                    elseif color ~= nil and color(row) ~= nil then
+                        text = "|cff" .. color(row) .. text .. "|r"
                     end
                     line.cells[field]:SetText(text)
                 end
@@ -1043,6 +1298,380 @@ local function buildRecentAds(framework, page, frameName, onTurnBackOn)
         end)
     ads.scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 0)
     return ads
+end
+
+-- Each Guild Log event type's color (hex RGB), on its entries' Event
+-- column and its filter check box: arrivals green, departures orange and
+-- red, rank changes blue and purple.
+local GUILD_LOG_TYPE_COLORS = {
+    join = "40ff40", invite = "40e0d0", leave = "ff9933", kick = "ff4040", promote = "66b3ff", demote = "d080ff",
+}
+
+-- The officers' Guild Log page: every entry newest first, with its date,
+-- what happened (in its type's color), the character, its player, and who
+-- did it.
+local GUILD_LOG_COLUMNS = {
+    { field = "date", x = 8, width = 84 },
+    { field = "event", x = 96, width = 170, color = function(row)
+        return GUILD_LOG_TYPE_COLORS[row.eventType]
+    end },
+    { field = "character", x = 270, width = 130 },
+    { field = "player", x = 404, width = 120 },
+    { field = "actor", x = 528, width = 130 },
+}
+
+-- The Guild Log page's date ranges, in the order its Range button steps
+-- through them: days back, or false for all.
+local GUILD_LOG_RANGES = { false, 7, 30, 90 }
+local GUILD_LOG_TYPE_LABELS = {
+    join = "Join", invite = "Invite", leave = "Leave", kick = "Kick", promote = "Promote", demote = "Demote",
+}
+
+local function smallButton(parent, width, text, onClick)
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(width, 20)
+    button:SetText(text)
+    button:SetScript("OnClick", onClick)
+    return button
+end
+
+-- Draws the Guild Log page, below the frame's title bar: a search box, a
+-- sort button, a date range button, and page buttons, then a check box for
+-- each event type, then the list, filling the page (clear of the scroll
+-- bar). Each control calls its `options` handler; SetGuildLog shows where
+-- they stand.
+local function buildGuildLog(framework, page, frameName, options)
+    local holder = CreateFrame("Frame", nil, page)
+    holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
+    holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
+    local controls = {}
+    local search = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+    search:SetSize(160, 20)
+    search:SetPoint("TOPLEFT", holder, "TOPLEFT", 120, -2)
+    search:SetAutoFocus(false)
+    local placeholder = search:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    placeholder:SetPoint("LEFT", search, "LEFT", 2, 0)
+    placeholder:SetText("Name, alias or main")
+    search:SetScript("OnTextChanged", function(box)
+        local text = box:GetText()
+        if text == "" then
+            placeholder:Show()
+        else
+            placeholder:Hide()
+        end
+        if options.onGuildLogSearch ~= nil then
+            options.onGuildLogSearch(text)
+        end
+    end)
+    search:SetScript("OnEscapePressed", function(box)
+        box:ClearFocus()
+    end)
+    search:SetScript("OnEnterPressed", function(box)
+        box:ClearFocus()
+    end)
+    controls.sort = smallButton(holder, 96, "Sort: Date", function()
+        if options.onGuildLogSort ~= nil and controls.state ~= nil then
+            options.onGuildLogSort(controls.state.filters.sort == "name" and "date" or "name")
+        end
+    end)
+    controls.sort:SetPoint("LEFT", search, "RIGHT", 10, 0)
+    controls.range = smallButton(holder, 100, "Range: All", function()
+        if options.onGuildLogRange == nil or controls.state == nil then
+            return
+        end
+        local current = controls.state.filters.range or false
+        local index, nextIndex = 1, 1
+        for index = 1, #GUILD_LOG_RANGES do
+            if GUILD_LOG_RANGES[index] == current then
+                nextIndex = index % #GUILD_LOG_RANGES + 1
+            end
+        end
+        options.onGuildLogRange(GUILD_LOG_RANGES[nextIndex] or nil)
+    end)
+    controls.range:SetPoint("LEFT", controls.sort, "RIGHT", 6, 0)
+    controls.previous = smallButton(holder, 24, "<", function()
+        if options.onGuildLogPage ~= nil and controls.state ~= nil then
+            options.onGuildLogPage(controls.state.page - 1)
+        end
+    end)
+    controls.previous:SetPoint("LEFT", controls.range, "RIGHT", 12, 0)
+    controls.pageText = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    controls.pageText:SetPoint("LEFT", controls.previous, "RIGHT", 6, 0)
+    controls.pageText:SetWidth(120)
+    controls.next = smallButton(holder, 24, ">", function()
+        if options.onGuildLogPage ~= nil and controls.state ~= nil then
+            options.onGuildLogPage(controls.state.page + 1)
+        end
+    end)
+    controls.next:SetPoint("LEFT", controls.pageText, "RIGHT", 6, 0)
+    controls.types = {}
+    local typeIndex
+    for typeIndex = 1, #addon.GuildLog.TYPES do
+        local eventType = addon.GuildLog.TYPES[typeIndex]
+        local check = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
+        check:SetSize(22, 22)
+        check:SetPoint("TOPLEFT", holder, "TOPLEFT", 16 + (typeIndex - 1) * 96, -26)
+        local label = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("LEFT", check, "RIGHT", 2, 0)
+        label:SetText("|cff" .. GUILD_LOG_TYPE_COLORS[eventType] .. GUILD_LOG_TYPE_LABELS[eventType] .. "|r")
+        check:SetScript("OnClick", function(box)
+            if options.onGuildLogType ~= nil then
+                options.onGuildLogType(eventType, box:GetChecked() == true)
+            end
+        end)
+        controls.types[eventType] = check
+    end
+    local listHolder = CreateFrame("Frame", nil, holder)
+    listHolder:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, -50)
+    listHolder:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", 0, 0)
+    local width, height = page:GetSize()
+    local lines = math.max(1, math.floor((height - 120) / RosterWindow.LINE_HEIGHT))
+    local log = buildList(framework, listHolder, frameName .. "GuildLogScroll", "Guild Log",
+        GUILD_LOG_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines)
+    log.scroll:SetPoint("BOTTOMRIGHT", listHolder, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 0)
+    log.controls = controls
+    return log
+end
+
+-- The officers' Promotions page, below the frame's title bar: the
+-- promotion requirements editor. (Add-ons can't promote, and each
+-- character's checklist is worked on the player panel's Promotion tab.) <
+-- and > pick a rank, a warning shows when the rank was set up under
+-- another name, the automatic checks are listed with a check box each (and
+-- a number box for one that takes days or a level), and below them a box
+-- adds a custom requirement (with whether it needs a note) or edits one,
+-- and each custom requirement has Up, Down, Edit and Delete. Delete asks
+-- first, in the page itself. Each control calls its `options` handler,
+-- which returns true, or false and why not (shown in the page);
+-- SetPromotions shows the model (see PromotionsViewModel.Editor).
+local function buildPromotions(framework, page, frameName, options)
+    local holder = CreateFrame("Frame", nil, page)
+    holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
+    holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
+    local editor = { rows = {} }
+    local function call(handler, ...)
+        local callback = options[handler]
+        if callback == nil then
+            return
+        end
+        local ok, done, reason = pcall(callback, ...)
+        local text = ""
+        if ok and done == false then
+            text = "|cffff8040" .. tostring(reason or "That didn't work") .. ".|r"
+        end
+        editor.message:SetText(text)
+        return ok and done ~= false
+    end
+    local previous = smallButton(holder, 24, "<", function()
+        call("onPromotionsRank", -1)
+    end)
+    previous:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -2)
+    editor.rankText = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    editor.rankText:SetPoint("LEFT", previous, "RIGHT", 8, 0)
+    editor.rankText:SetWidth(220)
+    editor.rankText:SetJustifyH("LEFT")
+    local nextButton = smallButton(holder, 24, ">", function()
+        call("onPromotionsRank", 1)
+    end)
+    nextButton:SetPoint("LEFT", editor.rankText, "RIGHT", 8, 0)
+    editor.nextText = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    editor.nextText:SetPoint("LEFT", nextButton, "RIGHT", 12, 0)
+    editor.mismatch = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    editor.mismatch:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -28)
+    editor.mismatch:SetWidth(680)
+    editor.mismatch:SetJustifyH("LEFT")
+
+    -- The automated checks, two to a line: a check box turns each on or
+    -- off, and one that takes a number (days, or a level) has its box. A
+    -- number typed for a check that's on is saved on Enter, or on leaving
+    -- the box.
+    local section = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    section:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -48)
+    section:SetText("Automatic checks")
+    editor.automated = {}
+    local automatedIndex
+    for automatedIndex = 1, #addon.RankRequirements.AUTOMATED_ORDER do
+        local kind = addon.RankRequirements.AUTOMATED_ORDER[automatedIndex]
+        local line = {}
+        local x = 16 + ((automatedIndex - 1) % 2) * 350
+        local y = -66 - math.floor((automatedIndex - 1) / 2) * RosterWindow.LINE_HEIGHT
+        line.check = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
+        line.check:SetSize(22, 22)
+        line.check:SetPoint("TOPLEFT", holder, "TOPLEFT", x, y)
+        line.text = line.check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        line.text:SetPoint("LEFT", line.check, "RIGHT", 2, 0)
+        line.text:SetWidth(200)
+        line.text:SetJustifyH("LEFT")
+        line.text:SetText(addon.RankRequirements.KINDS[kind])
+        if addon.RankRequirements.HasNumber(kind) then
+            line.number = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+            line.number:SetSize(40, 20)
+            line.number:SetPoint("LEFT", line.check, "RIGHT", 232, 0)
+            line.number:SetAutoFocus(false)
+            line.number:SetMaxLetters(4)
+            line.number:SetNumeric(true)
+            local function save()
+                local entry = line.entry
+                if entry ~= nil and entry.enabled and tonumber(line.number:GetText()) ~= entry.n then
+                    call("onPromotionsAutomated", kind, true, line.number:GetText())
+                end
+            end
+            line.number:SetScript("OnEnterPressed", function(self)
+                self:ClearFocus()
+            end)
+            line.number:SetScript("OnEscapePressed", function(self)
+                self:ClearFocus()
+            end)
+            line.number:SetScript("OnEditFocusLost", save)
+        end
+        line.check:SetScript("OnClick", function(self)
+            local checked = self:GetChecked() == true
+            local done = call("onPromotionsAutomated", kind, checked, line.number and line.number:GetText() or nil)
+            if not done then
+                self:SetChecked(not checked)
+            end
+        end)
+        editor.automated[kind] = line
+    end
+
+    -- The custom requirements: a box for the text, whether ticking it
+    -- needs a note, and Add (or Save and Cancel while editing one).
+    local custom = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    custom:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -138)
+    custom:SetText("Custom requirements")
+    local box = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+    box:SetSize(240, 20)
+    box:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -172)
+    box:SetAutoFocus(false)
+    box:SetMaxLetters(addon.RankRequirements.MAX_LABEL)
+    box:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
+    editor.box = box
+    local boxLabel = holder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    boxLabel:SetPoint("BOTTOMLEFT", box, "TOPLEFT", -4, 2)
+    boxLabel:SetText("Requirement text")
+    local noteCheck = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
+    noteCheck:SetSize(22, 22)
+    noteCheck:SetPoint("LEFT", box, "RIGHT", 8, 0)
+    local noteLabel = noteCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    noteLabel:SetPoint("LEFT", noteCheck, "RIGHT", 2, 0)
+    noteLabel:SetText("Needs a note")
+    editor.noteCheck = noteCheck
+    local function stopRenaming()
+        editor.renaming = nil
+        editor.save:SetText("Add")
+        editor.cancel:Hide()
+        box:SetText("")
+        noteCheck:SetChecked(false)
+    end
+    editor.save = smallButton(holder, 70, "Add", function()
+        local text = box:GetText()
+        local needsNote = noteCheck:GetChecked() == true
+        local done
+        if editor.renaming ~= nil then
+            done = call("onPromotionsRename", editor.renaming, text, needsNote)
+        else
+            done = call("onPromotionsAdd", text, needsNote)
+        end
+        if done then
+            stopRenaming()
+            box:ClearFocus()
+        end
+    end)
+    editor.save:SetPoint("LEFT", noteCheck, "RIGHT", 90, 0)
+    box:SetScript("OnEnterPressed", function()
+        editor.save:Click()
+    end)
+    editor.cancel = smallButton(holder, 70, "Cancel", stopRenaming)
+    editor.cancel:SetPoint("LEFT", editor.save, "RIGHT", 6, 0)
+    editor.cancel:Hide()
+    editor.message = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    editor.message:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -196)
+    editor.message:SetWidth(680)
+    editor.message:SetJustifyH("LEFT")
+
+    -- Asking before a delete, in the page.
+    local confirm = CreateFrame("Frame", nil, holder)
+    confirm:SetSize(680, 24)
+    confirm:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -210)
+    confirm.text = confirm:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    confirm.text:SetPoint("LEFT", confirm, "LEFT", 0, 0)
+    confirm.text:SetWidth(470)
+    confirm.text:SetJustifyH("LEFT")
+    local yes = smallButton(confirm, 80, "Delete", function()
+        local id = confirm.id
+        confirm:Hide()
+        if id ~= nil then
+            call("onPromotionsDelete", id)
+        end
+    end)
+    yes:SetPoint("LEFT", confirm.text, "RIGHT", 8, 0)
+    local no = smallButton(confirm, 70, "Cancel", function()
+        confirm:Hide()
+    end)
+    no:SetPoint("LEFT", yes, "RIGHT", 6, 0)
+    confirm:Hide()
+    editor.confirm = confirm
+
+    editor.empty = holder:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    editor.empty:SetPoint("TOPLEFT", holder, "TOPLEFT", 22, -240)
+    editor.empty:SetWidth(660)
+    editor.empty:SetJustifyH("LEFT")
+    local index
+    for index = 1, addon.RankRequirements.MAX_ITEMS do
+        local row = CreateFrame("Frame", nil, holder)
+        row:SetSize(700, RosterWindow.LINE_HEIGHT)
+        row:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -236 - (index - 1) * RosterWindow.LINE_HEIGHT)
+        row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.label:SetPoint("LEFT", row, "LEFT", 6, 0)
+        row.label:SetWidth(260)
+        row.label:SetJustifyH("LEFT")
+        row.label:SetWordWrap(false)
+        row.kind = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        row.kind:SetPoint("LEFT", row, "LEFT", 272, 0)
+        row.kind:SetWidth(180)
+        row.kind:SetJustifyH("LEFT")
+        row.up = smallButton(row, 44, "Up", function()
+            call("onPromotionsMove", row.item.id, -1)
+        end)
+        row.up:SetPoint("LEFT", row, "LEFT", 458, 0)
+        row.down = smallButton(row, 50, "Down", function()
+            call("onPromotionsMove", row.item.id, 1)
+        end)
+        row.down:SetPoint("LEFT", row.up, "RIGHT", 2, 0)
+        row.rename = smallButton(row, 64, "Edit", function()
+            editor.renaming = row.item.id
+            box:SetText(row.item.label)
+            box:SetFocus()
+            noteCheck:SetChecked(row.item.needsNote == true)
+            editor.save:SetText("Save")
+            editor.cancel:Show()
+        end)
+        row.rename:SetPoint("LEFT", row.down, "RIGHT", 2, 0)
+        row.delete = smallButton(row, 60, "Delete", function()
+            confirm.id = row.item.id
+            confirm.text:SetText("Delete \"" .. row.item.label .. "\"? Its ticks are dropped too.")
+            confirm:Show()
+        end)
+        row.delete:SetPoint("LEFT", row.rename, "RIGHT", 2, 0)
+        row:Hide()
+        editor.rows[index] = row
+    end
+
+    return editor
+end
+
+-- What the Guild Log page's controls say, from the controller's state
+-- (see RosterController:GuildLogView).
+function RosterWindow.GuildLogControlText(state)
+    local filters = state.filters
+    return {
+        sort = filters.sort == "name" and "Sort: Name" or "Sort: Date",
+        range = filters.range ~= nil and ("Range: " .. filters.range .. " days") or "Range: All",
+        page = "Page " .. state.page .. " of " .. state.pages .. " (" .. state.total ..
+            (state.total == 1 and " entry)" or " entries)"),
+    }
 end
 
 -- The guild-size counts line: its text, and on hover a tooltip with the
@@ -1145,6 +1774,26 @@ local function build(framework, options)
         -- Showing the page brings "how long ago" up to date.
         if options.onRecentAdsShown ~= nil then
             adsPage:HookScript("OnShow", options.onRecentAdsShown)
+        end
+    end
+    -- The officers' Guild Log page, when the frame has one.
+    local guildLog
+    local logPage = host:Content("guildlog")
+    if logPage ~= nil then
+        local built, log = pcall(buildGuildLog, framework, logPage, frameName, options)
+        guildLog = built and log or nil
+        if options.onGuildLogShown ~= nil then
+            logPage:HookScript("OnShow", options.onGuildLogShown)
+        end
+    end
+    -- The officers' Promotions page, when the frame has one.
+    local promotions
+    local promotionsPage = host:Content("promotions")
+    if promotionsPage ~= nil then
+        local built, editor = pcall(buildPromotions, framework, promotionsPage, frameName, options)
+        promotions = built and editor or nil
+        if options.onPromotionsShown ~= nil then
+            promotionsPage:HookScript("OnShow", options.onPromotionsShown)
         end
     end
     if options.onHide ~= nil then
@@ -1369,7 +2018,7 @@ local function build(framework, options)
         playerPanel.panel:Hide()
     end)
 
-    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts
+    return host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts, guildLog, promotions
 end
 
 -- options.navigator is the PageNavigator with the master frame's pages;
@@ -1404,7 +2053,7 @@ function RosterWindow.Create(client, options)
         return nil, "the Details! Framework is not available"
     end
 
-    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts =
+    local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts, guildLog, promotions =
         pcall(build, framework, options)
     if not ok or host == nil then
         return nil, "the Details! Framework could not build the window"
@@ -1418,6 +2067,8 @@ function RosterWindow.Create(client, options)
         playerPanel = playerPanel,
         recruiters = recruiters,
         recentAds = recentAds,
+        guildLog = guildLog,
+        promotions = promotions,
         counts = counts,
     }, Window)
 end
@@ -1474,7 +2125,8 @@ function Window:SetConflicts(rows)
 end
 
 -- Shows the bundle review (see BundleReviewViewModel) beside the conflict
--- panel.
+-- panel: who suggested it, each changed player before and after, the guild
+-- notes, and its changes.
 function Window:ShowReview(model)
     return (pcall(function()
         local review = self.conflicts.review
@@ -1484,11 +2136,10 @@ function Window:ShowReview(model)
         elseif review.panel.Title ~= nil then
             review.panel.Title:SetText(model.title)
         end
+        review.suggestedBy:SetText(model.suggestedBy or "")
+        review.list:SetData(RosterWindow.ReviewLines(model))
+        review.list:Refresh()
         local index
-        for index = 1, 3 do
-            review.before[index]:SetText(model.before[index] or "")
-            review.suggested[index]:SetText(model.suggested[index] or "")
-        end
         for index = 1, #review.lines do
             local line = review.lines[index]
             local item = model.items[index]
@@ -1529,8 +2180,98 @@ function Window:SetRecruiters(rows)
     end))
 end
 
--- Shows the Recent ads page's rows (see RosterController:RecentAdsView).
--- False when the frame has no Recent ads page.
+-- Shows the Promotions page's editor model (see PromotionsViewModel.Editor).
+-- False when the frame has no Promotions page.
+function Window:SetPromotions(model)
+    local editor = self.promotions
+    if editor == nil or type(model) ~= "table" then
+        return false
+    end
+    return (pcall(function()
+        editor.rankText:SetText(model.rankText or "")
+        editor.nextText:SetText(model.nextText or "")
+        editor.mismatch:SetText(model.mismatch and ("|cffff8040" .. model.mismatch .. "|r") or "")
+        editor.empty:SetText(model.empty or "")
+        if editor.confirm.id ~= nil and editor.confirm:IsShown() then
+            local found = false
+            local itemIndex
+            for itemIndex = 1, #model.items do
+                found = found or model.items[itemIndex].id == editor.confirm.id
+            end
+            if not found then
+                editor.confirm:Hide()
+            end
+        end
+        local rankChanged = editor.shownRank ~= model.rank
+        editor.shownRank = model.rank
+        local automatedIndex
+        for automatedIndex = 1, #(model.automated or {}) do
+            local entry = model.automated[automatedIndex]
+            local line = editor.automated[entry.kind]
+            if line ~= nil then
+                line.entry = entry
+                line.check:SetChecked(entry.enabled)
+                -- A number typed for a check that's off stays until the
+                -- rank changes; one being typed is left alone.
+                if line.number ~= nil and not line.number:HasFocus() and (entry.enabled or rankChanged) then
+                    line.number:SetText(entry.n ~= nil and tostring(entry.n) or "")
+                end
+            end
+        end
+        local index
+        for index = 1, #editor.rows do
+            local row, item = editor.rows[index], model.items[index]
+            row.item = item
+            if item == nil then
+                row:Hide()
+            else
+                row.label:SetText(item.label)
+                row.kind:SetText(item.needsNote and "Needs a note" or "")
+                if item.canUp then row.up:Enable() else row.up:Disable() end
+                if item.canDown then row.down:Enable() else row.down:Disable() end
+                row:Show()
+            end
+        end
+    end))
+end
+
+-- Shows the Guild Log page's rows and where its controls stand (see
+-- RosterController:GuildLogView). False when the frame has no Guild Log
+-- page.
+function Window:SetGuildLog(rows, state)
+    local guildLog = self.guildLog
+    if guildLog == nil then
+        return false
+    end
+    return (pcall(function()
+        guildLog.scroll:SetData(rows or {})
+        guildLog.scroll:Refresh()
+        local controls = guildLog.controls
+        if state == nil or controls == nil then
+            return
+        end
+        controls.state = state
+        local text = RosterWindow.GuildLogControlText(state)
+        controls.sort:SetText(text.sort)
+        controls.range:SetText(text.range)
+        controls.pageText:SetText(text.page)
+        if state.page > 1 then
+            controls.previous:Enable()
+        else
+            controls.previous:Disable()
+        end
+        if state.page < state.pages then
+            controls.next:Enable()
+        else
+            controls.next:Disable()
+        end
+        local eventType, check
+        for eventType, check in pairs(controls.types) do
+            check:SetChecked(state.filters.types[eventType] == true)
+        end
+    end))
+end
+
 function Window:SetRecentAds(rows)
     local recentAds = self.recentAds
     if recentAds == nil then
@@ -1579,8 +2320,30 @@ function Window:ShowPlayer(model)
         end
         edit.dontSync:SetChecked(model.dontSync == true)
         edit.dontSyncLabel:SetText(model.dontSync and "|cffff8000Don't sync: kept as yours|r" or "Don't sync")
-        edit.scroll:SetData(model.rows)
-        edit.scroll:Refresh()
+        -- Shows the tab picked, staying on it from player to player while
+        -- each has one.
+        edit.show = function()
+            local current = edit.model
+            if current == nil then
+                return
+            end
+            local promotion = current.promotionRows ~= nil
+            if not promotion then
+                edit.tab = "profile"
+            end
+            local name, tab
+            for name, tab in pairs(edit.tabs) do
+                if promotion then
+                    tab:Show()
+                else
+                    tab:Hide()
+                end
+                edit.selectTab(tab, name == edit.tab)
+            end
+            edit.scroll:SetData(edit.tab == "promotion" and current.promotionRows or current.rows)
+            edit.scroll:Refresh()
+        end
+        edit.show()
         edit.panel:Show()
     end))
 end

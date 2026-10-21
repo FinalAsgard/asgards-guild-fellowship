@@ -21,6 +21,7 @@ Core/Identity.lua
 Adapters/ClientProfile.lua
 Adapters/WoW.lua
 Adapters/MasterFrame.lua
+Adapters/PromotionLines.lua
 Adapters/RosterWindow.lua
 Adapters/EntryPoints.lua
 Adapters/GuildNoteOverlay.lua
@@ -81,6 +82,13 @@ Core/GroupAvailability.lua
 Core/GroupCandidates.lua
 Core/JoinRequests.lua
 Core/GroupHistory.lua
+Core/GuildLog.lua
+Core/GuildLogSync.lua
+Core/MembershipDates.lua
+Core/RankRequirements.lua
+Core/PromotionChecks.lua
+Core/PromotionPolicy.lua
+Core/PromotionsViewModel.lua
 Core/LocationProtocol.lua
 Core/LocationScheduler.lua
 Core/LocationBoard.lua

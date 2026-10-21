@@ -164,7 +164,7 @@ end
 -- A single-character player is just its character row, marked
 -- `standalone = true` and carrying the player's `label`, `coloredLabel` and
 -- `discord`.
--- Players sort online first, then by label.
+-- Players sort online first, then by label. MarkReady adds `ready`.
 local function trimmedLower(text)
     if type(text) ~= "string" then
         return ""
@@ -439,4 +439,23 @@ function Cache:Build(inputs, stamp)
     self.stamp = stamp
     self.builds = self.builds + 1
     return self.rows
+end
+
+-- Marks each character row whose key is in `ready` (a set, or nil for
+-- none) with `ready = true`, for the officers' ready marker, and clears the
+-- rest. True when any row changed.
+function RosterViewModel.MarkReady(rows, ready)
+    local changed = false
+    local index
+    for index = 1, #(rows or {}) do
+        local row = rows[index]
+        if row.kind == "character" then
+            local mark = ready ~= nil and ready[row.key] == true or nil
+            if row.ready ~= mark then
+                row.ready = mark
+                changed = true
+            end
+        end
+    end
+    return changed
 end

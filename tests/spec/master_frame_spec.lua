@@ -284,3 +284,38 @@ test.test("no window closes on a right-click: every framework panel turns that o
     listing:close()
     test.assertTrue(checked >= 5, "found the panels")
 end)
+
+-- The specs stand in for RosterWindow.Create, so the real window's parts are
+-- checked in its source: every part Create keeps must come back from build.
+-- The patterns read RosterWindow.lua's layout: build's one-line
+-- "    return host, scroll, ..." and Create's "local ok, host, ... = pcall(build,".
+-- A failure on "found build's return" means that layout changed, not a part.
+test.test("the roster window keeps every part build makes, the Guild Log and Promotions pages included", function()
+    local handle = assert(io.open("Adapters/RosterWindow.lua", "r"))
+    local source = handle:read("*a")
+    handle:close()
+    local function names(list)
+        local set = {}
+        local name
+        for name in string.gmatch(list, "[%a_][%w_]*") do
+            set[name] = true
+        end
+        return set
+    end
+    local returned = string.match(source, "\n    return (host, scroll, [^\n]+)\nend\n")
+    local captured = string.match(source, "local ok, (host, [^=]+)=%s*pcall%(build,")
+    test.assertTrue(returned ~= nil and captured ~= nil, "found build's return and Create's call")
+    returned, captured = names(returned), names(captured)
+    local create = string.match(source, "function RosterWindow%.Create%(.-\nend\n")
+    local kept = 0
+    local field, value
+    for field, value in string.gmatch(create, "\n%s+([%a_][%w_]*) = ([%a_][%w_]*),") do
+        if field == value then
+            test.assertTrue(captured[field], "Create keeps " .. field .. " without taking it from build")
+            test.assertTrue(returned[field], "build doesn't return " .. field)
+            kept = kept + 1
+        end
+    end
+    test.assertTrue(kept >= 9, "found the window's parts")
+    test.assertTrue(returned.guildLog and returned.promotions, "build returns the Guild Log and Promotions pages")
+end)

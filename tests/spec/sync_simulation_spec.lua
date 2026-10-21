@@ -149,6 +149,9 @@ test.test("an officer's edit reaches every online member and only sends main lin
     local officer = login(channel, "Toolbox-Area52")
     local hammer = login(channel, "Hammer-Area52")
     local wrench = login(channel, "Wrench-Area52")
+    -- The officer's first scan shared the guild's tracking-start mark.
+    fixtures.deliver(channel)
+    officer.sentMessages = {}
 
     linkAlt(officer, "hammer-area52", "toolbox-area52")
     fixtures.deliver(channel)
@@ -1137,16 +1140,20 @@ test.test("an officer sees one bundle per member's player, reviews it, and appro
     test.assertEqual(2, #bundles)
     local hammers = bundles[1].name == "Hammer" and bundles[1] or bundles[2]
     test.assertEqual(2, hammers.count)
-    test.assertEqual("2 changes", hammers.suggests)
+    test.assertEqual("2 changes", hammers.changes)
     -- A bundle counts once, for the button and the minimap tooltip.
     test.assertEqual(2, officer.addon.rosterController:PendingConflictCount())
 
     test.assertTrue(officer.addon.rosterController:ReviewBundle(hammers.group))
     local review = officer.addon.rosterController.window.review
     test.assertEqual("Review: Hammer", review.title)
-    test.assertEqual("Alts: none", review.before[2])
-    test.assertEqual("Alts: Wrench", review.suggested[2])
-    test.assertEqual("Alias: Hammers", review.suggested[3])
+    test.assertEqual("Suggested by Hammer", review.suggestedBy)
+    local hammerBlock = review.players[1]
+    test.assertEqual("Alts: none", hammerBlock.before[4].text)
+    test.assertEqual("removed", hammerBlock.before[4].mark)
+    test.assertEqual("Alias: Hammers", hammerBlock.after[2].text)
+    test.assertEqual("added", hammerBlock.after[2].mark)
+    test.assertEqual("Alt: Wrench", hammerBlock.after[4].text)
     test.assertEqual(2, #review.items)
 
     test.assertEqual(2, officer.addon.rosterController:DecideBundle(hammers.group, true))
@@ -1209,7 +1216,8 @@ test.test("an officer's declared main reaches everyone; a member's waits in thei
     local group = bundleRows(officer)[1].group
     officer.addon.rosterController:ReviewBundle(group)
     local review = officer.addon.rosterController.window.review
-    test.assertEqual("Main: Hammer (declared)", review.suggested[1])
+    test.assertEqual("Main: Hammer (declared)", review.players[1].after[1].text)
+    test.assertEqual("added", review.players[1].after[1].mark)
     local found
     local index
     for index = 1, #review.items do

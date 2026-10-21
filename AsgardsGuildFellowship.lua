@@ -27,6 +27,37 @@ end
 
 local persistence, rosterController, entryPoints, chatAnnotator, comm, syncSession, settings, settingsPanel, pages
 local frameSettings
+-- The officers' guild log for the current guild, or nil for everyone else
+-- (set up with guild sync below).
+local guildLogOf = function()
+    return nil
+end
+local requestGuildLog, readGuildLog, recordLiveMembership = function() end, function() end, function() end
+-- Shares the officers' guild log between officers (see GuildLogSync).
+local guildLogSync
+-- Membership dates (see MembershipDates), set up with guild sync below:
+-- what a roster scan saw, and the officer's lines for the player panel.
+local observeMembership, membershipLines = function() end, function() end
+-- An add-on message was heard from a character (see MembershipDates:Heard).
+local heardFrom = function() end
+-- The officers' Promotions page, the requirements editor (see
+-- RankRequirements), set up with guild sync below: view() gives its
+-- model, and the rest edit it.
+local promotions = {
+    view = function()
+        return nil
+    end,
+    askOnce = function() end,
+    prune = function() end,
+    shown = function() end,
+    changed = function() end,
+    readyKeys = function()
+        return nil
+    end,
+    panelRows = function()
+        return nil
+    end,
+}
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local guildNoteOverlay
@@ -56,6 +87,13 @@ if clientProfile.supported then
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
+    -- Officers only: they come and go with the character's rank.
+    pages:Add("promotions", "Promotion Requirements", addon.MasterFrame.ICONS.promotions, function()
+        return guildLogOf() ~= nil
+    end)
+    pages:Add("guildlog", "Guild Log", addon.MasterFrame.ICONS.guildlog, function()
+        return guildLogOf() ~= nil
+    end)
     pages:Add("settings", "Settings", addon.MasterFrame.ICONS.settings)
     -- This install has logged in on this character: My Profile can offer it
     -- to the player's other characters as an alt. Recorded once per session
@@ -106,6 +144,15 @@ if clientProfile.supported then
         onScanFinished = function(_, result)
             syncSession:UpgradeLegacy()
             recordOwnCharacter()
+            observeMembership()
+            -- Once ranks are known, catch up on promotion requirements and
+            -- ticks; a rank change makes a character's ticks stale.
+            promotions.prune()
+            promotions.askOnce()
+            promotions.changed()
+            -- A scan that saw a promotion or demotion shows or hides the
+            -- officers' tabs.
+            rosterController:RefreshPages()
             -- Characters new to the guild may be due a welcome mail.
             if guildWelcome ~= nil and type(result) == "table" then
                 guildWelcome:OnScan(result.newKeys)
@@ -131,6 +178,18 @@ if clientProfile.supported then
             local roles = rolesOf(key)
             return roles and addon.RoleCatalog.Describe(roles) or nil
         end,
+        membership = function(keys)
+            return membershipLines(keys)
+        end,
+        promotionsView = function()
+            return promotions.view()
+        end,
+        promotion = function(keys, playerId)
+            return promotions.panelRows(keys, playerId)
+        end,
+        readyKeys = function()
+            return promotions.readyKeys()
+        end,
         groupedWith = function(keys)
             local guild, partition = rosterController:QuietContext()
             if guild == nil then
@@ -145,6 +204,13 @@ if clientProfile.supported then
         end,
         recentAds = function()
             return guildRecruit:KnownAds()
+        end,
+        guildLog = function()
+            return (guildLogOf())
+        end,
+        rankName = function(index)
+            local names = client:GetGuildRankNames()
+            return names and names[index + 1] or nil
         end,
         offZones = function()
             return guildRecruit:OffZones()
@@ -210,6 +276,51 @@ if clientProfile.supported then
                 end,
                 onRecentAdsShown = function()
                     rosterController:RefreshRecruiters()
+                end,
+                onGuildLogShown = function()
+                    rosterController:RefreshGuildLog()
+                end,
+                onPromotionsShown = function()
+                    promotions.shown()
+                end,
+                onPromotionsRank = function(step)
+                    return promotions.rank(step)
+                end,
+                onPromotionsAdd = function(label, needsNote)
+                    return promotions.add(label, needsNote)
+                end,
+                onPromotionsRename = function(id, label, needsNote)
+                    return promotions.rename(id, label, needsNote)
+                end,
+                onPromotionsAutomated = function(kind, enabled, n)
+                    return promotions.automated(kind, enabled, n)
+                end,
+                onPromotionsMove = function(id, step)
+                    return promotions.move(id, step)
+                end,
+                onPromotionsDelete = function(id)
+                    return promotions.delete(id)
+                end,
+                onPromotionsTick = function(key, item, ticked, note)
+                    return promotions.tick(key, item, ticked, note)
+                end,
+                onPanelPromotionToggle = function(key)
+                    return promotions.togglePanel(key)
+                end,
+                onGuildLogSearch = function(text)
+                    rosterController:SetGuildLogSearch(text)
+                end,
+                onGuildLogSort = function(sort)
+                    rosterController:SetGuildLogSort(sort)
+                end,
+                onGuildLogRange = function(days)
+                    rosterController:SetGuildLogRange(days)
+                end,
+                onGuildLogType = function(eventType, shown)
+                    rosterController:SetGuildLogType(eventType, shown)
+                end,
+                onGuildLogPage = function(page)
+                    rosterController:SetGuildLogPage(page)
                 end,
                 onTurnBackOn = function(zoneKey)
                     rosterController:TurnBackOn(zoneKey)
@@ -1833,6 +1944,738 @@ if clientProfile.supported then
             return comm:RankCanViewOfficerNotes(rank)
         end,
     })
+    -- The officers' guild log (see GuildLog): only an officer's add-on
+    -- records or stores it. It's read from the game's guild event log
+    -- (asked for again at most every LOG_REQUEST_SECONDS, as the roster
+    -- updates) and from joins and leaves seen live. A client without the
+    -- event log keeps only the live events.
+    -- The character's own rank is read live, so a promotion or demotion
+    -- counts at once, not after the next full scan.
+    local function selfIsOfficer()
+        local rank = client:GetPlayerGuildRankIndex()
+        if rank == nil then
+            return officerAuthority:IsOfficer(rosterController:SelfKey())
+        end
+        return officerAuthority:IsOfficerRank(rank)
+    end
+    -- Membership dates: every add-on works them out from its own roster
+    -- scans; an officer's add-on also from the guild log, and shares those
+    -- (and dates set by hand) with the guild as officer facts.
+    local function datesOf(partition)
+        return addon.MembershipDates.Create(partition:GetMembershipDates(), {
+            isOfficer = function(key)
+                return officerAuthority:IsOfficer(key)
+            end,
+        })
+    end
+    local function shareDates(facts)
+        if facts ~= nil and facts[1] ~= nil then
+            syncSession:ShareOfficerFacts(facts)
+        end
+    end
+    -- Dates from guild log entries this officer's add-on just recorded.
+    local function datesFromLog(entries)
+        local guild, partition = rosterController:QuietContext()
+        local now = client:Timestamp()
+        if guild == nil or now == nil or not selfIsOfficer() then
+            return
+        end
+        shareDates(datesOf(partition):FromLog(entries, rosterController:SelfKey(), now))
+    end
+    observeMembership = function()
+        local guild, partition = rosterController:QuietContext()
+        local now = client:Timestamp()
+        if guild == nil or now == nil then
+            return
+        end
+        local present = {}
+        partition:EachCharacter(function(key, character)
+            if partition:IsInGuild(key) then
+                present[key] = character.rank or false
+            end
+        end)
+        local dates = datesOf(partition)
+        if dates:ObserveScan(present, now) and selfIsOfficer() then
+            shareDates({ dates:StampTracking(rosterController:SelfKey(), now) })
+        end
+    end
+    -- Every add-on message heard proves its sender has the add-on. Writes
+    -- are throttled per character, so busy sync costs a table lookup. An
+    -- officer's add-on notes who it heard and, every few minutes, makes
+    -- and shares their last-heard facts together, not one message per
+    -- character; until then its digest is unchanged.
+    local HEARD_THROTTLE_SECONDS = 60
+    local HEARD_FLUSH_SECONDS = 300
+    local lastHeard = {}
+    local heardKeys, heardFlushing = {}, false
+    local function flushHeard()
+        heardFlushing = false
+        local keys = heardKeys
+        heardKeys = {}
+        local guild, partition = rosterController:QuietContext()
+        local author, now = rosterController:SelfKey(), client:Timestamp()
+        if guild == nil or author == nil or now == nil or not selfIsOfficer() then
+            return
+        end
+        local dates = datesOf(partition)
+        local sorted = {}
+        local key
+        for key in pairs(keys) do
+            table.insert(sorted, key)
+        end
+        table.sort(sorted)
+        local facts = {}
+        local index
+        for index = 1, #sorted do
+            local fact = dates:ShareHeard(sorted[index], author, now)
+            if fact ~= nil then
+                table.insert(facts, fact)
+            end
+        end
+        shareDates(facts)
+    end
+    heardFrom = function(sender)
+        local now = client:Timestamp()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local key = guild and normalizer:Key(sender)
+        if key == nil or now == nil or (lastHeard[key] ~= nil and now - lastHeard[key] < HEARD_THROTTLE_SECONDS)
+            or partition:GetCharacter(key) == nil
+        then
+            return
+        end
+        lastHeard[key] = now
+        datesOf(partition):Heard(key, now)
+        if selfIsOfficer() then
+            heardKeys[key] = true
+            if not heardFlushing then
+                heardFlushing = true
+                if not client:After(HEARD_FLUSH_SECONDS, flushHeard) then
+                    flushHeard()
+                end
+            end
+        end
+    end
+    -- The player panel's dates, for officers only: the player's earliest
+    -- current join, then each character's join and time at its rank.
+    membershipLines = function(keys)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil or not selfIsOfficer() then
+            return nil
+        end
+        local dates = datesOf(partition)
+        local function formatDate(timestamp)
+            return client:FormatDate(timestamp)
+        end
+        local current = {}
+        local index
+        for index = 1, #keys do
+            if partition:IsInGuild(keys[index]) then
+                table.insert(current, keys[index])
+            end
+        end
+        local lines = {
+            "Earliest join: " .. addon.MembershipDates.Describe(dates:EarliestJoin(current), formatDate),
+        }
+        for index = 1, #current do
+            local character = partition:GetCharacter(current[index])
+            table.insert(lines, (normalizer:Display(character.name) or current[index]) .. ": joined " ..
+                addon.MembershipDates.Describe(dates:Joined(current[index]), formatDate) .. ", at this rank since " ..
+                addon.MembershipDates.Describe(dates:RankSince(current[index], character.rank), formatDate))
+        end
+        return lines
+    end
+    router:Register("setdate",
+        "set a character's join or rank date (officers): setdate join|rank <character> <YYYY-MM-DD>",
+        function(arguments)
+            local which, name, text = string.match(arguments or "", "^%s*(%S+)%s+(.-)%s+(%S+)%s*$")
+            local kind = which and ({ join = addon.MembershipDates.KIND_JOINED,
+                rank = addon.MembershipDates.KIND_RANK_SINCE })[string.lower(which)]
+            local time = addon.MembershipDates.ParseDate(text)
+            if kind == nil or name == nil or name == "" or time == nil then
+                rosterController:Print("Use " .. addon.Identity.slashCommand ..
+                    " setdate join|rank <character> <YYYY-MM-DD>.")
+                return
+            end
+            local guild, partition, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(name)
+            local character = key and partition:GetCharacter(key)
+            if character == nil then
+                rosterController:Print("No character named " .. name .. " in the roster.")
+                return
+            end
+            local author = rosterController:SelfKey()
+            if not selfIsOfficer() or author == nil then
+                rosterController:Print("Only officers can set dates.")
+                return
+            end
+            local fact, reason = datesOf(partition):SetByOfficer(key, kind, time, character.rank, author,
+                client:Timestamp())
+            if fact == nil then
+                rosterController:Print("Date not set: " .. tostring(reason) .. ".")
+                return
+            end
+            shareDates({ fact })
+            rosterController:Print("Set " .. (normalizer:Display(character.name) or key) ..
+                (kind == addon.MembershipDates.KIND_JOINED and "'s join date" or "'s rank date") ..
+                " to " .. client:FormatDate(time) .. ".")
+            rosterController:Invalidate()
+        end)
+    local guildLogs = {}
+    guildLogOf = function()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil or not selfIsOfficer() then
+            return nil
+        end
+        local log = guildLogs[partition.key]
+        if log == nil then
+            log = addon.GuildLog.Create(partition:GetGuildLog())
+            guildLogs[partition.key] = log
+        end
+        return log, normalizer
+    end
+    -- Promotion requirements: officers edit them on the Promotions page;
+    -- every add-on keeps them, shares edits with the guild, and asks for
+    -- them once a session.
+    local function requirementsOf()
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        return addon.RankRequirements.Create(partition:GetRankRequirements(), {
+            isOfficer = function(key)
+                return officerAuthority:IsOfficer(key)
+            end,
+        })
+    end
+    local requirementsSync = addon.RankRequirements.CreateSync({
+        store = requirementsOf,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        senderKey = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(sender) or nil
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        announce = function(message)
+            return comm:Broadcast(message)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        onChange = function()
+            promotions.changed()
+        end,
+    })
+    promotions.sync = requirementsSync
+    -- Officers' ticks: shared the same way.
+    local function checksOf()
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        local dates = datesOf(partition)
+        return addon.PromotionChecks.Create(partition:GetPromotionChecks(), {
+            isOfficer = function(key)
+                return officerAuthority:IsOfficer(key)
+            end,
+            rankOf = function(key)
+                local character = partition:GetCharacter(key)
+                if character == nil or not partition:IsInGuild(key) then
+                    return nil
+                end
+                return character.rank
+            end,
+            -- When the character's current stint at its rank began, from
+            -- the guild log (or an officer's date), less the log's doubt and
+            -- SAME_JOIN_SECONDS: ticks made before it are from an earlier
+            -- stint (promoted, then demoted back). A roster scan's date
+            -- only says the change happened by then, so it decides nothing.
+            stintStart = function(key)
+                local character = partition:GetCharacter(key)
+                local since = character and dates:RankSince(key, character.rank)
+                if since == nil or (since.source ~= addon.MembershipDates.LOG
+                    and since.source ~= addon.MembershipDates.OFFICER)
+                then
+                    return nil
+                end
+                return since.time - math.max(since.tolerance or 0, addon.MembershipDates.SAME_JOIN_SECONDS)
+            end,
+        })
+    end
+    local ticksSync = addon.RankRequirements.CreateSync({
+        store = checksOf,
+        stateType = addon.PromotionChecks.TYPE_STATE,
+        askType = addon.PromotionChecks.TYPE_ASK,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        senderKey = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            return guild and normalizer:Key(sender) or nil
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        announce = function(message)
+            return comm:Broadcast(message)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        onChange = function()
+            promotions.changed()
+        end,
+    })
+    promotions.ticks = ticksSync
+    promotions.askOnce = function()
+        requirementsSync:AskOnce()
+        ticksSync:AskOnce()
+    end
+    promotions.prune = function()
+        local checks = checksOf()
+        if checks ~= nil then
+            checks:Prune()
+        end
+    end
+    -- The game guild roster's promotion panel, for the member named `name`
+    -- selected there: that character's rows only (as panelRows, so who may
+    -- see them is decided by its player), its checklist open at first. Its
+    -- own open checklists, kept while the same member stays selected.
+    local rosterExpanded, rosterSelected = {}, nil
+    promotions.rosterRows = function(name)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local key = guild and normalizer:Key(name)
+        local character = key and partition:GetCharacter(key)
+        if character == nil or character.player == nil then
+            return nil
+        end
+        if key ~= rosterSelected then
+            rosterSelected = key
+            rosterExpanded = { [key] = true }
+        end
+        return promotions.panelRows({ key }, character.player, rosterExpanded)
+    end
+    promotions.toggleRoster = function(key)
+        rosterExpanded[key] = not rosterExpanded[key] or nil
+    end
+    -- Requirements or ticks changed: redraw the page, the player panel and
+    -- the roster's Ready markers, here and on the game's guild roster.
+    promotions.changed = function()
+        rosterController:RefreshPromotions()
+        if guildNoteOverlay ~= nil then
+            guildNoteOverlay:Refresh()
+        end
+    end
+    -- The Promotions page (the requirements editor) opened: redraw it.
+    promotions.shown = function()
+        rosterController:RefreshPromotions()
+    end
+    -- What the rules engine reads, or nil before the guild is known.
+    local function promotionInputs()
+        local guild, partition = rosterController:QuietContext()
+        local requirements, checks = requirementsOf(), checksOf()
+        if guild == nil or requirements == nil or checks == nil then
+            return nil
+        end
+        return {
+            partition = partition,
+            requirements = requirements,
+            checks = checks,
+            dates = datesOf(partition),
+            now = client:Timestamp(),
+            rankNames = client:GetGuildRankNames() or {},
+        }
+    end
+    -- The characters ready for promotion, as a set, for the roster's marker:
+    -- officers only.
+    promotions.readyKeys = function()
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        return addon.PromotionPolicy.ReadySet(inputs)
+    end
+    -- The characters whose checklists are open on the player panel's
+    -- Promotion tab, for the session.
+    local panelExpanded = {}
+    promotions.togglePanel = function(key)
+        panelExpanded[key] = not panelExpanded[key] or nil
+        rosterController:RedrawPanel()
+        return true
+    end
+    -- The player panel's Promotion tab (see PromotionsViewModel.PanelRows):
+    -- an officer's for anyone, a member's for their own player only, and
+    -- nil for everyone else. `expanded` is the set of open checklists
+    -- (the panel's own, by default).
+    promotions.panelRows = function(keys, playerId, expanded)
+        local inputs = promotionInputs()
+        if inputs == nil then
+            return nil
+        end
+        local partition = inputs.partition
+        local _, _, normalizer = rosterController:QuietContext()
+        local officer = selfIsOfficer()
+        local selfKey = rosterController:SelfKey()
+        local own = selfKey ~= nil and partition:GetCharacter(selfKey) ~= nil
+            and partition:GetCharacter(selfKey).player == playerId
+        if not officer and not own then
+            return nil
+        end
+        local function nameOf(key)
+            local character = partition:GetCharacter(key)
+            return (character and normalizer:Display(character.name)) or key
+        end
+        local dates = inputs.dates
+        local characters = {}
+        local index
+        for index = 1, #keys do
+            local key = keys[index]
+            local character = partition:GetCharacter(key)
+            if character ~= nil and partition:IsInGuild(key) and type(character.rank) == "number" then
+                table.insert(characters, {
+                    key = key,
+                    name = nameOf(key),
+                    rankName = inputs.rankNames[character.rank + 1] or ("Rank " .. character.rank),
+                    evaluated = addon.PromotionPolicy.Evaluate(inputs, key),
+                    lastPromotion = dates and dates:LastPromotion(key) or nil,
+                })
+            end
+        end
+        local highest = addon.PromotionPolicy.HighestRank(partition, playerId)
+        return addon.PromotionsViewModel.PanelRows(characters, {
+            officer = officer,
+            expanded = expanded or panelExpanded,
+            highestRankName = highest and (inputs.rankNames[highest + 1] or ("Rank " .. highest)) or nil,
+            nameOf = nameOf,
+            formatDate = function(timestamp)
+                return client:FormatDate(timestamp)
+            end,
+        })
+    end
+    promotions.tick = function(key, itemId, ticked, note)
+        local requirements, checks = requirementsOf(), checksOf()
+        local author = rosterController:SelfKey()
+        local now = client:Timestamp()
+        if requirements == nil or checks == nil or author == nil or now == nil then
+            return false, "saved data is unavailable"
+        end
+        if not selfIsOfficer() then
+            return false, "only officers can tick promotion requirements"
+        end
+        local item = requirements:Item(itemId)
+        if item == nil then
+            return false, "that requirement no longer exists"
+        end
+        local records, reason = checks:Set(key, item, ticked, note, author, now)
+        if records == nil then
+            return false, reason
+        end
+        ticksSync:Share(records)
+        promotions.changed()
+        return true
+    end
+    local selectedRank
+    local function rankNames()
+        return client:GetGuildRankNames() or {}
+    end
+    promotions.view = function()
+        local requirements = requirementsOf()
+        if requirements == nil then
+            return nil
+        end
+        local model = addon.PromotionsViewModel.Editor({
+            requirements = requirements,
+            rank = selectedRank,
+            rankNames = rankNames(),
+        })
+        selectedRank = model.rank
+        return model
+    end
+    -- Makes an edit with `change(requirements, author, now)` -> records, or
+    -- nil and why, shares it, and redraws. Returns true, or false and why.
+    local function editRequirements(change)
+        local requirements = requirementsOf()
+        local author = rosterController:SelfKey()
+        local now = client:Timestamp()
+        if requirements == nil or author == nil or now == nil then
+            return false, "saved data is unavailable"
+        end
+        if not selfIsOfficer() then
+            return false, "only officers can change promotion requirements"
+        end
+        local records, reason = change(requirements, author, now)
+        if records == nil then
+            return false, reason
+        end
+        requirementsSync:Share(records)
+        promotions.changed()
+        return true
+    end
+    promotions.rank = function(step)
+        local requirements = requirementsOf()
+        if requirements == nil then
+            return false, "saved data is unavailable"
+        end
+        local names = rankNames()
+        selectedRank = addon.PromotionsViewModel.StepRank(
+            addon.PromotionsViewModel.PickRank(selectedRank, requirements, names), step, names)
+        promotions.changed()
+        return true
+    end
+    -- Adds a custom requirement: a checkbox, needing a note when
+    -- `needsNote`. (Automated checks are turned on with promotions.automated.)
+    promotions.add = function(label, needsNote)
+        return editRequirements(function(requirements, author, now)
+            local names = rankNames()
+            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, names)
+            if rank == nil then
+                return nil, "the guild's ranks aren't known yet"
+            end
+            local kind = needsNote and addon.RankRequirements.KIND_CHECK_NOTE or addon.RankRequirements.KIND_CHECK
+            return requirements:Add(rank, label, kind, names[rank + 1], author, now)
+        end)
+    end
+    -- Renames checkbox item `id`, and sets whether it needs a note when
+    -- `needsNote` is given (true or false).
+    promotions.rename = function(id, label, needsNote)
+        return editRequirements(function(requirements, author, now)
+            local item = requirements:Item(id)
+            if item == nil then
+                return nil, "that item no longer exists"
+            end
+            local records = {}
+            if label ~= nil and string.gsub(label, "^%s*(.-)%s*$", "%1") ~= item.label then
+                local renamed, reason = requirements:Rename(id, label, author, now)
+                if renamed == nil then
+                    return nil, reason
+                end
+                records = renamed
+            end
+            if needsNote ~= nil then
+                local changed, reason = requirements:SetNeedsNote(id, needsNote == true, author, now)
+                if changed == nil then
+                    return nil, reason
+                end
+                local index
+                for index = 1, #changed do
+                    table.insert(records, changed[index])
+                end
+            end
+            return records
+        end)
+    end
+    -- Turns automated check `kind` on (with its number `n`, as typed) or
+    -- off for the rank shown.
+    promotions.automated = function(kind, enabled, n)
+        return editRequirements(function(requirements, author, now)
+            local names = rankNames()
+            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, names)
+            if rank == nil then
+                return nil, "the guild's ranks aren't known yet"
+            end
+            return requirements:SetAutomated(rank, kind, enabled == true, tonumber(n), names[rank + 1], author, now)
+        end)
+    end
+    promotions.move = function(id, step)
+        return editRequirements(function(requirements, author, now)
+            return requirements:Move(id, step, author, now)
+        end)
+    end
+    promotions.delete = function(id)
+        return editRequirements(function(requirements, author, now)
+            return requirements:Delete(id, author, now)
+        end)
+    end
+    local LOG_REQUEST_SECONDS = 10 * 60
+    local logRequestedAt
+    requestGuildLog = function()
+        local now = client:Timestamp()
+        if guildLogOf() == nil or now == nil
+            or (logRequestedAt ~= nil and now - logRequestedAt < LOG_REQUEST_SECONDS)
+        then
+            return
+        end
+        logRequestedAt = now
+        client:RequestGuildEventLog()
+    end
+    readGuildLog = function()
+        local log, normalizer = guildLogOf()
+        local raw = log ~= nil and client:ReadGuildEventLog() or nil
+        if raw == nil then
+            return
+        end
+        local rankNames = client:GetGuildRankNames() or {}
+        local events = addon.GuildLog.FromGameEntries(raw, client:Timestamp(), function(name)
+            return normalizer:Key(name)
+        end, function(rank)
+            local index
+            for index = 1, #rankNames do
+                if rankNames[index] == rank then
+                    return index - 1
+                end
+            end
+            return nil
+        end)
+        local _, changed = log:RecordBatch(events)
+        if changed[1] ~= nil then
+            rosterController:RefreshGuildLog()
+            guildLogSync:Share(changed)
+            datesFromLog(changed)
+        end
+    end
+    recordLiveMembership = function(kind, name)
+        local log, normalizer = guildLogOf()
+        local key = log ~= nil and normalizer:Key(name) or nil
+        local now = client:Timestamp()
+        if key == nil or now == nil then
+            return
+        end
+        local eventType = kind == "join" and addon.GuildLog.JOIN or addon.GuildLog.LEAVE
+        local _, changed = log:RecordLive(eventType, key, now, name)
+        if changed[1] ~= nil then
+            rosterController:RefreshGuildLog()
+            guildLogSync:Share(changed)
+            datesFromLog(changed)
+        end
+    end
+    -- The other officers online: { key, name, rank }, as the live roster
+    -- reports them.
+    local function onlineOfficers()
+        local guild, _, normalizer = rosterController:QuietContext()
+        local count = client:GetGuildRosterCount()
+        local officers = {}
+        if guild == nil or count == nil then
+            return officers
+        end
+        local selfKey = rosterController:SelfKey()
+        local index
+        for index = 1, count do
+            local member = client:GetGuildMember(index)
+            local key = member and member.online and normalizer:Key(member.name)
+            if key and key ~= selfKey and officerAuthority:IsOfficer(key) then
+                table.insert(officers, { key = key, name = member.name, rank = member.rankIndex })
+            end
+        end
+        return officers
+    end
+    -- Guild log messages go to the add-on officer channel. Officers whose
+    -- rank can't listen to officer chat are whispered too, and every
+    -- officer online is when this character's rank can't speak in it (or
+    -- it can't be sent): the add-on's officer rule (viewing officer notes)
+    -- and officer chat are separate rank permissions.
+    local function sendToOfficers(message)
+        local canSpeak = comm:RankHasFlag(client:GetPlayerGuildRankIndex(), addon.Comm.OFFICER_CHAT_SPEAK_FLAG)
+        local sent = canSpeak ~= false and comm:SendOfficers(message)
+        local officers = onlineOfficers()
+        local index
+        for index = 1, #officers do
+            if not sent or comm:RankHasFlag(officers[index].rank, addon.Comm.OFFICER_CHAT_LISTEN_FLAG) == false then
+                comm:Whisper(message, officers[index].name)
+            end
+        end
+    end
+    -- Pings the officer channel only, so the officers it misses show.
+    local function probeOfficerChannel()
+        if guildLogOf() == nil then
+            rosterController:Print("Only officers can probe the officer channel.")
+            return
+        end
+        local id, sent = guildLogSync:Ping()
+        if not sent then
+            rosterController:Print("The officer channel couldn't be sent from here; guild log entries are" ..
+                " whispered to each officer online instead.")
+            return
+        end
+        rosterController:Print("Pinged the officer channel; answers in a few seconds.")
+        local function report()
+            local _, normalizer = guildLogOf()
+            local lines = addon.GuildLogSync.ProbeLines(guildLogSync:Answers(id), onlineOfficers(), function(name)
+                return normalizer and normalizer:Key(name)
+            end)
+            local index
+            for index = 1, #lines do
+                rosterController:Print(lines[index])
+            end
+        end
+        if not client:After(addon.GuildLogSync.PROBE_SECONDS, report) then
+            report()
+        end
+    end
+    -- Whether the Ready flags reach the game's guild roster: how many
+    -- characters are ready, whether the roster's rows are followed, and how
+    -- many show a flag now. Changes nothing.
+    local function probeReady()
+        if not selfIsOfficer() then
+            rosterController:Print("Only officers can probe the Ready flags.")
+            return
+        end
+        local ready = promotions.readyKeys() or {}
+        local count = 0
+        local key
+        for key in pairs(ready) do
+            count = count + 1
+        end
+        rosterController:Print("Ready flag probe:")
+        client:Print("  Ready for promotion: " .. count)
+        local lines = guildNoteOverlay ~= nil and guildNoteOverlay:ReadyProbeLines() or { "No guild roster overlay" }
+        local index
+        for index = 1, #lines do
+            client:Print("  " .. lines[index])
+        end
+    end
+    router:Register("probe",
+        "check what the game reports to the add-on (probe log: the guild event log; probe officer: the" ..
+        " officer channel; probe ready: the Ready flags on the game's guild roster; officers)",
+        function(arguments)
+            local what = string.match(arguments or "", "^%s*(%S*)")
+            what = string.lower(what or "")
+            if what == "officer" then
+                probeOfficerChannel()
+                return
+            end
+            if what == "ready" then
+                probeReady()
+                return
+            end
+            if what ~= "log" then
+                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe log, " ..
+                    addon.Identity.slashCommand .. " probe officer or " .. addon.Identity.slashCommand ..
+                    " probe ready.")
+                return
+            end
+            if guildLogOf() == nil then
+                rosterController:Print("Only officers can probe the guild event log.")
+                return
+            end
+            client:RequestGuildEventLog()
+            local function report()
+                local present = client:GuildEventLogCalls()
+                local calls = {}
+                local index
+                for index = 1, #addon.Compatibility.EVENT_LOG_CALLS do
+                    local name = addon.Compatibility.EVENT_LOG_CALLS[index]
+                    table.insert(calls, { name = name, present = present[name] })
+                end
+                rosterController:Print("Guild event log probe:")
+                local lines = addon.GuildLog.ProbeLines(calls, client:ReadGuildEventLog(), 5)
+                for index = 1, #lines do
+                    client:Print("  " .. lines[index])
+                end
+            end
+            -- The log the game sends back takes a moment to arrive.
+            if not client:After(2, report) then
+                report()
+            end
+        end)
     syncSession = addon.SyncSession.Create({
         comm = comm,
         context = function()
@@ -1920,6 +2763,33 @@ if clientProfile.supported then
             rosterController:UpdateStatus()
         end,
         rolesOf = rolesOf,
+    })
+    guildLogSync = addon.GuildLogSync.Create({
+        send = sendToOfficers,
+        probe = function(message)
+            return comm:SendOfficers(message)
+        end,
+        log = function()
+            return guildLogOf()
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        -- Within guild sync's frame budget, and never while busy.
+        worker = syncSession,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        onMerged = function(entries)
+            rosterController:RefreshGuildLog()
+            datesFromLog(entries)
+        end,
     })
     router:Register("channels", "show the chat channels Guild Recruit sees here", function()
         local lines = client:ChannelReport()
@@ -2410,6 +3280,10 @@ if clientProfile.supported then
     client:ObserveGuildRoster(function()
         rosterController:OnRosterUpdate()
         recordOwnCharacter()
+        -- A promotion or demotion shows or hides the officers' tabs, and an
+        -- officer's add-on keeps the guild log up to date.
+        rosterController:RefreshPages()
+        requestGuildLog()
         -- Who is online decides the Group Finder's Invite buttons.
         if groupFinder ~= nil then
             groupFinder:Refresh()
@@ -2528,6 +3402,30 @@ if clientProfile.supported then
         end,
         editProfile = function()
             rosterController:Open("profile")
+        end,
+        -- The selected member's player's promotion status: officers work on
+        -- anyone's; a member sees only their own, read-only.
+        promotionFor = function(name)
+            return promotions.rosterRows(name)
+        end,
+        tick = function(key, item, ticked, note)
+            return promotions.tick(key, item, ticked, note)
+        end,
+        toggle = function(key)
+            promotions.toggleRoster(key)
+        end,
+        -- Officers see which members are ready for promotion: worked out
+        -- once per redraw of the rows.
+        readyCheck = function()
+            local ready = promotions.readyKeys()
+            local guild, _, normalizer = rosterController:QuietContext()
+            if ready == nil or guild == nil then
+                return nil
+            end
+            return function(name)
+                local key = normalizer:Key(name)
+                return key ~= nil and ready[key] == true
+            end
         end,
     })
     -- Guildmates on the map: add-on users share where they are with the
@@ -2829,6 +3727,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     rosterController:OnSavedDataReady()
     -- Without the comm libraries, sync simply stays off, and Guild Greet and
     -- Guild Recruit work uncoordinated.
+    comm:OnHeard(function(sender)
+        heardFrom(sender)
+    end)
     if comm:Start(function(message, sender)
         if message.t == addon.GuildGreet.TYPE_GREETED then
             guildGreet:OnGreeted(message, sender)
@@ -2840,16 +3741,29 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             onGroupFinderMessage(message, sender)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
+        elseif addon.RankRequirements.TYPES[message.t] ~= nil then
+            promotions.sync:OnMessage(message, sender)
+        elseif addon.PromotionChecks.TYPES[message.t] ~= nil then
+            promotions.ticks:OnMessage(message, sender)
         else
             syncSession:Receive(message, sender)
         end
     end, function(message, sender)
-        -- Only guild map updates are whispered.
+        -- Only guild map updates and, to officers who miss the officer
+        -- channel, guild log messages are whispered.
         if addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
+        elseif addon.GuildLogSync.TYPES[message.t] ~= nil then
+            guildLogSync:Receive(message, sender)
+        end
+    end, function(message, sender)
+        -- Only guild log messages go to the officer channel.
+        if addon.GuildLogSync.TYPES[message.t] ~= nil then
+            guildLogSync:Receive(message, sender)
         end
     end) then
         syncSession:Start()
+        guildLogSync:Start()
         startLocations()
     end
     -- The minimap button needs saved data for its position.
@@ -2858,7 +3772,13 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Settings show saved values, so the panel waits for saved data too.
     settingsPanel:Register()
     -- Without the system message event, Guild Greet simply never prompts.
+    client:ObserveGuildEventLog(function()
+        readGuildLog()
+    end)
     client:ObservePresence(function(kind, name)
+        if kind == "join" or kind == "leave" then
+            recordLiveMembership(kind, name)
+        end
         guildGreet:OnPresence(kind, name)
         if kind == "join" then
             guildWelcome:OnJoined(name)
@@ -2954,6 +3874,7 @@ addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
 addon.guildWelcome = guildWelcome
+addon.promotions = promotions
 addon.groupSession = groupSession
 addon.groupBoard = groupBoard
 addon.groupAvailability = groupAvailability

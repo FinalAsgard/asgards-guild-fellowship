@@ -229,7 +229,8 @@ local function validatePartition(data)
     local containers = {
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
         "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn", "withdrawals",
-        "welcomeConfig", "welcomeLedger",
+        "welcomeConfig", "welcomeLedger", "guildLog", "membershipDates",
+        "rankRequirements", "promotionChecks",
     }
     local index
     for index = 1, #containers do
@@ -266,7 +267,8 @@ local function validatePartition(data)
     local optional = {
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
         recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true, withdrawals = true,
-        welcomeConfig = true, welcomeLedger = true,
+        welcomeConfig = true, welcomeLedger = true, guildLog = true, membershipDates = true,
+        rankRequirements = true, promotionChecks = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -1540,6 +1542,41 @@ function Partition:GetWelcomeLedger()
         ledger.gone = {}
     end
     return ledger
+end
+
+-- The officers' long-term guild log (see GuildLog), created on first use,
+-- so only an officer's add-on ever stores one.
+function Partition:GetGuildLog()
+    if self.data.guildLog == nil then
+        self.data.guildLog = {}
+    end
+    return self.data.guildLog
+end
+
+-- The guild's promotion requirements (see RankRequirements), created on
+-- first use.
+function Partition:GetRankRequirements()
+    if self.data.rankRequirements == nil then
+        self.data.rankRequirements = {}
+    end
+    return self.data.rankRequirements
+end
+
+-- Officers' ticks on promotion checklists (see PromotionChecks), created
+-- on first use.
+function Partition:GetPromotionChecks()
+    if self.data.promotionChecks == nil then
+        self.data.promotionChecks = {}
+    end
+    return self.data.promotionChecks
+end
+
+-- The guild's membership dates (see MembershipDates), created on first use.
+function Partition:GetMembershipDates()
+    if self.data.membershipDates == nil then
+        self.data.membershipDates = {}
+    end
+    return self.data.membershipDates
 end
 
 -- Guild Recruit's last ad time in each channel (see RecruitLedger), created
