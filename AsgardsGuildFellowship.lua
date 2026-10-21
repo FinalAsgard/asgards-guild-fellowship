@@ -326,6 +326,9 @@ if clientProfile.supported then
                 onPromotionsFocus = function(key)
                     return promotions.focus(key)
                 end,
+                onPanelPromotionToggle = function(key)
+                    return promotions.togglePanel(key)
+                end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
                 end,
@@ -2371,7 +2374,15 @@ if clientProfile.supported then
         end
         return addon.PromotionPolicy.ReadySet(inputs)
     end
-    -- The player panel's Promotion section (see PromotionsViewModel.PanelRows):
+    -- The characters whose checklists are open on the player panel's
+    -- Promotion tab, for the session.
+    local panelExpanded = {}
+    promotions.togglePanel = function(key)
+        panelExpanded[key] = not panelExpanded[key] or nil
+        rosterController:RedrawPanel()
+        return true
+    end
+    -- The player panel's Promotion tab (see PromotionsViewModel.PanelRows):
     -- an officer's for anyone, a member's for their own player only, and
     -- nil for everyone else.
     promotions.panelRows = function(keys, playerId)
@@ -2413,6 +2424,7 @@ if clientProfile.supported then
         local highest = addon.PromotionPolicy.HighestRank(partition, playerId)
         return addon.PromotionsViewModel.PanelRows(characters, {
             officer = officer,
+            expanded = panelExpanded,
             highestRankName = highest and (inputs.rankNames[highest + 1] or ("Rank " .. highest)) or nil,
             nameOf = nameOf,
             formatDate = function(timestamp)

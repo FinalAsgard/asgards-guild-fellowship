@@ -553,6 +553,7 @@ test.test("an officer's panel shows each character's checklist with its buttons,
         highestRankName = "Veteran",
         promoteAction = "Promote",
         lastPromotion = { time = NOW, rank = 4, promoter = OFFICER },
+        expanded = { main = true, bolt = true },
         nameOf = function(key)
             return key == OFFICER and "Toolbox" or key
         end,
@@ -560,8 +561,8 @@ test.test("an officer's panel shows each character's checklist with its buttons,
             return "2026-10-20"
         end,
     })
-    test.assertEqual("Promotion", rows[1].text)
-    test.assertEqual("Highest rank: Veteran", rows[2].text)
+    test.assertEqual("Highest rank: Veteran", rows[1].text)
+    test.assertContains(rowWith(rows, "bolt: Initiate").text, "[-] ", "an open checklist")
     test.assertContains(rowWith(rows, "main: Veteran").text, "no requirements")
     test.assertContains(rowWith(rows, "bolt: Initiate -> Member, 1 of 2").text, "1 of 2")
     test.assertContains(rowWith(rows, "Promoted on 2026-10-20").text, "by Toolbox")
@@ -590,6 +591,7 @@ test.test("a member's own panel shows progress and details read-only, without no
         highestRankName = "Veteran",
         promoteAction = "Promote",
         lastPromotion = { time = NOW, rank = 4, promoter = OFFICER },
+        expanded = { bolt = true },
     })
     test.assertEqual(nil, rowWith(rows, "Highest rank"))
     test.assertEqual(nil, rowWith(rows, "Promoted on"))
@@ -604,6 +606,26 @@ test.test("a member's own panel shows progress and details read-only, without no
     for index = 1, #rows do
         test.assertEqual(nil, rows[index].action)
     end
+end)
+
+test.test("the panel's Promotion tab shows one line per character, each opening to its checklist", function()
+    local inputs, addon = newGuild({ main = 2, bolt = 4 })
+    addItem(inputs, 4, "Attend an event")
+
+    local rows = panelFor(inputs, addon, { "main", "bolt" }, { officer = true, promoteAction = "Promote" })
+    test.assertEqual(2, #rows, "closed, just the characters")
+    local bolt = rowWith(rows, "bolt: Initiate")
+    test.assertTrue(bolt.toggle)
+    test.assertFalse(bolt.expanded)
+    test.assertContains(bolt.text, "[+] ")
+    test.assertEqual(nil, rowWith(rows, "main: Veteran").toggle, "nothing to open without requirements")
+    test.assertEqual(nil, rowWith(rows, "Attend an event"))
+
+    rows = panelFor(inputs, addon, { "main", "bolt" }, { officer = true, promoteAction = "Promote",
+        expanded = { bolt = true } })
+    test.assertTrue(rowWith(rows, "bolt: Initiate").expanded)
+    test.assertEqual("Tick", rowWith(rows, "Attend an event").action)
+    test.assertTrue(rowWith(rows, "Promote to Member") ~= nil)
 end)
 
 test.test("the roster marks ready characters' rows, and clears marks that no longer apply", function()
@@ -1024,6 +1046,10 @@ for profileIndex = 1, #fixtures.PROFILES do
         local boltKeys = partition:CharactersOf(boltPlayer)
 
         local panel = promotions.panelRows(boltKeys, boltPlayer)
+        test.assertEqual(nil, rowWith(panel, "Read the rules"), "a checklist starts closed")
+        test.assertTrue(rowWith(panel, "Initiate -> Member").toggle)
+        test.assertTrue(promotions.togglePanel(bolt.key))
+        panel = promotions.panelRows(boltKeys, boltPlayer)
         local item = rowWith(panel, "Read the rules")
         test.assertEqual("Tick", item.action)
         test.assertTrue(rowWith(panel, "Promote to Member") ~= nil)
@@ -1059,6 +1085,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         local hammerKey = hammer.addon.rosterController:SelfKey()
         local _, memberPartition = hammer.addon.rosterController:QuietContext()
         local hammerPlayer = memberPartition:GetCharacter(hammerKey).player
+        hammer.addon.promotions.togglePanel(hammerKey)
         local own = hammer.addon.promotions.panelRows(memberPartition:CharactersOf(hammerPlayer), hammerPlayer)
         local help = rowWith(own, "Help a new member")
         test.assertContains(help.text, "[ ]")

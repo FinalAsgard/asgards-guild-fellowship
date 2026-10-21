@@ -280,8 +280,9 @@ function PromotionsViewModel.List(evaluated, options)
     return rows
 end
 
--- The player panel's Promotion section, from the same evaluation as the
--- Promotions tab (so the two always agree). `characters` lists the
+-- The player panel's Promotion tab, from the same evaluation as the
+-- Promotions tab (so the two always agree). Each character is one line
+-- that opens (when in `options.expanded`) to show its checklist. `characters` lists the
 -- player's characters in the guild:
 --   { key, name, rankName, evaluated (PromotionPolicy.Evaluate, or nil
 --     when its rank has no requirements), lastPromotion (a MembershipDates
@@ -289,8 +290,11 @@ end
 -- options: officer (true for an officer's view: tick, override and promote
 -- buttons, who ticked, notes and reasons; false for a member's own view,
 -- read-only, with just each item's status and detail), highestRankName,
--- nameOf(key), formatDate(time).
--- Rows: { kind = "section" }, then { kind = "stat", text } lines, and
+-- nameOf(key), formatDate(time), expanded (a set of the character keys
+-- whose checklists are open).
+-- Rows: { kind = "stat", text } lines, then for each character
+--   { kind = "promotion", text, key, toggle?, expanded? }, `toggle` when
+--   it has a checklist (or a promotion date) to open, and when open
 --   { kind = "promotion", text, key, item?, action?, ticked, needsNote,
 --     askReason, promote?, confirm?, tooltip? }
 -- where `action` names the row's button (officers only).
@@ -298,7 +302,8 @@ function PromotionsViewModel.PanelRows(characters, options)
     options = options or {}
     local nameOf = options.nameOf or tostring
     local formatDate = options.formatDate or tostring
-    local rows = { { kind = "section", text = "Promotion" } }
+    local expanded = options.expanded or {}
+    local rows = {}
     if options.officer and options.highestRankName ~= nil then
         table.insert(rows, { kind = "stat", text = "Highest rank: " .. options.highestRankName })
     end
@@ -313,9 +318,18 @@ function PromotionsViewModel.PanelRows(characters, options)
             text = text .. " -> " .. evaluated.nextRankName .. ", " .. evaluated.met .. " of " .. evaluated.total ..
                 (evaluated.ready and "  |cff40ff40Ready|r" or "")
         end
-        table.insert(rows, { kind = "promotion", key = character.key, text = text })
-        local last = character.lastPromotion
-        if options.officer and last ~= nil then
+        local last = options.officer and character.lastPromotion or nil
+        local header = { kind = "promotion", key = character.key, text = text }
+        table.insert(rows, header)
+        if evaluated ~= nil or last ~= nil then
+            header.toggle = true
+            header.expanded = expanded[character.key] == true
+            header.text = (header.expanded and "[-] " or "[+] ") .. text
+        end
+        if not header.expanded then
+            evaluated, last = nil, nil
+        end
+        if last ~= nil then
             table.insert(rows, { kind = "promotion", key = character.key, text = "    |cff9d9d9dPromoted on " ..
                 formatDate(last.time) .. (last.promoter and (" by " .. tostring(nameOf(last.promoter))) or "") .. "|r" })
         end

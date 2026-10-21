@@ -439,13 +439,13 @@ The last line of an open checklist promotes the character one rank, if the game 
 
 ### In the player panel and the roster
 
-An officer's player panel has a **Promotion** section: the player's highest rank and earliest join, and for each character its join date, the date it reached its rank, its rank and next rank with progress (and **Ready**), its last promotion ("Promoted on <date> by Thunderer"), and its checklist. **Tick**, **Untick**, **Override**, **Undo override** and **Promote** work from the panel as on the tab. A needs-a-note item, or a promotion that needs confirming, opens the character on the Promotions tab instead, where there's room to type or confirm. The panel and the tab always agree.
+An officer's player panel has two tabs: **Profile** (the player's details, membership dates, main, alts and history) and **Promotion**. The Promotion tab shows the player's highest rank, then one line per character with its rank and next rank, its progress, and **Ready** when it is. Click a character's line (`[+]`) to open its last promotion ("Promoted on <date> by Thunderer") and its checklist, and click it again (`[-]`) to close them. **Tick**, **Untick**, **Override**, **Undo override** and **Promote** work from the panel as on the tab. A needs-a-note item, or a promotion that needs confirming, opens the character on the Promotions tab instead, where there's room to type or confirm. The panel and the tab always agree.
 
 On officers' rosters, a character who meets every requirement shows **Ready** before its rank. Members never see it.
 
 ### Your own progress
 
-A member sees the Promotion section in their own player panel only: each of their characters' items toward the next rank, with whether each is met and the automated items' progress ("5 of 7 days"). It's read-only, and it never shows notes, who ticked what, or anyone else's progress.
+A member sees the Promotion tab in their own player panel only: each of their characters' items toward the next rank, with whether each is met and the automated items' progress ("5 of 7 days"). It's read-only, and it never shows notes, who ticked what, or anyone else's progress.
 
 ### Dates behind the checks
 

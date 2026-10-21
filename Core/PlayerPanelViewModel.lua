@@ -172,22 +172,22 @@ end
 -- (optional function(keys) -> how often this user grouped with the player,
 -- or nil), membership (optional function(keys) -> lines about the
 -- player's membership dates, or nil; only officers get them), promotion
--- (optional function(keys, playerId) -> the promotion section's rows, see
+-- (optional function(keys, playerId) -> the Promotion tab's rows, see
 -- PromotionsViewModel.PanelRows, or nil), wrap
 -- (optional function(text) -> an About entry's lines as they fit the
 -- panel; by default, lines of at most BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
 --   { id, label, alias, aliasSource, main, mainName, canMerge, discord,
---     dontSync, rows }
+--     dontSync, rows, promotionRows }
 -- where `main` is the main's character key, `canMerge` whether the player
 -- can be merged into another (only with no alts), `discord` the player's
 -- Discord username or nil (for "Set Discord…"), `dontSync` whether guild
--- sync leaves this player alone, and `rows` is a flat list for the
--- panel's scroll list:
+-- sync leaves this player alone, `promotionRows` the Promotion tab's rows
+-- (nil when there's no such tab for this player), and `rows` is a flat
+-- list for the Profile tab's scroll list:
 --   { kind = "stat", text }  (the player's ad count, then how often you
 --                             grouped with them, then membership dates,
 --                             first, when there are any)
---   then the promotion section's rows, when there are any
 --   { kind = "section", text }
 --   { kind = "about", text }  (under an About heading: "Discord: name",
 --                              "Location: text", then the bio's lines;
@@ -233,12 +233,11 @@ function PlayerPanelViewModel.Build(inputs)
             end
         end
     end
+    local promotionRows
     if inputs.promotion ~= nil then
         local ok, promotion = pcall(inputs.promotion, keys, inputs.playerId)
         if ok and type(promotion) == "table" then
-            for index = 1, #promotion do
-                table.insert(rows, promotion[index])
-            end
+            promotionRows = promotion
         end
     end
     local about = aboutRows(partition, inputs.playerId, inputs.wrap or function(text)
@@ -300,6 +299,7 @@ function PlayerPanelViewModel.Build(inputs)
         discord = (partition:PlayerProfileText(inputs.playerId, "discord")),
         dontSync = player.noSync == true,
         rows = rows,
+        promotionRows = promotionRows,
     }
 end
 

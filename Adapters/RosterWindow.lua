@@ -403,6 +403,9 @@ local PANEL_HEIGHT = 440
 -- and the room the list leaves for it.
 local PANEL_BAR_MARGIN = 10
 local PANEL_BAR_HEIGHT = 40
+-- The Profile and Promotion tab buttons, and the list's top below them.
+local PANEL_TABS_TOP = 70
+local PANEL_LIST_TOP = 96
 
 -- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
 -- merge)` open the dialogs the right-click menu uses (`merge` titles the
@@ -482,7 +485,31 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.aliasSource = aliasSource
     edit.setMain = setMain
 
-    local lineAmount = math.floor((PANEL_HEIGHT - 72 - PANEL_BAR_HEIGHT) / RosterWindow.LINE_HEIGHT)
+    -- The tabs above the list: Profile (the player's details and
+    -- characters) and Promotion (each character's checklist, for an
+    -- officer, or a member's own player). Without a Promotion tab, both
+    -- are hidden and the list shows the profile.
+    edit.tab = "profile"
+    edit.tabs = {}
+    local tabNames = { { "profile", "Profile" }, { "promotion", "Promotion" } }
+    local tabIndex
+    for tabIndex = 1, #tabNames do
+        local name = tabNames[tabIndex][1]
+        local tab = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        tab:SetSize(90, 20)
+        tab:SetText(tabNames[tabIndex][2])
+        tab:SetPoint("TOPLEFT", panel, "TOPLEFT", 12 + (tabIndex - 1) * 94, -PANEL_TABS_TOP)
+        tab:SetScript("OnClick", function()
+            edit.tab = name
+            if edit.show ~= nil then
+                edit.show()
+            end
+        end)
+        tab:Hide()
+        edit.tabs[name] = tab
+    end
+
+    local lineAmount = math.floor((PANEL_HEIGHT - PANEL_LIST_TOP - PANEL_BAR_HEIGHT) / RosterWindow.LINE_HEIGHT)
     local function newLine(scroll, index)
         local line = CreateFrame("Frame", nil, scroll)
         line:SetHeight(RosterWindow.LINE_HEIGHT)
@@ -551,6 +578,15 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 GameTooltip:Hide()
             end
         end)
+        -- Clicking a character's line on the Promotion tab opens or closes
+        -- its checklist.
+        line:EnableMouse(true)
+        line:SetScript("OnMouseUp", function()
+            local row = line.row
+            if row ~= nil and row.toggle and options.onPanelPromotionToggle ~= nil then
+                pcall(options.onPanelPromotionToggle, row.key)
+            end
+        end)
         return line
     end
     local function refreshLines(scroll, rows, offset, totalLines)
@@ -609,9 +645,10 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         end
     end
     local scroll = framework:CreateScrollBox(panel, frameName .. "PlayerScroll", refreshLines, {},
-        PANEL_WIDTH - 20, PANEL_HEIGHT - 72 - PANEL_BAR_HEIGHT, lineAmount, RosterWindow.LINE_HEIGHT, newLine, true)
+        PANEL_WIDTH - 20, PANEL_HEIGHT - PANEL_LIST_TOP - PANEL_BAR_HEIGHT, lineAmount, RosterWindow.LINE_HEIGHT,
+        newLine, true)
     scroll:ClearAllPoints()
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -72)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -PANEL_LIST_TOP)
     -- Room on the right for the scroll bar, which sits beside the list, and
     -- below for the action bar.
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, PANEL_BAR_HEIGHT)
@@ -2505,8 +2542,34 @@ function Window:ShowPlayer(model)
         end
         edit.dontSync:SetChecked(model.dontSync == true)
         edit.dontSyncLabel:SetText(model.dontSync and "|cffff8000Don't sync: kept as yours|r" or "Don't sync")
-        edit.scroll:SetData(model.rows)
-        edit.scroll:Refresh()
+        -- Shows the tab picked, staying on it from player to player while
+        -- each has one.
+        edit.show = function()
+            local current = edit.model
+            if current == nil then
+                return
+            end
+            local promotion = current.promotionRows ~= nil
+            if not promotion then
+                edit.tab = "profile"
+            end
+            local name, tab
+            for name, tab in pairs(edit.tabs) do
+                if promotion then
+                    tab:Show()
+                else
+                    tab:Hide()
+                end
+                if name == edit.tab then
+                    tab:LockHighlight()
+                else
+                    tab:UnlockHighlight()
+                end
+            end
+            edit.scroll:SetData(edit.tab == "promotion" and current.promotionRows or current.rows)
+            edit.scroll:Refresh()
+        end
+        edit.show()
         edit.panel:Show()
     end))
 end
