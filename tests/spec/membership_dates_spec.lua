@@ -291,17 +291,15 @@ test.test("every add-on keeps when it last heard each character; an officer's sh
         { time = NOW - 1, source = "heard", at = NOW + 5, by = OFFICER }), "the newest time wins, not the stamp")
 end)
 
-test.test("a promotion with the add-on keeps when, to which rank, and by whom; the log fills in game-UI ones", function()
+test.test("the log records each promotion: when, to which rank, and by whom", function()
     local dates = newDates()
 
-    local fact = dates:Promoted("bolt", 3, OFFICER, NOW)
-    test.assertEqual("lastPromotion", fact.kind)
-    test.assertEqual(OFFICER, fact.promoter)
+    -- One recorded by an older version's Promote button still loads, and
+    -- the log's record of the same promotion doesn't replace it; a later
+    -- one, done in the game's guild window, does.
+    dates:Apply({ kind = "lastPromotion", character = "bolt", time = NOW, rank = 3,
+        promoter = OFFICER, source = "addon", at = NOW, by = OFFICER })
     test.assertEqual(3, dates:LastPromotion("bolt").rank)
-    test.assertEqual(nil, dates:Promoted("bolt", 12, OFFICER, NOW))
-
-    -- The log's record of the same promotion doesn't replace the add-on's;
-    -- a later one, done in the game's guild UI, does.
     local facts = dates:FromLog({ logged("promote", "bolt", NOW - 600, { actor = OTHER_OFFICER, toRank = 3 }) },
         OTHER_OFFICER, NOW)
     test.assertEqual(1, #facts, "only the rank date")

@@ -137,10 +137,8 @@ function PromotionsViewModel.Editor(inputs)
     return model
 end
 
-PromotionsViewModel.NOBODY = "Nobody is at a rank with requirements."
-PromotionsViewModel.NO_REQUIREMENTS = "No rank has promotion requirements yet. Use Edit requirements to add some."
-
--- One checklist item's row under character `key` (see List).
+-- One checklist item's status, actions and tooltip for character `key`
+-- (see PanelRows).
 function PromotionsViewModel.ItemRow(key, item, nameOf, formatDate)
     local record = item.record
     local ticked = record ~= nil and record.ticked
@@ -159,8 +157,6 @@ function PromotionsViewModel.ItemRow(key, item, nameOf, formatDate)
         kind = "item",
         key = key,
         item = item.id,
-        character = "    " .. (item.met and "|cff40ff40[x]|r " or "[ ] ") .. item.label,
-        highest = "",
         ticked = ticked == true,
         label = item.label,
         tooltip = tooltip,
@@ -172,137 +168,43 @@ function PromotionsViewModel.ItemRow(key, item, nameOf, formatDate)
             row.action = "Undo override"
         elseif not item.met then
             row.action = "Override"
-            row.askReason = true
         end
         return row
     end
     row.needsNote = item.kind == addon.RankRequirements.KIND_CHECK_NOTE
     row.ranks = row.needsNote and "Needs a note" or ""
     row.progress = ticked and record.note and ("\"" .. record.note .. "\"") or ""
-    row.action = ticked and "Untick" or "Tick"
     return row
 end
 
--- The row under an open checklist that promotes `row` (an evaluated
--- character): `action` is "Promote" or "Mark as promoted", `unmet` the
--- labels of the items not met (asked about first), and `confirm` the
--- question to ask then.
-function PromotionsViewModel.PromoteRow(row, action)
-    local unmet = {}
-    local index
-    for index = 1, #row.items do
-        if not row.items[index].met then
-            table.insert(unmet, row.items[index].label)
-        end
-    end
-    local promote = {
-        kind = "promote",
-        key = row.key,
-        character = "    Promote to " .. tostring(row.nextRankName),
-        ranks = "",
-        progress = "",
-        highest = "",
-        action = action,
-        unmet = unmet,
-        name = row.name,
-    }
-    if unmet[1] ~= nil then
-        promote.confirm = "Promote " .. tostring(row.name) .. "? Not met: " .. table.concat(unmet, ", ")
-        promote.tooltip = { "Not met:" }
-        for index = 1, #unmet do
-            table.insert(promote.tooltip, unmet[index])
-        end
-    end
-    return promote
-end
-
--- The Promotions list's rows from PromotionPolicy.List's `evaluated`, for
--- the page's list. An automated item's row shows its detail; a failed one
--- offers Override (`askReason`: the officer may give a reason), and an
--- overridden one Undo override. options:
---   expanded      set of character keys whose checklist is open
---   nameOf(key)   a character's (or officer's) name to show
---   formatDate(time)
---   anyRequirements  whether any rank has requirements
---   promoteAction(key) -> "Promote", "Mark as promoted", or nil when this
---                 officer can't promote that character
---   filtered      true when characters have checklists but the filters or
---                 search hide them all
--- Rows: a heading, then per character
---   { kind = "character", key, character, ranks, progress, highest, action }
--- and, under an open one, per item
---   { kind = "item", key, item, character, ranks, ticked, needsNote,
---     askReason, action, tooltip }
--- then its PromoteRow when promoteAction names one. `tooltip` lists who
--- ticked (or overrode) it, when, and the note (or reason). With no
--- characters, one { kind = "empty" } row says why.
-function PromotionsViewModel.List(evaluated, options)
-    options = options or {}
-    local expanded = options.expanded or {}
-    local nameOf = options.nameOf or tostring
-    local formatDate = options.formatDate or tostring
-    local rows = {
-        { kind = "heading", character = "Character", ranks = "Rank", progress = "Progress", highest = "Player's highest" },
-    }
-    local index
-    for index = 1, #evaluated do
-        local row = evaluated[index]
-        local open = expanded[row.key] == true
-        table.insert(rows, {
-            kind = "character",
-            key = row.key,
-            character = (row.ready and "|cff40ff40Ready|r " or "") .. tostring(row.name),
-            ranks = row.rankName .. " -> " .. row.nextRankName,
-            progress = row.met .. " of " .. row.total,
-            highest = row.highestRankName or "",
-            action = open and "Close" or "Open",
-        })
-        if open then
-            local itemIndex
-            for itemIndex = 1, #row.items do
-                table.insert(rows, PromotionsViewModel.ItemRow(row.key, row.items[itemIndex], nameOf, formatDate))
-            end
-            local promote = options.promoteAction and options.promoteAction(row.key)
-            if promote ~= nil then
-                table.insert(rows, PromotionsViewModel.PromoteRow(row, promote))
-            end
-        end
-    end
-    if evaluated[1] == nil then
-        local text = PromotionsViewModel.NO_REQUIREMENTS
-        if options.filtered then
-            text = PromotionsViewModel.NO_MATCH
-        elseif options.anyRequirements then
-            text = PromotionsViewModel.NOBODY
-        end
-        table.insert(rows, { kind = "empty", character = text })
-    end
-    return rows
-end
-
 -- The player panel's Promotion tab, from the same evaluation as the
--- Promotions tab (so the two always agree). Each character is one line
--- that opens (when in `options.expanded`) to show its checklist. `characters` lists the
+-- roster's Ready markers (so the two always agree). Each character is one
+-- line, marked Ready when it meets every requirement, that opens (when in
+-- `options.expanded`) to show its checklist. `characters` lists the
 -- player's characters in the guild:
 --   { key, name, rankName, evaluated (PromotionPolicy.Evaluate, or nil
 --     when its rank has no requirements), lastPromotion (a MembershipDates
---     record, or nil), promoteAction ("Promote", "Mark as promoted", nil) }
--- options: officer (true for an officer's view: tick, override and promote
--- buttons, who ticked, notes and reasons; false for a member's own view,
+--     record, or nil) }
+-- Add-ons can't promote: an officer promotes in the game's guild window.
+-- options: officer (true for an officer's view: check boxes, Override,
+-- who ticked, notes and reasons; false for a member's own view,
 -- read-only, with just each item's status and detail), highestRankName,
 -- nameOf(key), formatDate(time), expanded (a set of the character keys
 -- whose checklists are open).
 -- Rows: { kind = "stat", text } lines, then for each character
 --   { kind = "promotion", text, key, toggle?, expanded? }, `toggle` when
 --   it has a checklist (or a promotion date) to open, and when open
---   { kind = "promotion", text, key, item?, action?, ticked, needsNote,
---     askReason, promote?, confirm?, tooltip? }
--- where `action` names the row's button (officers only). An item row has
--- `check` (drawn with a check box), `checked` (met) and, for an officer's
--- custom item, `canCheck` (ticking the box ticks it). An officer's
--- needs-a-note item (with `note`, its saved note while ticked) is followed
--- by the line its note is typed on, and shown on once saved:
---   { kind = "promotion", key, item, noteInput = true, ticked, note? }
+--   { kind = "promotion", text, key, item, action?, ticked, needsNote,
+--     tooltip?, check, checked, canCheck?, note? }
+-- where `action` names an automated item's button, Override or Undo
+-- override (officers only). An item row is drawn with a check box,
+-- `checked` when met; `canCheck` for an officer's custom item (ticking the
+-- box ticks it). An officer's needs-a-note item (with `note`, its saved
+-- note while ticked) is followed by the line its note is typed on, and
+-- shown on once saved; a failed automated item's by one for the
+-- override's optional reason:
+--   { kind = "promotion", key, item, noteInput = true, ticked, note?,
+--     reason? }
 function PromotionsViewModel.PanelRows(characters, options)
     options = options or {}
     local nameOf = options.nameOf or tostring
@@ -321,7 +223,7 @@ function PromotionsViewModel.PanelRows(characters, options)
             text = text .. "  |cff9d9d9dno requirements|r"
         else
             text = text .. " -> " .. evaluated.nextRankName .. ", " .. evaluated.met .. " of " .. evaluated.total ..
-                (evaluated.ready and "  |cff40ff40Ready|r" or "")
+                (evaluated.ready and "  |cff40ff40Ready for promotion|r" or "")
         end
         local last = options.officer and character.lastPromotion or nil
         local header = { kind = "promotion", key = character.key, text = text }
@@ -363,73 +265,25 @@ function PromotionsViewModel.PanelRows(characters, options)
                     -- An automated item's box shows whether it's met;
                     -- Override and Undo override are its button.
                     row.action = item.action
-                    row.askReason = item.askReason
                 else
                     row.canCheck = true
                 end
             end
             table.insert(rows, row)
+            local record = evaluatedItem.record
             if row.canCheck and row.needsNote then
-                local record = evaluatedItem.record
                 row.note = row.ticked and record ~= nil and record.note or nil
                 table.insert(rows, { kind = "promotion", key = character.key, item = item.item, noteInput = true,
                     ticked = row.ticked, note = row.note })
+            elseif options.officer and evaluatedItem.automated and not evaluatedItem.met then
+                -- A failed check: an override's reason, typed first.
+                table.insert(rows, { kind = "promotion", key = character.key, item = item.item, noteInput = true,
+                    reason = true, ticked = false })
             end
-        end
-        if options.officer and evaluated ~= nil and character.promoteAction ~= nil then
-            evaluated.name = evaluated.name or character.name
-            local promote = PromotionsViewModel.PromoteRow(evaluated, character.promoteAction)
-            table.insert(rows, {
-                kind = "promotion",
-                key = character.key,
-                promote = true,
-                text = promote.character,
-                action = promote.confirm and (character.promoteAction .. "...") or character.promoteAction,
-                confirm = promote.confirm,
-                tooltip = promote.tooltip,
-            })
         end
     end
     if characters[1] == nil then
         table.insert(rows, { kind = "empty", text = "No characters in the guild" })
     end
     return rows
-end
-
-PromotionsViewModel.NO_MATCH ="Nobody matches. Tick In progress to see everyone working toward a rank."
-
--- The tab's name with how many characters are ready: "Promotions (4)".
-function PromotionsViewModel.TabLabel(ready)
-    if type(ready) == "number" and ready > 0 then
-        return "Promotions (" .. ready .. ")"
-    end
-    return "Promotions"
-end
-
--- Where the list's controls stand, from PromotionPolicy.Query's result and
--- the filters: { pageText, page, pages, ready, progress, ranks, tabLabel,
--- badge (the ready count, or "") },
--- `ranks` being { rank, name, shown } for each rank with requirements.
-function PromotionsViewModel.Controls(result, filters, rankNames)
-    filters = filters or {}
-    local hidden = filters.hiddenRanks or {}
-    local names = rankNames or {}
-    local controls = {
-        page = result.page,
-        pages = result.pages,
-        pageText = "Page " .. result.page .. " of " .. result.pages .. " (" .. result.total ..
-            (result.total == 1 and " character)" or " characters)"),
-        ready = filters.ready == true,
-        progress = filters.progress == true,
-        ranks = {},
-        tabLabel = PromotionsViewModel.TabLabel(result.ready),
-        badge = (result.ready or 0) > 0 and tostring(result.ready) or "",
-    }
-    local index
-    for index = 1, #(result.ranks or {}) do
-        local rank = result.ranks[index]
-        table.insert(controls.ranks, { rank = rank, name = names[rank + 1] or ("Rank " .. rank),
-            shown = not hidden[rank] })
-    end
-    return controls
 end

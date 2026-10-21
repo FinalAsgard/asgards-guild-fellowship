@@ -52,8 +52,7 @@ Controller.__index = Controller
 --   membership    optional function(keys) -> lines about a player's
 --                 membership dates for the player panel (officers), or nil
 --   promotionsView optional function() -> the Promotions page's editor
---                 model, list rows and list controls (see
---                 PromotionsViewModel.Editor, List and Controls)
+--                 model (see PromotionsViewModel.Editor)
 --   promotion     optional function(keys, playerId) -> the player panel's
 --                 promotion rows (officers, or a member's own player), or nil
 --   readyKeys     optional function() -> the set of characters ready for
@@ -1229,9 +1228,9 @@ function Controller:MarkReady(redraw)
     end
 end
 
--- Redraws the Promotions page, and its tab's ready count, when the window
--- is open (see PromotionsViewModel.Editor and Controls), with the roster's
--- ready markers and the player panel's promotion section.
+-- Redraws the Promotions page (the requirements editor, see
+-- PromotionsViewModel.Editor) when the window is open, with the roster's
+-- ready markers and the player panel's Promotion tab.
 function Controller:RefreshPromotions()
     if self.window == nil or not self.window:IsShown() then
         return
@@ -1241,9 +1240,9 @@ function Controller:RefreshPromotions()
     if type(self.window.SetPromotions) ~= "function" or self.promotionsView == nil then
         return
     end
-    local ok, model, rows, controls = pcall(self.promotionsView)
+    local ok, model = pcall(self.promotionsView)
     if ok and model ~= nil then
-        self.window:SetPromotions(model, rows, controls)
+        self.window:SetPromotions(model)
     end
 end
 

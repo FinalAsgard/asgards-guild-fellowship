@@ -14,6 +14,7 @@ local function fakeWidget()
     function widget:SetColorTexture(...) self.color = { ... } end
     function widget:Show() self.shown = true end
     function widget:Hide() self.shown = false end
+    function widget:IsShown() return self.shown end
     function widget:SetSize(width, height) self.size = { width, height } end
     function widget:SetAllPoints(target) self.allPoints = target end
     function widget:SetTexture(texture) self.texture = texture end
@@ -90,9 +91,14 @@ local function installGuildRoster(environment)
             detail.panel.button = fakeWidget()
             return detail.panel.button
         end
+        -- A row's note marker first, then its Ready flag.
         if type(parent) == "table" and parent.SetMember ~= nil then
-            parent.marker = fakeWidget()
-            return parent.marker
+            if parent.marker == nil then
+                parent.marker = fakeWidget()
+                return parent.marker
+            end
+            parent.readyMarker = fakeWidget()
+            return parent.readyMarker
         end
         return createFrame(frameType, name, parent, ...)
     end
@@ -134,6 +140,13 @@ local function build(world, options)
         end,
         editProfile = function()
             options.edited = (options.edited or 0) + 1
+        end,
+        readyCheck = function()
+            options.readyChecks = (options.readyChecks or 0) + 1
+            local ready = options.ready
+            return ready and function(name)
+                return ready[name] == true
+            end or nil
         end,
     })
     return overlay, addon
@@ -430,15 +443,57 @@ local function registerRowTests(profile)
         test.assertFalse(list.rows[2].marker.shown)
     end)
 
+    test.test(profile .. ": an officer sees a Ready flag on rows of members ready for promotion", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local list = detail.memberList
+        list.rows = { fakeRow("Hammer"), fakeRow("Bolt"), fakeRow(nil) }
+        local options = { rows = { Hammer = ROW }, ready = { Bolt = true } }
+        local overlay = build(world, options)
+        overlay:AttachRows()
+
+        test.assertFalse(list.rows[1].readyMarker.shown)
+        test.assertTrue(list.rows[1].marker.shown, "the note marker is separate")
+        test.assertTrue(list.rows[2].readyMarker.shown)
+        test.assertFalse(list.rows[2].marker.shown)
+        test.assertFalse(list.rows[3].readyMarker.shown)
+        test.assertEqual("RIGHT", list.rows[2].readyMarker.points[1][1])
+        test.assertEqual(-20, list.rows[2].readyMarker.points[1][4])
+        test.assertEqual(1, options.readyChecks, "worked out once per redraw, not per row")
+
+        -- Scrolling reuses a row: the flag follows the member.
+        list.rows[1]:SetMember({ name = "Bolt" })
+        list.rows[2]:SetMember({ name = "Hammer" })
+        test.assertTrue(list.rows[1].readyMarker.shown)
+        test.assertFalse(list.rows[2].readyMarker.shown)
+
+        -- Promoted in the game's window: the next refresh clears the flag.
+        options.ready = {}
+        overlay:Refresh()
+        test.assertFalse(list.rows[1].readyMarker.shown)
+        local lines = overlay:ReadyProbeLines()
+        test.assertEqual("Guild roster rows followed: yes (3 shown)", lines[1])
+        test.assertEqual("Rows with a Ready flag now: 0", lines[2])
+    end)
+
+    test.test(profile .. ": before the guild roster opens, the probe says its rows aren't followed yet", function()
+        local world = fixtures.newEnvironment(profile)
+        local overlay = build(world, { ready = { Bolt = true } })
+        test.assertContains(overlay:ReadyProbeLines()[1], "Guild roster rows followed: no")
+    end)
+
     test.test(profile .. ": members who aren't officers see no row markers", function()
         local world = fixtures.newEnvironment(profile)
         local detail = installGuildRoster(world.environment)
         detail.memberList.rows = { fakeRow("Hammer") }
-        local overlay = build(world, { officer = false, rows = { Hammer = ROW } })
+        local options = { officer = false, rows = { Hammer = ROW }, ready = { Hammer = true } }
+        local overlay = build(world, options)
 
         overlay:AttachRows()
 
         test.assertFalse(detail.memberList.rows[1].marker.shown)
+        test.assertFalse(detail.memberList.rows[1].readyMarker.shown)
+        test.assertEqual(nil, options.readyChecks, "a member's add-on never works out who's ready")
     end)
 
     test.test(profile .. ": in the whole add-on, an officer's row marker appears after the next roster update", function()
@@ -461,6 +516,37 @@ local function registerRowTests(profile)
         fixtures.runTimers(world)
 
         test.assertTrue(row.marker.shown)
+    end)
+
+    test.test(profile .. ": in the whole add-on, a ticked character's row gets its Ready flag at once", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local member = world.guild.members[#world.guild.members]
+        detail.memberList.rows = { fakeRow(member.name) }
+        fixtures.loadAddon(world)
+        fixtures.fire(world, "ADDON_LOADED", world.addonName)
+        world.loggedIn = true
+        fixtures.fire(world, "PLAYER_LOGIN")
+        fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local row = detail.memberList.rows[1]
+        test.assertFalse(row.readyMarker.shown)
+
+        local promotions = world.addon.promotions
+        local _, partition, normalizer = world.addon.rosterController:QuietContext()
+        local key = normalizer:Key(member.name)
+        local rank = partition:GetCharacter(key).rank
+        local step = rank - (promotions.view().rank or rank)
+        local guard = 0
+        while promotions.view().rank ~= rank and guard < 10 do
+            promotions.rank(step > 0 and 1 or -1)
+            guard = guard + 1
+        end
+        test.assertTrue(promotions.add("Read the rules", false))
+        test.assertFalse(row.readyMarker.shown)
+        test.assertTrue(promotions.tick(key, promotions.view().items[1].id, true))
+        test.assertTrue(row.readyMarker.shown, "flagged without waiting for a scan")
     end)
 end
 

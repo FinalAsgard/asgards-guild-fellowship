@@ -664,9 +664,10 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         line.check:Hide()
         -- A needs-a-note item's note, on the line under it: Enter ticks the
         -- item with the note typed, or saves a ticked item's changed note.
+        -- A failed automated item's line takes an override's optional
+        -- reason instead: Enter overrides with it.
         line.noteLabel = line:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         line.noteLabel:SetPoint("LEFT", line, "LEFT", 40, 0)
-        line.noteLabel:SetText("Note:")
         line.noteLabel:Hide()
         line.note = CreateFrame("EditBox", nil, line, "InputBoxTemplate")
         line.note:SetHeight(18)
@@ -694,7 +695,15 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         line.note:SetScript("OnEnterPressed", function(self)
             self:ClearFocus()
             local row = line.row
-            if row ~= nil and row.noteInput and not (row.ticked and self:GetText() == (row.note or "")) then
+            if row == nil or not row.noteInput then
+                return
+            end
+            if row.reason then
+                local id = noteId(row)
+                if call("onPromotionsTick", row.key, row.item, true, edit.notes[id]) then
+                    edit.notes[id] = nil
+                end
+            elseif not (row.ticked and self:GetText() == (row.note or "")) then
                 tickWithNote(row)
             end
         end)
@@ -702,9 +711,8 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
             self:ClearFocus()
         end)
         line.note:Hide()
-        -- A promotion row's button: Override and Undo override work here,
-        -- as does Promote; a reason, or a promotion with unmet items, opens
-        -- the character on the Promotions tab instead.
+        -- An automated item's button: Override (with the reason typed on
+        -- the line below, if any) and Undo override.
         line.act = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
         line.act:SetSize(96, 18)
         line.act:SetPoint("RIGHT", line, "RIGHT", -2, 0)
@@ -713,12 +721,13 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
             if row == nil or row.kind ~= "promotion" then
                 return
             end
-            if row.promote then
-                call(row.confirm and "onPromotionsFocus" or "onPromotionsPromote", row.key)
-            elseif not row.ticked and row.askReason then
-                call("onPromotionsFocus", row.key)
-            else
-                call("onPromotionsTick", row.key, row.item, not row.ticked)
+            if row.ticked then
+                call("onPromotionsTick", row.key, row.item, false)
+                return
+            end
+            local id = noteId(row)
+            if call("onPromotionsTick", row.key, row.item, true, edit.notes[id]) then
+                edit.notes[id] = nil
             end
         end)
         line.act:SetScript("OnEnter", function(self)
@@ -793,8 +802,13 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                     if not line.note:HasFocus() then
                         line.note:SetText(edit.notes[id] or row.note or "")
                     end
-                    line.note.placeholder:SetText(edit.noteNeeded[id] and "|cffff8040Type a note, then tick the box|r"
-                        or "Note (needed to tick it)")
+                    line.noteLabel:SetText(row.reason and "Reason:" or "Note:")
+                    if row.reason then
+                        line.note.placeholder:SetText("Optional, then Override (or Enter)")
+                    else
+                        line.note.placeholder:SetText(edit.noteNeeded[id]
+                            and "|cffff8040Type a note, then tick the box|r" or "Note (needed to tick it)")
+                    end
                     if line.note:GetText() == "" then
                         line.note.placeholder:Show()
                     else
@@ -1591,40 +1605,21 @@ local function buildGuildLog(framework, page, frameName, options)
     return log
 end
 
--- The Promotions list's columns.
-local PROMOTION_COLUMNS = {
-    { field = "character", x = 8, width = 230 },
-    { field = "ranks", x = 242, width = 160 },
-    { field = "progress", x = 406, width = 80 },
-    { field = "highest", x = 490, width = 120 },
-    { field = "button", x = 614, width = 1, action = true },
-}
-
--- The officers' Promotions page, below the frame's title bar. It opens on
--- the list, one page at a time, under a search box, Ready and In progress
--- filters, page buttons, and a filter per rank: each character at a rank
--- with requirements, its ranks,
--- progress and its player's highest rank; Open shows its checklist, where
--- Tick and Untick work each item (an item that needs a note asks for one
--- first, in the page), an automated item shows its detail with Override
--- (asking for an optional reason) or Undo override, and hovering a tick or
--- override says who made it, when, and the note or reason. Edit
--- requirements switches to the editor: < and > pick a rank, a warning
--- shows when the rank was set up under another name, the automatic checks
--- are listed with a check box each (and a number box for one that takes
--- days or a level), and below them a box adds a custom requirement (with
--- whether it needs a note) or edits one, and each custom requirement has
--- Up, Down, Edit and Delete. Delete asks first, in the page itself. Each control calls
--- its `options` handler, which returns true, or false and why not (shown
--- in the page); SetPromotions shows the models (see
--- PromotionsViewModel.Editor and List).
+-- The officers' Promotions page, below the frame's title bar: the
+-- promotion requirements editor. (Add-ons can't promote, and each
+-- character's checklist is worked on the player panel's Promotion tab.) <
+-- and > pick a rank, a warning shows when the rank was set up under
+-- another name, the automatic checks are listed with a check box each (and
+-- a number box for one that takes days or a level), and below them a box
+-- adds a custom requirement (with whether it needs a note) or edits one,
+-- and each custom requirement has Up, Down, Edit and Delete. Delete asks
+-- first, in the page itself. Each control calls its `options` handler,
+-- which returns true, or false and why not (shown in the page);
+-- SetPromotions shows the model (see PromotionsViewModel.Editor).
 local function buildPromotions(framework, page, frameName, options)
     local holder = CreateFrame("Frame", nil, page)
     holder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
     holder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
-    local listHolder = CreateFrame("Frame", nil, page)
-    listHolder:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -28)
-    listHolder:SetPoint("BOTTOMRIGHT", page, "BOTTOMRIGHT", 0, 10)
     local editor = { rows = {} }
     local function call(handler, ...)
         local callback = options[handler]
@@ -1637,9 +1632,6 @@ local function buildPromotions(framework, page, frameName, options)
             text = "|cffff8040" .. tostring(reason or "That didn't work") .. ".|r"
         end
         editor.message:SetText(text)
-        if editor.listMessage ~= nil then
-            editor.listMessage:SetText(text)
-        end
         return ok and done ~= false
     end
     local previous = smallButton(holder, 24, "<", function()
@@ -1839,199 +1831,6 @@ local function buildPromotions(framework, page, frameName, options)
         editor.rows[index] = row
     end
 
-    -- The list's controls: a search box, Ready and In progress check
-    -- boxes, page buttons, and below them a check box per rank with
-    -- requirements (made as SetPromotions names them).
-    local controls = { ranks = {} }
-    editor.controls = controls
-    local search = CreateFrame("EditBox", nil, listHolder, "InputBoxTemplate")
-    search:SetSize(150, 20)
-    search:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 22, -2)
-    search:SetAutoFocus(false)
-    local placeholder = search:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    placeholder:SetPoint("LEFT", search, "LEFT", 2, 0)
-    placeholder:SetText("Name, alias or main")
-    search:SetScript("OnTextChanged", function(box)
-        local text = box:GetText()
-        if text == "" then
-            placeholder:Show()
-        else
-            placeholder:Hide()
-        end
-        call("onPromotionsSearch", text)
-    end)
-    search:SetScript("OnEscapePressed", function(box)
-        box:ClearFocus()
-    end)
-    search:SetScript("OnEnterPressed", function(box)
-        box:ClearFocus()
-    end)
-    controls.search = search
-    local function filterBox(text, x, y, onClick)
-        local check = CreateFrame("CheckButton", nil, listHolder, "UICheckButtonTemplate")
-        check:SetSize(22, 22)
-        check:SetPoint("TOPLEFT", listHolder, "TOPLEFT", x, y)
-        check.text = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        check.text:SetPoint("LEFT", check, "RIGHT", 2, 0)
-        check.text:SetWidth(64)
-        check.text:SetJustifyH("LEFT")
-        check.text:SetWordWrap(false)
-        check.text:SetText(text)
-        check:SetScript("OnClick", onClick)
-        return check
-    end
-    controls.ready = filterBox("Ready", 184, -1, function(box)
-        call("onPromotionsFilter", "ready", box:GetChecked() == true)
-    end)
-    controls.progress = filterBox("In progress", 254, -1, function(box)
-        call("onPromotionsFilter", "progress", box:GetChecked() == true)
-    end)
-    controls.previous = smallButton(listHolder, 24, "<", function()
-        if controls.state ~= nil then
-            call("onPromotionsPage", controls.state.page - 1)
-        end
-    end)
-    controls.previous:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 350, -2)
-    controls.pageText = listHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    controls.pageText:SetPoint("LEFT", controls.previous, "RIGHT", 6, 0)
-    controls.pageText:SetWidth(150)
-    controls.next = smallButton(listHolder, 24, ">", function()
-        if controls.state ~= nil then
-            call("onPromotionsPage", controls.state.page + 1)
-        end
-    end)
-    controls.next:SetPoint("LEFT", controls.pageText, "RIGHT", 6, 0)
-    -- The check box for the `index`th rank, made the first time it's needed.
-    controls.rankBox = function(index)
-        if controls.ranks[index] == nil then
-            local check
-            check = filterBox("", 16 + (index - 1) * 86, -24, function(box)
-                if check.rank ~= nil then
-                    call("onPromotionsFilter", check.rank, box:GetChecked() == true)
-                end
-            end)
-            controls.ranks[index] = check
-        end
-        return controls.ranks[index]
-    end
-
-    -- The list, with the note prompt above it.
-    local listArea = CreateFrame("Frame", nil, listHolder)
-    listArea:SetPoint("TOPLEFT", listHolder, "TOPLEFT", 0, -46)
-    listArea:SetPoint("BOTTOMRIGHT", listHolder, "BOTTOMRIGHT", 0, 0)
-    local width, height = page:GetSize()
-    local lines = math.max(1, math.floor((height - 156) / RosterWindow.LINE_HEIGHT))
-    local noteBar = CreateFrame("Frame", nil, listArea)
-    noteBar:SetSize(560, 24)
-    noteBar:SetPoint("TOPLEFT", listArea, "TOPLEFT", 120, 0)
-    noteBar.text = noteBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    noteBar.text:SetPoint("LEFT", noteBar, "LEFT", 0, 0)
-    noteBar.text:SetWidth(150)
-    noteBar.text:SetJustifyH("LEFT")
-    noteBar.text:SetWordWrap(false)
-    local noteBox = CreateFrame("EditBox", nil, noteBar, "InputBoxTemplate")
-    noteBox:SetSize(240, 20)
-    noteBox:SetPoint("LEFT", noteBar.text, "RIGHT", 8, 0)
-    noteBox:SetAutoFocus(false)
-    noteBox:SetMaxLetters(addon.PromotionChecks.MAX_NOTE)
-    local function tickWithNote()
-        local row = noteBar.row
-        if row ~= nil and call("onPromotionsTick", row.key, row.item, true, noteBox:GetText()) then
-            noteBar:Hide()
-        end
-    end
-    noteBox:SetScript("OnEnterPressed", tickWithNote)
-    noteBox:SetScript("OnEscapePressed", function()
-        noteBar:Hide()
-    end)
-    local tick = smallButton(noteBar, 70, "Tick", tickWithNote)
-    tick:SetPoint("LEFT", noteBox, "RIGHT", 6, 0)
-    local cancelNote = smallButton(noteBar, 60, "Cancel", function()
-        noteBar:Hide()
-    end)
-    cancelNote:SetPoint("LEFT", tick, "RIGHT", 4, 0)
-    noteBar:Hide()
-    editor.noteBar = noteBar
-    -- Asking before promoting a character with unmet items, in the page.
-    local promoteBar = CreateFrame("Frame", nil, listArea)
-    promoteBar:SetSize(560, 24)
-    promoteBar:SetPoint("TOPLEFT", listArea, "TOPLEFT", 120, 0)
-    promoteBar.text = promoteBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    promoteBar.text:SetPoint("LEFT", promoteBar, "LEFT", 0, 0)
-    promoteBar.text:SetWidth(380)
-    promoteBar.text:SetJustifyH("LEFT")
-    promoteBar.text:SetWordWrap(false)
-    local promoteYes = smallButton(promoteBar, 110, "Promote", function()
-        local key = promoteBar.key
-        promoteBar:Hide()
-        if key ~= nil then
-            call("onPromotionsPromote", key)
-        end
-    end)
-    promoteYes:SetPoint("LEFT", promoteBar.text, "RIGHT", 6, 0)
-    local promoteNo = smallButton(promoteBar, 60, "Cancel", function()
-        promoteBar:Hide()
-    end)
-    promoteNo:SetPoint("LEFT", promoteYes, "RIGHT", 4, 0)
-    promoteBar:Hide()
-    editor.promoteBar = promoteBar
-    editor.list = buildList(framework, listArea, frameName .. "PromotionsScroll", "Promotions",
-        PROMOTION_COLUMNS, width - 16 - RosterWindow.SCROLL_BAR_ROOM, lines, function(row)
-            if row.kind == "character" then
-                call("onPromotionsExpand", row.key)
-            elseif row.kind == "promote" then
-                noteBar:Hide()
-                if row.confirm ~= nil then
-                    promoteBar.key = row.key
-                    promoteBar.text:SetText(row.confirm)
-                    promoteYes:SetText(row.action)
-                    promoteBar:Show()
-                else
-                    call("onPromotionsPromote", row.key)
-                end
-            elseif row.kind == "item" then
-                promoteBar:Hide()
-                if not row.ticked and (row.needsNote or row.askReason) then
-                    noteBar.row = row
-                    if row.askReason then
-                        noteBar.text:SetText("Reason (optional):")
-                        tick:SetText("Override")
-                    else
-                        noteBar.text:SetText("Note for " .. tostring(row.label) .. ":")
-                        tick:SetText("Tick")
-                    end
-                    noteBox:SetText("")
-                    noteBar:Show()
-                    noteBox:SetFocus()
-                else
-                    call("onPromotionsTick", row.key, row.item, not row.ticked)
-                end
-            end
-        end)
-    editor.list.scroll:SetPoint("BOTTOMRIGHT", listArea, "BOTTOMRIGHT", -RosterWindow.SCROLL_BAR_ROOM, 24)
-    editor.listMessage = listHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    editor.listMessage:SetPoint("BOTTOMLEFT", listHolder, "BOTTOMLEFT", 16, 4)
-    editor.listMessage:SetWidth(680)
-    editor.listMessage:SetJustifyH("LEFT")
-
-    -- Switching between the list and the editor.
-    local mode = smallButton(page, 130, "Edit requirements", nil)
-    mode:SetPoint("TOPRIGHT", page, "TOPRIGHT", -20, -30)
-    local function showList(list)
-        if list then
-            holder:Hide()
-            listHolder:Show()
-            mode:SetText("Edit requirements")
-        else
-            listHolder:Hide()
-            holder:Show()
-            mode:SetText("Back to list")
-        end
-    end
-    mode:SetScript("OnClick", function()
-        showList(not listHolder:IsShown())
-    end)
-    showList(true)
     return editor
 end
 
@@ -2553,47 +2352,14 @@ function Window:SetRecruiters(rows)
     end))
 end
 
--- Shows the Recent ads page's rows (see RosterController:RecentAdsView).
--- False when the frame has no Recent ads page.
--- Shows the Promotions page's editor model, list rows, and where the list's
--- controls stand, with the ready count on its tab (see
--- PromotionsViewModel.Editor, List and Controls). False when the frame has
--- no Promotions page.
-function Window:SetPromotions(model, rows, state)
+-- Shows the Promotions page's editor model (see PromotionsViewModel.Editor).
+-- False when the frame has no Promotions page.
+function Window:SetPromotions(model)
     local editor = self.promotions
     if editor == nil or type(model) ~= "table" then
         return false
     end
     return (pcall(function()
-        if rows ~= nil then
-            editor.list.scroll:SetData(rows)
-            editor.list.scroll:Refresh()
-        end
-        local controls = editor.controls
-        if state ~= nil and controls ~= nil then
-            controls.state = state
-            controls.ready:SetChecked(state.ready)
-            controls.progress:SetChecked(state.progress)
-            controls.pageText:SetText(state.pageText)
-            if state.page > 1 then controls.previous:Enable() else controls.previous:Disable() end
-            if state.page < state.pages then controls.next:Enable() else controls.next:Disable() end
-            local index
-            for index = 1, math.max(#state.ranks, #controls.ranks) do
-                local rank = state.ranks[index]
-                if rank == nil then
-                    controls.ranks[index]:Hide()
-                else
-                    local check = controls.rankBox(index)
-                    check.rank = rank.rank
-                    check.text:SetText(rank.name)
-                    check:SetChecked(rank.shown)
-                    check:Show()
-                end
-            end
-            if self.host ~= nil and type(self.host.SetLabel) == "function" then
-                self.host:SetLabel("promotions", state.tabLabel, state.badge)
-            end
-        end
         editor.rankText:SetText(model.rankText or "")
         editor.nextText:SetText(model.nextText or "")
         editor.mismatch:SetText(model.mismatch and ("|cffff8040" .. model.mismatch .. "|r") or "")

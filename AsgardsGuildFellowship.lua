@@ -40,23 +40,21 @@ local guildLogSync
 local observeMembership, membershipLines = function() end, function() end
 -- An add-on message was heard from a character (see MembershipDates:Heard).
 local heardFrom = function() end
--- The officers' Promotions page (see RankRequirements), set up with guild
--- sync below: view() gives its model, and the rest edit it.
+-- The officers' Promotions page, the requirements editor (see
+-- RankRequirements), set up with guild sync below: view() gives its
+-- model, and the rest edit it.
 local promotions = {
     view = function()
         return nil
     end,
     askOnce = function() end,
     prune = function() end,
-    observe = function() end,
     shown = function() end,
+    changed = function() end,
     readyKeys = function()
         return nil
     end,
     panelRows = function()
-        return nil
-    end,
-    listRows = function()
         return nil
     end,
 }
@@ -90,7 +88,7 @@ if clientProfile.supported then
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
     -- Officers only: they come and go with the character's rank.
-    pages:Add("promotions", "Promotions", addon.MasterFrame.ICONS.promotions, function()
+    pages:Add("promotions", "Promotion Requirements", addon.MasterFrame.ICONS.promotions, function()
         return guildLogOf() ~= nil
     end)
     pages:Add("guildlog", "Guild Log", addon.MasterFrame.ICONS.guildlog, function()
@@ -150,9 +148,8 @@ if clientProfile.supported then
             -- Once ranks are known, catch up on promotion requirements and
             -- ticks; a rank change makes a character's ticks stale.
             promotions.prune()
-            promotions.observe()
             promotions.askOnce()
-            rosterController:RefreshPromotions()
+            promotions.changed()
             -- A scan that saw a promotion or demotion shows or hides the
             -- officers' tabs.
             rosterController:RefreshPages()
@@ -185,8 +182,7 @@ if clientProfile.supported then
             return membershipLines(keys)
         end,
         promotionsView = function()
-            local rows, controls = promotions.listRows()
-            return promotions.view(), rows, controls
+            return promotions.view()
         end,
         promotion = function(keys, playerId)
             return promotions.panelRows(keys, playerId)
@@ -287,15 +283,6 @@ if clientProfile.supported then
                 onPromotionsShown = function()
                     promotions.shown()
                 end,
-                onPromotionsFilter = function(name, shown)
-                    return promotions.filter(name, shown)
-                end,
-                onPromotionsSearch = function(text)
-                    return promotions.search(text)
-                end,
-                onPromotionsPage = function(page)
-                    return promotions.page(page)
-                end,
                 onPromotionsRank = function(step)
                     return promotions.rank(step)
                 end,
@@ -314,17 +301,8 @@ if clientProfile.supported then
                 onPromotionsDelete = function(id)
                     return promotions.delete(id)
                 end,
-                onPromotionsExpand = function(key)
-                    return promotions.expand(key)
-                end,
                 onPromotionsTick = function(key, item, ticked, note)
                     return promotions.tick(key, item, ticked, note)
-                end,
-                onPromotionsPromote = function(key)
-                    return promotions.promote(key)
-                end,
-                onPromotionsFocus = function(key)
-                    return promotions.focus(key)
                 end,
                 onPanelPromotionToggle = function(key)
                     return promotions.togglePanel(key)
@@ -2191,7 +2169,7 @@ if clientProfile.supported then
             return client:Random(low, high)
         end,
         onChange = function()
-            rosterController:RefreshPromotions()
+            promotions.changed()
         end,
     })
     promotions.sync = requirementsSync
@@ -2238,7 +2216,7 @@ if clientProfile.supported then
             return client:Random(low, high)
         end,
         onChange = function()
-            rosterController:RefreshPromotions()
+            promotions.changed()
         end,
     })
     promotions.ticks = ticksSync
@@ -2252,102 +2230,17 @@ if clientProfile.supported then
             checks:Prune()
         end
     end
-    local expandedPromotions = {}
-    -- The list's filters (ready only, at first), search and page; this
-    -- session only.
-    local promotionFilters = { ready = true, progress = false, hiddenRanks = {} }
-    local promotionSearch, promotionPage = "", 1
-    -- One page of the Promotions list's rows, and where its controls stand
-    -- (see PromotionsViewModel.Controls). Every change redraws it once; the
-    -- day-based checks also catch up while the page is open (see
-    -- promotions.shown).
-    promotions.listRows = function()
-        local guild, partition, normalizer = rosterController:QuietContext()
-        local requirements, checks = requirementsOf(), checksOf()
-        if guild == nil or requirements == nil or checks == nil then
-            return nil
-        end
-        local function nameOf(key)
-            local character = partition:GetCharacter(key)
-            return (character and normalizer:Display(character.name)) or key
-        end
-        local rankNames = client:GetGuildRankNames() or {}
-        local result = addon.PromotionPolicy.Query({
-            partition = partition,
-            requirements = requirements,
-            checks = checks,
-            dates = datesOf(partition),
-            now = client:Timestamp(),
-            rankNames = rankNames,
-        }, {
-            nameOf = nameOf,
-            filters = promotionFilters,
-            matches = addon.PromotionPolicy.Matches(partition, promotionSearch, function(name)
-                return normalizer:Display(name)
-            end),
-            page = promotionPage,
-        })
-        promotionPage = result.page
-        local rows = addon.PromotionsViewModel.List(result.rows, {
-            expanded = expandedPromotions,
-            nameOf = nameOf,
-            formatDate = function(timestamp)
-                return client:FormatDate(timestamp)
-            end,
-            anyRequirements = requirements:Ranks()[1] ~= nil,
-            filtered = result.all > 0,
-            promoteAction = function(key)
-                local mode = promotions.mode(key)
-                return mode == "promote" and "Promote" or mode == "mark" and "Mark as promoted" or nil
-            end,
-        })
-        return rows, addon.PromotionsViewModel.Controls(result, promotionFilters, rankNames)
-    end
-    -- The list's controls: `name` is "ready", "progress", or a rank, shown
-    -- or not. Each goes back to the first page.
-    promotions.filter = function(name, shown)
-        if name == "ready" or name == "progress" then
-            promotionFilters[name] = shown == true
-        elseif type(name) == "number" then
-            promotionFilters.hiddenRanks[name] = not shown or nil
-        else
-            return false, "unknown filter"
-        end
-        promotionPage = 1
+    -- Requirements or ticks changed: redraw the page, the player panel and
+    -- the roster's Ready markers, here and on the game's guild roster.
+    promotions.changed = function()
         rosterController:RefreshPromotions()
-        return true
-    end
-    promotions.search = function(text)
-        promotionSearch = type(text) == "string" and text or ""
-        promotionPage = 1
-        rosterController:RefreshPromotions()
-        return true
-    end
-    promotions.page = function(page)
-        promotionPage = tonumber(page) or 1
-        rosterController:RefreshPromotions()
-        return true
-    end
-    -- The page opened: redraw it now (day-based checks count from now), then
-    -- every PROMOTIONS_REFRESH_SECONDS while it stays open.
-    local PROMOTIONS_REFRESH_SECONDS = 300
-    local refreshingPromotions = false
-    local function promotionsOpen()
-        local window = rosterController.window
-        return window ~= nil and window:IsShown() and pages:Current() == "promotions"
-    end
-    local function refreshOpenPromotions()
-        refreshingPromotions = false
-        if promotionsOpen() then
-            rosterController:RefreshPromotions()
-            refreshingPromotions = client:After(PROMOTIONS_REFRESH_SECONDS, refreshOpenPromotions) and true or false
+        if guildNoteOverlay ~= nil then
+            guildNoteOverlay:Refresh()
         end
     end
+    -- The Promotions page (the requirements editor) opened: redraw it.
     promotions.shown = function()
         rosterController:RefreshPromotions()
-        if not refreshingPromotions then
-            refreshingPromotions = client:After(PROMOTIONS_REFRESH_SECONDS, refreshOpenPromotions) and true or false
-        end
     end
     -- What the rules engine reads, or nil before the guild is known.
     local function promotionInputs()
@@ -2410,14 +2303,12 @@ if clientProfile.supported then
             local key = keys[index]
             local character = partition:GetCharacter(key)
             if character ~= nil and partition:IsInGuild(key) and type(character.rank) == "number" then
-                local mode = officer and promotions.mode(key) or nil
                 table.insert(characters, {
                     key = key,
                     name = nameOf(key),
                     rankName = inputs.rankNames[character.rank + 1] or ("Rank " .. character.rank),
                     evaluated = addon.PromotionPolicy.Evaluate(inputs, key),
                     lastPromotion = dates and dates:LastPromotion(key) or nil,
-                    promoteAction = mode == "promote" and "Promote" or mode == "mark" and "Mark as promoted" or nil,
                 })
             end
         end
@@ -2431,116 +2322,6 @@ if clientProfile.supported then
                 return client:FormatDate(timestamp)
             end,
         })
-    end
-    -- Shows `key` on the Promotions tab, its checklist open: for a note, a
-    -- reason or a confirmation the panel has no room for.
-    promotions.focus = function(key)
-        local guild, partition, normalizer = rosterController:QuietContext()
-        local character = guild and partition:GetCharacter(key)
-        if character == nil or not selfIsOfficer() then
-            return false, "only officers can work promotions"
-        end
-        promotionFilters.ready, promotionFilters.progress = true, true
-        if type(character.rank) == "number" then
-            promotionFilters.hiddenRanks[character.rank] = nil
-        end
-        promotionSearch = normalizer:Display(character.name) or key
-        promotionPage = 1
-        expandedPromotions[key] = true
-        rosterController:ShowPage("promotions")
-        rosterController:RefreshPromotions()
-        return true
-    end
-    -- How this officer can promote `key`: "promote" when the game's calls
-    -- exist and allow it, "mark" when the calls are missing (the officer
-    -- changes the rank in the game's guild window and the add-on records
-    -- it once a scan sees it), or nil when they can't.
-    promotions.mode = function(key)
-        local guild, partition = rosterController:QuietContext()
-        local character = guild and partition:GetCharacter(key)
-        if character == nil or not partition:IsInGuild(key) or type(character.rank) ~= "number"
-            or character.rank < 1 or not selfIsOfficer()
-        then
-            return nil
-        end
-        if client:CanUsePromote() then
-            return client:CanPromoteMember(character.rank) and "promote" or nil
-        end
-        local own = client:GetPlayerGuildRankIndex()
-        if own ~= nil and character.rank - 1 <= own then
-            return nil
-        end
-        return "mark"
-    end
-    -- Promotions this officer marked, waiting for a scan to see the new
-    -- rank: key -> the rank it goes to.
-    local markedPromotions = {}
-    local function recordPromotion(partition, key, rank)
-        local author, now = rosterController:SelfKey(), client:Timestamp()
-        local fact = author and now and datesOf(partition):Promoted(key, rank, author, now)
-        if fact ~= nil then
-            shareDates({ fact })
-        end
-    end
-    -- After a scan: a marked character seen at its new rank is recorded as
-    -- promoted by the officer who marked it.
-    promotions.observe = function()
-        local guild, partition = rosterController:QuietContext()
-        if guild == nil then
-            return
-        end
-        local key, rank
-        for key, rank in pairs(markedPromotions) do
-            local character = partition:GetCharacter(key)
-            if character ~= nil and character.rank == rank then
-                markedPromotions[key] = nil
-                recordPromotion(partition, key, rank)
-            end
-        end
-    end
-    -- Promotes `key` one rank (or marks it, see mode). Its checklist goes
-    -- with the old rank: the next scan sees the new one and drops it.
-    promotions.promote = function(key)
-        local guild, partition, normalizer = rosterController:QuietContext()
-        local character = guild and partition:GetCharacter(key)
-        if character == nil then
-            return false, "that character isn't in the roster"
-        end
-        local mode = promotions.mode(key)
-        if mode == nil then
-            return false, "you can't promote that character"
-        end
-        local rank = character.rank - 1
-        local names = client:GetGuildRankNames() or {}
-        local name = normalizer:Display(character.name) or key
-        local rankName = names[rank + 1] or ("rank " .. rank)
-        if mode == "mark" then
-            markedPromotions[key] = rank
-            rosterController:Print("Change " .. name .. "'s rank to " .. rankName .. " in the game's guild window;" ..
-                " the add-on records the promotion when it sees the change.")
-            return true
-        end
-        if not client:PromoteMember(character.name) then
-            return false, "the game didn't accept the promotion"
-        end
-        recordPromotion(partition, key, rank)
-        -- Only full scans read known characters' ranks again, so the new
-        -- rank is recorded now, as a scan would: its time at rank starts,
-        -- and the old rank's ticks go. A scan corrects it if the game
-        -- didn't make the change after all.
-        partition:RecordCharacter(key, { rankIndex = rank })
-        observeMembership()
-        promotions.prune()
-        rosterController:Print("Promoted " .. name .. " to " .. rankName .. ".")
-        client:RequestGuildRoster()
-        rosterController:Invalidate()
-        rosterController:RefreshPromotions()
-        return true
-    end
-    promotions.expand = function(key)
-        expandedPromotions[key] = not expandedPromotions[key] or nil
-        rosterController:RefreshPromotions()
-        return true
     end
     promotions.tick = function(key, itemId, ticked, note)
         local requirements, checks = requirementsOf(), checksOf()
@@ -2561,7 +2342,7 @@ if clientProfile.supported then
             return false, reason
         end
         ticksSync:Share(records)
-        rosterController:RefreshPromotions()
+        promotions.changed()
         return true
     end
     local selectedRank
@@ -2598,7 +2379,7 @@ if clientProfile.supported then
             return false, reason
         end
         requirementsSync:Share(records)
-        rosterController:RefreshPromotions()
+        promotions.changed()
         return true
     end
     promotions.rank = function(step)
@@ -2609,7 +2390,7 @@ if clientProfile.supported then
         local names = rankNames()
         selectedRank = addon.PromotionsViewModel.StepRank(
             addon.PromotionsViewModel.PickRank(selectedRank, requirements, names), step, names)
-        rosterController:RefreshPromotions()
+        promotions.changed()
         return true
     end
     -- `kind` is an item kind (true for a needs-a-note checkbox, false or
@@ -2793,54 +2574,46 @@ if clientProfile.supported then
             report()
         end
     end
-    -- A dry run of Promote for the member named `name`: which calls exist,
-    -- and whether this officer may promote them. Changes no rank.
-    local function probePromote(name)
+    -- Whether the Ready flags reach the game's guild roster: how many
+    -- characters are ready, whether the roster's rows are followed, and how
+    -- many show a flag now. Changes nothing.
+    local function probeReady()
         if not selfIsOfficer() then
-            rosterController:Print("Only officers can probe promoting.")
+            rosterController:Print("Only officers can probe the Ready flags.")
             return
         end
-        local guild, partition, normalizer = rosterController:QuietContext()
-        local key = guild and name ~= "" and normalizer:Key(name)
-        local character = key and partition:GetCharacter(key)
-        if character == nil then
-            rosterController:Print("Use " .. addon.Identity.slashCommand ..
-                " probe promote <character>, naming someone in the roster.")
-            return
+        local ready = promotions.readyKeys() or {}
+        local count = 0
+        local key
+        for key in pairs(ready) do
+            count = count + 1
         end
-        rosterController:Print("Promote probe (dry run, no rank changed):")
-        local calls = client:PromoteCalls()
+        rosterController:Print("Ready flag probe:")
+        client:Print("  Ready for promotion: " .. count)
+        local lines = guildNoteOverlay ~= nil and guildNoteOverlay:ReadyProbeLines() or { "No guild roster overlay" }
         local index
-        for index = 1, #addon.Compatibility.PROMOTE_CALLS do
-            local call = addon.Compatibility.PROMOTE_CALLS[index]
-            client:Print("  " .. call .. ": " .. (calls[call] and "present" or "missing"))
+        for index = 1, #lines do
+            client:Print("  " .. lines[index])
         end
-        local allowed = client:CanPromoteMember(character.rank)
-        client:Print("  Your rank: " .. tostring(client:GetPlayerGuildRankIndex()) .. "; " ..
-            (normalizer:Display(character.name) or key) .. "'s rank: " .. tostring(character.rank))
-        client:Print("  May promote: " .. (allowed == nil and "unknown" or allowed and "yes" or "no"))
-        local mode = promotions.mode(key)
-        client:Print("  The button would be: " ..
-            (mode == "promote" and "Promote" or mode == "mark" and "Mark as promoted" or "not shown"))
     end
     router:Register("probe",
         "check what the game reports to the add-on (probe log: the guild event log; probe officer: the" ..
-        " officer channel; probe promote <character>: a dry run of Promote; officers)",
+        " officer channel; probe ready: the Ready flags on the game's guild roster; officers)",
         function(arguments)
-            local what, rest = string.match(arguments or "", "^%s*(%S*)%s*(.-)%s*$")
+            local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
             if what == "officer" then
                 probeOfficerChannel()
                 return
             end
-            if what == "promote" then
-                probePromote(rest or "")
+            if what == "ready" then
+                probeReady()
                 return
             end
             if what ~= "log" then
                 rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe log, " ..
                     addon.Identity.slashCommand .. " probe officer or " .. addon.Identity.slashCommand ..
-                    " probe promote <character>.")
+                    " probe ready.")
                 return
             end
             if guildLogOf() == nil then
@@ -3593,6 +3366,19 @@ if clientProfile.supported then
         end,
         editProfile = function()
             rosterController:Open("profile")
+        end,
+        -- Officers see which members are ready for promotion: worked out
+        -- once per redraw of the rows.
+        readyCheck = function()
+            local ready = promotions.readyKeys()
+            local guild, _, normalizer = rosterController:QuietContext()
+            if ready == nil or guild == nil then
+                return nil
+            end
+            return function(name)
+                local key = normalizer:Key(name)
+                return key ~= nil and ready[key] == true
+            end
         end,
     })
     -- Guildmates on the map: add-on users share where they are with the

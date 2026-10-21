@@ -66,7 +66,8 @@ local MembershipDates = {
     HEARD_SHARE_SECONDS = 24 * 3600,
     -- The character's last promotion: when, to which rank, and by whom.
     KIND_LAST_PROMOTION = "lastPromotion",
-    -- Promoted with the add-on's Promote (or Mark as promoted) button.
+    -- Promoted with the Promote button older versions had (add-ons can't
+    -- promote): such records still load.
     ADDON = "addon",
 }
 addon.MembershipDates = MembershipDates
@@ -429,23 +430,6 @@ function Dates:FromLog(entries, author, now)
         end
     end
     return facts
-end
-
--- An officer (`author`) promoted `key` to `rank` with the add-on at `now`
--- (`promoter` is who did it: the author). Returns its fact, or nil.
-function Dates:Promoted(key, rank, author, now)
-    if not isText(key) or not isText(author) or not isTime(now) or not isRank(rank) then
-        return nil
-    end
-    local held = self:held(key, MembershipDates.KIND_LAST_PROMOTION)
-    local record = { time = now, rank = rank, promoter = author, source = MembershipDates.ADDON, at = now, by = author }
-    if held ~= nil and held.at ~= nil and held.at >= now then
-        record.at = held.at + 1
-    end
-    if not self:Offer(key, MembershipDates.KIND_LAST_PROMOTION, record) then
-        return nil
-    end
-    return self:FactOf(key, MembershipDates.KIND_LAST_PROMOTION)
 end
 
 -- `key`'s last promotion { time, rank, promoter, source }, or nil.

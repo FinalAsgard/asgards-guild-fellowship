@@ -1,6 +1,8 @@
 local _, addon = ...
 
--- Adds to the game's own guild roster: for officers, which members' public
+-- Adds to the game's own guild roster: for officers, which members are
+-- ready for promotion (an up arrow on their rows: add-ons can't promote,
+-- so the officer promotes them in the game's window), which members' public
 -- notes are out of date (a marker on their rows) and what a selected
 -- member's note should say (see NoteAudit), in a small panel to the right
 -- of the member detail panel, level with its note; for everyone, a mini
@@ -29,6 +31,11 @@ local GuildNoteOverlay = {
     -- The small marker on a roster row whose member's note is out of date.
     MARKER_TEXTURE = "Interface\\COMMON\\Indicator-Yellow",
     MARKER_SIZE = 12,
+    -- The flag on a roster row whose member is ready for promotion, left
+    -- of the note marker: the game's up arrow, on both clients.
+    READY_TEXTURE = "Interface\\Buttons\\Arrow-Up-Up",
+    READY_SIZE = 16,
+    READY_OFFSET = -20,
     -- The overlay's panels: their edge, the room inside them, and the gap
     -- between lines. The note panel is this wide; the profile panel is as
     -- wide as the detail panel, and shows at most PROFILE_LINES lines.
@@ -68,6 +75,9 @@ Overlay.__index = Overlay
 --               the add-on has no record of them; `own` when that player is
 --               the user's, who then gets an Edit button
 --   editProfile function() -> opens the user's My Profile page
+--   readyCheck  function() -> a function(name) telling whether the roster
+--               member named `name` is ready for promotion, or nil when
+--               nobody's flagged (members); asked once per redraw
 function GuildNoteOverlay.Create(options)
     return setmetatable({
         client = options.client,
@@ -83,6 +93,9 @@ function GuildNoteOverlay.Create(options)
             return nil
         end,
         editProfile = options.editProfile or function() end,
+        readyCheck = options.readyCheck or function()
+            return nil
+        end,
     }, Overlay)
 end
 
@@ -366,31 +379,53 @@ local function rowName(row)
     return type(info) == "table" and info.name or nil
 end
 
--- Shows or hides `row`'s marker for its current member. The marker is the
--- overlay's own child frame, made the first time the row is drawn; the row
--- itself is only followed (its SetMember hooked), never changed.
+-- The ready check for this redraw (see readyCheck), worked out on first use.
+function Overlay:ReadyCheck()
+    if self.ready == nil then
+        local ok, check = false, nil
+        if self.isOfficer() then
+            ok, check = pcall(self.readyCheck)
+        end
+        self.ready = ok and type(check) == "function" and check or false
+    end
+    return self.ready or nil
+end
+
+-- One of a row's markers: the overlay's own child frame, `size` square,
+-- `offset` in from the row's right edge, showing `texture`.
+function Overlay:Marker(row, size, offset, texture)
+    local frame = self.environment.CreateFrame("Frame", nil, row)
+    frame:SetSize(size, size)
+    frame:SetPoint("RIGHT", row, "RIGHT", offset, 0)
+    local picture = frame:CreateTexture(nil, "OVERLAY")
+    picture:SetAllPoints(frame)
+    picture:SetTexture(texture)
+    frame:Hide()
+    return frame
+end
+
+-- Shows or hides `row`'s markers for its current member. They're the
+-- overlay's own child frames, made the first time the row is drawn; the
+-- row itself is only followed (its SetMember hooked), never changed.
 function Overlay:MarkRow(row)
     if type(row) ~= "table" then
         return
     end
     self.rows = self.rows or setmetatable({}, { __mode = "k" })
+    self.readyMarkers = self.readyMarkers or setmetatable({}, { __mode = "k" })
     local marker = self.rows[row]
     if marker == nil then
-        local ok, created = pcall(function()
-            local frame = self.environment.CreateFrame("Frame", nil, row)
-            frame:SetSize(GuildNoteOverlay.MARKER_SIZE, GuildNoteOverlay.MARKER_SIZE)
-            frame:SetPoint("RIGHT", row, "RIGHT", -4, 0)
-            local texture = frame:CreateTexture(nil, "OVERLAY")
-            texture:SetAllPoints(frame)
-            texture:SetTexture(GuildNoteOverlay.MARKER_TEXTURE)
-            frame:Hide()
-            return frame
+        local ok, created, ready = pcall(function()
+            return self:Marker(row, GuildNoteOverlay.MARKER_SIZE, -4, GuildNoteOverlay.MARKER_TEXTURE),
+                self:Marker(row, GuildNoteOverlay.READY_SIZE, GuildNoteOverlay.READY_OFFSET,
+                    GuildNoteOverlay.READY_TEXTURE)
         end)
         if not ok or created == nil then
             return
         end
         marker = created
         self.rows[row] = marker
+        self.readyMarkers[row] = ready
         -- Scrolling reuses rows for other members: follow each new one.
         if type(row.SetMember) == "function" then
             pcall(self.environment.hooksecurefunc, row, "SetMember", function(drawn)
@@ -409,16 +444,55 @@ function Overlay:MarkRow(row)
     else
         marker:Hide()
     end
+    local readyMarker = self.readyMarkers[row]
+    if readyMarker ~= nil then
+        local check = name ~= nil and self:ReadyCheck() or nil
+        local ok, ready = false, false
+        if check ~= nil then
+            ok, ready = pcall(check, name)
+        end
+        if ok and ready == true then
+            readyMarker:Show()
+        else
+            readyMarker:Hide()
+        end
+    end
 end
 
--- Marks every row the member list shows now.
+-- Marks every row the member list shows now, with the ready check worked
+-- out afresh.
 function Overlay:MarkRows()
+    self.ready = nil
     if self.memberList == nil then
         return
     end
     pcall(eachRow, self.memberList, function(row)
         self:MarkRow(row)
     end)
+end
+
+-- What /agf probe ready prints about the guild roster: whether its rows
+-- are followed, and how many show a Ready flag now.
+function Overlay:ReadyProbeLines()
+    if self.memberList == nil then
+        return { "Guild roster rows followed: no (open the game's guild roster, then probe again)" }
+    end
+    self:MarkRows()
+    local shown, rows = 0, 0
+    pcall(eachRow, self.memberList, function(row)
+        rows = rows + 1
+        local readyMarker = self.readyMarkers and self.readyMarkers[row]
+        local ok, isShown = pcall(function()
+            return readyMarker ~= nil and readyMarker:IsShown()
+        end)
+        if ok and isShown then
+            shown = shown + 1
+        end
+    end)
+    return {
+        "Guild roster rows followed: yes (" .. rows .. " shown)",
+        "Rows with a Ready flag now: " .. shown,
+    }
 end
 
 -- Follows the member list's redraws. Safe to call again; it hooks once.

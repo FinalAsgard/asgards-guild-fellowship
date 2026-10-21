@@ -332,26 +332,6 @@ local function installGuild(world, environment, profile)
     environment.GuildControlGetRankName = function(index)
         return world.rankNames[index]
     end
-    -- Promoting: `world.canPromote = false` takes away the rank's promote
-    -- permission; GuildPromote moves the named member one rank up and
-    -- records the name in `world.promoted`. WoW Forever is assumed to match
-    -- Retail here (#233); a spec removes the calls to try the fallback.
-    world.canPromote = true
-    world.promoted = {}
-    environment.CanGuildPromote = function()
-        return world.canPromote
-    end
-    environment.GuildPromote = function(name)
-        table.insert(world.promoted, name)
-        local index
-        for index = 1, #(world.guild and world.guild.members or {}) do
-            local member = world.guild.members[index]
-            if member.name == name and member.rank > 1 then
-                member.rank = member.rank - 1
-                member.rankName = world.rankNames[member.rank + 1]
-            end
-        end
-    end
     if profile == "Retail" then
         environment.C_GuildInfo.GuildRoster = request
         environment.GetNormalizedRealmName = function()

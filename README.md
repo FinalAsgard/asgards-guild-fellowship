@@ -27,7 +27,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf mail` | Opens [Guild Mail](#guild-mail), to mail the guild ranks you pick (officers only). |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf setdate join\|rank <character> <YYYY-MM-DD>` | Sets a character's join date, or the date it reached its current rank, when you know better than the add-on (officers only; see [Dates behind the checks](#dates-behind-the-checks)). |
-| `/agf probe log`, `/agf probe officer`, `/agf probe promote <character>` | Reports what the game gives the add-on: the guild event log, the officer channel, or a dry run of **Promote** for one character (officers only). |
+| `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** flags reach the game's guild roster (officers only). |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
@@ -40,7 +40,7 @@ Everything the add-on does is in one window, with picture tabs down its right ed
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
-- **Promotions** (officers only): who is ready to move up a rank, each character's checklist, and each rank's requirements (see [Promotions](#promotions)). Its tab shows how many characters are ready.
+- **Promotion Requirements** (officers only): each rank's promotion requirements (see [Promotions](#promotions)). Characters' checklists are in the player panel, and ready members are flagged on the game's guild roster.
 - **Guild Log** (officers only): the guild's long-term record of joins, invites, leaves, kicks, promotions and demotions (see [Guild Log](#guild-log)).
 - **Settings**: everything else (General, Chat Tags, Guild Map, and the Group Finder's Do Not Disturb), and the version you're running.
 
@@ -385,11 +385,11 @@ A mail paused at the limit doesn't hold you up: **Edit** your draft and send a n
 
 ## Promotions
 
-Each guild rank can have **promotion requirements**: what a character at that rank must do to move up to the next one. Officers set them up and work through them on the window's **Promotions** tab; the rest of the guild only sees their own progress (see [Your own progress](#your-own-progress)). The Promotions and [Guild Log](#guild-log) tabs are only shown to officers (the guild master's rank, or any rank that can view officer notes), and appear or disappear without a reload when someone is promoted or demoted.
+Each guild rank can have **promotion requirements**: what a character at that rank must do to move up to the next one. Officers set them up on the window's **Promotion Requirements** tab and work through each character's checklist in the [player panel](#in-the-player-panel-and-the-roster). A character who meets every requirement is flagged **Ready for promotion**, and an officer promotes them in the game's own guild window (add-ons aren't allowed to promote). The rest of the guild only sees their own progress (see [Your own progress](#your-own-progress)). The Promotions and [Guild Log](#guild-log) tabs are only shown to officers (the guild master's rank, or any rank that can view officer notes), and appear or disappear without a reload when someone is promoted or demoted.
 
 ### Setting up requirements
 
-Every rank starts with no requirements, so nothing changes until your guild sets them up. On the Promotions tab, **Edit requirements** opens the editor; **Back to list** returns to the list.
+Every rank starts with no requirements, so nothing changes until your guild sets them up. The **Promotion Requirements** tab is the editor.
 
 - `<` and `>` pick the rank, for example **Member (rank 4)**, with the rank it promotes to beside it. The guild master's rank has no rank above it, so it isn't offered.
 - **Automatic checks** lists every check the add-on works out for itself, each with a check box to turn it on or off for the rank. A check that takes a number has a box beside it; type the number before turning the check on, and change it later by typing a new one and pressing Enter:
@@ -405,41 +405,21 @@ Every rank starts with no requirements, so nothing changes until your guild sets
 
 Requirements reach every add-on in the guild through [guild sync](#guild-sync). When two officers edit the same item, the newest edit wins everywhere. Changes are only taken from an officer's add-on, so nobody else can send one, even in an officer's name. An add-on that logs in catches up from an officer online.
 
-### The Promotions list
+### Ready for promotion
 
-The list shows the characters at ranks that have requirements: each with its rank and the rank it would move to, its progress ("3 of 4"), and its player's highest rank on any character when that's higher, so you can see "this is an alt of a rank-5 member" at a glance.
+Officers see who's ready in three places:
 
-- By default it shows only characters who are **Ready** (every requirement met). Tick **In progress** to add everyone else, and untick a rank's box to hide that rank.
-- Search by character name, alias or main. Searching a player shows all their characters.
-- Ready characters come first, then by rank, then by name. Long lists come in pages of 50 (`<` and `>`).
-- The tab's label shows how many are ready, as **Promotions (4)**, and the tab's icon shows the count too.
-- When nobody matches, or no rank has requirements yet, the list says so.
-- While the tab is open, it's checked again every 5 minutes, so day-based items catch up.
+- **The game's guild roster:** a ready member's row shows an up arrow at its right edge (beside the yellow out-of-date note marker, when there is one). Promote them in that window. `/agf probe ready` says how many are ready and whether the roster's rows are being followed (open the guild roster first).
+- **The add-on's roster:** a ready character shows **Ready** before its rank.
+- **The player panel's Promotion tab:** a ready character's line says **Ready for promotion**.
 
-Click a character to open its checklist:
-
-- **Tick** and **Untick** a checkbox item. A needs-a-note item asks for the note above the list first.
-- Automated items show whether they're met and how close the character is: "5 of 7 days", "level 42 of 50", "seen 3 days ago", or "before tracking". An approximate date is marked "(approx.)".
-- **Override** passes a failed automated item for this character, with an optional reason. **Undo override** removes it.
-- Hover an item to see who ticked or overrode it, when, and the note or reason.
-
-Ticks, notes and overrides reach every officer's add-on through guild sync, including officers who were offline, who catch up when they log in. They're only taken from an officer's add-on, so nobody can tick their own items, even in an officer's name.
-
-### Promoting
-
-The last line of an open checklist promotes the character one rank, if the game lets you promote them.
-
-- When every item is met, **Promote** promotes at once.
-- When some aren't, the button reads **Promote...** and asks first, in the window, listing what isn't met. Hover it to see the list.
-- The add-on records the date and who promoted. Promotions made in the game's own guild window are recorded too, with the promoter from the guild event log when it has one.
-- Any rank change, up or down, from the add-on or the game, clears that character's ticks, notes and overrides. Only the last promotion's date and promoter are kept.
-- Where the game doesn't let add-ons promote, the button reads **Mark as promoted**: change the rank in the game's guild window, and the add-on records the promotion when it sees the new rank.
-
-`/agf probe promote <character>` shows whether you may promote a character and what the button would be, without promoting.
+Any rank change, up or down, clears that character's ticks, notes and overrides. The last promotion's date and promoter are kept, from the guild event log when it names who did it.
 
 ### In the player panel and the roster
 
-An officer's player panel has two tabs: **Profile** (the player's details, membership dates, main, alts and history) and **Promotion**. The Promotion tab shows the player's highest rank, then one line per character with its rank and next rank, its progress, and **Ready** when it is. Click a character's line (`[+]`) to open its last promotion ("Promoted on <date> by Thunderer") and its checklist, and click it again (`[-]`) to close them. Each item has a check box: tick or untick a custom requirement with it. A needs-a-note item has a **Note:** box on the line under it: type the note, then tick the item (or press Enter). Once it's ticked, the box shows the saved note; change it and press Enter to save the new one. Unticking keeps the note in the box, ready to tick again. An automated item's box shows whether it's met, with **Override** or **Undo override** beside it, and **Promote** sits under the checklist. An override reason, or a promotion that needs confirming, opens the character on the Promotions tab instead, where there's room to type or confirm. The panel and the tab always agree.
+An officer's player panel has two tabs: **Profile** (the player's details, membership dates, main, alts and history) and **Promotion**. The Promotion tab shows the player's highest rank, then one line per character with its rank and next rank, its progress, and **Ready** when it is. Click a character's line (`[+]`) to open its last promotion ("Promoted on <date> by Thunderer") and its checklist, and click it again (`[-]`) to close them. Each item has a check box: tick or untick a custom requirement with it. A needs-a-note item has a **Note:** box on the line under it: type the note, then tick the item (or press Enter). Once it's ticked, the box shows the saved note; change it and press Enter to save the new one. Unticking keeps the note in the box, ready to tick again. An automated item's box shows whether it's met, how close the character is ("5 of 7 days", "level 42 of 50", "seen 3 days ago", or "before tracking"; an approximate date is marked "(approx.)"), with **Override** or **Undo override** beside it. A failed check has a **Reason:** box under it for the override's optional reason. Hover an item to see who ticked or overrode it, when, and the note or reason.
+
+Ticks, notes and overrides reach every officer's add-on through guild sync, including officers who were offline, who catch up when they log in. They're only taken from an officer's add-on, so nobody can tick their own items, even in an officer's name.
 
 On officers' rosters, a character who meets every requirement shows **Ready** before its rank. Members never see it.
 
