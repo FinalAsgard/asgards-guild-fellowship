@@ -415,6 +415,18 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     -- Like every panel here, closed only with its close button or Escape.
     panel.DontRightClickClose = true
     panel:SetFrameStrata("HIGH")
+    -- In the window's strata, but a top-level window like it: whichever was
+    -- clicked last is in front, all of it (its tabs, boxes and text, which
+    -- sit at higher levels than its background, included). It opens in
+    -- front.
+    if type(panel.SetToplevel) == "function" then
+        panel:SetToplevel(true)
+    end
+    panel:HookScript("OnShow", function(self)
+        if type(self.Raise) == "function" then
+            self:Raise()
+        end
+    end)
     panel:ClearAllPoints()
     panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
     local edit = { panel = panel }

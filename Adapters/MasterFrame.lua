@@ -141,6 +141,11 @@ function MasterFrame.Build(framework, options)
     -- ours close only with the close button or Escape.
     panel.DontRightClickClose = true
     panel:SetFrameStrata("HIGH")
+    -- A top-level window: clicked, it comes in front of the pop-out panels
+    -- in its strata (the player panel), every part of it, and they of it.
+    if type(panel.SetToplevel) == "function" then
+        panel:SetToplevel(true)
+    end
     setResizeBounds(panel)
     restoreGeometry(panel, options.loadGeometry(), parent)
 
