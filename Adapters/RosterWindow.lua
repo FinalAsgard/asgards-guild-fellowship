@@ -564,52 +564,26 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         end
     end
 
-    -- Notes typed on the Promotion tab's note lines, by character and
-    -- item, kept while the list redraws until they're saved (a line shows
-    -- its item's saved note otherwise); and the items whose box was ticked
-    -- before a note was typed.
-    edit.notes = {}
-    edit.noteNeeded = {}
-    local function noteId(row)
-        return tostring(row.key) .. "\31" .. tostring(row.item)
-    end
-    local function call(handler, ...)
-        if options[handler] ~= nil then
-            local ok, done = pcall(options[handler], ...)
-            return ok and done ~= false
-        end
-        return false
-    end
-    local function showTooltip(owner, tooltip)
-        if tooltip ~= nil and GameTooltip ~= nil then
-            GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
-            local index
-            for index = 1, #tooltip do
-                GameTooltip:AddLine(tooltip[index], 1, 1, 1, true)
+    -- The Promotion tab's lines: their typed notes and actions (see
+    -- PromotionLines).
+    edit.promotionLines = addon.PromotionLines.State({
+        createFrame = CreateFrame,
+        tooltip = GameTooltip,
+        tick = function(key, item, ticked, note)
+            if options.onPromotionsTick == nil then
+                return false
             end
-            GameTooltip:Show()
-        end
-    end
-    local function hideTooltip()
-        if GameTooltip ~= nil then
-            GameTooltip:Hide()
-        end
-    end
-    -- Ticks an officer's needs-a-note item with the note typed under it,
-    -- or, with none typed yet, asks for one.
-    local function tickWithNote(row)
-        local id = noteId(row)
-        local note = edit.notes[id]
-        if note == nil or string.find(note, "%S") == nil then
-            edit.noteNeeded[id] = true
+            return options.onPromotionsTick(key, item, ticked, note)
+        end,
+        toggle = function(key)
+            if options.onPanelPromotionToggle ~= nil then
+                options.onPanelPromotionToggle(key)
+            end
+        end,
+        redraw = function()
             edit.scroll:Refresh()
-            return
-        end
-        if call("onPromotionsTick", row.key, row.item, true, note) then
-            edit.notes[id] = nil
-            edit.noteNeeded[id] = nil
-        end
-    end
+        end,
+    })
 
     local lineAmount = math.floor((PANEL_HEIGHT - PANEL_LIST_TOP - PANEL_BAR_HEIGHT) / RosterWindow.LINE_HEIGHT)
     local function newLine(scroll, index)
@@ -640,121 +614,9 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 options.onDetach(line.row.key)
             end
         end)
-        -- A checklist item's box: an officer ticks a custom item with it
-        -- (a needs-a-note item with the note typed on the line below);
-        -- otherwise it only shows whether the item is met.
-        line.check = CreateFrame("CheckButton", nil, line, "UICheckButtonTemplate")
-        line.check:SetSize(20, 20)
-        line.check:SetPoint("LEFT", line, "LEFT", 14, 0)
-        line.check:SetScript("OnClick", function(self)
-            local row = line.row
-            if row == nil or not row.canCheck then
-                self:SetChecked(row ~= nil and row.checked)
-                return
-            end
-            -- The box shows the item's state until the change is saved.
-            self:SetChecked(row.checked)
-            if not row.ticked and row.needsNote then
-                tickWithNote(row)
-            else
-                -- Unticked, the note stays in its box, ready to tick again
-                -- (set first: the untick redraws the list).
-                local id = noteId(row)
-                local typed = edit.notes[id]
-                if row.ticked and row.note ~= nil then
-                    edit.notes[id] = row.note
-                end
-                if not call("onPromotionsTick", row.key, row.item, not row.ticked) then
-                    edit.notes[id] = typed
-                end
-            end
-        end)
-        line.check:SetScript("OnEnter", function(self)
-            showTooltip(self, line.row and line.row.tooltip)
-        end)
-        line.check:SetScript("OnLeave", hideTooltip)
-        line.check:Hide()
-        -- A needs-a-note item's note, on the line under it: Enter ticks the
-        -- item with the note typed, or saves a ticked item's changed note.
-        -- A failed automated item's line takes an override's optional
-        -- reason instead: Enter overrides with it.
-        line.noteLabel = line:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        line.noteLabel:SetPoint("LEFT", line, "LEFT", 40, 0)
-        line.noteLabel:Hide()
-        line.note = CreateFrame("EditBox", nil, line, "InputBoxTemplate")
-        line.note:SetHeight(18)
-        line.note:SetPoint("LEFT", line.noteLabel, "RIGHT", 8, 0)
-        line.note:SetPoint("RIGHT", line, "RIGHT", -8, 0)
-        line.note:SetAutoFocus(false)
-        line.note:SetMaxLetters(addon.PromotionChecks.MAX_NOTE)
-        line.note.placeholder = line.note:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        line.note.placeholder:SetPoint("LEFT", line.note, "LEFT", 2, 0)
-        line.note:SetScript("OnTextChanged", function(self, userInput)
-            local row = line.row
-            if row == nil or not row.noteInput then
-                return
-            end
-            local text = self:GetText()
-            if userInput then
-                edit.notes[noteId(row)] = text
-            end
-            if text == "" then
-                self.placeholder:Show()
-            else
-                self.placeholder:Hide()
-            end
-        end)
-        line.note:SetScript("OnEnterPressed", function(self)
-            self:ClearFocus()
-            local row = line.row
-            if row == nil or not row.noteInput then
-                return
-            end
-            if row.reason then
-                local id = noteId(row)
-                if call("onPromotionsTick", row.key, row.item, true, edit.notes[id]) then
-                    edit.notes[id] = nil
-                end
-            elseif not (row.ticked and self:GetText() == (row.note or "")) then
-                tickWithNote(row)
-            end
-        end)
-        line.note:SetScript("OnEscapePressed", function(self)
-            self:ClearFocus()
-        end)
-        line.note:Hide()
-        -- An automated item's button: Override (with the reason typed on
-        -- the line below, if any) and Undo override.
-        line.act = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
-        line.act:SetSize(96, 18)
-        line.act:SetPoint("RIGHT", line, "RIGHT", -2, 0)
-        line.act:SetScript("OnClick", function()
-            local row = line.row
-            if row == nil or row.kind ~= "promotion" then
-                return
-            end
-            if row.ticked then
-                call("onPromotionsTick", row.key, row.item, false)
-                return
-            end
-            local id = noteId(row)
-            if call("onPromotionsTick", row.key, row.item, true, edit.notes[id]) then
-                edit.notes[id] = nil
-            end
-        end)
-        line.act:SetScript("OnEnter", function(self)
-            showTooltip(self, line.row and line.row.tooltip)
-        end)
-        line.act:SetScript("OnLeave", hideTooltip)
-        -- Clicking a character's line on the Promotion tab opens or closes
-        -- its checklist.
-        line:EnableMouse(true)
-        line:SetScript("OnMouseUp", function()
-            local row = line.row
-            if row ~= nil and row.toggle and options.onPanelPromotionToggle ~= nil then
-                pcall(options.onPanelPromotionToggle, row.key)
-            end
-        end)
+        -- A Promotion row's check box, note box and button (see
+        -- PromotionLines).
+        addon.PromotionLines.Attach(line, edit.promotionLines)
         return line
     end
     local function refreshLines(scroll, rows, offset, totalLines)
@@ -783,63 +645,17 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 elseif row.kind == "history" then
                     text = "  " .. row.name .. "  |cff9d9d9d" .. row.role .. ", " .. row.reason ..
                         (row.dates ~= "" and (", " .. row.dates) or "") .. "|r"
-                elseif row.kind == "promotion" and not row.noteInput then
-                    text = (row.check and "" or "  ") .. row.text
                 end
-                -- Only character rows and promotion rows with an action have
-                -- buttons; the others' text uses the line's full width. An
-                -- item's text starts after its check box.
-                local acts = row.kind == "promotion" and row.action ~= nil
-                line.text:ClearAllPoints()
-                if row.check then
-                    line.text:SetPoint("LEFT", line.check, "RIGHT", 2, 0)
+                -- Only character rows have buttons; the others' text uses
+                -- the line's full width. Promotion rows draw themselves.
+                if row.kind == "promotion" then
+                    addon.PromotionLines.Draw(line, row, edit.promotionLines)
                 else
+                    addon.PromotionLines.Hide(line)
+                    line.text:ClearAllPoints()
                     line.text:SetPoint("LEFT", line, "LEFT", 6, 0)
-                end
-                line.text:SetPoint("RIGHT", line, "RIGHT", row.kind == "character" and -128 or (acts and -100 or -6), 0)
-                line.text:SetText(text)
-                if row.check then
-                    line.check:SetChecked(row.checked == true)
-                    if row.canCheck then
-                        line.check:Enable()
-                    else
-                        line.check:Disable()
-                    end
-                    line.check:Show()
-                else
-                    line.check:Hide()
-                end
-                if row.noteInput then
-                    local id = noteId(row)
-                    if not line.note:HasFocus() then
-                        line.note:SetText(edit.notes[id] or row.note or "")
-                    end
-                    line.noteLabel:SetText(row.reason and "Reason:" or "Note:")
-                    if row.reason then
-                        line.note.placeholder:SetText("Optional, then Override (or Enter)")
-                    else
-                        line.note.placeholder:SetText(edit.noteNeeded[id]
-                            and "|cffff8040Type a note, then tick the box|r" or "Note (needed to tick it)")
-                    end
-                    if line.note:GetText() == "" then
-                        line.note.placeholder:Show()
-                    else
-                        line.note.placeholder:Hide()
-                    end
-                    line.noteLabel:Show()
-                    line.note:Show()
-                else
-                    if line.note:HasFocus() then
-                        line.note:ClearFocus()
-                    end
-                    line.noteLabel:Hide()
-                    line.note:Hide()
-                end
-                if acts then
-                    line.act:SetText(row.action)
-                    line.act:Show()
-                else
-                    line.act:Hide()
+                    line.text:SetPoint("RIGHT", line, "RIGHT", row.kind == "character" and -128 or -6, 0)
+                    line.text:SetText(text)
                 end
                 if row.kind == "character" and row.canMakeMain then
                     line.makeMain:Show()

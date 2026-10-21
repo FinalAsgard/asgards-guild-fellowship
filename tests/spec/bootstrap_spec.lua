@@ -6,6 +6,7 @@ local MANIFEST_FILES = {
     "Adapters/ClientProfile.lua",
     "Adapters/WoW.lua",
     "Adapters/MasterFrame.lua",
+    "Adapters/PromotionLines.lua",
     "Adapters/RosterWindow.lua",
     "Adapters/EntryPoints.lua",
     "Adapters/GuildNoteOverlay.lua",

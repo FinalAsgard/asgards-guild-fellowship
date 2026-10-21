@@ -423,6 +423,14 @@ Ticks, notes and overrides reach every officer's add-on through guild sync, incl
 
 On officers' rosters, a character who meets every requirement shows **Ready** before its rank. Members never see it.
 
+### In the game's guild roster
+
+Select a member in the game's guild roster and a **Promotion** panel opens to the right of the [mini profile](#mini-profile-in-the-guild-roster). It shows the same lines as the player panel's Promotion tab for that member's player, with the selected member's checklist open:
+
+- Officers see anyone's, and work on it there: tick and untick, notes, overrides with a reason, opening and closing each character's checklist.
+- Members see it only for their own characters, read-only, and never anyone else's.
+- A long list shows its first 18 lines; the add-on's player panel has the rest.
+
 ### Your own progress
 
 A member sees the Promotion tab in their own player panel only: each of their characters' items toward the next rank, with whether each is met and the automated items' progress ("5 of 7 days"). It's read-only, and it never shows notes, who ticked what, or anyone else's progress.

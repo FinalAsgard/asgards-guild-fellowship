@@ -7,8 +7,11 @@ local _, addon = ...
 -- member's note should say (see NoteAudit), in a small panel to the right
 -- of the member detail panel, level with its note; for everyone, a mini
 -- profile of the selected member's player (alias, Discord, location, bio,
--- main and alts) in a panel hung under it. Forever and Retail share the
--- Communities guild roster, so one overlay serves both.
+-- main and alts) in a panel hung under it; and to the right of that, the
+-- selected member's player's promotion status (see
+-- PromotionsViewModel.PanelRows): an officer's for anyone, to work on, and
+-- a member's for their own player only, read-only. Forever and Retail share
+-- the Communities guild roster, so one overlay serves both.
 --
 -- It only adds its own child frames and follows the game's frames with
 -- hooksecurefunc and HookScript; nothing is drawn inside the game's panel.
@@ -55,6 +58,13 @@ local GuildNoteOverlay = {
     LINE_GAP = 3,
     LINE_HEIGHT = 12,
     IGNORE_SIZE = { 64, 18 },
+    -- The promotion panel: this wide, its lines this tall, at most this
+    -- many (a longer list ends with a pointer to the add-on's panel).
+    PROMOTION_WIDTH = 380,
+    PROMOTION_LINE_HEIGHT = 20,
+    PROMOTION_LINES = 18,
+    PROMOTION_TITLE = "Promotion",
+    PROMOTION_MORE = "|cff9d9d9dMore in the add-on's player panel|r",
     -- Member list methods that redraw its rows (scrolling, sorting, and
     -- roster refreshes all end in one of these); hooked where they exist.
     LIST_REFRESHES = { "RefreshListDisplay", "RefreshLayout", "Update" },
@@ -82,6 +92,12 @@ Overlay.__index = Overlay
 --   readyCheck  function() -> a function(name) telling whether the roster
 --               member named `name` is ready for promotion, or nil when
 --               nobody's flagged (members); asked once per redraw
+--   promotionFor function(name) -> the promotion rows for the player of
+--               the roster member named `name`, or nil when this user may
+--               not see them (or there are none)
+--   tick        function(key, item, ticked, note) -> true, or false and
+--               why: an officer's tick, untick or override
+--   toggle      function(key) -> opens or closes a character's checklist
 function GuildNoteOverlay.Create(options)
     return setmetatable({
         client = options.client,
@@ -100,6 +116,13 @@ function GuildNoteOverlay.Create(options)
         readyCheck = options.readyCheck or function()
             return nil
         end,
+        promotionFor = options.promotionFor or function()
+            return nil
+        end,
+        tick = options.tick or function()
+            return false
+        end,
+        toggle = options.toggle or function() end,
     }, Overlay)
 end
 
@@ -221,6 +244,7 @@ function Overlay:Attach()
         return created
     end)
     self.profile = okProfile and profile or nil
+    self:BuildPromotion(detail)
     local hooked = pcall(hook, detail, "DisplayMember", function(_, _, memberInfo)
         self:ShowMember(type(memberInfo) == "table" and memberInfo.name or nil)
     end)
@@ -246,6 +270,7 @@ function Overlay:ShowMember(name)
         return
     end
     self:ShowProfile(name)
+    self:ShowPromotion(name)
     local row
     if name ~= nil and self.isOfficer() then
         local ok, found = pcall(self.rowFor, name)
@@ -314,6 +339,99 @@ function Overlay:ShowProfile(name)
     profile:SetHeight(height(profile.title, 1) + GuildNoteOverlay.LINE_GAP
         + height(profile.body, math.max(#(summary.lines or {}), 1)) + button + 2 * GuildNoteOverlay.PANEL_PADDING)
     profile:Show()
+end
+
+-- Builds the promotion panel, to the right of the profile panel (or of the
+-- detail panel, without one): a title over PROMOTION_LINES lines drawn by
+-- PromotionLines, made a child of the detail panel so it shows and hides
+-- with it.
+function Overlay:BuildPromotion(detail)
+    local padding = GuildNoteOverlay.PANEL_PADDING
+    local ok, promotion = pcall(function()
+        local created = self:Box(detail)
+        if self.profile ~= nil then
+            created:SetPoint("TOPLEFT", self.profile, "TOPRIGHT", 0, 0)
+        else
+            created:SetPoint("TOPLEFT", detail, "BOTTOMRIGHT", GuildNoteOverlay.PROFILE_SHIFT, 0)
+        end
+        created:SetWidth(GuildNoteOverlay.PROMOTION_WIDTH)
+        created.title = created:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        created.title:SetPoint("TOPLEFT", created, "TOPLEFT", padding, -padding)
+        created.title:SetText(GuildNoteOverlay.PROMOTION_TITLE)
+        created.state = addon.PromotionLines.State({
+            createFrame = self.environment.CreateFrame,
+            tooltip = self.environment.GameTooltip,
+            tick = function(key, item, ticked, note)
+                return self.tick(key, item, ticked, note)
+            end,
+            toggle = function(key)
+                self.toggle(key)
+                self:ShowPromotion(self.member)
+            end,
+            redraw = function()
+                self:ShowPromotion(self.member)
+            end,
+        })
+        created.lines = {}
+        local index
+        for index = 1, GuildNoteOverlay.PROMOTION_LINES do
+            local line = self.environment.CreateFrame("Frame", nil, created)
+            line:SetHeight(GuildNoteOverlay.PROMOTION_LINE_HEIGHT)
+            local top = -padding - GuildNoteOverlay.LINE_HEIGHT - GuildNoteOverlay.LINE_GAP
+                - (index - 1) * GuildNoteOverlay.PROMOTION_LINE_HEIGHT
+            line:SetPoint("TOPLEFT", created, "TOPLEFT", padding, top)
+            line:SetPoint("TOPRIGHT", created, "TOPRIGHT", -padding, top)
+            line.text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            line.text:SetJustifyH("LEFT")
+            line.text:SetWordWrap(false)
+            addon.PromotionLines.Attach(line, created.state)
+            line:Hide()
+            created.lines[index] = line
+        end
+        created:Hide()
+        return created
+    end)
+    self.promotion = ok and promotion or nil
+end
+
+-- Shows the promotion status of the player of the member named `name`, or
+-- hides it when this user may not see it.
+function Overlay:ShowPromotion(name)
+    local promotion = self.promotion
+    if promotion == nil then
+        return
+    end
+    local rows
+    if name ~= nil then
+        local ok, found = pcall(self.promotionFor, name)
+        rows = ok and type(found) == "table" and found[1] ~= nil and found or nil
+    end
+    if rows == nil then
+        promotion:Hide()
+        return
+    end
+    local cap = GuildNoteOverlay.PROMOTION_LINES
+    local shown = {}
+    local index
+    for index = 1, math.min(#rows, cap) do
+        shown[index] = rows[index]
+    end
+    if #rows > cap then
+        shown[cap] = { kind = "promotion", text = GuildNoteOverlay.PROMOTION_MORE }
+    end
+    for index = 1, cap do
+        local line = promotion.lines[index]
+        if shown[index] ~= nil then
+            addon.PromotionLines.Draw(line, shown[index], promotion.state)
+            line:Show()
+        else
+            line.row = nil
+            line:Hide()
+        end
+    end
+    promotion:SetHeight(2 * GuildNoteOverlay.PANEL_PADDING + GuildNoteOverlay.LINE_HEIGHT
+        + GuildNoteOverlay.LINE_GAP + #shown * GuildNoteOverlay.PROMOTION_LINE_HEIGHT)
+    promotion:Show()
 end
 
 -- The panel's height for the lines it shows now: each line as tall as its

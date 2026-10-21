@@ -2246,6 +2246,27 @@ if clientProfile.supported then
             checks:Prune()
         end
     end
+    -- The game guild roster's promotion panel, for the member named `name`
+    -- selected there: their player's rows (as panelRows), with that
+    -- member's checklist open at first. Its own open checklists, kept while
+    -- the same member stays selected.
+    local rosterExpanded, rosterSelected = {}, nil
+    promotions.rosterRows = function(name)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local key = guild and normalizer:Key(name)
+        local character = key and partition:GetCharacter(key)
+        if character == nil or character.player == nil then
+            return nil
+        end
+        if key ~= rosterSelected then
+            rosterSelected = key
+            rosterExpanded = { [key] = true }
+        end
+        return promotions.panelRows(partition:CharactersOf(character.player), character.player, rosterExpanded)
+    end
+    promotions.toggleRoster = function(key)
+        rosterExpanded[key] = not rosterExpanded[key] or nil
+    end
     -- Requirements or ticks changed: redraw the page, the player panel and
     -- the roster's Ready markers, here and on the game's guild roster.
     promotions.changed = function()
@@ -2293,8 +2314,9 @@ if clientProfile.supported then
     end
     -- The player panel's Promotion tab (see PromotionsViewModel.PanelRows):
     -- an officer's for anyone, a member's for their own player only, and
-    -- nil for everyone else.
-    promotions.panelRows = function(keys, playerId)
+    -- nil for everyone else. `expanded` is the set of open checklists
+    -- (the panel's own, by default).
+    promotions.panelRows = function(keys, playerId, expanded)
         local inputs = promotionInputs()
         if inputs == nil then
             return nil
@@ -2331,7 +2353,7 @@ if clientProfile.supported then
         local highest = addon.PromotionPolicy.HighestRank(partition, playerId)
         return addon.PromotionsViewModel.PanelRows(characters, {
             officer = officer,
-            expanded = panelExpanded,
+            expanded = expanded or panelExpanded,
             highestRankName = highest and (inputs.rankNames[highest + 1] or ("Rank " .. highest)) or nil,
             nameOf = nameOf,
             formatDate = function(timestamp)
@@ -3380,6 +3402,17 @@ if clientProfile.supported then
         end,
         editProfile = function()
             rosterController:Open("profile")
+        end,
+        -- The selected member's player's promotion status: officers work on
+        -- anyone's; a member sees only their own, read-only.
+        promotionFor = function(name)
+            return promotions.rosterRows(name)
+        end,
+        tick = function(key, item, ticked, note)
+            return promotions.tick(key, item, ticked, note)
+        end,
+        toggle = function(key)
+            promotions.toggleRoster(key)
         end,
         -- Officers see which members are ready for promotion: worked out
         -- once per redraw of the rows.
