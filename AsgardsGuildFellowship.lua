@@ -286,8 +286,8 @@ if clientProfile.supported then
                 onPromotionsRank = function(step)
                     return promotions.rank(step)
                 end,
-                onPromotionsAdd = function(label, kind, n)
-                    return promotions.add(label, kind, n)
+                onPromotionsAdd = function(label, needsNote)
+                    return promotions.add(label, needsNote)
                 end,
                 onPromotionsRename = function(id, label, needsNote)
                     return promotions.rename(id, label, needsNote)
@@ -2179,6 +2179,7 @@ if clientProfile.supported then
         if guild == nil then
             return nil
         end
+        local dates = datesOf(partition)
         return addon.PromotionChecks.Create(partition:GetPromotionChecks(), {
             isOfficer = function(key)
                 return officerAuthority:IsOfficer(key)
@@ -2197,7 +2198,7 @@ if clientProfile.supported then
             -- only says the change happened by then, so it decides nothing.
             stintStart = function(key)
                 local character = partition:GetCharacter(key)
-                local since = character and datesOf(partition):RankSince(key, character.rank)
+                local since = character and dates:RankSince(key, character.rank)
                 if since == nil or (since.source ~= addon.MembershipDates.LOG
                     and since.source ~= addon.MembershipDates.OFFICER)
                 then
@@ -2408,19 +2409,17 @@ if clientProfile.supported then
         promotions.changed()
         return true
     end
-    -- `kind` is an item kind (true for a needs-a-note checkbox, false or
-    -- nil for a plain one); `n` an automated kind's number, as typed.
-    promotions.add = function(label, kind, n)
+    -- Adds a custom requirement: a checkbox, needing a note when
+    -- `needsNote`. (Automated checks are turned on with promotions.automated.)
+    promotions.add = function(label, needsNote)
         return editRequirements(function(requirements, author, now)
             local names = rankNames()
             local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, names)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end
-            if type(kind) ~= "string" then
-                kind = kind and addon.RankRequirements.KIND_CHECK_NOTE or addon.RankRequirements.KIND_CHECK
-            end
-            return requirements:Add(rank, label, kind, names[rank + 1], author, now, tonumber(n))
+            local kind = needsNote and addon.RankRequirements.KIND_CHECK_NOTE or addon.RankRequirements.KIND_CHECK
+            return requirements:Add(rank, label, kind, names[rank + 1], author, now)
         end)
     end
     -- Renames checkbox item `id`, and sets whether it needs a note when
