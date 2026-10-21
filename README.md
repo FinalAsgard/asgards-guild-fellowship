@@ -385,7 +385,7 @@ A mail paused at the limit doesn't hold you up: **Edit** your draft and send a n
 
 ## Promotions
 
-Each guild rank can have **promotion requirements**: what a character at that rank must do to move up to the next one. Officers set them up on the window's **Promotion Requirements** tab and work through each character's checklist in the [player panel](#in-the-player-panel-and-the-roster). A character who meets every requirement is flagged **Ready for promotion**, and an officer promotes them in the game's own guild window (add-ons aren't allowed to promote). The rest of the guild only sees their own progress (see [Your own progress](#your-own-progress)). The Promotions and [Guild Log](#guild-log) tabs are only shown to officers (the guild master's rank, or any rank that can view officer notes), and appear or disappear without a reload when someone is promoted or demoted.
+Each guild rank can have **promotion requirements**: what a character at that rank must do to move up to the next one. Officers set them up on the window's **Promotion Requirements** tab and work through each character's checklist in the [player panel](#in-the-player-panel-and-the-roster). A character who meets every requirement is flagged **Ready for promotion**, and an officer promotes them in the game's own guild window (add-ons aren't allowed to promote). The rest of the guild only sees their own progress (see [Your own progress](#your-own-progress)). The Promotion Requirements and [Guild Log](#guild-log) tabs are only shown to officers (the guild master's rank, or any rank that can view officer notes), and appear or disappear without a reload when someone is promoted or demoted.
 
 ### Setting up requirements
 
