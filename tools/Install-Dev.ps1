@@ -35,7 +35,7 @@ $ErrorActionPreference = "Stop"
 # the manifest through the junction.
 $addonFolderName = "AsgardsGuildFellowshipDev"
 $clients = @{
-    Forever = @{ Directory = "_classic_beta_"; Manifest = "AsgardsGuildFellowshipDev_Camelot.toc" }
+    Forever = @{ Directory = "_forever_"; Manifest = "AsgardsGuildFellowshipDev_Camelot.toc" }
     Retail = @{ Directory = "_retail_"; Manifest = "AsgardsGuildFellowshipDev_Mainline.toc" }
 }
 $target = $clients[$Client]

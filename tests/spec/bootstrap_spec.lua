@@ -258,7 +258,7 @@ test.test("the dev installer links the dev folder for the dev manifests", functi
     handle:close()
 
     test.assertContains(source, '$addonFolderName = "AsgardsGuildFellowshipDev"')
-    test.assertContains(source, 'Directory = "_classic_beta_"; Manifest = "AsgardsGuildFellowshipDev_Camelot.toc"')
+    test.assertContains(source, 'Directory = "_forever_"; Manifest = "AsgardsGuildFellowshipDev_Camelot.toc"')
     test.assertContains(source, 'Directory = "_retail_"; Manifest = "AsgardsGuildFellowshipDev_Mainline.toc"')
     test.assertContains(source, '[string]$Client = "Forever"')
     test.assertContains(source, '"Fetch-Libraries.ps1"')
