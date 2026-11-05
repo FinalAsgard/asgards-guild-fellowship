@@ -302,6 +302,9 @@ local function showDiscordDialog(label, current, onSave)
     return showTextDialog("SET_DISCORD", "Discord username for %s (leave empty to clear):",
         addon.FellowshipStore.PROFILE_FIELDS.discord, label, current, onSave)
 end
+-- The same dialog, for the game roster's mini profile: false when the
+-- client has no dialogs.
+RosterWindow.ShowDiscordDialog = showDiscordDialog
 
 local PICKER_WIDTH = 360
 local PICKER_HEIGHT = 380

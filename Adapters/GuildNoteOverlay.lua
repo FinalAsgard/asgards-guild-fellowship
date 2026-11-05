@@ -10,7 +10,8 @@ local _, addon = ...
 -- PromotionsViewModel.PanelRows): an officer's for anyone, to work on, and
 -- a member's for their own player only, read-only; and for everyone, under
 -- that (or straight under the detail panel), a mini profile of the selected
--- member's player (alias, Discord, location, bio, main and alts). Forever and Retail share
+-- member's player (alias, Discord, location, bio, main and alts), with a
+-- Set Discord… button. Forever and Retail share
 -- the Communities guild roster, so one overlay serves both.
 --
 -- It only adds its own child frames and follows the game's frames with
@@ -31,6 +32,10 @@ local GuildNoteOverlay = {
     TOO_LONG_TEXT = "Too long for a public note: the other text has to be trimmed.",
     IGNORE_TEXT = "Ignore",
     EDIT_TEXT = "Edit",
+    DISCORD_TEXT = "Set Discord...",
+    -- The mini profile's Set Discord… button, bottom left (Edit, on the
+    -- user's own, is bottom right). Best guess at placement: check in game.
+    DISCORD_SIZE = { 100, 18 },
     -- The small marker on a roster row whose member's note is out of date.
     MARKER_TEXTURE = "Interface\\COMMON\\Indicator-Yellow",
     MARKER_SIZE = 12,
@@ -94,6 +99,9 @@ Overlay.__index = Overlay
 --               the add-on has no record of them; `own` when that player is
 --               the user's, who then gets an Edit button
 --   editProfile function() -> opens the user's My Profile page
+--   setDiscord  function(name) -> opens the Set Discord box for the player
+--               of the roster member named `name` (saved by an officer, a
+--               suggestion from a member); the overlay redraws on the save
 --   readyCheck  function() -> a function(name) telling whether the roster
 --               member named `name` is ready for promotion, or nil when
 --               nobody's flagged (members); asked once per redraw
@@ -118,6 +126,7 @@ function GuildNoteOverlay.Create(options)
             return nil
         end,
         editProfile = options.editProfile or function() end,
+        setDiscord = options.setDiscord or function() end,
         readyCheck = options.readyCheck or function()
             return nil
         end,
@@ -245,6 +254,16 @@ function Overlay:Attach()
         end)
         edit:Hide()
         created.edit = edit
+        local discord = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
+        discord:SetSize(GuildNoteOverlay.DISCORD_SIZE[1], GuildNoteOverlay.DISCORD_SIZE[2])
+        discord:SetPoint("BOTTOMLEFT", created, "BOTTOMLEFT", padding, padding)
+        discord:SetText(GuildNoteOverlay.DISCORD_TEXT)
+        discord:SetScript("OnClick", function()
+            if self.member ~= nil then
+                pcall(self.setDiscord, self.member)
+            end
+        end)
+        created.discord = discord
         created:Hide()
         return created
     end)
@@ -333,11 +352,13 @@ function Overlay:ShowProfile(name)
         local ok, found = pcall(text.GetStringHeight, text)
         return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT * lines
     end
-    -- The user's own player gets an Edit button at the bottom.
-    local button = 0
+    -- Set Discord… along the bottom for everyone, and the user's own
+    -- player gets an Edit button beside it.
+    local button = GuildNoteOverlay.EDIT_GAP + math.max(GuildNoteOverlay.IGNORE_SIZE[2],
+        GuildNoteOverlay.DISCORD_SIZE[2])
+    profile.discord:Show()
     if summary.own then
         profile.edit:Show()
-        button = GuildNoteOverlay.EDIT_GAP + GuildNoteOverlay.IGNORE_SIZE[2]
     else
         profile.edit:Hide()
     end

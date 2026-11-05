@@ -133,9 +133,14 @@ local function installGuildRoster(environment)
             table.insert(parent.children, widget)
             return widget
         end
+        -- The profile's Edit button first, then its Set Discord… button.
         if parent ~= nil and parent == detail.profile then
-            detail.profile.editButton = fakeWidget()
-            return detail.profile.editButton
+            if detail.profile.editButton == nil then
+                detail.profile.editButton = fakeWidget()
+                return detail.profile.editButton
+            end
+            detail.profile.discordButton = fakeWidget()
+            return detail.profile.discordButton
         end
         if parent ~= nil and parent == detail.panel then
             detail.panel.button = fakeWidget()
@@ -191,6 +196,10 @@ local function build(world, options)
         end,
         editProfile = function()
             options.edited = (options.edited or 0) + 1
+        end,
+        setDiscord = function(name)
+            options.discordFor = options.discordFor or {}
+            table.insert(options.discordFor, name)
         end,
         promotionFor = function(name)
             return (options.promotions or {})[name]
@@ -433,9 +442,9 @@ local function registerProfileTests(profile)
         test.assertEqual(6, shown.points[1][4])
         test.assertEqual("BOTTOMRIGHT", shown.points[2][3])
         test.assertEqual(6, shown.points[2][4])
-        -- Tall enough for the title and three lines; someone else's
-        -- profile has no Edit button.
-        test.assertEqual(12 + 3 + 3 * 12 + 16, shown.height)
+        -- Tall enough for the title, three lines and the buttons' row;
+        -- someone else's profile has no Edit button.
+        test.assertEqual(12 + 3 + 3 * 12 + 10 + 18 + 16, shown.height)
         test.assertFalse(shown.editButton.shown)
 
         -- Someone the add-on has no record of: no profile.
@@ -466,6 +475,32 @@ local function registerProfileTests(profile)
         test.assertEqual(12 + 3 + 12 + 10 + 18 + 16, detail.profile.height)
         edit.OnClick()
         test.assertEqual(1, options.edited)
+    end)
+
+    test.test(profile .. ": anyone's mini profile has a Set Discord button for the selected player", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local options = { officer = false, profiles = {
+            Hammer = { title = "TheTool (Toolbox)", lines = { "Main: Toolbox (80)" } },
+            Toolbox = { title = "TheTool (Toolbox)", lines = { "Main: Toolbox (80)" }, own = true },
+        } }
+        local overlay = build(world, options)
+
+        overlay:Attach()
+        detail:DisplayMember(1, { name = "Hammer" })
+
+        local button = detail.profile.discordButton
+        test.assertTrue(button.shown, "someone else's profile has it too")
+        test.assertEqual("Set Discord...", button.text)
+        test.assertEqual("BOTTOMLEFT", button.points[1][1])
+        button.OnClick()
+        test.assertEqual("Hammer", options.discordFor[1])
+
+        detail:DisplayMember(1, { name = "Toolbox" })
+        test.assertTrue(button.shown)
+        test.assertTrue(detail.profile.editButton.shown, "beside the user's own Edit button")
+        button.OnClick()
+        test.assertEqual("Toolbox", options.discordFor[2])
     end)
 
     test.test(profile .. ": without the guild roster or hooksecurefunc, the overlay stays off", function()
@@ -730,6 +765,63 @@ local function registerRowTests(profile)
         lines[2].scripts.OnMouseUp(lines[2])
         test.assertContains(lines[2].text.text, "[+] ", "closed")
         test.assertFalse(lines[3].shown)
+    end)
+
+    test.test(profile .. ": in the whole add-on, an officer sets a Discord name from the mini profile and sees the "
+        .. "check pass", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local shown = {}
+        world.environment.StaticPopupDialogs = {}
+        world.environment.StaticPopup_Show = function(name, label, _, data)
+            table.insert(shown, { name = name, label = label, data = data })
+        end
+        local member = world.guild.members[#world.guild.members]
+        fixtures.loadAddon(world)
+        fixtures.fire(world, "ADDON_LOADED", world.addonName)
+        world.loggedIn = true
+        fixtures.fire(world, "PLAYER_LOGIN")
+        fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local _, partition, normalizer = world.addon.rosterController:QuietContext()
+        local key = normalizer:Key(member.name)
+        local requirements = world.addon.RankRequirements.Create(partition:GetRankRequirements(), {
+            isOfficer = function()
+                return true
+            end,
+        })
+        requirements:SetAutomated(partition:GetCharacter(key).rank, "discord", true, nil, nil, "boss", world.time)
+
+        detail:DisplayMember(1, { name = member.name })
+        local function promotionText()
+            local texts = {}
+            local index
+            for index = 1, #detail.promotion.lines do
+                local line = detail.promotion.lines[index]
+                if line.shown then
+                    table.insert(texts, line.text.text or "")
+                end
+            end
+            return table.concat(texts, "\n")
+        end
+        test.assertContains(promotionText(), "not set")
+        test.assertContains(detail.profile.body.text, "Discord:\n", "no name yet")
+
+        -- The add-on's own window was never opened.
+        detail.profile.discordButton.OnClick()
+        test.assertEqual(1, #shown)
+        test.assertEqual(nil, shown[1].data.current, "an empty box with no name yet")
+        shown[1].data.onSave("hammer#1")
+
+        test.assertContains(detail.profile.body.text, "Discord: hammer#1", "the mini profile is redrawn")
+        test.assertContains(promotionText(), "Ready for promotion", "and the check is seen to pass")
+        test.assertContains(promotionText(), "hammer#1")
+
+        detail.profile.discordButton.OnClick()
+        test.assertEqual("hammer#1", shown[2].data.current, "prefilled with the current name")
+        shown[2].data.onSave("")
+        test.assertContains(promotionText(), "not set", "clearing it clears the name")
     end)
 
     test.test(profile .. ": in the whole add-on, a member sees only their own promotion status, read-only",

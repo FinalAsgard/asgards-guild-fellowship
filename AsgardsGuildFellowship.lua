@@ -3410,6 +3410,23 @@ if clientProfile.supported then
         editProfile = function()
             rosterController:Open("profile")
         end,
+        -- The player panel's Set Discord… box, from the mini profile.
+        setDiscord = function(name)
+            local guild, partition, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(name)
+            local character = key and partition:GetCharacter(key)
+            local player = character and partition:GetPlayer(character.player)
+            if player == nil then
+                return
+            end
+            local summary = addon.PlayerPanelViewModel.Summary({ partition = partition, playerId = character.player,
+                normalizer = normalizer })
+            local label = summary and summary.title or name
+            local current = partition:PlayerProfileText(character.player, "discord")
+            addon.RosterWindow.ShowDiscordDialog(label, current, function(text)
+                rosterController:SetDiscord(player.main, text)
+            end)
+        end,
         -- The selected member's player's promotion status: officers work on
         -- anyone's; a member sees only their own, read-only.
         promotionFor = function(name)

@@ -630,11 +630,12 @@ function Controller:Detach(key)
     return self:Organize("Detach", key)
 end
 
--- "Set Discord…" from the player panel: sets the Discord username of
--- `key`'s player to `text` ("" clears it), as an officer's or as a member's
--- suggestion, and redraws.
+-- "Set Discord…" from the player panel or the game roster's mini profile:
+-- sets the Discord username of `key`'s player to `text` ("" clears it), as
+-- an officer's or as a member's suggestion, and redraws. The add-on's
+-- window needn't have been opened.
 function Controller:SetDiscord(key, text)
-    if self.current == nil or self.onDiscordChanged == nil then
+    if self.onDiscordChanged == nil or (self.current == nil and self:QuietContext() == nil) then
         return false
     end
     if self.onDiscordChanged(key, text) == nil then
