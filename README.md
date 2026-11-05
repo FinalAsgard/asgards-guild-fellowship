@@ -267,6 +267,10 @@ First and last parts only differ on WoW Forever, where names have two parts, so 
 
 When you greet someone, the add-on tells other add-on users in the guild. Once a player has had enough greetings from anyone (2 by default; set it from 1 to 10 in the Guild Greet settings), your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (15 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever category or character it was for. This only counts members running the add-on; greetings typed by hand aren't seen. If two people press Greet at the same moment, an extra greeting can slip through.
 
+Greetings you press in a row take turns, so nobody floods guild chat. The first posts at once. Each one posted starts a cooldown before the next, 2 seconds longer each time: press Greet on three prompts and the second posts 2 seconds after the first, the third 4 seconds after that. A greeting still waiting when its player has had enough greetings from others is dropped without posting. Once a cooldown runs out with nothing waiting, your next Greet posts at once again, and the cooldown starts over at 2 seconds. Turning Guild Greet off drops greetings still waiting.
+
+Greeting messages, recruitment ad times, and the officer channel probe travel apart from guild sync's traffic, so a busy sync (a big guild logging in at once) doesn't hold them up.
+
 ### Editing greetings
 
 Greetings are edited on the window's **Greetings** tab (`/agf greet`, or **Edit Greetings** in the AddOns options), below Guild Greet's settings. The editor has a button for each category. Each lists that category's greetings, with **Edit** beside each one. Type in the box below the list and press **Add** (or Enter) to add a greeting. **Edit** puts a greeting in the box, with **Save**, **Delete** and **Cancel** beside it. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The editor lists every placeholder.

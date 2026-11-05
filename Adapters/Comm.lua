@@ -8,6 +8,16 @@ local _, addon = ...
 -- add-ons. Small messages others should hear within seconds (Guild Greet's
 -- "greeted") can ask for "NORMAL" instead. Like the WoW adapter, every method returns nil or false instead
 -- of raising.
+--
+-- The game limits how fast each add-on message prefix may send, and
+-- ChatThrottleLib holds a prefix's queue back while it's over that limit,
+-- so a big sync backlog would hold up everything sent under the same
+-- prefix. Messages others must hear within seconds (Guild Greet's
+-- "greeted", Guild Recruit's ad times, the officer channel probe) go out
+-- "live", under a second prefix of their own, at NORMAL priority. Until
+-- every guildmate's add-on listens on the live prefix, each live message
+-- is also sent under the sync prefix for older versions; both prefixes
+-- reach the same receivers, which already ignore a message heard twice.
 local Comm = {
     DISTRIBUTION = "GUILD",
     WHISPER = "WHISPER",
@@ -25,9 +35,10 @@ addon.Comm = Comm
 local Endpoint = {}
 Endpoint.__index = Endpoint
 
--- `client` is the WoW adapter; `prefix` the build's add-on message prefix.
-function Comm.Create(client, prefix)
-    return setmetatable({ client = client, prefix = prefix }, Endpoint)
+-- `client` is the WoW adapter; `prefix` the build's add-on message prefix,
+-- and `livePrefix`, when given, its prefix for live messages.
+function Comm.Create(client, prefix, livePrefix)
+    return setmetatable({ client = client, prefix = prefix, livePrefix = livePrefix }, Endpoint)
 end
 
 -- Starts listening: onMessage(message, sender) runs for every guild message
@@ -48,7 +59,7 @@ function Endpoint:Start(onMessage, onWhisper, onOfficer)
     if not pcall(aceComm.Embed, aceComm, endpoint) then
         return false
     end
-    local ok = pcall(endpoint.RegisterComm, endpoint, self.prefix, function(_, text, distribution, sender)
+    local function heard(_, text, distribution, sender)
         local receive = distribution == Comm.DISTRIBUTION and onMessage
             or distribution == Comm.WHISPER and onWhisper
             or distribution == Comm.OFFICER and onOfficer or nil
@@ -65,9 +76,14 @@ function Endpoint:Start(onMessage, onWhisper, onOfficer)
         if type(receive) == "function" then
             pcall(receive, message, sender)
         end
-    end)
-    if not ok then
+    end
+    if not pcall(endpoint.RegisterComm, endpoint, self.prefix, heard) then
         return false
+    end
+    -- Without the live prefix, live messages still go out under the sync
+    -- prefix.
+    if self.livePrefix ~= nil and not pcall(endpoint.RegisterComm, endpoint, self.livePrefix, heard) then
+        self.livePrefix = nil
     end
     self.endpoint = endpoint
     self.serializer = serializer
@@ -81,51 +97,58 @@ function Endpoint:OnHeard(onHeard)
     self.onHeard = onHeard
 end
 
+-- Serializes `message` and sends it on `distribution` (to `target` for a
+-- whisper) at `priority`. A live message goes under the live prefix, with
+-- a copy under the sync prefix for older add-ons. Returns false when it
+-- couldn't be sent.
+function Endpoint:send(message, distribution, target, priority, live)
+    if self.endpoint == nil or type(message) ~= "table" then
+        return false
+    end
+    local serialized, text = pcall(self.serializer.Serialize, self.serializer, message)
+    if not serialized or type(text) ~= "string" then
+        return false
+    end
+    local function sendUnder(prefix, sendPriority)
+        local ok = pcall(self.endpoint.SendCommMessage, self.endpoint, prefix, text, distribution, target,
+            sendPriority)
+        return ok
+    end
+    if not live or self.livePrefix == nil then
+        return sendUnder(self.prefix, live and Comm.PRIORITY_NORMAL or priority)
+    end
+    local ok = sendUnder(self.livePrefix, Comm.PRIORITY_NORMAL)
+    sendUnder(self.prefix, Comm.PRIORITY_NORMAL)
+    return ok
+end
+
 -- Sends `message` to the guild at `priority` (BULK when nil). Returns false
 -- when it couldn't be sent.
 function Endpoint:Broadcast(message, priority)
-    if self.endpoint == nil or type(message) ~= "table" then
-        return false
-    end
-    local serialized, text = pcall(self.serializer.Serialize, self.serializer, message)
-    if not serialized or type(text) ~= "string" then
-        return false
-    end
-    local ok = pcall(self.endpoint.SendCommMessage, self.endpoint, self.prefix, text,
-        Comm.DISTRIBUTION, nil, priority or Comm.PRIORITY)
-    return ok
+    return self:send(message, Comm.DISTRIBUTION, nil, priority or Comm.PRIORITY, false)
 end
 
--- Sends `message` to the guild's officer channel at BULK priority: only
--- guildmates whose rank can listen to officer chat get it. Returns false
--- when it couldn't be sent.
-function Endpoint:SendOfficers(message)
-    if self.endpoint == nil or type(message) ~= "table" then
-        return false
-    end
-    local serialized, text = pcall(self.serializer.Serialize, self.serializer, message)
-    if not serialized or type(text) ~= "string" then
-        return false
-    end
-    local ok = pcall(self.endpoint.SendCommMessage, self.endpoint, self.prefix, text,
-        Comm.OFFICER, nil, Comm.PRIORITY)
-    return ok
+-- Sends `message` to the guild live: heard within seconds, however much
+-- sync traffic is waiting. Returns false when it couldn't be sent.
+function Endpoint:BroadcastLive(message)
+    return self:send(message, Comm.DISTRIBUTION, nil, Comm.PRIORITY_NORMAL, true)
 end
 
--- Whispers `message` to the character named `target` at BULK priority.
--- Returns false when it couldn't be sent (whispered add-on messages may not
--- work on every client).
-function Endpoint:Whisper(message, target)
-    if self.endpoint == nil or type(message) ~= "table" or type(target) ~= "string" or target == "" then
+-- Sends `message` to the guild's officer channel (at BULK priority, or
+-- live when `live`): only guildmates whose rank can listen to officer chat
+-- get it. Returns false when it couldn't be sent.
+function Endpoint:SendOfficers(message, live)
+    return self:send(message, Comm.OFFICER, nil, Comm.PRIORITY, live == true)
+end
+
+-- Whispers `message` to the character named `target` (at BULK priority,
+-- or live when `live`). Returns false when it couldn't be sent (whispered
+-- add-on messages may not work on every client).
+function Endpoint:Whisper(message, target, live)
+    if type(target) ~= "string" or target == "" then
         return false
     end
-    local serialized, text = pcall(self.serializer.Serialize, self.serializer, message)
-    if not serialized or type(text) ~= "string" then
-        return false
-    end
-    local ok = pcall(self.endpoint.SendCommMessage, self.endpoint, self.prefix, text,
-        Comm.WHISPER, target, Comm.PRIORITY)
-    return ok
+    return self:send(message, Comm.WHISPER, target, Comm.PRIORITY, live == true)
 end
 
 -- Whether guild rank `rankIndex` (0-based, as the roster reports it) has

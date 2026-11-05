@@ -181,6 +181,8 @@ for index = 1, #fixtures.PROFILES do
         world.greet:OnPresence("online", world.names.bishop)
         world.handlers.greet(world.shown[1].player)
         world.handlers.greet(world.shown[1].player)
+        -- The second greeting posts once the first one's cooldown ends.
+        advance(world, 2)
 
         local anvil = string.match(world.names.anvil, "^[^%-]+")
         local tongs = string.match(world.names.tongs, "^[^%-]+")
@@ -199,6 +201,8 @@ for index = 1, #fixtures.PROFILES do
         world.greet:OnPresence("online", world.names.bishop)
         world.handlers.greet(world.shown[1].player)
         world.handlers.greet(world.shown[1].player)
+        -- The second greeting posts once the first one's cooldown ends.
+        advance(world, 2)
 
         if profile == "Forever" then
             test.assertEqual("Anvil Stone|Anvil|Stone|Tongs|Stone|Anvil Stone", world.sent[1])
@@ -919,4 +923,80 @@ test.test("greet: prompts in instances are on by default, and turned off none sh
     test.assertTrue(world.store:GreetInInstances())
     test.assertFalse(world.store:SetGreetInInstances(false))
     test.assertFalse(world.store:SetGreetInInstances("off"))
+end)
+
+-- Greet cooldown ---------------------------------------------------------------
+
+-- Bolt, Bishop and Anvil come online, and the user presses Greet on each.
+local function greetThree(world)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+    local index
+    for index = 1, 3 do
+        world.handlers.greet(world.shown[1].player)
+    end
+    test.assertEqual(0, #world.shown, "each prompt closes when pressed")
+end
+
+test.test("guild greet: greetings in a row wait 2, then 4 more seconds, and the cooldown resets once it runs out",
+    function()
+        local world = setup("Retail")
+        greetThree(world)
+        test.assertEqual(1, #world.sent, "the first posts at once")
+
+        advance(world, 1)
+        test.assertEqual(1, #world.sent)
+        advance(world, 1)
+        test.assertEqual(2, #world.sent, "the second 2 seconds later")
+        advance(world, 3)
+        test.assertEqual(2, #world.sent)
+        advance(world, 1)
+        test.assertEqual(3, #world.sent, "the third 4 seconds after that")
+        test.assertEqual(3, #world.announced)
+
+        -- The third's 6-second cooldown runs out with nothing waiting.
+        advance(world, 6)
+        world.greet:OnPresence("online", world.names.rust)
+        world.handlers.greet(world.shown[1].player)
+        test.assertEqual(4, #world.sent, "after the cooldown, Greet posts at once again")
+        local last = world.timers[#world.timers]
+        test.assertEqual(world.time + 2, last.at, "and the cooldown starts over at 2 seconds")
+    end)
+
+test.test("guild greet: a waiting greeting for a player others greeted enough is dropped unposted", function()
+    local world = setup("Retail")
+    greetThree(world)
+    test.assertEqual(1, #world.sent)
+
+    -- Bishop's greeting waits; meanwhile two others greet Bishop.
+    test.assertTrue(greeted(world, "bolt", world.names.bishop, START))
+    test.assertTrue(greeted(world, "rust", world.names.bishop, START))
+
+    advance(world, 2)
+    test.assertEqual(2, #world.sent, "Bishop's is skipped, and Anvil's takes its turn")
+    test.assertContains(world.sent[2], string.match(world.names.anvil, "^[^%-]+"))
+    test.assertEqual(2, #world.announced)
+    advance(world, 10)
+    test.assertEqual(2, #world.sent)
+end)
+
+test.test("guild greet: turning Guild Greet off drops greetings still waiting", function()
+    local world = setup("Retail")
+    greetThree(world)
+
+    world.greet:OnEnabledChanged(false)
+    advance(world, 10)
+
+    test.assertEqual(1, #world.sent)
+end)
+
+test.test("guild greet: without timers, each Greet posts at once", function()
+    local world = setup("Retail")
+    world.greet.after = function()
+        return false
+    end
+    greetThree(world)
+
+    test.assertEqual(3, #world.sent)
 end)

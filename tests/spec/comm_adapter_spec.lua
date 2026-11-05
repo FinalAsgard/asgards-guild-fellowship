@@ -172,3 +172,57 @@ test.test("a client without encounter or keystone checks is busy only in combat,
     end
     test.assertFalse(comm:IsBusy())
 end)
+
+test.test("live messages go under the live prefix at NORMAL, with a copy under the sync prefix", function()
+    local world = fixtures.newEnvironment("Retail")
+    local addon = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua", "Adapters/Comm.lua")
+    local comm = addon.Comm.Create(addon.Compatibility.Create(world.environment), "AGFSync", "AGFLive")
+    local guild, officer, whispered = {}, {}, {}
+    test.assertTrue(comm:Start(function(message)
+        table.insert(guild, message)
+    end, function(message)
+        table.insert(whispered, message)
+    end, function(message)
+        table.insert(officer, message)
+    end))
+    local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
+
+    test.assertTrue(comm:BroadcastLive({ v = 1, t = "greeted" }))
+    test.assertEqual(2, #world.sentMessages)
+    test.assertEqual("AGFLive", world.sentMessages[1].prefix)
+    test.assertEqual("NORMAL", world.sentMessages[1].priority)
+    test.assertEqual("GUILD", world.sentMessages[1].distribution)
+    test.assertEqual("AGFSync", world.sentMessages[2].prefix, "older add-ons still hear it")
+    test.assertEqual("NORMAL", world.sentMessages[2].priority)
+
+    test.assertTrue(comm:SendOfficers({ v = 1, t = "logping" }, true))
+    test.assertEqual("AGFLive", world.sentMessages[3].prefix)
+    test.assertEqual("OFFICER", world.sentMessages[3].distribution)
+    test.assertTrue(comm:Whisper({ v = 1, t = "logpong" }, "Anvil-Area52", true))
+    test.assertEqual("AGFLive", world.sentMessages[5].prefix)
+    test.assertEqual("Anvil-Area52", world.sentMessages[5].recipient)
+
+    -- Sync traffic stays under the sync prefix alone.
+    test.assertTrue(comm:Broadcast({ v = 1 }))
+    test.assertEqual(7, #world.sentMessages)
+    test.assertEqual("AGFSync", world.sentMessages[7].prefix)
+    test.assertEqual("BULK", world.sentMessages[7].priority)
+
+    -- Both prefixes reach the same receivers.
+    world.commHandlers.AGFLive("AGFLive", serializer:Serialize({ v = 1, t = "greeted" }), "GUILD", "Hammer-Area52")
+    world.commHandlers.AGFLive("AGFLive", serializer:Serialize({ v = 1, t = "logping" }), "OFFICER", "Anvil-Area52")
+    world.commHandlers.AGFLive("AGFLive", serializer:Serialize({ v = 1, t = "logpong" }), "WHISPER", "Anvil-Area52")
+    test.assertEqual(1, #guild)
+    test.assertEqual(1, #officer)
+    test.assertEqual(1, #whispered)
+end)
+
+test.test("without a live prefix, live messages go under the sync prefix at NORMAL", function()
+    local world, comm = build()
+    comm:Start(function() end)
+
+    test.assertTrue(comm:BroadcastLive({ v = 1 }))
+    test.assertEqual(1, #world.sentMessages)
+    test.assertEqual("AGFSync", world.sentMessages[1].prefix)
+    test.assertEqual("NORMAL", world.sentMessages[1].priority)
+end)

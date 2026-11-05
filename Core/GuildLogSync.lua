@@ -34,6 +34,8 @@ local _, addon = ...
 --   send(message)      sends to the guild's officers
 --   probe(message)     -> whether it could send `message` to the officer
 --                         channel alone, with no fallback (send, when nil)
+--   answer(message)    sends a probe's answer to the guild's officers
+--                      (send, when nil)
 --   log()              -> this officer's GuildLog and NameNormalizer, or
 --                         nil when this character isn't an officer (or
 --                         there's no guild)
@@ -80,6 +82,7 @@ function GuildLogSync.Create(options)
             options.send(message)
             return true
         end,
+        answer = options.answer or options.send,
         log = options.log,
         selfKey = options.selfKey,
         isOfficer = options.isOfficer,
@@ -330,7 +333,7 @@ function Sync:Process(message, sender)
     end
     if message.t == GuildLogSync.TYPE_PING then
         if type(message.id) == "string" then
-            self:Send({ t = GuildLogSync.TYPE_PONG, re = message.id })
+            self.answer({ v = GuildLogSync.PROTOCOL, t = GuildLogSync.TYPE_PONG, re = message.id })
         end
         return 0
     end
