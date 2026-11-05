@@ -9,10 +9,9 @@ local _, addon = ...
 --         by }
 --         `rank` is the 0-based rank index (as the roster numbers ranks) the
 --         item belongs to, `kind` an item kind (KINDS), `n` an automated
---         kind's number (days, or a level; the add-on check has none, and
---         one made when it took days keeps them, unused), `position` its
---         place in the
---         rank's list. A deleted item stays as a tombstone, so it
+--         kind's number (days, or a level; the add-on and Discord checks
+--         have none, and an add-on check made when it took days keeps
+--         them, unused), `position` its place in the rank's list. A deleted item stays as a tombstone, so it
 --         beats older edits made elsewhere.
 --   rank  { t = "rank", rank, name, at, by }: the rank's name when an
 --         officer last edited its requirements, so the editor can warn when
@@ -44,6 +43,7 @@ local RankRequirements = {
     KIND_RANK_DAYS = "rank-days",
     KIND_LEVEL = "level",
     KIND_ADDON = "addon",
+    KIND_DISCORD = "discord",
     MAX_LABEL = 60,
     -- The most items a rank can have.
     MAX_ITEMS = 15,
@@ -69,6 +69,7 @@ RankRequirements.KINDS = {
     [RankRequirements.KIND_RANK_DAYS] = "Days at rank",
     [RankRequirements.KIND_LEVEL] = "Character level",
     [RankRequirements.KIND_ADDON] = "Has the Guild Fellowship Addon",
+    [RankRequirements.KIND_DISCORD] = "Has a Discord name set",
 }
 
 -- The automated kinds, in the order the editor lists them. A rank has at
@@ -79,11 +80,13 @@ RankRequirements.AUTOMATED_ORDER = {
     RankRequirements.KIND_RANK_DAYS,
     RankRequirements.KIND_LEVEL,
     RankRequirements.KIND_ADDON,
+    RankRequirements.KIND_DISCORD,
 }
 
 -- The automated kinds, each with the range of its `n`, the label an item
 -- gets when the officer leaves it blank, and what `n` is called in the
--- editor. A kind without a range (the add-on check) has no number.
+-- editor. A kind without a range (the add-on and Discord checks) has no
+-- number.
 RankRequirements.AUTOMATED = {
     [RankRequirements.KIND_CHAR_DAYS] = { low = 1, high = 3650, label = "In the guild %d days", number = "Days" },
     [RankRequirements.KIND_PLAYER_DAYS] = { low = 1, high = 3650, label = "Player in the guild %d days",
@@ -91,7 +94,9 @@ RankRequirements.AUTOMATED = {
     [RankRequirements.KIND_RANK_DAYS] = { low = 1, high = 3650, label = "At this rank %d days", number = "Days" },
     [RankRequirements.KIND_LEVEL] = { low = 1, high = 100, label = "Level %d", number = "Level" },
     -- Any of the player's characters ever heard on add-on sync.
-    [RankRequirements.KIND_ADDON] = { label = "Has the Guild Fellowship Addon" },
+    [RankRequirements.KIND_ADDON] = { label = "Has the Guild Fellowship Addon", legacyNumber = true },
+    -- The player has a Discord name on file.
+    [RankRequirements.KIND_DISCORD] = { label = "Has a Discord name set" },
 }
 
 RankRequirements.TYPES = {
@@ -139,7 +144,7 @@ function RankRequirements.IsRecord(record)
     if automated.low == nil then
         -- An add-on check made when it took a number of days keeps it,
         -- unused.
-        return record.n == nil or isWhole(record.n, 0, 10000)
+        return record.n == nil or (automated.legacyNumber == true and isWhole(record.n, 0, 10000))
     end
     return isWhole(record.n, automated.low, automated.high)
 end

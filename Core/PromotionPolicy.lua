@@ -104,6 +104,21 @@ PromotionPolicy.STATUS = {
         local text = count == 0 and "seen today" or ("seen " .. count .. (count == 1 and " day ago" or " days ago"))
         return true, text
     end,
+    -- Player-wide: the player's Discord name (the newest any of its
+    -- characters set) isn't empty.
+    discord = function(inputs, key, item, character)
+        local partition = inputs.partition
+        local name
+        if character.player ~= nil then
+            name = partition:PlayerProfileText(character.player, "discord")
+        else
+            name = partition:GetProfileText(key, "discord")
+        end
+        if type(name) ~= "string" or not string.find(name, "%S") then
+            return false, "not set"
+        end
+        return true, name
+    end,
 }
 PromotionPolicy.STATUS["check-note"] = PromotionPolicy.STATUS.check
 

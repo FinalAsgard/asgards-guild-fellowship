@@ -115,6 +115,19 @@ test.test("changes by non-officers, oversized labels, and too many items are ref
     test.assertEqual(nil, (requirements:Add(3, "One more", "check", "Veteran", OFFICER, NOW + 100)))
 end)
 
+test.test("an add-on that doesn't know a kind refuses just that record", function()
+    local requirements, addon = newRequirements()
+    -- An older add-on, from before the Discord check.
+    addon.RankRequirements.KINDS.discord = nil
+    addon.RankRequirements.AUTOMATED.discord = nil
+
+    test.assertFalse(requirements:Apply({ t = "item", id = "d", rank = 4, label = "Has a Discord name set",
+        kind = "discord", position = 1, at = NOW, by = OFFICER }))
+    test.assertTrue(requirements:Apply({ t = "item", id = "c", rank = 4, label = "Read the rules", kind = "check",
+        position = 2, at = NOW, by = OFFICER }), "the rest still apply")
+    test.assertEqual("Read the rules", labels(requirements, 4))
+end)
+
 test.test("the editor warns when the game's rank name no longer matches the one stored", function()
     local requirements, addon = newRequirements()
     requirements:Add(3, "Hi", "check", "Veteran", OFFICER, NOW)
@@ -214,7 +227,7 @@ test.test("automated items carry their number, which an officer can change", fun
     test.assertEqual(1, #model.items, "only custom requirements are listed as items")
     test.assertEqual("Read the rules", model.items[1].label)
     test.assertFalse(model.items[1].needsNote)
-    test.assertEqual(5, #model.automated, "every automatic check is listed, on or off")
+    test.assertEqual(6, #model.automated, "every automatic check is listed, on or off")
     test.assertEqual("char-guild-days", model.automated[1].kind)
     test.assertEqual("Character days in guild", model.automated[1].text)
     test.assertTrue(model.automated[1].enabled)
@@ -226,6 +239,10 @@ test.test("automated items carry their number, which an officer can change", fun
     test.assertEqual("Has the Guild Fellowship Addon", model.automated[5].text)
     test.assertFalse(model.automated[5].enabled)
     test.assertEqual(nil, model.automated[5].numberText, "the add-on check has no number")
+    test.assertEqual("discord", model.automated[6].kind, "the Discord check is listed last")
+    test.assertEqual("Has a Discord name set", model.automated[6].text)
+    test.assertFalse(model.automated[6].enabled)
+    test.assertEqual(nil, model.automated[6].numberText, "the Discord check has no number")
     test.assertEqual("Character days in guild: 10", addon.PromotionsViewModel.KindText(requirements:Item(days.id)))
 end)
 
@@ -248,6 +265,14 @@ test.test("automatic checks turn on and off, one per rank, and a checkbox can be
     -- One made when it took a number of days still loads.
     test.assertTrue(addon.RankRequirements.IsRecord({ t = "item", id = "old", rank = 4,
         label = "Has the add-on (seen in 30 days)", kind = "addon", n = 30, position = 9, at = NOW, by = OFFICER }))
+
+    local discord = requirements:SetAutomated(4, "discord", true, 30, "Initiate", OFFICER, NOW + 2)[1]
+    test.assertEqual(nil, discord.n, "the Discord check takes no number")
+    test.assertEqual("Has a Discord name set", discord.label)
+    test.assertFalse(addon.RankRequirements.IsRecord({ t = "item", id = "d", rank = 4, label = "Discord",
+        kind = "discord", n = 30, position = 9, at = NOW, by = OFFICER }), "nor does a record of one")
+    test.assertTrue(#requirements:SetAutomated(4, "discord", false, nil, "Initiate", OFFICER, NOW + 3) == 1)
+    test.assertEqual(nil, requirements:Item(discord.id), "turning the Discord check off deletes it")
 
     test.assertTrue(#requirements:SetAutomated(4, "rank-days", false, nil, "Initiate", OFFICER, NOW + 3) == 1)
     test.assertEqual(nil, requirements:Item(id), "turning a check off deletes it")

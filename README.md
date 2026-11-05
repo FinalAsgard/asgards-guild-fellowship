@@ -403,6 +403,7 @@ Every rank starts with no requirements, so nothing changes until your guild sets
   - **Days at rank**: the character has held its current rank at least N days.
   - **Character level**: the character is at least level N.
   - **Has the Guild Fellowship Addon**: any of the player's characters has been heard on the add-on. It's a simple yes or no, with no number.
+  - **Has a Discord name set**: the player has a Discord name on file, set on any of their characters. Any name counts, and it's met as soon as the name is saved; clearing it fails the check again. When it isn't met, its detail says "not set". It's a yes or no too, with no number. Add-ons older than this check don't show it.
 - Turning a check off deletes it, along with any overrides on it.
 - **Custom requirements** are the ones an officer ticks. Type the **Requirement text**, tick **Needs a note** if ticking it should ask for a note (up to 100 characters, such as which event the member attended), and press **Add** (or Enter).
 - Each custom requirement has **Up** and **Down** to reorder it, **Edit** to change its text or whether it needs a note (ticks are kept), and **Delete**, which asks first because it drops the requirement's ticks too.
