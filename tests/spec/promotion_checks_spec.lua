@@ -458,6 +458,7 @@ local function panelFor(inputs, addon, keys, options)
             rankName = RANKS[character.rank + 1],
             evaluated = addon.PromotionPolicy.Evaluate(inputs, keys[index]),
             lastPromotion = options.lastPromotion,
+            matchRankName = options.matchRankNames and options.matchRankNames[keys[index]] or nil,
         })
     end
     return addon.PromotionsViewModel.PanelRows(characters, options)
@@ -527,6 +528,38 @@ test.test("an officer's panel shows each character's checklist with its check bo
     end
     test.assertTrue(reason.reason, "a failed check has a line for the override's optional reason")
     test.assertEqual(nil, rowWith(rows, "Promote to"), "add-ons can't promote: no Promote button")
+end)
+
+test.test("an officer sees a Promote to match line beside an alt that's behind, apart from its checklist", function()
+    local inputs, addon = newGuild({ main = 2, bolt = 4, quiet = 3 })
+    addItem(inputs, 4, "Read the rules")
+    local matches = { bolt = "Veteran", quiet = "Veteran" }
+
+    local rows = panelFor(inputs, addon, { "main", "bolt", "quiet" }, { officer = true, matchRankNames = matches,
+        expanded = { bolt = true } })
+    local function indexOf(text)
+        local index
+        for index = 1, #rows do
+            if rows[index].text ~= nil and string.find(rows[index].text, text, 1, true) then
+                return index
+            end
+        end
+        return nil
+    end
+    local header = indexOf("bolt: Initiate")
+    test.assertContains(rows[header + 1].text, "Promote to match: Veteran", "right under the alt's line")
+    test.assertTrue(rows[header + 1].match)
+    test.assertEqual("bolt", rows[header + 1].key)
+    test.assertEqual(nil, rows[header + 1].check, "not one of its checklist's items")
+    test.assertContains(rows[header + 2].text, "Read the rules", "the checklist follows")
+    local quiet = indexOf("quiet: Member")
+    test.assertContains(rows[quiet].text, "no requirements")
+    test.assertContains(rows[quiet + 1].text, "Promote to match: Veteran", "even with no checklist")
+    test.assertEqual(nil, rows[indexOf("main: Veteran") + 1].match)
+
+    local member = panelFor(inputs, addon, { "bolt" }, { officer = false, matchRankNames = matches,
+        expanded = { bolt = true } })
+    test.assertEqual(nil, rowWith(member, "Promote to match"), "officers only")
 end)
 
 test.test("a member's own panel shows progress and details read-only, without notes or names", function()

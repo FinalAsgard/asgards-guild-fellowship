@@ -1,8 +1,9 @@
 local _, addon = ...
 
 -- The promotion rules engine: for each character, the next rank, each
--- requirement's status, progress, whether it's ready, and its player's
--- highest rank. Pure: the caller passes everything in.
+-- requirement's status, progress, whether it's ready, its player's highest
+-- rank, and the rank to promote it to so it matches its player's other
+-- characters. Pure: the caller passes everything in.
 --
 -- inputs:
 --   partition     the guild's FellowshipStore partition (characters, their
@@ -257,6 +258,48 @@ local function eachCandidate(inputs, visit)
             visit(key, character, itemsOf)
         end
     end)
+end
+
+-- Whether alts are matched to `rank`. Every rank is, for now.
+local function matchesAlts(inputs, rank)
+    return true
+end
+
+-- The rank `key` should be promoted to so it matches its player's other
+-- characters, or nil. The ceiling is the player's highest rank in the
+-- guild, or the rank just below the guild master's when that's it (a guild
+-- has one guild master); the target is the highest rank at or below the
+-- ceiling, above `key`'s own, that alts are matched to. It doesn't depend on
+-- whether `key`'s rank has requirements.
+function PromotionPolicy.MatchTarget(inputs, key)
+    local partition = inputs.partition
+    local character = partition:GetCharacter(key)
+    if character == nil or character.player == nil or not partition:IsInGuild(key)
+        or type(character.rank) ~= "number"
+    then
+        return nil
+    end
+    local ceiling = PromotionPolicy.HighestRank(partition, character.player)
+    if ceiling == nil then
+        return nil
+    end
+    ceiling = math.max(ceiling, 1)
+    local rank
+    for rank = ceiling, character.rank - 1 do
+        if matchesAlts(inputs, rank) then
+            return rank
+        end
+    end
+    return nil
+end
+
+-- Every character in the guild with a match target, as key -> target rank.
+function PromotionPolicy.MatchSet(inputs)
+    local targets = {}
+    inputs.partition:EachCharacter(function(key)
+        targets[key] = PromotionPolicy.MatchTarget(inputs, key)
+    end)
+    return targets
 end
 
 -- The characters who meet every requirement, as a set of keys.

@@ -2341,12 +2341,14 @@ if clientProfile.supported then
             local key = keys[index]
             local character = partition:GetCharacter(key)
             if character ~= nil and partition:IsInGuild(key) and type(character.rank) == "number" then
+                local match = officer and addon.PromotionPolicy.MatchTarget(inputs, key) or nil
                 table.insert(characters, {
                     key = key,
                     name = nameOf(key),
                     rankName = inputs.rankNames[character.rank + 1] or ("Rank " .. character.rank),
                     evaluated = addon.PromotionPolicy.Evaluate(inputs, key),
                     lastPromotion = dates and dates:LastPromotion(key) or nil,
+                    matchRankName = match and (inputs.rankNames[match + 1] or ("Rank " .. match)) or nil,
                 })
             end
         end

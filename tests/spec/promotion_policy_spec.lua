@@ -115,3 +115,82 @@ test.test("an officer's override passes a failed Discord check, and it counts to
     local again = inputs.requirements:SetAutomated(4, "discord", true, nil, RANKS[5], OFFICER, NOW + 2)[1]
     test.assertFalse(statusOf(inputs, addon, "quiet", again.id).met)
 end)
+
+-- Matching alts ----------------------------------------------------------------
+
+-- A guild of players: each list's first character is the main, the rest
+-- its alts (key -> rank, in `ranks`).
+local function newPlayers(ranks, players)
+    local inputs, addon = newGuild(ranks)
+    local index
+    for index = 1, #players do
+        local others
+        for others = 2, #players[index] do
+            inputs.partition:JoinPlayerOf(players[index][others], players[index][1], "manual")
+        end
+    end
+    return inputs, addon
+end
+
+test.test("an alt below its player's highest rank is matched to that rank", function()
+    local inputs, addon = newPlayers({ main = 2, alt = 4, other = 3 }, { { "main", "alt" } })
+    local Policy = addon.PromotionPolicy
+
+    test.assertEqual(2, Policy.MatchTarget(inputs, "alt"))
+    test.assertEqual(nil, Policy.MatchTarget(inputs, "main"), "the main is at the ceiling")
+    test.assertEqual(nil, Policy.MatchTarget(inputs, "other"), "a player with one character")
+    test.assertEqual(nil, Policy.MatchTarget(inputs, "nobody"))
+
+    inputs.partition:RecordCharacter("alt", { rankIndex = 2 })
+    test.assertEqual(nil, Policy.MatchTarget(inputs, "alt"), "the flag clears once the alt reaches the rank")
+end)
+
+test.test("an alt that outranks the main sets the target", function()
+    local inputs, addon = newPlayers({ main = 4, alt = 1, third = 3 }, { { "main", "alt", "third" } })
+
+    test.assertEqual(1, addon.PromotionPolicy.MatchTarget(inputs, "main"))
+    test.assertEqual(1, addon.PromotionPolicy.MatchTarget(inputs, "third"))
+    test.assertEqual(nil, addon.PromotionPolicy.MatchTarget(inputs, "alt"))
+end)
+
+test.test("the guild master's alts are matched to the rank below the guild master's", function()
+    local inputs, addon = newPlayers({ boss = 0, bank = 1, alt = 3 }, { { "boss", "bank", "alt" } })
+
+    test.assertEqual(1, addon.PromotionPolicy.MatchTarget(inputs, "alt"))
+    test.assertEqual(nil, addon.PromotionPolicy.MatchTarget(inputs, "bank"), "already as high as alts go")
+    test.assertEqual(nil, addon.PromotionPolicy.MatchTarget(inputs, "boss"))
+end)
+
+test.test("characters out of the guild neither set the target nor get one", function()
+    local inputs, addon = newPlayers({ main = 1, alt = 3, low = 4 }, { { "main", "alt", "low" } })
+    inputs.partition:MarkDeparted("main", NOW)
+
+    test.assertEqual(3, addon.PromotionPolicy.MatchTarget(inputs, "low"), "the departed main doesn't count")
+    test.assertEqual(nil, addon.PromotionPolicy.MatchTarget(inputs, "alt"))
+    test.assertEqual(nil, addon.PromotionPolicy.MatchTarget(inputs, "main"))
+end)
+
+test.test("an alt whose rank has no requirements still gets a target", function()
+    local inputs, addon = newPlayers({ main = 2, alt = 4 }, { { "main", "alt" } })
+    inputs.requirements:Add(3, "Read the rules", "check", RANKS[4], OFFICER, NOW)
+
+    test.assertEqual(nil, addon.PromotionPolicy.Evaluate(inputs, "alt"), "no checklist at the alt's rank")
+    test.assertEqual(2, addon.PromotionPolicy.MatchTarget(inputs, "alt"))
+end)
+
+test.test("the match set holds every in-guild character with a target", function()
+    local inputs, addon = newPlayers({ main = 2, alt = 4, alt2 = 2, boss = 0, bank = 3, solo = 4, gone = 4 },
+        { { "main", "alt", "alt2", "gone" }, { "boss", "bank" } })
+    inputs.partition:MarkDeparted("gone", NOW)
+
+    local set = addon.PromotionPolicy.MatchSet(inputs)
+    local keys = {}
+    local key
+    for key in pairs(set) do
+        table.insert(keys, key)
+    end
+    table.sort(keys)
+    test.assertEqual("alt,bank", table.concat(keys, ","))
+    test.assertEqual(2, set.alt)
+    test.assertEqual(1, set.bank)
+end)

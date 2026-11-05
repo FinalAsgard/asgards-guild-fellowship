@@ -824,6 +824,44 @@ local function registerRowTests(profile)
         test.assertContains(promotionText(), "not set", "clearing it clears the name")
     end)
 
+    test.test(profile .. ": in the whole add-on, an officer sees an alt that's behind flagged to match, until it is",
+        function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local alt = world.guild.members[2]
+        fixtures.loadAddon(world)
+        fixtures.fire(world, "ADDON_LOADED", world.addonName)
+        world.loggedIn = true
+        fixtures.fire(world, "PLAYER_LOGIN")
+        fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local function matchLine()
+            local index
+            for index = 1, #detail.promotion.lines do
+                local line = detail.promotion.lines[index]
+                if line.shown and string.find(line.text.text or "", "Promote to match", 1, true) then
+                    return line.text.text
+                end
+            end
+            return nil
+        end
+
+        -- The alt's rank has no requirements: the panel still shows, with
+        -- the match line.
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertTrue(detail.promotion.shown)
+        test.assertContains(matchLine(), "Promote to match: Officer")
+
+        -- Promoted in the game's own guild window: the flag clears.
+        alt.rank, alt.rankName = 1, "Officer"
+        world.addon.rosterController:Rescan()
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world, 5)
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertEqual(nil, matchLine())
+    end)
+
     test.test(profile .. ": in the whole add-on, a member sees only their own promotion status, read-only",
         function()
         local world = fixtures.newEnvironment(profile, { playerName = fixtures.GUILDS[profile].members[2].name })

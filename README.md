@@ -421,6 +421,17 @@ Officers see who's ready in three places:
 
 Any rank change, up or down, clears that character's ticks, notes and overrides. A character promoted and later demoted back to a rank starts that rank's checklist afresh. That holds even on an officer's add-on that was offline the whole time, once the guild log (or an officer's date) shows when it came back to the rank. The last promotion's date and promoter are kept, from the guild event log when it names who did it.
 
+### Promote to match
+
+When a player has characters at different ranks, officers see each alt that's behind flagged with the rank to promote it to so it matches the player's highest, for example **Promote to match: Officer**. The highest rank among the player's characters still in the guild sets it, whichever character holds it. The guild master's rank is never a target, since a guild has only one guild master: the guild master's alts are matched to the rank just below it. The flag doesn't depend on promotion requirements, so it shows even for an alt whose rank has none. It clears by itself once the alt reaches the rank, including when it's promoted in the game's own guild window.
+
+The flag is a line of its own, under the alt's line and apart from its checklist, in two places:
+
+- **The player panel's Promotion tab**.
+- **The game guild roster's Promotion panel**, when that alt is selected.
+
+Members never see match flags.
+
 ### In the player panel and the roster
 
 An officer's player panel has two tabs: **Profile** (the player's details, membership dates, main, alts and history) and **Promotion**. The Promotion tab shows the player's highest rank, then one line per character with its rank and next rank, its progress, and **Ready** when it is. Click a character's line (`[+]`) to open its last promotion ("Promoted on <date> by Thunderer") and its checklist, and click it again (`[-]`) to close them. Each item has a check box: tick or untick a custom requirement with it. A needs-a-note item has a **Note:** box on the line under it: type the note, then tick the item (or press Enter). Once it's ticked, the box shows the saved note; change it and press Enter to save the new one. Unticking keeps the note in the box, ready to tick again. An automated item's box shows whether it's met, how close the character is ("5 of 7 days", "level 42 of 50", "seen 3 days ago", or "before tracking"; an approximate date is marked "(approx.)"), with **Override** or **Undo override** beside it. A failed check has a **Reason:** box under it for the override's optional reason. Hover an item to see who ticked or overrode it, when, and the note or reason.
