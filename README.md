@@ -663,7 +663,7 @@ The installer fetches the libraries first, so you don't need to run `tools/Fetch
 
 | `-Client` | Default client directory |
 |---|---|
-| `Forever` (default) | `C:\Program Files (x86)\World of Warcraft\_classic_beta_` |
+| `Forever` (default) | `C:\Program Files (x86)\World of Warcraft\_forever_` |
 | `Retail` | `C:\Program Files (x86)\World of Warcraft\_retail_` |
 
 If WoW is installed somewhere else, pass the `World of Warcraft` folder with `-WowInstallRoot`; `-Client` still picks the client directory inside it. For an unusual layout, pass the exact client directory with `-WowRoot`, which overrides the derived one:
