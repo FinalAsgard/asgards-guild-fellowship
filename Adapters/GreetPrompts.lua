@@ -190,7 +190,9 @@ end
 
 -- Draws `prompts` (from GreetPromptQueue:Visible), hiding unused boxes.
 -- `handlers.greet(player)` and `handlers.close(player)` answer the buttons.
-function Prompts:Show(prompts, handlers)
+-- While `lockedFor` (whole seconds) is above 0, each Greet button is
+-- disabled and counts down, as "Greet (3)".
+function Prompts:Show(prompts, handlers, lockedFor)
     if type(self.environment.CreateFrame) ~= "function" then
         return false
     end
@@ -202,6 +204,11 @@ function Prompts:Show(prompts, handlers)
             local row = self:row(index)
             row.player = prompt.player
             row.name:SetText(prompt.label or "")
+            local locked = type(lockedFor) == "number" and lockedFor > 0
+            row.greet:SetText(locked and ("Greet (" .. lockedFor .. ")") or "Greet")
+            if type(row.greet.SetEnabled) == "function" then
+                row.greet:SetEnabled(not locked)
+            end
             row.frame:Show()
         end
         for index = #prompts + 1, #self.rows do
