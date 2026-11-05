@@ -5,6 +5,7 @@ local addonName, addon = ...
 local VARIANTS = {
     AsgardsGuildFellowship = {
         commPrefix = "AGFSync",
+        liveCommPrefix = "AGFLive",
         displayName = "Asgard's Guild Fellowship",
         shortName = "Guild Fellowship",
         slashAlias = "/asgardsfellowship",
@@ -12,6 +13,7 @@ local VARIANTS = {
     },
     AsgardsGuildFellowshipDev = {
         commPrefix = "AGFSyncDev",
+        liveCommPrefix = "AGFLiveDev",
         displayName = "Asgard's Guild Fellowship (Dev)",
         shortName = "Guild Fellowship (Dev)",
         slashAlias = "/asgardsfellowshipdev",
@@ -29,6 +31,9 @@ addon.Identity = {
     -- The add-on message prefix for guild sync (at most 16 characters), so
     -- production and development builds never exchange data.
     commPrefix = variant.commPrefix,
+    -- The prefix for messages others must hear within seconds, kept apart
+    -- from sync's traffic (see Adapters/Comm.lua).
+    liveCommPrefix = variant.liveCommPrefix,
     databaseName = addonName .. "DB",
     displayName = variant.displayName,
     shortName = variant.shortName,

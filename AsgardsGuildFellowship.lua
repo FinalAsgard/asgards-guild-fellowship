@@ -77,7 +77,7 @@ local recordParty = function() end
 local recordOwnCharacter = function() end
 if clientProfile.supported then
     persistence = addon.Persistence.Create(client)
-    comm = addon.Comm.Create(client, addon.Identity.commPrefix)
+    comm = addon.Comm.Create(client, addon.Identity.commPrefix, addon.Identity.liveCommPrefix)
     -- The master frame's tabs, in order. The first is where the general
     -- entry points open it.
     pages = addon.PageNavigator.Create()
@@ -2571,15 +2571,16 @@ if clientProfile.supported then
     -- rank can't listen to officer chat are whispered too, and every
     -- officer online is when this character's rank can't speak in it (or
     -- it can't be sent): the add-on's officer rule (viewing officer notes)
-    -- and officer chat are separate rank permissions.
-    local function sendToOfficers(message)
+    -- and officer chat are separate rank permissions. `live` sends them
+    -- live, as the probe's answers are.
+    local function sendToOfficers(message, live)
         local canSpeak = comm:RankHasFlag(client:GetPlayerGuildRankIndex(), addon.Comm.OFFICER_CHAT_SPEAK_FLAG)
-        local sent = canSpeak ~= false and comm:SendOfficers(message)
+        local sent = canSpeak ~= false and comm:SendOfficers(message, live)
         local officers = onlineOfficers()
         local index
         for index = 1, #officers do
             if not sent or comm:RankHasFlag(officers[index].rank, addon.Comm.OFFICER_CHAT_LISTEN_FLAG) == false then
-                comm:Whisper(message, officers[index].name)
+                comm:Whisper(message, officers[index].name, live)
             end
         end
     end
@@ -2766,8 +2767,13 @@ if clientProfile.supported then
     })
     guildLogSync = addon.GuildLogSync.Create({
         send = sendToOfficers,
+        -- The probe and its answers go out live, so a sync backlog doesn't
+        -- read as a missed officer.
         probe = function(message)
-            return comm:SendOfficers(message)
+            return comm:SendOfficers(message, true)
+        end,
+        answer = function(message)
+            sendToOfficers(message, true)
         end,
         log = function()
             return guildLogOf()
@@ -3134,9 +3140,9 @@ if clientProfile.supported then
         inInstance = function()
             return client:IsInInstance()
         end,
-        -- Heard within seconds, unlike sync's bulk traffic.
+        -- Heard within seconds, however much sync traffic is waiting.
         announce = function(message)
-            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+            return comm:BroadcastLive(message)
         end,
         view = greetPrompts,
     })
@@ -3220,9 +3226,10 @@ if clientProfile.supported then
         random = function(low, high)
             return client:Random(low, high)
         end,
-        -- Heard within seconds, so others' prompts close quickly.
+        -- Heard within seconds, so others' prompts close quickly, however
+        -- much sync traffic is waiting.
         announce = function(message)
-            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+            return comm:BroadcastLive(message)
         end,
         isOfficer = function(key)
             return officerAuthority:IsOfficer(key)
@@ -3669,9 +3676,14 @@ if clientProfile.supported then
         if not sharing or inInstance then
             return
         end
-        -- Guildmates in the same zone hear more often, by whisper.
-        local near, targets = locationScheduler:Near({ now = now, character = character, spot = spot,
+        -- Guildmates in the same zone hear more often: by whisper when
+        -- there are few, in one guild message when there are many.
+        local near, targets, toGuild = locationScheduler:Near({ now = now, character = character, spot = spot,
             guildmates = locationBoard:All() })
+        if toGuild then
+            comm:Broadcast(near)
+            return
+        end
         local index
         for index = 1, #(targets or {}) do
             if not comm:Whisper(near, targets[index]) then

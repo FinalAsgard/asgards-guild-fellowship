@@ -13,6 +13,13 @@ local _, addon = ...
 -- user's prompt for them quietly closes, and they aren't prompted again
 -- until the welcome-back window passes. Without add-on messaging, Greet
 -- simply works uncoordinated.
+--
+-- After each greeting, Greet is locked for a cooldown, so one user can't
+-- flood guild chat: 2 seconds after the first in a row, then 4, then 6. The
+-- game only lets chat go out inside a button press, so nothing waits to
+-- post: the prompts stay, and the user presses Greet again once it unlocks.
+-- A prompt whose player has had enough greetings meanwhile closes as usual.
+-- Once a cooldown ends with no prompt showing, the next starts at 2 again.
 local GuildGreet = {
     -- The "greeted" message: { v = PROTOCOL, t = TYPE_GREETED, c = the
     -- greeted character's key, a = when they arrived (server time) }. The
@@ -24,6 +31,8 @@ local GuildGreet = {
     -- still loading.
     SHOW_DELAY_MIN = 5,
     SHOW_DELAY_MAX = 10,
+    -- How much longer Greet stays locked after each greeting in a row.
+    COOLDOWN_STEP_SECONDS = 2,
 }
 addon.GuildGreet = GuildGreet
 
@@ -65,6 +74,11 @@ function GuildGreet.Create(options)
             return false
         end,
         queue =addon.GreetPromptQueue.Create(),
+        -- Greetings posted in a row, and when Greet unlocks.
+        streak = 0,
+        readyAt = nil,
+        -- Bumped by each cooldown, so an older one's countdown stops.
+        cooldownId = 0,
         -- Hours since each offline member's last login, as the roster said
         -- when the session's roster first loaded.
         absences = {},
@@ -349,30 +363,86 @@ function Greet:ShowDelay()
     return delay
 end
 
--- Draws the waiting prompts.
+-- Whole seconds until Greet unlocks: 0 when it isn't locked.
+function Greet:LockedFor(now)
+    if self.readyAt == nil or type(now) ~= "number" or now >= self.readyAt then
+        return 0
+    end
+    return math.ceil(self.readyAt - now)
+end
+
+-- Draws the waiting prompts, with Greet locked while a cooldown runs. A
+-- cooldown that ended with no prompt showing resets the streak.
 function Greet:Refresh()
     local now = self.now()
     if type(now) ~= "number" or self.view == nil then
         return
     end
-    pcall(self.view.Show, self.view, self.queue:Visible(now), {
+    local prompts = self.queue:Visible(now)
+    local lockedFor = self:LockedFor(now)
+    if lockedFor == 0 then
+        self.readyAt = nil
+        if #prompts == 0 then
+            self.streak = 0
+        end
+    end
+    pcall(self.view.Show, self.view, prompts, {
         greet = function(player)
             self:Greet(player)
         end,
         close = function(player)
             self:Close(player)
         end,
-    })
+    }, lockedFor)
 end
 
--- The user pressed Greet: posts a random greeting from the prompt's
--- category, using the names as they are now. Returns the text sent, or nil.
+-- The user pressed Greet: unless Greet is locked, posts a random greeting
+-- from the prompt's category (inside the press, as the game requires),
+-- closes the prompt, and locks Greet for the next cooldown. Returns the text
+-- sent, or nil.
 function Greet:Greet(player)
     local prompt = self.queue:Get(player)
-    if prompt == nil then
+    local now = self.now()
+    if prompt == nil or type(now) ~= "number" or self:LockedFor(now) > 0 then
         return nil
     end
     self.queue:Remove(player)
+    local text
+    if not self.tally:Reached(prompt.player, self:Cap(), now) then
+        text = self:post(prompt, now)
+    end
+    if text ~= nil then
+        self:startCooldown(now)
+    end
+    self:Refresh()
+    return text
+end
+
+-- Locks Greet for 2 seconds more than the last cooldown in a row, and
+-- redraws every second until it unlocks. Without timers, Greet never locks.
+function Greet:startCooldown(now)
+    self.streak = self.streak + 1
+    self.cooldownId = self.cooldownId + 1
+    local id = self.cooldownId
+    self.readyAt = now + GuildGreet.COOLDOWN_STEP_SECONDS * self.streak
+    local function tick()
+        if self.cooldownId ~= id then
+            return
+        end
+        self:Refresh()
+        if self.readyAt ~= nil then
+            self.after(1, tick)
+        end
+    end
+    if not self.after(1, tick) then
+        self.readyAt = nil
+        self.streak = 0
+    end
+end
+
+-- Posts a random greeting from `prompt`'s category, using the names as they
+-- are now, and tells other add-on users. Returns the text sent, or nil.
+function Greet:post(prompt, now)
     local greeting = self:Library():Pick(prompt.category)
     local text
     if greeting ~= nil then
@@ -381,16 +451,14 @@ function Greet:Greet(player)
             text = nil
         end
     end
-    local now = self.now()
-    if text ~= nil and type(now) == "number" then
+    if text ~= nil then
         local selfKey = self.selfKey()
         local greeter = selfKey and self.policy:PlayerOf(selfKey) or "self"
-        self.tally:Add(player, greeter, prompt.raisedAt, now)
+        self.tally:Add(prompt.player, greeter, prompt.raisedAt, now)
         pcall(self.announce, {
             v = GuildGreet.PROTOCOL, t = GuildGreet.TYPE_GREETED, c = prompt.key, a = prompt.raisedAt,
         })
     end
-    self:Refresh()
     return text
 end
 

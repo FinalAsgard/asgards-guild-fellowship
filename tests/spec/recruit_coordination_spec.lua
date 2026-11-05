@@ -164,8 +164,12 @@ local function channelTimes(channel)
         local world = channel.worlds[index]
         local serializer = world.environment.LibStub.libs["AceSerializer-3.0"]
         for sentIndex = 1, #world.sentMessages do
-            local _, message = serializer:Deserialize(world.sentMessages[sentIndex].text)
-            if type(message) == "table" and message.t == "channel-time" then
+            local sent = world.sentMessages[sentIndex]
+            local _, message = serializer:Deserialize(sent.text)
+            -- The live message counts, not its copy for older add-ons.
+            if type(message) == "table" and message.t == "channel-time"
+                and sent.prefix == world.addon.Identity.liveCommPrefix
+            then
                 count = count + 1
             end
         end
@@ -229,8 +233,12 @@ local function sentConfigs(channel)
         local world = channel.worlds[index]
         local serializer = world.environment.LibStub.libs["AceSerializer-3.0"]
         for sentIndex = 1, #world.sentMessages do
-            local _, message = serializer:Deserialize(world.sentMessages[sentIndex].text)
-            if type(message) == "table" and message.t == "config" then
+            local sent = world.sentMessages[sentIndex]
+            local _, message = serializer:Deserialize(sent.text)
+            -- The live message counts, not its copy for older add-ons.
+            if type(message) == "table" and message.t == "config"
+                and sent.prefix == world.addon.Identity.liveCommPrefix
+            then
                 count = count + 1
             end
         end

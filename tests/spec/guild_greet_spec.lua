@@ -115,7 +115,8 @@ local function setup(profile)
             return world.inInstance == true
         end,
         view = {
-            Show = function(_, prompts, handlers)
+            Show = function(_, prompts, handlers, lockedFor)
+                world.lockedFor = lockedFor
                 world.shown = {}
                 local promptIndex
                 for promptIndex = 1, #prompts do
@@ -180,6 +181,8 @@ for index = 1, #fixtures.PROFILES do
         world.greet:OnPresence("online", world.names.tongs)
         world.greet:OnPresence("online", world.names.bishop)
         world.handlers.greet(world.shown[1].player)
+        -- Greet unlocks 2 seconds after the first greeting.
+        advance(world, 2)
         world.handlers.greet(world.shown[1].player)
 
         local anvil = string.match(world.names.anvil, "^[^%-]+")
@@ -198,6 +201,8 @@ for index = 1, #fixtures.PROFILES do
         world.greet:OnPresence("online", world.names.tongs)
         world.greet:OnPresence("online", world.names.bishop)
         world.handlers.greet(world.shown[1].player)
+        -- Greet unlocks 2 seconds after the first greeting.
+        advance(world, 2)
         world.handlers.greet(world.shown[1].player)
 
         if profile == "Forever" then
@@ -919,4 +924,89 @@ test.test("greet: prompts in instances are on by default, and turned off none sh
     test.assertTrue(world.store:GreetInInstances())
     test.assertFalse(world.store:SetGreetInInstances(false))
     test.assertFalse(world.store:SetGreetInInstances("off"))
+end)
+
+-- Greet cooldown ---------------------------------------------------------------
+
+-- Bolt, Bishop and Anvil come online.
+local function threeArrive(world)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertEqual(3, #world.shown)
+end
+
+test.test("guild greet: Greet locks 2, then 4 seconds after greetings in a row, and resets once a lock ends unused",
+    function()
+        local world = setup("Retail")
+        threeArrive(world)
+
+        test.assertEqual("Hey Bolt!", world.greet:Greet(world.shown[1].player))
+        test.assertEqual(2, world.lockedFor)
+        -- A press while locked does nothing; the prompt stays.
+        test.assertEqual(nil, world.greet:Greet(world.shown[1].player))
+        test.assertEqual(2, #world.shown)
+        test.assertEqual(1, #world.sent)
+        advance(world, 1)
+        test.assertEqual(1, world.lockedFor, "the countdown redraws every second")
+        advance(world, 1)
+        test.assertEqual(0, world.lockedFor)
+
+        test.assertTrue(world.greet:Greet(world.shown[1].player) ~= nil)
+        test.assertEqual(4, world.lockedFor, "the second greeting in a row locks for 4")
+        advance(world, 4)
+        test.assertTrue(world.greet:Greet(world.shown[1].player) ~= nil)
+        test.assertEqual(6, world.lockedFor)
+        test.assertEqual(3, #world.sent)
+        test.assertEqual(3, #world.announced)
+
+        -- The lock ends with no prompt showing, so the next starts at 2.
+        advance(world, 6)
+        world.greet:OnPresence("online", world.names.rust)
+        world.greet:Greet(world.shown[1].player)
+        test.assertEqual(4, #world.sent)
+        test.assertEqual(2, world.lockedFor)
+    end)
+
+test.test("guild greet: a lock that ends with prompts still showing keeps the streak", function()
+    local world = setup("Retail")
+    threeArrive(world)
+
+    world.greet:Greet(world.shown[1].player)
+    advance(world, 30)
+    world.greet:Greet(world.shown[1].player)
+
+    test.assertEqual(4, world.lockedFor)
+end)
+
+test.test("guild greet: a prompt whose player others greeted enough during the lock closes unposted", function()
+    local world = setup("Retail")
+    threeArrive(world)
+    world.greet:Greet(world.shown[1].player)
+
+    test.assertTrue(greeted(world, "bolt", world.names.bishop, START))
+    test.assertTrue(greeted(world, "rust", world.names.bishop, START))
+
+    test.assertEqual(1, #world.shown, "only Anvil's prompt is left")
+    advance(world, 2)
+    world.greet:Greet(world.shown[1].player)
+    test.assertEqual(2, #world.sent)
+    test.assertContains(world.sent[2], string.match(world.names.anvil, "^[^%-]+"))
+end)
+
+test.test("guild greet: without timers, Greet never locks", function()
+    local world = setup("Retail")
+    world.greet.after = function()
+        return false
+    end
+    world.showDelay = 0
+    threeArrive(world)
+
+    local index
+    for index = 1, 3 do
+        world.greet:Greet(world.shown[1].player)
+    end
+
+    test.assertEqual(3, #world.sent)
+    test.assertEqual(0, world.lockedFor)
 end)

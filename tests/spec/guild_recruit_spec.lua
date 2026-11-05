@@ -667,6 +667,12 @@ test.test("guild recruit: leaving a zone or city closes the prompts for it", fun
     test.assertEqual(0, #world.shown)
 end)
 
+-- Recruit messages go out live, with a copy under the sync prefix for
+-- older add-ons; the live one is counted.
+local function live(world, sent)
+    return sent.prefix == world.addon.Identity.liveCommPrefix
+end
+
 -- The `advertised` messages the world sent, deserialized, with their
 -- priorities.
 local function advertised(world)
@@ -676,7 +682,7 @@ local function advertised(world)
     for index = 1, #world.sentMessages do
         local sent = world.sentMessages[index]
         local _, message = serializer:Deserialize(sent.text)
-        if type(message) == "table" and message.t == "advertised" then
+        if type(message) == "table" and message.t == "advertised" and live(world, sent) then
             message.priority = sent.priority
             table.insert(found, message)
         end
@@ -826,7 +832,7 @@ local function sentOfType(world, kind)
     local index
     for index = 1, #world.sentMessages do
         local _, message = serializer:Deserialize(world.sentMessages[index].text)
-        if type(message) == "table" and message.t == kind then
+        if type(message) == "table" and message.t == kind and live(world, world.sentMessages[index]) then
             table.insert(found, message)
         end
     end

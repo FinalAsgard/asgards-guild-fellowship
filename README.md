@@ -267,6 +267,10 @@ First and last parts only differ on WoW Forever, where names have two parts, so 
 
 When you greet someone, the add-on tells other add-on users in the guild. Once a player has had enough greetings from anyone (2 by default; set it from 1 to 10 in the Guild Greet settings), your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (15 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever category or character it was for. This only counts members running the add-on; greetings typed by hand aren't seen. If two people press Greet at the same moment, an extra greeting can slip through.
 
+After each greeting, Greet is locked for a moment so nobody floods guild chat: 2 seconds after your first greeting in a row, 4 after the second, 6 after the third, and so on. While it's locked, the Greet buttons are greyed out and count down, as **Greet (3)**. Press again once they unlock; the game only lets an add-on post to chat when you press a button, so nothing is sent for you later. A prompt whose player gets enough greetings from others in the meantime closes as usual. Once a lock runs out with no prompts showing, the next one starts at 2 seconds again.
+
+Greeting messages, recruitment ad times, and the officer channel probe travel apart from guild sync's traffic, so a busy sync (a big guild logging in at once) doesn't hold them up.
+
 ### Editing greetings
 
 Greetings are edited on the window's **Greetings** tab (`/agf greet`, or **Edit Greetings** in the AddOns options), below Guild Greet's settings. The editor has a button for each category. Each lists that category's greetings, with **Edit** beside each one. Type in the box below the list and press **Add** (or Enter) to add a greeting. **Edit** puts a greeting in the box, with **Save**, **Delete** and **Cancel** beside it. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The editor lists every placeholder.
@@ -567,7 +571,7 @@ Guildmates running the add-on share where they are, so you can see where the gui
 - While you're in a party, guildmates outside it are slightly dimmed on every map and the minimap, so your party members stand out. A marker with nobody from your party is dimmed as a whole.
 - Your own characters never show.
 
-Guildmates in your zone move every 10 seconds or so; everyone else updates about every 2 minutes, and promptly after a zone change. Same-zone updates go by whisper to at most the 10 guildmates heard from most recently. If whispers don't work, the add-on falls back to the guild-wide update alone.
+Guildmates in your zone move every 10 seconds or so; everyone else updates about every 2 minutes, and promptly after a zone change. Same-zone updates go by whisper when only one or two guildmates are near; with three or more, one update goes to the whole guild instead, so a crowded zone doesn't flood add-on messages. If whispers don't work, the add-on falls back to the guild-wide updates alone.
 
 A dot disappears when the guildmate:
 

@@ -97,7 +97,7 @@ local function guildmates(count)
     return found
 end
 
-test.test("same-zone guildmates get a whispered update every 10 seconds", function()
+test.test("one or two same-zone guildmates get a whispered update every 10 seconds", function()
     local addon = load()
     local scheduler = addon.LocationScheduler.Create()
     local state = { now = 1000, character = "toolbox-area52", spot = SPOT, guildmates = guildmates(2) }
@@ -106,10 +106,10 @@ test.test("same-zone guildmates get a whispered update every 10 seconds", functi
     test.assertEqual("gm-near", message.t)
     test.assertEqual("toolbox-area52", message.c)
     test.assertEqual(1429, message.m)
-    -- Only those in the same zone, most recently heard first.
+    -- Only those in the same zone.
     test.assertEqual(2, #targets)
-    test.assertEqual("G2-Area52", targets[1])
-    test.assertEqual("G1-Area52", targets[2])
+    test.assertEqual("G1-Area52", targets[1])
+    test.assertEqual("G2-Area52", targets[2])
 
     state.now = 1009
     test.assertEqual(nil, scheduler:Near(state))
@@ -121,16 +121,33 @@ test.test("same-zone guildmates get a whispered update every 10 seconds", functi
     test.assertEqual(nil, scheduler:Near(state))
 end)
 
-test.test("whispers go to at most the 10 most recently heard guildmates", function()
+test.test("with 3 or more guildmates in the zone, one gm-near goes to the guild instead of whispers", function()
     local addon = load()
     local scheduler = addon.LocationScheduler.Create()
+    local state = { now = 1000, character = "toolbox-area52", spot = SPOT, guildmates = guildmates(12) }
 
-    local _, targets = scheduler:Near({ now = 1000, character = "toolbox-area52", spot = SPOT,
-        guildmates = guildmates(12) })
+    local message, targets, toGuild = scheduler:Near(state)
+    test.assertEqual("gm-near", message.t)
+    test.assertEqual(0, #targets)
+    test.assertTrue(toGuild)
+    -- Still only every 10 seconds.
+    state.now = 1009
+    test.assertEqual(nil, scheduler:Near(state))
 
-    test.assertEqual(10, #targets)
-    test.assertEqual("G12-Area52", targets[1])
-    test.assertEqual("G3-Area52", targets[10])
+    -- Two near are whispered.
+    state.now = 1010
+    state.guildmates = guildmates(2)
+    message, targets, toGuild = scheduler:Near(state)
+    test.assertEqual(2, #targets)
+    test.assertFalse(toGuild)
+
+    -- After a whisper fails, a crowd still hears the guild-wide one.
+    scheduler:WhisperFailed()
+    state.now = 1020
+    test.assertEqual(nil, scheduler:Near(state))
+    state.now = 1030
+    state.guildmates = guildmates(3)
+    test.assertTrue(select(3, scheduler:Near(state)))
 end)
 
 test.test("after a whisper fails, only the guild broadcast goes on", function()
@@ -1363,6 +1380,29 @@ local function registerWholeAddonTests(profile)
         fixtures.runTimers(sharer, 5)
         test.assertEqual(2, #whispers(sharer))
     end)
+
+    test.test(profile .. ": in the whole add-on, a crowded zone gets one gm-near over the guild, not whispers",
+        function()
+            local channel = fixtures.newChannel()
+            local guild = fixtures.GUILDS[profile]
+            local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+            local spot = { mapID = 1429, x = 0.25, y = 0.5 }
+            local sharer = login(profile, channel, guild.members[3].name, spot, "MAGE")
+            fixtures.deliver(channel)
+            -- The test guild is small, so one guildmate nearby counts as a crowd.
+            sharer.addon.LocationScheduler.NEAR_GUILD_MIN = 1
+
+            spot.x = 0.75
+            fixtures.runTimers(sharer, 5)
+            test.assertEqual(0, #whispers(sharer))
+            local last = sharer.sentMessages[#sharer.sentMessages]
+            test.assertEqual("GUILD", last.distribution)
+            local _, message = sharer.environment.LibStub.libs["AceSerializer-3.0"]:Deserialize(last.text)
+            test.assertEqual("gm-near", message.t)
+            -- Heard over the guild like any location.
+            fixtures.deliver(channel)
+            test.assertEqual(0.75, viewer.pins.icons[1].x)
+        end)
 
     -- The location messages of type `kind` the world sent.
     local function sentOfType(world, kind)

@@ -40,9 +40,15 @@ local function newScreen()
         local name
         for _, name in ipairs({
             "SetWidth", "SetHeight", "SetMovable", "SetClampedToScreen", "SetFrameStrata",
-            "EnableMouse", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "SetText",
+            "EnableMouse", "RegisterForDrag", "StartMoving", "StopMovingOrSizing",
         }) do
             frame[name] = function() end
+        end
+        function frame:SetText(text)
+            self.text = text
+        end
+        function frame:SetEnabled(enabled)
+            self.enabled = enabled
         end
         table.insert(screen.frames, frame)
         return frame
@@ -167,4 +173,16 @@ test.test("greet prompt position: saved account-wide, and an unusable one counts
     database.greet = "corrupt"
     test.assertFalse(store:SetGreetAnchor({ point = "LEFT", x = 40, y = 120 }))
     test.assertEqual("corrupt", database.greet)
+end)
+
+test.test("greet prompts: while Greet is locked, its buttons are disabled and count down", function()
+    local world = newPrompts(nil)
+
+    world.prompts:Show({ prompt(1), prompt(2) }, {}, 3)
+    test.assertEqual("Greet (3)", world.prompts.rows[1].greet.text)
+    test.assertEqual(false, world.prompts.rows[2].greet.enabled)
+
+    world.prompts:Show({ prompt(1) }, {}, 0)
+    test.assertEqual("Greet", world.prompts.rows[1].greet.text)
+    test.assertEqual(true, world.prompts.rows[1].greet.enabled)
 end)
