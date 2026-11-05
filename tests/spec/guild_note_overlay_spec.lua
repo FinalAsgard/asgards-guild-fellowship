@@ -19,6 +19,8 @@ local function fakeWidget()
     function widget:SetAllPoints(target) self.allPoints = target end
     function widget:SetTexture(texture) self.texture = texture end
     function widget:SetScript(name, handler) self[name] = handler end
+    function widget:SetVertexColor(...) self.tint = { ... } end
+    function widget:EnableMouse(enabled) self.mouse = enabled end
     function widget:CreateFontString()
         return fakeWidget()
     end
@@ -217,7 +219,11 @@ local function build(world, options)
             options.readyChecks = (options.readyChecks or 0) + 1
             local ready = options.ready
             return ready and function(name)
-                return ready[name] == true
+                local match = (options.match or {})[name]
+                if match ~= nil then
+                    return "match", match
+                end
+                return ready[name] == true and "ready" or nil
             end or nil
         end,
     })
@@ -688,6 +694,59 @@ local function registerRowTests(profile)
         test.assertContains(overlay:ReadyProbeLines()[3], "at the row's right edge (no rank text found): 1")
     end)
 
+    test.test(profile .. ": an alt to promote to match gets the arrow tinted, with a tooltip, over a Ready flag",
+        function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local tooltip = { shown = false }
+        function tooltip:SetOwner(owner) self.owner = owner end
+        function tooltip:SetText(text) self.text = text end
+        function tooltip:Show() self.shown = true end
+        function tooltip:Hide() self.shown = false end
+        world.environment.GameTooltip = tooltip
+        local list = detail.memberList
+        list.rows = { fakeRow("Hammer"), fakeRow("Bolt"), fakeRow("Nail") }
+        local options = { ready = { Hammer = true, Bolt = true }, match = { Hammer = "Officer", Nail = "Veteran" } }
+        local overlay = build(world, options)
+        overlay:AttachRows()
+
+        local hammer, bolt, nail = list.rows[1].readyMarker, list.rows[2].readyMarker, list.rows[3].readyMarker
+        test.assertTrue(hammer.shown, "behind and ready: the match flag shows")
+        test.assertTrue(nail.shown)
+        test.assertTrue(bolt.shown)
+        test.assertEqual(0.30, hammer.picture.tint[1])
+        test.assertEqual(1, bolt.picture.tint[1], "a Ready flag keeps the plain arrow")
+        test.assertTrue(hammer.mouse)
+        test.assertFalse(bolt.mouse, "a Ready flag doesn't take the mouse")
+
+        hammer.OnEnter()
+        test.assertTrue(tooltip.shown)
+        test.assertEqual("Promote to match: Officer", tooltip.text)
+        test.assertEqual(hammer, tooltip.owner)
+        hammer.OnLeave()
+        test.assertFalse(tooltip.shown)
+        bolt.OnEnter()
+        test.assertFalse(tooltip.shown, "no tooltip on a Ready flag")
+
+        local lines = overlay:ReadyProbeLines()
+        test.assertEqual("Rows with a Ready flag now: 1", lines[2])
+        test.assertEqual("Rows with a Promote to match flag now: 2", lines[4])
+
+        -- Scrolling reuses a row; the alt reaches its rank and the flag
+        -- goes back to Ready, untinted.
+        list.rows[2]:SetMember({ name = "Nail" })
+        test.assertEqual(0.30, bolt.picture.tint[1], "the flag follows the member")
+        options.match = { Nail = "Veteran" }
+        overlay:Refresh()
+        test.assertEqual(1, hammer.picture.tint[1])
+        test.assertFalse(hammer.mouse)
+        options.match = {}
+        options.ready = {}
+        overlay:Refresh()
+        test.assertFalse(bolt.shown)
+        test.assertFalse(nail.shown)
+    end)
+
     test.test(profile .. ": before the guild roster opens, the probe says its rows aren't followed yet", function()
         local world = fixtures.newEnvironment(profile)
         local overlay = build(world, { ready = { Bolt = true } })
@@ -698,7 +757,8 @@ local function registerRowTests(profile)
         local world = fixtures.newEnvironment(profile)
         local detail = installGuildRoster(world.environment)
         detail.memberList.rows = { fakeRow("Hammer") }
-        local options = { officer = false, rows = { Hammer = ROW }, ready = { Hammer = true } }
+        local options = { officer = false, rows = { Hammer = ROW }, ready = { Hammer = true },
+            match = { Hammer = "Officer" } }
         local overlay = build(world, options)
 
         overlay:AttachRows()
@@ -829,6 +889,7 @@ local function registerRowTests(profile)
         local world = fixtures.newEnvironment(profile)
         local detail = installGuildRoster(world.environment)
         local alt = world.guild.members[2]
+        detail.memberList.rows = { fakeRow(alt.name), fakeRow(world.guild.members[1].name) }
         fixtures.loadAddon(world)
         fixtures.fire(world, "ADDON_LOADED", world.addonName)
         world.loggedIn = true
@@ -836,6 +897,20 @@ local function registerRowTests(profile)
         fixtures.fire(world, "PLAYER_ENTERING_WORLD")
         fixtures.fire(world, "GUILD_ROSTER_UPDATE")
         fixtures.runTimers(world)
+        local arrow = detail.memberList.rows[1].readyMarker
+        local function arrowTinted()
+            return arrow.shown and arrow.picture.tint ~= nil and arrow.picture.tint[1] < 1
+        end
+        -- The game's roster: a tinted arrow on the alt's row, none on the
+        -- main's.
+        test.assertTrue(arrowTinted(), "the alt's row has the match arrow")
+        test.assertFalse(detail.memberList.rows[2].readyMarker.shown)
+        world.messages = {}
+        fixtures.slash(world, "probe ready")
+        local printed = table.concat(world.messages, "\n")
+        test.assertContains(printed, "Promote to match: 1")
+        test.assertContains(printed, " to Officer")
+        test.assertContains(printed, "Rows with a Promote to match flag now: 1")
         local function matchLine()
             local index
             for index = 1, #detail.promotion.lines do
@@ -876,6 +951,7 @@ local function registerRowTests(profile)
         test.assertTrue(promotions.matchAlts(false))
         detail:DisplayMember(1, { name = alt.name })
         test.assertEqual(nil, matchLine(), "no rank in range is on")
+        test.assertFalse(arrow.shown, "and the roster's arrow goes")
         test.assertTrue(promotions.rank(-1))
         test.assertTrue(promotions.matchAlts(true))
         detail:DisplayMember(1, { name = alt.name })
@@ -888,6 +964,7 @@ local function registerRowTests(profile)
         fixtures.runTimers(world, 5)
         detail:DisplayMember(1, { name = alt.name })
         test.assertEqual(nil, matchLine())
+        test.assertFalse(arrow.shown, "the roster's arrow clears too")
     end)
 
     test.test(profile .. ": in the whole add-on, a member sees only their own promotion status, read-only",

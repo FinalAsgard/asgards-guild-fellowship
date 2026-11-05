@@ -27,7 +27,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf mail` | Opens [Guild Mail](#guild-mail), to mail the guild ranks you pick (officers only). |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf setdate join\|rank <character> <YYYY-MM-DD>` | Sets a character's join date, or the date it reached its current rank, when you know better than the add-on (officers only; see [Dates behind the checks](#dates-behind-the-checks)). |
-| `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** flags reach the game's guild roster (officers only). |
+| `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** and **Promote to match** flags reach the game's guild roster (officers only). |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
@@ -425,10 +425,11 @@ Any rank change, up or down, clears that character's ticks, notes and overrides.
 
 When a player has characters at different ranks, officers see each alt that's behind flagged with the rank to promote it to so it matches the player's highest, for example **Promote to match: Officer**. The highest rank among the player's characters still in the guild sets it, whichever character holds it. The guild master's rank is never a target, since a guild has only one guild master: the guild master's alts are matched to the rank just below it. The flag doesn't depend on promotion requirements, so it shows even for an alt whose rank has none. It clears by itself once the alt reaches the rank, including when it's promoted in the game's own guild window.
 
-The flag is a line of its own, under the alt's line and apart from its checklist, in two places:
+The flag shows in three places:
 
-- **The player panel's Promotion tab**.
-- **The game guild roster's Promotion panel**, when that alt is selected.
+- **The player panel's Promotion tab**, as a line of its own under the alt's line, apart from its checklist.
+- **The game guild roster's Promotion panel**, the same way, when that alt is selected.
+- **The game's guild roster list**, as the same up arrow as Ready for promotion, tinted blue. Hover it for the rank, for example **Promote to match: Officer**. An alt that's both behind and ready shows the blue arrow. `/agf probe ready` counts the alts to promote to match, lists each with its target rank, and says how many rows show the blue arrow.
 
 Members never see match flags.
 
