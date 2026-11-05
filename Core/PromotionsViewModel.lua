@@ -82,6 +82,8 @@ end
 --             { kind, text, enabled, id?, n?, numberText? }, `numberText`
 --             what `n` is called ("Days"), nil for a check without one
 --   empty     what to say instead of custom items, or nil
+--   matchAlts whether the rank's "Alts should match this rank" box is
+--             ticked (nil for the guild master's rank, which has none)
 function PromotionsViewModel.Editor(inputs)
     local requirements, names = inputs.requirements, inputs.rankNames or {}
     local rank = PromotionsViewModel.PickRank(inputs.rank, requirements, names)
@@ -96,6 +98,9 @@ function PromotionsViewModel.Editor(inputs)
         items = {},
         automated = {},
     }
+    if rank >= 1 then
+        model.matchAlts = requirements:MatchesAlts(rank)
+    end
     if requirements:Mismatch(rank, name) then
         model.mismatch = "Set up when rank " .. rank .. " was called \"" .. requirements:RankName(rank) ..
             "\"; the game now calls it \"" .. tostring(name) .. "\". Check these still belong here."

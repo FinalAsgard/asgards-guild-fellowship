@@ -194,3 +194,32 @@ test.test("the match set holds every in-guild character with a target", function
     test.assertEqual(2, set.alt)
     test.assertEqual(1, set.bank)
 end)
+
+test.test("ranks with matching off are skipped for the next one that's on", function()
+    local inputs, addon = newPlayers({ main = 1, alt = 4 }, { { "main", "alt" } })
+    local Policy = addon.PromotionPolicy
+
+    inputs.requirements:SetMatchesAlts(1, false, OFFICER, NOW)
+    test.assertEqual(2, Policy.MatchTarget(inputs, "alt"), "Officer is off: Veteran is next")
+    inputs.requirements:SetMatchesAlts(2, false, OFFICER, NOW)
+    test.assertEqual(3, Policy.MatchTarget(inputs, "alt"))
+    inputs.requirements:SetMatchesAlts(1, true, OFFICER, NOW + 1)
+    test.assertEqual(1, Policy.MatchTarget(inputs, "alt"), "turned back on")
+end)
+
+test.test("no flag when every rank in range has matching off", function()
+    local inputs, addon = newPlayers({ main = 2, alt = 4, alt2 = 3, other = 1, low = 4 },
+        { { "main", "alt", "alt2" }, { "other", "low" } })
+    inputs.requirements:SetMatchesAlts(2, false, OFFICER, NOW)
+    inputs.requirements:SetMatchesAlts(3, false, OFFICER, NOW)
+
+    test.assertEqual(nil, addon.PromotionPolicy.MatchTarget(inputs, "alt"))
+    test.assertEqual(nil, addon.PromotionPolicy.MatchTarget(inputs, "alt2"))
+    test.assertEqual(1, addon.PromotionPolicy.MatchTarget(inputs, "low"), "other players' ranks still count")
+
+    local set = addon.PromotionPolicy.MatchSet(inputs)
+    test.assertEqual(nil, set.alt)
+    test.assertEqual(nil, set.alt2)
+    test.assertEqual(1, set.low)
+    test.assertEqual(nil, next(set, next(set)), "low is the only one")
+end)

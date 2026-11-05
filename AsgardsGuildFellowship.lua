@@ -295,6 +295,9 @@ if clientProfile.supported then
                 onPromotionsAutomated = function(kind, enabled, n)
                     return promotions.automated(kind, enabled, n)
                 end,
+                onPromotionsMatchAlts = function(on)
+                    return promotions.matchAlts(on)
+                end,
                 onPromotionsMove = function(id, step)
                     return promotions.move(id, step)
                 end,
@@ -2485,6 +2488,16 @@ if clientProfile.supported then
                 return nil, "the guild's ranks aren't known yet"
             end
             return requirements:SetAutomated(rank, kind, enabled == true, tonumber(n), names[rank + 1], author, now)
+        end)
+    end
+    -- Sets whether alts are matched to the rank shown.
+    promotions.matchAlts = function(on)
+        return editRequirements(function(requirements, author, now)
+            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, rankNames())
+            if rank == nil then
+                return nil, "the guild's ranks aren't known yet"
+            end
+            return requirements:SetMatchesAlts(rank, on == true, author, now)
         end)
     end
     promotions.move = function(id, step)

@@ -17,7 +17,13 @@ local _, addon = ...
 --         officer last edited its requirements, so the editor can warn when
 --         the game's rank at that index has another name (the guild master
 --         inserted or removed a rank).
--- The newest record wins per item (and per rank name), with sync's
+--   match { t = "match", rank, on, at, by }: whether alts are promoted to
+--         match their player's highest character at `rank` (1 or more: no
+--         alt is matched to the guild master's rank). A rank with no
+--         record is on.
+-- An add-on that doesn't know a record's type refuses that record alone,
+-- so a newer type doesn't stop an older add-on taking the rest.
+-- The newest record wins per item (and per rank name and setting), with sync's
 -- tie-break (time, then author), so every add-on settles on the same list.
 -- Only records by officers are accepted, and labels longer than MAX_LABEL
 -- are refused.
@@ -131,6 +137,9 @@ function RankRequirements.IsRecord(record)
     if record.t == "rank" then
         return isText(record.name) and #record.name <= RankRequirements.MAX_LABEL
     end
+    if record.t == "match" then
+        return record.rank >= 1 and type(record.on) == "boolean"
+    end
     if not (record.t == "item" and isText(record.id) and #record.id <= 80 and isLabel(record.label)
         and RankRequirements.KINDS[record.kind] ~= nil and isWhole(record.position, 0, 10000)
         and (record.deleted == nil or record.deleted == true))
@@ -194,6 +203,9 @@ function RankRequirements.Create(saved, options)
     if type(saved.ranks) ~= "table" then
         saved.ranks = {}
     end
+    if type(saved.matches) ~= "table" then
+        saved.matches = {}
+    end
     options = options or {}
     return setmetatable({
         saved = saved,
@@ -207,11 +219,21 @@ local function rankKey(rank)
     return "r" .. tostring(rank)
 end
 
-function Requirements:heldOf(record)
-    if record.t == "rank" then
-        return self.saved.ranks[rankKey(record.rank)]
+-- Where each type of record is kept in the saved table.
+local STORES = { rank = "ranks", match = "matches", item = "items" }
+-- The order a snapshot lists the types in.
+local TYPE_ORDER = { rank = 1, match = 2, item = 3 }
+
+-- A record's key within its type's store.
+local function storeKey(record)
+    if record.t == "item" then
+        return record.id
     end
-    return self.saved.items[record.id]
+    return rankKey(record.rank)
+end
+
+function Requirements:heldOf(record)
+    return self.saved[STORES[record.t]][storeKey(record)]
 end
 
 -- Applies a record received from another add-on (or made here): when it
@@ -236,11 +258,7 @@ function Requirements:Apply(record, fromOfficer)
     then
         return false
     end
-    if record.t == "rank" then
-        self.saved.ranks[rankKey(record.rank)] = copy(record)
-    else
-        self.saved.items[record.id] = copy(record)
-    end
+    self.saved[STORES[record.t]][storeKey(record)] = copy(record)
     return true
 end
 
@@ -294,6 +312,17 @@ function Requirements:RankName(rank)
         return record.name
     end
     return nil
+end
+
+-- Whether alts are promoted to match their player's highest character at
+-- `rank`: on unless an officer turned it off. Never for the guild master's
+-- rank.
+function Requirements:MatchesAlts(rank)
+    if not isWhole(rank, 1, RankRequirements.MAX_RANK) then
+        return false
+    end
+    local record = self.saved.matches[rankKey(rank)]
+    return not (RankRequirements.IsRecord(record) and record.on == false)
 end
 
 -- True when `rank` has requirements and was set up under another name than
@@ -507,6 +536,19 @@ function Requirements:SetAutomated(rank, kind, enabled, n, rankName, author, at)
     return {}
 end
 
+-- An officer sets whether alts are matched to `rank` (see MatchesAlts).
+-- Returns the records to share, or nil and why not.
+function Requirements:SetMatchesAlts(rank, on, author, at)
+    if not isWhole(rank, 1, RankRequirements.MAX_RANK) then
+        return nil, "alts can't be matched to that rank"
+    end
+    on = on == true
+    if self:MatchesAlts(rank) == on then
+        return {}
+    end
+    return self:commit({ self:stamped({ t = "match", rank = rank, on = on }, author, at) }, author)
+end
+
 -- An officer moves item `id` one place up (`step` -1) or down (1) in its
 -- rank's list. Every item of the rank gets its new position, so the order
 -- is the same everywhere. Returns the records to share, or nil and why not.
@@ -551,24 +593,19 @@ end
 -- Every record held, tombstones included, for sending to other add-ons.
 function Requirements:Snapshot()
     local records = {}
-    local _, record
-    for _, record in pairs(self.saved.ranks) do
-        if RankRequirements.IsRecord(record) then
-            table.insert(records, copy(record))
-        end
-    end
-    for _, record in pairs(self.saved.items) do
-        if RankRequirements.IsRecord(record) then
-            table.insert(records, copy(record))
+    local recordType, store, _, record
+    for recordType, store in pairs(STORES) do
+        for _, record in pairs(self.saved[store]) do
+            if RankRequirements.IsRecord(record) and record.t == recordType then
+                table.insert(records, copy(record))
+            end
         end
     end
     table.sort(records, function(a, b)
-        local aKey = a.t == "rank" and rankKey(a.rank) or a.id
-        local bKey = b.t == "rank" and rankKey(b.rank) or b.id
         if a.t ~= b.t then
-            return a.t == "rank"
+            return TYPE_ORDER[a.t] < TYPE_ORDER[b.t]
         end
-        return aKey < bKey
+        return storeKey(a) < storeKey(b)
     end)
     return records
 end
@@ -585,13 +622,13 @@ function Requirements:CoveredBy(records)
     for index = 1, #records do
         local record = records[index]
         if RankRequirements.IsRecord(record) then
-            heard[record.t == "rank" and rankKey(record.rank) or ("item:" .. record.id)] = record
+            heard[record.t .. ":" .. storeKey(record)] = record
         end
     end
     local held = self:Snapshot()
     for index = 1, #held do
         local record = held[index]
-        local other = heard[record.t == "rank" and rankKey(record.rank) or ("item:" .. record.id)]
+        local other = heard[record.t .. ":" .. storeKey(record)]
         if other == nil or addon.SyncFacts.IsNewer(record.at, record.by, other.at, other.by) then
             return false
         end

@@ -853,6 +853,34 @@ local function registerRowTests(profile)
         test.assertTrue(detail.promotion.shown)
         test.assertContains(matchLine(), "Promote to match: Officer")
 
+        -- The officer turns matching off for Officer, then Veteran too:
+        -- the flag moves down, then goes, then comes back.
+        local promotions = world.addon.promotions
+        test.assertTrue(promotions.rank(1), "from the newest members' rank round to Officer")
+        test.assertEqual(1, promotions.view().rank)
+        test.assertTrue(promotions.view().matchAlts, "ticked by default")
+        test.assertTrue(promotions.matchAlts(false))
+        test.assertFalse(promotions.view().matchAlts)
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertContains(matchLine(), "Promote to match: Veteran")
+        local _, partition, normalizer = world.addon.rosterController:QuietContext()
+        local altKey = normalizer:Key(alt.name)
+        local rows = promotions.panelRows({ altKey }, partition:GetCharacter(altKey).player)
+        local panelText = {}
+        local index
+        for index = 1, #rows do
+            table.insert(panelText, rows[index].text or "")
+        end
+        test.assertContains(table.concat(panelText, "\n"), "Promote to match: Veteran", "the player panel too")
+        test.assertTrue(promotions.rank(1))
+        test.assertTrue(promotions.matchAlts(false))
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertEqual(nil, matchLine(), "no rank in range is on")
+        test.assertTrue(promotions.rank(-1))
+        test.assertTrue(promotions.matchAlts(true))
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertContains(matchLine(), "Promote to match: Officer")
+
         -- Promoted in the game's own guild window: the flag clears.
         alt.rank, alt.rankName = 1, "Officer"
         world.addon.rosterController:Rescan()

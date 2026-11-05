@@ -260,9 +260,10 @@ local function eachCandidate(inputs, visit)
     end)
 end
 
--- Whether alts are matched to `rank`. Every rank is, for now.
+-- Whether alts are matched to `rank`: the rank's "Alts should match this
+-- rank" setting.
 local function matchesAlts(inputs, rank)
-    return true
+    return inputs.requirements:MatchesAlts(rank)
 end
 
 -- The rank `key` should be promoted to so it matches its player's other

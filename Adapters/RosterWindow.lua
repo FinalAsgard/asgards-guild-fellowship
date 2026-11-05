@@ -1439,7 +1439,8 @@ end
 -- The officers' Promotions page, below the frame's title bar: the
 -- promotion requirements editor. (Add-ons can't promote, and each
 -- character's checklist is worked on the player panel's Promotion tab.) <
--- and > pick a rank, a warning shows when the rank was set up under
+-- and > pick a rank, a check box beside it sets whether alts are matched
+-- to it, a warning shows when the rank was set up under
 -- another name, the automatic checks are listed with a check box each (and
 -- a number box for one that takes days or a level), and below them a box
 -- adds a custom requirement (with whether it needs a note) or edits one,
@@ -1479,6 +1480,22 @@ local function buildPromotions(framework, page, frameName, options)
     nextButton:SetPoint("LEFT", editor.rankText, "RIGHT", 8, 0)
     editor.nextText = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     editor.nextText:SetPoint("LEFT", nextButton, "RIGHT", 12, 0)
+    -- Whether alts are promoted to match their player at this rank. (The
+    -- guild master's rank has none; it can't be picked here anyway.)
+    -- Placed at the right of the rank line, a best guess at where it reads
+    -- as the rank's own setting.
+    editor.matchCheck = CreateFrame("CheckButton", nil, holder, "UICheckButtonTemplate")
+    editor.matchCheck:SetSize(22, 22)
+    editor.matchCheck:SetPoint("TOPLEFT", holder, "TOPLEFT", 480, -1)
+    local matchLabel = editor.matchCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    matchLabel:SetPoint("LEFT", editor.matchCheck, "RIGHT", 2, 0)
+    matchLabel:SetText("Alts should match this rank")
+    editor.matchCheck:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() == true
+        if not call("onPromotionsMatchAlts", checked) then
+            self:SetChecked(not checked)
+        end
+    end)
     editor.mismatch = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     editor.mismatch:SetPoint("TOPLEFT", holder, "TOPLEFT", 16, -28)
     editor.mismatch:SetWidth(680)
@@ -2195,6 +2212,12 @@ function Window:SetPromotions(model)
         editor.nextText:SetText(model.nextText or "")
         editor.mismatch:SetText(model.mismatch and ("|cffff8040" .. model.mismatch .. "|r") or "")
         editor.empty:SetText(model.empty or "")
+        if model.matchAlts == nil then
+            editor.matchCheck:Hide()
+        else
+            editor.matchCheck:SetChecked(model.matchAlts)
+            editor.matchCheck:Show()
+        end
         if editor.confirm.id ~= nil and editor.confirm:IsShown() then
             local found = false
             local itemIndex
