@@ -3676,9 +3676,14 @@ if clientProfile.supported then
         if not sharing or inInstance then
             return
         end
-        -- Guildmates in the same zone hear more often, by whisper.
-        local near, targets = locationScheduler:Near({ now = now, character = character, spot = spot,
+        -- Guildmates in the same zone hear more often: by whisper when
+        -- there are few, in one guild message when there are many.
+        local near, targets, toGuild = locationScheduler:Near({ now = now, character = character, spot = spot,
             guildmates = locationBoard:All() })
+        if toGuild then
+            comm:Broadcast(near)
+            return
+        end
         local index
         for index = 1, #(targets or {}) do
             if not comm:Whisper(near, targets[index]) then

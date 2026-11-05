@@ -571,7 +571,7 @@ Guildmates running the add-on share where they are, so you can see where the gui
 - While you're in a party, guildmates outside it are slightly dimmed on every map and the minimap, so your party members stand out. A marker with nobody from your party is dimmed as a whole.
 - Your own characters never show.
 
-Guildmates in your zone move every 10 seconds or so; everyone else updates about every 2 minutes, and promptly after a zone change. Same-zone updates go by whisper to at most the 10 guildmates heard from most recently. If whispers don't work, the add-on falls back to the guild-wide update alone.
+Guildmates in your zone move every 10 seconds or so; everyone else updates about every 2 minutes, and promptly after a zone change. Same-zone updates go by whisper when only one or two guildmates are near; with three or more, one update goes to the whole guild instead, so a crowded zone doesn't flood add-on messages. If whispers don't work, the add-on falls back to the guild-wide updates alone.
 
 A dot disappears when the guildmate:
 
