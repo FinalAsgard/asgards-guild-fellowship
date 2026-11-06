@@ -301,9 +301,11 @@ function RosterController.DescribeScan(summary)
 end
 
 function Controller:OnScanFinished(result, summary)
-    -- Incremental pickups that found new characters, and every full scan,
-    -- are reported; quiet checks are not.
-    if summary.mode ~= "incremental" or summary.newCharacters > 0 then
+    -- A Rescan, the first scan, and any scan that found something are
+    -- reported; a login scan or a quiet check that found nothing is not.
+    local found = (summary.newCharacters or 0) + (summary.linked or 0) + (summary.aliased or 0)
+        + (summary.departed or 0) + (summary.rejoined or 0) + (summary.promoted or 0) + (summary.conflicts or 0)
+    if summary.forced or summary.mode == "initial" or found > 0 then
         self:Print("Roster scanned: " .. RosterController.DescribeScan(summary) .. ".")
     end
     self:Invalidate()

@@ -104,8 +104,8 @@ The add-on never writes to guild notes.
 
 ### Scanning
 
-- On login, the add-on scans every note if the last full scan is more than a day old.
-- New members are picked up automatically when the guild roster updates.
+- Every login (and `/reload`) scans the roster, so ranks, notes and departures that changed while you were away show at once. Only notes that changed are read again, so it's quick. It says nothing in chat unless it found something.
+- New members, and rank or level changes (including promotions made in the game's own guild window), are picked up automatically when the guild roster updates.
 - **Rescan** in the window, or `/agf rescan`, scans right away.
 
 Scans run a little at a time, so even a large guild doesn't cause a hitch. The window's footer shows when the last scan ran and what it found.

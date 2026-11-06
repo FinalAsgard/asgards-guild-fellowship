@@ -997,9 +997,9 @@ local function registerRowTests(profile)
         detail:DisplayMember(1, { name = alt.name })
         test.assertContains(matchLine(), "Promote to match: Officer")
 
-        -- Promoted in the game's own guild window: the flag clears.
+        -- Promoted in the game's own guild window: the flag clears on the
+        -- roster update, with no Rescan.
         alt.rank, alt.rankName = 1, "Officer"
-        world.addon.rosterController:Rescan()
         fixtures.fire(world, "GUILD_ROSTER_UPDATE")
         fixtures.runTimers(world, 5)
         detail:DisplayMember(1, { name = alt.name })

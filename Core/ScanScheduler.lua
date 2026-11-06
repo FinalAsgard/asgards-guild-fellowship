@@ -3,15 +3,18 @@ local _, addon = ...
 -- Decides when the guild roster is scanned and runs each scan in small,
 -- time-budgeted steps across frames, so even a large guild never hitches.
 --
---   full         at login (or when the roster first becomes available) if
---                the last full scan is over 24 hours old, and on request
---   incremental  when roster updates show characters the store hasn't seen
+--   full         at every login (or when the roster first becomes
+--                available), so ranks and notes changed while the user was
+--                away are read at once, and on request. It only reprocesses
+--                notes that changed, so it's cheap when little did.
+--   incremental  when roster updates show characters the store hasn't seen,
+--                or known characters whose rank or level changed (promoted
+--                in the game's own guild window, say)
 --
 -- Opening the roster window never scans. A scan only ever works from a
 -- complete roster read: an empty or partial roster (as at login, while it
 -- loads asynchronously) waits for the next roster update instead.
 local ScanScheduler = {
-    FULL_SCAN_INTERVAL = 24 * 60 * 60,
     -- Roster updates arrive in bursts; they are coalesced into one check.
     COALESCE_SECONDS = 2,
     -- How long to wait for a requested roster refresh before reading anyway
@@ -107,21 +110,33 @@ function Scheduler:OnRosterUpdate()
     self:ScheduleIncremental()
 end
 
--- Runs a full scan when the last one is over 24 hours old (or never ran).
--- Only marked done once a scan can actually start, so a roster that isn't
+-- The login scan: a full scan, every login, so what changed in the roster
+-- while the user was away (ranks, notes, who left) shows at once. Only
+-- marked done once a scan can actually start, so a roster that isn't
 -- available yet is checked again on the next update.
 function Scheduler:CheckDaily()
     -- Without a guild, context() returns nil and a message, not a partition.
-    local guild, partition = self.context()
+    local guild = self.context()
     if guild == nil then
         return
     end
     self.dailyChecked = true
-    local lastScan = partition:GetLastScan()
-    local now = self.client:Timestamp() or 0
-    if lastScan == nil or now - lastScan > ScanScheduler.FULL_SCAN_INTERVAL then
-        self:Start("full", false)
+    self:Start("full", false)
+end
+
+-- True when a known character in `members` has another rank or level than
+-- the store holds.
+local function factsChanged(partition, members)
+    local key, member
+    for key, member in pairs(members) do
+        local character = partition:GetCharacter(key)
+        if character ~= nil and ((member.rankIndex ~= nil and character.rank ~= member.rankIndex)
+            or (member.level ~= nil and character.level ~= member.level))
+        then
+            return true
+        end
     end
+    return false
 end
 
 -- Coalesces a burst of roster updates into one incremental check.
@@ -229,9 +244,11 @@ function Scheduler:Run(mode, force)
         checkpoint = checkpoint,
         now = now,
     })
-    -- An incremental check that finds nobody new or returning changes
-    -- nothing.
-    if planMode == "incremental" and next(plan.processed) == nil and plan.rejoins[1] == nil then
+    -- An incremental check that finds nobody new or returning, and no rank
+    -- or level changed, changes nothing.
+    if planMode == "incremental" and next(plan.processed) == nil and plan.rejoins[1] == nil
+        and not factsChanged(partition, members)
+    then
         return { idle = true }
     end
     local result = engine.Apply(partition, plan, checkpoint)
@@ -241,6 +258,7 @@ function Scheduler:Run(mode, force)
     local summary = {
         at = now,
         mode = planMode,
+        forced = force == true or nil,
         newCharacters = result.newCharacters,
         linked = result.linked,
         aliased = result.aliased,

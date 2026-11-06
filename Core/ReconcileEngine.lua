@@ -568,12 +568,13 @@ end
 function ReconcileEngine.Apply(partition, plan, checkpoint)
     checkpoint = checkpoint or function() end
 
-    -- Full scans refresh every character's lasting facts; incremental scans
-    -- only add the characters they found.
+    -- Every scan refreshes the lasting facts (rank, level) of the
+    -- characters it read; an incremental one only adds the new characters
+    -- it found.
     local recorded = 0
     local key, member
     for key, member in pairs(plan.members) do
-        if plan.mode ~= "incremental" or plan.processed[key] then
+        if plan.mode ~= "incremental" or plan.processed[key] or partition:GetCharacter(key) ~= nil then
             if partition:RecordCharacter(key, member) ~= nil then
                 recorded = recorded + 1
             end

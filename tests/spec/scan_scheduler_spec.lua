@@ -56,16 +56,42 @@ test.test("a full scan runs at login when the guild was never scanned", function
     test.assertEqual(setup.world.time, setup.partition():GetLastScan())
 end)
 
-test.test("the daily scan is skipped when the last full scan is under 24 hours old", function()
+test.test("every login runs a full scan, so a rank changed while away shows at once", function()
     local setup = build()
     setup.login()
-    -- Next session, 23 hours later.
+    -- Next session (a /reload), a minute later; meanwhile an officer
+    -- promoted someone.
     local later = build({ database = setup.database })
-    later.world.time = setup.world.time + 23 * 3600
+    later.world.time = setup.world.time + 60
+    later.world.guild.members[3].rank = 1
 
     later.login()
 
-    test.assertEqual(0, #later.finished)
+    test.assertEqual(1, #later.finished)
+    test.assertEqual("full", later.finished[1].mode)
+    local key = later.normalizer:Key(later.world.guild.members[3].name)
+    test.assertEqual(1, later.partition():GetCharacter(key).rank)
+end)
+
+test.test("a roster update with a known character's new rank records it", function()
+    local setup = build()
+    setup.login()
+    local key = setup.normalizer:Key(setup.world.guild.members[3].name)
+    test.assertTrue(setup.partition():GetCharacter(key).rank ~= 1)
+    -- Promoted in the game's own guild window.
+    setup.world.guild.members[3].rank = 1
+
+    setup.scheduler:OnRosterUpdate()
+    fixtures.runTimers(setup.world, 2)
+
+    test.assertEqual(2, #setup.finished)
+    test.assertEqual("incremental", setup.finished[2].mode)
+    test.assertEqual(1, setup.partition():GetCharacter(key).rank)
+
+    -- Nothing else changed: the next update is a quiet check.
+    setup.scheduler:OnRosterUpdate()
+    fixtures.runTimers(setup.world, 2)
+    test.assertEqual(2, #setup.finished)
 end)
 
 test.test("the daily scan runs again once the last full scan is over 24 hours old", function()
