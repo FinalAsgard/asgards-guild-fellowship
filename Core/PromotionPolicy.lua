@@ -272,7 +272,9 @@ end
 -- has one guild master); the target is the highest rank at or below the
 -- ceiling, above `key`'s own, that alts are matched to. It doesn't depend on
 -- whether `key`'s rank has requirements.
-function PromotionPolicy.MatchTarget(inputs, key)
+-- `highestOf(player)`, when given, is the player's highest rank (MatchSet
+-- reads each player's once).
+local function matchTarget(inputs, key, highestOf)
     local partition = inputs.partition
     local character = partition:GetCharacter(key)
     if character == nil or character.player == nil or not partition:IsInGuild(key)
@@ -280,7 +282,7 @@ function PromotionPolicy.MatchTarget(inputs, key)
     then
         return nil
     end
-    local ceiling = PromotionPolicy.HighestRank(partition, character.player)
+    local ceiling = highestOf(character.player)
     if ceiling == nil then
         return nil
     end
@@ -294,11 +296,26 @@ function PromotionPolicy.MatchTarget(inputs, key)
     return nil
 end
 
+function PromotionPolicy.MatchTarget(inputs, key)
+    return matchTarget(inputs, key, function(player)
+        return PromotionPolicy.HighestRank(inputs.partition, player)
+    end)
+end
+
 -- Every character in the guild with a match target, as key -> target rank.
+-- Each player's highest rank is read once, however many characters they
+-- have.
 function PromotionPolicy.MatchSet(inputs)
     local targets = {}
+    local highest = {}
+    local function highestOf(player)
+        if highest[player] == nil then
+            highest[player] = { PromotionPolicy.HighestRank(inputs.partition, player) }
+        end
+        return highest[player][1]
+    end
     inputs.partition:EachCharacter(function(key)
-        targets[key] = PromotionPolicy.MatchTarget(inputs, key)
+        targets[key] = matchTarget(inputs, key, highestOf)
     end)
     return targets
 end

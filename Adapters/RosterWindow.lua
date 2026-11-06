@@ -1480,6 +1480,13 @@ local function buildPromotions(framework, page, frameName, options)
     nextButton:SetPoint("LEFT", editor.rankText, "RIGHT", 8, 0)
     editor.nextText = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     editor.nextText:SetPoint("LEFT", nextButton, "RIGHT", 12, 0)
+    -- Kept short of the match box at x=480, so a long rank name is cut off
+    -- rather than drawn over it.
+    editor.nextText:SetWidth(160)
+    editor.nextText:SetJustifyH("LEFT")
+    if editor.nextText.SetWordWrap then
+        editor.nextText:SetWordWrap(false)
+    end
     -- Whether alts are promoted to match their player at this rank. (The
     -- guild master's rank has none; it can't be picked here anyway.)
     -- Placed at the right of the rank line, a best guess at where it reads

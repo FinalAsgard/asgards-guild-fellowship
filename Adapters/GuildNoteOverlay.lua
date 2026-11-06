@@ -588,13 +588,18 @@ end
 
 -- Sets the flag `marker` shows: "ready" (the plain arrow) or "match" to
 -- `rankName` (tinted, with a tooltip). Only a match flag takes the mouse,
--- for its tooltip, and clicks still go to the row.
+-- for its tooltip, and clicks still go to the row. Where clicks can't be
+-- passed through (no SetMouseClickEnabled), the flag never takes the
+-- mouse and goes without its tooltip, so the row keeps its clicks.
 function Overlay:SetFlag(marker, kind, rankName)
     local tint = kind == "match" and GuildNoteOverlay.MATCH_TINT or { 1, 1, 1 }
     pcall(marker.picture.SetVertexColor, marker.picture, tint[1], tint[2], tint[3])
     marker.tooltip = kind == "match" and string.format(GuildNoteOverlay.MATCH_TOOLTIP, tostring(rankName)) or nil
-    pcall(marker.EnableMouse, marker, marker.tooltip ~= nil)
-    pcall(marker.SetMouseClickEnabled, marker, false)
+    local hover = marker.tooltip ~= nil and type(marker.SetMouseClickEnabled) == "function"
+    pcall(marker.EnableMouse, marker, hover)
+    if hover and not pcall(marker.SetMouseClickEnabled, marker, false) then
+        pcall(marker.EnableMouse, marker, false)
+    end
     if not marker.hasTooltip then
         marker.hasTooltip = true
         local environment = self.environment

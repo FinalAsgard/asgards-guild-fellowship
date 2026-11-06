@@ -21,6 +21,7 @@ local function fakeWidget()
     function widget:SetScript(name, handler) self[name] = handler end
     function widget:SetVertexColor(...) self.tint = { ... } end
     function widget:EnableMouse(enabled) self.mouse = enabled end
+    function widget:SetMouseClickEnabled(enabled) self.clicks = enabled end
     function widget:CreateFontString()
         return fakeWidget()
     end
@@ -717,6 +718,7 @@ local function registerRowTests(profile)
         test.assertEqual(0.30, hammer.picture.tint[1])
         test.assertEqual(1, bolt.picture.tint[1], "a Ready flag keeps the plain arrow")
         test.assertTrue(hammer.mouse)
+        test.assertFalse(hammer.clicks, "the match flag's clicks go through to the row")
         test.assertFalse(bolt.mouse, "a Ready flag doesn't take the mouse")
 
         hammer.OnEnter()
@@ -727,6 +729,13 @@ local function registerRowTests(profile)
         test.assertFalse(tooltip.shown)
         bolt.OnEnter()
         test.assertFalse(tooltip.shown, "no tooltip on a Ready flag")
+
+        -- A client that can't pass clicks through: the flag never takes
+        -- the mouse, so the row still gets its clicks.
+        nail.SetMouseClickEnabled = nil
+        overlay:SetFlag(nail, "match", "Veteran")
+        test.assertFalse(nail.mouse)
+        test.assertEqual(0.30, nail.picture.tint[1], "still tinted")
 
         local lines = overlay:ReadyProbeLines()
         test.assertEqual("Rows with a Ready flag now: 1", lines[2])
@@ -882,6 +891,37 @@ local function registerRowTests(profile)
         test.assertEqual("hammer#1", shown[2].data.current, "prefilled with the current name")
         shown[2].data.onSave("")
         test.assertContains(promotionText(), "not set", "clearing it clears the name")
+    end)
+
+    test.test(profile .. ": in the whole add-on, a member's Discord name for someone else from the mini profile "
+        .. "waits for an officer", function()
+        local world = fixtures.newEnvironment(profile, { playerName = fixtures.GUILDS[profile].members[2].name })
+        local detail = installGuildRoster(world.environment)
+        local shown = {}
+        world.environment.StaticPopupDialogs = {}
+        world.environment.StaticPopup_Show = function(name, label, _, data)
+            table.insert(shown, { name = name, label = label, data = data })
+        end
+        local other = world.guild.members[3]
+        fixtures.loadAddon(world)
+        fixtures.fire(world, "ADDON_LOADED", world.addonName)
+        world.loggedIn = true
+        fixtures.fire(world, "PLAYER_LOGIN")
+        fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local _, partition = world.addon.rosterController:QuietContext()
+        test.assertEqual(0, #(partition:GetSuggestions() or {}))
+
+        detail:DisplayMember(1, { name = other.name })
+        detail.profile.discordButton.OnClick()
+        test.assertEqual(1, #shown)
+        shown[1].data.onSave("nail#9")
+
+        -- Kept as a pending suggestion for an officer to approve (the
+        -- member's own client shows it meanwhile, like any member edit).
+        test.assertEqual(1, #partition:GetSuggestions(), "kept as a suggestion")
+        test.assertEqual(1, #world.addon.syncSession:Suggestions(partition):Pending())
     end)
 
     test.test(profile .. ": in the whole add-on, an officer sees an alt that's behind flagged to match, until it is",
