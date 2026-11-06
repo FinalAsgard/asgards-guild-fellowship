@@ -301,9 +301,11 @@ function RosterController.DescribeScan(summary)
 end
 
 function Controller:OnScanFinished(result, summary)
-    -- Incremental pickups that found new characters, and every full scan,
-    -- are reported; quiet checks are not.
-    if summary.mode ~= "incremental" or summary.newCharacters > 0 then
+    -- A Rescan, the first scan, and any scan that found something are
+    -- reported; a login scan or a quiet check that found nothing is not.
+    local found = (summary.newCharacters or 0) + (summary.linked or 0) + (summary.aliased or 0)
+        + (summary.departed or 0) + (summary.rejoined or 0) + (summary.promoted or 0) + (summary.conflicts or 0)
+    if summary.forced or summary.mode == "initial" or found > 0 then
         self:Print("Roster scanned: " .. RosterController.DescribeScan(summary) .. ".")
     end
     self:Invalidate()
@@ -630,11 +632,12 @@ function Controller:Detach(key)
     return self:Organize("Detach", key)
 end
 
--- "Set Discord…" from the player panel: sets the Discord username of
--- `key`'s player to `text` ("" clears it), as an officer's or as a member's
--- suggestion, and redraws.
+-- "Set Discord…" from the player panel or the game roster's mini profile:
+-- sets the Discord username of `key`'s player to `text` ("" clears it), as
+-- an officer's or as a member's suggestion, and redraws. The add-on's
+-- window needn't have been opened.
 function Controller:SetDiscord(key, text)
-    if self.current == nil or self.onDiscordChanged == nil then
+    if self.onDiscordChanged == nil or (self.current == nil and self:QuietContext() == nil) then
         return false
     end
     if self.onDiscordChanged(key, text) == nil then

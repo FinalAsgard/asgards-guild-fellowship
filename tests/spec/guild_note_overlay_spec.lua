@@ -19,6 +19,9 @@ local function fakeWidget()
     function widget:SetAllPoints(target) self.allPoints = target end
     function widget:SetTexture(texture) self.texture = texture end
     function widget:SetScript(name, handler) self[name] = handler end
+    function widget:SetVertexColor(...) self.tint = { ... } end
+    function widget:EnableMouse(enabled) self.mouse = enabled end
+    function widget:SetMouseClickEnabled(enabled) self.clicks = enabled end
     function widget:CreateFontString()
         return fakeWidget()
     end
@@ -133,9 +136,14 @@ local function installGuildRoster(environment)
             table.insert(parent.children, widget)
             return widget
         end
+        -- The profile's Edit button first, then its Set Discord… button.
         if parent ~= nil and parent == detail.profile then
-            detail.profile.editButton = fakeWidget()
-            return detail.profile.editButton
+            if detail.profile.editButton == nil then
+                detail.profile.editButton = fakeWidget()
+                return detail.profile.editButton
+            end
+            detail.profile.discordButton = fakeWidget()
+            return detail.profile.discordButton
         end
         if parent ~= nil and parent == detail.panel then
             detail.panel.button = fakeWidget()
@@ -192,6 +200,10 @@ local function build(world, options)
         editProfile = function()
             options.edited = (options.edited or 0) + 1
         end,
+        setDiscord = function(name)
+            options.discordFor = options.discordFor or {}
+            table.insert(options.discordFor, name)
+        end,
         promotionFor = function(name)
             return (options.promotions or {})[name]
         end,
@@ -208,7 +220,11 @@ local function build(world, options)
             options.readyChecks = (options.readyChecks or 0) + 1
             local ready = options.ready
             return ready and function(name)
-                return ready[name] == true
+                local match = (options.match or {})[name]
+                if match ~= nil then
+                    return "match", match
+                end
+                return ready[name] == true and "ready" or nil
             end or nil
         end,
     })
@@ -433,9 +449,9 @@ local function registerProfileTests(profile)
         test.assertEqual(6, shown.points[1][4])
         test.assertEqual("BOTTOMRIGHT", shown.points[2][3])
         test.assertEqual(6, shown.points[2][4])
-        -- Tall enough for the title and three lines; someone else's
-        -- profile has no Edit button.
-        test.assertEqual(12 + 3 + 3 * 12 + 16, shown.height)
+        -- Tall enough for the title, three lines and the buttons' row;
+        -- someone else's profile has no Edit button.
+        test.assertEqual(12 + 3 + 3 * 12 + 10 + 18 + 16, shown.height)
         test.assertFalse(shown.editButton.shown)
 
         -- Someone the add-on has no record of: no profile.
@@ -466,6 +482,32 @@ local function registerProfileTests(profile)
         test.assertEqual(12 + 3 + 12 + 10 + 18 + 16, detail.profile.height)
         edit.OnClick()
         test.assertEqual(1, options.edited)
+    end)
+
+    test.test(profile .. ": anyone's mini profile has a Set Discord button for the selected player", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local options = { officer = false, profiles = {
+            Hammer = { title = "TheTool (Toolbox)", lines = { "Main: Toolbox (80)" } },
+            Toolbox = { title = "TheTool (Toolbox)", lines = { "Main: Toolbox (80)" }, own = true },
+        } }
+        local overlay = build(world, options)
+
+        overlay:Attach()
+        detail:DisplayMember(1, { name = "Hammer" })
+
+        local button = detail.profile.discordButton
+        test.assertTrue(button.shown, "someone else's profile has it too")
+        test.assertEqual("Set Discord...", button.text)
+        test.assertEqual("BOTTOMLEFT", button.points[1][1])
+        button.OnClick()
+        test.assertEqual("Hammer", options.discordFor[1])
+
+        detail:DisplayMember(1, { name = "Toolbox" })
+        test.assertTrue(button.shown)
+        test.assertTrue(detail.profile.editButton.shown, "beside the user's own Edit button")
+        button.OnClick()
+        test.assertEqual("Toolbox", options.discordFor[2])
     end)
 
     test.test(profile .. ": without the guild roster or hooksecurefunc, the overlay stays off", function()
@@ -653,6 +695,67 @@ local function registerRowTests(profile)
         test.assertContains(overlay:ReadyProbeLines()[3], "at the row's right edge (no rank text found): 1")
     end)
 
+    test.test(profile .. ": an alt to promote to match gets the arrow tinted, with a tooltip, over a Ready flag",
+        function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local tooltip = { shown = false }
+        function tooltip:SetOwner(owner) self.owner = owner end
+        function tooltip:SetText(text) self.text = text end
+        function tooltip:Show() self.shown = true end
+        function tooltip:Hide() self.shown = false end
+        world.environment.GameTooltip = tooltip
+        local list = detail.memberList
+        list.rows = { fakeRow("Hammer"), fakeRow("Bolt"), fakeRow("Nail") }
+        local options = { ready = { Hammer = true, Bolt = true }, match = { Hammer = "Officer", Nail = "Veteran" } }
+        local overlay = build(world, options)
+        overlay:AttachRows()
+
+        local hammer, bolt, nail = list.rows[1].readyMarker, list.rows[2].readyMarker, list.rows[3].readyMarker
+        test.assertTrue(hammer.shown, "behind and ready: the match flag shows")
+        test.assertTrue(nail.shown)
+        test.assertTrue(bolt.shown)
+        test.assertEqual(0.30, hammer.picture.tint[1])
+        test.assertEqual(1, bolt.picture.tint[1], "a Ready flag keeps the plain arrow")
+        test.assertTrue(hammer.mouse)
+        test.assertFalse(hammer.clicks, "the match flag's clicks go through to the row")
+        test.assertFalse(bolt.mouse, "a Ready flag doesn't take the mouse")
+
+        hammer.OnEnter()
+        test.assertTrue(tooltip.shown)
+        test.assertEqual("Promote to match: Officer", tooltip.text)
+        test.assertEqual(hammer, tooltip.owner)
+        hammer.OnLeave()
+        test.assertFalse(tooltip.shown)
+        bolt.OnEnter()
+        test.assertFalse(tooltip.shown, "no tooltip on a Ready flag")
+
+        -- A client that can't pass clicks through: the flag never takes
+        -- the mouse, so the row still gets its clicks.
+        nail.SetMouseClickEnabled = nil
+        overlay:SetFlag(nail, "match", "Veteran")
+        test.assertFalse(nail.mouse)
+        test.assertEqual(0.30, nail.picture.tint[1], "still tinted")
+
+        local lines = overlay:ReadyProbeLines()
+        test.assertEqual("Rows with a Ready flag now: 1", lines[2])
+        test.assertEqual("Rows with a Promote to match flag now: 2", lines[4])
+
+        -- Scrolling reuses a row; the alt reaches its rank and the flag
+        -- goes back to Ready, untinted.
+        list.rows[2]:SetMember({ name = "Nail" })
+        test.assertEqual(0.30, bolt.picture.tint[1], "the flag follows the member")
+        options.match = { Nail = "Veteran" }
+        overlay:Refresh()
+        test.assertEqual(1, hammer.picture.tint[1])
+        test.assertFalse(hammer.mouse)
+        options.match = {}
+        options.ready = {}
+        overlay:Refresh()
+        test.assertFalse(bolt.shown)
+        test.assertFalse(nail.shown)
+    end)
+
     test.test(profile .. ": before the guild roster opens, the probe says its rows aren't followed yet", function()
         local world = fixtures.newEnvironment(profile)
         local overlay = build(world, { ready = { Bolt = true } })
@@ -663,7 +766,8 @@ local function registerRowTests(profile)
         local world = fixtures.newEnvironment(profile)
         local detail = installGuildRoster(world.environment)
         detail.memberList.rows = { fakeRow("Hammer") }
-        local options = { officer = false, rows = { Hammer = ROW }, ready = { Hammer = true } }
+        local options = { officer = false, rows = { Hammer = ROW }, ready = { Hammer = true },
+            match = { Hammer = "Officer" } }
         local overlay = build(world, options)
 
         overlay:AttachRows()
@@ -730,6 +834,177 @@ local function registerRowTests(profile)
         lines[2].scripts.OnMouseUp(lines[2])
         test.assertContains(lines[2].text.text, "[+] ", "closed")
         test.assertFalse(lines[3].shown)
+    end)
+
+    test.test(profile .. ": in the whole add-on, an officer sets a Discord name from the mini profile and sees the "
+        .. "check pass", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local shown = {}
+        world.environment.StaticPopupDialogs = {}
+        world.environment.StaticPopup_Show = function(name, label, _, data)
+            table.insert(shown, { name = name, label = label, data = data })
+        end
+        local member = world.guild.members[#world.guild.members]
+        fixtures.loadAddon(world)
+        fixtures.fire(world, "ADDON_LOADED", world.addonName)
+        world.loggedIn = true
+        fixtures.fire(world, "PLAYER_LOGIN")
+        fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local _, partition, normalizer = world.addon.rosterController:QuietContext()
+        local key = normalizer:Key(member.name)
+        local requirements = world.addon.RankRequirements.Create(partition:GetRankRequirements(), {
+            isOfficer = function()
+                return true
+            end,
+        })
+        requirements:SetAutomated(partition:GetCharacter(key).rank, "discord", true, nil, nil, "boss", world.time)
+
+        detail:DisplayMember(1, { name = member.name })
+        local function promotionText()
+            local texts = {}
+            local index
+            for index = 1, #detail.promotion.lines do
+                local line = detail.promotion.lines[index]
+                if line.shown then
+                    table.insert(texts, line.text.text or "")
+                end
+            end
+            return table.concat(texts, "\n")
+        end
+        test.assertContains(promotionText(), "not set")
+        test.assertContains(detail.profile.body.text, "Discord:\n", "no name yet")
+
+        -- The add-on's own window was never opened.
+        detail.profile.discordButton.OnClick()
+        test.assertEqual(1, #shown)
+        test.assertEqual(nil, shown[1].data.current, "an empty box with no name yet")
+        shown[1].data.onSave("hammer#1")
+
+        test.assertContains(detail.profile.body.text, "Discord: hammer#1", "the mini profile is redrawn")
+        test.assertContains(promotionText(), "Ready for promotion", "and the check is seen to pass")
+        test.assertContains(promotionText(), "hammer#1")
+
+        detail.profile.discordButton.OnClick()
+        test.assertEqual("hammer#1", shown[2].data.current, "prefilled with the current name")
+        shown[2].data.onSave("")
+        test.assertContains(promotionText(), "not set", "clearing it clears the name")
+    end)
+
+    test.test(profile .. ": in the whole add-on, a member's Discord name for someone else from the mini profile "
+        .. "waits for an officer", function()
+        local world = fixtures.newEnvironment(profile, { playerName = fixtures.GUILDS[profile].members[2].name })
+        local detail = installGuildRoster(world.environment)
+        local shown = {}
+        world.environment.StaticPopupDialogs = {}
+        world.environment.StaticPopup_Show = function(name, label, _, data)
+            table.insert(shown, { name = name, label = label, data = data })
+        end
+        local other = world.guild.members[3]
+        fixtures.loadAddon(world)
+        fixtures.fire(world, "ADDON_LOADED", world.addonName)
+        world.loggedIn = true
+        fixtures.fire(world, "PLAYER_LOGIN")
+        fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local _, partition = world.addon.rosterController:QuietContext()
+        test.assertEqual(0, #(partition:GetSuggestions() or {}))
+
+        detail:DisplayMember(1, { name = other.name })
+        detail.profile.discordButton.OnClick()
+        test.assertEqual(1, #shown)
+        shown[1].data.onSave("nail#9")
+
+        -- Kept as a pending suggestion for an officer to approve (the
+        -- member's own client shows it meanwhile, like any member edit).
+        test.assertEqual(1, #partition:GetSuggestions(), "kept as a suggestion")
+        test.assertEqual(1, #world.addon.syncSession:Suggestions(partition):Pending())
+    end)
+
+    test.test(profile .. ": in the whole add-on, an officer sees an alt that's behind flagged to match, until it is",
+        function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local alt = world.guild.members[2]
+        detail.memberList.rows = { fakeRow(alt.name), fakeRow(world.guild.members[1].name) }
+        fixtures.loadAddon(world)
+        fixtures.fire(world, "ADDON_LOADED", world.addonName)
+        world.loggedIn = true
+        fixtures.fire(world, "PLAYER_LOGIN")
+        fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local arrow = detail.memberList.rows[1].readyMarker
+        local function arrowTinted()
+            return arrow.shown and arrow.picture.tint ~= nil and arrow.picture.tint[1] < 1
+        end
+        -- The game's roster: a tinted arrow on the alt's row, none on the
+        -- main's.
+        test.assertTrue(arrowTinted(), "the alt's row has the match arrow")
+        test.assertFalse(detail.memberList.rows[2].readyMarker.shown)
+        world.messages = {}
+        fixtures.slash(world, "probe ready")
+        local printed = table.concat(world.messages, "\n")
+        test.assertContains(printed, "Promote to match: 1")
+        test.assertContains(printed, " to Officer")
+        test.assertContains(printed, "Rows with a Promote to match flag now: 1")
+        local function matchLine()
+            local index
+            for index = 1, #detail.promotion.lines do
+                local line = detail.promotion.lines[index]
+                if line.shown and string.find(line.text.text or "", "Promote to match", 1, true) then
+                    return line.text.text
+                end
+            end
+            return nil
+        end
+
+        -- The alt's rank has no requirements: the panel still shows, with
+        -- the match line.
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertTrue(detail.promotion.shown)
+        test.assertContains(matchLine(), "Promote to match: Officer")
+
+        -- The officer turns matching off for Officer, then Veteran too:
+        -- the flag moves down, then goes, then comes back.
+        local promotions = world.addon.promotions
+        test.assertTrue(promotions.rank(1), "from the newest members' rank round to Officer")
+        test.assertEqual(1, promotions.view().rank)
+        test.assertTrue(promotions.view().matchAlts, "ticked by default")
+        test.assertTrue(promotions.matchAlts(false))
+        test.assertFalse(promotions.view().matchAlts)
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertContains(matchLine(), "Promote to match: Veteran")
+        local _, partition, normalizer = world.addon.rosterController:QuietContext()
+        local altKey = normalizer:Key(alt.name)
+        local rows = promotions.panelRows({ altKey }, partition:GetCharacter(altKey).player)
+        local panelText = {}
+        local index
+        for index = 1, #rows do
+            table.insert(panelText, rows[index].text or "")
+        end
+        test.assertContains(table.concat(panelText, "\n"), "Promote to match: Veteran", "the player panel too")
+        test.assertTrue(promotions.rank(1))
+        test.assertTrue(promotions.matchAlts(false))
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertEqual(nil, matchLine(), "no rank in range is on")
+        test.assertFalse(arrow.shown, "and the roster's arrow goes")
+        test.assertTrue(promotions.rank(-1))
+        test.assertTrue(promotions.matchAlts(true))
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertContains(matchLine(), "Promote to match: Officer")
+
+        -- Promoted in the game's own guild window: the flag clears on the
+        -- roster update, with no Rescan.
+        alt.rank, alt.rankName = 1, "Officer"
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world, 5)
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertEqual(nil, matchLine())
+        test.assertFalse(arrow.shown, "the roster's arrow clears too")
     end)
 
     test.test(profile .. ": in the whole add-on, a member sees only their own promotion status, read-only",

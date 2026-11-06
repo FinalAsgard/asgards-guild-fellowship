@@ -115,6 +115,19 @@ test.test("changes by non-officers, oversized labels, and too many items are ref
     test.assertEqual(nil, (requirements:Add(3, "One more", "check", "Veteran", OFFICER, NOW + 100)))
 end)
 
+test.test("an add-on that doesn't know a kind refuses just that record", function()
+    local requirements, addon = newRequirements()
+    -- An older add-on, from before the Discord check.
+    addon.RankRequirements.KINDS.discord = nil
+    addon.RankRequirements.AUTOMATED.discord = nil
+
+    test.assertFalse(requirements:Apply({ t = "item", id = "d", rank = 4, label = "Has a Discord name set",
+        kind = "discord", position = 1, at = NOW, by = OFFICER }))
+    test.assertTrue(requirements:Apply({ t = "item", id = "c", rank = 4, label = "Read the rules", kind = "check",
+        position = 2, at = NOW, by = OFFICER }), "the rest still apply")
+    test.assertEqual("Read the rules", labels(requirements, 4))
+end)
+
 test.test("the editor warns when the game's rank name no longer matches the one stored", function()
     local requirements, addon = newRequirements()
     requirements:Add(3, "Hi", "check", "Veteran", OFFICER, NOW)
@@ -214,7 +227,7 @@ test.test("automated items carry their number, which an officer can change", fun
     test.assertEqual(1, #model.items, "only custom requirements are listed as items")
     test.assertEqual("Read the rules", model.items[1].label)
     test.assertFalse(model.items[1].needsNote)
-    test.assertEqual(5, #model.automated, "every automatic check is listed, on or off")
+    test.assertEqual(6, #model.automated, "every automatic check is listed, on or off")
     test.assertEqual("char-guild-days", model.automated[1].kind)
     test.assertEqual("Character days in guild", model.automated[1].text)
     test.assertTrue(model.automated[1].enabled)
@@ -226,6 +239,10 @@ test.test("automated items carry their number, which an officer can change", fun
     test.assertEqual("Has the Guild Fellowship Addon", model.automated[5].text)
     test.assertFalse(model.automated[5].enabled)
     test.assertEqual(nil, model.automated[5].numberText, "the add-on check has no number")
+    test.assertEqual("discord", model.automated[6].kind, "the Discord check is listed last")
+    test.assertEqual("Has a Discord name set", model.automated[6].text)
+    test.assertFalse(model.automated[6].enabled)
+    test.assertEqual(nil, model.automated[6].numberText, "the Discord check has no number")
     test.assertEqual("Character days in guild: 10", addon.PromotionsViewModel.KindText(requirements:Item(days.id)))
 end)
 
@@ -248,6 +265,14 @@ test.test("automatic checks turn on and off, one per rank, and a checkbox can be
     -- One made when it took a number of days still loads.
     test.assertTrue(addon.RankRequirements.IsRecord({ t = "item", id = "old", rank = 4,
         label = "Has the add-on (seen in 30 days)", kind = "addon", n = 30, position = 9, at = NOW, by = OFFICER }))
+
+    local discord = requirements:SetAutomated(4, "discord", true, 30, "Initiate", OFFICER, NOW + 2)[1]
+    test.assertEqual(nil, discord.n, "the Discord check takes no number")
+    test.assertEqual("Has a Discord name set", discord.label)
+    test.assertFalse(addon.RankRequirements.IsRecord({ t = "item", id = "d", rank = 4, label = "Discord",
+        kind = "discord", n = 30, position = 9, at = NOW, by = OFFICER }), "nor does a record of one")
+    test.assertTrue(#requirements:SetAutomated(4, "discord", false, nil, "Initiate", OFFICER, NOW + 3) == 1)
+    test.assertEqual(nil, requirements:Item(discord.id), "turning the Discord check off deletes it")
 
     test.assertTrue(#requirements:SetAutomated(4, "rank-days", false, nil, "Initiate", OFFICER, NOW + 3) == 1)
     test.assertEqual(nil, requirements:Item(id), "turning a check off deletes it")
@@ -385,6 +410,113 @@ test.test("a catch-up from an officer keeps items made by an officer since demot
     -- Taken directly, a record still needs its author to be an officer now.
     test.assertFalse(hub.nodes["late-area52"].requirements():Apply({ t = "item", id = "c", rank = 3, label = "New",
         kind = "check", position = 3, at = NOW, by = "former-area52" }))
+end)
+
+-- Matching alts ------------------------------------------------------------------------
+
+test.test("every rank but the guild master's matches alts until an officer turns it off", function()
+    local requirements, addon = newRequirements()
+
+    test.assertTrue(requirements:MatchesAlts(1))
+    test.assertTrue(requirements:MatchesAlts(4))
+    test.assertFalse(requirements:MatchesAlts(0), "no alt is matched to the guild master's rank")
+    test.assertEqual(0, #requirements:SetMatchesAlts(2, true, OFFICER, NOW), "already on: nothing to share")
+
+    local records = requirements:SetMatchesAlts(2, false, OFFICER, NOW)
+    test.assertEqual(1, #records)
+    local record = records[1]
+    test.assertEqual("match", record.t)
+    test.assertEqual(2, record.rank)
+    test.assertEqual(false, record.on)
+    test.assertEqual(NOW, record.at)
+    test.assertEqual(OFFICER, record.by)
+    test.assertFalse(requirements:MatchesAlts(2))
+    test.assertTrue(requirements:MatchesAlts(3), "only that rank")
+
+    test.assertTrue(requirements:SetMatchesAlts(2, true, OTHER_OFFICER, NOW)[1].at > NOW, "a later change is newer")
+    test.assertTrue(requirements:MatchesAlts(2))
+    test.assertEqual(nil, (requirements:SetMatchesAlts(0, false, OFFICER, NOW)))
+    test.assertEqual(nil, (requirements:SetMatchesAlts(3, false, MEMBER, NOW)), "members can't change it")
+    test.assertTrue(requirements:MatchesAlts(3))
+
+    -- The editor's box follows it.
+    local Model = addon.PromotionsViewModel
+    test.assertTrue(Model.Editor({ requirements = requirements, rank = 2, rankNames = RANKS }).matchAlts)
+    requirements:SetMatchesAlts(3, false, OFFICER, NOW + 5)
+    test.assertFalse(Model.Editor({ requirements = requirements, rank = 3, rankNames = RANKS }).matchAlts)
+end)
+
+test.test("match records are officer-only and the newest wins", function()
+    local requirements, addon = newRequirements()
+    local function match(on, at, by)
+        return { t = "match", rank = 3, on = on, at = at, by = by }
+    end
+
+    test.assertFalse(requirements:Apply(match(false, NOW, MEMBER)), "a member's record is refused")
+    test.assertTrue(requirements:MatchesAlts(3))
+    test.assertTrue(requirements:Apply(match(false, NOW, OFFICER)))
+    test.assertFalse(requirements:MatchesAlts(3))
+    test.assertFalse(requirements:Apply(match(true, NOW - 1, OTHER_OFFICER)), "an older change loses")
+    test.assertFalse(requirements:MatchesAlts(3))
+    test.assertTrue(requirements:Apply(match(true, NOW + 1, OTHER_OFFICER)))
+    test.assertTrue(requirements:MatchesAlts(3))
+
+    -- Badly shaped ones are refused.
+    test.assertFalse(addon.RankRequirements.IsRecord(match("no", NOW, OFFICER)))
+    test.assertFalse(addon.RankRequirements.IsRecord({ t = "match", rank = 0, on = false, at = NOW, by = OFFICER }))
+    test.assertFalse(addon.RankRequirements.IsRecord({ t = "match", rank = 3, at = NOW, by = OFFICER }))
+end)
+
+test.test("match records are in the snapshot and the cover check", function()
+    local requirements = newRequirements()
+    local other = newRequirements()
+    requirements:Add(3, "Hi", "check", "Veteran", OFFICER, NOW)
+    requirements:SetMatchesAlts(2, false, OFFICER, NOW)
+
+    local snapshot = requirements:Snapshot()
+    test.assertEqual(3, #snapshot)
+    test.assertEqual("rank,match,item", snapshot[1].t .. "," .. snapshot[2].t .. "," .. snapshot[3].t)
+    local index
+    for index = 1, #snapshot do
+        other:Apply(snapshot[index])
+    end
+    test.assertFalse(other:MatchesAlts(2))
+    test.assertTrue(requirements:CoveredBy(other:Snapshot()))
+
+    -- Without the match record the snapshot doesn't cover it, nor one
+    -- with an older one.
+    test.assertFalse(requirements:CoveredBy({ snapshot[1], snapshot[3] }))
+    requirements:SetMatchesAlts(2, true, OFFICER, NOW + 1)
+    test.assertFalse(requirements:CoveredBy(snapshot))
+end)
+
+test.test("records of a type an add-on doesn't know are refused one at a time", function()
+    local hub = newHub({ OFFICER, MEMBER })
+    hub.nodes[OFFICER].sync:Share({
+        { t = "someday", rank = 3, at = NOW, by = OFFICER },
+        { t = "match", rank = 3, on = false, at = NOW, by = OFFICER },
+        { t = "item", id = "a", rank = 3, label = "Hi", kind = "check", position = 1, at = NOW, by = OFFICER },
+    })
+    hub:deliver()
+
+    local member = hub.nodes[MEMBER].requirements()
+    test.assertEqual("Hi", labels(member, 3))
+    test.assertFalse(member:MatchesAlts(3))
+    test.assertEqual(2, #member:Snapshot(), "the unknown record isn't kept")
+end)
+
+test.test("a match change reaches every add-on, and one that logs in later catches up", function()
+    local hub = newHub({ OFFICER, MEMBER })
+    local officer = hub.nodes[OFFICER]
+    officer.sync:Share(officer.requirements():SetMatchesAlts(1, false, OFFICER, NOW))
+    hub:deliver()
+    test.assertFalse(hub.nodes[MEMBER].requirements():MatchesAlts(1))
+
+    local late = newHub({ OFFICER, "late-area52" })
+    late.nodes[OFFICER].saved = officer.saved
+    late.nodes["late-area52"].sync:AskOnce()
+    late:runTimers()
+    test.assertFalse(late.nodes["late-area52"].requirements():MatchesAlts(1))
 end)
 
 -- In the composed add-on -----------------------------------------------------------

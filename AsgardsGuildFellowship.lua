@@ -295,6 +295,9 @@ if clientProfile.supported then
                 onPromotionsAutomated = function(kind, enabled, n)
                     return promotions.automated(kind, enabled, n)
                 end,
+                onPromotionsMatchAlts = function(on)
+                    return promotions.matchAlts(on)
+                end,
                 onPromotionsMove = function(id, step)
                     return promotions.move(id, step)
                 end,
@@ -2304,6 +2307,19 @@ if clientProfile.supported then
         end
         return addon.PromotionPolicy.ReadySet(inputs)
     end
+    -- The characters to promote to match their player, as key -> target
+    -- rank, for the roster's marker: officers only.
+    promotions.matchKeys = function()
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        return addon.PromotionPolicy.MatchSet(inputs)
+    end
+    -- The game's name for rank index `rank`.
+    promotions.rankName = function(rank)
+        return (client:GetGuildRankNames() or {})[rank + 1] or ("Rank " .. rank)
+    end
     -- The characters whose checklists are open on the player panel's
     -- Promotion tab, for the session.
     local panelExpanded = {}
@@ -2341,12 +2357,14 @@ if clientProfile.supported then
             local key = keys[index]
             local character = partition:GetCharacter(key)
             if character ~= nil and partition:IsInGuild(key) and type(character.rank) == "number" then
+                local match = officer and addon.PromotionPolicy.MatchTarget(inputs, key) or nil
                 table.insert(characters, {
                     key = key,
                     name = nameOf(key),
                     rankName = inputs.rankNames[character.rank + 1] or ("Rank " .. character.rank),
                     evaluated = addon.PromotionPolicy.Evaluate(inputs, key),
                     lastPromotion = dates and dates:LastPromotion(key) or nil,
+                    matchRankName = match and (inputs.rankNames[match + 1] or ("Rank " .. match)) or nil,
                 })
             end
         end
@@ -2483,6 +2501,16 @@ if clientProfile.supported then
                 return nil, "the guild's ranks aren't known yet"
             end
             return requirements:SetAutomated(rank, kind, enabled == true, tonumber(n), names[rank + 1], author, now)
+        end)
+    end
+    -- Sets whether alts are matched to the rank shown.
+    promotions.matchAlts = function(on)
+        return editRequirements(function(requirements, author, now)
+            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, rankNames())
+            if rank == nil then
+                return nil, "the guild's ranks aren't known yet"
+            end
+            return requirements:SetMatchesAlts(rank, on == true, author, now)
         end)
     end
     promotions.move = function(id, step)
@@ -2627,6 +2655,22 @@ if clientProfile.supported then
         end
         rosterController:Print("Ready flag probe:")
         client:Print("  Ready for promotion: " .. count)
+        -- The alts to promote to match, by name, A to Z.
+        local match = promotions.matchKeys() or {}
+        local _, partition, normalizer = rosterController:QuietContext()
+        local matched = {}
+        local rank
+        for key, rank in pairs(match) do
+            local character = partition and partition:GetCharacter(key)
+            local name = character and normalizer:Display(character.name) or key
+            table.insert(matched, name .. " to " .. promotions.rankName(rank))
+        end
+        table.sort(matched)
+        client:Print("  Promote to match: " .. #matched)
+        local matchIndex
+        for matchIndex = 1, #matched do
+            client:Print("    " .. matched[matchIndex])
+        end
         local lines = guildNoteOverlay ~= nil and guildNoteOverlay:ReadyProbeLines() or { "No guild roster overlay" }
         local index
         for index = 1, #lines do
@@ -3410,6 +3454,23 @@ if clientProfile.supported then
         editProfile = function()
             rosterController:Open("profile")
         end,
+        -- The player panel's Set Discord… box, from the mini profile.
+        setDiscord = function(name)
+            local guild, partition, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(name)
+            local character = key and partition:GetCharacter(key)
+            local player = character and partition:GetPlayer(character.player)
+            if player == nil then
+                return
+            end
+            local summary = addon.PlayerPanelViewModel.Summary({ partition = partition, playerId = character.player,
+                normalizer = normalizer })
+            local label = summary and summary.title or name
+            local current = partition:PlayerProfileText(character.player, "discord")
+            addon.RosterWindow.ShowDiscordDialog(label, current, function(text)
+                rosterController:SetDiscord(player.main, text)
+            end)
+        end,
         -- The selected member's player's promotion status: officers work on
         -- anyone's; a member sees only their own, read-only.
         promotionFor = function(name)
@@ -3421,17 +3482,26 @@ if clientProfile.supported then
         toggle = function(key)
             promotions.toggleRoster(key)
         end,
-        -- Officers see which members are ready for promotion: worked out
-        -- once per redraw of the rows.
+        -- Officers see which members are ready for promotion, and which
+        -- alts to promote to match their player (that flag wins): worked
+        -- out once per redraw of the rows.
         readyCheck = function()
             local ready = promotions.readyKeys()
+            local match = promotions.matchKeys()
             local guild, _, normalizer = rosterController:QuietContext()
             if ready == nil or guild == nil then
                 return nil
             end
+            match = match or {}
             return function(name)
                 local key = normalizer:Key(name)
-                return key ~= nil and ready[key] == true
+                if key == nil then
+                    return nil
+                end
+                if match[key] ~= nil then
+                    return "match", promotions.rankName(match[key])
+                end
+                return ready[key] == true and "ready" or nil
             end
         end,
     })

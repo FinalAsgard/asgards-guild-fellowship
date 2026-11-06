@@ -1,8 +1,9 @@
 local _, addon = ...
 
 -- The promotion rules engine: for each character, the next rank, each
--- requirement's status, progress, whether it's ready, and its player's
--- highest rank. Pure: the caller passes everything in.
+-- requirement's status, progress, whether it's ready, its player's highest
+-- rank, and the rank to promote it to so it matches its player's other
+-- characters. Pure: the caller passes everything in.
 --
 -- inputs:
 --   partition     the guild's FellowshipStore partition (characters, their
@@ -103,6 +104,21 @@ PromotionPolicy.STATUS = {
         local count = days(inputs, heard)
         local text = count == 0 and "seen today" or ("seen " .. count .. (count == 1 and " day ago" or " days ago"))
         return true, text
+    end,
+    -- Player-wide: the player's Discord name (the newest any of its
+    -- characters set) isn't empty.
+    discord = function(inputs, key, item, character)
+        local partition = inputs.partition
+        local name
+        if character.player ~= nil then
+            name = partition:PlayerProfileText(character.player, "discord")
+        else
+            name = partition:GetProfileText(key, "discord")
+        end
+        if type(name) ~= "string" or not string.find(name, "%S") then
+            return false, "not set"
+        end
+        return true, name
     end,
 }
 PromotionPolicy.STATUS["check-note"] = PromotionPolicy.STATUS.check
@@ -242,6 +258,66 @@ local function eachCandidate(inputs, visit)
             visit(key, character, itemsOf)
         end
     end)
+end
+
+-- Whether alts are matched to `rank`: the rank's "Alts should match this
+-- rank" setting.
+local function matchesAlts(inputs, rank)
+    return inputs.requirements:MatchesAlts(rank)
+end
+
+-- The rank `key` should be promoted to so it matches its player's other
+-- characters, or nil. The ceiling is the player's highest rank in the
+-- guild, or the rank just below the guild master's when that's it (a guild
+-- has one guild master); the target is the highest rank at or below the
+-- ceiling, above `key`'s own, that alts are matched to. It doesn't depend on
+-- whether `key`'s rank has requirements.
+-- `highestOf(player)`, when given, is the player's highest rank (MatchSet
+-- reads each player's once).
+local function matchTarget(inputs, key, highestOf)
+    local partition = inputs.partition
+    local character = partition:GetCharacter(key)
+    if character == nil or character.player == nil or not partition:IsInGuild(key)
+        or type(character.rank) ~= "number"
+    then
+        return nil
+    end
+    local ceiling = highestOf(character.player)
+    if ceiling == nil then
+        return nil
+    end
+    ceiling = math.max(ceiling, 1)
+    local rank
+    for rank = ceiling, character.rank - 1 do
+        if matchesAlts(inputs, rank) then
+            return rank
+        end
+    end
+    return nil
+end
+
+function PromotionPolicy.MatchTarget(inputs, key)
+    return matchTarget(inputs, key, function(player)
+        return PromotionPolicy.HighestRank(inputs.partition, player)
+    end)
+end
+
+-- Every character in the guild with a match target, as key -> target rank.
+-- Each player's highest rank is read once, however many characters they
+-- have.
+function PromotionPolicy.MatchSet(inputs)
+    local targets = {}
+    local highest = {}
+    local function highestOf(player)
+        if highest[player] == nil then
+            highest[player] = { PromotionPolicy.HighestRank(inputs.partition, player) }
+        end
+        return highest[player][1]
+    end
+    inputs.partition:EachCharacter(function(key)
+        targets[key] = matchTarget(inputs, key, highestOf)
+    end)
+    return targets
 end
 
 -- The characters who meet every requirement, as a set of keys.

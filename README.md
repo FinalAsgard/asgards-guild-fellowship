@@ -27,7 +27,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf mail` | Opens [Guild Mail](#guild-mail), to mail the guild ranks you pick (officers only). |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf setdate join\|rank <character> <YYYY-MM-DD>` | Sets a character's join date, or the date it reached its current rank, when you know better than the add-on (officers only; see [Dates behind the checks](#dates-behind-the-checks)). |
-| `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** flags reach the game's guild roster (officers only). |
+| `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** and **Promote to match** flags reach the game's guild roster (officers only). |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
@@ -104,8 +104,8 @@ The add-on never writes to guild notes.
 
 ### Scanning
 
-- On login, the add-on scans every note if the last full scan is more than a day old.
-- New members are picked up automatically when the guild roster updates.
+- Every login (and `/reload`) scans the roster, so ranks, notes and departures that changed while you were away show at once. Only notes that changed are read again, so it's quick. It says nothing in chat unless it found something.
+- New members, and rank or level changes (including promotions made in the game's own guild window), are picked up automatically when the guild roster updates.
 - **Rescan** in the window, or `/agf rescan`, scans right away.
 
 Scans run a little at a time, so even a large guild doesn't cause a hitch. The window's footer shows when the last scan ran and what it found.
@@ -138,7 +138,7 @@ What a note should say:
 
 ### Mini profile in the guild roster
 
-Select any member in the game's guild roster and, if the add-on knows their player, a small panel under the game's member details (under the [Promotion](#in-the-games-guild-roster) panel, when that shows) shows that player in brief, under their alias and main as the title: their main, then their Discord and location, then their alts one per line, then their bio under **Personal Bio**. Anything they haven't set is left blank. Levels follow each character's name. On your own characters the panel has an **Edit** button that opens [My Profile](#my-profile). Everyone sees it, not just officers.
+Select any member in the game's guild roster and, if the add-on knows their player, a small panel under the game's member details (under the [Promotion](#in-the-games-guild-roster) panel, when that shows) shows that player in brief, under their alias and main as the title: their main, then their Discord and location, then their alts one per line, then their bio under **Personal Bio**. Anything they haven't set is left blank. Levels follow each character's name. It has a **Set Discord…** button that opens the same box as **Set Discord…** in the [player panel](#organizing-by-hand), filled in with the player's current Discord name (empty it and save to clear it): an officer's edit is saved and sent to the guild at once, and a member's becomes a suggestion for an officer to approve. The panel and the Promotion panel above it update as soon as the name is saved. On your own characters the panel also has an **Edit** button that opens [My Profile](#my-profile). Everyone sees it, not just officers.
 
 ### Mains, alts, and departures
 
@@ -150,7 +150,7 @@ Select any member in the game's guild roster and, if the add-on knows their play
 
 The roster marks a **declared main** (a player who said "this is my main" on purpose) as **(declared main)**, so confirmed players stand apart from characters nobody has organized yet. Players declare their main on [My Profile](#my-profile), or by starting the character's note with `^` (see [The guild note convention](#the-guild-note-convention)). Like the other organizing changes, an officer's declaration is official at once and a member's goes to officers as a [suggestion](#suggestions).
 
-Right-click a character for **Link as alt of…** (makes it an alt of another player), **Make this the main**, **Set alias…**, **Split off as own player** (takes it out of its player into one of its own), and **View player…**. Clicking a character also opens the player panel. It shows the alias, the player's Discord, location and bio under **About** (when they set any; see [About me](#about-me)), main, alts, and history, and has **Set alias…** and **Merge into player…** buttons: **Merge into player…** links the player's main as an alt of another player, the same as **Link as alt of…** on the main. A main that still has alts can't be moved: **Merge into player…** is greyed out and its right-click menu has no **Link as alt of…**. Move its alts or split them off first. History lists characters that left the player: ones that left the guild, were split off, or were moved to another player.
+Right-click a character for **Link as alt of…** (makes it an alt of another player), **Make this the main**, **Set alias…**, **Split off as own player** (takes it out of its player into one of its own), and **View player…**. Clicking a character also opens the player panel. It shows the alias, the player's Discord, location and bio under **About** (when they set any; see [About me](#about-me)), main, alts, and history, and has **Set alias…**, **Set Discord…** and **Merge into player…** buttons. **Set Discord…** sets the player's Discord name: an officer's edit is saved at once, and a member's becomes a suggestion for an officer to approve. **Merge into player…** links the player's main as an alt of another player, the same as **Link as alt of…** on the main. A main that still has alts can't be moved: **Merge into player…** is greyed out and its right-click menu has no **Link as alt of…**. Move its alts or split them off first. History lists characters that left the player: ones that left the guild, were split off, or were moved to another player.
 
 For a player who has posted recruitment ads, the player panel also shows **Advertised: N (M in last 30 days)** (see [Ad counts](#ad-counts)).
 
@@ -173,7 +173,7 @@ When an officer changes which characters belong together, or what a player goes 
 - When two officers change the same character or the same alias, the most recent edit wins everywhere.
 - A member's own edits apply in their roster right away and are sent to officers as suggestions (see [Suggestions](#suggestions)). Only officers' edits change everyone's roster directly.
 - Edits made before sync existed: they become official and are sent to the guild once you log in on an officer character with this version. Until then, and for members, they stay in your own roster only.
-- Only main and alt links, aliases, each character's [role preferences](#role-preferences), and each player's [Discord, location and bio](#about-me) are shared. Role preferences and About me are set by the player's own characters, never by officers, and reach the guild at once with no approval. Guildmates who were offline get them through the same catch-up as everything else. Departures, purges, history (including your [group history](#group-history)), conflicts, and settings stay on your computer.
+- Only main and alt links, aliases, each character's [role preferences](#role-preferences), and each player's [Discord, location and bio](#about-me) are shared. Role preferences and About me are set by the player's own characters and reach the guild at once with no approval. The one exception is the Discord name: an officer can also set or clear it with **Set Discord…**, and a member's **Set Discord…** on someone else becomes a suggestion for an officer to approve. Guildmates who were offline get them through the same catch-up as everything else. Departures, purges, history (including your [group history](#group-history)), conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
 - The Roster tab's footer shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
 - Sync never gets in the way of play. It sends and processes nothing while you're in combat, or on Retail during a boss encounter or a keystone run, and picks up where it left off once that's over. Like scans, it works on data a little at a time, so even a large guild's full sync doesn't cause a hitch, and your roster redraws once per batch rather than once per change.
@@ -403,6 +403,7 @@ Every rank starts with no requirements, so nothing changes until your guild sets
   - **Days at rank**: the character has held its current rank at least N days.
   - **Character level**: the character is at least level N.
   - **Has the Guild Fellowship Addon**: any of the player's characters has been heard on the add-on. It's a simple yes or no, with no number.
+  - **Has a Discord name set**: the player has a Discord name on file, set on any of their characters. Any name counts, and it's met as soon as the name is saved; clearing it fails the check again. When it isn't met, its detail says "not set". It's a yes or no too, with no number. Add-ons older than this check don't show it.
 - Turning a check off deletes it, along with any overrides on it.
 - **Custom requirements** are the ones an officer ticks. Type the **Requirement text**, tick **Needs a note** if ticking it should ask for a note (up to 100 characters, such as which event the member attended), and press **Add** (or Enter).
 - Each custom requirement has **Up** and **Down** to reorder it, **Edit** to change its text or whether it needs a note (ticks are kept), and **Delete**, which asks first because it drops the requirement's ticks too.
@@ -419,6 +420,20 @@ Officers see who's ready in three places:
 - **The player panel's Promotion tab:** a ready character's line says **Ready for promotion**.
 
 Any rank change, up or down, clears that character's ticks, notes and overrides. A character promoted and later demoted back to a rank starts that rank's checklist afresh. That holds even on an officer's add-on that was offline the whole time, once the guild log (or an officer's date) shows when it came back to the rank. The last promotion's date and promoter are kept, from the guild event log when it names who did it.
+
+### Promote to match
+
+When a player has characters at different ranks, officers see each alt that's behind flagged with the rank to promote it to so it matches the player's highest, for example **Promote to match: Officer**. The highest rank among the player's characters still in the guild sets it, whichever character holds it. The guild master's rank is never a target, since a guild has only one guild master: the guild master's alts are matched to the rank just below it. The flag doesn't depend on promotion requirements, so it shows even for an alt whose rank has none. It clears by itself once the alt reaches the rank, including when it's promoted in the game's own guild window.
+
+The flag shows in three places:
+
+- **The player panel's Promotion tab**, as a line of its own under the alt's line, apart from its checklist.
+- **The game guild roster's Promotion panel**, the same way, when that alt is selected.
+- **The game's guild roster list**, as the same up arrow as Ready for promotion, tinted blue. Hover it for the rank, for example **Promote to match: Officer**. An alt that's both behind and ready shows the blue arrow. `/agf probe ready` counts the alts to promote to match, lists each with its target rank, and says how many rows show the blue arrow.
+
+Members never see match flags.
+
+Each rank in the Promotion Requirements editor has an **Alts should match this rank** check box, beside the rank's name. It's ticked by default. Untick it and alts aren't matched to that rank: an alt is flagged with the next rank down that's still ticked, and isn't flagged at all when none between it and the player's highest rank are. For example, untick Officer, and an Officer's alt at Member is flagged **Promote to match: Veteran**. The setting is shared with every officer, the newest change wins, and flags update as soon as it changes. The guild master's rank has no box, since alts are never matched to it.
 
 ### In the player panel and the roster
 
@@ -611,7 +626,7 @@ Below your characters, **Your other characters on this computer** lists the char
 
 Below the alias are your **Discord** username (up to 32 characters), **Location** (up to 40, for example "Ohio, evenings") and a **Bio** (up to 500, in a taller box that wraps onto several lines). Each box shows how many characters you've used. Type in one and press Enter (or click elsewhere) to save it; Escape puts back what was saved. Empty a box and save to stop sharing it.
 
-These belong to your player, not to one character: whichever of your characters you're on, you see and edit the same values, and the newest edit wins. They're yours alone. They're saved and sent to the guild at once, with no officer approving them, and only your own characters can change them; officers can't edit or clear them. If someone's add-on passes on a change in your name that you never made, yours sends your real values back out, and you're warned who passed it on, as for role preferences. Guildmates see them under **About** in your player panel.
+These belong to your player, not to one character: whichever of your characters you're on, you see and edit the same values, and the newest edit wins. They're yours alone. They're saved and sent to the guild at once, with no officer approving them, and only your own characters can change your location and bio. Your Discord name can also be set or cleared by an officer with **Set Discord…** (in the player panel or the guild roster's mini profile), and a guildmate's **Set Discord…** on you becomes a suggestion for an officer to approve. If someone's add-on passes on a change in your name that you never made, yours sends your real values back out, and you're warned who passed it on, as for role preferences. Guildmates see them under **About** in your player panel.
 
 ### Characters and roles
 

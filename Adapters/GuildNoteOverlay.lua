@@ -2,7 +2,8 @@ local _, addon = ...
 
 -- Adds to the game's own guild roster: for officers, which members are
 -- ready for promotion (an up arrow beside their rank: add-ons can't promote,
--- so the officer promotes them in the game's window), which members' public
+-- so the officer promotes them in the game's window) or alts to promote to
+-- match their player (the same arrow, tinted), which members' public
 -- notes are out of date (a marker on their rows) and what a selected
 -- member's note should say (see NoteAudit), in a small panel to the right
 -- of the member detail panel, level with its note; under the detail panel,
@@ -10,7 +11,8 @@ local _, addon = ...
 -- PromotionsViewModel.PanelRows): an officer's for anyone, to work on, and
 -- a member's for their own player only, read-only; and for everyone, under
 -- that (or straight under the detail panel), a mini profile of the selected
--- member's player (alias, Discord, location, bio, main and alts). Forever and Retail share
+-- member's player (alias, Discord, location, bio, main and alts), with a
+-- Set Discord… button. Forever and Retail share
 -- the Communities guild roster, so one overlay serves both.
 --
 -- It only adds its own child frames and follows the game's frames with
@@ -31,6 +33,10 @@ local GuildNoteOverlay = {
     TOO_LONG_TEXT = "Too long for a public note: the other text has to be trimmed.",
     IGNORE_TEXT = "Ignore",
     EDIT_TEXT = "Edit",
+    DISCORD_TEXT = "Set Discord...",
+    -- The mini profile's Set Discord… button, bottom left (Edit, on the
+    -- user's own, is bottom right). Best guess at placement: check in game.
+    DISCORD_SIZE = { 100, 18 },
     -- The small marker on a roster row whose member's note is out of date.
     MARKER_TEXTURE = "Interface\\COMMON\\Indicator-Yellow",
     MARKER_SIZE = 12,
@@ -43,6 +49,12 @@ local GuildNoteOverlay = {
     READY_SIZE = 16,
     READY_GAP = 4,
     READY_OFFSET = -20,
+    -- A Promote to match flag is the same arrow tinted MATCH_TINT (the
+    -- blue of the panels' "Promote to match" lines, |cff4da6ff), with a
+    -- tooltip. The tint is a best guess at one that's easy to tell apart
+    -- from the plain arrow; it's checked in game on the PRD's HITL issue.
+    MATCH_TINT = { 0.30, 0.65, 1.00 },
+    MATCH_TOOLTIP = "Promote to match: %s",
     -- The overlay's panels: their edge, the room inside them, and the gap
     -- between lines. The note panel is this wide; the profile panel is as
     -- wide as the detail panel, and shows at most PROFILE_LINES lines.
@@ -94,9 +106,14 @@ Overlay.__index = Overlay
 --               the add-on has no record of them; `own` when that player is
 --               the user's, who then gets an Edit button
 --   editProfile function() -> opens the user's My Profile page
---   readyCheck  function() -> a function(name) telling whether the roster
---               member named `name` is ready for promotion, or nil when
---               nobody's flagged (members); asked once per redraw
+--   setDiscord  function(name) -> opens the Set Discord box for the player
+--               of the roster member named `name` (saved by an officer, a
+--               suggestion from a member); the overlay redraws on the save
+--   readyCheck  function() -> a function(name) giving the roster member
+--               named `name`'s flag: "ready" (ready for promotion), or
+--               "match" and the rank name to promote them to (which wins
+--               over ready), or nil for none; or nil when nobody's flagged
+--               (members); asked once per redraw
 --   promotionFor function(name) -> the promotion rows for the player of
 --               the roster member named `name`, or nil when this user may
 --               not see them (or there are none)
@@ -118,6 +135,7 @@ function GuildNoteOverlay.Create(options)
             return nil
         end,
         editProfile = options.editProfile or function() end,
+        setDiscord = options.setDiscord or function() end,
         readyCheck = options.readyCheck or function()
             return nil
         end,
@@ -245,6 +263,16 @@ function Overlay:Attach()
         end)
         edit:Hide()
         created.edit = edit
+        local discord = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
+        discord:SetSize(GuildNoteOverlay.DISCORD_SIZE[1], GuildNoteOverlay.DISCORD_SIZE[2])
+        discord:SetPoint("BOTTOMLEFT", created, "BOTTOMLEFT", padding, padding)
+        discord:SetText(GuildNoteOverlay.DISCORD_TEXT)
+        discord:SetScript("OnClick", function()
+            if self.member ~= nil then
+                pcall(self.setDiscord, self.member)
+            end
+        end)
+        created.discord = discord
         created:Hide()
         return created
     end)
@@ -333,11 +361,13 @@ function Overlay:ShowProfile(name)
         local ok, found = pcall(text.GetStringHeight, text)
         return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT * lines
     end
-    -- The user's own player gets an Edit button at the bottom.
-    local button = 0
+    -- Set Discord… along the bottom for everyone, and the user's own
+    -- player gets an Edit button beside it.
+    local button = GuildNoteOverlay.EDIT_GAP + math.max(GuildNoteOverlay.IGNORE_SIZE[2],
+        GuildNoteOverlay.DISCORD_SIZE[2])
+    profile.discord:Show()
     if summary.own then
         profile.edit:Show()
-        button = GuildNoteOverlay.EDIT_GAP + GuildNoteOverlay.IGNORE_SIZE[2]
     else
         profile.edit:Hide()
     end
@@ -551,8 +581,43 @@ function Overlay:Marker(row, size, offset, texture)
     local picture = frame:CreateTexture(nil, "OVERLAY")
     picture:SetAllPoints(frame)
     picture:SetTexture(texture)
+    frame.picture = picture
     frame:Hide()
     return frame
+end
+
+-- Sets the flag `marker` shows: "ready" (the plain arrow) or "match" to
+-- `rankName` (tinted, with a tooltip). Only a match flag takes the mouse,
+-- for its tooltip, and clicks still go to the row. Where clicks can't be
+-- passed through (no SetMouseClickEnabled), the flag never takes the
+-- mouse and goes without its tooltip, so the row keeps its clicks.
+function Overlay:SetFlag(marker, kind, rankName)
+    local tint = kind == "match" and GuildNoteOverlay.MATCH_TINT or { 1, 1, 1 }
+    pcall(marker.picture.SetVertexColor, marker.picture, tint[1], tint[2], tint[3])
+    marker.tooltip = kind == "match" and string.format(GuildNoteOverlay.MATCH_TOOLTIP, tostring(rankName)) or nil
+    local hover = marker.tooltip ~= nil and type(marker.SetMouseClickEnabled) == "function"
+    pcall(marker.EnableMouse, marker, hover)
+    if hover and not pcall(marker.SetMouseClickEnabled, marker, false) then
+        pcall(marker.EnableMouse, marker, false)
+    end
+    if not marker.hasTooltip then
+        marker.hasTooltip = true
+        local environment = self.environment
+        pcall(marker.SetScript, marker, "OnEnter", function()
+            local tooltip = environment.GameTooltip
+            if marker.tooltip ~= nil and tooltip ~= nil then
+                pcall(tooltip.SetOwner, tooltip, marker, "ANCHOR_RIGHT")
+                pcall(tooltip.SetText, tooltip, marker.tooltip)
+                pcall(tooltip.Show, tooltip)
+            end
+        end)
+        pcall(marker.SetScript, marker, "OnLeave", function()
+            local tooltip = environment.GameTooltip
+            if tooltip ~= nil then
+                pcall(tooltip.Hide, tooltip)
+            end
+        end)
+    end
 end
 
 -- Shows or hides `row`'s markers for its current member. They're the
@@ -598,15 +663,19 @@ function Overlay:MarkRow(row)
     local readyMarker = self.readyMarkers[row]
     if readyMarker ~= nil then
         local check = name ~= nil and self:ReadyCheck() or nil
-        local ok, ready = false, false
+        local ok, kind, rankName = false, nil, nil
         if check ~= nil then
-            ok, ready = pcall(check, name)
+            ok, kind, rankName = pcall(check, name)
         end
-        if ok and ready == true then
+        self.readyKinds = self.readyKinds or setmetatable({}, { __mode = "k" })
+        if ok and (kind == "ready" or kind == "match") then
+            self:SetFlag(readyMarker, kind, rankName)
             self:PlaceReady(row, readyMarker)
             readyMarker:Show()
+            self.readyKinds[row] = kind
         else
             readyMarker:Hide()
+            self.readyKinds[row] = nil
         end
     end
 end
@@ -663,13 +732,14 @@ function Overlay:MarkRows()
 end
 
 -- What /agf probe ready prints about the guild roster: whether its rows
--- are followed, and how many show a Ready flag now.
+-- are followed, and how many show a Ready flag and a Promote to match flag
+-- now.
 function Overlay:ReadyProbeLines()
     if self.memberList == nil then
         return { "Guild roster rows followed: no (open the game's guild roster, then probe again)" }
     end
     self:MarkRows()
-    local shown, rows, byRank = 0, 0, 0
+    local shown, rows, byRank, matches = 0, 0, 0, 0
     pcall(eachRow, self.memberList, function(row)
         rows = rows + 1
         local readyMarker = self.readyMarkers and self.readyMarkers[row]
@@ -677,6 +747,9 @@ function Overlay:ReadyProbeLines()
             return readyMarker ~= nil and readyMarker:IsShown()
         end)
         if ok and isShown then
+            if self.readyKinds and self.readyKinds[row] == "match" then
+                matches = matches + 1
+            end
             shown = shown + 1
             if self.readyPlaces and self.readyPlaces[row] == "rank" then
                 byRank = byRank + 1
@@ -685,9 +758,10 @@ function Overlay:ReadyProbeLines()
     end)
     return {
         "Guild roster rows followed: yes (" .. rows .. " shown)",
-        "Rows with a Ready flag now: " .. shown,
+        "Rows with a Ready flag now: " .. (shown - matches),
         "Flags next to the rank: " .. byRank .. "; at the row's right edge (no rank text found): " ..
             (shown - byRank),
+        "Rows with a Promote to match flag now: " .. matches,
     }
 end
 
