@@ -3569,13 +3569,14 @@ if clientProfile.supported then
             return members[key] ~= nil and members[key].online == true
         end)
     end
-    -- The keys of the player's party members, or nil outside a party.
-    local function partyKeys(normalizer)
+    -- The keys of everyone in the player's party or raid, or nil outside a
+    -- group.
+    local function groupKeys(normalizer)
         if not client:IsInGroup() then
             return nil
         end
         local keys = {}
-        local members = client:GetPartyMembers()
+        local members = client:GetGroupMembers()
         local index
         for index = 1, #members do
             local key = normalizer:Key(members[index].name)
@@ -3586,14 +3587,14 @@ if clientProfile.supported then
         return keys
     end
     -- A board entry as the map shows it: with the character's name and its
-    -- chat tag (alias or main), and dimmed while the player is in a party
-    -- it isn't in.
+    -- chat tag (alias or main), dimmed while the player is in a group it
+    -- isn't in, and marked `grouped` when it's in the player's group.
     local function describeLocations(entries)
         local guild, partition, normalizer = rosterController:QuietContext()
         if guild == nil then
             return {}
         end
-        local party = partyKeys(normalizer)
+        local group = groupKeys(normalizer)
         local people = addon.PlayerService.Create(partition, { normalizer = normalizer })
         local described = {}
         local index
@@ -3610,7 +3611,8 @@ if clientProfile.supported then
                 name = people:CharacterName(entry.key) or entry.key,
                 label = tag and tag.text or nil,
                 fromRoster = entry.fromRoster,
-                dimmed = party ~= nil and not party[entry.key] or nil,
+                dimmed = group ~= nil and not group[entry.key] or nil,
+                grouped = group ~= nil and group[entry.key] or nil,
             })
         end
         return described
@@ -3695,12 +3697,20 @@ if clientProfile.supported then
     end
     mapPins = addon.MapPins.Create({
         client = client,
+        -- Groupmates get no zone map or minimap dot: the game marks them
+        -- already. They still count in the markers.
         dots = function()
-            local dots = describeLocations(locationBoard:All())
+            local dots = {}
+            local described = describeLocations(locationBoard:All())
             local fromRoster = describeLocations(rosterDots())
             local index
             for index = 1, #fromRoster do
-                table.insert(dots, fromRoster[index])
+                table.insert(described, fromRoster[index])
+            end
+            for index = 1, #described do
+                if not described[index].grouped then
+                    table.insert(dots, described[index])
+                end
             end
             return dots
         end,
@@ -3911,7 +3921,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         if groupFinder ~= nil then
             groupFinder:Refresh()
         end
-        -- Guildmates outside the party are dimmed on the maps.
+        -- Groupmates leave the maps' dots, and those outside the group
+        -- are dimmed.
         if mapPins ~= nil then
             mapPins:Refresh()
         end
