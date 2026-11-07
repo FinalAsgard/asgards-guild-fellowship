@@ -1038,14 +1038,17 @@ function Client:GetGroupMembers()
         return self:GetPartyMembers()
     end
     local environment = self.environment
-    local members = { readUnit(environment, "player", true) }
+    local player = readUnit(environment, "player", true)
+    local members = { player }
     local index
     for index = 1, Compatibility.RAID_SIZE do
         local unit = "raid" .. index
-        local _, isPlayer = callFunction(environment.UnitIsUnit, unit, "player")
-        if not isPlayer then
+        -- The player is among the raid units; a UnitIsUnit that fails
+        -- tells nothing, so their GUID decides then.
+        local ok, isPlayer = callFunction(environment.UnitIsUnit, unit, "player")
+        if not (ok and isPlayer) then
             local member = readUnit(environment, unit, false)
-            if member ~= nil then
+            if member ~= nil and not (player ~= nil and member.guid ~= nil and member.guid == player.guid) then
                 table.insert(members, member)
             end
         end

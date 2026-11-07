@@ -603,7 +603,8 @@ function ReconcileEngine.Plan(inputs)
     return plan
 end
 
--- Records in `playerId`'s history that `key` left it because of its note.
+-- Records in `playerId`'s history that `key` left it because of its note,
+-- and has the next scan re-read the notes of the characters still there.
 -- Nothing is recorded when the old player is gone (it had no other
 -- characters).
 local function recordLeaving(partition, playerId, key, wasMain, now, reason)
@@ -618,6 +619,13 @@ local function recordLeaving(partition, playerId, key, wasMain, now, reason)
         ["until"] = now,
         reason = reason,
     })
+    -- The characters left behind may have notes naming `key`, which has
+    -- gone elsewhere: the next scan reads them again.
+    local keys = partition:CharactersOf(playerId)
+    local index
+    for index = 1, #keys do
+        partition:ForgetNoteFingerprint(keys[index])
+    end
 end
 
 -- Commits a plan to the partition. `checkpoint` is called between

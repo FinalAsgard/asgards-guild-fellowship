@@ -347,6 +347,27 @@ for _, profile in ipairs(fixtures.PROFILES) do
         test.assertEqual(2, #client:GetPartyMembers())
     end)
 
+    test.test(profile .. " adapter reads the raid when UnitIsUnit fails, the player once", function()
+        local world = fixtures.newEnvironment(profile)
+        local me = { name = "Tool", guid = "Player-1", class = "WARRIOR", level = 60, guild = true }
+        local units = {
+            raid1 = { name = "Hammer", guid = "Player-2", class = "PALADIN", level = 42, guild = true },
+            raid2 = me,
+            raid9 = { name = "Wrench", guid = "Player-4", class = "ROGUE", level = 55, guild = true },
+        }
+        installRaid(world.environment, units, me)
+        world.environment.IsInRaid = function() return true end
+        world.environment.UnitIsUnit = function() error("unavailable") end
+        local client = newClient(world)
+
+        local members = client:GetGroupMembers()
+
+        test.assertEqual(3, #members)
+        test.assertTrue(members[1].isPlayer)
+        test.assertEqual("Hammer", members[2].name)
+        test.assertEqual("Wrench", members[3].name)
+    end)
+
     test.test(profile .. " adapter reads the party as the group outside a raid", function()
         local world = fixtures.newEnvironment(profile)
         installParty(world.environment, {

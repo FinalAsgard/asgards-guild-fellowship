@@ -433,6 +433,33 @@ local function registerSubmittedTests(profile, rules)
         test.assertEqual(key("Crafter"), playerOf(partition, key("Wrench")).main)
     end)
 
+    test.test(profile .. " a main a note moves takes the alts whose notes name it along, by the next scan", function()
+        local addon, partition = twoPlayers()
+        -- Toolbox's own note now names Visitor; Hammer's still names Toolbox.
+        local entries = {
+            { name("Toolbox"), ">" .. name("Visitor") },
+            { name("Hammer"), ">" .. name("Toolbox") },
+            { name("Visitor"), "" },
+            { name("Wrench"), ">" .. name("Visitor") },
+            { name("Crafter"), "" },
+        }
+
+        profileRescan(addon, partition, rules, entries)
+        test.assertEqual(key("Visitor"), playerOf(partition, key("Toolbox")).main)
+
+        -- Hammer's unchanged note is read again, by an incremental scan too.
+        local members, normalizer = roster(addon, rules, entries)
+        addon.ReconcileEngine.Apply(partition, addon.ReconcileEngine.Plan({
+            partition = partition,
+            members = members,
+            normalizer = normalizer,
+            rules = rules,
+            mode = "incremental",
+        }))
+        test.assertEqual(key("Visitor"), playerOf(partition, key("Hammer")).main)
+        test.assertEqual(0, #partition:GetConflicts())
+    end)
+
     test.test(profile .. " notes naming each other's players change nothing", function()
         local addon, partition = twoPlayers()
 
