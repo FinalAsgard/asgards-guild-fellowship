@@ -539,20 +539,24 @@ function Controller:MenuFor(row)
     end
     local player = partition:GetPlayer(character.player)
     local entries = {}
+    -- A member gets the organizing actions only for their own characters.
+    local editable = self:CanEditPlayer(row.key)
     if partition:IsInGuild(row.key) then
         -- A main with alts can't join another player.
-        if not addon.PlayerService.HasAlts(partition, row.key) then
+        if not addon.PlayerService.HasAlts(partition, row.key)
+            and (self:IsOfficerUser() or self:IsKnownOwn(row.key))
+        then
             table.insert(entries, { text = "Link as alt of...", action = "setMain", key = row.key })
         end
-        if player ~= nil and player.main ~= row.key then
+        if editable and player ~= nil and player.main ~= row.key then
             table.insert(entries, { text = "Make this the main", action = "makeMain", key = row.key })
         end
     end
-    if self:CanEditPlayer(row.key) then
+    if editable then
         table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
     end
     table.insert(entries, { text = "View player...", action = "view", key = row.key })
-    if partition:CharactersOf(character.player)[2] ~= nil then
+    if editable and partition:CharactersOf(character.player)[2] ~= nil then
         table.insert(entries, { text = "Split off as own player", action = "detach", key = row.key })
     end
     return entries
@@ -561,16 +565,17 @@ end
 -- Manual changes that move characters between players or change a main.
 local MAIN_LINK_OPERATIONS = { SetMainPlayer = true, MakeMain = true, Detach = true }
 -- Manual changes a member may make only to their own player.
-local OWN_PLAYER_OPERATIONS = { SetAlias = true }
+local OWN_PLAYER_OPERATIONS = { SetAlias = true, MakeMain = true, Detach = true, SetDeclared = true }
 local NOT_OWN_PLAYER = "members can only change their own player"
+local NOT_KNOWN_OWN = "members can only link characters the add-on knows are theirs"
 
--- Whether this user may change the player of `key`: an officer anyone's,
--- a member only their own (the logged-in character's player).
-function Controller:CanEditPlayer(key)
+function Controller:IsOfficerUser()
     local ok, officer = pcall(self.isOfficer)
-    if ok and officer == true then
-        return true
-    end
+    return ok and officer == true
+end
+
+-- Whether `key` is on the logged-in character's player.
+function Controller:IsOwnPlayer(key)
     local guild, partition = self:QuietContext()
     local selfKey = self:SelfKey()
     if guild == nil or selfKey == nil or type(key) ~= "string" then
@@ -582,6 +587,56 @@ function Controller:CanEditPlayer(key)
     local own = partition:GetCharacter(selfKey)
     local character = partition:GetCharacter(key)
     return own ~= nil and character ~= nil and own.player == character.player
+end
+
+-- Whether this user may change the player of `key`: an officer anyone's,
+-- a member only their own (the logged-in character's player).
+function Controller:CanEditPlayer(key)
+    return self:IsOfficerUser() or self:IsOwnPlayer(key)
+end
+
+-- Whether the add-on knows `key` is this user's character: on their
+-- player, or one this install has logged in on.
+function Controller:IsKnownOwn(key)
+    if self:IsOwnPlayer(key) then
+        return true
+    end
+    local guild, partition = self:QuietContext()
+    if guild == nil then
+        return false
+    end
+    local owned = partition:OwnCharacters()
+    local index
+    for index = 1, #owned do
+        if owned[index] == key then
+            return true
+        end
+    end
+    return false
+end
+
+-- Whether the player `playerId` has a character the add-on knows is this
+-- user's.
+function Controller:IsKnownOwnPlayer(playerId)
+    local guild, partition = self:QuietContext()
+    if guild == nil or playerId == nil then
+        return false
+    end
+    local keys = partition:CharactersOf(playerId)
+    local index
+    for index = 1, #keys do
+        if self:IsKnownOwn(keys[index]) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Whether this user may link `key` as an alt of the player `playerId`: an
+-- officer any; a member only a character the add-on knows is theirs, onto
+-- a player the add-on knows is theirs.
+function Controller:CanLink(key, playerId)
+    return self:IsOfficerUser() or (self:IsKnownOwn(key) and self:IsKnownOwnPlayer(playerId))
 end
 
 -- Adds every character of `key`'s player to the set `keys`.
@@ -621,6 +676,10 @@ function Controller:Organize(operation, key, ...)
     end
     if OWN_PLAYER_OPERATIONS[operation] and not self:CanEditPlayer(key) then
         self:Print("That change wasn't made: " .. NOT_OWN_PLAYER .. ".")
+        return false
+    end
+    if operation == "SetMainPlayer" and not self:CanLink(key, (...)) then
+        self:Print("That change wasn't made: " .. NOT_KNOWN_OWN .. ".")
         return false
     end
     local service = self:Service()
@@ -708,7 +767,8 @@ function Controller:SetDontSync(key, enabled)
     return ok == true
 end
 
--- Results for the "Link as alt of…" picker, without `key`'s own player.
+-- Results for the "Link as alt of…" picker, without `key`'s own player; a
+-- member gets only players the add-on knows are theirs.
 function Controller:SearchPlayers(key, query)
     if self.current == nil then
         return {}
@@ -719,7 +779,7 @@ function Controller:SearchPlayers(key, query)
     local found = service:SearchPlayers(query, 50)
     local index
     for index = 1, #found do
-        if found[index].id ~= ownPlayer then
+        if found[index].id ~= ownPlayer and self:CanLink(key, found[index].id) then
             table.insert(results, found[index])
         end
     end
@@ -820,8 +880,20 @@ function Controller:RedrawPanel()
         self:ClosePanel()
         return
     end
-    -- Set alias… and Set Discord… only for a player this user may change.
+    -- Set alias…, Set Discord…, Merge into player… and each character's
+    -- Make main and Detach only for a player this user may change.
     model.canEdit = self:CanEditPlayer(model.main)
+    if not model.canEdit then
+        model.canMerge = false
+        local index
+        for index = 1, #model.rows do
+            local row = model.rows[index]
+            if row.kind == "character" then
+                row.canMakeMain = false
+                row.canDetach = false
+            end
+        end
+    end
     self.window:ShowPlayer(model)
 end
 

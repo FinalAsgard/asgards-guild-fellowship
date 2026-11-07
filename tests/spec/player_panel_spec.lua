@@ -259,7 +259,7 @@ test.test("panel edits are manual and refresh the roster and the panel at once",
 end)
 
 test.test("the panel closes when its player is merged away", function()
-    local controller, window = controllerSetup()
+    local controller, window = controllerSetup(nil, { officer = true })
     controller:SelectPlayerOf("visitor-stormrage")
     test.assertTrue(window.player ~= nil)
 
@@ -343,6 +343,14 @@ for _, profile in ipairs({ "Forever", "Retail" }) do
 
         controller:SelectPlayerOf(otherKey)
         test.assertFalse(window.player.canEdit, "someone else's player")
+        test.assertFalse(window.player.canMerge, "Merge into player... greyed out")
+        local index
+        for index = 1, #window.player.rows do
+            local row = window.player.rows[index]
+            if row.kind == "character" then
+                test.assertFalse(row.canMakeMain == true or row.canDetach == true, "no Make main or Detach")
+            end
+        end
         test.assertFalse(controller:SetDiscord(otherKey, "spam#1"))
         test.assertFalse(controller:SetAlias(otherKey, "Spam"))
         test.assertEqual(1, edits, "nothing sent for someone else")

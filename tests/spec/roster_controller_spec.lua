@@ -379,7 +379,7 @@ local function registerCountsTests(profile)
     end)
 
     test.test(profile .. " the counts line updates after linking an alt", function()
-        local setup = build(profile)
+        local setup = build(profile, { isOfficer = function() return true end })
         setup.login()
         setup.controller:Toggle()
         local playerId = setup.partition().characters[first.key].player

@@ -115,8 +115,12 @@ local function playerIdOf(world, key)
 end
 
 -- `world` links `alt` as an alt of `main`'s player, through the roster's
--- "Link as alt of..." action.
+-- "Link as alt of..." action. Its user plays both: this install has
+-- logged in on them, so a member may link them too.
 local function linkAlt(world, alt, main)
+    local partition = partitionOf(world)
+    partition:RecordOwnCharacter(alt, 1)
+    partition:RecordOwnCharacter(main, 1)
     test.assertTrue(world.addon.rosterController:SetMainPlayer(alt, playerIdOf(world, main)))
 end
 

@@ -306,9 +306,11 @@ test.test("the right-click menu offers the actions that apply to the row", funct
     test.assertEqual(nil, main.makeMain)
     test.assertEqual(nil, main.setMain)
 
-    -- Visitor is another player's, so a member isn't offered its alias.
+    -- Visitor is another player's, so a member is offered none of its
+    -- organizing actions.
     local single = actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage")))
-    test.assertTrue(single.setMain and single.view)
+    test.assertTrue(single.view)
+    test.assertEqual(nil, single.setMain)
     test.assertEqual(nil, single.alias)
     test.assertEqual(nil, single.detach)
 
@@ -374,9 +376,54 @@ test.test("organizing from the menu refreshes the roster at once without a scan"
 end)
 
 test.test("a refused change is reported in chat", function()
-    local controller, window, world = controllerSetup()
+    local controller, window, world = controllerSetup({ officer = true })
 
     test.assertFalse(controller:Detach(rowFor(window, "Visitor-Stormrage").key))
 
     test.assertContains(world.messages[#world.messages], "That change wasn't made: it is already its own player.")
+end)
+
+test.test("an officer is offered every organizing action on anyone's character", function()
+    local controller, window = controllerSetup({ officer = true })
+
+    local single = actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage")))
+    test.assertTrue(single.setMain and single.alias and single.view)
+end)
+
+test.test("a member can't move, promote or split another player's characters", function()
+    local controller, window, world = controllerSetup()
+    local partition = controller.current.partition
+    local toolPlayer = partition:GetCharacter("toolbox-area52").player
+    local visitorPlayer = partition:GetCharacter("visitor-stormrage").player
+
+    test.assertFalse(controller:SetMainPlayer("visitor-stormrage", toolPlayer), "taking someone's character")
+    test.assertContains(world.messages[#world.messages], "members can only link characters the add-on knows are theirs")
+    test.assertFalse(controller:SetMainPlayer("hammer-area52", visitorPlayer), "joining someone else's player")
+    test.assertEqual(toolPlayer, partition:GetCharacter("hammer-area52").player)
+    test.assertEqual(visitorPlayer, partition:GetCharacter("visitor-stormrage").player)
+
+    test.assertEqual(0, #controller:SearchPlayers("hammer-area52", ""), "no one else's player is offered")
+end)
+
+test.test("a member may link a character this install has logged in on to their own player", function()
+    local controller, window = controllerSetup()
+    local partition = controller.current.partition
+    local toolPlayer = partition:GetCharacter("toolbox-area52").player
+    partition:RecordOwnCharacter("visitor-stormrage", 1)
+
+    test.assertTrue(actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage"))).setMain)
+    local offered = controller:SearchPlayers("visitor-stormrage", "")
+    test.assertEqual(1, #offered)
+    test.assertEqual(toolPlayer, offered[1].id)
+    test.assertTrue(controller:SetMainPlayer("visitor-stormrage", toolPlayer))
+    test.assertEqual(toolPlayer, partition:GetCharacter("visitor-stormrage").player)
+end)
+
+test.test("a member may still organize their own player", function()
+    local controller, window = controllerSetup()
+
+    test.assertTrue(controller:MakeMain("hammer-area52"))
+    test.assertEqual("hammer-area52", controller.current.partition:GetPlayer(
+        controller.current.partition:GetCharacter("toolbox-area52").player).main)
+    test.assertTrue(controller:Detach("toolbox-area52"))
 end)

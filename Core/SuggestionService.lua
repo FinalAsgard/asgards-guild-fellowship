@@ -408,18 +408,25 @@ function Service:Differs(fact)
     return not (main ~= nil and main.player == character.player and player.main == fact.main)
 end
 
--- Whether the member `from` may suggest `fact`: an alias or Discord
--- username only for their own player (by the officer's data).
-function Service:FromOwnPlayer(fact, from)
-    if fact.kind ~= addon.SyncFacts.KIND_ALIAS and fact.kind ~= addon.SyncFacts.KIND_DISCORD then
-        return true
-    end
-    if fact.character == from then
+-- Whether `key` is `from` or on the same player (by the officer's data).
+function Service:SamePlayer(key, from)
+    if key == from then
         return true
     end
     local sender = self.partition:GetCharacter(from)
-    local character = self.partition:GetCharacter(fact.character)
+    local character = self.partition:GetCharacter(key)
     return sender ~= nil and character ~= nil and sender.player == character.player
+end
+
+-- Whether the member `from` may suggest `fact`: only about their own
+-- player (by the officer's data). A main link may also bring a character
+-- onto the member's player: the officer can't tell which characters the
+-- member logged in on, so that one is left to them to review.
+function Service:FromOwnPlayer(fact, from)
+    if self:SamePlayer(fact.character, from) then
+        return true
+    end
+    return fact.kind == addon.SyncFacts.KIND_MAIN and fact.main ~= nil and self:SamePlayer(fact.main, from)
 end
 
 local function findEntry(conflicts, character, kind)

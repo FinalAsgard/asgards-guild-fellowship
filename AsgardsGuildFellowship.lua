@@ -1876,6 +1876,10 @@ if clientProfile.supported then
                 return addon.ProfileViewModel.AltCandidates({
                     partition = partition,
                     selfKey = rosterController:SelfKey(),
+                    -- A member picks only characters the add-on knows are theirs.
+                    known = not rosterController:IsOfficerUser() and function(key)
+                        return rosterController:IsKnownOwn(key)
+                    end or nil,
                     members = rosterController:LiveMembers(normalizer),
                     normalizer = normalizer,
                     classColor = function(classToken)

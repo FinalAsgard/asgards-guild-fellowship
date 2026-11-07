@@ -200,14 +200,31 @@ end)
 
 test.test("a newer suggestion about the same thing replaces the older one, and resending changes nothing", function()
     local setup = newSetup()
-    setup.service:Queue({ link("wrench-area52", MEMBER, NOW) }, MEMBER)
+    setup.service:Queue({ link(MEMBER, "wrench-area52", NOW) }, MEMBER)
 
-    test.assertEqual(0, setup.service:Queue({ link("wrench-area52", MEMBER, NOW) }, MEMBER))
-    test.assertEqual(1, setup.service:Queue({ link("wrench-area52", "anvil-area52", NOW + 5) }, MEMBER))
+    test.assertEqual(0, setup.service:Queue({ link(MEMBER, "wrench-area52", NOW) }, MEMBER))
+    test.assertEqual(1, setup.service:Queue({ link(MEMBER, "anvil-area52", NOW + 5) }, MEMBER))
 
     local entries = queued(setup)
     test.assertEqual(1, #entries)
     test.assertEqual("anvil-area52", entries[1].suggestion.main)
+end)
+
+test.test("an officer queues a member's suggestions only about the member's own player", function()
+    local setup = newSetup()
+
+    test.assertEqual(0, setup.service:Queue({ link("wrench-area52", "anvil-area52") }, MEMBER),
+        "moving someone else's character to someone else")
+    test.assertEqual(0, setup.service:Queue({ alias(OFFICER, "Bossy") }, MEMBER), "someone else's alias")
+    test.assertEqual(0, setup.service:Queue({
+        { kind = "declared", character = "wrench-area52", declared = true, at = NOW, by = MEMBER },
+    }, MEMBER), "declaring someone else's main")
+    test.assertEqual(0, #queued(setup))
+
+    -- Bringing a character onto the member's own player is theirs to
+    -- suggest: the officer can't tell which characters they play.
+    test.assertEqual(1, setup.service:Queue({ link("wrench-area52", MEMBER) }, MEMBER))
+    test.assertEqual(1, setup.service:Queue({ alias(MEMBER, "Hammy") }, MEMBER))
 end)
 
 test.test("approving makes an officer fact under the approver's name, newer than what is held", function()
