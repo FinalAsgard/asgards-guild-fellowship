@@ -368,6 +368,30 @@ for _, profile in ipairs(fixtures.PROFILES) do
         test.assertEqual("Wrench", members[3].name)
     end)
 
+    test.test(profile .. " adapter reads the raid with no gap when the player's own name can't be read", function()
+        local world = fixtures.newEnvironment(profile)
+        local me = { name = "Tool", guid = "Player-1", class = "WARRIOR", level = 60, guild = true }
+        local units = {
+            raid1 = { name = "Hammer", guid = "Player-2", class = "PALADIN", level = 42, guild = true },
+            raid2 = me,
+        }
+        installRaid(world.environment, units, me)
+        world.environment.IsInRaid = function() return true end
+        local unitName = world.environment.UnitName
+        world.environment.UnitName = function(unit)
+            if unit == "player" then
+                return nil
+            end
+            return unitName(unit)
+        end
+        local client = newClient(world)
+
+        local members = client:GetGroupMembers()
+
+        test.assertEqual(1, #members)
+        test.assertEqual("Hammer", members[1].name)
+    end)
+
     test.test(profile .. " adapter reads the party as the group outside a raid", function()
         local world = fixtures.newEnvironment(profile)
         installParty(world.environment, {

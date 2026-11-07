@@ -1039,7 +1039,10 @@ function Client:GetGroupMembers()
     end
     local environment = self.environment
     local player = readUnit(environment, "player", true)
-    local members = { player }
+    local members = {}
+    if player ~= nil then
+        table.insert(members, player)
+    end
     local index
     for index = 1, Compatibility.RAID_SIZE do
         local unit = "raid" .. index
