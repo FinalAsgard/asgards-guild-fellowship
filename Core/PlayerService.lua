@@ -9,11 +9,9 @@ local _, addon = ...
 -- and every one leaves the acting-main invariant intact: a player with any
 -- in-guild character has an in-guild main.
 local PlayerService = {
-    -- Kinds whose suggestion can be applied (an unresolved marker records
-    -- its name as an out-of-guild main; a promotion confirms the new acting
-    -- main). The others (ambiguous, cycle, self reference, chain too long,
-    -- competing aliases) have nothing to apply and can only be dismissed.
-    ACCEPTABLE = { main = true, alias = true, unresolved = true, promotion = true },
+    -- Note conflicts whose suggestion can be applied. A self reference has
+    -- nothing to apply and can only be dismissed.
+    ACCEPTABLE = { main = true, alias = true },
 }
 addon.PlayerService = PlayerService
 
@@ -44,8 +42,7 @@ function PlayerService.Create(partition, options)
     }, Service)
 end
 
--- Restores the acting-main invariant after a manual change. Manual changes
--- don't queue promotion conflicts: the player made them on purpose.
+-- Restores the acting-main invariant after a manual change.
 function Service:KeepActingMains()
     addon.ReconcileEngine.EnsureActingMains(self.partition, {}, self.now())
 end
@@ -130,19 +127,7 @@ function Service:AcceptConflict(character, kind)
         if record == nil or not self.partition:SetAlias(record.player, conflict.suggestion.alias, source) then
             return false, "the alias could not be set"
         end
-    elseif kind == "unresolved" then
-        local record = self.partition:GetCharacter(character)
-        if record == nil or type(conflict.suggestion.outOfGuild) ~= "string" then
-            return false, "there is nothing to apply; dismiss it instead"
-        end
-        self.partition:AddHistory(record.player, {
-            name = conflict.suggestion.outOfGuild,
-            role = "main",
-            since = self.now(),
-            reason = "out of guild",
-        })
     end
-    -- A promotion needs no change: accepting confirms the new acting main.
     self.partition:RemoveConflict(character, kind)
     self.partition:ClearRejected(character, kind)
     return true
@@ -159,9 +144,7 @@ function Service:RejectConflict(character, kind)
     if conflict == nil then
         return false, "that conflict is no longer pending"
     end
-    -- A rejected promotion keeps the acting main; choose another with
-    -- MakeMain. It isn't remembered, since it doesn't come from a note.
-    if conflict.fingerprint ~= nil and kind ~= "promotion" then
+    if conflict.fingerprint ~= nil then
         self.partition:SetRejected(character, kind, conflict.fingerprint)
     end
     return true
@@ -169,7 +152,7 @@ end
 
 -- Makes `key` its player's main ("Make this the main"; also how an automatic
 -- promotion is reassigned). The character must be in the guild, so the
--- acting main always is. Any pending promotion for the player is resolved.
+-- acting main always is.
 function Service:MakeMain(key)
     local character = self.partition:GetCharacter(key)
     if character == nil then
@@ -186,17 +169,6 @@ function Service:MakeMain(key)
     end
     self.partition:SetMain(playerId, key)
     character.source = addon.FellowshipStore.SOURCE_MANUAL
-    local conflicts = self.partition:GetConflicts() or {}
-    local index = #conflicts
-    while index >= 1 do
-        local entry = conflicts[index]
-        if entry.kind == "promotion" and self.partition:GetCharacter(entry.character) ~= nil
-            and self.partition:GetCharacter(entry.character).player == playerId
-        then
-            table.remove(conflicts, index)
-        end
-        index = index - 1
-    end
     return true
 end
 
@@ -317,7 +289,7 @@ function Service:SetAlias(key, alias)
     for index = 1, #members do
         keys[members[index]] = true
     end
-    self:SettleConflicts(keys, { alias = true, ["competing aliases"] = true })
+    self:SettleConflicts(keys, { alias = true })
     return true
 end
 

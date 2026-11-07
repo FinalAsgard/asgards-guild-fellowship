@@ -626,7 +626,7 @@ local function installMap(environment)
     return pins
 end
 
--- MapPins.DIM_ALPHA, the opacity of guildmates outside the player's party.
+-- MapPins.DIM_ALPHA, the opacity of guildmates outside the player's group.
 local DIM_ALPHA = 0.6
 
 local DOTS = {
@@ -1228,6 +1228,15 @@ local function locationMessages(world)
     return count
 end
 
+-- A group member's name as the game gives it: Forever gives only the
+-- first name.
+local function unitName(profile, fullName)
+    if profile == "Forever" then
+        return (string.match(fullName, "^(%S+)"))
+    end
+    return fullName
+end
+
 local function registerWholeAddonTests(profile)
     test.test(profile .. ": in the whole add-on, a guildmate sharing their location appears on the zone map", function()
         local channel = fixtures.newChannel()
@@ -1544,34 +1553,86 @@ local function registerWholeAddonTests(profile)
         end
     end)
 
-    test.test(profile .. ": in the whole add-on, guildmates outside the player's party are dimmed", function()
+    test.test(profile .. ": in the whole add-on, a party member gets no dot and others outside it are dimmed", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR", nil,
+            function(environment)
+                installCoordinates(environment)
+                environment.C_Map.GetMapInfo = treeMaps().GetMapInfo
+            end)
+        login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        fixtures.deliver(channel)
+        local pins = viewer.pins
+        test.assertEqual(1, iconsOn(pins, 1429)[1].icon.alpha)
+
+        -- In a party without the sharer: still drawn, dimmed.
+        local environment = viewer.environment
+        local units = { player = guild.members[1].name, party1 = "Stranger" }
+        environment.IsInGroup = function() return true end
+        environment.IsInRaid = function() return false end
+        environment.UnitExists = function(unit) return units[unit] ~= nil end
+        environment.UnitName = function(unit) return units[unit] end
+        fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        test.assertEqual(DIM_ALPHA, iconsOn(pins, 1429)[1].icon.alpha)
+        test.assertEqual(DIM_ALPHA, pins.minimap[1].icon.alpha)
+
+        -- The sharer joins the party: no dot on the zone map or minimap,
+        -- but still counted, undimmed, in the continent and world markers.
+        units.party1 = unitName(profile, guild.members[3].name)
+        fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        test.assertEqual(0, #iconsOn(pins, 1429))
+        test.assertEqual(0, #pins.minimap)
+        local zone = iconsOn(pins, 1415)[1].icon
+        test.assertEqual(1, #zone.marker.people)
+        test.assertEqual(1, zone.badge.alpha)
+        test.assertEqual(1, #worldIcons(pins)[1].icon.marker.people)
+
+        -- Leaving the party brings the dot back at once, undimmed.
+        environment.IsInGroup = function() return false end
+        units.party1 = nil
+        fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        test.assertEqual(1, #iconsOn(pins, 1429))
+        test.assertEqual(1, iconsOn(pins, 1429)[1].icon.alpha)
+        test.assertEqual(1, #pins.minimap)
+    end)
+
+    test.test(profile .. ": in the whole add-on, a raid member in any subgroup gets no dot", function()
         local channel = fixtures.newChannel()
         local guild = fixtures.GUILDS[profile]
         local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
         login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
         fixtures.deliver(channel)
-        test.assertEqual(1, viewer.pins.icons[1].icon.alpha)
+        local pins = viewer.pins
 
-        -- In a party without the sharer.
+        -- A party with the sharer...
         local environment = viewer.environment
-        local units = { player = guild.members[1].name, party1 = "Stranger" }
+        local raid = false
+        local units = { player = guild.members[1].name, party1 = unitName(profile, guild.members[3].name) }
         environment.IsInGroup = function() return true end
+        environment.IsInRaid = function() return raid end
         environment.UnitExists = function(unit) return units[unit] ~= nil end
         environment.UnitName = function(unit) return units[unit] end
+        environment.UnitIsUnit = function(unit, other)
+            return units[unit] ~= nil and units[unit] == units[other]
+        end
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
-        test.assertEqual(DIM_ALPHA, viewer.pins.icons[1].icon.alpha)
-        test.assertEqual(DIM_ALPHA, viewer.pins.minimap[1].icon.alpha)
+        test.assertEqual(0, #iconsOn(pins, 1429))
 
-        -- The sharer joins the party.
-        units.party1 = guild.members[3].name
+        -- ...converted to a raid, the sharer in another subgroup: the game
+        -- gives party units for the player's own subgroup only.
+        raid = true
+        units = { player = guild.members[1].name, raid1 = guild.members[1].name, raid2 = "Stranger",
+            raid7 = unitName(profile, guild.members[3].name) }
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
-        test.assertEqual(1, viewer.pins.icons[1].icon.alpha)
+        test.assertEqual(0, #iconsOn(pins, 1429))
+        test.assertEqual(0, #pins.minimap)
 
-        -- Out of the party, nobody is dimmed.
-        environment.IsInGroup = function() return false end
-        units.party1 = nil
+        -- The sharer leaves the raid: drawn again, dimmed.
+        units.raid7 = nil
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
-        test.assertEqual(1, viewer.pins.icons[1].icon.alpha)
+        test.assertEqual(1, #iconsOn(pins, 1429))
+        test.assertEqual(DIM_ALPHA, iconsOn(pins, 1429)[1].icon.alpha)
     end)
 
     test.test(profile .. ": in the whole add-on, turning showing off clears every guildmate pin", function()

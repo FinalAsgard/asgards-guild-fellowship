@@ -408,6 +408,59 @@ function Service:Differs(fact)
     return not (main ~= nil and main.player == character.player and player.main == fact.main)
 end
 
+-- Whether `key` is `from` or on the same player (by the officer's data).
+function Service:SamePlayer(key, from)
+    if key == from then
+        return true
+    end
+    local sender = self.partition:GetCharacter(from)
+    local character = self.partition:GetCharacter(key)
+    return sender ~= nil and character ~= nil and sender.player == character.player
+end
+
+-- Whether `key` is a character nobody organized: alone on its player,
+-- with no alias and not a declared main (by the officer's data).
+function Service:Unorganized(key)
+    local character = self.partition:GetCharacter(key)
+    local player = character and self.partition:GetPlayer(character.player)
+    return player ~= nil and player.alias == nil and not self.partition:IsDeclared(key)
+        and #self.partition:CharactersOf(character.player) == 1
+end
+
+-- Whether the member `from` may suggest `fact`: only about their own
+-- player (by the officer's data). A main link must keep both ends theirs:
+-- reorganizing their own player, splitting one of its characters off, or
+-- bringing a character nobody organized onto it. The officer can't tell
+-- which characters the member logged in on, so a character nobody
+-- organized that the member is playing may also join a main: that one is
+-- left to the officer to review. A character on another organized player
+-- is never theirs to move, and their own characters never join another
+-- player.
+function Service:FromOwnPlayer(fact, from)
+    if fact.kind ~= addon.SyncFacts.KIND_MAIN or fact.main == nil then
+        return self:SamePlayer(fact.character, from)
+    end
+    local ownCharacter = self:SamePlayer(fact.character, from)
+    local ownMain = self:SamePlayer(fact.main, from)
+    if ownCharacter and (ownMain or fact.main == fact.character) then
+        return true
+    end
+    if ownMain and self:Unorganized(fact.character) then
+        return true
+    end
+    return fact.character == from and self:Unorganized(fact.character)
+end
+
+-- Whether queued `entry` is still its member's to suggest, by this
+-- client's data now: a scan may have organized a character since.
+function Service:StillTheirs(entry)
+    local fact = { kind = factKind(entry.kind), character = entry.character }
+    if fact.kind == addon.SyncFacts.KIND_MAIN then
+        fact.main = entry.suggestion.main
+    end
+    return self:FromOwnPlayer(fact, entry.from)
+end
+
 local function findEntry(conflicts, character, kind)
     local index
     for index = 1, #conflicts do
@@ -419,8 +472,9 @@ local function findEntry(conflicts, character, kind)
 end
 
 -- Queues the suggestions `from` (a member's key) sent, for this officer to
--- decide. Only the member's own edits count, and only those that would
--- change something and are newer than what this client holds. A newer
+-- decide. Only the member's own edits count, an alias or Discord username
+-- only about their own player, and only those that would change something
+-- and are newer than what this client holds. A newer
 -- suggestion about the same thing replaces an older one, and a newer one
 -- that changes nothing withdraws it. Returns how many entries were queued
 -- or withdrawn.
@@ -438,6 +492,7 @@ function Service:Queue(facts, from)
             and not (now > 0 and fact.at > now + addon.SyncFacts.MAX_FUTURE_SECONDS)
             and self.partition:GetCharacter(fact.character) ~= nil
             and (fact.kind ~= addon.SyncFacts.KIND_MAIN or self.partition:GetCharacter(fact.main) ~= nil)
+            and self:FromOwnPlayer(fact, from)
         if usable then
             local heldAt, heldBy = self:HeldStamp(fact)
             usable = addon.SyncFacts.IsNewer(fact.at, fact.by, heldAt, heldBy) and self:Differs(fact)

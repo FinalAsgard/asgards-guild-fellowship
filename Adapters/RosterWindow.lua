@@ -497,6 +497,8 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     end)
     edit.aliasText = aliasText
     edit.aliasSource = aliasSource
+    edit.setAlias = setAlias
+    edit.setDiscord = setDiscord
     edit.setMain = setMain
 
     -- The tabs above the list: Profile (the player's details and
@@ -2151,6 +2153,23 @@ function Window:SetConflicts(rows)
     end))
 end
 
+-- Shows or hides the Conflicts button; hiding it also closes the conflict
+-- panel and its review (members never see them).
+function Window:SetConflictsShown(shown)
+    return (pcall(function()
+        local conflicts = self.conflicts
+        if shown then
+            conflicts.button:Show()
+            return
+        end
+        conflicts.button:Hide()
+        conflicts.panel:Hide()
+        if conflicts.review ~= nil then
+            conflicts.review.panel:Hide()
+        end
+    end))
+end
+
 -- Shows the bundle review (see BundleReviewViewModel) beside the conflict
 -- panel: who suggested it, each changed player before and after, the guild
 -- notes, and its changes.
@@ -2345,6 +2364,15 @@ function Window:ShowPlayer(model)
         end
         edit.aliasText:SetText(model.alias and ("Alias: " .. model.alias) or "|cff9d9d9dNo alias|r")
         edit.aliasSource:SetText(model.alias and model.aliasSource and ("Alias " .. model.aliasSource) or "")
+        -- A member can't change another player's alias or Discord.
+        local button
+        for _, button in ipairs({ edit.setAlias, edit.setDiscord }) do
+            if model.canEdit == false then
+                button:Disable()
+            else
+                button:Enable()
+            end
+        end
         -- A player with alts can't be merged into another.
         if model.canMerge then
             edit.setMain:Enable()

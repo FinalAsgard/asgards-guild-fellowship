@@ -28,6 +28,10 @@ local function newWindow()
         self.conflicts = rows
         return true
     end
+    function window:SetConflictsShown(shown)
+        self.conflictsShown = shown
+        return true
+    end
     function window:SetRows(rows)
         self.rows = rows
         return true
@@ -149,6 +153,24 @@ local function registerProfileTests(profile)
         test.assertEqual("TheTool (" .. first.name .. ")", setup.window.rows[1].label)
         test.assertContains(setup.window.status, "Last scan just now: 3 new characters")
         test.assertContains(setup.window.status, "\nNot synced yet")
+    end)
+
+    test.test(profile .. " the scan probe shows the last full scan and how many notes the last scan changed", function()
+        local setup = build(profile)
+        local before = setup.controller:ScanProbeLines()
+        test.assertEqual("Last full scan: never.", before[1])
+        test.assertEqual("Last scan: none yet.", before[2])
+        setup.login()
+        setup.world.time = setup.world.time + 600
+        setup.world.guild.members[3].note = ">" .. setup.world.guild.members[1].name
+
+        setup.controller.scheduler:OnRosterUpdate()
+        fixtures.runTimers(setup.world, 2)
+
+        local lines = setup.controller:ScanProbeLines()
+        test.assertEqual("Last full scan: 10 minutes ago.", lines[1])
+        test.assertEqual("Last scan (on a roster update, just now): 1 note changed.", lines[2])
+        test.assertEqual(2, #lines)
     end)
 
     test.test(profile .. " opening the window never scans", function()
@@ -344,6 +366,53 @@ test.test("the Recruiters leaderboard is for officers only, and recent ads for e
     test.assertEqual("No recent ads known.", setup.window.recentAds[2].label)
 end)
 
+local conflictProfile
+for _, conflictProfile in ipairs({ "Forever", "Retail" }) do
+    test.test(conflictProfile .. ": Conflicts are for officers only, following a change of rank", function()
+        local officer = false
+        local setup = build(conflictProfile, {
+            isOfficer = function()
+                return officer
+            end,
+        })
+        setup.login()
+        setup.controller:Toggle()
+
+        test.assertEqual(false, setup.window.conflictsShown, "a member's window hides them")
+        test.assertEqual(nil, setup.controller:PendingConflictCount(), "and the minimap tooltip has no count")
+
+        -- Promoted: shown at the next redraw, no reload.
+        officer = true
+        setup.controller:Refresh()
+        test.assertEqual(true, setup.window.conflictsShown)
+        test.assertEqual(0, setup.controller:PendingConflictCount())
+
+        officer = false
+        setup.controller:Refresh()
+        test.assertEqual(false, setup.window.conflictsShown)
+    end)
+
+    test.test(conflictProfile .. ": a member's scan report leaves out conflicts", function()
+        local officer = false
+        local setup = build(conflictProfile, {
+            isOfficer = function()
+                return officer
+            end,
+        })
+        setup.login()
+        local said = #setup.world.messages
+
+        setup.controller:OnScanFinished({}, { mode = "full", newCharacters = 0, conflicts = 2 })
+        test.assertEqual(said, #setup.world.messages, "nothing else found: nothing said")
+        setup.controller:OnScanFinished({}, { mode = "full", newCharacters = 1, conflicts = 2 })
+        test.assertContains(setup.world.messages[#setup.world.messages], "Roster scanned: 1 new character.")
+
+        officer = true
+        setup.controller:OnScanFinished({}, { mode = "full", newCharacters = 0, conflicts = 2 })
+        test.assertContains(setup.world.messages[#setup.world.messages], "2 new conflicts to review")
+    end)
+end
+
 test.test("without a stats source, nobody gets the Recruiters view", function()
     local setup = build("Retail", { isOfficer = function() return true end })
     setup.login()
@@ -379,7 +448,7 @@ local function registerCountsTests(profile)
     end)
 
     test.test(profile .. " the counts line updates after linking an alt", function()
-        local setup = build(profile)
+        local setup = build(profile, { isOfficer = function() return true end })
         setup.login()
         setup.controller:Toggle()
         local playerId = setup.partition().characters[first.key].player

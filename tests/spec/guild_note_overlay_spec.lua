@@ -430,7 +430,7 @@ local function registerProfileTests(profile)
         local world = fixtures.newEnvironment(profile)
         local detail = installGuildRoster(world.environment)
         local summary = { title = "TheTool (Toolbox)", lines = { "Discord: thetool", "Main: Toolbox (80)",
-            "Alts: Hammer (70)" } }
+            "Alts: Hammer (70)" }, canSetDiscord = true }
         local overlay = build(world, { officer = false, profiles = { Hammer = summary } })
 
         overlay:Attach()
@@ -484,12 +484,29 @@ local function registerProfileTests(profile)
         test.assertEqual(1, options.edited)
     end)
 
-    test.test(profile .. ": anyone's mini profile has a Set Discord button for the selected player", function()
+    test.test(profile .. ": a member's mini profile of another player has no Set Discord button or button row", function()
         local world = fixtures.newEnvironment(profile)
         local detail = installGuildRoster(world.environment)
         local options = { officer = false, profiles = {
-            Hammer = { title = "TheTool (Toolbox)", lines = { "Main: Toolbox (80)" } },
-            Toolbox = { title = "TheTool (Toolbox)", lines = { "Main: Toolbox (80)" }, own = true },
+            Visitor = { title = "Visitor", lines = { "Main: Visitor (80)" } },
+        } }
+        local overlay = build(world, options)
+
+        overlay:Attach()
+        detail:DisplayMember(1, { name = "Visitor" })
+
+        test.assertFalse(detail.profile.discordButton.shown)
+        test.assertFalse(detail.profile.editButton.shown)
+        test.assertEqual(12 + 3 + 12 + 16, detail.profile.height)
+    end)
+
+    test.test(profile .. ": the mini profile has a Set Discord button for a player the user may change", function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local options = { officer = false, profiles = {
+            Hammer = { title = "TheTool (Toolbox)", lines = { "Main: Toolbox (80)" }, canSetDiscord = true },
+            Toolbox = { title = "TheTool (Toolbox)", lines = { "Main: Toolbox (80)" }, own = true,
+                canSetDiscord = true },
         } }
         local overlay = build(world, options)
 
@@ -497,7 +514,7 @@ local function registerProfileTests(profile)
         detail:DisplayMember(1, { name = "Hammer" })
 
         local button = detail.profile.discordButton
-        test.assertTrue(button.shown, "someone else's profile has it too")
+        test.assertTrue(button.shown, "an alt of the user's player")
         test.assertEqual("Set Discord...", button.text)
         test.assertEqual("BOTTOMLEFT", button.points[1][1])
         button.OnClick()
@@ -893,7 +910,31 @@ local function registerRowTests(profile)
         test.assertContains(promotionText(), "not set", "clearing it clears the name")
     end)
 
-    test.test(profile .. ": in the whole add-on, a member's Discord name for someone else from the mini profile "
+    test.test(profile .. ": in the whole add-on, a member gets no Set Discord button for another player, and "
+        .. "the controller refuses one anyway", function()
+        local world = fixtures.newEnvironment(profile, { playerName = fixtures.GUILDS[profile].members[2].name })
+        local detail = installGuildRoster(world.environment)
+        local other = world.guild.members[3]
+        fixtures.loadAddon(world)
+        fixtures.fire(world, "ADDON_LOADED", world.addonName)
+        world.loggedIn = true
+        fixtures.fire(world, "PLAYER_LOGIN")
+        fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world)
+        local guild, partition, normalizer = world.addon.rosterController:QuietContext()
+        test.assertTrue(guild ~= nil)
+
+        detail:DisplayMember(1, { name = other.name })
+        test.assertTrue(detail.profile.shown)
+        test.assertFalse(detail.profile.discordButton.shown)
+
+        test.assertFalse(world.addon.rosterController:SetDiscord(normalizer:Key(other.name), "nail#9"))
+        test.assertEqual(0, #(partition:GetSuggestions() or {}), "nothing kept or sent")
+        test.assertContains(world.messages[#world.messages], "members can only change their own player")
+    end)
+
+    test.test(profile .. ": in the whole add-on, a member's Discord name for their own player from the mini profile "
         .. "waits for an officer", function()
         local world = fixtures.newEnvironment(profile, { playerName = fixtures.GUILDS[profile].members[2].name })
         local detail = installGuildRoster(world.environment)
@@ -902,7 +943,8 @@ local function registerRowTests(profile)
         world.environment.StaticPopup_Show = function(name, label, _, data)
             table.insert(shown, { name = name, label = label, data = data })
         end
-        local other = world.guild.members[3]
+        -- The member's main, whose player the logged-in alt is on.
+        local main = world.guild.members[1]
         fixtures.loadAddon(world)
         fixtures.fire(world, "ADDON_LOADED", world.addonName)
         world.loggedIn = true
@@ -913,7 +955,8 @@ local function registerRowTests(profile)
         local _, partition = world.addon.rosterController:QuietContext()
         test.assertEqual(0, #(partition:GetSuggestions() or {}))
 
-        detail:DisplayMember(1, { name = other.name })
+        detail:DisplayMember(1, { name = main.name })
+        test.assertTrue(detail.profile.discordButton.shown)
         detail.profile.discordButton.OnClick()
         test.assertEqual(1, #shown)
         shown[1].data.onSave("nail#9")

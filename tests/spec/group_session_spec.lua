@@ -302,6 +302,127 @@ test.test("Forever adapter reads the party without assigned roles", function()
     test.assertFalse(client:IsInGroup())
 end)
 
+-- A raid whose `units` (raidN -> as installParty) hold the player too.
+local function installRaid(environment, units, player)
+    installParty(environment, units, true)
+    environment.UnitIsUnit = function(unit, other)
+        return other == "player" and units[unit] ~= nil and units[unit] == units.player
+    end
+    units.player = player
+end
+
+for _, profile in ipairs(fixtures.PROFILES) do
+    test.test(profile .. " adapter reads the whole raid as the group, every subgroup", function()
+        local world = fixtures.newEnvironment(profile)
+        local me = { name = "Tool", guid = "Player-1", class = "WARRIOR", level = 60, guild = true }
+        local units = {
+            raid1 = { name = "Hammer", guid = "Player-2", class = "PALADIN", level = 42, guild = true },
+            raid2 = me,
+            raid23 = { name = "Visitor", guid = "Player-3", class = "MAGE", level = 60, guild = false },
+            raid40 = { name = "Wrench", guid = "Player-4", class = "ROGUE", level = 55, guild = true },
+            party1 = { name = "Hammer", guid = "Player-2", class = "PALADIN", level = 42, guild = true },
+        }
+        installRaid(world.environment, units, me)
+        if profile == "Forever" then
+            -- Older clients count the raid instead.
+            world.environment.IsInRaid = nil
+            world.environment.GetNumRaidMembers = function() return 4 end
+        else
+            world.environment.IsInRaid = function() return true end
+        end
+        local client = newClient(world)
+
+        local members = client:GetGroupMembers()
+
+        test.assertTrue(client:IsInRaid())
+        test.assertEqual(4, #members)
+        test.assertTrue(members[1].isPlayer)
+        test.assertEqual("Tool", members[1].name)
+        test.assertEqual("Hammer", members[2].name)
+        test.assertEqual("Visitor", members[3].name)
+        test.assertFalse(members[3].inGuild)
+        test.assertEqual("Wrench", members[4].name)
+        test.assertEqual("ROGUE", members[4].classToken)
+        -- The party is still just the player's own subgroup.
+        test.assertEqual(2, #client:GetPartyMembers())
+    end)
+
+    test.test(profile .. " adapter reads the raid when UnitIsUnit fails, the player once", function()
+        local world = fixtures.newEnvironment(profile)
+        local me = { name = "Tool", guid = "Player-1", class = "WARRIOR", level = 60, guild = true }
+        local units = {
+            raid1 = { name = "Hammer", guid = "Player-2", class = "PALADIN", level = 42, guild = true },
+            raid2 = me,
+            raid9 = { name = "Wrench", guid = "Player-4", class = "ROGUE", level = 55, guild = true },
+        }
+        installRaid(world.environment, units, me)
+        world.environment.IsInRaid = function() return true end
+        world.environment.UnitIsUnit = function() error("unavailable") end
+        local client = newClient(world)
+
+        local members = client:GetGroupMembers()
+
+        test.assertEqual(3, #members)
+        test.assertTrue(members[1].isPlayer)
+        test.assertEqual("Hammer", members[2].name)
+        test.assertEqual("Wrench", members[3].name)
+    end)
+
+    test.test(profile .. " adapter reads the raid with no gap when the player's own name can't be read", function()
+        local world = fixtures.newEnvironment(profile)
+        local me = { name = "Tool", guid = "Player-1", class = "WARRIOR", level = 60, guild = true }
+        local units = {
+            raid1 = { name = "Hammer", guid = "Player-2", class = "PALADIN", level = 42, guild = true },
+            raid2 = me,
+        }
+        installRaid(world.environment, units, me)
+        world.environment.IsInRaid = function() return true end
+        local unitName = world.environment.UnitName
+        world.environment.UnitName = function(unit)
+            if unit == "player" then
+                return nil
+            end
+            return unitName(unit)
+        end
+        local client = newClient(world)
+
+        local members = client:GetGroupMembers()
+
+        test.assertEqual(1, #members)
+        test.assertEqual("Hammer", members[1].name)
+    end)
+
+    test.test(profile .. " adapter reads the party as the group outside a raid", function()
+        local world = fixtures.newEnvironment(profile)
+        installParty(world.environment, {
+            player = { name = "Tool", guid = "Player-1", class = "WARRIOR", level = 60, guild = true },
+            party1 = { name = "Hammer", guid = "Player-2", class = "PALADIN", level = 42, guild = true },
+            raid1 = { name = "Stale", guid = "Player-9", class = "MAGE", level = 60, guild = true },
+        }, true)
+        world.environment.IsInRaid = function() return false end
+        world.environment.GetNumRaidMembers = function() return 0 end
+        local client = newClient(world)
+
+        local members = client:GetGroupMembers()
+
+        test.assertFalse(client:IsInRaid())
+        test.assertEqual(2, #members)
+        test.assertEqual("Hammer", members[2].name)
+
+        -- Without IsInRaid, the raid count decides, whatever IsInGroup says.
+        world.environment.IsInRaid = nil
+        test.assertTrue(client:IsInGroup())
+        test.assertFalse(client:IsInRaid())
+        world.environment.GetNumRaidMembers = function() return 3 end
+        test.assertTrue(client:IsInRaid())
+        -- An IsInRaid that raises falls back the same way.
+        world.environment.IsInRaid = function() error("unavailable") end
+        test.assertTrue(client:IsInRaid())
+        world.environment.GetNumRaidMembers = function() return 0 end
+        test.assertFalse(client:IsInRaid())
+    end)
+end
+
 test.test("adapter reports party changes", function()
     local world = fixtures.newEnvironment("Retail")
     local client = newClient(world)

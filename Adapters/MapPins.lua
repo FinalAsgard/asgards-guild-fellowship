@@ -31,8 +31,8 @@ local MapPins = {
     -- is added on the continent with this flag.
     SHOW_WORLD_GLOBAL = "HBD_PINS_WORLDMAP_SHOW_WORLD",
     SHOW_WORLD = 3,
-    -- While the player is in a party, guildmates outside it are drawn at
-    -- this opacity, so the party stands out.
+    -- While the player is in a party or raid, guildmates outside it are
+    -- drawn at this opacity.
     DIM_ALPHA = 0.6,
     -- Ends the tooltip of a zone map dot placed only by the roster's zone.
     UNKNOWN_SPOT_TEXT = "(exact location unknown)",
@@ -68,7 +68,7 @@ Pins.__index = Pins
 --   dots    function() -> the guildmates to draw: each { key, mapId, x, y,
 --           class, name, level, label?, dimmed?, fromRoster? } (label is
 --           the chat tag's text; dimmed is set for those outside the
---           player's party; fromRoster for those only the roster places,
+--           player's group, whose own members get no dot; fromRoster for those only the roster places,
 --           at their zone's center, never on the minimap)
 --   zone    function() -> the player's zone map ID, or nil (no minimap
 --           dots then)
@@ -395,7 +395,7 @@ function Pins:DrawMarker(frame, marker)
         frame.badge:Show()
         frame.count:SetText(tostring(#marker.people))
     end
-    -- A marker with nobody from the player's party is dimmed as a whole.
+    -- A marker with nobody from the player's group is dimmed as a whole.
     local anyoneUndimmed = false
     for index = 1, #marker.people do
         if not marker.people[index].dimmed then
@@ -407,7 +407,7 @@ function Pins:DrawMarker(frame, marker)
 end
 
 -- Draws a dot frame in `dot`'s class color, dimmed when it's outside the
--- player's party.
+-- player's group.
 function Pins:Color(icon, dot)
     pcall(icon.texture.SetVertexColor, icon.texture, self:ClassColor(dot.class))
     pcall(icon.SetAlpha, icon, dot.dimmed and MapPins.DIM_ALPHA or 1)
