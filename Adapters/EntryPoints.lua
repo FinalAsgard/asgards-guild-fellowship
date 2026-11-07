@@ -24,7 +24,8 @@ Points.__index = Points
 -- options:
 --   client          the compatibility adapter
 --   toggle          function() that shows or hides the roster
---   conflictCount   function() -> pending conflicts for the current guild
+--   conflictCount   function() -> pending conflicts for the current guild,
+--                   or nil when this user doesn't review them (a member)
 --   minimapState    function() -> the saved LibDBIcon table, or nil
 function EntryPoints.Create(options)
     return setmetatable({
@@ -53,11 +54,15 @@ local function library(environment, major)
 end
 
 function Points:TooltipLines()
-    local count = self.conflictCount() or 0
+    local count = self.conflictCount()
     local lines = {
         addon.Identity.displayName,
         "Click to open or close the roster.",
     }
+    -- No count (a member): no conflicts line at all.
+    if count == nil then
+        return lines
+    end
     if count > 0 then
         table.insert(lines, count .. (count == 1 and " conflict" or " conflicts") .. " to review")
     else

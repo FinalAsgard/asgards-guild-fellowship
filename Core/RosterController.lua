@@ -238,8 +238,12 @@ function Controller:Context()
 end
 
 -- Pending conflicts for the current guild, for the minimap tooltip: each
--- note conflict, and each player's suggestions once.
+-- note conflict, and each player's suggestions once. Nil for a member,
+-- who never sees conflicts.
 function Controller:PendingConflictCount()
+    if not self:IsOfficerUser() then
+        return nil
+    end
     local guild, partition = self:QuietContext()
     if guild == nil then
         return 0
@@ -302,11 +306,22 @@ end
 
 function Controller:OnScanFinished(result, summary)
     -- A Rescan, the first scan, and any scan that found something are
-    -- reported; a login scan or a quiet check that found nothing is not.
-    local found = (summary.newCharacters or 0) + (summary.linked or 0) + (summary.aliased or 0)
-        + (summary.departed or 0) + (summary.rejoined or 0) + (summary.promoted or 0) + (summary.conflicts or 0)
-    if summary.forced or summary.mode == "initial" or found > 0 then
-        self:Print("Roster scanned: " .. RosterController.DescribeScan(summary) .. ".")
+    -- reported; a login scan or a quiet check that found nothing is not. A
+    -- member never hears about conflicts.
+    local described = summary
+    if not self:IsOfficerUser() and (summary.conflicts or 0) > 0 then
+        described = {}
+        local key, value
+        for key, value in pairs(summary) do
+            described[key] = value
+        end
+        described.conflicts = nil
+    end
+    local found = (described.newCharacters or 0) + (described.linked or 0) + (described.aliased or 0)
+        + (described.departed or 0) + (described.rejoined or 0) + (described.promoted or 0)
+        + (described.conflicts or 0)
+    if described.forced or described.mode == "initial" or found > 0 then
+        self:Print("Roster scanned: " .. RosterController.DescribeScan(described) .. ".")
     end
     self:Invalidate()
     if self.onScanFinished ~= nil then
@@ -1020,6 +1035,11 @@ function Controller:Redraw()
             pending = self.current.partition:GetSuggestions(),
         })
         self.window:SetConflicts(conflictRows)
+        -- Only officers see Conflicts; this follows a promotion or
+        -- demotion at the next redraw.
+        if type(self.window.SetConflictsShown) == "function" then
+            self.window:SetConflictsShown(self:IsOfficerUser())
+        end
         self:RedrawReview(conflictRows, normalizer, members)
         self:RedrawPanel()
     end

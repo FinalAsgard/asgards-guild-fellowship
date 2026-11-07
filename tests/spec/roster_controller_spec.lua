@@ -28,6 +28,10 @@ local function newWindow()
         self.conflicts = rows
         return true
     end
+    function window:SetConflictsShown(shown)
+        self.conflictsShown = shown
+        return true
+    end
     function window:SetRows(rows)
         self.rows = rows
         return true
@@ -343,6 +347,53 @@ test.test("the Recruiters leaderboard is for officers only, and recent ads for e
     test.assertFalse(setup.window.recruiters)
     test.assertEqual("No recent ads known.", setup.window.recentAds[2].label)
 end)
+
+local conflictProfile
+for _, conflictProfile in ipairs({ "Forever", "Retail" }) do
+    test.test(conflictProfile .. ": Conflicts are for officers only, following a change of rank", function()
+        local officer = false
+        local setup = build(conflictProfile, {
+            isOfficer = function()
+                return officer
+            end,
+        })
+        setup.login()
+        setup.controller:Toggle()
+
+        test.assertEqual(false, setup.window.conflictsShown, "a member's window hides them")
+        test.assertEqual(nil, setup.controller:PendingConflictCount(), "and the minimap tooltip has no count")
+
+        -- Promoted: shown at the next redraw, no reload.
+        officer = true
+        setup.controller:Refresh()
+        test.assertEqual(true, setup.window.conflictsShown)
+        test.assertEqual(0, setup.controller:PendingConflictCount())
+
+        officer = false
+        setup.controller:Refresh()
+        test.assertEqual(false, setup.window.conflictsShown)
+    end)
+
+    test.test(conflictProfile .. ": a member's scan report leaves out conflicts", function()
+        local officer = false
+        local setup = build(conflictProfile, {
+            isOfficer = function()
+                return officer
+            end,
+        })
+        setup.login()
+        local said = #setup.world.messages
+
+        setup.controller:OnScanFinished({}, { mode = "full", newCharacters = 0, conflicts = 2 })
+        test.assertEqual(said, #setup.world.messages, "nothing else found: nothing said")
+        setup.controller:OnScanFinished({}, { mode = "full", newCharacters = 1, conflicts = 2 })
+        test.assertContains(setup.world.messages[#setup.world.messages], "Roster scanned: 1 new character.")
+
+        officer = true
+        setup.controller:OnScanFinished({}, { mode = "full", newCharacters = 0, conflicts = 2 })
+        test.assertContains(setup.world.messages[#setup.world.messages], "2 new conflicts to review")
+    end)
+end
 
 test.test("without a stats source, nobody gets the Recruiters view", function()
     local setup = build("Retail", { isOfficer = function() return true end })

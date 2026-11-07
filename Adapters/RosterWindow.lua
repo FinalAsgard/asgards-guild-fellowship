@@ -2153,6 +2153,23 @@ function Window:SetConflicts(rows)
     end))
 end
 
+-- Shows or hides the Conflicts button; hiding it also closes the conflict
+-- panel and its review (members never see them).
+function Window:SetConflictsShown(shown)
+    return (pcall(function()
+        local conflicts = self.conflicts
+        if shown then
+            conflicts.button:Show()
+            return
+        end
+        conflicts.button:Hide()
+        conflicts.panel:Hide()
+        if conflicts.review ~= nil then
+            conflicts.review.panel:Hide()
+        end
+    end))
+end
+
 -- Shows the bundle review (see BundleReviewViewModel) beside the conflict
 -- panel: who suggested it, each changed player before and after, the guild
 -- notes, and its changes.
