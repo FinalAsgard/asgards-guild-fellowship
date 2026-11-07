@@ -182,10 +182,12 @@ end)
 
 -- Controller: selecting and editing ------------------------------------------
 
--- `options.onDiscordChanged` as for the controller.
+-- `options.onDiscordChanged` as for the controller; `options.profile` the
+-- client (Retail by default); `options.officer` makes the user, logged in
+-- on the guild's first member, an officer.
 local function controllerSetup(onSyncResumed, options)
     options = options or {}
-    local world = fixtures.newEnvironment("Retail")
+    local world = fixtures.newEnvironment(options.profile or "Retail")
     world.environment.date = function(format, timestamp)
         return os.date("!" .. format, timestamp)
     end
@@ -222,6 +224,7 @@ local function controllerSetup(onSyncResumed, options)
         createWindow = function() return window end,
         onSyncResumed = onSyncResumed,
         onDiscordChanged = options.onDiscordChanged,
+        isOfficer = function() return options.officer == true end,
     })
     controller:OnSavedDataReady()
     controller:OnRosterUpdate()
@@ -313,6 +316,57 @@ test.test("set discord: the edit goes to guild sync and the panel redraws", func
     test.assertEqual(window.player.main, edits[1].key)
     test.assertEqual("tool#1", window.player.discord)
 end)
+
+local profile
+for _, profile in ipairs({ "Forever", "Retail" }) do
+    -- The second and third members: an alt of the user's player, and
+    -- someone else's.
+    local alt = fixtures.GUILDS[profile].members[2].name
+    local other = fixtures.GUILDS[profile].members[3].name
+
+    test.test(profile .. ": a member may edit only their own player's alias and Discord from the panel", function()
+        local edits = 0
+        local controller, window, client = controllerSetup(nil, { profile = profile,
+            onDiscordChanged = function()
+                edits = edits + 1
+                return { {} }
+            end })
+        local printed
+        client.Print = function(_, message) printed = message end
+        local _, partition, normalizer = controller:QuietContext()
+        local otherKey = normalizer:Key(other)
+
+        controller:SelectPlayerOf(normalizer:Key(alt))
+        test.assertTrue(window.player.canEdit, "their own player")
+        test.assertTrue(controller:SetDiscord(window.player.main, "tool#1"))
+        test.assertEqual(1, edits)
+
+        controller:SelectPlayerOf(otherKey)
+        test.assertFalse(window.player.canEdit, "someone else's player")
+        test.assertFalse(controller:SetDiscord(otherKey, "spam#1"))
+        test.assertFalse(controller:SetAlias(otherKey, "Spam"))
+        test.assertEqual(1, edits, "nothing sent for someone else")
+        test.assertEqual(nil, partition:GetPlayer(partition:GetCharacter(otherKey).player).alias)
+        test.assertContains(printed, "members can only change their own player")
+    end)
+
+    test.test(profile .. ": an officer may edit any player's alias and Discord from the panel", function()
+        local edits = 0
+        local controller, window = controllerSetup(nil, { profile = profile, officer = true,
+            onDiscordChanged = function()
+                edits = edits + 1
+                return { {} }
+            end })
+        local _, _, normalizer = controller:QuietContext()
+        local otherKey = normalizer:Key(other)
+
+        controller:SelectPlayerOf(otherKey)
+        test.assertTrue(window.player.canEdit)
+        test.assertTrue(controller:SetDiscord(otherKey, "visitor#1"))
+        test.assertTrue(controller:SetAlias(otherKey, "Visi"))
+        test.assertEqual(1, edits)
+    end)
+end
 
 test.test("set discord: an edit that couldn't be saved is reported", function()
     local controller, _, client = controllerSetup(nil, {

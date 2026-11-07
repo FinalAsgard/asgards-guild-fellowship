@@ -361,11 +361,19 @@ function Overlay:ShowProfile(name)
         local ok, found = pcall(text.GetStringHeight, text)
         return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT * lines
     end
-    -- Set Discord… along the bottom for everyone, and the user's own
-    -- player gets an Edit button beside it.
-    local button = GuildNoteOverlay.EDIT_GAP + math.max(GuildNoteOverlay.IGNORE_SIZE[2],
-        GuildNoteOverlay.DISCORD_SIZE[2])
-    profile.discord:Show()
+    -- Set Discord… along the bottom for a player the user may change (an
+    -- officer any, a member their own), and the user's own player gets an
+    -- Edit button beside it.
+    local button = 0
+    if summary.canSetDiscord or summary.own then
+        button = GuildNoteOverlay.EDIT_GAP + math.max(GuildNoteOverlay.IGNORE_SIZE[2],
+            GuildNoteOverlay.DISCORD_SIZE[2])
+    end
+    if summary.canSetDiscord then
+        profile.discord:Show()
+    else
+        profile.discord:Hide()
+    end
     if summary.own then
         profile.edit:Show()
     else

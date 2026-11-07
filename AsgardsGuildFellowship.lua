@@ -3449,6 +3449,9 @@ if clientProfile.supported then
             if summary ~= nil and own ~= nil and own.player == character.player then
                 summary.own = true
             end
+            if summary ~= nil then
+                summary.canSetDiscord = rosterController:CanEditPlayer(key)
+            end
             return summary
         end,
         editProfile = function()

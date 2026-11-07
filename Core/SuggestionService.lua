@@ -408,6 +408,20 @@ function Service:Differs(fact)
     return not (main ~= nil and main.player == character.player and player.main == fact.main)
 end
 
+-- Whether the member `from` may suggest `fact`: an alias or Discord
+-- username only for their own player (by the officer's data).
+function Service:FromOwnPlayer(fact, from)
+    if fact.kind ~= addon.SyncFacts.KIND_ALIAS and fact.kind ~= addon.SyncFacts.KIND_DISCORD then
+        return true
+    end
+    if fact.character == from then
+        return true
+    end
+    local sender = self.partition:GetCharacter(from)
+    local character = self.partition:GetCharacter(fact.character)
+    return sender ~= nil and character ~= nil and sender.player == character.player
+end
+
 local function findEntry(conflicts, character, kind)
     local index
     for index = 1, #conflicts do
@@ -419,8 +433,9 @@ local function findEntry(conflicts, character, kind)
 end
 
 -- Queues the suggestions `from` (a member's key) sent, for this officer to
--- decide. Only the member's own edits count, and only those that would
--- change something and are newer than what this client holds. A newer
+-- decide. Only the member's own edits count, an alias or Discord username
+-- only about their own player, and only those that would change something
+-- and are newer than what this client holds. A newer
 -- suggestion about the same thing replaces an older one, and a newer one
 -- that changes nothing withdraws it. Returns how many entries were queued
 -- or withdrawn.
@@ -438,6 +453,7 @@ function Service:Queue(facts, from)
             and not (now > 0 and fact.at > now + addon.SyncFacts.MAX_FUTURE_SECONDS)
             and self.partition:GetCharacter(fact.character) ~= nil
             and (fact.kind ~= addon.SyncFacts.KIND_MAIN or self.partition:GetCharacter(fact.main) ~= nil)
+            and self:FromOwnPlayer(fact, from)
         if usable then
             local heldAt, heldBy = self:HeldStamp(fact)
             usable = addon.SyncFacts.IsNewer(fact.at, fact.by, heldAt, heldBy) and self:Differs(fact)

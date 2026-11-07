@@ -514,17 +514,23 @@ end
 
 -- The right-click menu for a roster row: a list of { text, action }.
 -- Character rows offer every organizing action that applies; player
--- headers offer the alias.
+-- headers offer the alias. A member is offered the alias only on their
+-- own player.
 function Controller:MenuFor(row)
     if self.current == nil or type(row) ~= "table" then
         return {}
     end
     if row.kind == "player" then
         local player = self.current.partition:GetPlayer(row.id)
-        return player and {
-            { text = "Set alias...", action = "alias", key = player.main },
-            { text = "View player...", action = "view", key = player.main },
-        } or {}
+        if player == nil then
+            return {}
+        end
+        local entries = {}
+        if self:CanEditPlayer(player.main) then
+            table.insert(entries, { text = "Set alias...", action = "alias", key = player.main })
+        end
+        table.insert(entries, { text = "View player...", action = "view", key = player.main })
+        return entries
     end
     local partition = self.current.partition
     local character = partition:GetCharacter(row.key)
@@ -542,7 +548,9 @@ function Controller:MenuFor(row)
             table.insert(entries, { text = "Make this the main", action = "makeMain", key = row.key })
         end
     end
-    table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
+    if self:CanEditPlayer(row.key) then
+        table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
+    end
     table.insert(entries, { text = "View player...", action = "view", key = row.key })
     if partition:CharactersOf(character.player)[2] ~= nil then
         table.insert(entries, { text = "Split off as own player", action = "detach", key = row.key })
@@ -552,6 +560,29 @@ end
 
 -- Manual changes that move characters between players or change a main.
 local MAIN_LINK_OPERATIONS = { SetMainPlayer = true, MakeMain = true, Detach = true }
+-- Manual changes a member may make only to their own player.
+local OWN_PLAYER_OPERATIONS = { SetAlias = true }
+local NOT_OWN_PLAYER = "members can only change their own player"
+
+-- Whether this user may change the player of `key`: an officer anyone's,
+-- a member only their own (the logged-in character's player).
+function Controller:CanEditPlayer(key)
+    local ok, officer = pcall(self.isOfficer)
+    if ok and officer == true then
+        return true
+    end
+    local guild, partition = self:QuietContext()
+    local selfKey = self:SelfKey()
+    if guild == nil or selfKey == nil or type(key) ~= "string" then
+        return false
+    end
+    if key == selfKey then
+        return true
+    end
+    local own = partition:GetCharacter(selfKey)
+    local character = partition:GetCharacter(key)
+    return own ~= nil and character ~= nil and own.player == character.player
+end
 
 -- Adds every character of `key`'s player to the set `keys`.
 function Controller:AddPlayerKeys(keys, key)
@@ -586,6 +617,10 @@ end
 -- the alias before the change ("" for none).
 function Controller:Organize(operation, key, ...)
     if self.current == nil then
+        return false
+    end
+    if OWN_PLAYER_OPERATIONS[operation] and not self:CanEditPlayer(key) then
+        self:Print("That change wasn't made: " .. NOT_OWN_PLAYER .. ".")
         return false
     end
     local service = self:Service()
@@ -634,10 +669,14 @@ end
 
 -- "Set Discord…" from the player panel or the game roster's mini profile:
 -- sets the Discord username of `key`'s player to `text` ("" clears it), as
--- an officer's or as a member's suggestion, and redraws. The add-on's
--- window needn't have been opened.
+-- an officer's or as a member's suggestion about their own player, and
+-- redraws. The add-on's window needn't have been opened.
 function Controller:SetDiscord(key, text)
     if self.onDiscordChanged == nil or (self.current == nil and self:QuietContext() == nil) then
+        return false
+    end
+    if not self:CanEditPlayer(key) then
+        self:Print("That Discord username wasn't saved: " .. NOT_OWN_PLAYER .. ".")
         return false
     end
     if self.onDiscordChanged(key, text) == nil then
@@ -781,6 +820,8 @@ function Controller:RedrawPanel()
         self:ClosePanel()
         return
     end
+    -- Set alias… and Set Discord… only for a player this user may change.
+    model.canEdit = self:CanEditPlayer(model.main)
     self.window:ShowPlayer(model)
 end
 

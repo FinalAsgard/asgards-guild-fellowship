@@ -807,19 +807,20 @@ test.test("a rejected suggestion reverts to the officers' data, which then match
     local officer = login(channel, "Toolbox-Area52")
     local hammer = login(channel, "Hammer-Area52")
     linkAlt(officer, "wrench-area52", "toolbox-area52")
-    test.assertTrue(officer.addon.rosterController:SetAlias("toolbox-area52", "The Tool"))
+    test.assertTrue(officer.addon.rosterController:SetAlias("hammer-area52", "Hammer Time"))
     fixtures.deliver(channel)
     hammer.time = officer.time + 60
     linkAlt(hammer, "wrench-area52", "hammer-area52")
-    test.assertTrue(hammer.addon.rosterController:SetAlias("toolbox-area52", "Tooly"))
+    test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hams"))
     fixtures.deliver(channel)
     test.assertEqual("hammer-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual("Hams", aliasOf(hammer, "hammer-area52"))
 
     test.assertTrue(officer.addon.rosterController:RejectAllConflicts())
     fixtures.deliver(channel)
 
     test.assertEqual("toolbox-area52", mainOf(hammer, "wrench-area52"))
-    test.assertEqual("The Tool", aliasOf(hammer, "toolbox-area52"))
+    test.assertEqual("Hammer Time", aliasOf(hammer, "hammer-area52"))
     test.assertEqual(0, #pendingOf(hammer))
     local _, by = partitionOf(hammer):GetMainStamp("wrench-area52")
     test.assertEqual("toolbox-area52", by, "the officer's fact again")

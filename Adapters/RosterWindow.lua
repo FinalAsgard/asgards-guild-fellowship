@@ -497,6 +497,8 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     end)
     edit.aliasText = aliasText
     edit.aliasSource = aliasSource
+    edit.setAlias = setAlias
+    edit.setDiscord = setDiscord
     edit.setMain = setMain
 
     -- The tabs above the list: Profile (the player's details and
@@ -2345,6 +2347,15 @@ function Window:ShowPlayer(model)
         end
         edit.aliasText:SetText(model.alias and ("Alias: " .. model.alias) or "|cff9d9d9dNo alias|r")
         edit.aliasSource:SetText(model.alias and model.aliasSource and ("Alias " .. model.aliasSource) or "")
+        -- A member can't change another player's alias or Discord.
+        local button
+        for _, button in ipairs({ edit.setAlias, edit.setDiscord }) do
+            if model.canEdit == false then
+                button:Disable()
+            else
+                button:Enable()
+            end
+        end
         -- A player with alts can't be merged into another.
         if model.canMerge then
             edit.setMain:Enable()

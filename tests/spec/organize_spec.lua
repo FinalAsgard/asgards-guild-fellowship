@@ -233,7 +233,10 @@ end)
 
 -- Controller: the menu and immediate refresh -------------------------------
 
-local function controllerSetup()
+-- The user is logged in as Toolbox, whose player has Hammer as an alt;
+-- `options.officer` makes them an officer.
+local function controllerSetup(options)
+    options = options or {}
     local world = fixtures.newEnvironment("Retail")
     local addon = test.newAddon(
         "Adapters/ClientProfile.lua",
@@ -263,6 +266,7 @@ local function controllerSetup()
         nameRules = client:GetClientProfile().nameRules,
         getDatabase = function() return database end,
         createWindow = function() return window end,
+        isOfficer = function() return options.officer == true end,
     })
     controller:OnSavedDataReady()
     controller:OnRosterUpdate()
@@ -302,8 +306,10 @@ test.test("the right-click menu offers the actions that apply to the row", funct
     test.assertEqual(nil, main.makeMain)
     test.assertEqual(nil, main.setMain)
 
+    -- Visitor is another player's, so a member isn't offered its alias.
     local single = actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage")))
-    test.assertTrue(single.setMain and single.alias)
+    test.assertTrue(single.setMain and single.view)
+    test.assertEqual(nil, single.alias)
     test.assertEqual(nil, single.detach)
 
     -- Each label says what it does.
@@ -322,8 +328,40 @@ test.test("the right-click menu offers the actions that apply to the row", funct
     test.assertTrue(alt.view and main.view and single.view)
 end)
 
-test.test("organizing from the menu refreshes the roster at once without a scan", function()
+test.test("an officer is offered the alias on anyone's rows", function()
+    local controller, window = controllerSetup({ officer = true })
+
+    test.assertTrue(actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage"))).alias)
+    test.assertTrue(actions(controller:MenuFor(rowFor(window, "TheTool (Toolbox)"))).alias)
+end)
+
+test.test("a member is offered the alias on their own player's rows and header", function()
+    local controller, window = controllerSetup()
+
+    test.assertTrue(actions(controller:MenuFor(rowFor(window, "Hammer"))).alias, "an alt of theirs")
+    test.assertTrue(actions(controller:MenuFor(rowFor(window, "TheTool (Toolbox)"))).alias, "their header")
+end)
+
+test.test("a member's alias for another player is refused and reported", function()
     local controller, window, world = controllerSetup()
+
+    test.assertFalse(controller:SetAlias("visitor-stormrage", "Visi"))
+
+    test.assertEqual("Visitor-Stormrage", rowFor(window, "Visitor-Stormrage").label)
+    test.assertContains(world.messages[#world.messages],
+        "That change wasn't made: members can only change their own player.")
+end)
+
+test.test("a member can set their own player's alias", function()
+    local controller, window = controllerSetup()
+
+    test.assertTrue(controller:SetAlias("hammer-area52", "Tool Time"))
+
+    test.assertEqual("Tool Time (Toolbox)", rowFor(window, "Tool Time (Toolbox)").label)
+end)
+
+test.test("organizing from the menu refreshes the roster at once without a scan", function()
+    local controller, window, world = controllerSetup({ officer = true })
     local requests = world.rosterRequests
 
     test.assertTrue(controller:Detach(rowFor(window, "Hammer").key))

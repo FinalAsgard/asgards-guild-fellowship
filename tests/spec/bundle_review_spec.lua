@@ -196,21 +196,19 @@ end)
 
 test.test("changed declared main and Discord lines are marked, and unchanged players are left out", function()
     local setup = newSetup()
-    setup.partition:SetProfileText("wrench-area52", "discord", "old#1", NOW - 10, "wrench-area52")
-    -- Hammer declares their main and suggests a Discord for Wrench's player.
+    setup.partition:SetProfileText("hammer-area52", "discord", "old#1", NOW - 10, "hammer-area52")
+    -- Hammer declares their main and suggests a new Discord for their player.
     setup.service:Queue({
         declare("hammer-area52", "hammer-area52"),
-        discord("wrench-area52", "wrench#1", "hammer-area52"),
+        discord("hammer-area52", "hammer#1", "hammer-area52"),
     }, "hammer-area52")
 
     local review = setup.review(setup.rows()[1])
 
-    test.assertEqual(2, #review.players)
-    test.assertEqual("-Main: Hammer; Alias: none; Discord: none; Alt: Bolt", side(review.players[1].before))
-    test.assertEqual("+Main: Hammer (declared); Alias: none; Discord: none; Alt: Bolt", side(review.players[1].after))
-    test.assertEqual("Wrench", review.players[2].name)
-    test.assertEqual("Main: Wrench; Alias: none; -Discord: old#1; Alts: none", side(review.players[2].before))
-    test.assertEqual("Main: Wrench; Alias: none; +Discord: wrench#1; Alts: none", side(review.players[2].after))
+    test.assertEqual(1, #review.players)
+    test.assertEqual("-Main: Hammer; Alias: none; -Discord: old#1; Alt: Bolt", side(review.players[1].before))
+    test.assertEqual("+Main: Hammer (declared); Alias: none; +Discord: hammer#1; Alt: Bolt",
+        side(review.players[1].after))
 end)
 
 test.test("the review shows the live guild note of each character involved, unhighlighted", function()
