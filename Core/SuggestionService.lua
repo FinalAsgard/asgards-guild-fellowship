@@ -418,15 +418,26 @@ function Service:SamePlayer(key, from)
     return sender ~= nil and character ~= nil and sender.player == character.player
 end
 
+-- Whether `key` is a character nobody organized: alone on its player,
+-- with no alias and not a declared main (by the officer's data).
+function Service:Unorganized(key)
+    local character = self.partition:GetCharacter(key)
+    local player = character and self.partition:GetPlayer(character.player)
+    return player ~= nil and player.alias == nil and not self.partition:IsDeclared(key)
+        and #self.partition:CharactersOf(character.player) == 1
+end
+
 -- Whether the member `from` may suggest `fact`: only about their own
 -- player (by the officer's data). A main link may also bring a character
--- onto the member's player: the officer can't tell which characters the
--- member logged in on, so that one is left to them to review.
+-- nobody organized onto the member's player: the officer can't tell which
+-- characters the member logged in on, so that one is left to them to
+-- review. A character on another organized player is never theirs to move.
 function Service:FromOwnPlayer(fact, from)
     if self:SamePlayer(fact.character, from) then
         return true
     end
     return fact.kind == addon.SyncFacts.KIND_MAIN and fact.main ~= nil and self:SamePlayer(fact.main, from)
+        and self:Unorganized(fact.character)
 end
 
 local function findEntry(conflicts, character, kind)

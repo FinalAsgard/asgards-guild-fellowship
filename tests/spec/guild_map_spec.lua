@@ -1228,6 +1228,15 @@ local function locationMessages(world)
     return count
 end
 
+-- A group member's name as the game gives it: Forever gives only the
+-- first name.
+local function unitName(profile, fullName)
+    if profile == "Forever" then
+        return (string.match(fullName, "^(%S+)"))
+    end
+    return fullName
+end
+
 local function registerWholeAddonTests(profile)
     test.test(profile .. ": in the whole add-on, a guildmate sharing their location appears on the zone map", function()
         local channel = fixtures.newChannel()
@@ -1570,7 +1579,7 @@ local function registerWholeAddonTests(profile)
 
         -- The sharer joins the party: no dot on the zone map or minimap,
         -- but still counted, undimmed, in the continent and world markers.
-        units.party1 = guild.members[3].name
+        units.party1 = unitName(profile, guild.members[3].name)
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
         test.assertEqual(0, #iconsOn(pins, 1429))
         test.assertEqual(0, #pins.minimap)
@@ -1599,7 +1608,7 @@ local function registerWholeAddonTests(profile)
         -- A party with the sharer...
         local environment = viewer.environment
         local raid = false
-        local units = { player = guild.members[1].name, party1 = guild.members[3].name }
+        local units = { player = guild.members[1].name, party1 = unitName(profile, guild.members[3].name) }
         environment.IsInGroup = function() return true end
         environment.IsInRaid = function() return raid end
         environment.UnitExists = function(unit) return units[unit] ~= nil end
@@ -1614,7 +1623,7 @@ local function registerWholeAddonTests(profile)
         -- gives party units for the player's own subgroup only.
         raid = true
         units = { player = guild.members[1].name, raid1 = guild.members[1].name, raid2 = "Stranger",
-            raid7 = guild.members[3].name }
+            raid7 = unitName(profile, guild.members[3].name) }
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
         test.assertEqual(0, #iconsOn(pins, 1429))
         test.assertEqual(0, #pins.minimap)

@@ -975,11 +975,19 @@ local function readUnit(environment, unit, isPlayer)
     if not nameOk or type(name) ~= "string" or name == "" then
         return nil
     end
-    local _, guid = callFunction(environment.UnitGUID, unit)
-    local _, _, classToken = callFunction(environment.UnitClass, unit)
-    local _, level = callFunction(environment.UnitLevel, unit)
-    local _, role = callFunction(environment.UnitGroupRolesAssigned, unit)
-    local _, inGuild = callFunction(environment.UnitIsInMyGuild, unit)
+    -- A call that fails gives nothing, never its error text.
+    local function value(api, index)
+        local results = { callFunction(api, unit) }
+        if not results[1] then
+            return nil
+        end
+        return results[(index or 1) + 1]
+    end
+    local guid = value(environment.UnitGUID)
+    local classToken = value(environment.UnitClass, 2)
+    local level = value(environment.UnitLevel)
+    local role = value(environment.UnitGroupRolesAssigned)
+    local inGuild = value(environment.UnitIsInMyGuild)
     return {
         key = type(guid) == "string" and guid ~= "" and guid or name,
         name = name,

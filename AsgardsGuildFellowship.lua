@@ -3569,22 +3569,34 @@ if clientProfile.supported then
             return members[key] ~= nil and members[key].online == true
         end)
     end
-    -- The keys of everyone in the player's party or raid, or nil outside a
-    -- group.
-    local function groupKeys(normalizer)
+    -- The roster keys of everyone in the player's party or raid, or nil
+    -- outside a group. Forever gives group members only their first name,
+    -- so the roster decides, as for the Group Finder. Looked up again only
+    -- when the group changes.
+    local groupCache = { signature = nil, keys = nil }
+    local function groupKeys()
         if not client:IsInGroup() then
             return nil
         end
-        local keys = {}
         local members = client:GetGroupMembers()
+        local parts = {}
         local index
         for index = 1, #members do
-            local key = normalizer:Key(members[index].name)
-            if key ~= nil then
-                keys[key] = true
-            end
+            parts[index] = tostring(members[index].name) .. "/" .. tostring(members[index].guid)
         end
-        return keys
+        -- A roster still loading may not name everyone yet.
+        local signature = tostring(client:GetGuildRosterCount()) .. "|" .. table.concat(parts, ";")
+        if groupCache.signature ~= signature then
+            local keys = {}
+            for index = 1, #members do
+                local key = rosterController:RosterKeyFor(members[index].name, members[index].guid)
+                if key ~= nil then
+                    keys[key] = true
+                end
+            end
+            groupCache.signature, groupCache.keys = signature, keys
+        end
+        return groupCache.keys
     end
     -- A board entry as the map shows it: with the character's name and its
     -- chat tag (alias or main), dimmed while the player is in a group it
@@ -3594,7 +3606,7 @@ if clientProfile.supported then
         if guild == nil then
             return {}
         end
-        local group = groupKeys(normalizer)
+        local group = groupKeys()
         local people = addon.PlayerService.Create(partition, { normalizer = normalizer })
         local described = {}
         local index

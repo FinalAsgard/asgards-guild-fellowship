@@ -227,6 +227,24 @@ test.test("an officer queues a member's suggestions only about the member's own 
     test.assertEqual(1, setup.service:Queue({ alias(MEMBER, "Hammy") }, MEMBER))
 end)
 
+test.test("a member can't bring a character from another organized player onto their own", function()
+    local setup = newSetup()
+    local partition = setup.partition
+    -- Anvil is the officer's alt; Wrench is a player named Spanner.
+    partition:JoinPlayerOf("anvil-area52", OFFICER, "note")
+    partition:SetAlias(partition:GetCharacter("wrench-area52").player, "Spanner", "note")
+
+    test.assertEqual(0, setup.service:Queue({ link("anvil-area52", MEMBER) }, MEMBER), "someone's alt")
+    test.assertEqual(0, setup.service:Queue({ link(OFFICER, MEMBER, NOW + 1) }, MEMBER), "someone's main")
+    test.assertEqual(0, setup.service:Queue({ link("wrench-area52", MEMBER, NOW + 2) }, MEMBER),
+        "a player with an alias")
+    partition:SetAlias(partition:GetCharacter("wrench-area52").player, nil, "note")
+    partition:SetDeclared("wrench-area52", true, "note")
+    test.assertEqual(0, setup.service:Queue({ link("wrench-area52", MEMBER, NOW + 3) }, MEMBER),
+        "a declared main")
+    test.assertEqual(0, #queued(setup))
+end)
+
 test.test("approving makes an officer fact under the approver's name, newer than what is held", function()
     local setup = newSetup()
     setup.service:Queue({ link("wrench-area52", MEMBER, NOW), alias(MEMBER, "") }, MEMBER)

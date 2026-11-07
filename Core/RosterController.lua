@@ -422,7 +422,9 @@ end
 -- suggestions through guild sync; then the roster and the conflict list are
 -- redrawn.
 function Controller:ResolveConflicts(action, character, kind)
-    if self.current == nil then
+    -- Only officers decide conflicts, even from a window left open across
+    -- a demotion.
+    if self.current == nil or not self:IsOfficerUser() then
         return false
     end
     local service = self:Service()
@@ -811,6 +813,9 @@ function Controller:SetDontSync(key, enabled)
     return ok == true
 end
 
+-- How many players the "Link as alt of…" picker lists at most.
+RosterController.SEARCH_LIMIT = 50
+
 -- Results for the "Link as alt of…" picker, without `key`'s own player; a
 -- member gets only players the add-on knows are theirs.
 function Controller:SearchPlayers(key, query)
@@ -820,9 +825,14 @@ function Controller:SearchPlayers(key, query)
     local service = self:Service()
     local ownPlayer = service:PlayerOf(key)
     local results = {}
-    local found = service:SearchPlayers(query, 50)
+    -- Filtered before the limit, so a member's own players aren't crowded
+    -- out by matches they can't pick.
+    local found = service:SearchPlayers(query)
     local index
     for index = 1, #found do
+        if #results >= RosterController.SEARCH_LIMIT then
+            break
+        end
         if found[index].id ~= ownPlayer and self:CanLink(key, found[index].id) then
             table.insert(results, found[index])
         end

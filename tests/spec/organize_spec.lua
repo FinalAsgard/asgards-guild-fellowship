@@ -276,7 +276,7 @@ local function controllerSetup(options)
     controller:OnRosterUpdate()
     fixtures.runTimers(world)
     controller:Toggle()
-    return controller, window, world
+    return controller, window, world, addon
 end
 
 local function rowFor(window, name)
@@ -421,6 +421,28 @@ test.test("a member may link a character this install has logged in on to their 
     test.assertEqual(toolPlayer, offered[1].id)
     test.assertTrue(controller:SetMainPlayer("visitor-stormrage", toolPlayer))
     test.assertEqual(toolPlayer, partition:GetCharacter("visitor-stormrage").player)
+end)
+
+test.test("a member's own players aren't crowded out of the picker by ones they can't pick", function()
+    local controller, _, _, addon = controllerSetup()
+    local partition = controller.current.partition
+    local toolPlayer = partition:GetCharacter("toolbox-area52").player
+    partition:RecordOwnCharacter("visitor-stormrage", 1)
+    -- Aaron sorts first and isn't theirs.
+    partition:RecordCharacter("aaron-area52", { name = "Aaron-Area52", level = 10 })
+    addon.RosterController.SEARCH_LIMIT = 1
+
+    local offered = controller:SearchPlayers("visitor-stormrage", "")
+
+    test.assertEqual(1, #offered)
+    test.assertEqual(toolPlayer, offered[1].id)
+end)
+
+test.test("a member's add-on refuses to decide conflicts", function()
+    local controller = controllerSetup()
+
+    test.assertFalse(controller:ResolveConflicts("acceptAll"))
+    test.assertFalse(controller:ResolveConflicts("rejectAll"))
 end)
 
 test.test("a member may still organize their own player", function()

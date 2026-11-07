@@ -359,6 +359,115 @@ local function registerSubmittedTests(profile, rules)
         test.assertEqual(1, #partition:GetConflicts())
         test.assertEqual(key("Toolbox"), playerOf(partition, member).main)
     end)
+
+    test.test(profile .. " a note naming someone new in the roster moves a character there", function()
+        local addon, partition, plan = setup(rules, {
+            { name("Toolbox"), "" },
+            { name("Hammer"), ">" .. name("Toolbox") },
+        })
+        addon.ReconcileEngine.Apply(partition, plan())
+
+        local result = profileRescan(addon, partition, rules, {
+            { name("Toolbox"), "" },
+            { name("Hammer"), ">" .. name("Newbie") },
+            { name("Newbie"), "" },
+        })
+
+        test.assertEqual(1, result.linked)
+        test.assertEqual(key("Newbie"), playerOf(partition, key("Hammer")).main)
+        test.assertEqual(0, #partition:GetConflicts())
+    end)
+
+    test.test(profile .. " a marker that named nobody is read again once that character joins", function()
+        local addon, partition, plan = setup(rules, {
+            { name("Toolbox"), "" },
+            { name("Wrench"), ">" .. name("Newbie") },
+        })
+        addon.ReconcileEngine.Apply(partition, plan())
+        test.assertTrue(partition:GetCharacter(key("Wrench")).awaitsAlias)
+
+        -- Wrench's note is unchanged; Newbie joins.
+        local members, normalizer = roster(addon, rules, {
+            { name("Toolbox"), "" },
+            { name("Wrench"), ">" .. name("Newbie") },
+            { name("Newbie"), "" },
+        })
+        local result = addon.ReconcileEngine.Apply(partition, addon.ReconcileEngine.Plan({
+            partition = partition,
+            members = members,
+            normalizer = normalizer,
+            rules = rules,
+            mode = "incremental",
+        }))
+
+        test.assertEqual(1, result.linked)
+        test.assertEqual(key("Newbie"), playerOf(partition, key("Wrench")).main)
+        test.assertEqual(nil, partition:GetCharacter(key("Wrench")).awaitsAlias)
+    end)
+
+    -- Toolbox leads Hammer; Visitor leads Wrench; Crafter is on its own.
+    local function twoPlayers()
+        local addon, partition, plan = setup(rules, {
+            { name("Toolbox"), "" },
+            { name("Hammer"), ">" .. name("Toolbox") },
+            { name("Visitor"), "" },
+            { name("Wrench"), ">" .. name("Visitor") },
+            { name("Crafter"), "" },
+        })
+        addon.ReconcileEngine.Apply(partition, plan())
+        return addon, partition
+    end
+
+    test.test(profile .. " a move to a main that moves too follows it", function()
+        local addon, partition = twoPlayers()
+
+        profileRescan(addon, partition, rules, {
+            { name("Toolbox"), ">" .. name("Crafter") },
+            { name("Hammer"), ">" .. name("Toolbox") },
+            { name("Visitor"), "" },
+            { name("Wrench"), ">" .. name("Toolbox") },
+            { name("Crafter"), "" },
+        })
+
+        test.assertEqual(key("Crafter"), playerOf(partition, key("Toolbox")).main)
+        test.assertEqual(key("Crafter"), playerOf(partition, key("Wrench")).main)
+    end)
+
+    test.test(profile .. " notes naming each other's players change nothing", function()
+        local addon, partition = twoPlayers()
+
+        local result = profileRescan(addon, partition, rules, {
+            { name("Toolbox"), ">" .. name("Visitor") },
+            { name("Hammer"), ">" .. name("Toolbox") },
+            { name("Visitor"), ">" .. name("Toolbox") },
+            { name("Wrench"), ">" .. name("Visitor") },
+            { name("Crafter"), "" },
+        })
+
+        test.assertEqual(0, result.linked)
+        test.assertEqual(key("Toolbox"), playerOf(partition, key("Hammer")).main)
+        test.assertEqual(key("Visitor"), playerOf(partition, key("Wrench")).main)
+        test.assertTrue(playerOf(partition, key("Toolbox")) ~= playerOf(partition, key("Visitor")))
+    end)
+
+    test.test(profile .. " an alias on a note that moves or splits a character names the player it lands on", function()
+        local addon, partition = twoPlayers()
+
+        profileRescan(addon, partition, rules, {
+            { name("Toolbox"), "" },
+            { name("Hammer"), ">" .. name("Hammer") .. " @Hams" },
+            { name("Visitor"), "" },
+            { name("Wrench"), ">" .. name("Crafter") .. " @Crafty" },
+            { name("Crafter"), "" },
+        })
+
+        test.assertEqual(key("Hammer"), playerOf(partition, key("Hammer")).main)
+        test.assertEqual("Hams", playerOf(partition, key("Hammer")).alias)
+        test.assertEqual(key("Crafter"), playerOf(partition, key("Wrench")).main)
+        test.assertEqual("Crafty", playerOf(partition, key("Wrench")).alias)
+        test.assertEqual(nil, playerOf(partition, key("Toolbox")).alias)
+        test.assertEqual(nil, playerOf(partition, key("Visitor")).alias)
+    end)
 end
 
 registerSubmittedTests("Forever", FOREVER)

@@ -566,9 +566,10 @@ test.test("conflicts an earlier build queued load as members' suggestions only, 
                 ["hammer-area52"] = { player = 1, note = "0000abcd" },
                 ["toolbox-area52"] = { player = 2, note = "0000beef" },
                 ["visitor-area52"] = { player = 3, note = "0000cafe" },
+                ["wrench-area52"] = { player = 4, note = "0000f00d" },
             },
             players = { [1] = { main = "hammer-area52" }, [2] = { main = "toolbox-area52" },
-                [3] = { main = "visitor-area52" } },
+                [3] = { main = "visitor-area52" }, [4] = { main = "wrench-area52" } },
             conflicts = {
                 { character = "hammer-area52", fingerprint = "0000abcd", kind = "unresolved" },
                 { character = "toolbox-area52", fingerprint = "0000beef", kind = "main",
@@ -578,6 +579,7 @@ test.test("conflicts an earlier build queued load as members' suggestions only, 
             },
             unapplied = {
                 { character = "hammer-area52", fingerprint = "0000abcd", reason = "unresolved" },
+                { character = "wrench-area52", fingerprint = "0000f00d", reason = "unresolved" },
             },
         },
     } }
@@ -589,6 +591,8 @@ test.test("conflicts an earlier build queued load as members' suggestions only, 
     test.assertEqual(nil, partition:GetCharacter("hammer-area52").note)
     test.assertEqual(nil, partition:GetCharacter("toolbox-area52").note)
     test.assertEqual(nil, partition:GetCharacter("visitor-area52").note)
+    -- An even older build's unapplied markers are read again too.
+    test.assertEqual(nil, partition:GetCharacter("wrench-area52").note)
     test.assertEqual(nil, database.guilds["Knights-Area52"].unapplied)
 
     -- Only once: a note conflict queued later stays.

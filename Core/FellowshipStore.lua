@@ -245,7 +245,19 @@ local function validatePartition(data)
         return false
     end
     -- Markers an earlier build recorded as `unapplied` couldn't be applied;
-    -- guild notes now win, so they are no longer conflicts.
+    -- guild notes now win, so they are no longer conflicts. Their notes are
+    -- read again by the next scan.
+    if type(data.unapplied) == "table" and type(data.characters) == "table" then
+        local entryIndex
+        for entryIndex = 1, #data.unapplied do
+            local entry = data.unapplied[entryIndex]
+            if type(entry) == "table" and isText(entry.character)
+                and type(data.characters[entry.character]) == "table"
+            then
+                data.characters[entry.character].note = nil
+            end
+        end
+    end
     data.unapplied = nil
     -- An officer's ledger and forgery log, and Guild Recruit's ad times,
     -- are only created when needed.
@@ -1243,7 +1255,8 @@ function Partition:MoveToNewPlayer(key, source)
 end
 
 -- Marks (or clears) a character whose note names a main that matches
--- nobody, or several players: a change to the guild's aliases may settle it.
+-- nobody, or several players: a change to the guild's aliases, or a new
+-- member, may settle it.
 function Partition:SetAwaitsAlias(key, awaits)
     local character = self.data.characters[key]
     if character ~= nil then

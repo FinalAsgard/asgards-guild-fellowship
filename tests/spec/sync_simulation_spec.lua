@@ -810,7 +810,10 @@ test.test("a rejected suggestion reverts to the officers' data, which then match
     local channel = fixtures.newChannel()
     local officer = login(channel, "Toolbox-Area52")
     local hammer = login(channel, "Hammer-Area52")
+    -- The officer made Wrench a player of its own. (A character on another
+    -- organized player is never a member's to suggest moving.)
     linkAlt(officer, "wrench-area52", "toolbox-area52")
+    test.assertTrue(officer.addon.rosterController:Detach("wrench-area52"))
     test.assertTrue(officer.addon.rosterController:SetAlias("hammer-area52", "Hammer Time"))
     fixtures.deliver(channel)
     hammer.time = officer.time + 60
@@ -823,7 +826,7 @@ test.test("a rejected suggestion reverts to the officers' data, which then match
     test.assertTrue(officer.addon.rosterController:RejectAllConflicts())
     fixtures.deliver(channel)
 
-    test.assertEqual("toolbox-area52", mainOf(hammer, "wrench-area52"))
+    test.assertEqual("wrench-area52", mainOf(hammer, "wrench-area52"))
     test.assertEqual("Hammer Time", aliasOf(hammer, "hammer-area52"))
     test.assertEqual(0, #pendingOf(hammer))
     local _, by = partitionOf(hammer):GetMainStamp("wrench-area52")

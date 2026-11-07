@@ -224,7 +224,8 @@ end
 --   splits       alts whose own note names them as main, where nobody
 --                submitted their link: each leaves for a player of its own
 --   retry        keys whose main marker names nobody, or several players:
---                read again when the guild's aliases change
+--                read again when the guild's aliases change, or when someone
+--                new is in the roster
 --   notesChanged how many known characters' notes differ from the ones
 --                last processed
 --   conflicts    { character, kind, fingerprint, suggestion? } to queue
@@ -372,12 +373,24 @@ function ReconcileEngine.Plan(inputs)
 
     local keys = {}
     local key, member
+    -- A new member may be the one a waiting marker names, so markers that
+    -- matched nobody are read again whenever someone new is in the roster.
+    local joined = false
+    for key in pairs(members) do
+        if partition:GetCharacter(key) == nil then
+            joined = true
+            break
+        end
+    end
     for key, member in pairs(members) do
         plan.fingerprints[key] = addon.NoteParser.Fingerprint(member.note or "")
         if partition:GetCharacter(key) == nil then
             table.insert(plan.newKeys, key)
         end
-        if selects(mode, inputs.force, partition, key, plan.fingerprints[key]) then
+        local stored = partition:GetCharacter(key)
+        if selects(mode, inputs.force, partition, key, plan.fingerprints[key])
+            or (joined and stored ~= nil and stored.awaitsAlias == true)
+        then
             table.insert(keys, key)
             plan.processed[key] = true
             local character = partition:GetCharacter(key)
@@ -473,9 +486,11 @@ function ReconcileEngine.Plan(inputs)
                     -- officer to decide.
                     local rootCharacter = partition:GetCharacter(root)
                     local character = partition:GetCharacter(key)
+                    -- A root the store hasn't seen is a new roster member,
+                    -- recorded before moves are applied.
                     if rootCharacter ~= nil and rootCharacter.player == character.player then
                         -- The note agrees.
-                    elseif rootCharacter == nil or linkSubmitted(partition, key) then
+                    elseif linkSubmitted(partition, key) then
                         addConflict(plan, partition, key, "main", { main = root })
                     else
                         plan.moves[key] = root
@@ -486,16 +501,34 @@ function ReconcileEngine.Plan(inputs)
         checkpoint()
     end
 
-    -- An alias on any character's note names that character's player. It is
-    -- applied unless someone named (or un-named) the player by hand or
-    -- through sync; then a different alias is a conflict. Notes that
-    -- disagree with each other change nothing.
+    -- A move to a main that moves too follows it to where it goes. Moves
+    -- that lead back to where they started (notes naming each other's
+    -- players) change nothing.
+    local moves = {}
+    local target
+    for key, target in pairs(plan.moves) do
+        local seen = { [key] = true }
+        while plan.moves[target] ~= nil and not seen[target] do
+            seen[target] = true
+            target = plan.moves[target]
+        end
+        if not seen[target] then
+            moves[key] = target
+        end
+    end
+    plan.moves = moves
+
+    -- An alias on any character's note names that character's player: the
+    -- one it joins or moves to, or the one it splits off as. It is applied
+    -- unless someone named (or un-named) the player by hand or through
+    -- sync; then a different alias is a conflict. Notes that disagree with
+    -- each other change nothing.
     local proposals = {}
     for index = 1, #keys do
         key = keys[index]
         local alias = parseOf(key).alias
         if alias ~= nil then
-            local root = plan.links[key] or key
+            local root = plan.links[key] or plan.moves[key] or key
             proposals[root] = proposals[root] or {}
             table.insert(proposals[root], { alias = alias, character = key })
         end
@@ -516,7 +549,7 @@ function ReconcileEngine.Plan(inputs)
         local player = rootCharacter and partition:GetPlayer(rootCharacter.player)
         if agreed == nil then
             -- Competing aliases: nothing to apply.
-        elseif rootCharacter == nil or not hasRelationship(partition, sizes, root) then
+        elseif rootCharacter == nil or not hasRelationship(partition, sizes, root) or plan.splits[root] then
             plan.aliases[root] = agreed
             plan.aliasNotes[root] = {}
             for index = 1, #entries do
@@ -737,6 +770,11 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         if not unprocessed[key] and partition:GetCharacter(key) ~= nil then
             partition:SetNoteFingerprint(key, plan.fingerprints[key])
             partition:SetAwaitsAlias(key, plan.retry[key] == true)
+            -- Aliases this apply changed came after the marker was read, so
+            -- it is read again by the next scan, as AliasesChanged does.
+            if aliased > 0 and plan.retry[key] then
+                partition:ForgetNoteFingerprint(key)
+            end
         end
     end
 

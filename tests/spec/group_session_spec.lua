@@ -363,6 +363,18 @@ for _, profile in ipairs(fixtures.PROFILES) do
         test.assertFalse(client:IsInRaid())
         test.assertEqual(2, #members)
         test.assertEqual("Hammer", members[2].name)
+
+        -- Without IsInRaid, the raid count decides, whatever IsInGroup says.
+        world.environment.IsInRaid = nil
+        test.assertTrue(client:IsInGroup())
+        test.assertFalse(client:IsInRaid())
+        world.environment.GetNumRaidMembers = function() return 3 end
+        test.assertTrue(client:IsInRaid())
+        -- An IsInRaid that raises falls back the same way.
+        world.environment.IsInRaid = function() error("unavailable") end
+        test.assertTrue(client:IsInRaid())
+        world.environment.GetNumRaidMembers = function() return 0 end
+        test.assertFalse(client:IsInRaid())
     end)
 end
 
