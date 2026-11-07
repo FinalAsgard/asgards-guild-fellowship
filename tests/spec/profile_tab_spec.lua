@@ -411,6 +411,24 @@ test.test("profile view model: alt candidates are the guild's other characters, 
     test.assertEqual(4, #fromVisitor(""))
 end)
 
+test.test("profile view model: a member's alt candidates are only characters the add-on knows are theirs", function()
+    local world = setup()
+    local addon = world.addon
+    local normalizer = addon.NameNormalizer.Create(RULES)
+    local partition = world.partition
+    partition:RecordCharacter("visitor-stormrage", { name = "Visitor-Stormrage", classToken = "MAGE", level = 80 })
+    partition:RecordCharacter("spark-area52", { name = "Spark-Area52", classToken = "MAGE", level = 30 })
+    local known = { ["spark-area52"] = true }
+
+    local found = addon.ProfileViewModel.AltCandidates({
+        partition = partition, selfKey = "toolbox-area52", normalizer = normalizer,
+        known = function(key) return known[key] == true end,
+    }, "")
+
+    test.assertEqual(1, #found)
+    test.assertEqual("spark-area52", found[1].key)
+end)
+
 test.test("profile tab: Make main and Remove on alts, and Add alt picks with a warning", function()
     local world = newPage(PLAYER)
     world.actions = {}
@@ -743,6 +761,24 @@ local function registerProfileTests(profile)
         test.assertTrue(playerOf(removed) ~= playerOf(selfKey))
         -- None of it waits for anyone.
         test.assertEqual(0, #addon.syncSession:Suggestions(partition):Pending())
+    end)
+
+    test.test(profile .. " a member's Add alt offers only characters this install has logged in on", function()
+        local member = profile == "Forever" and "Hammer Smith" or "Hammer-Area52"
+        local world, addon = loggedIn(profile, member)
+        local _, partition, normalizer = addon.rosterController:QuietContext()
+        local third = normalizer:Key(fixtures.GUILDS[profile].members[3].name)
+        local page = openProfile(world)
+
+        page.addAltButton.scripts.OnClick()
+        test.assertEqual(nil, page.picker.results[1] and page.picker.results[1].candidate,
+            "someone else's character isn't offered")
+
+        partition:RecordOwnCharacter(third, 1)
+        -- Add alt toggles the picker: closed, then opened afresh.
+        page.addAltButton.scripts.OnClick()
+        page.addAltButton.scripts.OnClick()
+        test.assertEqual(third, page.picker.results[1].candidate.key)
     end)
 
     test.test(profile .. " a member's identity edits on My Profile apply here and wait as suggestions", function()

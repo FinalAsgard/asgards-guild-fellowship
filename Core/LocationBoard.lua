@@ -72,6 +72,16 @@ function Board:Expire(now)
     return changed
 end
 
+-- Drops character `key` (the game reported it offline, or a whisper to it
+-- found nobody playing). Returns true when the board changed.
+function Board:Drop(key)
+    if key == nil or self.entries[key] == nil then
+        return false
+    end
+    self.entries[key] = nil
+    return true
+end
+
 -- Keeps only the entries `keep(key)` answers true for (the caller drops
 -- guildmates the roster shows offline or gone). Returns true when the board
 -- changed.

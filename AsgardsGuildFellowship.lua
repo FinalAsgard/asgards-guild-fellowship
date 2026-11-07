@@ -62,7 +62,7 @@ local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
-local dropOfflineLocations
+local dropOfflineLocations, dropLocationOf
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
 local onSlotsChanged, groupBoard, announceGroup
 -- Draws the Group Finder on its tab (set up with the Group Finder below).
@@ -1876,6 +1876,10 @@ if clientProfile.supported then
                 return addon.ProfileViewModel.AltCandidates({
                     partition = partition,
                     selfKey = rosterController:SelfKey(),
+                    -- A member picks only characters the add-on knows are theirs.
+                    known = not rosterController:IsOfficerUser() and function(key)
+                        return rosterController:IsKnownOwn(key)
+                    end or nil,
                     members = rosterController:LiveMembers(normalizer),
                     normalizer = normalizer,
                     classColor = function(classToken)
@@ -2678,11 +2682,25 @@ if clientProfile.supported then
         end
     end
     router:Register("probe",
-        "check what the game reports to the add-on (probe log: the guild event log; probe officer: the" ..
-        " officer channel; probe ready: the Ready flags on the game's guild roster; officers)",
+        "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..
+        " notes changed; probe log: the guild event log; probe officer: the officer channel; probe ready:" ..
+        " the Ready flags on the game's guild roster; officers)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
+            if what == "" or what == "scan" then
+                rosterController:Print("Roster scan probe:")
+                local lines = rosterController:ScanProbeLines()
+                local index
+                for index = 1, #lines do
+                    client:Print("  " .. lines[index])
+                end
+                if what == "" then
+                    client:Print("  Also: " .. addon.Identity.slashCommand .. " probe log, probe officer or" ..
+                        " probe ready.")
+                end
+                return
+            end
             if what == "officer" then
                 probeOfficerChannel()
                 return
@@ -3449,6 +3467,9 @@ if clientProfile.supported then
             if summary ~= nil and own ~= nil and own.player == character.player then
                 summary.own = true
             end
+            if summary ~= nil then
+                summary.canSetDiscord = rosterController:CanEditPlayer(key)
+            end
             return summary
         end,
         editProfile = function()
@@ -3548,31 +3569,62 @@ if clientProfile.supported then
             return members[key] ~= nil and members[key].online == true
         end)
     end
-    -- The keys of the player's party members, or nil outside a party.
-    local function partyKeys(normalizer)
+    -- A guildmate the game reports offline, gone from the guild, or not
+    -- playing (a whisper to them failed) leaves the board at once, without
+    -- waiting for the roster, so they get no more whispers.
+    dropLocationOf = function(name)
+        local guild, _, normalizer = rosterController:QuietContext()
+        local key = guild and normalizer:Key(name) or nil
+        if key ~= nil and locationBoard:Drop(key) then
+            mapPins:Refresh()
+        end
+    end
+    -- The roster keys of everyone in the player's party or raid, or nil
+    -- outside a group. Forever gives group members only their first name,
+    -- so the roster decides, as for the Group Finder. Looked up again when
+    -- the group or the roster's size changes, or while a guildmate in it
+    -- can't be placed.
+    local groupCache = { signature = nil, keys = nil }
+    local function groupKeys()
         if not client:IsInGroup() then
             return nil
         end
-        local keys = {}
-        local members = client:GetPartyMembers()
+        local members = client:GetGroupMembers()
+        local parts = {}
         local index
         for index = 1, #members do
-            local key = normalizer:Key(members[index].name)
+            parts[index] = tostring(members[index].name) .. "/" .. tostring(members[index].guid)
+        end
+        -- A roster still loading may not name everyone yet.
+        local signature = tostring(client:GetGuildRosterCount()) .. "|" .. table.concat(parts, ";")
+        if groupCache.signature == signature then
+            return groupCache.keys
+        end
+        local keys = {}
+        local complete = true
+        for index = 1, #members do
+            local key = rosterController:RosterKeyFor(members[index].name, members[index].guid)
             if key ~= nil then
                 keys[key] = true
+            elseif members[index].inGuild then
+                -- A guildmate the roster can't place yet: looked up again
+                -- next time.
+                complete = false
             end
         end
+        groupCache.signature = complete and signature or nil
+        groupCache.keys = keys
         return keys
     end
     -- A board entry as the map shows it: with the character's name and its
-    -- chat tag (alias or main), and dimmed while the player is in a party
-    -- it isn't in.
+    -- chat tag (alias or main), dimmed while the player is in a group it
+    -- isn't in, and marked `grouped` when it's in the player's group.
     local function describeLocations(entries)
         local guild, partition, normalizer = rosterController:QuietContext()
         if guild == nil then
             return {}
         end
-        local party = partyKeys(normalizer)
+        local group = groupKeys()
         local people = addon.PlayerService.Create(partition, { normalizer = normalizer })
         local described = {}
         local index
@@ -3589,7 +3641,8 @@ if clientProfile.supported then
                 name = people:CharacterName(entry.key) or entry.key,
                 label = tag and tag.text or nil,
                 fromRoster = entry.fromRoster,
-                dimmed = party ~= nil and not party[entry.key] or nil,
+                dimmed = group ~= nil and not group[entry.key] or nil,
+                grouped = group ~= nil and group[entry.key] or nil,
             })
         end
         return described
@@ -3674,12 +3727,20 @@ if clientProfile.supported then
     end
     mapPins = addon.MapPins.Create({
         client = client,
+        -- Groupmates get no zone map or minimap dot: the game marks them
+        -- already. They still count in the markers.
         dots = function()
-            local dots = describeLocations(locationBoard:All())
+            local dots = {}
+            local described = describeLocations(locationBoard:All())
             local fromRoster = describeLocations(rosterDots())
             local index
             for index = 1, #fromRoster do
-                table.insert(dots, fromRoster[index])
+                table.insert(described, fromRoster[index])
+            end
+            for index = 1, #described do
+                if not described[index].grouped then
+                    table.insert(dots, described[index])
+                end
             end
             return dots
         end,
@@ -3861,6 +3922,12 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         if kind == "join" or kind == "leave" then
             recordLiveMembership(kind, name)
         end
+        if dropLocationOf ~= nil and (kind == "offline" or kind == "leave" or kind == "notFound") then
+            dropLocationOf(name)
+        end
+        if kind == "notFound" then
+            return
+        end
         guildGreet:OnPresence(kind, name)
         if kind == "join" then
             guildWelcome:OnJoined(name)
@@ -3890,7 +3957,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         if groupFinder ~= nil then
             groupFinder:Refresh()
         end
-        -- Guildmates outside the party are dimmed on the maps.
+        -- Groupmates leave the maps' dots, and those outside the group
+        -- are dimmed.
         if mapPins ~= nil then
             mapPins:Refresh()
         end
@@ -3934,6 +4002,12 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)
+    end)
+    -- The game answers a whisper to someone who just logged off with "No
+    -- player named ... is currently playing."; when the add-on sent that
+    -- whisper, the line is hidden.
+    client:HidePlayerNotFound(function(name)
+        return comm:WhisperedRecently(name)
     end)
 end)
 

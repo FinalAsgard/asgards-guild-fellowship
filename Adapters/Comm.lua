@@ -29,6 +29,10 @@ local Comm = {
     OFFICER_CHAT_LISTEN_FLAG = 3,
     OFFICER_CHAT_SPEAK_FLAG = 4,
     VIEW_OFFICER_NOTE_FLAG = 11,
+    -- How long after whispering someone the game's "No player named ...
+    -- is currently playing." is taken to answer that whisper (ChatThrottleLib
+    -- may hold a whisper back a while before it goes out).
+    WHISPER_ANSWER_SECONDS = 60,
 }
 addon.Comm = Comm
 
@@ -148,7 +152,32 @@ function Endpoint:Whisper(message, target, live)
     if type(target) ~= "string" or target == "" then
         return false
     end
-    return self:send(message, Comm.WHISPER, target, Comm.PRIORITY, live == true)
+    local sent = self:send(message, Comm.WHISPER, target, Comm.PRIORITY, live == true)
+    if sent then
+        self.whispered = self.whispered or {}
+        self.whispered[string.lower(target)] = self.client:Timestamp()
+    end
+    return sent
+end
+
+-- Whether this add-on whispered the character named `name` (as the game's
+-- error message gives it) in the last WHISPER_ANSWER_SECONDS, so the
+-- game's "No player named ..." line answers the add-on, not the player.
+function Endpoint:WhisperedRecently(name)
+    if type(name) ~= "string" or self.whispered == nil then
+        return false
+    end
+    local key = string.lower(name)
+    local at = self.whispered[key]
+    local now = self.client:Timestamp()
+    if type(at) ~= "number" or type(now) ~= "number" then
+        return false
+    end
+    if now - at > Comm.WHISPER_ANSWER_SECONDS then
+        self.whispered[key] = nil
+        return false
+    end
+    return true
 end
 
 -- Whether guild rank `rankIndex` (0-based, as the roster reports it) has

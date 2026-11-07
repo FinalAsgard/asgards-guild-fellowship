@@ -244,20 +244,17 @@ local function validatePartition(data)
     then
         return false
     end
-    -- Markers an earlier build recorded as `unapplied` become conflicts.
-    if data.unapplied ~= nil and data.conflicts == nil then
-        data.conflicts = {}
+    -- Markers an earlier build recorded as `unapplied` couldn't be applied;
+    -- guild notes now win, so they are no longer conflicts. Their notes are
+    -- read again by the next scan.
+    if type(data.unapplied) == "table" and type(data.characters) == "table" then
         local entryIndex
         for entryIndex = 1, #data.unapplied do
             local entry = data.unapplied[entryIndex]
-            if type(entry) == "table" and isText(entry.character) and isText(entry.reason)
-                and entry.reason ~= "player already organized"
+            if type(entry) == "table" and isText(entry.character)
+                and type(data.characters[entry.character]) == "table"
             then
-                table.insert(data.conflicts, {
-                    character = entry.character,
-                    fingerprint = entry.fingerprint,
-                    kind = entry.reason,
-                })
+                data.characters[entry.character].note = nil
             end
         end
     end
@@ -274,6 +271,26 @@ local function validatePartition(data)
         if not optional[containers[index]] and data[containers[index]] == nil then
             data[containers[index]] = {}
         end
+    end
+    -- Once, for conflicts an earlier build queued: guild notes now win, so
+    -- only members' suggestions are kept. The notes behind the others are
+    -- read again by the next scan, which applies them or, where they
+    -- disagree with a submitted link or alias, queues them again.
+    if data.notesWin == nil then
+        local kept = {}
+        local entryIndex
+        for entryIndex = 1, #data.conflicts do
+            local entry = data.conflicts[entryIndex]
+            if type(entry) == "table" and entry.from ~= nil then
+                table.insert(kept, entry)
+            elseif type(entry) == "table" and isText(entry.character)
+                and type(data.characters[entry.character]) == "table"
+            then
+                data.characters[entry.character].note = nil
+            end
+        end
+        data.conflicts = kept
+        data.notesWin = true
     end
 
     local highestId = 0
@@ -1237,12 +1254,19 @@ function Partition:MoveToNewPlayer(key, source)
     return id
 end
 
--- Kinds of note conflict a new, changed, or cleared alias may settle.
-local ALIAS_RETRY_KINDS = { unresolved = true, ambiguous = true }
+-- Marks (or clears) a character whose note names a main that matches
+-- nobody, or several players: a change to the guild's aliases, or a new
+-- member, may settle it.
+function Partition:SetAwaitsAlias(key, awaits)
+    local character = self.data.characters[key]
+    if character ~= nil then
+        character.awaitsAlias = awaits or nil
+    end
+end
 
 -- After the partition's set of aliases changed from `old` to `new` (either
--- may be nil): notes with a pending unresolved or ambiguous conflict are
--- marked unread, so the next scan reads them against the new aliases.
+-- may be nil): notes waiting on an alias (see SetAwaitsAlias) are marked
+-- unread, so the next scan reads them against the new aliases.
 function Partition:AliasesChanged(old, new)
     if isText(old) and isText(new) and string.lower(old) == string.lower(new) then
         return
@@ -1250,15 +1274,10 @@ function Partition:AliasesChanged(old, new)
     if not isText(old) and not isText(new) then
         return
     end
-    local conflicts = self.data.conflicts
-    if type(conflicts) ~= "table" then
-        return
-    end
-    local index
-    for index = 1, #conflicts do
-        local entry = conflicts[index]
-        if type(entry) == "table" and entry.from == nil and ALIAS_RETRY_KINDS[entry.kind] then
-            self:ForgetNoteFingerprint(entry.character)
+    local key, character
+    for key, character in pairs(self.data.characters) do
+        if character.awaitsAlias then
+            self:ForgetNoteFingerprint(key)
         end
     end
 end
@@ -1341,13 +1360,12 @@ end
 
 -- The pending conflict queue: a list of
 --   { character, kind, fingerprint, suggestion? }
--- where kind is "main", "alias", "unresolved", "ambiguous", "cycle",
--- "self reference", "chain too long", or "competing aliases", and
--- suggestion is { main = key } or { alias = text } for the kinds that can be
--- accepted. An "ambiguous" conflict from an alias held by several players
--- also has `alias` and `mains` (the main of each of those players). Never
--- the note text. A member's suggestion queued for an
--- officer has kind "suggested main" or "suggested alias", plus `from` (the
+-- where kind is "main" or "alias" (a note disagreeing with a link or alias
+-- submitted through the add-on), with suggestion { main = key } or
+-- { alias = text }, or "self reference" (an alt's note naming itself as
+-- main, over a submitted link); see ReconcileEngine.CONFLICT_KINDS. Never
+-- the note text. A member's suggestion queued for an officer has a
+-- SuggestionService kind ("suggested main", ...), plus `from` (the
 -- member's key) and `at` (when they made the edit); see SuggestionService.
 function Partition:SetConflicts(entries)
     if type(entries) ~= "table" then

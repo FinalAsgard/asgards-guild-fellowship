@@ -238,8 +238,12 @@ function Controller:Context()
 end
 
 -- Pending conflicts for the current guild, for the minimap tooltip: each
--- note conflict, and each player's suggestions once.
+-- note conflict, and each player's suggestions once. Nil for a member,
+-- who never sees conflicts.
 function Controller:PendingConflictCount()
+    if not self:IsOfficerUser() then
+        return nil
+    end
     local guild, partition = self:QuietContext()
     if guild == nil then
         return 0
@@ -302,11 +306,22 @@ end
 
 function Controller:OnScanFinished(result, summary)
     -- A Rescan, the first scan, and any scan that found something are
-    -- reported; a login scan or a quiet check that found nothing is not.
-    local found = (summary.newCharacters or 0) + (summary.linked or 0) + (summary.aliased or 0)
-        + (summary.departed or 0) + (summary.rejoined or 0) + (summary.promoted or 0) + (summary.conflicts or 0)
-    if summary.forced or summary.mode == "initial" or found > 0 then
-        self:Print("Roster scanned: " .. RosterController.DescribeScan(summary) .. ".")
+    -- reported; a login scan or a quiet check that found nothing is not. A
+    -- member never hears about conflicts.
+    local described = summary
+    if not self:IsOfficerUser() and (summary.conflicts or 0) > 0 then
+        described = {}
+        local key, value
+        for key, value in pairs(summary) do
+            described[key] = value
+        end
+        described.conflicts = nil
+    end
+    local found = (described.newCharacters or 0) + (described.linked or 0) + (described.aliased or 0)
+        + (described.departed or 0) + (described.rejoined or 0) + (described.promoted or 0)
+        + (described.conflicts or 0)
+    if described.forced or described.mode == "initial" or found > 0 then
+        self:Print("Roster scanned: " .. RosterController.DescribeScan(described) .. ".")
     end
     self:Invalidate()
     if self.onScanFinished ~= nil then
@@ -328,6 +343,35 @@ function Controller:StatusText(partition)
     end
     local when = addon.RosterViewModel.Ago(math.max(0, (now or summary.at) - summary.at))
     return "Last scan " .. when .. ": " .. RosterController.DescribeScan(summary) .. "\n" .. sync
+end
+
+-- For `/agf probe`: when the last full scan ran, and how many notes the
+-- latest scan that found anything changed (an incremental scan that found
+-- nothing records nothing). Returns lines of text.
+function Controller:ScanProbeLines()
+    local guild, partition = self:QuietContext()
+    if guild == nil then
+        return { partition }
+    end
+    local now = self.client:Timestamp()
+    local function ago(at)
+        return addon.RosterViewModel.Ago(math.max(0, (now or at) - at))
+    end
+    local lines = {}
+    local full = partition:GetLastScan()
+    table.insert(lines, "Last full scan: " .. (full ~= nil and ago(full) or "never") .. ".")
+    local summary = partition:GetLastScanSummary()
+    if summary == nil then
+        table.insert(lines, "Last scan: none yet.")
+    else
+        local kind = summary.mode == "incremental" and "on a roster update" or "full"
+        table.insert(lines, "Last scan (" .. kind .. ", " .. ago(summary.at) .. "): " ..
+            plural(summary.notesChanged or 0, "note") .. " changed.")
+    end
+    if self.scheduler ~= nil and self.scheduler:IsRunning() then
+        table.insert(lines, "A scan is running now.")
+    end
+    return lines
 end
 
 function Controller:UpdateStatus()
@@ -378,7 +422,9 @@ end
 -- suggestions through guild sync; then the roster and the conflict list are
 -- redrawn.
 function Controller:ResolveConflicts(action, character, kind)
-    if self.current == nil then
+    -- Only officers decide conflicts, even from a window left open across
+    -- a demotion.
+    if self.current == nil or not self:IsOfficerUser() then
         return false
     end
     local service = self:Service()
@@ -514,17 +560,23 @@ end
 
 -- The right-click menu for a roster row: a list of { text, action }.
 -- Character rows offer every organizing action that applies; player
--- headers offer the alias.
+-- headers offer the alias. A member is offered the alias only on their
+-- own player.
 function Controller:MenuFor(row)
     if self.current == nil or type(row) ~= "table" then
         return {}
     end
     if row.kind == "player" then
         local player = self.current.partition:GetPlayer(row.id)
-        return player and {
-            { text = "Set alias...", action = "alias", key = player.main },
-            { text = "View player...", action = "view", key = player.main },
-        } or {}
+        if player == nil then
+            return {}
+        end
+        local entries = {}
+        if self:CanEditPlayer(player.main) then
+            table.insert(entries, { text = "Set alias...", action = "alias", key = player.main })
+        end
+        table.insert(entries, { text = "View player...", action = "view", key = player.main })
+        return entries
     end
     local partition = self.current.partition
     local character = partition:GetCharacter(row.key)
@@ -533,18 +585,24 @@ function Controller:MenuFor(row)
     end
     local player = partition:GetPlayer(character.player)
     local entries = {}
+    -- A member gets the organizing actions only for their own characters.
+    local editable = self:CanEditPlayer(row.key)
     if partition:IsInGuild(row.key) then
         -- A main with alts can't join another player.
-        if not addon.PlayerService.HasAlts(partition, row.key) then
+        if not addon.PlayerService.HasAlts(partition, row.key)
+            and (self:IsOfficerUser() or self:IsKnownOwn(row.key))
+        then
             table.insert(entries, { text = "Link as alt of...", action = "setMain", key = row.key })
         end
-        if player ~= nil and player.main ~= row.key then
+        if editable and player ~= nil and player.main ~= row.key then
             table.insert(entries, { text = "Make this the main", action = "makeMain", key = row.key })
         end
     end
-    table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
+    if editable then
+        table.insert(entries, { text = "Set alias...", action = "alias", key = row.key })
+    end
     table.insert(entries, { text = "View player...", action = "view", key = row.key })
-    if partition:CharactersOf(character.player)[2] ~= nil then
+    if editable and partition:CharactersOf(character.player)[2] ~= nil then
         table.insert(entries, { text = "Split off as own player", action = "detach", key = row.key })
     end
     return entries
@@ -552,6 +610,80 @@ end
 
 -- Manual changes that move characters between players or change a main.
 local MAIN_LINK_OPERATIONS = { SetMainPlayer = true, MakeMain = true, Detach = true }
+-- Manual changes a member may make only to their own player.
+local OWN_PLAYER_OPERATIONS = { SetAlias = true, MakeMain = true, Detach = true, SetDeclared = true }
+local NOT_OWN_PLAYER = "members can only change their own player"
+local NOT_KNOWN_OWN = "members can only link characters the add-on knows are theirs"
+
+function Controller:IsOfficerUser()
+    local ok, officer = pcall(self.isOfficer)
+    return ok and officer == true
+end
+
+-- Whether `key` is on the logged-in character's player.
+function Controller:IsOwnPlayer(key)
+    local guild, partition = self:QuietContext()
+    local selfKey = self:SelfKey()
+    if guild == nil or selfKey == nil or type(key) ~= "string" then
+        return false
+    end
+    if key == selfKey then
+        return true
+    end
+    local own = partition:GetCharacter(selfKey)
+    local character = partition:GetCharacter(key)
+    return own ~= nil and character ~= nil and own.player == character.player
+end
+
+-- Whether this user may change the player of `key`: an officer anyone's,
+-- a member only their own (the logged-in character's player).
+function Controller:CanEditPlayer(key)
+    return self:IsOfficerUser() or self:IsOwnPlayer(key)
+end
+
+-- Whether the add-on knows `key` is this user's character: on their
+-- player, or one this install has logged in on.
+function Controller:IsKnownOwn(key)
+    if self:IsOwnPlayer(key) then
+        return true
+    end
+    local guild, partition = self:QuietContext()
+    if guild == nil then
+        return false
+    end
+    local owned = partition:OwnCharacters()
+    local index
+    for index = 1, #owned do
+        if owned[index] == key then
+            return true
+        end
+    end
+    return false
+end
+
+-- Whether the player `playerId` has a character the add-on knows is this
+-- user's.
+function Controller:IsKnownOwnPlayer(playerId)
+    local guild, partition = self:QuietContext()
+    if guild == nil or playerId == nil then
+        return false
+    end
+    local keys = partition:CharactersOf(playerId)
+    local index
+    for index = 1, #keys do
+        if self:IsKnownOwn(keys[index]) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Whether this user may link `key` as an alt of the player `playerId`: an
+-- officer any; a member only a character the add-on knows is theirs, onto
+-- a player the add-on knows is theirs.
+function Controller:CanLink(key, playerId)
+    return self:IsOfficerUser() or (self:IsKnownOwn(key) and self:IsKnownOwnPlayer(playerId))
+end
 
 -- Adds every character of `key`'s player to the set `keys`.
 function Controller:AddPlayerKeys(keys, key)
@@ -586,6 +718,14 @@ end
 -- the alias before the change ("" for none).
 function Controller:Organize(operation, key, ...)
     if self.current == nil then
+        return false
+    end
+    if OWN_PLAYER_OPERATIONS[operation] and not self:CanEditPlayer(key) then
+        self:Print("That change wasn't made: " .. NOT_OWN_PLAYER .. ".")
+        return false
+    end
+    if operation == "SetMainPlayer" and not self:CanLink(key, (...)) then
+        self:Print("That change wasn't made: " .. NOT_KNOWN_OWN .. ".")
         return false
     end
     local service = self:Service()
@@ -634,10 +774,14 @@ end
 
 -- "Set Discord…" from the player panel or the game roster's mini profile:
 -- sets the Discord username of `key`'s player to `text` ("" clears it), as
--- an officer's or as a member's suggestion, and redraws. The add-on's
--- window needn't have been opened.
+-- an officer's or as a member's suggestion about their own player, and
+-- redraws. The add-on's window needn't have been opened.
 function Controller:SetDiscord(key, text)
     if self.onDiscordChanged == nil or (self.current == nil and self:QuietContext() == nil) then
+        return false
+    end
+    if not self:CanEditPlayer(key) then
+        self:Print("That Discord username wasn't saved: " .. NOT_OWN_PLAYER .. ".")
         return false
     end
     if self.onDiscordChanged(key, text) == nil then
@@ -669,7 +813,11 @@ function Controller:SetDontSync(key, enabled)
     return ok == true
 end
 
--- Results for the "Link as alt of…" picker, without `key`'s own player.
+-- How many players the "Link as alt of…" picker lists at most.
+RosterController.SEARCH_LIMIT = 50
+
+-- Results for the "Link as alt of…" picker, without `key`'s own player; a
+-- member gets only players the add-on knows are theirs.
 function Controller:SearchPlayers(key, query)
     if self.current == nil then
         return {}
@@ -677,10 +825,15 @@ function Controller:SearchPlayers(key, query)
     local service = self:Service()
     local ownPlayer = service:PlayerOf(key)
     local results = {}
-    local found = service:SearchPlayers(query, 50)
+    -- Filtered before the limit, so a member's own players aren't crowded
+    -- out by matches they can't pick.
+    local found = service:SearchPlayers(query)
     local index
     for index = 1, #found do
-        if found[index].id ~= ownPlayer then
+        if #results >= RosterController.SEARCH_LIMIT then
+            break
+        end
+        if found[index].id ~= ownPlayer and self:CanLink(key, found[index].id) then
             table.insert(results, found[index])
         end
     end
@@ -780,6 +933,20 @@ function Controller:RedrawPanel()
     if model == nil then
         self:ClosePanel()
         return
+    end
+    -- Set alias…, Set Discord…, Merge into player… and each character's
+    -- Make main and Detach only for a player this user may change.
+    model.canEdit = self:CanEditPlayer(model.main)
+    if not model.canEdit then
+        model.canMerge = false
+        local index
+        for index = 1, #model.rows do
+            local row = model.rows[index]
+            if row.kind == "character" then
+                row.canMakeMain = false
+                row.canDetach = false
+            end
+        end
     end
     self.window:ShowPlayer(model)
 end
@@ -907,6 +1074,11 @@ function Controller:Redraw()
             pending = self.current.partition:GetSuggestions(),
         })
         self.window:SetConflicts(conflictRows)
+        -- Only officers see Conflicts; this follows a promotion or
+        -- demotion at the next redraw.
+        if type(self.window.SetConflictsShown) == "function" then
+            self.window:SetConflictsShown(self:IsOfficerUser())
+        end
         self:RedrawReview(conflictRows, normalizer, members)
         self:RedrawPanel()
     end

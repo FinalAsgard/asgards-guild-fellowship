@@ -242,9 +242,12 @@ test.test("a new member whose pickup was cut short is finished by the next picku
     state.scan({ { "Toolbox-Area52", "" } }, "initial")
     local entries = { { "Toolbox-Area52", "" }, { "Hammer-Area52", ">Toolbox" } }
 
-    -- A reload stops the incremental pickup after Hammer is recorded.
+    -- A reload stops the incremental pickup after Hammer is recorded,
+    -- whatever order the roster is recorded in.
     local ok = pcall(state.addon.ReconcileEngine.Apply, state.partition, state.plan(entries, "incremental"), function()
-        error("interrupted")
+        if state.partition:GetCharacter("hammer-area52") ~= nil then
+            error("interrupted")
+        end
     end)
     test.assertFalse(ok)
     test.assertTrue(state.partition:GetCharacter("hammer-area52") ~= nil)

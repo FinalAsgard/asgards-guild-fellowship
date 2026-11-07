@@ -143,10 +143,8 @@ test.test("when a main departs the highest-level alt becomes acting main and his
     test.assertEqual("main", history.role)
     test.assertEqual(START + 2 * DAY, history["until"])
     test.assertEqual("departed", history.reason)
-    local promotions = state.conflictsOf("promotion")
-    test.assertEqual(1, #promotions)
-    test.assertEqual("wrench-area52", promotions[1].character)
-    test.assertEqual("toolbox-area52", promotions[1].suggestion.former)
+    -- Recorded in history, with nothing to confirm.
+    test.assertEqual(0, #state.partition:GetConflicts())
 end)
 
 test.test("ties on level go to whoever is online, then most recently online", function()
@@ -212,7 +210,9 @@ test.test("accepting a main conflict leaves the old player with an in-guild acti
         { "Other-Area52", "", 60 },
     }, "initial")
     local player = state.partition:GetCharacter("toolbox-area52").player
-    -- Hammer leaves, and Toolbox's note now names another main.
+    -- Toolbox was then placed by hand; Hammer leaves, and Toolbox's note
+    -- now names another main.
+    state.partition:GetCharacter("toolbox-area52").source = "manual"
     state.scan({
         { "Toolbox-Area52", ">Other", 80 },
         { "Lowbie-Area52", ">Toolbox", 20 },
@@ -240,27 +240,10 @@ test.test("an alt pointing at a main who left links to that main's player and ge
     test.assertEqual("newalt-area52", player.main)
     test.assertEqual("TheTool", player.alias)
     test.assertEqual("Toolbox-Area52", player.history[1].name)
-    test.assertEqual(1, #state.conflictsOf("promotion"))
+    test.assertEqual(0, #state.partition:GetConflicts())
 end)
 
-test.test("accepting an unknown main records it in history as out of guild", function()
-    local state = setup()
-    state.scan({ { "Hammer-Area52", ">Bigmain", 70 } }, "initial")
-    local conflict = state.conflictsOf("unresolved")[1]
-    test.assertEqual("Bigmain", conflict.suggestion.outOfGuild)
-    state.now = START + DAY
-
-    test.assertTrue(state.service():AcceptConflict("hammer-area52", "unresolved"))
-
-    local player = state.playerOf("hammer-area52")
-    test.assertEqual("hammer-area52", player.main)
-    test.assertEqual("Bigmain", player.history[1].name)
-    test.assertEqual("main", player.history[1].role)
-    test.assertEqual("out of guild", player.history[1].reason)
-    test.assertEqual(START + DAY, player.history[1].since)
-end)
-
-test.test("a promotion can be confirmed or reassigned", function()
+test.test("a new acting main can be reassigned, with nothing to confirm", function()
     local state = setup()
     state.scan({
         { "Toolbox-Area52", "", 80 },
@@ -268,18 +251,12 @@ test.test("a promotion can be confirmed or reassigned", function()
         { "Wrench-Area52", ">Toolbox", 60 },
     }, "initial")
     state.scan({ { "Hammer-Area52", ">Toolbox", 70 }, { "Wrench-Area52", ">Toolbox", 60 } })
+    test.assertEqual("hammer-area52", state.playerOf("hammer-area52").main)
+    test.assertEqual(0, #state.partition:GetConflicts())
 
     test.assertTrue(state.service():MakeMain("wrench-area52"))
 
     test.assertEqual("wrench-area52", state.playerOf("hammer-area52").main)
-    test.assertEqual(0, #state.conflictsOf("promotion"))
-
-    local confirm = setup()
-    confirm.scan({ { "Toolbox-Area52", "", 80 }, { "Hammer-Area52", ">Toolbox", 70 } }, "initial")
-    confirm.scan({ { "Hammer-Area52", ">Toolbox", 70 } })
-    test.assertTrue(confirm.service():AcceptConflict("hammer-area52", "promotion"))
-    test.assertEqual("hammer-area52", confirm.playerOf("hammer-area52").main)
-    test.assertEqual(0, #confirm.conflictsOf("promotion"))
 end)
 
 test.test("only characters in the guild can be made main", function()
@@ -291,16 +268,6 @@ test.test("only characters in the guild can be made main", function()
 
     test.assertFalse(ok)
     test.assertContains(reason, "in the guild")
-end)
-
-test.test("pending promotions survive later scans until they are resolved", function()
-    local state = setup()
-    state.scan({ { "Toolbox-Area52", "", 80 }, { "Hammer-Area52", ">Toolbox", 70 } }, "initial")
-    state.scan({ { "Hammer-Area52", ">Toolbox", 70 } })
-
-    state.scan({ { "Hammer-Area52", "changed >Toolbox", 70 } })
-
-    test.assertEqual(1, #state.conflictsOf("promotion"))
 end)
 
 test.test("purging a departed character keeps its history entry", function()

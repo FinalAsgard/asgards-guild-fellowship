@@ -48,7 +48,11 @@ local function build(world, options)
         toggle = function()
             toggles.count = toggles.count + 1
         end,
+        -- A member gets no count.
         conflictCount = function()
+            if options.member then
+                return nil
+            end
             return options.conflicts or 0
         end,
         minimapState = function()
@@ -89,6 +93,21 @@ local function registerProfileTests(profile)
         launcher.OnTooltipShow({ AddLine = function(_, text) table.insert(lines, text) end })
         test.assertEqual("Asgard's Guild Fellowship", lines[1])
         test.assertEqual("3 conflicts to review", lines[3])
+    end)
+
+    test.test(profile .. " a member's minimap tooltip has no conflicts line", function()
+        local world = fixtures.newEnvironment(profile)
+        local broker = installMinimapLibraries(world.environment)
+        local points = build(world, { member = true })
+
+        test.assertTrue(points:StartMinimap())
+
+        local lines = {}
+        broker.objects.AsgardsGuildFellowship.OnTooltipShow({
+            AddLine = function(_, text) table.insert(lines, text) end,
+        })
+        test.assertEqual(2, #lines)
+        test.assertEqual("Click to open or close the roster.", lines[2])
     end)
 
     test.test(profile .. " guild window button sits left of Invite Member and opens the roster", function()

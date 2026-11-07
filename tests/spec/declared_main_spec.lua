@@ -103,7 +103,7 @@ test.test("a later note fills in a main's declaration, but never overrides one s
     test.assertFalse(world.partition:IsDeclared("toolbox-area52"))
 end)
 
-test.test("on a character the roster has as an alt, a self marker is still a conflict", function()
+test.test("on an alt linked by notes, a self marker splits it off as a declared main", function()
     local world = scanned({
         { "Toolbox-Area52", "" },
         { "Hammer-Area52", ">Toolbox" },
@@ -112,8 +112,9 @@ test.test("on a character the roster has as an alt, a self marker is still a con
         { "Hammer-Area52", ">Hammer" },
     })
 
-    test.assertEqual("self reference", conflictKinds(world.partition)["hammer-area52"])
-    test.assertFalse(world.partition:IsDeclared("hammer-area52"))
+    test.assertEqual(nil, conflictKinds(world.partition)["hammer-area52"])
+    test.assertEqual("hammer-area52", world.partition:GetPlayer(world.partition:GetCharacter("hammer-area52").player).main)
+    test.assertTrue(world.partition:IsDeclared("hammer-area52"))
 end)
 
 test.test("a main's note naming itself next to an alias reads as declared, with the alias", function()

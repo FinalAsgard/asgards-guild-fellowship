@@ -294,8 +294,8 @@ function Client:ObserveGuildRoster(onUpdate)
 end
 
 -- Runs filter(event, message, sender) on every chat line of `events`. A
--- string it returns replaces the message text; anything else, or an error,
--- leaves the line as it was. The sender and the rest of the line pass
+-- string it returns replaces the message text, and true hides the line;
+-- anything else, or an error, leaves the line as it was. The sender and the rest of the line pass
 -- through untouched, so name links keep working. Retail keeps the filter
 -- API in ChatFrameUtil; older clients have it as a global. Returns false
 -- when the client has neither, or no event could be registered.
@@ -314,6 +314,9 @@ function Client:AddChatMessageFilter(events, filter)
 
     local function handler(_, event, message, sender, ...)
         local ok, replacement = pcall(filter, event, message, sender)
+        if ok and replacement == true then
+            return true
+        end
         if ok and type(replacement) == "string" then
             return false, replacement, sender, ...
         end
@@ -339,6 +342,8 @@ Compatibility.PRESENCE_FORMATS = {
     { kind = "offline", global = "ERR_FRIEND_OFFLINE_S", fallback = "%s has gone offline." },
     { kind = "join", global = "ERR_GUILD_JOIN_S", fallback = "%s has joined the guild." },
     { kind = "leave", global = "ERR_GUILD_LEAVE_S", fallback = "%s has left the guild." },
+    -- A whisper (the add-on's included) went to someone who isn't playing.
+    { kind = "notFound", global = "ERR_CHAT_PLAYER_NOT_FOUND_S", fallback = "No player named '%s' is currently playing." },
 }
 
 -- A Lua pattern matching a client format string, capturing each "%s" (or
@@ -353,24 +358,32 @@ function Compatibility.PatternFor(format)
     return "^" .. pattern .. "$"
 end
 
--- Calls onPresence(kind, name) for every system message saying someone came
--- online, went offline, joined the guild, or left it, with the name as the message gives it (from the
--- player link when there is one). Messages the client hides from add-ons
--- are skipped. Returns false when the client can't deliver the event.
-function Client:ObservePresence(onPresence)
-    if type(onPresence) ~= "function" then
-        return false
-    end
+-- Each presence message's pattern, by kind: { kind, pattern }.
+local function presencePatterns(environment)
     local patterns = {}
     local index
     for index = 1, #Compatibility.PRESENCE_FORMATS do
         local entry = Compatibility.PRESENCE_FORMATS[index]
-        local format = self.environment[entry.global]
+        local format = environment[entry.global]
         local pattern = Compatibility.PatternFor(type(format) == "string" and format or entry.fallback)
         if pattern ~= nil then
             table.insert(patterns, { kind = entry.kind, pattern = pattern })
         end
     end
+    return patterns
+end
+
+-- Calls onPresence(kind, name) for every system message saying someone came
+-- online, went offline, joined the guild, or left it, or that a whisper
+-- found nobody of that name playing ("notFound"), with the name as the
+-- message gives it (from the player link when there is one). Messages the
+-- client hides from add-ons are skipped. Returns false when the client
+-- can't deliver the event.
+function Client:ObservePresence(onPresence)
+    if type(onPresence) ~= "function" then
+        return false
+    end
+    local patterns = presencePatterns(self.environment)
     local frame = self:CreateEventFrame()
     if frame == nil
         or not self:SetEventHandler(frame, function(_, _, message)
@@ -392,6 +405,33 @@ function Client:ObservePresence(onPresence)
     end
     self.presenceFrame = frame
     return true
+end
+
+-- Hides the game's "No player named ... is currently playing." line from
+-- the chat frames when hide(name) answers true for the name it gives.
+-- Returns false when the client has no chat filter API.
+function Client:HidePlayerNotFound(hide)
+    if type(hide) ~= "function" then
+        return false
+    end
+    local pattern
+    local patterns = presencePatterns(self.environment)
+    local index
+    for index = 1, #patterns do
+        if patterns[index].kind == "notFound" then
+            pattern = patterns[index].pattern
+        end
+    end
+    if pattern == nil then
+        return false
+    end
+    return self:AddChatMessageFilter({ "CHAT_MSG_SYSTEM" }, function(_, message)
+        if type(message) ~= "string" or self:IsSecretValue(message) then
+            return nil
+        end
+        local name = string.match(message, pattern)
+        return name ~= nil and name ~= "" and hide(name) == true or nil
+    end)
 end
 
 -- Calls onChange(busy) when the player enters or leaves combat or, on
@@ -959,39 +999,100 @@ end
 Compatibility.ASSIGNED_ROLES = { TANK = "tank", HEALER = "healer", DAMAGER = "dps" }
 Compatibility.PARTY_UNITS = { "player", "party1", "party2", "party3", "party4" }
 
--- The player and their party members, each { key, name, classToken, level,
--- guid, assignedRole, inGuild, isPlayer }. `key` is the GUID where the
--- client gives one, else the name. `assignedRole` is nil where the client assigns none.
+-- One group unit as a member { key, name, classToken, level, guid,
+-- assignedRole, inGuild, isPlayer }, or nil when there's no one there.
+local function readUnit(environment, unit, isPlayer)
+    local existsOk, exists = callFunction(environment.UnitExists, unit)
+    if not isPlayer and not (existsOk and exists) then
+        return nil
+    end
+    -- A member from another realm comes with that realm; the name then
+    -- carries it, as the guild roster spells it.
+    local nameOk, name, realm = callFunction(environment.UnitName, unit)
+    if nameOk and type(name) == "string" and name ~= "" and type(realm) == "string" and realm ~= "" then
+        name = name .. "-" .. realm
+    end
+    if not nameOk or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    -- A call that fails gives nothing, never its error text.
+    local function value(api, index)
+        local results = { callFunction(api, unit) }
+        if not results[1] then
+            return nil
+        end
+        return results[(index or 1) + 1]
+    end
+    local guid = value(environment.UnitGUID)
+    local classToken = value(environment.UnitClass, 2)
+    local level = value(environment.UnitLevel)
+    local role = value(environment.UnitGroupRolesAssigned)
+    local inGuild = value(environment.UnitIsInMyGuild)
+    return {
+        key = type(guid) == "string" and guid ~= "" and guid or name,
+        name = name,
+        guid = type(guid) == "string" and guid ~= "" and guid or nil,
+        classToken = type(classToken) == "string" and classToken or nil,
+        level = type(level) == "number" and level > 0 and level or nil,
+        assignedRole = Compatibility.ASSIGNED_ROLES[role],
+        inGuild = isPlayer or (inGuild ~= nil and inGuild ~= false),
+        isPlayer = isPlayer,
+    }
+end
+
+-- The player and their party members, each as readUnit gives them. `key`
+-- is the GUID where the client gives one, else the name. `assignedRole` is
+-- nil where the client assigns none. In a raid this is the player's own
+-- subgroup only; GetGroupMembers reads the whole raid.
 function Client:GetPartyMembers()
-    local environment = self.environment
     local members = {}
     local index
     for index = 1, #Compatibility.PARTY_UNITS do
         local unit = Compatibility.PARTY_UNITS[index]
-        local existsOk, exists = callFunction(environment.UnitExists, unit)
-        if unit == "player" or (existsOk and exists) then
-            -- A member from another realm comes with that realm; the
-            -- name then carries it, as the guild roster spells it.
-            local nameOk, name, realm = callFunction(environment.UnitName, unit)
-            if nameOk and type(name) == "string" and name ~= "" and type(realm) == "string" and realm ~= "" then
-                name = name .. "-" .. realm
-            end
-            if nameOk and type(name) == "string" and name ~= "" then
-                local _, guid = callFunction(environment.UnitGUID, unit)
-                local _, _, classToken = callFunction(environment.UnitClass, unit)
-                local _, level = callFunction(environment.UnitLevel, unit)
-                local _, role = callFunction(environment.UnitGroupRolesAssigned, unit)
-                local _, inGuild = callFunction(environment.UnitIsInMyGuild, unit)
-                table.insert(members, {
-                    key = type(guid) == "string" and guid ~= "" and guid or name,
-                    name = name,
-                    guid = type(guid) == "string" and guid ~= "" and guid or nil,
-                    classToken = type(classToken) == "string" and classToken or nil,
-                    level = type(level) == "number" and level > 0 and level or nil,
-                    assignedRole = Compatibility.ASSIGNED_ROLES[role],
-                    inGuild = unit == "player" or (inGuild ~= nil and inGuild ~= false),
-                    isPlayer = unit == "player",
-                })
+        local member = readUnit(self.environment, unit, unit == "player")
+        if member ~= nil then
+            table.insert(members, member)
+        end
+    end
+    return members
+end
+
+Compatibility.RAID_SIZE = 40
+
+-- Whether the player is in a raid. False when the client can't say.
+function Client:IsInRaid()
+    local environment = self.environment
+    local ok, raid = callFunction(environment.IsInRaid)
+    if ok then
+        return raid ~= nil and raid ~= false
+    end
+    local count
+    ok, count = callFunction(environment.GetNumRaidMembers)
+    return ok and type(count) == "number" and count > 0
+end
+
+-- Everyone in the player's group, as GetPartyMembers gives them: the party,
+-- or in a raid every subgroup (raid1 to raid40, the player among them).
+function Client:GetGroupMembers()
+    if not self:IsInRaid() then
+        return self:GetPartyMembers()
+    end
+    local environment = self.environment
+    local player = readUnit(environment, "player", true)
+    local members = {}
+    if player ~= nil then
+        table.insert(members, player)
+    end
+    local index
+    for index = 1, Compatibility.RAID_SIZE do
+        local unit = "raid" .. index
+        -- The player is among the raid units; a UnitIsUnit that fails
+        -- tells nothing, so their GUID decides then.
+        local ok, isPlayer = callFunction(environment.UnitIsUnit, unit, "player")
+        if not (ok and isPlayer) then
+            local member = readUnit(environment, unit, false)
+            if member ~= nil and not (player ~= nil and member.guid ~= nil and member.guid == player.guid) then
+                table.insert(members, member)
             end
         end
     end

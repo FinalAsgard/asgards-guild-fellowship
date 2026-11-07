@@ -207,6 +207,8 @@ end
 -- one of another player's can't be taken from them. A character on its
 -- own is also offered other players' characters: picking one `joins` that
 -- player, the logged-in character becoming its alt, and `warning` says so.
+-- With `inputs.known` (function(key) -> boolean; for a member), only
+-- characters it accepts (the add-on knows they're the user's) are offered.
 function ProfileViewModel.AltCandidates(inputs, query, limit)
     local partition = inputs.partition
     local own = partition and inputs.selfKey and partition:GetCharacter(inputs.selfKey)
@@ -222,6 +224,9 @@ function ProfileViewModel.AltCandidates(inputs, query, limit)
     local found = {}
     partition:EachCharacter(function(key, character)
         if character.player == own.player or not partition:IsInGuild(key) then
+            return
+        end
+        if inputs.known ~= nil and not inputs.known(key) then
             return
         end
         local entry = candidateEntry(inputs, members, classColor, key, character)
