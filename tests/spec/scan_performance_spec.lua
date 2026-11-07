@@ -151,10 +151,11 @@ test.test("persisted records stay within a fixed field budget with no live field
 
     local partition = database.guilds["Big Guild-Area52"]
     local characterFields = { class = true, departed = true, level = true, name = true, note = true,
-        player = true, rank = true, rejected = true, source = true }
+        player = true, rank = true, rejected = true, source = true, awaitsAlias = true }
     local playerFields = { alias = true, aliasSource = true, history = true, main = true }
     local partitionFields = { characters = true, lastFullScan = true, lastScanSummary = true,
-        nextPlayerId = true, players = true, quarantine = true, conflicts = true, suggestions = true }
+        nextPlayerId = true, players = true, quarantine = true, conflicts = true, suggestions = true,
+        notesWin = true }
 
     local key, record, field
     for key in pairs(partition) do

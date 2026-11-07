@@ -7,19 +7,33 @@ local ConflictViewModel = {}
 addon.ConflictViewModel = ConflictViewModel
 
 local PROBLEMS = {
-    unresolved = "Main not found in the guild",
-    ambiguous = "Main name matches more than one character",
-    cycle = "Mains point at each other",
     ["self reference"] = "Note names the character itself as main",
-    ["chain too long"] = "Chain of mains is too long",
-    ["competing aliases"] = "Different aliases for one player",
 }
 
 local SOURCES = {
     note = "From a note",
     manual = "Set by hand",
     roster = "From the roster",
+    sync = "From guild sync",
 }
+
+-- The queue entries to show: members' suggestions, and notes that disagree
+-- with something submitted. Entries of kinds an earlier build queued are
+-- left out.
+local function shownEntries(partition)
+    local entries = {}
+    local conflicts = partition:GetConflicts() or {}
+    local index
+    for index = 1, #conflicts do
+        local entry = conflicts[index]
+        if type(entry) == "table"
+            and (entry.from ~= nil or addon.ReconcileEngine.CONFLICT_KINDS[entry.kind] == true)
+        then
+            table.insert(entries, entry)
+        end
+    end
+    return entries
+end
 
 local function displayName(inputs, key)
     local live = inputs.members[key]
@@ -35,11 +49,8 @@ local function currentText(inputs, key, kind)
     if player == nil then
         return "Not organized yet"
     end
-    if kind == "alias" or kind == "competing aliases" or kind == "suggested alias" then
+    if kind == "alias" or kind == "suggested alias" then
         return player.alias and ("Alias \"" .. player.alias .. "\"") or "No alias"
-    end
-    if kind == "promotion" then
-        return "Main of its player"
     end
     if kind == "suggested declared" then
         return inputs.partition:IsDeclared(key) and "Declared main" or "Not declared"
@@ -64,7 +75,7 @@ local function sourceText(inputs, key, kind)
         return ""
     end
     local source = character.source
-    if kind == "alias" or kind == "competing aliases" then
+    if kind == "alias" then
         local player = inputs.partition:GetPlayer(character.player)
         source = player and player.aliasSource
     end
@@ -106,7 +117,7 @@ end
 function ConflictViewModel.CountQueue(partition)
     local count = 0
     local groups = {}
-    local conflicts = partition:GetConflicts() or {}
+    local conflicts = shownEntries(partition)
     local index
     for index = 1, #conflicts do
         local entry = conflicts[index]
@@ -178,7 +189,7 @@ function ConflictViewModel.Build(inputs)
     inputs.members = inputs.members or {}
     local rows = {}
     local bundles, bundleOf = {}, {}
-    local conflicts = inputs.partition:GetConflicts() or {}
+    local conflicts = shownEntries(inputs.partition)
     local index
     for index = 1, #conflicts do
         local conflict = conflicts[index]
@@ -191,22 +202,6 @@ function ConflictViewModel.Build(inputs)
             suggests = "Alt of " .. displayName(inputs, conflict.suggestion.main)
         elseif conflict.kind == "alias" and conflict.suggestion then
             suggests = "Alias \"" .. conflict.suggestion.alias .. "\""
-        elseif conflict.kind == "unresolved" and conflict.suggestion and conflict.suggestion.outOfGuild then
-            suggests = "Main \"" .. conflict.suggestion.outOfGuild .. "\", not in the guild"
-        elseif conflict.kind == "ambiguous" and type(conflict.alias) == "string" then
-            local names = {}
-            local mains = type(conflict.mains) == "table" and conflict.mains or {}
-            local mainIndex
-            for mainIndex = 1, #mains do
-                table.insert(names, displayName(inputs, mains[mainIndex]))
-            end
-            suggests = "Alias \"" .. conflict.alias .. "\" is held by several players"
-            if #names > 0 then
-                suggests = suggests .. ": " .. table.concat(names, ", ")
-            end
-        elseif conflict.kind == "promotion" and conflict.suggestion then
-            suggests = "Acting main now, since " ..
-                displayName(inputs, conflict.suggestion.former) .. " left"
         else
             suggests = PROBLEMS[conflict.kind] or conflict.kind
         end

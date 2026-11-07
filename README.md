@@ -87,7 +87,7 @@ Two markers in a character's **public** note seed the database:
 - `Main: Toolbox` or the shorter `>Toolbox` means "this character is an alt of Toolbox".
 - `Main: TheTool` or `>TheTool`, naming an alias instead, means "this character is an alt of the player who goes by TheTool", whoever their main is. The alt stays linked when that player changes main, so its note never has to be rewritten.
 - `Alias: TheTool` or the shorter `@TheTool` means "this player goes by TheTool".
-- `^` at the very start of the note (for example `^ @TheTool raid lead`) means "this is my main, on purpose": a **declared main**, even with no alts. A main marker naming the character itself (`>Toolbox` on Toolbox's own note) says the same at more length. On a character the roster has as someone's alt, either one disagrees with the roster and goes to the conflict queue instead. A `^` anywhere else in the note is just text.
+- `^` at the very start of the note (for example `^ @TheTool raid lead`) means "this is my main, on purpose": a **declared main**, even with no alts. A main marker naming the character itself (`>Toolbox` on Toolbox's own note) says the same at more length. On a character the roster has as someone's alt, either one splits it off as a main of its own, unless that link was set in the add-on (then it goes to the officers' conflict queue). A `^` anywhere else in the note is just text.
 
 A marker can sit anywhere in the note (for example `Tank, Main: Toolbox, Alias: TheTool`, `Tank >Toolbox` or `@TheTool raid lead`), and both kinds can appear in one note. Only the first main marker and the first alias marker count. The `Main:` and `Alias:` labels can be any case (`main:` works too), the space after the colon is optional, and a label only counts as a word of its own (`Domain:` isn't a main marker). Matching ignores case.
 
@@ -98,7 +98,7 @@ An alias from a note is one word: letters (accented ones too), digits, `_`, `'`,
 
 A main marker's word is checked against aliases first, then against character names. So when a word is both someone's alias and a character's name, the note links to the player with that alias. Only one-word aliases can be named, upper and lower case don't matter, and on Forever `>Tool` matches the alias Tool before it tries a first name. A main's `@TheTool` and its alts' `>TheTool` link up in the same scan. A main marker naming the player's own alias (`>TheTool` on one of TheTool's characters) changes nothing.
 
-If two players share the alias a note names, or nobody has that alias yet, the add-on doesn't guess: the note goes to the conflict queue. When an alias is set, changed or cleared (from a note, by hand, or through [guild sync](#guild-sync)), those notes are read again on the next scan, so the alt links itself as soon as the alias exists.
+If two players share the alias a note names, or nobody has that alias yet, the add-on doesn't guess: the note changes nothing for now. When an alias is set, changed or cleared (from a note, by hand, or through [guild sync](#guild-sync)), those notes are read again on the next scan, so the alt links itself as soon as the alias exists.
 
 The add-on never writes to guild notes.
 
@@ -110,13 +110,16 @@ The add-on never writes to guild notes.
 
 Scans run a little at a time, so even a large guild doesn't cause a hitch. The window's footer shows when the last scan ran and what it found.
 
-### The database is the source of truth
+### Guild notes are the master copy
 
 - On the first scan, note markers are applied directly to any character the database doesn't know about.
-- After that, a note that disagrees with the database never overwrites it. The difference goes to the **conflict queue** instead. One exception: a note's alias is filled in for a player with no alias, as long as nobody ever set or cleared one by hand or through sync. An alias someone deliberately removed is never brought back by a note, and a note naming a different alias than the player has is still a conflict. A conflict like this left over from an earlier version is filled in the next time you use **Rescan**, or you can accept it. You'll also find in the queue any note naming a character that doesn't exist or matches more than one, and any note that loops back on itself.
-- **Conflicts (N)** at the bottom of the window opens the queue. Only officers have it: members see no Conflicts button or window, no count in the minimap tooltip, and no conflicts in the scan report in chat. It appears or disappears without a reload when someone is promoted to or demoted from an officer rank. Note conflicts are listed under **Note conflicts**: each shows the character, then one wrapped column with the note, what it suggests and what the database says. Accept or reject each one, or all at once. Members' changes are listed above them under **Changes to Player**, one line per player (see [Suggestions](#suggestions)).
-- A rejected suggestion stays away until that note changes again.
-- Officer data from [guild sync](#guild-sync) beats guild notes. On a new install, notes fill in the roster first, and officer edits replace them where the two disagree. After an officer edit arrives, the next scan checks the notes it affects again. A note that disagrees goes to the conflict queue, and a pending conflict the edit already settled disappears.
+- After that, a note that changes wins over what the notes or the roster set before: a character moves to the main its note now names, a player takes the alias its notes now give it, and an alt whose note now names itself as main becomes a main of its own. Nothing goes to the conflict queue for these. The player the character left records it in their history ("moved by a guild note").
+- The only conflicts are changes submitted through the add-on that disagree with the guild notes: a member's suggestion (see [Suggestions](#suggestions)), and a note that disagrees with a link or alias set by hand or through [guild sync](#guild-sync). Those keep what was submitted until an officer decides.
+- A note naming a character that doesn't exist, matching more than one, looping back on itself, or several notes giving one player different aliases change nothing and are not conflicts.
+- **Conflicts (N)** at the bottom of the window opens the queue. Only officers have it: members see no Conflicts button or window, no count in the minimap tooltip, and no conflicts in the scan report in chat. It appears or disappears without a reload when someone is promoted to or demoted from an officer rank. Members' changes are listed under **Changes to Player**, one line per player. Notes that disagree with a submitted link or alias are listed below them under **Note conflicts**: each shows the character, then one wrapped column with the note, what it suggests and what the database says. Accept or reject each one, or all at once.
+- A rejected note conflict stays away until that note changes again.
+- Conflicts an earlier version queued that don't fit these rules (unknown or ambiguous mains, loops, competing aliases, new acting mains to confirm) are cleared once, and the notes behind them are read again by the next scan.
+- Officer data from [guild sync](#guild-sync) beats an unchanged guild note. On a new install, notes fill in the roster first, and officer edits replace them where the two disagree. After an officer edit arrives, the next scan checks the notes it affects again. A note that disagrees goes to the conflict queue, and a pending conflict the edit already settled disappears.
 
 ### Out-of-date guild notes
 
@@ -142,7 +145,7 @@ Select any member in the game's guild roster and, if the add-on knows their play
 
 ### Mains, alts, and departures
 
-- A player always leads with a character who is in the guild. If their main leaves, or a note names a main outside the guild, an in-guild alt becomes the acting main: the highest level, then the most recently online. You confirm that change in the conflict queue.
+- A player always leads with a character who is in the guild. If their main leaves, or a note names a main outside the guild, an in-guild alt becomes the acting main: the highest level, then the most recently online. The player's history records it, and you can pick another main with **Make this the main**.
 - Characters who leave are kept and marked departed. They're hidden until you choose **Show departed**. A returning character goes back to their old player automatically.
 - **Purge** removes one departed character. **Purge all departed** removes them all.
 

@@ -6,30 +6,35 @@ local _, addon = ...
 -- Seeding: a note marker on a character with no relationship in the
 -- database is applied directly, which covers the whole first scan.
 --
--- Conflicts: the database is the source of truth, so a note that disagrees
--- with an existing relationship or alias never changes anything. It becomes
--- a conflict for the player to accept or reject, as do markers that can't be
--- applied at all (unresolved, ambiguous, cyclic, self-referencing, chains
--- that are too long, and competing aliases). A suggestion the player
--- rejected is not queued again until the note changes.
+-- Guild notes win: a note that disagrees with a link or alias nobody
+-- submitted (one from notes or the roster) is applied, with no conflict.
+-- Only a disagreement with something submitted through the add-on (set by
+-- hand, or through guild sync) becomes a conflict, for an officer to
+-- accept or reject; a suggestion rejected that way is not queued again
+-- until the note changes. Markers that can't be applied at all
+-- (unresolved, ambiguous, cyclic, chains that are too long, and competing
+-- aliases) change nothing and queue nothing; an unresolved or ambiguous
+-- one is read again when the guild's aliases change.
 --
 -- Departures: a full scan of a complete roster marks stored characters that
 -- are missing as departed, and clears the flag on any that are back (they
 -- keep their stored player). Afterwards every player that still has an
 -- in-guild character gets an in-guild acting main: the highest level, then
--- the most recently online. The former main goes into the player's history,
--- and a confirmation conflict is queued.
+-- the most recently online. The former main goes into the player's history.
 --
 -- Alias targets: a main marker naming a player's one-word alias (stored, or
 -- set by a note in the same plan) joins that player, whoever its main is. A
 -- note naming its own player's alias is consistent and changes nothing.
 --
 -- Out-of-guild mains: a marker naming a stored character who isn't in the
--- guild links to that character's player. A marker naming nobody known is an
--- "unresolved" conflict whose suggestion, if accepted, records the name as
--- the player's out-of-guild main.
+-- guild links to that character's player. A marker naming nobody known
+-- changes nothing until an alias names someone.
 local ReconcileEngine = {
     MAX_CHAIN_DEPTH = 10,
+    -- The note conflicts a scan queues: a note disagreeing with a submitted
+    -- main link, alias, or (on an alt) a note naming the character itself
+    -- as main.
+    CONFLICT_KINDS = { main = true, alias = true, ["self reference"] = true },
 }
 addon.ReconcileEngine = ReconcileEngine
 
@@ -95,12 +100,24 @@ local function hasRelationship(partition, sizes, key)
         or player.aliasSource == addon.FellowshipStore.SOURCE_SYNC
 end
 
+-- True when `player`'s alias was set or cleared by hand or through sync.
+local function aliasSubmitted(player)
+    return player ~= nil and (player.aliasSource == addon.FellowshipStore.SOURCE_MANUAL
+        or player.aliasSource == addon.FellowshipStore.SOURCE_SYNC)
+end
+
 -- True when `player` has no alias and nobody ever set or cleared one by
 -- hand or through sync, so a note may name it.
 local function aliasUntouched(player)
-    return player ~= nil and player.alias == nil
-        and player.aliasSource ~= addon.FellowshipStore.SOURCE_MANUAL
-        and player.aliasSource ~= addon.FellowshipStore.SOURCE_SYNC
+    return player ~= nil and player.alias == nil and not aliasSubmitted(player)
+end
+
+-- True when `key`'s place in its player was set by hand or through sync,
+-- rather than by notes or the roster.
+local function linkSubmitted(partition, key)
+    local character = partition:GetCharacter(key)
+    return character ~= nil and (character.source == addon.FellowshipStore.SOURCE_MANUAL
+        or character.source == addon.FellowshipStore.SOURCE_SYNC)
 end
 
 -- The main a resolved marker ultimately leads to, following other notes
@@ -154,10 +171,8 @@ local function rootOf(key, ref, parseOf, partition, sizes)
     return followChain(key, ref.key, parseOf, partition, sizes)
 end
 
--- Queues a conflict, unless the player already rejected this note.
--- `extra` fields (an ambiguous alias and the mains of the players holding
--- it) are copied onto the entry.
-local function addConflict(plan, partition, key, kind, suggestion, extra)
+-- Queues a conflict, unless an officer already rejected this note.
+local function addConflict(plan, partition, key, kind, suggestion)
     local character = partition:GetCharacter(key)
     if character ~= nil and character.rejected ~= nil
         and character.rejected[kind] == plan.fingerprints[key]
@@ -170,28 +185,7 @@ local function addConflict(plan, partition, key, kind, suggestion, extra)
         kind = kind,
         suggestion = suggestion,
     }
-    local field, value
-    for field, value in pairs(extra or {}) do
-        entry[field] = value
-    end
     table.insert(plan.conflicts, entry)
-end
-
--- For an alias held by several players: the alias and the main of each
--- player holding it, sorted.
-local function ambiguousAlias(ref, partition)
-    local mains = {}
-    local index
-    for index = 1, #ref.candidates do
-        local target = ref.candidates[index]
-        local player = target.player ~= nil and partition:GetPlayer(target.player)
-        local main = (player and player.main) or target.key
-        if main ~= nil then
-            table.insert(mains, main)
-        end
-    end
-    table.sort(mains)
-    return { alias = ref.text, mains = mains }
 end
 
 -- Which roster characters a plan processes:
@@ -232,6 +226,12 @@ end
 --   aliasNotes   main key -> keys of the characters whose notes set that alias
 --   declared     character keys whose own note names them as main: they're
 --                declared mains
+--   moves        organized key -> the main key whose player its note names,
+--                where nobody submitted its link (the note wins)
+--   splits       alts whose own note names them as main, where nobody
+--                submitted their link: each leaves for a player of its own
+--   retry        keys whose main marker names nobody, or several players:
+--                read again when the guild's aliases change
 --   conflicts    { character, kind, fingerprint, suggestion? } to queue
 --   departures   stored keys missing from the roster (full scans only)
 --   rejoins      departed keys back in the roster
@@ -250,6 +250,9 @@ function ReconcileEngine.Plan(inputs)
         aliasNotes = {},
         declared = {},
         links = {},
+        moves = {},
+        splits = {},
+        retry = {},
         members = members,
         mode = mode,
         newKeys = {},
@@ -423,13 +426,11 @@ function ReconcileEngine.Plan(inputs)
         key = keys[index]
         local ref = parseOf(key).mainRef
         if ref ~= nil then
-            if ref.status == "unresolved" then
-                -- Accepting records the name as an out-of-guild main.
-                addConflict(plan, partition, key, ref.status, { outOfGuild = ref.text })
-            elseif ref.status == "ambiguous" and ref.byAlias then
-                addConflict(plan, partition, key, ref.status, nil, ambiguousAlias(ref, partition))
+            if ref.status == "unresolved" or ref.status == "ambiguous" then
+                -- Nothing to apply until an alias settles who it names.
+                plan.retry[key] = true
             elseif ref.status ~= "resolved" then
-                addConflict(plan, partition, key, ref.status)
+                -- Nothing the note says can be applied.
             elseif ref.byAlias and (ref.key == key or (ref.player ~= nil and partition:GetCharacter(key) ~= nil
                 and partition:GetCharacter(key).player == ref.player))
             then
@@ -439,32 +440,45 @@ function ReconcileEngine.Plan(inputs)
                 -- A note naming the character itself as main declares it a
                 -- main: seeded on a character nobody organized yet, filled in
                 -- on a player's main nobody declared (or un-declared) by
-                -- hand or through sync. On an alt, the note and the roster
-                -- disagree.
+                -- hand or through sync. On an alt, the note wins unless its
+                -- link was submitted: it leaves for a player of its own.
                 local character = partition:GetCharacter(key)
                 local player = character and partition:GetPlayer(character.player)
                 if seedable[key] or (player ~= nil and player.main == key) then
                     if not partition:IsDeclared(key) and (character == nil or partition:DeclaredUntouched(key)) then
                         plan.declared[key] = true
                     end
-                else
+                elseif linkSubmitted(partition, key) then
                     addConflict(plan, partition, key, "self reference")
+                else
+                    plan.splits[key] = true
+                    if not partition:IsDeclared(key) and partition:DeclaredUntouched(key) then
+                        plan.declared[key] = true
+                    end
                 end
             else
-                local root, reason = rootOf(key, ref, parseOf, partition, sizes)
+                local root = rootOf(key, ref, parseOf, partition, sizes)
                 if root == nil then
-                    addConflict(plan, partition, key, reason)
+                    -- A cycle or a chain too long: nothing to apply.
+                    if ref.player ~= nil then
+                        plan.retry[key] = true
+                    end
                 elseif seedable[key] then
                     if root ~= key then
                         plan.links[key] = root
                     end
                 else
                     -- Already organized: a note naming a different player
-                    -- is drift, for the player to decide.
+                    -- wins, unless the link was submitted; then it's for an
+                    -- officer to decide.
                     local rootCharacter = partition:GetCharacter(root)
                     local character = partition:GetCharacter(key)
-                    if rootCharacter == nil or rootCharacter.player ~= character.player then
+                    if rootCharacter ~= nil and rootCharacter.player == character.player then
+                        -- The note agrees.
+                    elseif rootCharacter == nil or linkSubmitted(partition, key) then
                         addConflict(plan, partition, key, "main", { main = root })
+                    else
+                        plan.moves[key] = root
                     end
                 end
             end
@@ -472,10 +486,10 @@ function ReconcileEngine.Plan(inputs)
         checkpoint()
     end
 
-    -- An alias on any character's note names that character's player. On
-    -- unorganized players it is applied, and so it is on organized players
-    -- nobody named (or un-named) by hand or through sync; otherwise a
-    -- different alias is drift.
+    -- An alias on any character's note names that character's player. It is
+    -- applied unless someone named (or un-named) the player by hand or
+    -- through sync; then a different alias is a conflict. Notes that
+    -- disagree with each other change nothing.
     local proposals = {}
     for index = 1, #keys do
         key = keys[index]
@@ -486,7 +500,7 @@ function ReconcileEngine.Plan(inputs)
             table.insert(proposals[root], { alias = alias, character = key })
         end
     end
-    -- Organized players' notes, by player: { main, entries }.
+    -- Organized players' notes, by player: { main, alias, entries }.
     local fills = {}
     local root, entries
     for root, entries in pairs(proposals) do
@@ -501,20 +515,19 @@ function ReconcileEngine.Plan(inputs)
         local rootCharacter = partition:GetCharacter(root)
         local player = rootCharacter and partition:GetPlayer(rootCharacter.player)
         if agreed == nil then
-            for index = 1, #entries do
-                addConflict(plan, partition, entries[index].character, "competing aliases")
-            end
+            -- Competing aliases: nothing to apply.
         elseif rootCharacter == nil or not hasRelationship(partition, sizes, root) then
             plan.aliases[root] = agreed
             plan.aliasNotes[root] = {}
             for index = 1, #entries do
                 table.insert(plan.aliasNotes[root], entries[index].character)
             end
-        elseif aliasUntouched(player) then
-            -- Notes on several of its characters can name the player.
+        elseif not aliasSubmitted(player) then
+            -- Notes on several of its characters can name the player, or
+            -- rename it when notes named it: the notes win.
             local fill = fills[rootCharacter.player]
             if fill == nil then
-                fill = { main = player.main, entries = {} }
+                fill = { main = player.main, alias = player.alias, entries = {} }
                 fills[rootCharacter.player] = fill
             end
             for index = 1, #entries do
@@ -539,11 +552,7 @@ function ReconcileEngine.Plan(inputs)
                 break
             end
         end
-        if agreed == nil then
-            for index = 1, #fill.entries do
-                addConflict(plan, partition, fill.entries[index].character, "competing aliases")
-            end
-        else
+        if agreed ~= nil and (fill.alias == nil or string.lower(fill.alias) ~= string.lower(agreed)) then
             plan.aliases[fill.main] = agreed
             plan.aliasNotes[fill.main] = {}
             for index = 1, #fill.entries do
@@ -561,10 +570,27 @@ function ReconcileEngine.Plan(inputs)
     return plan
 end
 
+-- Records in `playerId`'s history that `key` left it because of its note.
+-- Nothing is recorded when the old player is gone (it had no other
+-- characters).
+local function recordLeaving(partition, playerId, key, wasMain, now, reason)
+    local character = partition:GetCharacter(key)
+    if character == nil or partition:GetPlayer(playerId) == nil then
+        return
+    end
+    partition:AddHistory(playerId, {
+        name = character.name or key,
+        character = key,
+        role = wasMain and "main" or "alt",
+        ["until"] = now,
+        reason = reason,
+    })
+end
+
 -- Commits a plan to the partition. `checkpoint` is called between
 -- characters, as in Plan. Returns counts for reporting:
---   recorded, newCharacters (and newKeys, their keys), linked, aliased, conflicts, departed,
---   rejoined, promoted
+--   recorded, newCharacters (and newKeys, their keys), linked (by notes, moves
+--   included), aliased, conflicts, departed, rejoined, promoted
 function ReconcileEngine.Apply(partition, plan, checkpoint)
     checkpoint = checkpoint or function() end
 
@@ -587,8 +613,7 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
     -- checked again: a character organized since then is left alone.
     --
     -- A note whose seed is skipped that way is left unprocessed: the next
-    -- scan reads it again and, the character now being organized, queues
-    -- any disagreement as a conflict.
+    -- scan reads it again against the character as it is organized now.
     local unprocessed = {}
     local sizes = playerSizes(partition)
     local linked = 0
@@ -601,6 +626,35 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         end
     end
 
+    -- Notes that win over links nobody submitted. A link submitted since
+    -- planning is left alone, and its note read again by the next scan.
+    for alt, main in pairs(plan.moves) do
+        local character = partition:GetCharacter(alt)
+        if character == nil or partition:GetCharacter(main) == nil or linkSubmitted(partition, alt) then
+            unprocessed[alt] = true
+        else
+            local formerPlayer = character.player
+            local wasMain = partition:GetPlayer(formerPlayer).main == alt
+            if partition:JoinPlayerOf(alt, main, addon.FellowshipStore.SOURCE_NOTE) then
+                linked = linked + 1
+                recordLeaving(partition, formerPlayer, alt, wasMain, plan.now, "moved by a guild note")
+            end
+        end
+    end
+    local split
+    for split in pairs(plan.splits) do
+        local character = partition:GetCharacter(split)
+        if character == nil or linkSubmitted(partition, split) then
+            unprocessed[split] = true
+        else
+            local formerPlayer = character.player
+            if partition:MoveToNewPlayer(split, addon.FellowshipStore.SOURCE_NOTE) ~= nil then
+                linked = linked + 1
+                recordLeaving(partition, formerPlayer, split, false, plan.now, "made a main by a guild note")
+            end
+        end
+    end
+
     local aliased = 0
     local alias
     for main, alias in pairs(plan.aliases) do
@@ -608,8 +662,8 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         local player = character and partition:GetPlayer(character.player)
         -- The plan's own links may have given this player alts; what must
         -- still hold is that nobody named it, or cleared its name, by hand or
-        -- through sync.
-        if player ~= nil and player.main == main and aliasUntouched(player) then
+        -- through sync. A name notes gave it, the notes may change.
+        if player ~= nil and player.main == main and not aliasSubmitted(player) then
             if partition:SetAlias(character.player, alias, addon.FellowshipStore.SOURCE_NOTE) then
                 aliased = aliased + 1
             end
@@ -651,24 +705,21 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
     local promotions = ReconcileEngine.EnsureActingMains(partition, plan.members, plan.now)
 
     -- Characters this plan skipped keep their pending conflicts; processed
-    -- characters get exactly the conflicts this plan found.
+    -- characters get exactly the conflicts this plan found. Members'
+    -- suggestions wait for an officer to decide them, whatever is rescanned.
+    -- New acting mains are recorded in their player's history, not queued.
     local conflicts = {}
     local previous = partition:GetConflicts() or {}
     for index = 1, #previous do
         local entry = previous[index]
-        -- Promotions wait for the player to confirm them, and members'
-        -- suggestions for an officer to decide them, whatever is rescanned.
-        if type(entry) == "table"
-            and (not plan.processed[entry.character] or entry.kind == "promotion" or entry.from ~= nil)
+        if type(entry) == "table" and (entry.from ~= nil
+            or (not plan.processed[entry.character] and ReconcileEngine.CONFLICT_KINDS[entry.kind]))
         then
             table.insert(conflicts, entry)
         end
     end
     for index = 1, #plan.conflicts do
         table.insert(conflicts, plan.conflicts[index])
-    end
-    for index = 1, #promotions do
-        table.insert(conflicts, promotions[index])
     end
     table.sort(conflicts, function(first, second)
         if first.character ~= second.character then
@@ -685,6 +736,7 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
     for key in pairs(plan.processed) do
         if not unprocessed[key] and partition:GetCharacter(key) ~= nil then
             partition:SetNoteFingerprint(key, plan.fingerprints[key])
+            partition:SetAwaitsAlias(key, plan.retry[key] == true)
         end
     end
 
@@ -694,7 +746,7 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         newCharacters = #plan.newKeys,
         newKeys = plan.newKeys,
         recorded = recorded,
-        conflicts = #plan.conflicts + #promotions,
+        conflicts = #plan.conflicts,
         departed = departed,
         rejoined = rejoined,
         promoted = #promotions,
@@ -741,7 +793,7 @@ end
 
 -- Keeps the invariant: a player with any in-guild character has an
 -- in-guild acting main. Each promotion records the former main in the
--- player's history and returns a "promotion" conflict for confirmation.
+-- player's history. Returns the promotions, { character, former }.
 -- `checkpoint`, when given, is called after each player.
 function ReconcileEngine.EnsureActingMains(partition, members, now, checkpoint)
     members = members or {}
@@ -771,11 +823,7 @@ function ReconcileEngine.EnsureActingMains(partition, members, now, checkpoint)
                     reason = former and "departed" or "out of guild",
                 })
                 partition:SetMain(id, best)
-                table.insert(promotions, {
-                    character = best,
-                    kind = "promotion",
-                    suggestion = { main = best, former = formerKey },
-                })
+                table.insert(promotions, { character = best, former = formerKey })
             end
         end
         checkpoint()

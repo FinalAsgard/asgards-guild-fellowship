@@ -86,7 +86,7 @@ test.test("members' suggestions are grouped into one bundle per player, before n
     setup.service:Queue({ alias("hammer-area52", "Hammers", "bolt-area52") }, "bolt-area52")
     setup.service:Queue({ link("anvil-area52", "toolbox-area52", "anvil-area52") }, "anvil-area52")
     local conflicts = setup.partition:GetConflicts()
-    table.insert(conflicts, { character = "toolbox-area52", kind = "unresolved" })
+    table.insert(conflicts, { character = "toolbox-area52", kind = "main", suggestion = { main = "anvil-area52" } })
     setup.partition:SetConflicts(conflicts)
 
     local rows = setup.rows()
@@ -102,7 +102,7 @@ test.test("members' suggestions are grouped into one bundle per player, before n
     test.assertEqual("bundle", rows[2].kind)
     test.assertEqual("Anvil", rows[2].name)
     test.assertEqual("1 change", rows[2].changes)
-    test.assertEqual("unresolved", rows[3].kind)
+    test.assertEqual("main", rows[3].kind)
     -- Counted once per bundle, plus each note conflict.
     test.assertEqual(3, setup.addon.ConflictViewModel.CountToReview(rows))
     test.assertEqual(3, setup.addon.ConflictViewModel.CountQueue(setup.partition))

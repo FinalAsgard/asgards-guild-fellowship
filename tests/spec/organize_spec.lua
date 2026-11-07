@@ -174,6 +174,10 @@ end)
 
 test.test("manual changes settle the matching pending note conflicts", function()
     local state = setup()
+    -- Hammer's link and the alias were set by hand, so notes disagreeing
+    -- with them are conflicts.
+    state.partition:GetCharacter("hammer-area52").source = "manual"
+    state.playerOf("toolbox-area52").aliasSource = "manual"
     state.scan({
         { "Toolbox-Area52", "@Toolman", 80 },
         { "Hammer-Area52", ">Visitor", 70 },

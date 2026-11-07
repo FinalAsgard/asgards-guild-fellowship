@@ -74,13 +74,23 @@ local SEEDED = {
     { "Visitor-Area52", "" },
 }
 
+-- SEEDED, with Hammer's link and Toolbox's alias then submitted through the
+-- add-on (set by hand), so a note that disagrees is a conflict.
 local function seeded()
     local state = setup()
     state.scan(SEEDED, "initial")
+    state.partition:GetCharacter("hammer-area52").source = "manual"
+    state.playerOf("toolbox-area52").aliasSource = "manual"
     return state
 end
 
-test.test("a note that moves an organized alt to another main becomes a conflict, changing nothing", function()
+-- A member's suggestion entry, as SuggestionService stores it.
+local function suggestedEntry(character, main, from)
+    return { character = character, kind = "suggested main", suggestion = { main = main }, from = from,
+        at = 1790000000 }
+end
+
+test.test("a note that moves an alt linked by hand becomes a conflict, changing nothing", function()
     local state = seeded()
     local before = fixtures.snapshot(state.database)
 
@@ -103,7 +113,7 @@ test.test("a note that moves an organized alt to another main becomes a conflict
     fixtures.assertSameData(before, state.database)
 end)
 
-test.test("a note with a different alias for an organized player becomes a conflict", function()
+test.test("a note with a different alias for a player named by hand becomes a conflict", function()
     local state = seeded()
 
     state.scan({
@@ -132,7 +142,7 @@ test.test("an alias on a new alt that matches its main's player raises no confli
     test.assertEqual(state.playerOf("toolbox-area52"), state.playerOf("wrench-area52"))
 end)
 
-test.test("each unusable marker kind becomes a conflict in full and incremental scans", function()
+test.test("unusable markers queue nothing in full and incremental scans", function()
     local state = seeded()
 
     state.scan({
@@ -148,17 +158,13 @@ test.test("each unusable marker kind becomes a conflict in full and incremental 
         { "Loop2-Area52", ">Loop1" },
     }, "incremental")
 
-    local kinds = {}
-    local index
-    for index = 1, #state.conflicts() do
-        kinds[state.conflicts()[index].character] = state.conflicts()[index].kind
-    end
-    test.assertEqual("unresolved", kinds["hammer-area52"])
-    -- Naming itself as main declares Visitor its own main instead.
-    test.assertEqual(nil, kinds["visitor-area52"])
+    test.assertEqual(0, #state.conflicts())
+    -- Hammer's link set by hand stays; its note waits for an alias.
+    test.assertEqual(state.playerOf("toolbox-area52"), state.playerOf("hammer-area52"))
+    test.assertTrue(state.partition:GetCharacter("hammer-area52").awaitsAlias)
+    -- Naming itself as main declares Visitor its own main.
     test.assertTrue(state.partition:IsDeclared("visitor-area52"))
-    test.assertEqual("cycle", kinds["loop1-area52"])
-    test.assertEqual("cycle", kinds["loop2-area52"])
+    test.assertTrue(state.playerOf("loop1-area52") ~= state.playerOf("loop2-area52"))
 end)
 
 test.test("accepting a main conflict moves the character through PlayerService", function()
@@ -198,6 +204,7 @@ test.test("moving a player's main to another player promotes the highest-level c
         { "Wrench-Area52", ">Toolbox", 40 },
         { "Visitor-Area52", "" },
     }, "initial")
+    state.partition:GetCharacter("toolbox-area52").source = "manual"
     state.scan({
         { "Toolbox-Area52", ">Visitor", 30 },
         { "Hammer-Area52", ">Toolbox", 60 },
@@ -209,6 +216,31 @@ test.test("moving a player's main to another player promotes the highest-level c
 
     test.assertEqual(state.playerOf("visitor-area52"), state.playerOf("toolbox-area52"))
     test.assertEqual("hammer-area52", state.playerOf("wrench-area52").main)
+end)
+
+test.test("a note moving a main nobody submitted wins, with no conflict", function()
+    local state = setup()
+    state.scan({
+        { "Toolbox-Area52", "", 30 },
+        { "Hammer-Area52", ">Toolbox", 60 },
+        { "Wrench-Area52", ">Toolbox", 40 },
+        { "Visitor-Area52", "" },
+    }, "initial")
+
+    local result = state.scan({
+        { "Toolbox-Area52", ">Visitor", 30 },
+        { "Hammer-Area52", ">Toolbox", 60 },
+        { "Wrench-Area52", ">Toolbox", 40 },
+        { "Visitor-Area52", "" },
+    })
+
+    test.assertEqual(0, result.conflicts)
+    test.assertEqual(0, #state.conflicts())
+    test.assertEqual(state.playerOf("visitor-area52"), state.playerOf("toolbox-area52"))
+    test.assertEqual("hammer-area52", state.playerOf("wrench-area52").main)
+    local history = state.playerOf("hammer-area52").history
+    test.assertEqual("toolbox-area52", history[#history].character)
+    test.assertEqual("main", history[#history].role)
 end)
 
 test.test("unusable markers can't be accepted, only dismissed", function()
@@ -367,13 +399,12 @@ test.test("review rows show the character, live note, suggestion, current state,
     test.assertEqual("healer >Visitor", byKind.main.note)
     test.assertEqual("Alt of Visitor", byKind.main.suggests)
     test.assertEqual("Alt of Toolbox", byKind.main.current)
-    test.assertEqual("From a note", byKind.main.source)
+    test.assertEqual("Set by hand", byKind.main.source)
     test.assertTrue(byKind.main.canAccept)
     test.assertEqual("Alias \"Toolman\"", byKind.alias.suggests)
     test.assertEqual("Alias \"TheTool\"", byKind.alias.current)
-    test.assertEqual("Main \"Nobody\", not in the guild", byKind.unresolved.suggests)
-    test.assertEqual("Own player", byKind.unresolved.current)
-    test.assertTrue(byKind.unresolved.canAccept)
+    -- A name nobody has is no conflict.
+    test.assertEqual(nil, byKind.unresolved)
 
     -- A character missing from the live roster has no note to show.
     rows = state.addon.ConflictViewModel.Build({ partition = state.partition, normalizer = state.normalizer })
@@ -526,15 +557,27 @@ test.test("a note rejected before officer data arrived stays rejected", function
     test.assertEqual(0, #state.conflicts())
 end)
 
-test.test("markers saved as unapplied by an earlier build load as conflicts", function()
+test.test("conflicts an earlier build queued load as members' suggestions only, and their notes are read again", function()
     local addon = load()
+    local suggestion = suggestedEntry("hammer-area52", "toolbox-area52", "hammer-area52")
     local database = { schemaVersion = 1, guilds = {
         ["Knights-Area52"] = {
-            characters = { ["hammer-area52"] = { player = 1 } },
-            players = { [1] = { main = "hammer-area52" } },
+            characters = {
+                ["hammer-area52"] = { player = 1, note = "0000abcd" },
+                ["toolbox-area52"] = { player = 2, note = "0000beef" },
+                ["visitor-area52"] = { player = 3, note = "0000cafe" },
+            },
+            players = { [1] = { main = "hammer-area52" }, [2] = { main = "toolbox-area52" },
+                [3] = { main = "visitor-area52" } },
+            conflicts = {
+                { character = "hammer-area52", fingerprint = "0000abcd", kind = "unresolved" },
+                { character = "toolbox-area52", fingerprint = "0000beef", kind = "main",
+                    suggestion = { main = "visitor-area52" } },
+                { character = "visitor-area52", kind = "promotion", suggestion = { main = "visitor-area52" } },
+                suggestion,
+            },
             unapplied = {
                 { character = "hammer-area52", fingerprint = "0000abcd", reason = "unresolved" },
-                { character = "hammer-area52", fingerprint = "0000abcd", reason = "player already organized" },
             },
         },
     } }
@@ -542,8 +585,19 @@ test.test("markers saved as unapplied by an earlier build load as conflicts", fu
     local partition = addon.FellowshipStore.Create(database):Partition({ name = "Knights", realm = "Area52" })
 
     test.assertEqual(1, #partition:GetConflicts())
-    test.assertEqual("unresolved", partition:GetConflicts()[1].kind)
+    test.assertEqual(suggestion, partition:GetConflicts()[1])
+    test.assertEqual(nil, partition:GetCharacter("hammer-area52").note)
+    test.assertEqual(nil, partition:GetCharacter("toolbox-area52").note)
+    test.assertEqual(nil, partition:GetCharacter("visitor-area52").note)
     test.assertEqual(nil, database.guilds["Knights-Area52"].unapplied)
+
+    -- Only once: a note conflict queued later stays.
+    partition:SetNoteFingerprint("toolbox-area52", "0000beef")
+    table.insert(partition:GetConflicts(), { character = "toolbox-area52", kind = "main",
+        suggestion = { main = "visitor-area52" } })
+    partition = addon.FellowshipStore.Create(database):Partition({ name = "Knights", realm = "Area52" })
+    test.assertEqual(2, #partition:GetConflicts())
+    test.assertEqual("0000beef", partition:GetCharacter("toolbox-area52").note)
 end)
 
 test.test("the add-on never writes guild notes", function()
@@ -575,32 +629,18 @@ test.test("the add-on never writes guild notes", function()
     end
 end)
 
-test.test("the panel says an ambiguous alias is held by several players, and names them", function()
-    local state = setup()
-    state.scan({
-        { "Toolbox-Area52", "@Tinker" },
-        { "Hammer-Area52", "@Tinker" },
-        { "Wrench-Area52", "Healer >Tinker" },
-    }, "initial")
-    local members = state.roster({ { "Wrench-Area52", "Healer >Tinker" } })
-
-    local rows = state.addon.ConflictViewModel.Build({
-        partition = state.partition,
-        members = members,
-        normalizer = state.normalizer,
+test.test("stored entries of kinds no longer queued are neither shown nor counted", function()
+    local state = seeded()
+    state.partition:SetConflicts({
+        { character = "hammer-area52", kind = "ambiguous", alias = "Tinker", mains = {} },
+        { character = "toolbox-area52", kind = "promotion", suggestion = { main = "toolbox-area52" } },
+        { character = "visitor-area52", kind = "competing aliases" },
     })
 
-    local found
-    local index
-    for index = 1, #rows do
-        if rows[index].character == "wrench-area52" then
-            found = rows[index]
-        end
-    end
-    test.assertEqual("ambiguous", found.kind)
-    test.assertEqual("Alias \"Tinker\" is held by several players: Hammer, Toolbox", found.suggests)
-    test.assertEqual("Healer >Tinker", found.note)
-    test.assertFalse(found.canAccept)
+    local rows = state.addon.ConflictViewModel.Build({ partition = state.partition, normalizer = state.normalizer })
+
+    test.assertEqual(0, #rows)
+    test.assertEqual(0, state.addon.ConflictViewModel.CountQueue(state.partition))
 end)
 
 -- Each section's own fields ------------------------------------------------
