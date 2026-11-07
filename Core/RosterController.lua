@@ -345,6 +345,35 @@ function Controller:StatusText(partition)
     return "Last scan " .. when .. ": " .. RosterController.DescribeScan(summary) .. "\n" .. sync
 end
 
+-- For `/agf probe`: when the last full scan ran, and how many notes the
+-- latest scan that found anything changed (an incremental scan that found
+-- nothing records nothing). Returns lines of text.
+function Controller:ScanProbeLines()
+    local guild, partition = self:QuietContext()
+    if guild == nil then
+        return { partition }
+    end
+    local now = self.client:Timestamp()
+    local function ago(at)
+        return addon.RosterViewModel.Ago(math.max(0, (now or at) - at))
+    end
+    local lines = {}
+    local full = partition:GetLastScan()
+    table.insert(lines, "Last full scan: " .. (full ~= nil and ago(full) or "never") .. ".")
+    local summary = partition:GetLastScanSummary()
+    if summary == nil then
+        table.insert(lines, "Last scan: none yet.")
+    else
+        local kind = summary.mode == "incremental" and "on a roster update" or "full"
+        table.insert(lines, "Last scan (" .. kind .. ", " .. ago(summary.at) .. "): " ..
+            plural(summary.notesChanged or 0, "note") .. " changed.")
+    end
+    if self.scheduler ~= nil and self.scheduler:IsRunning() then
+        table.insert(lines, "A scan is running now.")
+    end
+    return lines
+end
+
 function Controller:UpdateStatus()
     if self.window ~= nil and self.current ~= nil then
         self.window:SetStatus(self:StatusText(self.current.partition))

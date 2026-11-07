@@ -27,6 +27,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf mail` | Opens [Guild Mail](#guild-mail), to mail the guild ranks you pick (officers only). |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf setdate join\|rank <character> <YYYY-MM-DD>` | Sets a character's join date, or the date it reached its current rank, when you know better than the add-on (officers only; see [Dates behind the checks](#dates-behind-the-checks)). |
+| `/agf probe` | Shows when the roster last had a full scan, and how many guild notes the latest scan picked up as changed (anyone). |
 | `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** and **Promote to match** flags reach the game's guild roster (officers only). |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
@@ -105,7 +106,7 @@ The add-on never writes to guild notes.
 ### Scanning
 
 - Every login (and `/reload`) scans the roster, so ranks, notes and departures that changed while you were away show at once. Only notes that changed are read again, so it's quick. It says nothing in chat unless it found something.
-- New members, and rank or level changes (including promotions made in the game's own guild window), are picked up automatically when the guild roster updates.
+- New members, changed guild notes, and rank or level changes (including promotions made in the game's own guild window) are picked up automatically when the guild roster updates. While you're online the add-on asks the game for a fresh roster every 5 minutes, so a note an officer edits reaches you within a few minutes, without a relog. `/agf probe` shows when the last full scan ran and how many notes the latest scan changed.
 - **Rescan** in the window, or `/agf rescan`, scans right away.
 
 Scans run a little at a time, so even a large guild doesn't cause a hitch. The window's footer shows when the last scan ran and what it found.

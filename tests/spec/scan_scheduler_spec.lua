@@ -12,30 +12,34 @@ local MODULES = {
 }
 
 local GUILD = { name = "Knights of Camelot", realm = "Area 52" }
+local FOREVER_GUILD = { name = "Knights of Camelot", realm = "Camelot" }
 
--- A scheduler over the Retail fixture guild. Finished scans are collected
--- in `setup.finished`.
+-- A scheduler over a fixture guild (Retail's, or options.profile's).
+-- Finished scans are collected in `setup.finished`.
 local function build(options)
     options = options or {}
-    local world = fixtures.newEnvironment("Retail", options.world)
+    local profile = options.profile or "Retail"
+    local guild = profile == "Forever" and FOREVER_GUILD or GUILD
+    local rules = { twoPartNames = profile == "Forever", homeRealm = guild.realm }
+    local world = fixtures.newEnvironment(profile, options.world)
     local addon = test.newAddon(unpack(MODULES))
     local client = addon.Compatibility.Create(world.environment)
     local database = options.database or { schemaVersion = 1, guilds = {} }
     local store = addon.FellowshipStore.Create(database)
-    local normalizer = addon.NameNormalizer.Create({ twoPartNames = false, homeRealm = GUILD.realm })
+    local normalizer = addon.NameNormalizer.Create(rules)
     local setup = { addon = addon, database = database, finished = {}, world = world, normalizer = normalizer }
     setup.scheduler = addon.ScanScheduler.Create({
         client = client,
-        rules = { twoPartNames = false },
+        rules = rules,
         context = function()
-            return GUILD, store:Partition(GUILD), normalizer
+            return guild, store:Partition(guild), normalizer
         end,
         onFinished = function(result, summary)
             table.insert(setup.finished, summary)
         end,
     })
     function setup.partition()
-        return store:Partition(GUILD)
+        return store:Partition(guild)
     end
     function setup.login()
         setup.scheduler:OnSavedDataReady()
@@ -137,21 +141,87 @@ test.test("a burst of roster updates is coalesced into one check", function()
     for burst = 1, 10 do
         setup.scheduler:OnRosterUpdate()
     end
-    test.assertEqual(1, #setup.world.timers)
+    -- One coalesced check, beside the periodic roster refresh.
+    local soon = 0
+    local index
+    for index = 1, #setup.world.timers do
+        if setup.world.timers[index].at <= setup.world.time + setup.addon.ScanScheduler.COALESCE_SECONDS then
+            soon = soon + 1
+        end
+    end
+    test.assertEqual(1, soon)
     fixtures.runTimers(setup.world, 2)
 
     test.assertEqual(2, #setup.finished)
 end)
 
-test.test("roster updates with nobody new finish quietly", function()
-    local setup = build()
-    setup.login()
+local function registerNoteTests(profile)
+    test.test(profile .. " roster updates with nothing changed finish quietly", function()
+        local setup = build({ profile = profile })
+        setup.login()
 
-    setup.scheduler:OnRosterUpdate()
-    fixtures.runTimers(setup.world, 2)
+        setup.scheduler:OnRosterUpdate()
+        fixtures.runTimers(setup.world, 2)
 
-    test.assertEqual(1, #setup.finished)
-end)
+        test.assertEqual(1, #setup.finished)
+        test.assertEqual(0, setup.finished[1].notesChanged)
+    end)
+
+    test.test(profile .. " a changed note on a known character is picked up by the next roster update", function()
+        local setup = build({ profile = profile })
+        setup.login()
+        local members = setup.world.guild.members
+        local officer = setup.normalizer:Key(members[1].name)
+        local third = setup.normalizer:Key(members[3].name)
+        local partition = setup.partition()
+        test.assertTrue(partition:GetCharacter(third).player ~= partition:GetCharacter(officer).player)
+        local lastFullScan = partition:GetLastScan()
+        -- An officer edits two notes while this member is online.
+        members[3].note = ">" .. members[1].name
+        members[1].note = "@Tools"
+
+        setup.scheduler:OnRosterUpdate()
+        fixtures.runTimers(setup.world, 2)
+
+        test.assertEqual(2, #setup.finished)
+        test.assertEqual("incremental", setup.finished[2].mode)
+        test.assertEqual(2, setup.finished[2].notesChanged)
+        partition = setup.partition()
+        test.assertEqual(partition:GetCharacter(officer).player, partition:GetCharacter(third).player)
+        test.assertEqual("Tools", partition:GetPlayer(partition:GetCharacter(officer).player).alias)
+        test.assertEqual(lastFullScan, partition:GetLastScan())
+
+        -- Read once: the next update is a quiet check again.
+        setup.scheduler:OnRosterUpdate()
+        fixtures.runTimers(setup.world, 2)
+        test.assertEqual(2, #setup.finished)
+    end)
+
+    test.test(profile .. " an online session asks for a fresh roster every few minutes", function()
+        local setup = build({ profile = profile })
+        setup.login()
+        local requests = setup.world.rosterRequests
+        local interval = setup.addon.ScanScheduler.ROSTER_REFRESH_SECONDS
+
+        fixtures.runTimers(setup.world, interval - 1)
+        test.assertEqual(requests, setup.world.rosterRequests)
+        fixtures.runTimers(setup.world, 1)
+        test.assertEqual(requests + 1, setup.world.rosterRequests)
+        fixtures.runTimers(setup.world, interval)
+        test.assertEqual(requests + 2, setup.world.rosterRequests)
+
+        -- The update that follows picks up a changed note.
+        setup.world.guild.members[3].note = ">" .. setup.world.guild.members[1].name
+        setup.scheduler:OnRosterUpdate()
+        fixtures.runTimers(setup.world, 2)
+        test.assertEqual(1, setup.finished[#setup.finished].notesChanged)
+    end)
+end
+
+local profileIndex
+for profileIndex = 1, #fixtures.PROFILES do
+    registerNoteTests(fixtures.PROFILES[profileIndex])
+end
 
 test.test("a manual scan requests a roster refresh and reprocesses every note", function()
     local setup = build()

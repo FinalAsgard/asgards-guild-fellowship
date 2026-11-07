@@ -2682,11 +2682,25 @@ if clientProfile.supported then
         end
     end
     router:Register("probe",
-        "check what the game reports to the add-on (probe log: the guild event log; probe officer: the" ..
-        " officer channel; probe ready: the Ready flags on the game's guild roster; officers)",
+        "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..
+        " notes changed; probe log: the guild event log; probe officer: the officer channel; probe ready:" ..
+        " the Ready flags on the game's guild roster; officers)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
+            if what == "" or what == "scan" then
+                rosterController:Print("Roster scan probe:")
+                local lines = rosterController:ScanProbeLines()
+                local index
+                for index = 1, #lines do
+                    client:Print("  " .. lines[index])
+                end
+                if what == "" then
+                    client:Print("  Also: " .. addon.Identity.slashCommand .. " probe log, probe officer or" ..
+                        " probe ready.")
+                end
+                return
+            end
             if what == "officer" then
                 probeOfficerChannel()
                 return

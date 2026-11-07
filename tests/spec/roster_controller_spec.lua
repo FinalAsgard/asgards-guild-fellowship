@@ -155,6 +155,24 @@ local function registerProfileTests(profile)
         test.assertContains(setup.window.status, "\nNot synced yet")
     end)
 
+    test.test(profile .. " the scan probe shows the last full scan and how many notes the last scan changed", function()
+        local setup = build(profile)
+        local before = setup.controller:ScanProbeLines()
+        test.assertEqual("Last full scan: never.", before[1])
+        test.assertEqual("Last scan: none yet.", before[2])
+        setup.login()
+        setup.world.time = setup.world.time + 600
+        setup.world.guild.members[3].note = ">" .. setup.world.guild.members[1].name
+
+        setup.controller.scheduler:OnRosterUpdate()
+        fixtures.runTimers(setup.world, 2)
+
+        local lines = setup.controller:ScanProbeLines()
+        test.assertEqual("Last full scan: 10 minutes ago.", lines[1])
+        test.assertEqual("Last scan (on a roster update, just now): 1 note changed.", lines[2])
+        test.assertEqual(2, #lines)
+    end)
+
     test.test(profile .. " opening the window never scans", function()
         local setup = build(profile)
 

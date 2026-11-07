@@ -190,23 +190,16 @@ end
 
 -- Which roster characters a plan processes:
 --   "initial"      every character (the first scan of a guild)
---   "full"         characters whose note fingerprint changed, plus new ones;
---                  with `force`, every character (a manual rescan)
---   "incremental"  only characters the store has never seen, or whose note
---                  was never processed (a scan was cut short)
+--   "full" and "incremental"
+--                  characters whose note fingerprint changed, plus new ones,
+--                  and those whose note was never processed (a scan was cut
+--                  short); a full scan with `force` takes every character (a
+--                  manual rescan)
 -- Characters whose note is unchanged are skipped entirely, so repeat scans
 -- do no per-character reconciliation work.
 local function selects(mode, force, partition, key, fingerprint)
     local character = partition:GetCharacter(key)
-    if character == nil then
-        return true
-    end
-    if mode == "incremental" then
-        -- A character recorded by a scan that was cut short has no note
-        -- fingerprint yet; picking it up again finishes its reconciliation.
-        return character.note == nil
-    end
-    if mode == "initial" or force then
+    if character == nil or mode == "initial" or (force and mode ~= "incremental") then
         return true
     end
     return character.note ~= fingerprint
@@ -232,6 +225,8 @@ end
 --                submitted their link: each leaves for a player of its own
 --   retry        keys whose main marker names nobody, or several players:
 --                read again when the guild's aliases change
+--   notesChanged how many known characters' notes differ from the ones
+--                last processed
 --   conflicts    { character, kind, fingerprint, suggestion? } to queue
 --   departures   stored keys missing from the roster (full scans only)
 --   rejoins      departed keys back in the roster
@@ -253,6 +248,7 @@ function ReconcileEngine.Plan(inputs)
         moves = {},
         splits = {},
         retry = {},
+        notesChanged = 0,
         members = members,
         mode = mode,
         newKeys = {},
@@ -384,6 +380,10 @@ function ReconcileEngine.Plan(inputs)
         if selects(mode, inputs.force, partition, key, plan.fingerprints[key]) then
             table.insert(keys, key)
             plan.processed[key] = true
+            local character = partition:GetCharacter(key)
+            if character ~= nil and character.note ~= nil and character.note ~= plan.fingerprints[key] then
+                plan.notesChanged = plan.notesChanged + 1
+            end
         end
         checkpoint()
     end
@@ -590,7 +590,7 @@ end
 -- Commits a plan to the partition. `checkpoint` is called between
 -- characters, as in Plan. Returns counts for reporting:
 --   recorded, newCharacters (and newKeys, their keys), linked (by notes, moves
---   included), aliased, conflicts, departed, rejoined, promoted
+--   included), aliased, conflicts, departed, rejoined, promoted, notesChanged
 function ReconcileEngine.Apply(partition, plan, checkpoint)
     checkpoint = checkpoint or function() end
 
@@ -747,6 +747,7 @@ function ReconcileEngine.Apply(partition, plan, checkpoint)
         newKeys = plan.newKeys,
         recorded = recorded,
         conflicts = #plan.conflicts,
+        notesChanged = plan.notesChanged,
         departed = departed,
         rejoined = rejoined,
         promoted = #promotions,

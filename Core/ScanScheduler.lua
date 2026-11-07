@@ -8,8 +8,13 @@ local _, addon = ...
 --                away are read at once, and on request. It only reprocesses
 --                notes that changed, so it's cheap when little did.
 --   incremental  when roster updates show characters the store hasn't seen,
+--                known characters whose note changed (an officer edited it),
 --                or known characters whose rank or level changed (promoted
 --                in the game's own guild window, say)
+--
+-- The game only refreshes its copy of the roster when asked (as its guild
+-- window does while open), so every few minutes the scheduler asks for a
+-- fresh roster; the update that follows brings in notes officers changed.
 --
 -- Opening the roster window never scans. A scan only ever works from a
 -- complete roster read: an empty or partial roster (as at login, while it
@@ -24,6 +29,8 @@ local ScanScheduler = {
     BUDGET_MS = 4,
     -- Without a precise clock, yield after this many characters instead.
     STEPS_WITHOUT_CLOCK = 50,
+    -- How often to ask the game for a fresh roster.
+    ROSTER_REFRESH_SECONDS = 300,
 }
 addon.ScanScheduler = ScanScheduler
 
@@ -55,6 +62,20 @@ end
 function Scheduler:OnSavedDataReady()
     self.ready = true
     self.client:RequestGuildRoster()
+    self:ScheduleRefresh()
+end
+
+-- Asks the game for a fresh roster every ROSTER_REFRESH_SECONDS, for as
+-- long as the session lasts.
+function Scheduler:ScheduleRefresh()
+    if self.refreshScheduled then
+        return
+    end
+    self.refreshScheduled = self.client:After(ScanScheduler.ROSTER_REFRESH_SECONDS, function()
+        self.refreshScheduled = false
+        self.client:RequestGuildRoster()
+        self:ScheduleRefresh()
+    end) == true
 end
 
 -- Requests a full scan. `manual` scans reprocess every note. Returns false
@@ -244,8 +265,8 @@ function Scheduler:Run(mode, force)
         checkpoint = checkpoint,
         now = now,
     })
-    -- An incremental check that finds nobody new or returning, and no rank
-    -- or level changed, changes nothing.
+    -- An incremental check that finds nobody new or returning, no note
+    -- changed, and no rank or level changed, changes nothing.
     if planMode == "incremental" and next(plan.processed) == nil and plan.rejoins[1] == nil
         and not factsChanged(partition, members)
     then
@@ -266,6 +287,7 @@ function Scheduler:Run(mode, force)
         departed = result.departed,
         rejoined = result.rejoined,
         promoted = result.promoted,
+        notesChanged = result.notesChanged,
     }
     partition:SetLastScanSummary(summary)
     return { result = result, summary = summary }
