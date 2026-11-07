@@ -561,6 +561,9 @@ function Session:Decide(character, kind, approved)
         if now == nil then
             return false, "the server time isn't known"
         end
+        if not suggestions:StillTheirs(entry) then
+            return false, "it's no longer that member's own player to change"
+        end
         local fact = suggestions:FactFor(entry, officer, now)
         if self:Facts(partition):ApplyAll({ fact }) == 0 then
             return false, "it can't be applied here (is the player marked Don't sync?)"

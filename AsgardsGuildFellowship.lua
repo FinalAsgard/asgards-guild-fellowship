@@ -3571,8 +3571,9 @@ if clientProfile.supported then
     end
     -- The roster keys of everyone in the player's party or raid, or nil
     -- outside a group. Forever gives group members only their first name,
-    -- so the roster decides, as for the Group Finder. Looked up again only
-    -- when the group changes.
+    -- so the roster decides, as for the Group Finder. Looked up again when
+    -- the group or the roster's size changes, or while a guildmate in it
+    -- can't be placed.
     local groupCache = { signature = nil, keys = nil }
     local function groupKeys()
         if not client:IsInGroup() then
@@ -3586,17 +3587,24 @@ if clientProfile.supported then
         end
         -- A roster still loading may not name everyone yet.
         local signature = tostring(client:GetGuildRosterCount()) .. "|" .. table.concat(parts, ";")
-        if groupCache.signature ~= signature then
-            local keys = {}
-            for index = 1, #members do
-                local key = rosterController:RosterKeyFor(members[index].name, members[index].guid)
-                if key ~= nil then
-                    keys[key] = true
-                end
-            end
-            groupCache.signature, groupCache.keys = signature, keys
+        if groupCache.signature == signature then
+            return groupCache.keys
         end
-        return groupCache.keys
+        local keys = {}
+        local complete = true
+        for index = 1, #members do
+            local key = rosterController:RosterKeyFor(members[index].name, members[index].guid)
+            if key ~= nil then
+                keys[key] = true
+            elseif members[index].inGuild then
+                -- A guildmate the roster can't place yet: looked up again
+                -- next time.
+                complete = false
+            end
+        end
+        groupCache.signature = complete and signature or nil
+        groupCache.keys = keys
+        return keys
     end
     -- A board entry as the map shows it: with the character's name and its
     -- chat tag (alias or main), dimmed while the player is in a group it

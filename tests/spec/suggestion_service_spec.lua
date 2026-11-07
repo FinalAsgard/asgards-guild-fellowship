@@ -238,11 +238,44 @@ test.test("a member can't bring a character from another organized player onto t
     test.assertEqual(0, setup.service:Queue({ link(OFFICER, MEMBER, NOW + 1) }, MEMBER), "someone's main")
     test.assertEqual(0, setup.service:Queue({ link("wrench-area52", MEMBER, NOW + 2) }, MEMBER),
         "a player with an alias")
-    partition:SetAlias(partition:GetCharacter("wrench-area52").player, nil, "note")
+    partition:ClearAlias(partition:GetCharacter("wrench-area52").player, "note")
+    test.assertEqual(nil, partition:GetPlayer(partition:GetCharacter("wrench-area52").player).alias)
     partition:SetDeclared("wrench-area52", true, "note")
     test.assertEqual(0, setup.service:Queue({ link("wrench-area52", MEMBER, NOW + 3) }, MEMBER),
         "a declared main")
     test.assertEqual(0, #queued(setup))
+end)
+
+test.test("a member can't take their own characters onto another player", function()
+    local setup = newSetup()
+    local partition = setup.partition
+    -- Wrench is the member's alt; Anvil is someone else on their own.
+    partition:JoinPlayerOf("wrench-area52", MEMBER, "note")
+
+    test.assertEqual(0, setup.service:Queue({ link(MEMBER, "anvil-area52") }, MEMBER), "their main")
+    test.assertEqual(0, setup.service:Queue({ link("wrench-area52", OFFICER, NOW + 1) }, MEMBER), "their alt")
+    test.assertEqual(0, #queued(setup))
+
+    -- Within their own player, or splitting one off, is theirs.
+    test.assertEqual(1, setup.service:Queue({ link("wrench-area52", "wrench-area52", NOW + 2) }, MEMBER))
+end)
+
+test.test("a member on a character nobody organized may suggest joining a main, for an officer to review", function()
+    local setup = newSetup()
+
+    test.assertEqual(1, setup.service:Queue({ link("anvil-area52", MEMBER, NOW, "anvil-area52") }, "anvil-area52"))
+end)
+
+test.test("approving a link the member no longer owns is refused", function()
+    local setup = newSetup()
+    setup.service:Queue({ link("wrench-area52", MEMBER) }, MEMBER)
+    local entry = setup.service:Entry("wrench-area52", "suggested main")
+    test.assertTrue(setup.service:StillTheirs(entry))
+
+    -- A scan named Wrench's player since.
+    setup.partition:SetAlias(setup.partition:GetCharacter("wrench-area52").player, "Spanner", "note")
+
+    test.assertFalse(setup.service:StillTheirs(entry))
 end)
 
 test.test("approving makes an officer fact under the approver's name, newer than what is held", function()

@@ -428,16 +428,37 @@ function Service:Unorganized(key)
 end
 
 -- Whether the member `from` may suggest `fact`: only about their own
--- player (by the officer's data). A main link may also bring a character
--- nobody organized onto the member's player: the officer can't tell which
--- characters the member logged in on, so that one is left to them to
--- review. A character on another organized player is never theirs to move.
+-- player (by the officer's data). A main link must keep both ends theirs:
+-- reorganizing their own player, splitting one of its characters off, or
+-- bringing a character nobody organized onto it. The officer can't tell
+-- which characters the member logged in on, so a character nobody
+-- organized that the member is playing may also join a main: that one is
+-- left to the officer to review. A character on another organized player
+-- is never theirs to move, and their own characters never join another
+-- player.
 function Service:FromOwnPlayer(fact, from)
-    if self:SamePlayer(fact.character, from) then
+    if fact.kind ~= addon.SyncFacts.KIND_MAIN or fact.main == nil then
+        return self:SamePlayer(fact.character, from)
+    end
+    local ownCharacter = self:SamePlayer(fact.character, from)
+    local ownMain = self:SamePlayer(fact.main, from)
+    if ownCharacter and (ownMain or fact.main == fact.character) then
         return true
     end
-    return fact.kind == addon.SyncFacts.KIND_MAIN and fact.main ~= nil and self:SamePlayer(fact.main, from)
-        and self:Unorganized(fact.character)
+    if ownMain and self:Unorganized(fact.character) then
+        return true
+    end
+    return fact.character == from and self:Unorganized(fact.character)
+end
+
+-- Whether queued `entry` is still its member's to suggest, by this
+-- client's data now: a scan may have organized a character since.
+function Service:StillTheirs(entry)
+    local fact = { kind = factKind(entry.kind), character = entry.character }
+    if fact.kind == addon.SyncFacts.KIND_MAIN then
+        fact.main = entry.suggestion.main
+    end
+    return self:FromOwnPlayer(fact, entry.from)
 end
 
 local function findEntry(conflicts, character, kind)
