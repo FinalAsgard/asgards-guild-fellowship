@@ -237,6 +237,20 @@ test.test("the board keeps only the guildmates the caller keeps", function()
     test.assertEqual(1, #board:All())
 end)
 
+test.test("the board drops one guildmate the game reports gone", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local board = addon.LocationBoard.Create()
+    board:OnLocation(protocol.Location("hammer-area52", SPOT), "hammer-area52", 1000)
+    board:OnLocation(protocol.Location("wrench-area52", SPOT), "wrench-area52", 1000)
+
+    test.assertTrue(board:Drop("hammer-area52"))
+    test.assertFalse(board:Drop("hammer-area52"))
+    test.assertFalse(board:Drop(nil))
+    test.assertEqual(1, #board:All())
+    test.assertEqual("wrench-area52", board:All()[1].key)
+end)
+
 test.test("a gm-hide takes that guildmate off the board", function()
     local addon = load()
     local protocol = addon.LocationProtocol
@@ -1552,6 +1566,68 @@ local function registerWholeAddonTests(profile)
             test.assertEqual(0, whispered, kinds[index])
         end
     end)
+
+    test.test(profile .. ": in the whole add-on, a guildmate who logs off gets no more whispers, before the roster says so",
+        function()
+            local guild = fixtures.GUILDS[profile]
+            local function whispersTo(world, name)
+                local count = 0
+                local sent
+                for _, sent in ipairs(world.sentMessages) do
+                    if sent.distribution == "WHISPER" and sent.recipient == name then
+                        count = count + 1
+                    end
+                end
+                return count
+            end
+            local kinds = { "notFound", "offline" }
+            local index
+            for index = 1, #kinds do
+                local filters = {}
+                local channel = fixtures.newChannel()
+                local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR", nil,
+                    function(environment)
+                        environment.ChatFrame_AddMessageEventFilter = function(event, filter)
+                            filters[event] = filters[event] or {}
+                            table.insert(filters[event], filter)
+                        end
+                    end)
+                local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 },
+                    "MAGE")
+                fixtures.deliver(channel)
+                fixtures.runTimers(viewer, 10)
+                local whispered = whispersTo(viewer, sharer.playerName)
+                test.assertTrue(whispered > 0, kinds[index])
+                local function hidden(message)
+                    local filter
+                    for _, filter in ipairs(filters.CHAT_MSG_SYSTEM or {}) do
+                        if filter(nil, "CHAT_MSG_SYSTEM", message, "") == true then
+                            return true
+                        end
+                    end
+                    return false
+                end
+
+                -- The sharer logs off; the viewer's roster still shows them
+                -- online.
+                local message = kinds[index] == "notFound"
+                    and "No player named '" .. sharer.playerName .. "' is currently playing."
+                    or sharer.playerName .. " has gone offline."
+                if kinds[index] == "notFound" then
+                    -- The game's answer to the add-on's whisper stays out of chat.
+                    test.assertTrue(hidden(message))
+                end
+                fixtures.fire(viewer, "CHAT_MSG_SYSTEM", message)
+                test.assertEqual(0, #viewer.pins.icons, kinds[index])
+                fixtures.runTimers(viewer, 60)
+                test.assertEqual(whispered, whispersTo(viewer, sharer.playerName), kinds[index])
+
+                -- The same line for someone the add-on didn't whisper still
+                -- shows, as does the offline notice.
+                test.assertFalse(hidden("No player named 'Stranger' is currently playing."))
+                test.assertFalse(hidden(sharer.playerName .. " has gone offline."))
+            end
+        end)
 
     test.test(profile .. ": in the whole add-on, a party member gets no dot and others outside it are dimmed", function()
         local channel = fixtures.newChannel()

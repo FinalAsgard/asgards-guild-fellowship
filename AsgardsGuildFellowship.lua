@@ -62,7 +62,7 @@ local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
-local dropOfflineLocations
+local dropOfflineLocations, dropLocationOf
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
 local onSlotsChanged, groupBoard, announceGroup
 -- Draws the Group Finder on its tab (set up with the Group Finder below).
@@ -3569,6 +3569,16 @@ if clientProfile.supported then
             return members[key] ~= nil and members[key].online == true
         end)
     end
+    -- A guildmate the game reports offline, gone from the guild, or not
+    -- playing (a whisper to them failed) leaves the board at once, without
+    -- waiting for the roster, so they get no more whispers.
+    dropLocationOf = function(name)
+        local guild, _, normalizer = rosterController:QuietContext()
+        local key = guild and normalizer:Key(name) or nil
+        if key ~= nil and locationBoard:Drop(key) then
+            mapPins:Refresh()
+        end
+    end
     -- The roster keys of everyone in the player's party or raid, or nil
     -- outside a group. Forever gives group members only their first name,
     -- so the roster decides, as for the Group Finder. Looked up again when
@@ -3912,6 +3922,12 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         if kind == "join" or kind == "leave" then
             recordLiveMembership(kind, name)
         end
+        if dropLocationOf ~= nil and (kind == "offline" or kind == "leave" or kind == "notFound") then
+            dropLocationOf(name)
+        end
+        if kind == "notFound" then
+            return
+        end
         guildGreet:OnPresence(kind, name)
         if kind == "join" then
             guildWelcome:OnJoined(name)
@@ -3986,6 +4002,12 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
         return chatAnnotator:Annotate(event, message, sender)
+    end)
+    -- The game answers a whisper to someone who just logged off with "No
+    -- player named ... is currently playing."; when the add-on sent that
+    -- whisper, the line is hidden.
+    client:HidePlayerNotFound(function(name)
+        return comm:WhisperedRecently(name)
     end)
 end)
 

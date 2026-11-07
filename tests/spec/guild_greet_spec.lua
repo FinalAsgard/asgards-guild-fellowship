@@ -359,9 +359,11 @@ for profileIndex = 1, #fixtures.PROFILES do
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "|Hplayer:Bolt Iron|h[Bolt Iron]|h has come online.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt-Area52 has gone offline.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt Iron has joined the guild.")
+        fixtures.fire(world, "CHAT_MSG_SYSTEM", "No player named 'Bolt-Area52' is currently playing.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", nil)
 
-        test.assertEqual("online:Bolt Iron,offline:Bolt-Area52,join:Bolt Iron", table.concat(heard, ","))
+        test.assertEqual("online:Bolt Iron,offline:Bolt-Area52,join:Bolt Iron,notFound:Bolt-Area52",
+            table.concat(heard, ","))
     end)
 end
 

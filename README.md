@@ -598,7 +598,9 @@ A dot disappears when the guildmate:
 - enters a dungeon, raid, battleground or arena (they come back when they leave),
 - turns sharing off,
 - hasn't sent an update for 5 minutes, or
-- shows as offline, or gone from the guild, in the guild roster.
+- logs off or leaves the guild (as soon as the game says so, or the guild roster shows it).
+
+Same-zone whispers stop as soon as a guildmate logs off. If one was already on its way, the game's "No player named ... is currently playing." reply is kept out of your chat.
 
 Nothing is sent during combat, a boss encounter or a keystone run. Location messages from outside the guild, or from add-on versions yours doesn't understand, are ignored.
 
