@@ -106,7 +106,7 @@ The add-on never writes to guild notes.
 ### Scanning
 
 - Every login (and `/reload`) scans the roster, so ranks, notes and departures that changed while you were away show at once. Only notes that changed are read again, so it's quick. It says nothing in chat unless it found something.
-- New members, changed guild notes, and rank or level changes (including promotions made in the game's own guild window) are picked up automatically when the guild roster updates. While you're online the add-on asks the game for a fresh roster every 5 minutes, so a note an officer edits reaches you within a few minutes, without a relog. `/agf probe` shows when the last full scan ran and how many notes the latest scan changed.
+- New members, changed guild notes, and rank or level changes (including promotions made in the game's own guild window) are picked up automatically when the guild roster updates. While you're online the add-on asks the game for a fresh roster every 15 minutes, so a note an officer edits reaches you within 15 minutes, without a relog. `/agf probe` shows when the last full scan ran and how many notes the latest scan changed.
 - **Rescan** in the window, or `/agf rescan`, scans right away.
 
 Scans run a little at a time, so even a large guild doesn't cause a hitch. The window's footer shows when the last scan ran and what it found.

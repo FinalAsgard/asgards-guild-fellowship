@@ -30,7 +30,7 @@ local ScanScheduler = {
     -- Without a precise clock, yield after this many characters instead.
     STEPS_WITHOUT_CLOCK = 50,
     -- How often to ask the game for a fresh roster.
-    ROSTER_REFRESH_SECONDS = 300,
+    ROSTER_REFRESH_SECONDS = 900,
 }
 addon.ScanScheduler = ScanScheduler
 
