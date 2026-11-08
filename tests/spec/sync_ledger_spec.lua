@@ -12,6 +12,12 @@ local function newSetup()
         "Core/SyncLedger.lua"
     )
     local partition = addon.FellowshipStore.Create({ schemaVersion = 2, guilds = {} }):Partition(GUILD)
+    -- Hammer and Wrench are one player; Anvil is another.
+    local _, key
+    for _, key in ipairs({ "hammer-area52", "wrench-area52", "anvil-area52" }) do
+        partition:RecordCharacter(key, { name = key, level = 60 })
+    end
+    partition:JoinPlayerOf("wrench-area52", "hammer-area52", addon.FellowshipStore.SOURCE_SYNC)
     return {
         addon = addon,
         partition = partition,
@@ -50,6 +56,20 @@ test.test("the officer's own stamp with a value a roster worked out since isn't 
         "the alias, now named by the acting main")
     test.assertTrue(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW + 1), NOW + 60),
         "an alias stamp they never wrote")
+    test.assertTrue(setup.ledger:IsForged(alias("anvil-area52", "Hammy", NOW), NOW + 60),
+        "their alias stamp reused for another player")
+end)
+
+test.test("an alias stamp the officer replaced since no longer vouches for drift", function()
+    local setup = newSetup()
+    setup.ledger:Record({ alias("hammer-area52", "Hammy", NOW) }, NOW)
+    test.assertFalse(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW), NOW))
+
+    -- The officer renames the player while the same check is under way.
+    local other = setup.addon.SyncLedger.Create(setup.partition)
+    other:Record({ alias("hammer-area52", "Hammers", NOW + 10) }, NOW + 10)
+
+    test.assertTrue(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW), NOW + 10))
 end)
 
 test.test("a newer edit by the officer replaces the older one, and an older record never does", function()

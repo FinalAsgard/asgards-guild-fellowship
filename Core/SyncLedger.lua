@@ -74,20 +74,37 @@ function Ledger:Record(facts, now)
     end
 end
 
--- Whether this officer stamped an alias at `at`, about any player.
-function Ledger:StampedAlias(data, at)
+-- Whether this officer stamped an alias at `at` for the player `character`
+-- belongs to now, under that player's main then (a character of the same
+-- player). The ledger keys by stamp are found once per ledger, and each is
+-- checked against the ledger as it is now, since a ledger can change while
+-- sync yields.
+function Ledger:StampedAlias(data, character, at)
+    local prefix = addon.SyncFacts.KIND_ALIAS .. "|"
     if self.aliasStamps == nil then
         self.aliasStamps = {}
         local key, held
         for key, held in pairs(data.facts) do
-            if string.sub(key, 1, #addon.SyncFacts.KIND_ALIAS + 1) == addon.SyncFacts.KIND_ALIAS .. "|"
-                and type(held) == "table" and isTime(held.at)
-            then
-                self.aliasStamps[held.at] = true
+            if string.sub(key, 1, #prefix) == prefix and type(held) == "table" and isTime(held.at) then
+                self.aliasStamps[held.at] = self.aliasStamps[held.at] or {}
+                table.insert(self.aliasStamps[held.at], key)
             end
         end
     end
-    return self.aliasStamps[at] == true
+    local current = self.partition:GetCharacter(character)
+    if current == nil then
+        return false
+    end
+    local keys = self.aliasStamps[at] or {}
+    local index
+    for index = 1, #keys do
+        local held = data.facts[keys[index]]
+        local former = self.partition:GetCharacter(string.sub(keys[index], #prefix + 1))
+        if type(held) == "table" and held.at == at and former ~= nil and former.player == current.player then
+            return true
+        end
+    end
+    return false
 end
 
 -- Whether `fact`, naming this officer as its author, is one they never
@@ -107,7 +124,7 @@ function Ledger:IsForged(fact, now)
     if data == nil or not addon.SyncFacts.IsValid(fact) or fact.at < data.since then
         return false
     end
-    if fact.kind == addon.SyncFacts.KIND_ALIAS and self:StampedAlias(data, fact.at) then
+    if fact.kind == addon.SyncFacts.KIND_ALIAS and self:StampedAlias(data, fact.character, fact.at) then
         return false
     end
     local held = data.facts[keyOf(fact)]
