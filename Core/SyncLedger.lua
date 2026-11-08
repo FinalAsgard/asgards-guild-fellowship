@@ -74,25 +74,47 @@ function Ledger:Record(facts, now)
     end
 end
 
+-- Whether this officer stamped an alias at `at`, about any player.
+function Ledger:StampedAlias(data, at)
+    if self.aliasStamps == nil then
+        self.aliasStamps = {}
+        local key, held
+        for key, held in pairs(data.facts) do
+            if string.sub(key, 1, #addon.SyncFacts.KIND_ALIAS + 1) == addon.SyncFacts.KIND_ALIAS .. "|"
+                and type(held) == "table" and isTime(held.at)
+            then
+                self.aliasStamps[held.at] = true
+            end
+        end
+    end
+    return self.aliasStamps[at] == true
+end
+
 -- Whether `fact`, naming this officer as its author, is one they never
--- wrote: newer than anything they wrote about that thing, or the same
--- moment with a different value. Facts older than the ledger itself, or
--- older than this officer's own newer edit, can't change anything they hold
--- and aren't judged.
+-- wrote: newer than anything they wrote about that thing. Facts older than
+-- the ledger itself, or older than this officer's own newer edit, can't
+-- change anything they hold and aren't judged.
+--
+-- A fact carrying a stamp this officer did write isn't forged, even when
+-- its value differs: facts are rebuilt from each roster, so a player whose
+-- main left the guild (and got an acting main) or moved by a guild note
+-- reports the officer's stamp with the main it has now. That's the same
+-- moment about the same thing, or for an alias (named by the player's
+-- main) an alias stamp of theirs under another main. It can't win over
+-- what anyone who held the officer's fact holds.
 function Ledger:IsForged(fact, now)
     local data = self:Data(now)
     if data == nil or not addon.SyncFacts.IsValid(fact) or fact.at < data.since then
+        return false
+    end
+    if fact.kind == addon.SyncFacts.KIND_ALIAS and self:StampedAlias(data, fact.at) then
         return false
     end
     local held = data.facts[keyOf(fact)]
     if type(held) ~= "table" or not isTime(held.at) then
         return true
     end
-    if fact.at ~= held.at then
-        return fact.at > held.at
-    end
-    return fact.main ~= held.main or fact.alias ~= held.alias or fact.text ~= held.text
-        or addon.SyncFacts.DateValue(fact) ~= held.date
+    return fact.at > held.at
 end
 
 -- Logs a forged fact and the character (key) that relayed it.

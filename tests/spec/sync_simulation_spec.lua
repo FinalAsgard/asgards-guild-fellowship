@@ -501,6 +501,56 @@ test.test("a forged relay while the officer is online is corrected at once", fun
     test.assertEqual("hammer-area52", log[1].relayedBy)
 end)
 
+-- `name` leaves `world`'s guild, and a full scan of its roster notices.
+local function leaveGuild(world, name)
+    local members = world.guild.members
+    local index
+    for index = #members, 1, -1 do
+        if members[index].name == name then
+            table.remove(members, index)
+        end
+    end
+    world.addon.rosterController.scheduler:RequestFull(true)
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 1000)
+end
+
+test.test("a member's acting main for the officer's linked player isn't taken for a forgery", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+    linkAlt(officer, "hammer-area52", "grandmaster-area52")
+    test.assertTrue(officer.addon.rosterController:SetAlias("grandmaster-area52", "Gramps"))
+    fixtures.deliver(channel)
+    logOff(channel, officer)
+
+    -- While the officer is away, the main leaves and Wrench's add-on makes
+    -- the alt the acting main.
+    leaveGuild(wrench, "Grandmaster-Area52")
+    test.assertEqual("hammer-area52", mainOf(wrench, "hammer-area52"))
+
+    -- The officer is back before their own scan noticed: Wrench's answer
+    -- carries the officer's stamps with the acting main.
+    fixtures.joinChannel(channel, officer)
+    officer.time = wrench.time + 60
+    local printed = #officer.messages
+    officer.addon.syncSession:Announce()
+    local round
+    for round = 1, 4 do
+        fixtures.deliver(channel)
+        fixtures.runTimers(wrench, 5)
+        fixtures.runTimers(officer, 5)
+    end
+
+    local index
+    for index = printed + 1, #officer.messages do
+        test.assertEqual(nil, string.find(officer.messages[index], "never made", 1, true), "no forgery warning")
+    end
+    test.assertEqual(nil, partitionOf(officer):GetForgeries())
+    test.assertEqual("hammer-area52", mainOf(wrench, "hammer-area52"), "the acting main isn't reverted")
+    test.assertEqual("Gramps", aliasOf(wrench, "hammer-area52"))
+end)
+
 -- Aliases ---------------------------------------------------------------------
 
 test.test("an officer's alias shows in members' roster and chat tags", function()
