@@ -14,8 +14,11 @@ local _, addon = ...
 --             when the ledger started: facts dated earlier (made before
 --             this install kept a ledger) can't be judged and are trusted.
 --   forgeries a list, newest last, of
---             { kind, character, main?, alias?, text?, at, relayedBy, seen }
---             keeping the last MAX_FORGERIES.
+--             { kind, character, main?, alias?, text?, roles?, declared?,
+--               date?, at, relayedBy, seen, heldAt? }
+--             keeping the last MAX_FORGERIES. `heldAt` is the stamp the
+--             ledger held for that thing when the fact arrived (nil when
+--             it held none).
 --
 -- Pure: works on a FellowshipStore partition and never touches the game.
 local SyncLedger = {
@@ -134,9 +137,12 @@ function Ledger:IsForged(fact, now)
     return fact.at > held.at
 end
 
--- Logs a forged fact and the character (key) that relayed it.
+-- Logs a forged fact and the character (key) that relayed it, with the
+-- stamp the ledger held for that thing.
 function Ledger:LogForgery(fact, relayedBy, now)
     local log = self:Forgeries()
+    local data = self.partition:GetLedger()
+    local held = type(data) == "table" and type(data.facts) == "table" and data.facts[keyOf(fact)] or nil
     table.insert(log, {
         kind = fact.kind,
         character = fact.character,
@@ -144,14 +150,73 @@ function Ledger:LogForgery(fact, relayedBy, now)
         alias = fact.alias,
         text = fact.text,
         roles = fact.roles,
+        declared = fact.declared,
+        date = addon.SyncFacts.DateValue(fact),
         at = fact.at,
         relayedBy = relayedBy,
         seen = now,
+        heldAt = type(held) == "table" and isTime(held.at) and held.at or nil,
     })
     while #log > SyncLedger.MAX_FORGERIES do
         table.remove(log, 1)
     end
     self.partition:SetForgeries(log)
+end
+
+-- What a logged forgery set, as text.
+local function valueOf(entry)
+    if entry.main ~= nil then
+        return "main " .. tostring(entry.main)
+    end
+    if entry.alias ~= nil then
+        return entry.alias == "" and "alias cleared" or ('alias "' .. tostring(entry.alias) .. '"')
+    end
+    if entry.declared ~= nil then
+        return entry.declared and "declared a main" or "not declared a main"
+    end
+    if type(entry.roles) == "table" then
+        local roles = {}
+        local index
+        for index = 1, #entry.roles do
+            roles[index] = tostring(entry.roles[index])
+        end
+        return "roles " .. (roles[1] ~= nil and table.concat(roles, ", ") or "none")
+    end
+    if entry.text ~= nil then
+        return entry.text == "" and "cleared" or ('"' .. tostring(entry.text) .. '"')
+    end
+    if entry.date ~= nil then
+        return "date " .. tostring(entry.date)
+    end
+    return "?"
+end
+
+-- The newest `limit` logged forgeries of `partition`, oldest first, one
+-- line each, for `/agf probe forgeries`. `formatTime(timestamp)` -> text.
+function SyncLedger.ForgeryLines(partition, formatTime, limit)
+    local log = SyncLedger.Create(partition):Forgeries()
+    local lines = {}
+    local data = partition:GetLedger()
+    if type(data) == "table" and isTime(data.since) then
+        table.insert(lines, "Ledger of your edits kept since " .. formatTime(data.since) .. ".")
+    end
+    if log[1] == nil then
+        table.insert(lines, "No forged edits are logged here.")
+        return lines
+    end
+    local first = math.max(1, #log - limit + 1)
+    table.insert(lines, #log .. " forged edits logged; the last " .. (#log - first + 1) .. ", oldest first:")
+    local index
+    for index = first, #log do
+        local entry = log[index]
+        if type(entry) == "table" then
+            table.insert(lines, formatTime(entry.seen) .. " from " .. tostring(entry.relayedBy) .. ": " ..
+                tostring(entry.kind) .. " of " .. tostring(entry.character) .. ", " .. valueOf(entry) ..
+                ", stamped " .. formatTime(entry.at) .. "; your ledger held " ..
+                (isTime(entry.heldAt) and formatTime(entry.heldAt) or "nothing") .. ".")
+        end
+    end
+    return lines
 end
 
 -- The forgery log, oldest first.

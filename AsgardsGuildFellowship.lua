@@ -2683,8 +2683,9 @@ if clientProfile.supported then
     end
     router:Register("probe",
         "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..
-        " notes changed; probe log: the guild event log; probe officer: the officer channel; probe ready:" ..
-        " the Ready flags on the game's guild roster; officers)",
+        " notes changed; probe forgeries: the guild sync edits caught as forged in your name; probe log: the" ..
+        " guild event log; probe officer: the officer channel; probe ready: the Ready flags on the game's" ..
+        " guild roster; officers)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
@@ -2696,8 +2697,24 @@ if clientProfile.supported then
                     client:Print("  " .. lines[index])
                 end
                 if what == "" then
-                    client:Print("  Also: " .. addon.Identity.slashCommand .. " probe log, probe officer or" ..
-                        " probe ready.")
+                    client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
+                        " probe officer or probe ready.")
+                end
+                return
+            end
+            if what == "forgeries" then
+                local _, partition = rosterController:QuietContext()
+                if partition == nil then
+                    rosterController:Print("Not in a guild.")
+                    return
+                end
+                rosterController:Print("Forged edit probe:")
+                local lines = addon.SyncLedger.ForgeryLines(partition, function(timestamp)
+                    return client:FormatDateTime(timestamp)
+                end, 10)
+                local index
+                for index = 1, #lines do
+                    client:Print("  " .. lines[index])
                 end
                 return
             end
@@ -2710,7 +2727,8 @@ if clientProfile.supported then
                 return
             end
             if what ~= "log" then
-                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe log, " ..
+                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe forgeries, " ..
+                    addon.Identity.slashCommand .. " probe log, " ..
                     addon.Identity.slashCommand .. " probe officer or " .. addon.Identity.slashCommand ..
                     " probe ready.")
                 return

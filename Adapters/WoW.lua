@@ -1267,6 +1267,19 @@ function Client:FormatDate(timestamp)
     return tostring(timestamp)
 end
 
+-- A timestamp as "2026-10-05 21:04:09" (local time), or the raw number
+-- when the client has no date function.
+function Client:FormatDateTime(timestamp)
+    if type(timestamp) ~= "number" then
+        return "?"
+    end
+    local ok, text = callFunction(self.environment.date, "%Y-%m-%d %H:%M:%S", timestamp)
+    if ok and type(text) == "string" then
+        return text
+    end
+    return tostring(timestamp)
+end
+
 -- The class color as an "ffrrggbb" hex string, or nil.
 function Client:GetClassColor(classToken)
     local colors = self.environment.RAID_CLASS_COLORS
