@@ -581,6 +581,23 @@ function Fixtures.newEnvironment(profile, options)
         end,
     })
     environment._G = environment
+    -- Each client draws from its own seeded sequence, so the add-on's random
+    -- delays don't depend on which tests ran before or on the interpreter's
+    -- generator (LuaJIT's and Lua 5.1's differ).
+    local seed = 12345
+    environment.math = setmetatable({
+        random = function(low, high)
+            -- Park-Miller: the product stays exact in a double.
+            seed = (seed * 16807) % 2147483647
+            if low == nil then
+                return seed / 2147483647
+            end
+            if high == nil then
+                low, high = 1, low
+            end
+            return low + seed % (high - low + 1)
+        end,
+    }, { __index = math })
 
     local declaredClient = options.declaredClient
     if declaredClient == nil then

@@ -12,6 +12,12 @@ local function newSetup()
         "Core/SyncLedger.lua"
     )
     local partition = addon.FellowshipStore.Create({ schemaVersion = 2, guilds = {} }):Partition(GUILD)
+    -- Hammer and Wrench are one player; Anvil is another.
+    local _, key
+    for _, key in ipairs({ "hammer-area52", "wrench-area52", "anvil-area52" }) do
+        partition:RecordCharacter(key, { name = key, level = 60 })
+    end
+    partition:JoinPlayerOf("wrench-area52", "hammer-area52", addon.FellowshipStore.SOURCE_SYNC)
     return {
         addon = addon,
         partition = partition,
@@ -27,18 +33,43 @@ local function alias(character, text, at)
     return { kind = "alias", character = character, alias = text, at = at, by = OFFICER }
 end
 
-test.test("facts the officer wrote are known, and anything newer or different about the same thing is forged", function()
+test.test("facts the officer wrote are known, and anything newer about the same thing is forged", function()
     local setup = newSetup()
     setup.ledger:Record({ link("wrench-area52", "hammer-area52", NOW), alias("hammer-area52", "Hammy", NOW) }, NOW)
 
     test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW), NOW), "the same fact")
     test.assertFalse(setup.ledger:IsForged(alias("hammer-area52", "Hammy", NOW), NOW))
-    test.assertTrue(setup.ledger:IsForged(link("wrench-area52", "anvil-area52", NOW), NOW), "another value")
     test.assertTrue(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW + 5), NOW), "newer")
     test.assertTrue(setup.ledger:IsForged(link("anvil-area52", "hammer-area52", NOW), NOW), "never written")
-    test.assertTrue(setup.ledger:IsForged(alias("hammer-area52", "", NOW), NOW))
+    test.assertTrue(setup.ledger:IsForged(alias("hammer-area52", "Hammy", NOW + 5), NOW), "a newer alias")
     -- Older than the officer's own newer edit: it can't change anything.
     test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "anvil-area52", NOW - 5), NOW))
+end)
+
+test.test("the officer's own stamp with a value a roster worked out since isn't forged", function()
+    local setup = newSetup()
+    setup.ledger:Record({ link("wrench-area52", "hammer-area52", NOW), alias("hammer-area52", "Hammy", NOW) }, NOW)
+
+    -- Hammer left the guild and Wrench became the player's acting main.
+    test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "wrench-area52", NOW), NOW + 60), "the link")
+    test.assertFalse(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW), NOW + 60),
+        "the alias, now named by the acting main")
+    test.assertTrue(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW + 1), NOW + 60),
+        "an alias stamp they never wrote")
+    test.assertTrue(setup.ledger:IsForged(alias("anvil-area52", "Hammy", NOW), NOW + 60),
+        "their alias stamp reused for another player")
+end)
+
+test.test("an alias stamp the officer replaced since no longer vouches for drift", function()
+    local setup = newSetup()
+    setup.ledger:Record({ alias("hammer-area52", "Hammy", NOW) }, NOW)
+    test.assertFalse(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW), NOW))
+
+    -- The officer renames the player while the same check is under way.
+    local other = setup.addon.SyncLedger.Create(setup.partition)
+    other:Record({ alias("hammer-area52", "Hammers", NOW + 10) }, NOW + 10)
+
+    test.assertTrue(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW), NOW + 10))
 end)
 
 test.test("a newer edit by the officer replaces the older one, and an older record never does", function()
@@ -48,7 +79,7 @@ test.test("a newer edit by the officer replaces the older one, and an older reco
     setup.ledger:Record({ link("wrench-area52", "hammer-area52", NOW) }, NOW + 10)
 
     test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "anvil-area52", NOW + 10), NOW + 10))
-    test.assertTrue(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW + 10), NOW + 10))
+    test.assertTrue(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW + 11), NOW + 10))
 end)
 
 test.test("facts dated before the ledger started are trusted, and nothing is judged without a clock", function()
