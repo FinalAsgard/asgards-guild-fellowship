@@ -16,6 +16,12 @@ local _, addon = ...
 -- is back on and the player is out.
 local LocationScheduler = {
     BROADCAST_SECONDS = 120,
+    -- The fast same-zone `gm-near` updates are off for now: a whisper to a
+    -- guildmate who just logged off gets the sender "No player named ...
+    -- is currently playing.", even after the first one drops them, since
+    -- whispers already queued still go out. Same-zone guildmates show where
+    -- they were at their last gm-loc until this is reworked.
+    NEAR_ENABLED = false,
     MIN_GAP_SECONDS = 10,
     NEAR_SECONDS = 10,
     -- With this many guildmates near, one gm-near goes to the guild instead
@@ -85,6 +91,9 @@ end
 -- the `gm-near`, no names and true when it goes to the guild instead, or
 -- nil.
 function Scheduler:Near(state)
+    if not LocationScheduler.NEAR_ENABLED then
+        return nil
+    end
     local spot = state.spot
     if state.sharing == false or state.inInstance or type(state.now) ~= "number" or state.character == nil
         or spot == nil
