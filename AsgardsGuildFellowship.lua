@@ -2332,6 +2332,37 @@ if clientProfile.supported then
         end
         return addon.PromotionPolicy.MatchSet(inputs)
     end
+    -- Why the character named `name` (in the game's guild roster) should be
+    -- promoted to match its player: { rankName, highestName,
+    -- highestRankName }, the rank to promote it to and the player's
+    -- highest character and its rank; nil when it needn't be, or for a
+    -- member.
+    promotions.matchFor = function(name)
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        local _, _, normalizer = rosterController:QuietContext()
+        local key = normalizer and normalizer:Key(name)
+        local character = key and inputs.partition:GetCharacter(key)
+        local target = character and addon.PromotionPolicy.MatchTarget(inputs, key)
+        if target == nil then
+            return nil
+        end
+        local highestKey, highest = addon.PromotionPolicy.HighestCharacter(inputs.partition, character.player)
+        local highestCharacter = highestKey and inputs.partition:GetCharacter(highestKey)
+        if highestCharacter == nil then
+            return nil
+        end
+        local function rankName(rank)
+            return inputs.rankNames[rank + 1] or ("Rank " .. rank)
+        end
+        return {
+            rankName = rankName(target),
+            highestName = normalizer:Display(highestCharacter.name) or highestKey,
+            highestRankName = rankName(highest),
+        }
+    end
     -- The game's name for rank index `rank`.
     promotions.rankName = function(rank)
         return (client:GetGuildRankNames() or {})[rank + 1] or ("Rank " .. rank)
@@ -3480,6 +3511,10 @@ if clientProfile.supported then
         -- player, for anyone.
         showPlayer = function(name)
             rosterController:ShowPlayerNamed(name)
+        end,
+        -- Officers see why a selected alt should be promoted to match.
+        matchFor = function(name)
+            return promotions.matchFor(name)
         end,
         -- Officers see which members are ready for promotion, and which
         -- alts to promote to match their player (that flag wins): worked

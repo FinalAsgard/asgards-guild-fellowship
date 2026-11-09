@@ -134,6 +134,9 @@ local function build(world, options)
             options.shownPlayers = options.shownPlayers or {}
             table.insert(options.shownPlayers, name)
         end,
+        matchFor = function(name)
+            return (options.matches or {})[name]
+        end,
         readyCheck = function()
             options.readyChecks = (options.readyChecks or 0) + 1
             local ready = options.ready
@@ -260,6 +263,42 @@ local function registerProfileTests(profile)
         test.assertEqual("TOPRIGHT", panel.points[2][1])
         test.assertEqual("BOTTOMRIGHT", panel.points[2][3])
         test.assertEqual(nil, panel.width, "its width follows the detail panel")
+    end)
+
+    test.test(profile .. ": an alt to promote to match gets a line naming the rank and the player's highest",
+        function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local match = { rankName = "Officer", highestName = "Toolbox", highestRankName = "Guild Master" }
+        local options = { rows = { Hammer = ROW }, matches = { Hammer = match, Wrench = match } }
+        local overlay = build(world, options)
+        overlay:Attach()
+
+        -- With an out-of-date note: under the note's lines, Ignore kept.
+        detail:DisplayMember(1, { name = "Hammer" })
+        local panel = detail.panel
+        test.assertTrue(panel.shown)
+        test.assertContains(panel.match.text, "Promote to Officer to match Toolbox (Guild Master), this player's "
+            .. "highest.")
+        test.assertTrue(panel.match.shown)
+        test.assertEqual(panel.problems, panel.match.points[1][2], "under the problems")
+        test.assertTrue(panel.button.shown)
+        test.assertEqual(18 + 3 + 12 + 3 + 12 + 16, panel.height)
+
+        -- Note fine: the match line alone, first, with no Ignore.
+        detail:DisplayMember(1, { name = "Wrench" })
+        test.assertTrue(panel.shown)
+        test.assertFalse(panel.suggested.shown)
+        test.assertFalse(panel.button.shown)
+        test.assertEqual(panel, panel.match.points[1][2])
+        test.assertEqual(12 + 16, panel.height)
+
+        -- Neither: hidden. Members never see it.
+        detail:DisplayMember(1, { name = "Toolbox" })
+        test.assertFalse(panel.shown)
+        options.officer = false
+        detail:DisplayMember(1, { name = "Wrench" })
+        test.assertFalse(panel.shown)
     end)
 
     test.test(profile .. ": selecting a member opens the add-on's player panel, for anyone, once per selection",
@@ -619,6 +658,13 @@ local function registerRowTests(profile)
 
         -- The alt's rank has no requirements: the match line still shows.
         test.assertContains(matchLine(), "Promote to match: Officer")
+        -- Selected in the game's roster, the panel under the details says
+        -- which rank and why.
+        detail:DisplayMember(1, { name = alt.name })
+        test.assertTrue(detail.panel.shown)
+        local main = partition:GetCharacter(partition:GetPlayer(partition:GetCharacter(altKey).player).main)
+        test.assertContains(detail.panel.match.text, "Promote to Officer to match "
+            .. normalizer:Display(main.name) .. " (")
 
         -- The officer turns matching off for Officer, then Veteran too:
         -- the flag moves down, then goes, then comes back.

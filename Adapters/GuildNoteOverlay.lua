@@ -46,6 +46,9 @@ local GuildNoteOverlay = {
     -- from the plain arrow; it's checked in game on the PRD's HITL issue.
     MATCH_TINT = { 0.30, 0.65, 1.00 },
     MATCH_TOOLTIP = "Promote to match: %s",
+    -- The note panel's line for an alt to promote to match: the rank, then
+    -- the player's highest character and its rank.
+    MATCH_TEXT = "|cff4da6ffPromote to %s to match %s (%s), this player's highest.|r",
     -- The note panel: this far right of the detail panel's edges (to clear
     -- the guild roster window's own edge), then its edge, the room inside
     -- it, and the gap between lines.
@@ -74,6 +77,10 @@ Overlay.__index = Overlay
 --   ignore      function(row) -> leaves the row's mismatch alone until its
 --               note or suggestion changes (Partition:IgnoreNote); the
 --               overlay redraws afterwards
+--   matchFor    function(name) -> { rankName, highestName,
+--               highestRankName } when the roster member named `name`
+--               should be promoted to `rankName` to match their player's
+--               highest character, else nil (and for members)
 --   showPlayer  function(name) -> opens the add-on's player panel for the
 --               player of the roster member named `name`, when it knows
 --               them
@@ -94,6 +101,9 @@ function GuildNoteOverlay.Create(options)
         end,
         ignore = options.ignore or function() end,
         showPlayer = options.showPlayer or function() end,
+        matchFor = options.matchFor or function()
+            return nil
+        end,
         readyCheck = options.readyCheck or function()
             return nil
         end,
@@ -183,6 +193,9 @@ function Overlay:Attach()
         created.suggested = line(nil, "GameFontHighlightSmall")
         created.suggested:SetPoint("RIGHT", button, "LEFT", -4, 0)
         created.problems = line(created.suggested, "GameFontNormalSmall")
+        -- Placed when shown: under the note's lines, or first without them.
+        created.match = created:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        created.match:SetJustifyH("LEFT")
         created.tooLong = line(created.problems, "GameFontRedSmall")
         created:Hide()
         return created
@@ -218,49 +231,109 @@ function Overlay:SelectMember(name)
     end
 end
 
+-- The note panel's line for `match` (see the matchFor option).
+function GuildNoteOverlay.MatchLine(match)
+    return string.format(GuildNoteOverlay.MATCH_TEXT, tostring(match.rankName), tostring(match.highestName),
+        tostring(match.highestRankName))
+end
+
 -- Shows the note panel for the member named `name`, or hides it: for
--- officers, for a member whose note is out of date.
+-- officers, for a member whose note is out of date (what it should say,
+-- with Ignore) or who should be promoted to match their player (the rank,
+-- and why), or both.
 function Overlay:ShowMember(name)
     self.member = name
     local panel = self.panel
     if panel == nil then
         return
     end
-    local row
+    local row, match
     if name ~= nil and self.isOfficer() then
         local ok, found = pcall(self.rowFor, name)
         row = ok and found or nil
+        local okMatch, matched = pcall(self.matchFor, name)
+        match = okMatch and type(matched) == "table" and matched or nil
     end
     self.shownRow = row
-    if row == nil then
+    if row == nil and match == nil then
         panel:Hide()
         return
     end
-    local lines = GuildNoteOverlay.Lines(row)
+    local noteLines = { panel.suggested, panel.problems, panel.tooLong }
+    local lines = row and GuildNoteOverlay.Lines(row) or { suggested = "", problems = "", tooLong = "" }
     panel.suggested:SetText(lines.suggested)
     panel.problems:SetText(lines.problems)
     panel.tooLong:SetText(lines.tooLong)
-    panel:SetHeight(self:PanelHeight(panel))
+    local index
+    for index = 1, #noteLines do
+        if row ~= nil then
+            noteLines[index]:Show()
+        else
+            noteLines[index]:Hide()
+        end
+    end
+    if row ~= nil then
+        panel.ignore:Show()
+    else
+        panel.ignore:Hide()
+    end
+    -- The match line goes under the last note line with text, else first.
+    local padding = GuildNoteOverlay.PANEL_PADDING
+    panel.match:SetText(match and GuildNoteOverlay.MatchLine(match) or "")
+    pcall(panel.match.ClearAllPoints, panel.match)
+    if match ~= nil then
+        local above
+        for index = 1, #noteLines do
+            if row ~= nil and (noteLines[index]:GetText() or "") ~= "" then
+                above = noteLines[index]
+            end
+        end
+        if above == nil then
+            panel.match:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -padding)
+        elseif above == panel.suggested then
+            -- Below Ignore too, which sits beside the suggestion.
+            panel.match:SetPoint("TOPLEFT", panel, "TOPLEFT", padding,
+                -padding - math.max(self:LineHeight(above), GuildNoteOverlay.IGNORE_SIZE[2])
+                - GuildNoteOverlay.LINE_GAP)
+        else
+            panel.match:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -GuildNoteOverlay.LINE_GAP)
+        end
+        panel.match:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
+        panel.match:Show()
+    else
+        panel.match:Hide()
+    end
+    panel:SetHeight(self:PanelHeight(panel, row ~= nil, match ~= nil))
     panel:Show()
+end
+
+-- How tall `text` is as wrapped, where the client says; LINE_HEIGHT
+-- otherwise.
+function Overlay:LineHeight(text)
+    local ok, found = pcall(text.GetStringHeight, text)
+    return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT
 end
 
 -- The panel's height for the lines it shows now: each line as tall as its
 -- wrapped text where the client says, the Ignore button's height at least
--- for the first.
-function Overlay:PanelHeight(panel)
-    local function height(text)
-        local ok, found = pcall(text.GetStringHeight, text)
-        return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT
-    end
-    local total = math.max(height(panel.suggested), GuildNoteOverlay.IGNORE_SIZE[2])
-    local lines = { panel.problems, panel.tooLong }
-    local index
-    for index = 1, #lines do
-        local text = lines[index]
-        local ok, shown = pcall(text.GetText, text)
-        if ok and type(shown) == "string" and shown ~= "" then
-            total = total + GuildNoteOverlay.LINE_GAP + height(text)
+-- for the note's first; the note's lines when `note`, the match line when
+-- `match`.
+function Overlay:PanelHeight(panel, note, match)
+    local total = 0
+    if note then
+        total = math.max(self:LineHeight(panel.suggested), GuildNoteOverlay.IGNORE_SIZE[2])
+        local lines = { panel.problems, panel.tooLong }
+        local index
+        for index = 1, #lines do
+            local text = lines[index]
+            local ok, shown = pcall(text.GetText, text)
+            if ok and type(shown) == "string" and shown ~= "" then
+                total = total + GuildNoteOverlay.LINE_GAP + self:LineHeight(text)
+            end
         end
+    end
+    if match then
+        total = total + (note and GuildNoteOverlay.LINE_GAP or 0) + self:LineHeight(panel.match)
     end
     return total + 2 * GuildNoteOverlay.PANEL_PADDING
 end

@@ -429,7 +429,7 @@ When a player has characters at different ranks, officers see each alt that's be
 The flag shows in three places:
 
 - **The player panel's Promotion tab**, as a line of its own under the alt's line, apart from its checklist.
-- **The game guild roster's Promotion panel**, the same way, when that alt is selected.
+- **The panel under the game guild roster's member details**, when that alt is selected, saying which rank and why, for example **Promote to Officer to match Toolbox (Guild Master), this player's highest.** It shares the panel with the [out-of-date note](#out-of-date-guild-notes) suggestion when both apply.
 - **The game's guild roster list**, as the same up arrow as Ready for promotion, tinted blue. Hover it for the rank, for example **Promote to match: Officer**. An alt that's both behind and ready shows the blue arrow. `/agf probe ready` counts the alts to promote to match, lists each with its target rank, and says how many rows show the blue arrow.
 
 Members never see match flags.

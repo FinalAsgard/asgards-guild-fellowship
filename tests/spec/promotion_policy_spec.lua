@@ -145,6 +145,23 @@ test.test("an alt below its player's highest rank is matched to that rank", func
     test.assertEqual(nil, Policy.MatchTarget(inputs, "alt"), "the flag clears once the alt reaches the rank")
 end)
 
+test.test("the player's highest character is the one with the top rank, the main on a tie", function()
+    -- The main's key sorts after its alts', so it wins a tie by being the
+    -- main, not by its name.
+    local inputs, addon = newPlayers({ zmain = 3, alt = 1, third = 4, solo = 2 }, { { "zmain", "alt", "third" } })
+    local Policy = addon.PromotionPolicy
+    local player = inputs.partition:GetCharacter("zmain").player
+
+    local key, rank = Policy.HighestCharacter(inputs.partition, player)
+    test.assertEqual("alt", key)
+    test.assertEqual(1, rank)
+
+    inputs.partition:RecordCharacter("zmain", { rankIndex = 1 })
+    key = Policy.HighestCharacter(inputs.partition, player)
+    test.assertEqual("zmain", key, "the main wins a tie")
+    test.assertEqual(1, Policy.HighestRank(inputs.partition, player))
+end)
+
 test.test("an alt that outranks the main sets the target", function()
     local inputs, addon = newPlayers({ main = 4, alt = 1, third = 3 }, { { "main", "alt", "third" } })
 
