@@ -708,36 +708,30 @@ end)
 
 -- Don't sync -------------------------------------------------------------------
 
-test.test("a member's don't-sync player keeps their version, and rejoins officer data when turned off", function()
-    local channel = fixtures.newChannel()
-    local officer = login(channel, "Toolbox-Area52")
-    local member = login(channel, "Wrench-Area52")
-    local controller = member.addon.rosterController
-    test.assertTrue(controller:SetDontSync("hammer-area52", true))
+test.test("a don't-sync mark from an earlier version is cleared at the next announcement, rejoining officer data",
+    function()
+        local channel = fixtures.newChannel()
+        local officer = login(channel, "Toolbox-Area52")
+        local member = login(channel, "Wrench-Area52")
+        -- An earlier version kept this player as the member's own.
+        local hammerPlayer = playerIdOf(member, "hammer-area52")
+        partitionOf(member):SetNoSync(hammerPlayer, true)
 
-    linkAlt(officer, "hammer-area52", "toolbox-area52")
-    officer.addon.rosterController:SetAlias("hammer-area52", "The Tool")
-    fixtures.deliver(channel)
+        linkAlt(officer, "hammer-area52", "toolbox-area52")
+        officer.addon.rosterController:SetAlias("hammer-area52", "The Tool")
+        fixtures.deliver(channel)
+        test.assertEqual("hammer-area52", mainOf(member, "hammer-area52"), "still kept until the mark is cleared")
 
-    test.assertEqual("hammer-area52", mainOf(member, "hammer-area52"))
-    test.assertEqual(nil, aliasOf(member, "hammer-area52"))
-    -- Other players still sync while one is pinned.
-    linkAlt(officer, "grandmaster-area52", "toolbox-area52")
-    fixtures.deliver(channel)
-    test.assertEqual("toolbox-area52", mainOf(member, "grandmaster-area52"))
+        -- The member's next announcement clears it and asks the guild.
+        announce(member)
+        test.assertFalse(partitionOf(member):IsNoSync(hammerPlayer))
+        fixtures.deliver(channel)
+        fixtures.runTimers(officer, 5)
+        fixtures.deliver(channel)
 
-    -- Turning it off asks the guild right away; the officer answers.
-    local sent = #member.sentMessages
-    test.assertTrue(controller:SetDontSync("hammer-area52", false))
-    test.assertEqual(sent + 1, #member.sentMessages)
-    test.assertEqual("digest", decode(member, member.sentMessages[#member.sentMessages]).t)
-    fixtures.deliver(channel)
-    fixtures.runTimers(officer, 5)
-    fixtures.deliver(channel)
-
-    test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
-    test.assertEqual("The Tool", aliasOf(member, "hammer-area52"))
-end)
+        test.assertEqual("toolbox-area52", mainOf(member, "hammer-area52"))
+        test.assertEqual("The Tool", aliasOf(member, "hammer-area52"))
+    end)
 
 -- Suggestions -------------------------------------------------------------------
 
@@ -894,7 +888,8 @@ test.test("accepting all says how many suggestions were left undecided, and why"
     local hammer = login(channel, "Hammer-Area52")
     test.assertTrue(hammer.addon.rosterController:SetAlias("hammer-area52", "Hammy"))
     fixtures.deliver(channel)
-    test.assertTrue(officer.addon.rosterController:SetDontSync("hammer-area52", true))
+    -- A don't-sync mark an earlier version left, not yet cleared.
+    test.assertTrue(partitionOf(officer):SetNoSync(playerIdOf(officer, "hammer-area52"), true))
     local printed = #officer.messages
 
     test.assertTrue(officer.addon.rosterController:AcceptAllConflicts())

@@ -447,15 +447,18 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertContains(table.concat(hammer.messages, "\n"), "Only officers can set dates.")
     end)
 
-    test.test(profile .. " the officer's player panel shows join dates, time at rank, and earliest join", function()
+    test.test(profile .. " the officer's player panel shows the earliest join, and each character's dates", function()
         local channel = fixtures.newChannel()
         local tool = login(profile, channel, names[1])
         local hammer = login(profile, channel, names[2])
         settle(channel)
 
+        -- The header's earliest join, and each character's dates for the Log.
+        test.assertEqual("before tracking", tool.addon.rosterController.joined({ keyOf(tool, names[2]) }))
         local lines = tool.addon.rosterController.membership({ keyOf(tool, names[2]) })
-        test.assertEqual("Earliest join: before tracking", lines[1])
-        test.assertContains(lines[2], "joined before tracking, at this rank since before tracking")
+        test.assertEqual(1, #lines)
+        test.assertContains(lines[1], "joined before tracking, at this rank since before tracking")
+        test.assertEqual(nil, hammer.addon.rosterController.joined({ keyOf(hammer, names[2]) }))
         test.assertEqual(nil, hammer.addon.rosterController.membership({ keyOf(hammer, names[2]) }))
     end)
 end

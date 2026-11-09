@@ -39,13 +39,15 @@ local function characterEntry(inputs, key, isMain, altCount)
         kind = "character",
         key = key,
         name = inputs.normalizer:Display(live.name or character.name) or key,
+        -- The name's class color ("ffrrggbb"), as the roster colors it.
+        color = inputs.classColor and inputs.classColor(live.classToken or character.class) or nil,
         level = live.level or character.level,
         isMain = isMain,
         inGuild = inGuild,
         status = status,
         source = SOURCES[character.source],
         roles = roles,
-        -- Actions, matching the right-click menu.
+        -- The name's right-click menu, matching the roster's.
         canMakeMain = not isMain and inGuild,
         canDetach = altCount > 0,
     }
@@ -123,14 +125,13 @@ function PlayerPanelViewModel.Wrap(text, width, measure)
     return lines
 end
 
--- The player's Discord, location and bio, as "about" rows under an About
--- heading; nothing when none is set. `wrap(text) -> lines` breaks each
--- into lines that fit the panel.
+-- The player's location and bio, as "about" rows under an About heading;
+-- nothing when neither is set. (Their Discord is in the panel's header.)
+-- `wrap(text) -> lines` breaks each into lines that fit the panel.
 local function aboutRows(partition, playerId, wrap)
-    local discord = partition:PlayerProfileText(playerId, "discord")
     local location = partition:PlayerProfileText(playerId, "location")
     local bio = partition:PlayerProfileText(playerId, "bio")
-    if discord == nil and location == nil and bio == nil then
+    if location == nil and bio == nil then
         return {}
     end
     local rows = { { kind = "section", text = "About" } }
@@ -140,9 +141,6 @@ local function aboutRows(partition, playerId, wrap)
         for index = 1, #lines do
             table.insert(rows, { kind = "about", text = lines[index] })
         end
-    end
-    if discord ~= nil then
-        add("Discord: " .. discord)
     end
     if location ~= nil then
         add("Location: " .. location)
@@ -166,34 +164,37 @@ local function datesText(entry, formatDate)
 end
 
 -- inputs: partition, playerId, members (live facts by key), normalizer,
--- formatDate (function(timestamp) -> text), adStats (optional function(keys)
+-- formatDate (function(timestamp) -> text), classColor (optional
+-- function(classToken) -> "ffrrggbb" or nil), adStats (optional function(keys)
 -- -> the player's ad count line, or nil), rolesOf (optional function(key)
--- -> the character's role preferences as text, or nil), groupedWith
--- (optional function(keys) -> how often this user grouped with the player,
--- or nil), membership (optional function(keys) -> lines about the
--- player's membership dates, or nil; only officers get them), promotion
--- (optional function(keys, playerId) -> the Promotion tab's rows, see
--- PromotionsViewModel.PanelRows, or nil), wrap
--- (optional function(text) -> an About entry's lines as they fit the
--- panel; by default, lines of at most BIO_LINE bytes).
+-- -> the character's role preferences as text, or nil), grouped (optional
+-- function(keys) -> how many times this user grouped with the player and
+-- when last, or nil), joined (optional function(keys) -> when the player
+-- first joined, as text, or nil; only officers get it), membership
+-- (optional function(keys) -> lines about each character's join and rank
+-- dates, or nil; only officers get them), promotion (optional
+-- function(keys, playerId) -> the Promotion tab's rows, see
+-- PromotionsViewModel.PanelRows, or nil), wrap (optional function(text) ->
+-- a long line's lines as they fit the panel; by default, lines of at most
+-- BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
 --   { id, label, alias, aliasSource, main, mainName, canMerge, discord,
---     dontSync, rows, promotionRows }
+--     joined, grouped, rows, logRows, promotionRows }
 -- where `main` is the main's character key, `canMerge` whether the player
 -- can be merged into another (only with no alts), `discord` the player's
--- Discord username or nil (for "Set Discord…"), `dontSync` whether guild
--- sync leaves this player alone, `promotionRows` the Promotion tab's rows
--- (nil when there's no such tab for this player), and `rows` is a flat
--- list for the Profile tab's scroll list:
---   { kind = "stat", text }  (the player's ad count, then how often you
---                             grouped with them, then membership dates,
---                             first, when there are any)
+-- Discord username or nil, `joined` "Joined: …" or nil, `grouped`
+-- "Grouped together 3 times" or nil (the header shows these),
+-- `promotionRows` the Promotion tab's rows (nil when there's no such tab
+-- for this player), `logRows` the Log tab's rows (the ad count, when they
+-- last grouped with this user, and each character's dates, wrapped):
+--   { kind = "log", text } or { kind = "empty", text }
+-- and `rows` is a flat list for the Profile tab's scroll list:
 --   { kind = "section", text }
---   { kind = "about", text }  (under an About heading: "Discord: name",
---                              "Location: text", then the bio's lines;
---                              only what the player set)
---   { kind = "character", key, name, level, isMain, inGuild, status, source,
---     roles, canMakeMain, canDetach }
+--   { kind = "about", text }  (under an About heading: "Location: text",
+--                              then the bio's lines; only what the player
+--                              set)
+--   { kind = "character", key, name, color, level, isMain, inGuild, status,
+--     source, roles, canMakeMain, canDetach }
 --   { kind = "history", name, role, dates, reason }
 --   { kind = "empty", text }
 function PlayerPanelViewModel.Build(inputs)
@@ -210,29 +211,56 @@ function PlayerPanelViewModel.Build(inputs)
     local altCount = #keys - 1
     local rows = {}
     local index
+    local wrap = inputs.wrap or function(text)
+        return PlayerPanelViewModel.Wrap(text, PlayerPanelViewModel.BIO_LINE)
+    end
+    -- An optional input's answer (up to two values), or nil when it's
+    -- missing or fails.
+    local function ask(callback, ...)
+        if callback == nil then
+            return nil
+        end
+        local ok, first, second = pcall(callback, ...)
+        if not ok then
+            return nil
+        end
+        return first, second
+    end
 
-    if inputs.adStats ~= nil then
-        local ok, line = pcall(inputs.adStats, keys)
-        if ok and type(line) == "string" then
-            table.insert(rows, { kind = "stat", text = line })
+    -- The Log tab: the ad count, when they last grouped with this user, and
+    -- each character's dates, each wrapped to the panel.
+    local logRows = {}
+    local function log(text)
+        if type(text) ~= "string" then
+            return
+        end
+        local lines = wrap(text)
+        local lineIndex
+        for lineIndex = 1, #lines do
+            table.insert(logRows, { kind = "log", text = lines[lineIndex] })
         end
     end
-    if inputs.groupedWith ~= nil then
-        local ok, line = pcall(inputs.groupedWith, keys)
-        if ok and type(line) == "string" then
-            table.insert(rows, { kind = "stat", text = line })
+    log(ask(inputs.adStats, keys))
+    local groupCount, groupLast = ask(inputs.grouped, keys)
+    local grouped
+    if type(groupCount) == "number" and groupCount > 0 then
+        grouped = "Grouped together " .. groupCount .. (groupCount == 1 and " time" or " times")
+        if type(groupLast) == "number" then
+            log("Last grouped together on " .. formatDate(groupLast))
         end
     end
-    if inputs.membership ~= nil then
-        local ok, lines = pcall(inputs.membership, keys)
-        if ok and type(lines) == "table" then
-            for index = 1, #lines do
-                if type(lines[index]) == "string" then
-                    table.insert(rows, { kind = "stat", text = lines[index] })
-                end
-            end
+    local membership = ask(inputs.membership, keys)
+    if type(membership) == "table" then
+        for index = 1, #membership do
+            log(membership[index])
         end
     end
+    if logRows[1] == nil then
+        table.insert(logRows, { kind = "empty", text = "Nothing logged yet" })
+    end
+    local joined = ask(inputs.joined, keys)
+    joined = type(joined) == "string" and ("Joined: " .. joined) or nil
+
     local promotionRows
     if inputs.promotion ~= nil then
         local ok, promotion = pcall(inputs.promotion, keys, inputs.playerId)
@@ -240,9 +268,7 @@ function PlayerPanelViewModel.Build(inputs)
             promotionRows = promotion
         end
     end
-    local about = aboutRows(partition, inputs.playerId, inputs.wrap or function(text)
-        return PlayerPanelViewModel.Wrap(text, PlayerPanelViewModel.BIO_LINE)
-    end)
+    local about = aboutRows(partition, inputs.playerId, wrap)
     for index = 1, #about do
         table.insert(rows, about[index])
     end
@@ -297,8 +323,10 @@ function PlayerPanelViewModel.Build(inputs)
         mainName = mainName,
         canMerge = altCount == 0,
         discord = (partition:PlayerProfileText(inputs.playerId, "discord")),
-        dontSync = player.noSync == true,
+        joined = joined,
+        grouped = grouped,
         rows = rows,
+        logRows = logRows,
         promotionRows = promotionRows,
     }
 end

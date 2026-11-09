@@ -30,6 +30,7 @@ local function setup()
             result[normalizer:Key(entries[index][1])] = {
                 name = entries[index][1], note = entries[index][2], level = entries[index][3],
                 online = entries[index][4] == "online", zone = entries[index][4] == "online" and "Dornogal" or nil,
+                classToken = entries[index][5],
             }
         end
         return result
@@ -41,7 +42,7 @@ local function setup()
         }))
     end
     local guild = {
-        { "Toolbox-Area52", "@TheTool", 80 },
+        { "Toolbox-Area52", "@TheTool", 80, nil, "WARRIOR" },
         { "Hammer-Area52", ">Toolbox", 70, "online" },
         { "Wrench-Area52", ">Toolbox", 60 },
     }
@@ -55,7 +56,7 @@ local function setup()
         playerId = playerId,
         -- `adStats`, when given, answers the panel's ad count line; `wrap`
         -- wraps the bio.
-        build = function(adStats, wrap)
+        build = function(adStats, wrap, classColor)
             return addon.PlayerPanelViewModel.Build({
                 partition = partition,
                 playerId = playerId,
@@ -63,6 +64,7 @@ local function setup()
                 normalizer = normalizer,
                 adStats = adStats,
                 wrap = wrap,
+                classColor = classColor,
                 formatDate = function(timestamp)
                     return "day " .. (timestamp - START) / 86400
                 end,
@@ -114,13 +116,19 @@ test.test("the panel shows the alias, acting main, alts, and history", function(
     test.assertEqual("until day 1", history[1].dates)
 end)
 
-test.test("the panel says whether the player is marked don't sync", function()
+test.test("character rows carry the class for the name's color, and Discord moves to the header", function()
     local state = setup()
-    test.assertFalse(state.build().dontSync)
+    state.partition:SetProfileText("toolbox-area52", "discord", "tool#1", 1, "toolbox-area52")
 
-    state.partition:SetNoSync(state.playerId, true)
+    local model = state.build(nil, nil, function(classToken)
+        return classToken == "WARRIOR" and "ffc69b6d" or nil
+    end)
 
-    test.assertTrue(state.build().dontSync)
+    test.assertEqual("tool#1", model.discord)
+    local characters = rowsOf(model, "character")
+    test.assertEqual("ffc69b6d", characters[1].color)
+    test.assertEqual(nil, characters[2].color, "no class known")
+    test.assertEqual(0, #rowsOf(model, "about"), "only Discord was set, and it's in the header")
 end)
 
 test.test("panel rows offer the same actions as the right-click menu", function()
@@ -185,7 +193,7 @@ end)
 -- `options.onDiscordChanged` as for the controller; `options.profile` the
 -- client (Retail by default); `options.officer` makes the user, logged in
 -- on the guild's first member, an officer.
-local function controllerSetup(onSyncResumed, options)
+local function controllerSetup(_, options)
     options = options or {}
     local world = fixtures.newEnvironment(options.profile or "Retail")
     world.environment.date = function(format, timestamp)
@@ -222,7 +230,6 @@ local function controllerSetup(onSyncResumed, options)
         nameRules = client:GetClientProfile().nameRules,
         getDatabase = function() return database end,
         createWindow = function() return window end,
-        onSyncResumed = onSyncResumed,
         onDiscordChanged = options.onDiscordChanged,
         isOfficer = function() return options.officer == true end,
     })
@@ -269,24 +276,18 @@ test.test("the panel closes when its player is merged away", function()
     test.assertEqual(nil, window.player)
 end)
 
-test.test("don't sync is toggled from the panel, marked there, and turning it off resumes sync", function()
-    local resumed = {}
-    local controller, window = controllerSetup(function(key)
-        table.insert(resumed, key)
-    end)
+test.test("the panel stays open without the window, and follows changes", function()
+    local controller, window = controllerSetup()
     controller:SelectPlayerOf("hammer-area52")
-    test.assertFalse(window.player.dontSync)
 
-    test.assertTrue(controller:SetDontSync(window.player.main, true))
-    test.assertTrue(window.player.dontSync, "the panel shows the player is pinned")
-    test.assertTrue(controller.current.partition:IsNoSync(window.player.id))
-    test.assertEqual(0, #resumed)
+    controller:Toggle()
+    test.assertFalse(window:IsShown())
+    test.assertTrue(window.player ~= nil)
 
-    test.assertTrue(controller:SetDontSync(window.player.main, false))
-    test.assertFalse(window.player.dontSync)
-    test.assertFalse(controller.current.partition:IsNoSync(window.player.id))
-    test.assertEqual(1, #resumed)
-    test.assertEqual("toolbox-area52", resumed[1])
+    local partition = controller.current.partition
+    partition:SetAlias(partition:GetCharacter("toolbox-area52").player, "Tool Box", "manual")
+    controller:Invalidate()
+    test.assertEqual("Tool Box (Toolbox)", window.player.label)
 end)
 
 test.test("set discord: the panel carries the player's Discord to prefill the dialog", function()
@@ -395,7 +396,7 @@ test.test("dates are formatted by the client", function()
     test.assertEqual("", client:FormatDate(nil))
 end)
 
-test.test("player panel: a player with an ad record shows it first, and one without shows nothing", function()
+test.test("player panel: the ad record goes to the Log tab, which says so when there's nothing", function()
     local state = setup()
     local asked
     local model = state.build(function(keys)
@@ -403,19 +404,35 @@ test.test("player panel: a player with an ad record shows it first, and one with
         return "Advertised: 12 (3 in last 30 days)"
     end)
 
-    test.assertEqual("stat", model.rows[1].kind)
-    test.assertEqual("Advertised: 12 (3 in last 30 days)", model.rows[1].text)
-    test.assertEqual("section", model.rows[2].kind)
+    test.assertEqual("log", model.logRows[1].kind)
+    test.assertEqual("Advertised: 12 (3 in last 30 days)", model.logRows[1].text)
+    test.assertEqual("section", model.rows[1].kind, "nothing logged on the Profile tab")
     -- Every one of the player's characters is asked about.
     test.assertEqual(2, #asked)
 
-    local none = state.build(function()
+    local function onlyEmpty(built)
+        return #built.logRows == 1 and built.logRows[1].kind == "empty"
+    end
+    test.assertTrue(onlyEmpty(state.build(function()
         return nil
+    end)))
+    test.assertTrue(onlyEmpty(state.build()))
+    test.assertTrue(onlyEmpty(state.build(function() error("boom") end)))
+end)
+
+test.test("player panel: long Log lines wrap instead of being cut off", function()
+    local state = setup()
+    local long = "Advertised: 12 (3 in last 30 days) in Trade, General and every city channel there is"
+
+    local model = state.build(function()
+        return long
     end)
-    test.assertEqual("section", none.rows[1].kind)
-    test.assertEqual(0, #rowsOf(none, "stat"))
-    test.assertEqual(0, #rowsOf(state.build(), "stat"))
-    test.assertEqual(0, #rowsOf(state.build(function() error("boom") end), "stat"))
+
+    test.assertTrue(#model.logRows > 1)
+    local index
+    for index = 1, #model.logRows do
+        test.assertTrue(#model.logRows[index].text <= state.addon.PlayerPanelViewModel.BIO_LINE)
+    end
 end)
 
 test.test("the bio wraps at spaces to a measured width, never inside a character", function()

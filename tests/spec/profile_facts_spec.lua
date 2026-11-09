@@ -1042,16 +1042,18 @@ test.test("guild sync: a fact of a kind this version doesn't know is ignored, as
     test.assertEqual(nil, member.partition:GetCharacter("wrench-area52").pronouns)
 end)
 
-test.test("player panel: shows the player's Discord, location and bio when set", function()
+test.test("player panel: shows the player's Discord in the header, and location and bio when set", function()
     local addon = test.newAddon("Core/NameNormalizer.lua", "Core/FellowshipStore.lua", "Core/RosterViewModel.lua",
         "Core/PlayerPanelViewModel.lua")
     local partition = addon.FellowshipStore.Create({ schemaVersion = 4, guilds = {} }):Partition(GUILD)
     partition:RecordCharacter(MEMBER, { name = "Hammer-Area52", classToken = "PALADIN" })
     local playerId = partition:GetCharacter(MEMBER).player
+    local discord
     local function build()
         local model = addon.PlayerPanelViewModel.Build({
             partition = partition, playerId = playerId, normalizer = addon.NameNormalizer.Create(RULES),
         })
+        discord = model.discord
         local lines = {}
         local index
         for index = 1, #model.rows do
@@ -1069,16 +1071,16 @@ test.test("player panel: shows the player's Discord, location and bio when set",
     partition:SetProfileText(MEMBER, "bio", "I heal dungeons most evenings and love a good keystone run with friends",
         NOW, MEMBER)
     local lines = build()
+    test.assertEqual("hammer#1", discord)
     test.assertEqual("About", lines[1])
-    test.assertEqual("Discord: hammer#1", lines[2])
     -- No location; the bio is wrapped to the panel.
-    test.assertEqual("I heal dungeons most evenings and love a good", lines[3])
-    test.assertEqual("keystone run with friends", lines[4])
-    test.assertEqual(4, #lines)
+    test.assertEqual("I heal dungeons most evenings and love a good", lines[2])
+    test.assertEqual("keystone run with friends", lines[3])
+    test.assertEqual(3, #lines)
 
     -- A line break the player typed starts a new line.
     partition:SetProfileText(MEMBER, "bio", "Healer.\nEvenings only.", NOW + 1, MEMBER)
     lines = build()
-    test.assertEqual("Healer.", lines[3])
-    test.assertEqual("Evenings only.", lines[4])
+    test.assertEqual("Healer.", lines[2])
+    test.assertEqual("Evenings only.", lines[3])
 end)
