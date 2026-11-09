@@ -653,7 +653,7 @@ end)
 
 test.test("guild greet: someone who just joined is placed by the user's prompt for them", function()
     local world = setup("Retail")
-    world.store:SetGreetCap(1)
+    world.store:SetGreetNumber("welcomeCap", 1)
 
     world.greet:OnPresence("join", world.names.newt)
     test.assertEqual(1, #world.shown)
@@ -706,19 +706,20 @@ test.test("guild greet settings: categories, thresholds and characters default o
 
     test.assertTrue(store:GreetCategoryEnabled("login"))
     test.assertEqual(15, store:GreetNumber("welcomeBackMinutes"))
-    test.assertEqual(30, store:GreetNumber("longAbsenceDays"))
+    test.assertEqual(3, store:GreetNumber("welcomeCap"))
+    test.assertEqual(nil, store:GreetNumber("longAbsenceDays"), "a long absence is a fixed 30 days")
     test.assertTrue(store:GreetOnCharacter("toolbox"))
 
     test.assertTrue(store:SetGreetCategoryEnabled("login", false))
     test.assertTrue(store:SetGreetNumber("welcomeBackMinutes", 120))
-    test.assertTrue(store:SetGreetNumber("longAbsenceDays", 1))
+    test.assertTrue(store:SetGreetNumber("welcomeCap", 1))
     test.assertTrue(store:SetGreetOnCharacter("toolbox", false))
 
     local again = addon.FellowshipStore.Create(database)
     test.assertFalse(again:GreetCategoryEnabled("login"))
     test.assertTrue(again:GreetCategoryEnabled("join"))
     test.assertEqual(120, again:GreetNumber("welcomeBackMinutes"))
-    test.assertEqual(1, again:GreetNumber("longAbsenceDays"))
+    test.assertEqual(1, again:GreetNumber("welcomeCap"))
     test.assertFalse(again:GreetOnCharacter("toolbox"))
     test.assertTrue(again:GreetOnCharacter("hammer"))
 
@@ -734,17 +735,18 @@ test.test("guild greet settings: ranges are enforced and unusable saved values a
 
     test.assertFalse(store:SetGreetNumber("welcomeBackMinutes", 0))
     test.assertFalse(store:SetGreetNumber("welcomeBackMinutes", 121))
-    test.assertFalse(store:SetGreetNumber("longAbsenceDays", 366))
-    test.assertFalse(store:SetGreetNumber("longAbsenceDays", 1.5))
+    test.assertFalse(store:SetGreetNumber("welcomeCap", 11))
+    test.assertFalse(store:SetGreetNumber("welcomeCap", 1.5))
+    test.assertFalse(store:SetGreetNumber("longAbsenceDays", 2))
     test.assertFalse(store:SetGreetNumber("nonsense", 3))
     test.assertEqual(nil, store:GreetNumber("nonsense"))
 
     database.greet = {
-        welcomeBackMinutes = "soon", longAbsenceDays = -4,
+        welcomeBackMinutes = "soon", welcomeCap = -4,
         categories = "corrupt", offCharacters = "corrupt",
     }
     test.assertEqual(15, store:GreetNumber("welcomeBackMinutes"))
-    test.assertEqual(30, store:GreetNumber("longAbsenceDays"))
+    test.assertEqual(3, store:GreetNumber("welcomeCap"))
     test.assertTrue(store:GreetCategoryEnabled("login"))
     test.assertTrue(store:GreetOnCharacter("toolbox"))
     test.assertFalse(store:SetGreetNumber("welcomeBackMinutes", 20))
@@ -769,14 +771,15 @@ test.test("guild greet: turning a category off stops its prompts only, and close
     test.assertEqual(1, #world.shown)
 end)
 
-test.test("guild greet: saved thresholds change the welcome-back and long-absence boundaries", function()
+test.test("guild greet: the saved threshold changes the welcome-back boundary; a long absence stays 30 days", function()
     local world = setup("Retail")
     world.store:SetGreetNumber("welcomeBackMinutes", 5)
-    world.store:SetGreetNumber("longAbsenceDays", 2)
+    -- Older saved data may still hold a long-absence setting; it's ignored.
+    world.store:GetGreetState().longAbsenceDays = 2
 
-    -- Anvil last logged in 2 days ago: a long absence now.
+    -- Anvil last logged in 2 days ago: a plain login.
     world.greet:OnPresence("online", world.names.anvil)
-    test.assertEqual("longAbsence", world.shown[1].category)
+    test.assertEqual("login", world.shown[1].category)
     world.handlers.close(world.shown[1].player)
 
     world.greet:OnPresence("offline", world.names.anvil)

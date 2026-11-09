@@ -111,9 +111,6 @@ function GuildGreet.Create(options)
         welcomeBackSeconds = function()
             return greet:Setting("welcomeBackMinutes") * 60
         end,
-        longAbsenceSeconds = function()
-            return greet:Setting("longAbsenceDays") * 24 * 60 * 60
-        end,
     })
     return greet
 end
@@ -134,8 +131,12 @@ function Greet:Library()
 end
 
 -- How many greetings a player must already have before the user's prompt
--- for them closes.
-function Greet:Cap()
+-- for them closes: the welcome cap for someone who just joined (a "join"
+-- prompt), the greeting cap otherwise.
+function Greet:Cap(category)
+    if category == addon.GreetPolicy.JOIN then
+        return self:Setting("welcomeCap")
+    end
     local store = self.store()
     return store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
 end
@@ -328,7 +329,7 @@ function Greet:OnPresence(kind, rawName)
     -- A category with no greetings has nothing to say, so it never prompts,
     -- and a player who has had enough greetings already isn't prompted.
     if prompt == nil or #self:Library():Greetings(prompt.category) == 0
-        or self.tally:Reached(prompt.player, self:Cap(), now)
+        or self.tally:Reached(prompt.player, self:Cap(prompt.category), now)
     then
         return
     end
@@ -408,7 +409,7 @@ function Greet:Greet(player)
     end
     self.queue:Remove(player)
     local text
-    if not self.tally:Reached(prompt.player, self:Cap(), now) then
+    if not self.tally:Reached(prompt.player, self:Cap(prompt.category), now) then
         text = self:post(prompt, now)
     end
     if text ~= nil then
@@ -479,17 +480,21 @@ function Greet:OnGreeted(message, sender)
     if senderKey == nil or type(now) ~= "number" or self:IsOwn(senderKey) then
         return false
     end
-    -- A player is placed by the database, or by a prompt the user has for
-    -- them (someone who just joined isn't in the database yet).
-    local player = self.policy:PlayerOf(message.c)
-    if partition:GetCharacter(message.c) == nil and self.queue:Get(player) == nil then
+    -- A player is placed by the prompt the user has for that character, or
+    -- else by the database. The prompt comes first: someone who just joined
+    -- got theirs before a roster scan put them in the database, which
+    -- places them as another player.
+    local prompt = self.queue:ForCharacter(message.c)
+    local player = prompt and prompt.player or self.policy:PlayerOf(message.c)
+    if partition:GetCharacter(message.c) == nil and prompt == nil then
         return false
     end
     local before = self.tally:Count(player, now)
     if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
         return false
     end
-    if self.tally:Reached(player, self:Cap(), now) and self.queue:Remove(player) then
+    local queued = self.queue:Get(player)
+    if queued ~= nil and self.tally:Reached(player, self:Cap(queued.category), now) and self.queue:Remove(player) then
         self:Refresh()
     end
     return true
