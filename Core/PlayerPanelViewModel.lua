@@ -178,7 +178,7 @@ end
 -- a long line's lines as they fit the panel; by default, lines of at most
 -- BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
---   { id, label, alias, aliasSource, main, mainName, canMerge, discord,
+--   { id, label, alias, main, mainName, canMerge, discord,
 --     joined, grouped, rows, logRows, promotionRows }
 -- where `main` is the main's character key, `canMerge` whether the player
 -- can be merged into another (only with no alts), `discord` the player's
@@ -318,7 +318,6 @@ function PlayerPanelViewModel.Build(inputs)
         id = inputs.playerId,
         label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
         alias = player.alias,
-        aliasSource = SOURCES[player.aliasSource],
         main = player.main,
         mainName = mainName,
         canMerge = altCount == 0,

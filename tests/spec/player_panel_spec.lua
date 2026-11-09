@@ -99,7 +99,6 @@ test.test("the panel shows the alias, acting main, alts, and history", function(
 
     test.assertEqual("TheTool (Toolbox)", model.label)
     test.assertEqual("TheTool", model.alias)
-    test.assertEqual("from a note", model.aliasSource)
     test.assertEqual("toolbox-area52", model.main)
     local characters = rowsOf(model, "character")
     test.assertEqual(2, #characters)
@@ -254,7 +253,8 @@ test.test("panel edits are manual and refresh the roster and the panel at once",
 
     controller:SetAlias(window.player.main, "Tool Time")
     test.assertEqual("Tool Time (Toolbox)", window.player.label)
-    test.assertEqual("set by hand", window.player.aliasSource)
+    local partition = controller.current.partition
+    test.assertEqual("manual", partition:GetPlayer(window.player.id).aliasSource)
     test.assertEqual("Tool Time (Toolbox)", window.rows[1].label)
 
     controller:MakeMain("hammer-area52")

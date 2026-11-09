@@ -401,14 +401,14 @@ end
 -- The player edit panel -------------------------------------------------------
 
 local PANEL_WIDTH = 380
-local PANEL_HEIGHT = 462
+local PANEL_HEIGHT = 440
 -- The action bar along the panel's bottom: its buttons' gap from the edge,
 -- and the room the list leaves for it.
 local PANEL_BAR_MARGIN = 10
 local PANEL_BAR_HEIGHT = 40
 -- The list's top, below the header, with the Profile, Promotion and Log
 -- tabs sitting on it.
-local PANEL_LIST_TOP = 118
+local PANEL_LIST_TOP = 96
 
 -- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
 -- merge)` open the dialogs the right-click menu uses (`merge` titles the
@@ -455,16 +455,14 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.joinedText = joinedText
     edit.groupedText = groupedText
 
-    -- On the left: the alias and where it came from, then their Discord.
+    -- On the left: the alias, then their Discord.
     local aliasText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     aliasText:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -32)
     aliasText:SetPoint("RIGHT", joinedText, "LEFT", -8, 0)
     aliasText:SetJustifyH("LEFT")
     aliasText:SetWordWrap(false)
-    local aliasSource = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    aliasSource:SetPoint("TOPLEFT", aliasText, "BOTTOMLEFT", 0, -6)
     local discordText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    discordText:SetPoint("TOPLEFT", aliasSource, "BOTTOMLEFT", 0, -6)
+    discordText:SetPoint("TOPLEFT", aliasText, "BOTTOMLEFT", 0, -6)
     discordText:SetPoint("RIGHT", panel, "RIGHT", -12, 0)
     discordText:SetJustifyH("LEFT")
     discordText:SetWordWrap(false)
@@ -509,7 +507,6 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         end
     end)
     edit.aliasText = aliasText
-    edit.aliasSource = aliasSource
     edit.setAlias = setAlias
     edit.setDiscord = setDiscord
     edit.setMain = setMain
@@ -2398,7 +2395,6 @@ function Window:ShowPlayer(model)
             edit.panel:SetTitle(model.label)
         end
         edit.aliasText:SetText(model.alias and ("Alias: " .. model.alias) or "|cff9d9d9dNo alias|r")
-        edit.aliasSource:SetText(model.alias and model.aliasSource and ("Alias " .. model.aliasSource) or "")
         edit.discordText:SetText(model.discord and ("Discord: " .. model.discord) or "|cff9d9d9dNo Discord|r")
         edit.joinedText:SetText(model.joined or "")
         edit.groupedText:SetText(model.grouped or "")
