@@ -647,6 +647,7 @@ function Session:SendDigest()
     local checkpoint = function()
         self:Checkpoint()
     end
+    self:ClearDontSync(partition)
     local facts = self:Facts(partition):SharedFacts(checkpoint)
     self:Send({ t = SyncSession.TYPE_DIGEST, digest = addon.SyncDigest.Of(facts, checkpoint) })
     if not self.isOfficer(self.selfKey()) and self.officerOnline() then
@@ -654,16 +655,23 @@ function Session:SendDigest()
     end
 end
 
--- After "Don't sync" was turned off for `key`'s player: lets officer data
--- win for it again, and asks the guild for it right away rather than at the
--- next login.
-function Session:Rejoin(key)
-    local partition = self.context()
-    if partition == nil then
-        return
+-- "Don't sync" is gone: any player an earlier version kept as this user's
+-- own syncs again. This user's own edits to it become the oldest possible,
+-- so officer data wins for it again, and the announcement that follows
+-- asks the guild for it.
+function Session:ClearDontSync(partition)
+    local pinned = {}
+    partition:EachPlayer(function(id, player)
+        if player.noSync == true then
+            table.insert(pinned, { id = id, main = player.main })
+        end
+    end)
+    local facts = self:Facts(partition)
+    local index
+    for index = 1, #pinned do
+        partition:SetNoSync(pinned[index].id, false)
+        facts:Rejoin(pinned[index].main)
     end
-    self:Facts(partition):Rejoin(key)
-    self:Announce()
 end
 
 -- Someone announced `digest`: unless it matches, schedules a reply with this

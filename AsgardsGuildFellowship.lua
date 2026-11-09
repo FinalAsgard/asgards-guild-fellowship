@@ -37,7 +37,7 @@ local requestGuildLog, readGuildLog, recordLiveMembership = function() end, func
 local guildLogSync
 -- Membership dates (see MembershipDates), set up with guild sync below:
 -- what a roster scan saw, and the officer's lines for the player panel.
-local observeMembership, membershipLines = function() end, function() end
+local observeMembership, membershipLines, earliestJoin = function() end, function() end, function() end
 -- An add-on message was heard from a character (see MembershipDates:Heard).
 local heardFrom = function() end
 -- The officers' Promotions page, the requirements editor (see
@@ -165,9 +165,6 @@ if clientProfile.supported then
                 guildNoteOverlay:Refresh()
             end
         end,
-        onSyncResumed = function(key)
-            syncSession:Rejoin(key)
-        end,
         onDecideSuggestion = function(character, kind, approved)
             return syncSession:Decide(character, kind, approved)
         end,
@@ -177,6 +174,9 @@ if clientProfile.supported then
         rolesOf = function(key)
             local roles = rolesOf(key)
             return roles and addon.RoleCatalog.Describe(roles) or nil
+        end,
+        joined = function(keys)
+            return earliestJoin(keys)
         end,
         membership = function(keys)
             return membershipLines(keys)
@@ -190,14 +190,12 @@ if clientProfile.supported then
         readyKeys = function()
             return promotions.readyKeys()
         end,
-        groupedWith = function(keys)
+        grouped = function(keys)
             local guild, partition = rosterController:QuietContext()
             if guild == nil then
                 return nil
             end
-            return addon.GroupHistory.Create(partition):Line(keys, function(timestamp)
-                return client:FormatDate(timestamp)
-            end)
+            return addon.GroupHistory.Create(partition):Stats(keys)
         end,
         recruitRecord = function(keys)
             return guildRecruit:RecordFor(keys)
@@ -425,9 +423,6 @@ if clientProfile.supported then
                 end,
                 onClosePanel = function()
                     rosterController:ClosePanel()
-                end,
-                onSetDontSync = function(key, enabled)
-                    rosterController:SetDontSync(key, enabled)
                 end,
                 onMenuUnavailable = function()
                     rosterController:Print("The organize menu isn't available on this client.")
@@ -2078,16 +2073,9 @@ if clientProfile.supported then
         end
     end
     -- The player panel's dates, for officers only: the player's earliest
-    -- current join, then each character's join and time at its rank.
-    membershipLines = function(keys)
-        local guild, partition, normalizer = rosterController:QuietContext()
-        if guild == nil or not selfIsOfficer() then
-            return nil
-        end
-        local dates = datesOf(partition)
-        local function formatDate(timestamp)
-            return client:FormatDate(timestamp)
-        end
+    -- current join (its header), and each character's join and time at its
+    -- rank (its Log).
+    local function inGuildKeys(partition, keys)
         local current = {}
         local index
         for index = 1, #keys do
@@ -2095,9 +2083,28 @@ if clientProfile.supported then
                 table.insert(current, keys[index])
             end
         end
-        local lines = {
-            "Earliest join: " .. addon.MembershipDates.Describe(dates:EarliestJoin(current), formatDate),
-        }
+        return current
+    end
+    local function formatDate(timestamp)
+        return client:FormatDate(timestamp)
+    end
+    earliestJoin = function(keys)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil or not selfIsOfficer() then
+            return nil
+        end
+        return addon.MembershipDates.Describe(datesOf(partition):EarliestJoin(inGuildKeys(partition, keys)),
+            formatDate)
+    end
+    membershipLines = function(keys)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil or not selfIsOfficer() then
+            return nil
+        end
+        local dates = datesOf(partition)
+        local current = inGuildKeys(partition, keys)
+        local lines = {}
+        local index
         for index = 1, #current do
             local character = partition:GetCharacter(current[index])
             table.insert(lines, (normalizer:Display(character.name) or current[index]) .. ": joined " ..

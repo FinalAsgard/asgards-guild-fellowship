@@ -133,12 +133,3 @@ function History:Stats(keys)
     end
     return count, last
 end
-
--- "Grouped together 3 times, last on 2026-10-12", or nil when never.
-function History:Line(keys, formatDate)
-    local count, last = self:Stats(keys)
-    if count == 0 then
-        return nil
-    end
-    return "Grouped together " .. count .. (count == 1 and " time" or " times") .. ", last on " .. formatDate(last)
-end
