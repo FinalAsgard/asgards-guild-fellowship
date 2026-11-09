@@ -81,18 +81,20 @@ local function setup()
     }
 end
 
-local function rowsOf(model, kind)
+-- The Profile tab's rows of `kind`, or the Log tab's with `list` "logRows".
+local function rowsOf(model, kind, list)
+    local rows = model[list or "rows"]
     local found = {}
     local index
-    for index = 1, #model.rows do
-        if model.rows[index].kind == kind then
-            table.insert(found, model.rows[index])
+    for index = 1, #rows do
+        if rows[index].kind == kind then
+            table.insert(found, rows[index])
         end
     end
     return found
 end
 
-test.test("the panel shows the alias, acting main, alts, and history", function()
+test.test("the panel shows the alias, acting main and alts, and the Log tab the history", function()
     local state = setup()
 
     local model = state.build()
@@ -106,7 +108,8 @@ test.test("the panel shows the alias, acting main, alts, and history", function(
     test.assertEqual("Toolbox", characters[1].name)
     test.assertEqual("Hammer", characters[2].name)
     test.assertEqual("Online, Dornogal", characters[2].status)
-    local history = rowsOf(model, "history")
+    test.assertEqual(0, #rowsOf(model, "history"), "history isn't on the Profile tab")
+    local history = rowsOf(model, "history", "logRows")
     test.assertEqual(1, #history)
     -- Shown as the roster spells it, without the home realm.
     test.assertEqual("Wrench", history[1].name)
@@ -155,9 +158,10 @@ test.test("a player with no alts or history says so", function()
         normalizer = addon.NameNormalizer.Create(RULES),
     })
 
-    local empties = rowsOf(model, "empty")
-    test.assertEqual("No alts", empties[1].text)
-    test.assertEqual("No former characters", empties[2].text)
+    test.assertEqual("No alts", rowsOf(model, "empty")[1].text)
+    local logEmpties = rowsOf(model, "empty", "logRows")
+    test.assertEqual("Nothing logged yet", logEmpties[1].text)
+    test.assertEqual("No former characters", logEmpties[2].text)
     test.assertFalse(rowsOf(model, "character")[1].canDetach)
     test.assertTrue(model.canMerge)
 end)
@@ -167,7 +171,7 @@ test.test("an out-of-guild main shows in history with its date", function()
     state.partition:AddHistory(state.playerId, { name = "Bigmain", role = "main", since = START + 2 * 86400,
         reason = "out of guild" })
 
-    local history = rowsOf(state.build(), "history")
+    local history = rowsOf(state.build(), "history", "logRows")
 
     test.assertEqual("Bigmain", history[1].name)
     test.assertEqual("Main", history[1].role)
@@ -396,7 +400,7 @@ test.test("dates are formatted by the client", function()
     test.assertEqual("", client:FormatDate(nil))
 end)
 
-test.test("player panel: the ad record goes to the Log tab, which says so when there's nothing", function()
+test.test("player panel: the ad record leads the Log tab, which says so when there's nothing, then History", function()
     local state = setup()
     local asked
     local model = state.build(function(keys)
@@ -410,8 +414,10 @@ test.test("player panel: the ad record goes to the Log tab, which says so when t
     -- Every one of the player's characters is asked about.
     test.assertEqual(2, #asked)
 
+    -- Nothing logged: the note, then the History section.
     local function onlyEmpty(built)
-        return #built.logRows == 1 and built.logRows[1].kind == "empty"
+        return built.logRows[1].kind == "empty" and built.logRows[1].text == "Nothing logged yet"
+            and built.logRows[2].kind == "section" and built.logRows[2].text == "History"
     end
     test.assertTrue(onlyEmpty(state.build(function()
         return nil
@@ -428,10 +434,11 @@ test.test("player panel: long Log lines wrap instead of being cut off", function
         return long
     end)
 
-    test.assertTrue(#model.logRows > 1)
+    local lines = rowsOf(model, "log", "logRows")
+    test.assertTrue(#lines > 1)
     local index
-    for index = 1, #model.logRows do
-        test.assertTrue(#model.logRows[index].text <= state.addon.PlayerPanelViewModel.BIO_LINE)
+    for index = 1, #lines do
+        test.assertTrue(#lines[index].text <= state.addon.PlayerPanelViewModel.BIO_LINE)
     end
 end)
 

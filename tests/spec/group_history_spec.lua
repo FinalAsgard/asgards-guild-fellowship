@@ -113,7 +113,7 @@ end)
 
 -- The player panel --------------------------------------------------------------------
 
-test.test("player panel: shows how often you grouped with the player, and when last in the Log", function()
+test.test("player panel: shows how often you grouped with the player, never included, and when last in the Log", function()
     local addon, partition, history = newHistory()
     partition:RecordCharacter("hammer", { name = "Hammer" })
     partition:RecordCharacter("cleric", { name = "Cleric" })
@@ -134,8 +134,8 @@ test.test("player panel: shows how often you grouped with the player, and when l
     test.assertEqual("Grouped together 1 time", hammer.grouped)
     test.assertEqual("Last grouped together on 2026-10-12", hammer.logRows[1].text)
     local cleric = build("cleric")
-    test.assertEqual(nil, cleric.grouped)
-    test.assertEqual("empty", cleric.logRows[1].kind)
+    test.assertEqual("Grouped together 0 times", cleric.grouped)
+    test.assertEqual("empty", cleric.logRows[1].kind, "no last time")
 end)
 
 -- The composed add-on -------------------------------------------------------------------

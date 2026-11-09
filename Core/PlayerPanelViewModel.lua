@@ -183,11 +183,13 @@ end
 -- where `main` is the main's character key, `canMerge` whether the player
 -- can be merged into another (only with no alts), `discord` the player's
 -- Discord username or nil, `joined` "Joined: …" or nil, `grouped`
--- "Grouped together 3 times" or nil (the header shows these),
+-- "Grouped together 3 times", 0 included (the header shows these),
 -- `promotionRows` the Promotion tab's rows (nil when there's no such tab
--- for this player), `logRows` the Log tab's rows (the ad count, when they
--- last grouped with this user, and each character's dates, wrapped):
---   { kind = "log", text } or { kind = "empty", text }
+-- for this player), `logRows` the Log tab's rows: the ad count, when they
+-- last grouped with this user, and each character's dates, wrapped, then
+-- the History section (characters that left the player):
+--   { kind = "log", text }, { kind = "section", text },
+--   { kind = "history", name, role, dates, reason } or { kind = "empty", text }
 -- and `rows` is a flat list for the Profile tab's scroll list:
 --   { kind = "section", text }
 --   { kind = "about", text }  (under an About heading: "Location: text",
@@ -195,7 +197,6 @@ end
 --                              set)
 --   { kind = "character", key, name, color, level, isMain, inGuild, status,
 --     source, roles, canMakeMain, canDetach }
---   { kind = "history", name, role, dates, reason }
 --   { kind = "empty", text }
 function PlayerPanelViewModel.Build(inputs)
     inputs.members = inputs.members or {}
@@ -241,13 +242,14 @@ function PlayerPanelViewModel.Build(inputs)
         end
     end
     log(ask(inputs.adStats, keys))
+    -- How often they grouped shows even when it's never.
     local groupCount, groupLast = ask(inputs.grouped, keys)
-    local grouped
-    if type(groupCount) == "number" and groupCount > 0 then
-        grouped = "Grouped together " .. groupCount .. (groupCount == 1 and " time" or " times")
-        if type(groupLast) == "number" then
-            log("Last grouped together on " .. formatDate(groupLast))
-        end
+    if type(groupCount) ~= "number" then
+        groupCount = 0
+    end
+    local grouped = "Grouped together " .. groupCount .. (groupCount == 1 and " time" or " times")
+    if groupCount > 0 and type(groupLast) == "number" then
+        log("Last grouped together on " .. formatDate(groupLast))
     end
     local membership = ask(inputs.membership, keys)
     if type(membership) == "table" then
@@ -286,7 +288,8 @@ function PlayerPanelViewModel.Build(inputs)
         table.insert(rows, { kind = "empty", text = "No alts" })
     end
 
-    table.insert(rows, { kind = "section", text = "History" })
+    -- The Log tab ends with the History section.
+    table.insert(logRows, { kind = "section", text = "History" })
     -- Former characters only: an entry for a character that is back in this
     -- player and in the guild (moved back, or rejoined) is left out.
     local history = {}
@@ -299,7 +302,7 @@ function PlayerPanelViewModel.Build(inputs)
     end
     for index = #history, 1, -1 do
         local entry = history[index]
-        table.insert(rows, {
+        table.insert(logRows, {
             kind = "history",
             -- Shown as the roster spells names (no home realm); an
             -- out-of-guild name from a note is shown as written.
@@ -310,7 +313,7 @@ function PlayerPanelViewModel.Build(inputs)
         })
     end
     if history[1] == nil then
-        table.insert(rows, { kind = "empty", text = "No former characters" })
+        table.insert(logRows, { kind = "empty", text = "No former characters" })
     end
 
     local mainName = mainRow.name
