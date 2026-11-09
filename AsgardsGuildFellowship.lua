@@ -663,11 +663,15 @@ if clientProfile.supported then
         label = "Timing",
     })
     greetNumber("welcomeBackMinutes", "Minutes away before coming back is a welcome back")
-    greetNumber("longAbsenceDays", "Days away before a login is a long absence")
+    settings:Add("guildGreet", {
+        id = "greetCloseHeading",
+        kind = "heading",
+        label = "Close my prompt after",
+    })
     settings:Add("guildGreet", {
         id = "greetCap",
         kind = "number",
-        label = "Close my prompt once a player has had this many greetings",
+        label = "Greetings (login, welcome back, long absence)",
         min = addon.FellowshipStore.GREET_CAP_MIN,
         max = addon.FellowshipStore.GREET_CAP_MAX,
         get = function()
@@ -685,6 +689,7 @@ if clientProfile.supported then
             return true
         end,
     })
+    greetNumber("welcomeCap", "Guild join welcomes")
     -- The greetings are edited below these settings on the master frame's
     -- Greetings tab; the AddOns options get a button to go there.
     local function openGreetings()

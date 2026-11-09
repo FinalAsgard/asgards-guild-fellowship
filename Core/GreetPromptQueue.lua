@@ -84,6 +84,17 @@ function Queue:Get(player)
     return index and self.prompts[index] or nil
 end
 
+-- The waiting prompt raised for the character `key`, or nil.
+function Queue:ForCharacter(key)
+    local index
+    for index = 1, #self.prompts do
+        if self.prompts[index].key == key then
+            return self.prompts[index]
+        end
+    end
+    return nil
+end
+
 -- Removes the prompt for `player` (greeted or closed). False when there was
 -- none.
 function Queue:Remove(player)

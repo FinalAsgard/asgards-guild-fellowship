@@ -592,8 +592,10 @@ end
 FellowshipStore.GREET_NUMBERS = {
     -- Minutes someone must be gone before coming back is a welcome back.
     welcomeBackMinutes = { default = 15, min = 1, max = 120 },
-    -- Days since anyone last saw a player before a login is a long absence.
-    longAbsenceDays = { default = 30, min = 1, max = 365 },
+    -- How many welcomes a player who just joined the guild must have had
+    -- before the user's prompt for them closes (the greeting cap covers
+    -- every other prompt).
+    welcomeCap = { default = 3, min = 1, max = 10 },
 }
 
 local function isInRange(value, range)
