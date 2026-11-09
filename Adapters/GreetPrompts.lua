@@ -1,25 +1,52 @@
 local _, addon = ...
 
 -- Guild Greet's prompts: small boxes stacked down from an anchor, oldest on
--- top, each with just the player's name, a Greet button, and a close button.
+-- top, each with just the player's name, a button named for the kind of
+-- greeting ("Welcome Back"), and a close button. Every greeting button is
+-- as wide as the longest label needs, so they line up.
 -- The anchor defaults to the left side of the screen (the right side holds
 -- the quest log). Unlocking it shows a handle above the stack that drags it
 -- anywhere; the new place is saved when the drag ends. Frames are made on
 -- first use and reused. Like the other adapters, a failing frame call hides
 -- the prompts rather than raising an error.
 local GreetPrompts = {
-    WIDTH = 250,
     HEIGHT = 40,
     GAP = 8,
     PADDING = 14,
-    BUTTON_WIDTH = 72,
+    -- Room for the player's name, between the padding and the button.
+    NAME_WIDTH = 118,
+    -- The greeting button's width when the client can't measure its labels.
+    BUTTON_WIDTH = 170,
+    -- Room on either side of the longest label.
+    BUTTON_TEXT_PADDING = 24,
     BUTTON_HEIGHT = 24,
     CLOSE_SIZE = 24,
     HANDLE_HEIGHT = 22,
     -- The top prompt's default place, relative to the screen's left edge.
     DEFAULT_ANCHOR = { point = "LEFT", x = 40, y = 120 },
+    -- The greeting button's label for each kind of prompt (GreetPolicy's
+    -- categories), and for any other.
+    LABELS = {
+        join = "Welcome to the Guild",
+        login = "Greet",
+        welcomeBack = "Welcome Back",
+        longAbsence = "Long Time No See!",
+    },
+    DEFAULT_LABEL = "Greet",
+    -- The widest countdown a locked button adds to its label.
+    WIDEST_COUNTDOWN = " (88)",
 }
 addon.GreetPrompts = GreetPrompts
+
+-- The greeting button's label for a prompt in `category`, with the
+-- countdown while Greet is locked for `lockedFor` seconds.
+function GreetPrompts.Label(category, lockedFor)
+    local label = GreetPrompts.LABELS[category] or GreetPrompts.DEFAULT_LABEL
+    if type(lockedFor) == "number" and lockedFor > 0 then
+        return label .. " (" .. lockedFor .. ")"
+    end
+    return label
+end
 
 local Prompts = {}
 Prompts.__index = Prompts
@@ -50,6 +77,37 @@ function Prompts:placeAnchor()
     end
 end
 
+-- How wide every greeting button is: the longest label with a countdown,
+-- as the button's font draws it, plus padding. BUTTON_WIDTH when the client
+-- can't measure text.
+function Prompts:measureButton(parent)
+    local createFrame = self.environment.CreateFrame
+    local width
+    pcall(function()
+        local button = createFrame("Button", nil, parent, "UIPanelButtonTemplate")
+        local fontString = button:GetFontString()
+        local _, label
+        for _, label in pairs(GreetPrompts.LABELS) do
+            button:SetText(label .. GreetPrompts.WIDEST_COUNTDOWN)
+            local textWidth = fontString:GetStringWidth()
+            if type(textWidth) == "number" and textWidth > 0 and (width == nil or textWidth > width) then
+                width = textWidth
+            end
+        end
+        button:Hide()
+    end)
+    if width == nil then
+        return GreetPrompts.BUTTON_WIDTH
+    end
+    return math.ceil(width) + GreetPrompts.BUTTON_TEXT_PADDING
+end
+
+-- A prompt's width: padding, the name, the greeting button and Close.
+function Prompts:width()
+    return GreetPrompts.PADDING + GreetPrompts.NAME_WIDTH + 10 + self.buttonWidth + 6
+        + GreetPrompts.CLOSE_SIZE + 6
+end
+
 -- The invisible frame the stack hangs from, with the drag handle above it.
 function Prompts:anchorFrame()
     if self.anchor ~= nil then
@@ -58,7 +116,8 @@ function Prompts:anchorFrame()
     local createFrame = self.environment.CreateFrame
     local parent = self.environment.UIParent
     local anchor = createFrame("Frame", nil, parent)
-    anchor:SetWidth(GreetPrompts.WIDTH)
+    self.buttonWidth = self:measureButton(anchor)
+    anchor:SetWidth(self:width())
     anchor:SetHeight(GreetPrompts.HEIGHT)
     anchor:SetMovable(true)
     anchor:SetClampedToScreen(true)
@@ -66,7 +125,7 @@ function Prompts:anchorFrame()
     self:placeAnchor()
 
     local handle = createFrame("Frame", nil, anchor)
-    handle:SetWidth(GreetPrompts.WIDTH)
+    handle:SetWidth(self:width())
     handle:SetHeight(GreetPrompts.HANDLE_HEIGHT)
     handle:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 4)
     handle:SetFrameStrata("HIGH")
@@ -139,7 +198,7 @@ function Prompts:row(index)
     local createFrame = self.environment.CreateFrame
     local anchor = self:anchorFrame()
     local frame = createFrame("Frame", nil, anchor)
-    frame:SetWidth(GreetPrompts.WIDTH)
+    frame:SetWidth(self:width())
     frame:SetHeight(GreetPrompts.HEIGHT)
     frame:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0,
         -(index - 1) * (GreetPrompts.HEIGHT + GreetPrompts.GAP))
@@ -151,18 +210,18 @@ function Prompts:row(index)
     background:SetColorTexture(0, 0, 0, 0.7)
 
     local row = { frame = frame }
-    -- Close sits at the far right, Greet just left of it, and the name fills
-    -- the rest, centered vertically with room on every side.
+    -- Close sits at the far right, the greeting button just left of it, and
+    -- the name fills the rest, centered vertically with room on every side.
     row.close = createFrame("Button", nil, frame, "UIPanelCloseButton")
     row.close:SetWidth(GreetPrompts.CLOSE_SIZE)
     row.close:SetHeight(GreetPrompts.CLOSE_SIZE)
     row.close:SetPoint("RIGHT", frame, "RIGHT", -6, 0)
 
     row.greet = createFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    row.greet:SetWidth(GreetPrompts.BUTTON_WIDTH)
+    row.greet:SetWidth(self.buttonWidth)
     row.greet:SetHeight(GreetPrompts.BUTTON_HEIGHT)
     row.greet:SetPoint("RIGHT", row.close, "LEFT", -6, 0)
-    row.greet:SetText("Greet")
+    row.greet:SetText(GreetPrompts.DEFAULT_LABEL)
 
     row.name = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     row.name:SetPoint("LEFT", frame, "LEFT", GreetPrompts.PADDING, 0)
@@ -190,8 +249,9 @@ end
 
 -- Draws `prompts` (from GreetPromptQueue:Visible), hiding unused boxes.
 -- `handlers.greet(player)` and `handlers.close(player)` answer the buttons.
--- While `lockedFor` (whole seconds) is above 0, each Greet button is
--- disabled and counts down, as "Greet (3)".
+-- Each greeting button is named for its prompt's category. While
+-- `lockedFor` (whole seconds) is above 0, each is disabled and counts down,
+-- as "Welcome Back (3)".
 function Prompts:Show(prompts, handlers, lockedFor)
     if type(self.environment.CreateFrame) ~= "function" then
         return false
@@ -205,7 +265,7 @@ function Prompts:Show(prompts, handlers, lockedFor)
             row.player = prompt.player
             row.name:SetText(prompt.label or "")
             local locked = type(lockedFor) == "number" and lockedFor > 0
-            row.greet:SetText(locked and ("Greet (" .. lockedFor .. ")") or "Greet")
+            row.greet:SetText(GreetPrompts.Label(prompt.category, lockedFor))
             if type(row.greet.SetEnabled) == "function" then
                 row.greet:SetEnabled(not locked)
             end

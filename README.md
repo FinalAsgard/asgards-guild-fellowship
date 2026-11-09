@@ -242,7 +242,7 @@ On Retail, the game hides chat from add-ons during encounters and keystone runs.
 
 ## Guild Greet
 
-When someone joins the guild or a guild member comes online, a small prompt appears (at the left side of the screen unless you move it) with just the name they go by and a **Greet** button. Press it to post a random greeting to guild chat. Nothing is ever posted unless you press the button.
+When someone joins the guild or a guild member comes online, a small prompt appears (at the left side of the screen unless you move it) with just the name they go by and a button named for the kind of greeting: **Welcome to the Guild** for someone who just joined, **Greet** for a login, **Welcome Back**, or **Long Time No See!** for a long absence. The buttons are all the same width, so they line up. Press it to post a random greeting of that kind to guild chat. Nothing is ever posted unless you press the button.
 
 - **Join**: someone joins the guild. They get this instead of a login prompt.
 - **Long absence**: someone's first login this session when none of their characters had logged in for 30 days or more (you can change the days), going by the guild roster's last-online times when you logged in.
@@ -271,7 +271,7 @@ First and last parts only differ on WoW Forever, where names have two parts, so 
 
 When you greet someone, the add-on tells other add-on users in the guild. Once a player has had enough greetings from anyone (2 by default; set it from 1 to 10 in the Guild Greet settings), your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (15 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever category or character it was for. This only counts members running the add-on; greetings typed by hand aren't seen. If two people press Greet at the same moment, an extra greeting can slip through.
 
-After each greeting, Greet is locked for a moment so nobody floods guild chat: 2 seconds after your first greeting in a row, 4 after the second, 6 after the third, and so on. While it's locked, the Greet buttons are greyed out and count down, as **Greet (3)**. Press again once they unlock; the game only lets an add-on post to chat when you press a button, so nothing is sent for you later. A prompt whose player gets enough greetings from others in the meantime closes as usual. Once a lock runs out with no prompts showing, the next one starts at 2 seconds again.
+After each greeting, Greet is locked for a moment so nobody floods guild chat: 2 seconds after your first greeting in a row, 4 after the second, 6 after the third, and so on. While it's locked, the greeting buttons are greyed out and count down, as **Welcome Back (3)**. Press again once they unlock; the game only lets an add-on post to chat when you press a button, so nothing is sent for you later. A prompt whose player gets enough greetings from others in the meantime closes as usual. Once a lock runs out with no prompts showing, the next one starts at 2 seconds again.
 
 Greeting messages, recruitment ad times, and the officer channel probe travel apart from guild sync's traffic, so a busy sync (a big guild logging in at once) doesn't hold them up.
 
