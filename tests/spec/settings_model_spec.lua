@@ -386,8 +386,10 @@ test.test("the Guild Greet section has category, threshold and this-character se
     test.assertEqual(15, addon.settings:Get("welcomeBackMinutes"))
     test.assertTrue(addon.settings:Set("welcomeBackMinutes", 20))
     test.assertEqual(20, world.database.greet.welcomeBackMinutes)
-    test.assertEqual(nil, addon.settings:Set("longAbsenceDays", 400))
-    test.assertEqual(30, addon.settings:Get("longAbsenceDays"))
+    test.assertEqual(3, addon.settings:Get("welcomeCap"))
+    test.assertTrue(addon.settings:Set("welcomeCap", 5))
+    test.assertEqual(5, world.database.greet.welcomeCap)
+    test.assertEqual(nil, addon.settings:Set("welcomeCap", 11))
 
     -- Greet stays on for other characters.
     test.assertTrue(addon.settings:Get("greetCharacter"))
@@ -575,7 +577,7 @@ end
 registerTagColorTest("Forever")
 registerTagColorTest("Retail")
 
-test.test("the Guild Greet settings open with the main switches, then headed groups for prompts and timing", function()
+test.test("the Guild Greet settings open with the main switches, then headed groups for prompts, timing and closing", function()
     local _, addon = loggedIn("Retail")
     local section = addon.settings:SectionsOn("greetings")[1]
     local ids = {}
@@ -594,8 +596,10 @@ test.test("the Guild Greet settings open with the main switches, then headed gro
     test.assertEqual("greetCategory:join", ids[6])
     test.assertEqual("greetTimingHeading", ids[10])
     test.assertEqual("welcomeBackMinutes", ids[11])
+    test.assertEqual("greetCloseHeading", ids[12])
     test.assertEqual("greetCap", ids[13])
-    test.assertEqual(13, #ids)
+    test.assertEqual("welcomeCap", ids[14])
+    test.assertEqual(14, #ids)
     -- "This character" explains how it differs from the main switch.
     test.assertContains(addon.settings:Info("greetCharacter"), "every character on this account")
 end)

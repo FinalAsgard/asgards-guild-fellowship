@@ -30,6 +30,7 @@ local function setup()
             result[normalizer:Key(entries[index][1])] = {
                 name = entries[index][1], note = entries[index][2], level = entries[index][3],
                 online = entries[index][4] == "online", zone = entries[index][4] == "online" and "Dornogal" or nil,
+                classToken = entries[index][5],
             }
         end
         return result
@@ -41,7 +42,7 @@ local function setup()
         }))
     end
     local guild = {
-        { "Toolbox-Area52", "@TheTool", 80 },
+        { "Toolbox-Area52", "@TheTool", 80, nil, "WARRIOR" },
         { "Hammer-Area52", ">Toolbox", 70, "online" },
         { "Wrench-Area52", ">Toolbox", 60 },
     }
@@ -55,7 +56,7 @@ local function setup()
         playerId = playerId,
         -- `adStats`, when given, answers the panel's ad count line; `wrap`
         -- wraps the bio.
-        build = function(adStats, wrap)
+        build = function(adStats, wrap, classColor)
             return addon.PlayerPanelViewModel.Build({
                 partition = partition,
                 playerId = playerId,
@@ -63,41 +64,35 @@ local function setup()
                 normalizer = normalizer,
                 adStats = adStats,
                 wrap = wrap,
+                classColor = classColor,
                 formatDate = function(timestamp)
                     return "day " .. (timestamp - START) / 86400
                 end,
             })
         end,
-        summary = function()
-            return addon.PlayerPanelViewModel.Summary({
-                partition = partition,
-                playerId = playerId,
-                members = members({ guild[1], guild[2] }),
-                normalizer = normalizer,
-            })
-        end,
     }
 end
 
-local function rowsOf(model, kind)
+-- The Profile tab's rows of `kind`, or the Log tab's with `list` "logRows".
+local function rowsOf(model, kind, list)
+    local rows = model[list or "rows"]
     local found = {}
     local index
-    for index = 1, #model.rows do
-        if model.rows[index].kind == kind then
-            table.insert(found, model.rows[index])
+    for index = 1, #rows do
+        if rows[index].kind == kind then
+            table.insert(found, rows[index])
         end
     end
     return found
 end
 
-test.test("the panel shows the alias, acting main, alts, and history", function()
+test.test("the panel shows the alias, acting main and alts, and the Log tab the history", function()
     local state = setup()
 
     local model = state.build()
 
     test.assertEqual("TheTool (Toolbox)", model.label)
     test.assertEqual("TheTool", model.alias)
-    test.assertEqual("from a note", model.aliasSource)
     test.assertEqual("toolbox-area52", model.main)
     local characters = rowsOf(model, "character")
     test.assertEqual(2, #characters)
@@ -105,7 +100,8 @@ test.test("the panel shows the alias, acting main, alts, and history", function(
     test.assertEqual("Toolbox", characters[1].name)
     test.assertEqual("Hammer", characters[2].name)
     test.assertEqual("Online, Dornogal", characters[2].status)
-    local history = rowsOf(model, "history")
+    test.assertEqual(0, #rowsOf(model, "history"), "history isn't on the Profile tab")
+    local history = rowsOf(model, "history", "logRows")
     test.assertEqual(1, #history)
     -- Shown as the roster spells it, without the home realm.
     test.assertEqual("Wrench", history[1].name)
@@ -114,13 +110,19 @@ test.test("the panel shows the alias, acting main, alts, and history", function(
     test.assertEqual("until day 1", history[1].dates)
 end)
 
-test.test("the panel says whether the player is marked don't sync", function()
+test.test("character rows carry the class for the name's color, and Discord moves to the header", function()
     local state = setup()
-    test.assertFalse(state.build().dontSync)
+    state.partition:SetProfileText("toolbox-area52", "discord", "tool#1", 1, "toolbox-area52")
 
-    state.partition:SetNoSync(state.playerId, true)
+    local model = state.build(nil, nil, function(classToken)
+        return classToken == "WARRIOR" and "ffc69b6d" or nil
+    end)
 
-    test.assertTrue(state.build().dontSync)
+    test.assertEqual("tool#1", model.discord)
+    local characters = rowsOf(model, "character")
+    test.assertEqual("ffc69b6d", characters[1].color)
+    test.assertEqual(nil, characters[2].color, "no class known")
+    test.assertEqual(0, #rowsOf(model, "about", "bioRows"), "only Discord was set, and it's in the header")
 end)
 
 test.test("panel rows offer the same actions as the right-click menu", function()
@@ -148,9 +150,10 @@ test.test("a player with no alts or history says so", function()
         normalizer = addon.NameNormalizer.Create(RULES),
     })
 
-    local empties = rowsOf(model, "empty")
-    test.assertEqual("No alts", empties[1].text)
-    test.assertEqual("No former characters", empties[2].text)
+    test.assertEqual("No alts", rowsOf(model, "empty")[1].text)
+    local logEmpties = rowsOf(model, "empty", "logRows")
+    test.assertEqual("Nothing logged yet", logEmpties[1].text)
+    test.assertEqual("No former characters", logEmpties[2].text)
     test.assertFalse(rowsOf(model, "character")[1].canDetach)
     test.assertTrue(model.canMerge)
 end)
@@ -160,7 +163,7 @@ test.test("an out-of-guild main shows in history with its date", function()
     state.partition:AddHistory(state.playerId, { name = "Bigmain", role = "main", since = START + 2 * 86400,
         reason = "out of guild" })
 
-    local history = rowsOf(state.build(), "history")
+    local history = rowsOf(state.build(), "history", "logRows")
 
     test.assertEqual("Bigmain", history[1].name)
     test.assertEqual("Main", history[1].role)
@@ -185,7 +188,7 @@ end)
 -- `options.onDiscordChanged` as for the controller; `options.profile` the
 -- client (Retail by default); `options.officer` makes the user, logged in
 -- on the guild's first member, an officer.
-local function controllerSetup(onSyncResumed, options)
+local function controllerSetup(_, options)
     options = options or {}
     local world = fixtures.newEnvironment(options.profile or "Retail")
     world.environment.date = function(format, timestamp)
@@ -222,8 +225,8 @@ local function controllerSetup(onSyncResumed, options)
         nameRules = client:GetClientProfile().nameRules,
         getDatabase = function() return database end,
         createWindow = function() return window end,
-        onSyncResumed = onSyncResumed,
         onDiscordChanged = options.onDiscordChanged,
+        onProfileTextChanged = options.onProfileTextChanged,
         isOfficer = function() return options.officer == true end,
     })
     controller:OnSavedDataReady()
@@ -247,7 +250,8 @@ test.test("panel edits are manual and refresh the roster and the panel at once",
 
     controller:SetAlias(window.player.main, "Tool Time")
     test.assertEqual("Tool Time (Toolbox)", window.player.label)
-    test.assertEqual("set by hand", window.player.aliasSource)
+    local partition = controller.current.partition
+    test.assertEqual("manual", partition:GetPlayer(window.player.id).aliasSource)
     test.assertEqual("Tool Time (Toolbox)", window.rows[1].label)
 
     controller:MakeMain("hammer-area52")
@@ -269,24 +273,18 @@ test.test("the panel closes when its player is merged away", function()
     test.assertEqual(nil, window.player)
 end)
 
-test.test("don't sync is toggled from the panel, marked there, and turning it off resumes sync", function()
-    local resumed = {}
-    local controller, window = controllerSetup(function(key)
-        table.insert(resumed, key)
-    end)
+test.test("the panel stays open without the window, and follows changes", function()
+    local controller, window = controllerSetup()
     controller:SelectPlayerOf("hammer-area52")
-    test.assertFalse(window.player.dontSync)
 
-    test.assertTrue(controller:SetDontSync(window.player.main, true))
-    test.assertTrue(window.player.dontSync, "the panel shows the player is pinned")
-    test.assertTrue(controller.current.partition:IsNoSync(window.player.id))
-    test.assertEqual(0, #resumed)
+    controller:Toggle()
+    test.assertFalse(window:IsShown())
+    test.assertTrue(window.player ~= nil)
 
-    test.assertTrue(controller:SetDontSync(window.player.main, false))
-    test.assertFalse(window.player.dontSync)
-    test.assertFalse(controller.current.partition:IsNoSync(window.player.id))
-    test.assertEqual(1, #resumed)
-    test.assertEqual("toolbox-area52", resumed[1])
+    local partition = controller.current.partition
+    partition:SetAlias(partition:GetCharacter("toolbox-area52").player, "Tool Box", "manual")
+    controller:Invalidate()
+    test.assertEqual("Tool Box (Toolbox)", window.player.label)
 end)
 
 test.test("set discord: the panel carries the player's Discord to prefill the dialog", function()
@@ -374,6 +372,38 @@ for _, profile in ipairs({ "Forever", "Retail" }) do
         test.assertTrue(controller:SetAlias(otherKey, "Visi"))
         test.assertEqual(1, edits)
     end)
+
+    test.test(profile .. ": the Bio tab's location and bio are editable for their own player, or by an officer",
+        function()
+        local sent = {}
+        local function record(key, kind, text)
+            table.insert(sent, kind .. "=" .. text)
+            return { {} }
+        end
+        local controller, window, client = controllerSetup(nil, { profile = profile,
+            onProfileTextChanged = record })
+        local printed
+        client.Print = function(_, message) printed = message end
+        local _, _, normalizer = controller:QuietContext()
+        local otherKey = normalizer:Key(other)
+
+        controller:SelectPlayerOf(normalizer:Key(alt))
+        test.assertEqual("location", window.player.bioRows[1].field)
+        test.assertTrue(controller:SetProfileText(window.player.main, "location", "Ohio"))
+        test.assertTrue(controller:SetProfileText(window.player.main, "bio", "Healer"))
+        test.assertFalse(controller:SetProfileText(otherKey, "bio", "Spam"))
+        test.assertEqual("location=Ohio,bio=Healer", table.concat(sent, ","))
+        test.assertContains(printed, "That bio wasn't saved: members can only change their own player")
+
+        local officer = controllerSetup(nil, { profile = profile, officer = true, onProfileTextChanged = record })
+        test.assertTrue(officer:SetProfileText(otherKey, "bio", "Raider"))
+        test.assertEqual("bio=Raider", sent[3])
+
+        -- 251 accented letters fit 500 letters but not 500 bytes.
+        test.assertFalse(controller:SetProfileText(window.player.main, "bio", string.rep("\195\169", 251)))
+        test.assertContains(printed, "longer than 500 bytes")
+        test.assertEqual(3, #sent, "nothing sent")
+    end)
 end
 
 test.test("set discord: an edit that couldn't be saved is reported", function()
@@ -395,7 +425,7 @@ test.test("dates are formatted by the client", function()
     test.assertEqual("", client:FormatDate(nil))
 end)
 
-test.test("player panel: a player with an ad record shows it first, and one without shows nothing", function()
+test.test("player panel: the ad record leads the Log tab, which says so when there's nothing, then History", function()
     local state = setup()
     local asked
     local model = state.build(function(keys)
@@ -403,19 +433,38 @@ test.test("player panel: a player with an ad record shows it first, and one with
         return "Advertised: 12 (3 in last 30 days)"
     end)
 
-    test.assertEqual("stat", model.rows[1].kind)
-    test.assertEqual("Advertised: 12 (3 in last 30 days)", model.rows[1].text)
-    test.assertEqual("section", model.rows[2].kind)
+    test.assertEqual("log", model.logRows[1].kind)
+    test.assertEqual("Advertised: 12 (3 in last 30 days)", model.logRows[1].text)
+    test.assertEqual("section", model.rows[1].kind, "nothing logged on the Profile tab")
     -- Every one of the player's characters is asked about.
     test.assertEqual(2, #asked)
 
-    local none = state.build(function()
+    -- Nothing logged: the note, then the History section.
+    local function onlyEmpty(built)
+        return built.logRows[1].kind == "empty" and built.logRows[1].text == "Nothing logged yet"
+            and built.logRows[2].kind == "section" and built.logRows[2].text == "History"
+    end
+    test.assertTrue(onlyEmpty(state.build(function()
         return nil
+    end)))
+    test.assertTrue(onlyEmpty(state.build()))
+    test.assertTrue(onlyEmpty(state.build(function() error("boom") end)))
+end)
+
+test.test("player panel: long Log lines wrap instead of being cut off", function()
+    local state = setup()
+    local long = "Advertised: 12 (3 in last 30 days) in Trade, General and every city channel there is"
+
+    local model = state.build(function()
+        return long
     end)
-    test.assertEqual("section", none.rows[1].kind)
-    test.assertEqual(0, #rowsOf(none, "stat"))
-    test.assertEqual(0, #rowsOf(state.build(), "stat"))
-    test.assertEqual(0, #rowsOf(state.build(function() error("boom") end), "stat"))
+
+    local lines = rowsOf(model, "log", "logRows")
+    test.assertTrue(#lines > 1)
+    local index
+    for index = 1, #lines do
+        test.assertTrue(#lines[index].text <= state.addon.PlayerPanelViewModel.BIO_LINE)
+    end
 end)
 
 test.test("the bio wraps at spaces to a measured width, never inside a character", function()
@@ -462,64 +511,49 @@ test.test("the panel model wraps the bio with the window's wrapper when given", 
         return { "[" .. text .. "]" }
     end)
 
-    local about = rowsOf(model, "about")
+    local about = rowsOf(model, "about", "bioRows")
     test.assertEqual("[Raid lead on weekends]", about[1].text)
 
-    -- Discord and Location are wrapped too, with their labels.
+    -- The location is wrapped too.
     state.partition:SetProfileText("toolbox-area52", "location", "Stormwind", START, "toolbox-area52")
     about = rowsOf(state.build(nil, function(text)
         return { "[" .. text .. "]" }
-    end), "about")
-    test.assertEqual("[Location: Stormwind]", about[1].text)
+    end), "about", "bioRows")
+    test.assertEqual("[Stormwind]", about[1].text)
+    test.assertEqual("[Raid lead on weekends]", about[2].text)
 end)
 
-test.test("the mini profile lists the main, then Discord and location, alts, and the bio", function()
+test.test("the Bio tab shows Location and Bio headings, each Not set until the player sets it", function()
     local state = setup()
 
-    -- Nothing set: the labels stay, left blank.
-    local summary = state.summary()
-    test.assertEqual("TheTool (Toolbox)", summary.title)
-    test.assertEqual(table.concat({
-        "Main: Toolbox (80)",
-        "",
-        "Discord:",
-        "Location:",
-        "",
-        "Alts:",
-        "Hammer (70)",
-        "",
-        "Personal Bio",
-        "",
-    }, "|"), table.concat(summary.lines, "|"))
+    local model = state.build()
+    local function texts(rows)
+        local found = {}
+        local index
+        for index = 1, #rows do
+            table.insert(found, rows[index].kind .. ":" .. rows[index].text .. ":" .. tostring(rows[index].field))
+        end
+        return table.concat(found, "|")
+    end
+    test.assertEqual("section:Location:location|empty:Not set:nil|section:Bio:bio|empty:Not set:nil",
+        texts(model.bioRows))
+    test.assertEqual(nil, model.location)
+    test.assertEqual(nil, model.bio)
+    test.assertEqual(0, #rowsOf(model, "about"), "the Profile tab has no About section")
 
-    state.partition:SetProfileText("toolbox-area52", "discord", "thetool", START, "toolbox-area52")
     state.partition:SetProfileText("toolbox-area52", "location", "Stormwind", START, "toolbox-area52")
-    state.partition:SetProfileText("toolbox-area52", "bio", "Raid lead on weekends", START, "toolbox-area52")
-    test.assertEqual(table.concat({
-        "Main: Toolbox (80)",
-        "",
-        "Discord: thetool",
-        "Location: Stormwind",
-        "",
-        "Alts:",
-        "Hammer (70)",
-        "",
-        "Personal Bio",
-        "Raid lead on weekends",
-    }, "|"), table.concat(state.summary().lines, "|"))
-end)
+    state.partition:SetProfileText("toolbox-area52", "bio", "Tank", START, "toolbox-area52")
+    model = state.build()
+    test.assertEqual("section:Location:location|about:Stormwind:nil|section:Bio:bio|about:Tank:nil",
+        texts(model.bioRows))
+    test.assertEqual("Stormwind", model.location)
+    test.assertEqual("Tank", model.bio)
 
-test.test("the mini profile leaves Alts blank for a player without alts, and is nil for one that's gone", function()
-    local state = setup()
-    state.addon.PlayerService.Create(state.partition):Detach("hammer-area52")
-
-    local lines = state.summary().lines
-    test.assertEqual("Alts:", lines[6])
-    test.assertEqual("", lines[7])
-    test.assertEqual("Personal Bio", lines[8])
-
-    local addon = state.addon
-    test.assertEqual(nil, addon.PlayerPanelViewModel.Summary({ partition = state.partition, playerId = "nobody" }))
+    -- Cleared reads as not set.
+    state.partition:SetProfileText("toolbox-area52", "location", "", START + 1, "toolbox-area52")
+    model = state.build()
+    test.assertEqual(nil, model.location)
+    test.assertEqual("empty", model.bioRows[2].kind)
 end)
 
 test.test("promotion rows go to the panel's Promotion tab, not the profile list", function()

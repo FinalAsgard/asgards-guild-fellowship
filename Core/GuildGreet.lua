@@ -7,12 +7,13 @@ local _, addon = ...
 -- given, so it never touches the game itself. Nothing is ever posted
 -- without the user pressing Greet.
 --
--- Greeters coordinate: after the user's greeting posts, a "greeted" message
--- tells other add-on users, and GreetTally counts each player's greetings
--- from both sides. Once a player has had as many as the user's cap, the
--- user's prompt for them quietly closes, and they aren't prompted again
--- until the welcome-back window passes. Without add-on messaging, Greet
--- simply works uncoordinated.
+-- Greeters coordinate through guild chat itself: a guild chat line that
+-- names someone with a waiting prompt (their character, main or alias, as
+-- a whole word) counts as a greeting for them, from whoever sent it, add-on
+-- or not, and GreetTally counts each player's greetings. Once a player has
+-- had as many as the user's cap for that prompt, the prompt quietly closes,
+-- and they aren't prompted again until the welcome-back window passes. A
+-- prompt also closes when its player goes offline.
 --
 -- After each greeting, Greet is locked for a cooldown, so one user can't
 -- flood guild chat: 2 seconds after the first in a row, then 4, then 6. The
@@ -21,11 +22,19 @@ local _, addon = ...
 -- A prompt whose player has had enough greetings meanwhile closes as usual.
 -- Once a cooldown ends with no prompt showing, the next starts at 2 again.
 local GuildGreet = {
-    -- The "greeted" message: { v = PROTOCOL, t = TYPE_GREETED, c = the
-    -- greeted character's key, a = when they arrived (server time) }. The
-    -- greeter is whoever the game says sent it.
+    -- The "greeted" message older versions (v0.9.4 and before) close their
+    -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
+    -- character's key, a = when they arrived (server time) }. The greeter
+    -- is whoever the game says sent it. Greetings are counted from guild
+    -- chat now, but it's still sent after a Greet press, and counted when
+    -- heard, so guildmates who haven't updated aren't nudged into greeting
+    -- again. Turn LEGACY_GREETED off (and remove it) once they have.
     PROTOCOL = 1,
     TYPE_GREETED = "greeted",
+    LEGACY_GREETED = true,
+    -- Name parts shorter than this never count as naming someone, so a
+    -- one-letter part of a two-part name doesn't match "a".
+    MIN_NAME_LETTERS = 2,
     -- A prompt shows a random whole number of seconds in this range after
     -- the arrival, so the greeting doesn't reach a player whose game is
     -- still loading.
@@ -111,9 +120,6 @@ function GuildGreet.Create(options)
         welcomeBackSeconds = function()
             return greet:Setting("welcomeBackMinutes") * 60
         end,
-        longAbsenceSeconds = function()
-            return greet:Setting("longAbsenceDays") * 24 * 60 * 60
-        end,
     })
     return greet
 end
@@ -134,8 +140,12 @@ function Greet:Library()
 end
 
 -- How many greetings a player must already have before the user's prompt
--- for them closes.
-function Greet:Cap()
+-- for them closes: the welcome cap for someone who just joined (a "join"
+-- prompt), the greeting cap otherwise.
+function Greet:Cap(category)
+    if category == addon.GreetPolicy.JOIN then
+        return self:Setting("welcomeCap")
+    end
     local store = self.store()
     return store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
 end
@@ -317,6 +327,21 @@ function Greet:OnPresence(kind, rawName)
     end
     if kind == "offline" then
         self.policy:WentOffline(key, now)
+        -- Nobody to greet any more: the prompt raised for this character,
+        -- not one for another of its player's characters still online.
+        -- Matched by character, so a prompt raised before a scan linked
+        -- them still closes.
+        local removed = false
+        local prompts = self.queue:All(now)
+        local index
+        for index = 1, #prompts do
+            if prompts[index].key == key then
+                removed = self.queue:Remove(prompts[index].player) or removed
+            end
+        end
+        if removed then
+            self:Refresh()
+        end
         return
     end
     local prompt
@@ -328,7 +353,7 @@ function Greet:OnPresence(kind, rawName)
     -- A category with no greetings has nothing to say, so it never prompts,
     -- and a player who has had enough greetings already isn't prompted.
     if prompt == nil or #self:Library():Greetings(prompt.category) == 0
-        or self.tally:Reached(prompt.player, self:Cap(), now)
+        or self.tally:Reached(prompt.player, self:Cap(prompt.category), now)
     then
         return
     end
@@ -408,7 +433,7 @@ function Greet:Greet(player)
     end
     self.queue:Remove(player)
     local text
-    if not self.tally:Reached(prompt.player, self:Cap(), now) then
+    if not self.tally:Reached(prompt.player, self:Cap(prompt.category), now) then
         text = self:post(prompt, now)
     end
     if text ~= nil then
@@ -441,7 +466,8 @@ function Greet:startCooldown(now)
 end
 
 -- Posts a random greeting from `prompt`'s category, using the names as they
--- are now, and tells other add-on users. Returns the text sent, or nil.
+-- are now, counts it, and tells older versions (see LEGACY_GREETED).
+-- Returns the text sent, or nil.
 function Greet:post(prompt, now)
     local greeting = self:Library():Pick(prompt.category)
     local text
@@ -452,24 +478,25 @@ function Greet:post(prompt, now)
         end
     end
     if text ~= nil then
-        local selfKey = self.selfKey()
-        local greeter = selfKey and self.policy:PlayerOf(selfKey) or "self"
-        self.tally:Add(prompt.player, greeter, prompt.raisedAt, now)
-        pcall(self.announce, {
-            v = GuildGreet.PROTOCOL, t = GuildGreet.TYPE_GREETED, c = prompt.key, a = prompt.raisedAt,
-        })
+        self.tally:Add(prompt.player, self:ownGreeter(), prompt.raisedAt, now)
+        if GuildGreet.LEGACY_GREETED then
+            pcall(self.announce, {
+                v = GuildGreet.PROTOCOL, t = GuildGreet.TYPE_GREETED, c = prompt.key, a = prompt.raisedAt,
+            })
+        end
     end
     return text
 end
 
--- Another add-on user's "greeted" message, from `sender` (a name as the game
--- reports it). Counts their greeting, and closes the user's prompt once the
--- player has had enough. Messages from the user's own characters, about
--- players this add-on can't place, or for an arrival that's long past are
--- ignored. Returns true when it was counted.
+-- Another add-on user's "greeted" message (see LEGACY_GREETED), from
+-- `sender` (a name as the game reports it). Counts their greeting, once per
+-- greeter however it's heard (their line in guild chat too), and closes
+-- the user's prompt once the player has had enough. Messages from the
+-- user's own characters, about players this add-on can't place, or for an
+-- arrival that's long past are ignored. Returns true when it was counted.
 function Greet:OnGreeted(message, sender)
-    if type(message) ~= "table" or message.v ~= GuildGreet.PROTOCOL or message.t ~= GuildGreet.TYPE_GREETED
-        or type(message.c) ~= "string" or type(message.a) ~= "number"
+    if not GuildGreet.LEGACY_GREETED or type(message) ~= "table" or message.v ~= GuildGreet.PROTOCOL
+        or message.t ~= GuildGreet.TYPE_GREETED or type(message.c) ~= "string" or type(message.a) ~= "number"
     then
         return false
     end
@@ -482,17 +509,116 @@ function Greet:OnGreeted(message, sender)
     -- A player is placed by the database, or by a prompt the user has for
     -- them (someone who just joined isn't in the database yet).
     local player = self.policy:PlayerOf(message.c)
-    if partition:GetCharacter(message.c) == nil and self.queue:Get(player) == nil then
+    local prompt = self.queue:Get(player)
+    if partition:GetCharacter(message.c) == nil and prompt == nil then
         return false
     end
     local before = self.tally:Count(player, now)
     if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
         return false
     end
-    if self.tally:Reached(player, self:Cap(), now) and self.queue:Remove(player) then
+    if prompt ~= nil and self.tally:Reached(player, self:Cap(prompt.category), now) and self.queue:Remove(player) then
         self:Refresh()
     end
     return true
+end
+
+-- Who the user counts as when they greet, on any of their characters.
+function Greet:ownGreeter()
+    local selfKey = self.selfKey()
+    return selfKey and self.policy:PlayerOf(selfKey) or "self"
+end
+
+-- Whether `lowered` (a chat line, case-folded with NameNormalizer.Fold)
+-- contains `name` as a whole word: not inside a longer word. Letters
+-- outside ASCII count as part of a word, so accented names aren't matched
+-- inside longer ones. A name shorter than MIN_NAME_LETTERS characters (not
+-- bytes: "é" is one) never matches.
+local function namesWord(lowered, name)
+    if type(name) ~= "string" then
+        return false
+    end
+    -- UTF-8 continuation bytes don't start a character.
+    local letters = #name - select(2, string.gsub(name, "[\128-\191]", ""))
+    if letters < GuildGreet.MIN_NAME_LETTERS then
+        return false
+    end
+    name = addon.NameNormalizer.Fold(name)
+    local function wordByte(index)
+        local byte = string.byte(lowered, index)
+        return byte ~= nil and (byte >= 128 or string.find(string.char(byte), "^%w") ~= nil)
+    end
+    local start = 1
+    while true do
+        local first, last = string.find(lowered, name, start, true)
+        if first == nil then
+            return false
+        end
+        if not wordByte(first - 1) and not wordByte(last + 1) then
+            return true
+        end
+        start = first + 1
+    end
+end
+
+-- Whether a chat line names `prompt`'s player: their alias as a whole, or
+-- their character or main, or a part of a two-part name, each also without
+-- a realm (a connected realm's "Anvil-Stormrage" is written "Anvil"; an
+-- alias "Tank-Healer" is never cut to "Tank").
+function Greet:NamedIn(lowered, prompt)
+    local names = self:Names(prompt.key, prompt.rawName)
+    if namesWord(lowered, names.name) then
+        return true
+    end
+    local _, name
+    for _, name in ipairs({ names.character, names.characterfirst, names.characterlast,
+        names.main, names.mainfirst, names.mainlast })
+    do
+        if namesWord(lowered, name)
+            or (type(name) == "string" and namesWord(lowered, string.match(name, "^([^%-]+)%-")))
+        then
+            return true
+        end
+    end
+    return false
+end
+
+-- A line in guild chat, `message` from `sender` (a name as the game
+-- reports it). Counts as a greeting from the sender for each waiting prompt
+-- whose player it names, except the player's own lines, and closes those
+-- prompts once their player has had enough. Returns how many prompts it
+-- counted for.
+function Greet:OnGuildChat(message, sender)
+    local _, normalizer = self.context()
+    local now = self.now()
+    local senderKey = normalizer and normalizer:Key(sender)
+    if type(message) ~= "string" or senderKey == nil or type(now) ~= "number" then
+        return 0
+    end
+    local greeter = self:IsOwn(senderKey) and self:ownGreeter() or self.policy:PlayerOf(senderKey)
+    local lowered = addon.NameNormalizer.Fold(message)
+    local counted, closed = 0, false
+    local prompts = self.queue:All(now)
+    local index
+    for index = 1, #prompts do
+        local prompt = prompts[index]
+        -- The player's own lines don't count, even when a scan linked
+        -- them after the prompt was raised.
+        local own = greeter == prompt.player or greeter == self.policy:PlayerOf(prompt.key)
+        if not own and self:NamedIn(lowered, prompt) then
+            local before = self.tally:Count(prompt.player, now)
+            if self.tally:Add(prompt.player, greeter, prompt.raisedAt, now) > before then
+                counted = counted + 1
+                if self.tally:Reached(prompt.player, self:Cap(prompt.category), now) then
+                    closed = self.queue:Remove(prompt.player) or closed
+                end
+            end
+        end
+    end
+    if closed then
+        self:Refresh()
+    end
+    return counted
 end
 
 -- The user closed a prompt without greeting.

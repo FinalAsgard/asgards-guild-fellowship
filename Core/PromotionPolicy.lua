@@ -126,18 +126,27 @@ PromotionPolicy.STATUS["check-note"] = PromotionPolicy.STATUS.check
 -- The highest rank (lowest index) among `playerId`'s characters in the
 -- guild, or nil.
 function PromotionPolicy.HighestRank(partition, playerId)
-    local best
+    local _, rank = PromotionPolicy.HighestCharacter(partition, playerId)
+    return rank
+end
+
+-- The character of `playerId`'s in the guild with the highest rank, and
+-- that rank, or nil. On a tie, the player's main (CharactersOf lists it
+-- first), else the first by key.
+function PromotionPolicy.HighestCharacter(partition, playerId)
+    local bestKey, best
     local keys = partition:CharactersOf(playerId)
     local index
     for index = 1, #keys do
-        local character = partition:GetCharacter(keys[index])
-        if character ~= nil and type(character.rank) == "number" and partition:IsInGuild(keys[index])
+        local key = keys[index]
+        local character = partition:GetCharacter(key)
+        if character ~= nil and type(character.rank) == "number" and partition:IsInGuild(key)
             and (best == nil or character.rank < best)
         then
-            best = character.rank
+            bestKey, best = key, character.rank
         end
     end
-    return best
+    return bestKey, best
 end
 
 -- One character's promotion status, or nil when it isn't in the guild,

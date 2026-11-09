@@ -119,3 +119,25 @@ test.test("a saved ledger or forgery log of the wrong shape quarantines nothing 
     test.assertEqual(NOW, partition:GetLedger().since, "started over")
     test.assertEqual(0, #ledger:Forgeries())
 end)
+
+test.test("the forgery probe lists each logged forgery with what the ledger held for it", function()
+    local setup = newSetup()
+    local function format(timestamp)
+        return "t" .. tostring(timestamp - NOW)
+    end
+    test.assertEqual("No forged edits are logged here.", setup.addon.SyncLedger.ForgeryLines(setup.partition,
+        format, 10)[1])
+
+    setup.ledger:Record({ link("wrench-area52", "hammer-area52", NOW) }, NOW)
+    setup.ledger:LogForgery(link("wrench-area52", "anvil-area52", NOW + 5), "anvil-area52", NOW + 9)
+    setup.ledger:LogForgery(alias("anvil-area52", "", NOW + 6), "hammer-area52", NOW + 9)
+
+    local lines = setup.addon.SyncLedger.ForgeryLines(setup.partition, format, 10)
+    test.assertEqual("Ledger of your edits kept since t0.", lines[1])
+    test.assertEqual("2 forged edits logged; the last 2, oldest first:", lines[2])
+    test.assertEqual("t9 from anvil-area52: main of wrench-area52, main anvil-area52, stamped t5;" ..
+        " your ledger held t0.", lines[3])
+    test.assertEqual("t9 from hammer-area52: alias of anvil-area52, alias cleared, stamped t6;" ..
+        " your ledger held nothing.", lines[4])
+    test.assertEqual(1, #setup.addon.SyncLedger.ForgeryLines(setup.partition, format, 1) - 2, "only the newest")
+end)

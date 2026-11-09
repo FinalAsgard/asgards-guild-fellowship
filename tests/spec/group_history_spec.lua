@@ -78,11 +78,6 @@ test.test("group history: counted per player across all their characters", funct
     test.assertEqual(2, count)
     test.assertEqual(NOW + 86400, last)
     test.assertEqual(0, (history:Stats({ "cleric" })))
-    test.assertEqual("Grouped together 2 times, last on day " .. (NOW + 86400),
-        history:Line({ "hammer", "bolt" }, function(at) return "day " .. at end))
-    test.assertEqual("Grouped together 1 time, last on day " .. NOW,
-        history:Line({ "hammer" }, function(at) return "day " .. at end))
-    test.assertEqual(nil, history:Line({ "cleric" }, tostring))
 end)
 
 -- Storage ---------------------------------------------------------------------------
@@ -118,7 +113,7 @@ end)
 
 -- The player panel --------------------------------------------------------------------
 
-test.test("player panel: shows how often you grouped with the player, and nothing when never", function()
+test.test("player panel: shows how often you grouped with the player, never included, and when last in the Log", function()
     local addon, partition, history = newHistory()
     partition:RecordCharacter("hammer", { name = "Hammer" })
     partition:RecordCharacter("cleric", { name = "Cleric" })
@@ -128,16 +123,19 @@ test.test("player panel: shows how often you grouped with the player, and nothin
             partition = partition,
             playerId = partition:GetCharacter(key).player,
             normalizer = addon.NameNormalizer.Create({ twoPartNames = false, homeRealm = "Camelot" }),
-            groupedWith = function(keys)
-                return history:Line(keys, function() return "2026-10-12" end)
+            grouped = function(keys)
+                return history:Stats(keys)
             end,
+            formatDate = function() return "2026-10-12" end,
         })
     end
 
     local hammer = build("hammer")
-    test.assertEqual("stat", hammer.rows[1].kind)
-    test.assertEqual("Grouped together 1 time, last on 2026-10-12", hammer.rows[1].text)
-    test.assertEqual("section", build("cleric").rows[1].kind)
+    test.assertEqual("Grouped together 1 time", hammer.grouped)
+    test.assertEqual("Last grouped together on 2026-10-12", hammer.logRows[1].text)
+    local cleric = build("cleric")
+    test.assertEqual("Grouped together 0 times", cleric.grouped)
+    test.assertEqual("empty", cleric.logRows[1].kind, "no last time")
 end)
 
 -- The composed add-on -------------------------------------------------------------------

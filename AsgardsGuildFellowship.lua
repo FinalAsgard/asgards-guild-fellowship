@@ -37,7 +37,7 @@ local requestGuildLog, readGuildLog, recordLiveMembership = function() end, func
 local guildLogSync
 -- Membership dates (see MembershipDates), set up with guild sync below:
 -- what a roster scan saw, and the officer's lines for the player panel.
-local observeMembership, membershipLines = function() end, function() end
+local observeMembership, membershipLines, earliestJoin = function() end, function() end, function() end
 -- An add-on message was heard from a character (see MembershipDates:Heard).
 local heardFrom = function() end
 -- The officers' Promotions page, the requirements editor (see
@@ -138,6 +138,14 @@ if clientProfile.supported then
         onDiscordChanged = function(key, text)
             return syncSession:LocalDiscordEdit(key, text)
         end,
+        -- Their own player's is their own edit; an officer's for someone
+        -- else is stamped on that player's main.
+        onProfileTextChanged = function(key, kind, text)
+            if rosterController:IsOwnPlayer(key) then
+                return syncSession:LocalProfileEdit(kind, text)
+            end
+            return syncSession:LocalPlayerTextEdit(key, kind, text)
+        end,
         onDeclaredChanged = function(key, before)
             syncSession:LocalDeclaredEdit(key, before)
         end,
@@ -165,9 +173,6 @@ if clientProfile.supported then
                 guildNoteOverlay:Refresh()
             end
         end,
-        onSyncResumed = function(key)
-            syncSession:Rejoin(key)
-        end,
         onDecideSuggestion = function(character, kind, approved)
             return syncSession:Decide(character, kind, approved)
         end,
@@ -177,6 +182,9 @@ if clientProfile.supported then
         rolesOf = function(key)
             local roles = rolesOf(key)
             return roles and addon.RoleCatalog.Describe(roles) or nil
+        end,
+        joined = function(keys)
+            return earliestJoin(keys)
         end,
         membership = function(keys)
             return membershipLines(keys)
@@ -190,14 +198,12 @@ if clientProfile.supported then
         readyKeys = function()
             return promotions.readyKeys()
         end,
-        groupedWith = function(keys)
+        grouped = function(keys)
             local guild, partition = rosterController:QuietContext()
             if guild == nil then
                 return nil
             end
-            return addon.GroupHistory.Create(partition):Line(keys, function(timestamp)
-                return client:FormatDate(timestamp)
-            end)
+            return addon.GroupHistory.Create(partition):Stats(keys)
         end,
         recruitRecord = function(keys)
             return guildRecruit:RecordFor(keys)
@@ -307,8 +313,8 @@ if clientProfile.supported then
                 onPromotionsTick = function(key, item, ticked, note)
                     return promotions.tick(key, item, ticked, note)
                 end,
-                onPanelPromotionToggle = function(key)
-                    return promotions.togglePanel(key)
+                onPanelPromotionToggle = function(key, expanded)
+                    return promotions.togglePanel(key, expanded)
                 end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
@@ -336,6 +342,16 @@ if clientProfile.supported then
                     local store = rosterController:Store()
                     if store ~= nil then
                         store:SetFrameState(state)
+                    end
+                end,
+                loadPlayerPanelPosition = function()
+                    local store = rosterController:Store()
+                    return store and store:GetPlayerPanelPosition()
+                end,
+                savePlayerPanelPosition = function(position)
+                    local store = rosterController:Store()
+                    if store ~= nil then
+                        store:SetPlayerPanelPosition(position)
                     end
                 end,
                 onToggleGroup = function(playerId)
@@ -386,6 +402,9 @@ if clientProfile.supported then
                 onSetAlias = function(key, text)
                     rosterController:SetAlias(key, text)
                 end,
+                onSetProfileText = function(key, kind, text)
+                    rosterController:SetProfileText(key, kind, text)
+                end,
                 onSetDiscord = function(key, text)
                     rosterController:SetDiscord(key, text)
                 end,
@@ -415,9 +434,6 @@ if clientProfile.supported then
                 end,
                 onClosePanel = function()
                     rosterController:ClosePanel()
-                end,
-                onSetDontSync = function(key, enabled)
-                    rosterController:SetDontSync(key, enabled)
                 end,
                 onMenuUnavailable = function()
                     rosterController:Print("The organize menu isn't available on this client.")
@@ -663,11 +679,15 @@ if clientProfile.supported then
         label = "Timing",
     })
     greetNumber("welcomeBackMinutes", "Minutes away before coming back is a welcome back")
-    greetNumber("longAbsenceDays", "Days away before a login is a long absence")
+    settings:Add("guildGreet", {
+        id = "greetCloseHeading",
+        kind = "heading",
+        label = "Close my prompt after",
+    })
     settings:Add("guildGreet", {
         id = "greetCap",
         kind = "number",
-        label = "Close my prompt once a player has had this many greetings",
+        label = "Greetings (login, welcome back, long absence)",
         min = addon.FellowshipStore.GREET_CAP_MIN,
         max = addon.FellowshipStore.GREET_CAP_MAX,
         get = function()
@@ -685,6 +705,7 @@ if clientProfile.supported then
             return true
         end,
     })
+    greetNumber("welcomeCap", "Guild join welcomes")
     -- The greetings are edited below these settings on the master frame's
     -- Greetings tab; the AddOns options get a button to go there.
     local function openGreetings()
@@ -2063,16 +2084,9 @@ if clientProfile.supported then
         end
     end
     -- The player panel's dates, for officers only: the player's earliest
-    -- current join, then each character's join and time at its rank.
-    membershipLines = function(keys)
-        local guild, partition, normalizer = rosterController:QuietContext()
-        if guild == nil or not selfIsOfficer() then
-            return nil
-        end
-        local dates = datesOf(partition)
-        local function formatDate(timestamp)
-            return client:FormatDate(timestamp)
-        end
+    -- current join (its header), and each character's join and time at its
+    -- rank (its Log).
+    local function inGuildKeys(partition, keys)
         local current = {}
         local index
         for index = 1, #keys do
@@ -2080,9 +2094,28 @@ if clientProfile.supported then
                 table.insert(current, keys[index])
             end
         end
-        local lines = {
-            "Earliest join: " .. addon.MembershipDates.Describe(dates:EarliestJoin(current), formatDate),
-        }
+        return current
+    end
+    local function formatDate(timestamp)
+        return client:FormatDate(timestamp)
+    end
+    earliestJoin = function(keys)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil or not selfIsOfficer() then
+            return nil
+        end
+        return addon.MembershipDates.Describe(datesOf(partition):EarliestJoin(inGuildKeys(partition, keys)),
+            formatDate)
+    end
+    membershipLines = function(keys)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil or not selfIsOfficer() then
+            return nil
+        end
+        local dates = datesOf(partition)
+        local current = inGuildKeys(partition, keys)
+        local lines = {}
+        local index
         for index = 1, #current do
             local character = partition:GetCharacter(current[index])
             table.insert(lines, (normalizer:Display(character.name) or current[index]) .. ": joined " ..
@@ -2253,27 +2286,6 @@ if clientProfile.supported then
             checks:Prune()
         end
     end
-    -- The game guild roster's promotion panel, for the member named `name`
-    -- selected there: that character's rows only (as panelRows, so who may
-    -- see them is decided by its player), its checklist open at first. Its
-    -- own open checklists, kept while the same member stays selected.
-    local rosterExpanded, rosterSelected = {}, nil
-    promotions.rosterRows = function(name)
-        local guild, partition, normalizer = rosterController:QuietContext()
-        local key = guild and normalizer:Key(name)
-        local character = key and partition:GetCharacter(key)
-        if character == nil or character.player == nil then
-            return nil
-        end
-        if key ~= rosterSelected then
-            rosterSelected = key
-            rosterExpanded = { [key] = true }
-        end
-        return promotions.panelRows({ key }, character.player, rosterExpanded)
-    end
-    promotions.toggleRoster = function(key)
-        rosterExpanded[key] = not rosterExpanded[key] or nil
-    end
     -- Requirements or ticks changed: redraw the page, the player panel and
     -- the roster's Ready markers, here and on the game's guild roster.
     promotions.changed = function()
@@ -2320,15 +2332,47 @@ if clientProfile.supported then
         end
         return addon.PromotionPolicy.MatchSet(inputs)
     end
+    -- Why the character named `name` (in the game's guild roster) should be
+    -- promoted to match its player: { rankName, highestName,
+    -- highestRankName }, the rank to promote it to and the player's
+    -- highest character and its rank; nil when it needn't be, or for a
+    -- member.
+    promotions.matchFor = function(name)
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        local _, _, normalizer = rosterController:QuietContext()
+        local key = normalizer and normalizer:Key(name)
+        local character = key and inputs.partition:GetCharacter(key)
+        local target = character and addon.PromotionPolicy.MatchTarget(inputs, key)
+        if target == nil then
+            return nil
+        end
+        local highestKey, highest = addon.PromotionPolicy.HighestCharacter(inputs.partition, character.player)
+        local highestCharacter = highestKey and inputs.partition:GetCharacter(highestKey)
+        if highestCharacter == nil then
+            return nil
+        end
+        local function rankName(rank)
+            return inputs.rankNames[rank + 1] or ("Rank " .. rank)
+        end
+        return {
+            rankName = rankName(target),
+            highestName = normalizer:Display(highestCharacter.name) or highestKey,
+            highestRankName = rankName(highest),
+        }
+    end
     -- The game's name for rank index `rank`.
     promotions.rankName = function(rank)
         return (client:GetGuildRankNames() or {})[rank + 1] or ("Rank " .. rank)
     end
-    -- The characters whose checklists are open on the player panel's
-    -- Promotion tab, for the session.
+    -- The characters whose checklists were opened (true) or closed (false)
+    -- on the player panel's Promotion tab, for the session; the top one
+    -- opens until it's closed.
     local panelExpanded = {}
-    promotions.togglePanel = function(key)
-        panelExpanded[key] = not panelExpanded[key] or nil
+    promotions.togglePanel = function(key, expanded)
+        panelExpanded[key] = not expanded
         rosterController:RedrawPanel()
         return true
     end
@@ -2376,6 +2420,7 @@ if clientProfile.supported then
         return addon.PromotionsViewModel.PanelRows(characters, {
             officer = officer,
             expanded = expanded or panelExpanded,
+            openFirst = true,
             highestRankName = highest and (inputs.rankNames[highest + 1] or ("Rank " .. highest)) or nil,
             nameOf = nameOf,
             formatDate = function(timestamp)
@@ -2683,8 +2728,9 @@ if clientProfile.supported then
     end
     router:Register("probe",
         "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..
-        " notes changed; probe log: the guild event log; probe officer: the officer channel; probe ready:" ..
-        " the Ready flags on the game's guild roster; officers)",
+        " notes changed; probe forgeries: the guild sync edits caught as forged in your name; probe log: the" ..
+        " guild event log; probe officer: the officer channel; probe ready: the Ready flags on the game's" ..
+        " guild roster; officers)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
@@ -2696,8 +2742,24 @@ if clientProfile.supported then
                     client:Print("  " .. lines[index])
                 end
                 if what == "" then
-                    client:Print("  Also: " .. addon.Identity.slashCommand .. " probe log, probe officer or" ..
-                        " probe ready.")
+                    client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
+                        " probe officer or probe ready.")
+                end
+                return
+            end
+            if what == "forgeries" then
+                local _, partition = rosterController:QuietContext()
+                if partition == nil then
+                    rosterController:Print("Not in a guild.")
+                    return
+                end
+                rosterController:Print("Forged edit probe:")
+                local lines = addon.SyncLedger.ForgeryLines(partition, function(timestamp)
+                    return client:FormatDateTime(timestamp)
+                end, 10)
+                local index
+                for index = 1, #lines do
+                    client:Print("  " .. lines[index])
                 end
                 return
             end
@@ -2710,7 +2772,8 @@ if clientProfile.supported then
                 return
             end
             if what ~= "log" then
-                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe log, " ..
+                rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe forgeries, " ..
+                    addon.Identity.slashCommand .. " probe log, " ..
                     addon.Identity.slashCommand .. " probe officer or " .. addon.Identity.slashCommand ..
                     " probe ready.")
                 return
@@ -3202,7 +3265,8 @@ if clientProfile.supported then
         inInstance = function()
             return client:IsInInstance()
         end,
-        -- Heard within seconds, however much sync traffic is waiting.
+        -- Older versions' "greeted" message (GuildGreet.LEGACY_GREETED),
+        -- heard within seconds, however much sync traffic is waiting.
         announce = function(message)
             return comm:BroadcastLive(message)
         end,
@@ -3448,60 +3512,14 @@ if clientProfile.supported then
                 auditCache = nil
             end
         end,
-        -- Anyone sees the selected member's player in brief.
-        profileFor = function(name)
-            local guild, partition, normalizer = rosterController:QuietContext()
-            local key = guild and normalizer:Key(name)
-            local character = key and partition:GetCharacter(key)
-            if character == nil then
-                return nil
-            end
-            local summary = addon.PlayerPanelViewModel.Summary({
-                partition = partition,
-                playerId = character.player,
-                members = rosterController:LiveMembers(normalizer),
-                normalizer = normalizer,
-            })
-            local selfKey = rosterController:SelfKey()
-            local own = selfKey and partition:GetCharacter(selfKey)
-            if summary ~= nil and own ~= nil and own.player == character.player then
-                summary.own = true
-            end
-            if summary ~= nil then
-                summary.canSetDiscord = rosterController:CanEditPlayer(key)
-            end
-            return summary
+        -- Selecting a member there opens the player panel for their
+        -- player, for anyone.
+        showPlayer = function(name)
+            return rosterController:ShowPlayerNamed(name)
         end,
-        editProfile = function()
-            rosterController:Open("profile")
-        end,
-        -- The player panel's Set Discord… box, from the mini profile.
-        setDiscord = function(name)
-            local guild, partition, normalizer = rosterController:QuietContext()
-            local key = guild and normalizer:Key(name)
-            local character = key and partition:GetCharacter(key)
-            local player = character and partition:GetPlayer(character.player)
-            if player == nil then
-                return
-            end
-            local summary = addon.PlayerPanelViewModel.Summary({ partition = partition, playerId = character.player,
-                normalizer = normalizer })
-            local label = summary and summary.title or name
-            local current = partition:PlayerProfileText(character.player, "discord")
-            addon.RosterWindow.ShowDiscordDialog(label, current, function(text)
-                rosterController:SetDiscord(player.main, text)
-            end)
-        end,
-        -- The selected member's player's promotion status: officers work on
-        -- anyone's; a member sees only their own, read-only.
-        promotionFor = function(name)
-            return promotions.rosterRows(name)
-        end,
-        tick = function(key, item, ticked, note)
-            return promotions.tick(key, item, ticked, note)
-        end,
-        toggle = function(key)
-            promotions.toggleRoster(key)
+        -- Officers see why a selected alt should be promoted to match.
+        matchFor = function(name)
+            return promotions.matchFor(name)
         end,
         -- Officers see which members are ready for promotion, and which
         -- alts to promote to match their player (that flag wins): worked
@@ -3917,6 +3935,11 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- Without the system message event, Guild Greet simply never prompts.
     client:ObserveGuildEventLog(function()
         readGuildLog()
+    end)
+    -- A guild chat line naming someone with a greet prompt counts as a
+    -- greeting for them, whoever typed it.
+    client:ObserveGuildChat(function(message, sender)
+        guildGreet:OnGuildChat(message, sender)
     end)
     client:ObservePresence(function(kind, name)
         if kind == "join" or kind == "leave" then

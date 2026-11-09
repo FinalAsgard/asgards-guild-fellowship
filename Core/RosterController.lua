@@ -31,6 +31,11 @@ Controller.__index = Controller
 --                 player panel ("" clears it): official at once for an
 --                 officer, a suggestion for a member; nil when it wasn't
 --                 saved
+--   onProfileTextChanged optional function(key, kind, text) -> facts or
+--                 nil: this user set the location or bio ("location" or
+--                 "bio") of `key`'s player from the player panel ("" clears
+--                 it): their own player's as their own, an officer's for
+--                 anyone else; nil when it wasn't saved
 --   onAliasChanged  optional function(key, before): after a manual alias
 --                 change to the player of `key`, with the alias before it
 --                 ("" for none) (for guild sync)
@@ -39,18 +44,20 @@ Controller.__index = Controller
 --                   applied (result.newKeys: the characters new to the store)
 --   onChanged     optional function(): after anything the roster shows
 --                 changed (a scan, sync, manual change, or roster update)
---   onSyncResumed  optional function(key): after "Don't sync" was turned
---                 off for the player of `key`
 --   onDecideSuggestion  optional function(character, kind, approved) ->
 --                 ok, reason: decides a member's suggestion in the queue
 --   adStats       optional function(keys) -> a player's ad count line for
 --                 the player panel, or nil
 --   rolesOf       optional function(key) -> a character's role preferences
 --                 for the player panel ("Tank, DPS"), or nil
---   groupedWith   optional function(keys) -> how often this user grouped
---                 with a player, for the player panel, or nil
---   membership    optional function(keys) -> lines about a player's
---                 membership dates for the player panel (officers), or nil
+--   grouped       optional function(keys) -> how many times this user
+--                 grouped with a player and when last, for the player
+--                 panel, or nil
+--   joined        optional function(keys) -> when a player first joined, as
+--                 text, for the player panel (officers), or nil
+--   membership    optional function(keys) -> lines about each of a player's
+--                 characters' join and rank dates for the player panel's
+--                 Log (officers), or nil
 --   promotionsView optional function() -> the Promotions page's editor
 --                 model (see PromotionsViewModel.Editor)
 --   promotion     optional function(keys, playerId) -> the player panel's
@@ -71,7 +78,8 @@ function RosterController.Create(options)
         client = options.client,
         adStats = options.adStats,
         rolesOf = options.rolesOf,
-        groupedWith = options.groupedWith,
+        grouped = options.grouped,
+        joined = options.joined,
         membership = options.membership,
         promotionsView = options.promotionsView,
         promotion = options.promotion,
@@ -89,10 +97,10 @@ function RosterController.Create(options)
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
         onDiscordChanged = options.onDiscordChanged,
+        onProfileTextChanged = options.onProfileTextChanged,
         onDeclaredChanged = options.onDeclaredChanged,
         onScanFinished = options.onScanFinished,
         onChanged = options.onChanged,
-        onSyncResumed = options.onSyncResumed,
         collapsed = {},
         showDeparted = false,
         createWindow = options.createWindow,
@@ -772,7 +780,7 @@ function Controller:Detach(key)
     return self:Organize("Detach", key)
 end
 
--- "Set Discord…" from the player panel or the game roster's mini profile:
+-- "Set Discord…" from the player panel:
 -- sets the Discord username of `key`'s player to `text` ("" clears it), as
 -- an officer's or as a member's suggestion about their own player, and
 -- redraws. The add-on's window needn't have been opened.
@@ -792,25 +800,36 @@ function Controller:SetDiscord(key, text)
     return true
 end
 
+-- The Bio tab's Edit: sets the location or bio (`kind`) of `key`'s player
+-- to `text` ("" clears it), for the user's own player or, as an officer,
+-- anyone's, and redraws.
+function Controller:SetProfileText(key, kind, text)
+    if self.onProfileTextChanged == nil or (self.current == nil and self:QuietContext() == nil) then
+        return false
+    end
+    local label = kind == "bio" and "That bio" or "That location"
+    if not addon.FellowshipStore.IsProfileText(kind, text) then
+        self:Print(label .. " wasn't saved: it's longer than " .. tostring(addon.FellowshipStore.PROFILE_FIELDS[kind])
+            .. " bytes (an accented letter takes two).")
+        return false
+    end
+    if not self:CanEditPlayer(key) then
+        self:Print(label .. " wasn't saved: " .. NOT_OWN_PLAYER .. ".")
+        return false
+    end
+    if self.onProfileTextChanged(key, kind, text) == nil then
+        self:Print(label .. " wasn't saved: this character isn't in the guild roster yet, or the server time "
+            .. "isn't known yet.")
+        return false
+    end
+    -- The panel can be open without the window.
+    self:Invalidate()
+    return true
+end
+
 -- "Declare as my main": `key` must be its player's main.
 function Controller:SetDeclared(key, declared)
     return self:Organize("SetDeclared", key, declared)
-end
-
--- Turns "Don't sync" on or off for `key`'s player. Turning it off reports
--- the player to onSyncResumed, so guild sync can bring it back in line.
-function Controller:SetDontSync(key, enabled)
-    if self.current == nil then
-        return false
-    end
-    local ok, reason = self:Service():SetDontSync(key, enabled)
-    if not ok then
-        self:Print("That change wasn't made: " .. tostring(reason) .. ".")
-    elseif not enabled and self.onSyncResumed ~= nil then
-        self.onSyncResumed(key)
-    end
-    self:Refresh()
-    return ok == true
 end
 
 -- How many players the "Link as alt of…" picker lists at most.
@@ -897,6 +916,29 @@ function Controller:SelectPlayerOf(key)
     return character ~= nil and self:SelectPlayer(character.player)
 end
 
+-- The game's guild roster selected `name`: opens the player panel for its
+-- player, without the add-on's window. False when the add-on has no record
+-- of them, or the panel can't be drawn.
+function Controller:ShowPlayerNamed(name)
+    local guild, partition, normalizer = self:QuietContext()
+    local key = guild and type(name) == "string" and normalizer:Key(name)
+    local character = key and partition:GetCharacter(key)
+    if character == nil or character.player == nil then
+        return false
+    end
+    if self.window == nil then
+        local window = self.createWindow()
+        if window == nil then
+            return false
+        end
+        self.window = window
+    end
+    if self.current == nil or self.current.partition ~= partition then
+        self.current = { guild = guild, partition = partition }
+    end
+    return self:SelectPlayer(character.player)
+end
+
 function Controller:ClosePanel()
     self.selected = nil
     if self.window ~= nil then
@@ -914,14 +956,19 @@ function Controller:RedrawPanel()
     local model = addon.PlayerPanelViewModel.Build({
         partition = self.current.partition,
         playerId = self.selected,
-        members = self.liveMembers or self:LiveMembers(normalizer),
+        -- The window's snapshot is only kept current while it shows.
+        members = (self.window:IsShown() and self.liveMembers) or self:LiveMembers(normalizer),
         normalizer = normalizer,
         formatDate = function(timestamp)
             return self.client:FormatDate(timestamp)
         end,
+        classColor = function(classToken)
+            return self.client:GetClassColor(classToken)
+        end,
         adStats = self.adStats,
         rolesOf = self.rolesOf,
-        groupedWith = self.groupedWith,
+        grouped = self.grouped,
+        joined = self.joined,
         membership = self.membership,
         promotion = self.promotion,
         -- The window wraps the bio to the panel's width, when it can
@@ -1026,11 +1073,15 @@ function Controller:NotifyChanged()
 end
 
 -- Data changed: the rows are stale even while the window is hidden, so the
--- next open rebuilds them. Only a shown window redraws now.
+-- next open rebuilds them. Only a shown window redraws now, or the player
+-- panel when it's open on its own.
 function Controller:Invalidate()
     self.revision = (self.revision or 0) + 1
     if self.window ~= nil and self.window:IsShown() then
         self:Redraw()
+    elseif self.selected ~= nil then
+        -- The player panel stays open without the window.
+        self:RedrawPanel()
     end
     self:NotifyChanged()
 end

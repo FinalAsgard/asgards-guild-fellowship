@@ -14,7 +14,8 @@ addon.PromotionLines = PromotionLines
 --   createFrame(type, name, parent, template)
 --   tooltip       GameTooltip, or nil
 --   tick(key, item, ticked, note) -> true when saved
---   toggle(key)   opens or closes a character's checklist
+--   toggle(key, expanded) opens or closes a character's checklist
+--                 (`expanded` is whether it's open now)
 --   redraw()      draws the lines again (to ask for a missing note)
 -- Notes typed are kept, by character and item, while the list redraws
 -- until they're saved (a line shows its item's saved note otherwise);
@@ -30,8 +31,8 @@ function PromotionLines.State(options)
         local ok, done = pcall(options.tick, key, item, ticked, note)
         return ok and done ~= false
     end
-    function state.toggle(key)
-        pcall(options.toggle, key)
+    function state.toggle(key, expanded)
+        pcall(options.toggle, key, expanded)
     end
     function state.redraw()
         pcall(options.redraw)
@@ -187,7 +188,7 @@ function PromotionLines.Attach(line, state)
     line:SetScript("OnMouseUp", function()
         local row = line.row
         if row ~= nil and row.toggle then
-            state.toggle(row.key)
+            state.toggle(row.key, row.expanded == true)
         end
     end)
 end

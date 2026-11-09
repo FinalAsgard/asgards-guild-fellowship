@@ -99,6 +99,8 @@ end
 
 test.test("one or two same-zone guildmates get a whispered update every 10 seconds", function()
     local addon = load()
+    -- The fast same-zone updates are off by default; these tests cover them.
+    addon.LocationScheduler.NEAR_ENABLED = true
     local scheduler = addon.LocationScheduler.Create()
     local state = { now = 1000, character = "toolbox-area52", spot = SPOT, guildmates = guildmates(2) }
 
@@ -123,6 +125,8 @@ end)
 
 test.test("with 3 or more guildmates in the zone, one gm-near goes to the guild instead of whispers", function()
     local addon = load()
+    -- The fast same-zone updates are off by default; these tests cover them.
+    addon.LocationScheduler.NEAR_ENABLED = true
     local scheduler = addon.LocationScheduler.Create()
     local state = { now = 1000, character = "toolbox-area52", spot = SPOT, guildmates = guildmates(12) }
 
@@ -1375,12 +1379,34 @@ local function registerWholeAddonTests(profile)
         return found
     end
 
+    test.test(profile .. ": by default, same-zone guildmates get no whispers, only the 2-minute broadcast",
+        function()
+            local channel = fixtures.newChannel()
+            local guild = fixtures.GUILDS[profile]
+            local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
+            local spot = { mapID = 1429, x = 0.25, y = 0.5 }
+            local sharer = login(profile, channel, guild.members[3].name, spot, "MAGE")
+            fixtures.deliver(channel)
+            local broadcasts = locationMessages(sharer)
+
+            spot.x = 0.75
+            fixtures.runTimers(sharer, 60)
+            test.assertEqual(0, #whispers(sharer))
+            test.assertEqual(0, #whispers(viewer))
+            test.assertEqual(broadcasts, locationMessages(sharer), "nothing more within the 2 minutes")
+
+            fixtures.runTimers(sharer, 60)
+            test.assertEqual(broadcasts + 1, locationMessages(sharer), "the 2-minute broadcast")
+            test.assertEqual(0, #whispers(sharer))
+        end)
+
     test.test(profile .. ": in the whole add-on, a guildmate in the same zone hears updates every 10 seconds", function()
         local channel = fixtures.newChannel()
         local guild = fixtures.GUILDS[profile]
         local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
         local spot = { mapID = 1429, x = 0.25, y = 0.5 }
         local sharer = login(profile, channel, guild.members[3].name, spot, "MAGE")
+        sharer.addon.LocationScheduler.NEAR_ENABLED = true
         fixtures.deliver(channel)
         test.assertEqual(0, #whispers(sharer))
 
@@ -1414,6 +1440,7 @@ local function registerWholeAddonTests(profile)
             fixtures.deliver(channel)
             -- The test guild is small, so one guildmate nearby counts as a crowd.
             sharer.addon.LocationScheduler.NEAR_GUILD_MIN = 1
+            sharer.addon.LocationScheduler.NEAR_ENABLED = true
 
             spot.x = 0.75
             fixtures.runTimers(sharer, 5)
@@ -1592,6 +1619,7 @@ local function registerWholeAddonTests(profile)
                             table.insert(filters[event], filter)
                         end
                     end)
+                viewer.addon.LocationScheduler.NEAR_ENABLED = true
                 local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 },
                     "MAGE")
                 fixtures.deliver(channel)

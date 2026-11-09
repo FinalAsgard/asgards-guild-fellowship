@@ -27,13 +27,13 @@ test.test("prompt queue: prompts are shown oldest first, one per player", functi
     test.assertEqual("welcomeBack", visible[2].category)
 end)
 
-test.test("prompt queue: a prompt disappears exactly 2 minutes after it was raised", function()
+test.test("prompt queue: a prompt disappears exactly 90 seconds after it was raised", function()
     local queue = newQueue()
 
-    test.assertEqual(START + 120, queue:Add({ player = 1 }, START))
+    test.assertEqual(START + 90, queue:Add({ player = 1 }, START))
 
-    test.assertEqual("1", players(queue:Visible(START + 119)))
-    test.assertEqual("", players(queue:Visible(START + 120)))
+    test.assertEqual("1", players(queue:Visible(START + 89)))
+    test.assertEqual("", players(queue:Visible(START + 90)))
     test.assertEqual(nil, queue:Get(1))
 end)
 
@@ -70,19 +70,19 @@ test.test("prompt queue: a prompt that expires while held never appears", functi
     queue:Add({ player = 2 }, START + 60)
 
     queue:SetHeld(false)
-    test.assertEqual("2", players(queue:Visible(START + 150)))
+    test.assertEqual("2", players(queue:Visible(START + 120)))
 end)
 
-test.test("prompt queue: a delayed prompt shows when due and lasts 2 minutes from then", function()
+test.test("prompt queue: a delayed prompt shows when due and lasts 90 seconds from then", function()
     local queue = newQueue()
 
-    test.assertEqual(START + 7 + 120, queue:Add({ player = 1 }, START, 7))
+    test.assertEqual(START + 7 + 90, queue:Add({ player = 1 }, START, 7))
     queue:Add({ player = 2 }, START)
 
     test.assertEqual("2", players(queue:Visible(START + 6)))
     -- Waiting prompts can still be found, greeted, or closed.
     test.assertTrue(queue:Get(1) ~= nil)
     test.assertEqual("1,2", players(queue:Visible(START + 7)))
-    test.assertEqual("1", players(queue:Visible(START + 126)))
-    test.assertEqual("", players(queue:Visible(START + 127)))
+    test.assertEqual("1", players(queue:Visible(START + 96)))
+    test.assertEqual("", players(queue:Visible(START + 97)))
 end)

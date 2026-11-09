@@ -473,16 +473,30 @@ end
 -- suggestion for officers to decide. Returns the facts stamped, or nil
 -- when nothing could be (no server time yet, or unusable text).
 function Session:LocalDiscordEdit(key, text)
+    return self:LocalPlayerTextEdit(key, addon.SyncFacts.KIND_DISCORD, text)
+end
+
+-- The same for any text an officer may set for someone else (see
+-- SyncFacts.OFFICER_TEXT_KINDS): the Discord username, location or bio.
+-- Only a Discord username can be a member's suggestion; a member's own
+-- location and bio go through LocalProfileEdit.
+function Session:LocalPlayerTextEdit(key, kind, text)
+    if not addon.SyncFacts.OFFICER_TEXT_KINDS[kind] then
+        return nil
+    end
     local partition = self.context()
     local character = partition and partition:GetCharacter(key)
     local player = character and partition:GetPlayer(character.player)
     if player == nil then
         return nil
     end
-    local before = partition:PlayerProfileText(character.player, addon.SyncFacts.KIND_DISCORD) or ""
+    if kind ~= addon.SyncFacts.KIND_DISCORD and not self.isOfficer(self.selfKey()) then
+        return nil
+    end
+    local before = partition:PlayerProfileText(character.player, kind) or ""
     local stamped
     self:StampAndSend(function(facts, author, now)
-        stamped = { facts:StampText(player.main, addon.SyncFacts.KIND_DISCORD, text, now, author) }
+        stamped = { facts:StampText(player.main, kind, text, now, author) }
         return stamped
     end, function(fact)
         return fact.text ~= before
@@ -647,6 +661,7 @@ function Session:SendDigest()
     local checkpoint = function()
         self:Checkpoint()
     end
+    self:ClearDontSync(partition)
     local facts = self:Facts(partition):SharedFacts(checkpoint)
     self:Send({ t = SyncSession.TYPE_DIGEST, digest = addon.SyncDigest.Of(facts, checkpoint) })
     if not self.isOfficer(self.selfKey()) and self.officerOnline() then
@@ -654,16 +669,23 @@ function Session:SendDigest()
     end
 end
 
--- After "Don't sync" was turned off for `key`'s player: lets officer data
--- win for it again, and asks the guild for it right away rather than at the
--- next login.
-function Session:Rejoin(key)
-    local partition = self.context()
-    if partition == nil then
-        return
+-- "Don't sync" is gone: any player an earlier version kept as this user's
+-- own syncs again. This user's own edits to it become the oldest possible,
+-- so officer data wins for it again, and the announcement that follows
+-- asks the guild for it.
+function Session:ClearDontSync(partition)
+    local pinned = {}
+    partition:EachPlayer(function(id, player)
+        if player.noSync == true then
+            table.insert(pinned, { id = id, main = player.main })
+        end
+    end)
+    local facts = self:Facts(partition)
+    local index
+    for index = 1, #pinned do
+        partition:SetNoSync(pinned[index].id, false)
+        facts:Rejoin(pinned[index].main)
     end
-    self:Facts(partition):Rejoin(key)
-    self:Announce()
 end
 
 -- Someone announced `digest`: unless it matches, schedules a reply with this

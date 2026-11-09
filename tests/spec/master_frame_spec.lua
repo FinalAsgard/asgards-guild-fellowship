@@ -319,3 +319,60 @@ test.test("the roster window keeps every part build makes, the Guild Log and Pro
     test.assertTrue(kept >= 9, "found the window's parts")
     test.assertTrue(returned.guildLog and returned.promotions, "build returns the Guild Log and Promotions pages")
 end)
+
+-- A frame that remembers its one point, as the game reports it back.
+local function pointFrame()
+    local frame = {}
+    function frame:ClearAllPoints()
+        self.point = nil
+    end
+    function frame:SetPoint(point, relativeTo, relativePoint, x, y)
+        if type(x) ~= "number" then
+            error("bad offset")
+        end
+        self.point = { point, relativeTo, relativePoint, x, y }
+    end
+    function frame:GetPoint()
+        if self.point == nil then
+            return nil
+        end
+        return unpack(self.point)
+    end
+    return frame
+end
+
+test.test("a pop-out panel opens where it was left, else beside the master frame", function()
+    local addon = test.newAddon("Adapters/MasterFrame.lua")
+    local screen, master = {}, {}
+
+    local panel = pointFrame()
+    addon.MasterFrame.PlacePopOut(panel, master, nil, screen)
+    test.assertEqual("TOPLEFT", panel.point[1])
+    test.assertEqual(master, panel.point[2])
+    test.assertEqual("TOPRIGHT", panel.point[3])
+    test.assertEqual(addon.MasterFrame.SIDE_OFFSET, panel.point[4])
+    -- Still beside the frame: nothing to save, so it keeps following it.
+    test.assertEqual(nil, addon.MasterFrame.PopOutPosition(panel, screen))
+
+    -- Dragged: the game re-anchors it to the screen.
+    panel:SetPoint("TOPLEFT", nil, "BOTTOMLEFT", 900, 700)
+    local position = addon.MasterFrame.PopOutPosition(panel, screen)
+    test.assertEqual("TOPLEFT", position.point)
+    test.assertEqual("BOTTOMLEFT", position.relativePoint)
+    test.assertEqual(900, position.x)
+    test.assertEqual(700, position.y)
+
+    -- After a reload it opens there.
+    local reopened = pointFrame()
+    addon.MasterFrame.PlacePopOut(reopened, master, position, screen)
+    test.assertEqual(screen, reopened.point[2])
+    test.assertEqual(900, reopened.point[4])
+    test.assertEqual(700, reopened.point[5])
+    test.assertEqual(900, addon.MasterFrame.PopOutPosition(reopened, screen).x)
+
+    -- Something unusable saved: beside the frame again.
+    local fallback = pointFrame()
+    addon.MasterFrame.PlacePopOut(fallback, master, { point = "TOPLEFT", relativePoint = "TOPLEFT", x = "far",
+        y = 1 }, screen)
+    test.assertEqual(master, fallback.point[2])
+end)

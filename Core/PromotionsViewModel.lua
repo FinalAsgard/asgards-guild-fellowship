@@ -198,8 +198,10 @@ end
 -- options: officer (true for an officer's view: check boxes, Override,
 -- who ticked, notes and reasons; false for a member's own view,
 -- read-only, with just each item's status and detail), highestRankName,
--- nameOf(key), formatDate(time), expanded (a set of the character keys
--- whose checklists are open).
+-- nameOf(key), formatDate(time), expanded (the character keys whose
+-- checklists are open (true) or closed (false)), openFirst (true to open
+-- the first character with a checklist, not just a promotion date, unless
+-- `expanded` closes it).
 -- Rows: { kind = "stat", text } lines, then for each character
 --   { kind = "promotion", text, key, toggle?, expanded? }, `toggle` when
 --   it has a checklist (or a promotion date) to open, then for an officer
@@ -222,6 +224,7 @@ function PromotionsViewModel.PanelRows(characters, options)
     local formatDate = options.formatDate or tostring
     local expanded = options.expanded or {}
     local rows = {}
+    local firstOpened = false
     if options.officer and options.highestRankName ~= nil then
         table.insert(rows, { kind = "stat", text = "Highest rank: " .. options.highestRankName })
     end
@@ -246,7 +249,14 @@ function PromotionsViewModel.PanelRows(characters, options)
         end
         if evaluated ~= nil or last ~= nil then
             header.toggle = true
-            header.expanded = expanded[character.key] == true
+            local open = expanded[character.key]
+            if open == nil then
+                open = options.openFirst == true and not firstOpened and evaluated ~= nil
+            end
+            -- Only a checklist takes the default opening, not a promotion
+            -- date alone.
+            firstOpened = firstOpened or evaluated ~= nil
+            header.expanded = open == true
             header.text = (header.expanded and "[-] " or "[+] ") .. text
         end
         if not header.expanded then

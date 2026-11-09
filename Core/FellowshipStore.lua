@@ -401,6 +401,34 @@ function Store:SetFrameState(state)
     return true
 end
 
+-- Where the player panel was last left on screen ({ point, relativePoint,
+-- x, y }), shared by every character, or nil when it was never moved or an
+-- unusable value is stored.
+function Store:GetPlayerPanelPosition()
+    local position = type(self.database) == "table" and self.database.playerPanel or nil
+    if type(position) ~= "table" or type(position.point) ~= "string" or type(position.relativePoint) ~= "string"
+        or type(position.x) ~= "number" or type(position.y) ~= "number"
+    then
+        return nil
+    end
+    return position
+end
+
+-- Saves where the player panel was left. An unusable existing value is
+-- left alone.
+function Store:SetPlayerPanelPosition(position)
+    if type(self.database) ~= "table" or type(position) ~= "table" then
+        return false
+    end
+    if self.database.playerPanel ~= nil and type(self.database.playerPanel) ~= "table" then
+        return false
+    end
+    self.database.playerPanel = {
+        point = position.point, relativePoint = position.relativePoint, x = position.x, y = position.y,
+    }
+    return true
+end
+
 -- The minimap button's saved state (LibDBIcon's angle and hidden flag),
 -- created on first use. Nil when an unusable value is stored there; it is
 -- then left alone.
@@ -592,8 +620,10 @@ end
 FellowshipStore.GREET_NUMBERS = {
     -- Minutes someone must be gone before coming back is a welcome back.
     welcomeBackMinutes = { default = 15, min = 1, max = 120 },
-    -- Days since anyone last saw a player before a login is a long absence.
-    longAbsenceDays = { default = 30, min = 1, max = 365 },
+    -- How many welcomes a player who just joined the guild must have had
+    -- before the user's prompt for them closes (the greeting cap covers
+    -- every other prompt).
+    welcomeCap = { default = 3, min = 1, max = 10 },
 }
 
 local function isInRange(value, range)

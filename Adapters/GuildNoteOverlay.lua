@@ -6,14 +6,10 @@ local _, addon = ...
 -- match their player (the same arrow, tinted), which members' public
 -- notes are out of date (a marker on their rows) and what a selected
 -- member's note should say (see NoteAudit), in a small panel to the right
--- of the member detail panel, level with its note; under the detail panel,
--- the selected member's player's promotion status (see
--- PromotionsViewModel.PanelRows): an officer's for anyone, to work on, and
--- a member's for their own player only, read-only; and for everyone, under
--- that (or straight under the detail panel), a mini profile of the selected
--- member's player (alias, Discord, location, bio, main and alts), with a
--- Set Discord… button. Forever and Retail share
--- the Communities guild roster, so one overlay serves both.
+-- hung under the member detail panel, as wide as it. For everyone, selecting
+-- a member the add-on knows opens the add-on's player panel for their
+-- player. Forever and Retail share the Communities guild roster, so one
+-- overlay serves both.
 --
 -- It only adds its own child frames and follows the game's frames with
 -- hooksecurefunc and HookScript; nothing is drawn inside the game's panel.
@@ -32,11 +28,6 @@ local GuildNoteOverlay = {
     },
     TOO_LONG_TEXT = "Too long for a public note: the other text has to be trimmed.",
     IGNORE_TEXT = "Ignore",
-    EDIT_TEXT = "Edit",
-    DISCORD_TEXT = "Set Discord...",
-    -- The mini profile's Set Discord… button, bottom left (Edit, on the
-    -- user's own, is bottom right). Best guess at placement: check in game.
-    DISCORD_SIZE = { 100, 18 },
     -- The small marker on a roster row whose member's note is out of date.
     MARKER_TEXTURE = "Interface\\COMMON\\Indicator-Yellow",
     MARKER_SIZE = 12,
@@ -55,33 +46,20 @@ local GuildNoteOverlay = {
     -- from the plain arrow; it's checked in game on the PRD's HITL issue.
     MATCH_TINT = { 0.30, 0.65, 1.00 },
     MATCH_TOOLTIP = "Promote to match: %s",
-    -- The overlay's panels: their edge, the room inside them, and the gap
-    -- between lines. The note panel is this wide; the profile panel is as
-    -- wide as the detail panel, and shows at most PROFILE_LINES lines.
-    NOTE_WIDTH = 240,
-    PROFILE_LINES = 30,
-    -- The profile panel sits this far right of the detail panel's edge, to
-    -- clear the guild roster window, and leaves this much room above its
-    -- Edit button.
-    PROFILE_SHIFT = 6,
-    EDIT_GAP = 10,
+    -- The note panel's line for an alt to promote to match: the rank, then
+    -- the player's highest character and its rank.
+    MATCH_TEXT = "|cff4da6ffPromote to %s to match %s (%s), this player's highest.|r",
+    -- The note panel: this far right of the detail panel's edges (to clear
+    -- the guild roster window's own edge), then its edge, the room inside
+    -- it, and the gap between lines.
+    NOTE_SHIFT = 6,
     PANEL_EDGE = 1,
     PANEL_PADDING = 8,
     LINE_GAP = 3,
     LINE_HEIGHT = 12,
     IGNORE_SIZE = { 64, 18 },
-    -- The promotion panel: this wide (wider than the detail panel, to fit
-    -- requirement titles), its lines this tall, at most this many (a longer
-    -- list ends with a pointer to the add-on's panel), and this much more
-    -- room under its last line.
-    PROMOTION_WIDTH = 380,
-    PROMOTION_BOTTOM = 8,
-    -- The gap between the promotion panel and the profile panel under it.
-    PROMOTION_GAP = 6,
-    PROMOTION_LINE_HEIGHT = 20,
-    PROMOTION_LINES = 18,
-    PROMOTION_TITLE = "Promotion",
-    PROMOTION_MORE = "|cff9d9d9dMore in the add-on's player panel|r",
+    -- The room between the text and Ignore, along the panel's bottom.
+    IGNORE_GAP = 6,
     -- Member list methods that redraw its rows (scrolling, sorting, and
     -- roster refreshes all end in one of these); hooked where they exist.
     LIST_REFRESHES = { "RefreshListDisplay", "RefreshLayout", "Update" },
@@ -101,25 +79,18 @@ Overlay.__index = Overlay
 --   ignore      function(row) -> leaves the row's mismatch alone until its
 --               note or suggestion changes (Partition:IgnoreNote); the
 --               overlay redraws afterwards
---   profileFor  function(name) -> the mini profile of the roster member
---               named `name`'s player, { title, lines, own }, or nil when
---               the add-on has no record of them; `own` when that player is
---               the user's, who then gets an Edit button
---   editProfile function() -> opens the user's My Profile page
---   setDiscord  function(name) -> opens the Set Discord box for the player
---               of the roster member named `name` (saved by an officer, a
---               suggestion from a member); the overlay redraws on the save
+--   matchFor    function(name) -> { rankName, highestName,
+--               highestRankName } when the roster member named `name`
+--               should be promoted to `rankName` to match their player's
+--               highest character, else nil (and for members)
+--   showPlayer  function(name) -> opens the add-on's player panel for the
+--               player of the roster member named `name`, when it knows
+--               them; false when it couldn't
 --   readyCheck  function() -> a function(name) giving the roster member
 --               named `name`'s flag: "ready" (ready for promotion), or
 --               "match" and the rank name to promote them to (which wins
 --               over ready), or nil for none; or nil when nobody's flagged
 --               (members); asked once per redraw
---   promotionFor function(name) -> the promotion rows for the player of
---               the roster member named `name`, or nil when this user may
---               not see them (or there are none)
---   tick        function(key, item, ticked, note) -> true, or false and
---               why: an officer's tick, untick or override
---   toggle      function(key) -> opens or closes a character's checklist
 function GuildNoteOverlay.Create(options)
     return setmetatable({
         client = options.client,
@@ -131,21 +102,13 @@ function GuildNoteOverlay.Create(options)
             return nil
         end,
         ignore = options.ignore or function() end,
-        profileFor = options.profileFor or function()
+        showPlayer = options.showPlayer or function() end,
+        matchFor = options.matchFor or function()
             return nil
         end,
-        editProfile = options.editProfile or function() end,
-        setDiscord = options.setDiscord or function() end,
         readyCheck = options.readyCheck or function()
             return nil
         end,
-        promotionFor = options.promotionFor or function()
-            return nil
-        end,
-        tick = options.tick or function()
-            return false
-        end,
-        toggle = options.toggle or function() end,
     }, Overlay)
 end
 
@@ -192,10 +155,10 @@ function Overlay:Box(parent)
     return created
 end
 
--- Builds the note panel, to the right of the detail panel, and the profile
--- panel, hung under it: the overlay's own frames, made children of the
--- detail panel only so they show and hide with it. Safe to call again; it
--- attaches once.
+-- Builds the note panel, to the right of the detail panel: the overlay's
+-- own frame, made a child of the detail panel only so it shows and hides
+-- with it, and follows which member the detail panel shows. Safe to call
+-- again; it attaches once.
 function Overlay:Attach()
     if self.panel ~= nil then
         return true
@@ -208,11 +171,12 @@ function Overlay:Attach()
     local padding = GuildNoteOverlay.PANEL_PADDING
     local ok, panel = pcall(function()
         local created = self:Box(detail)
-        created:SetPoint("TOPLEFT", detail, "TOPRIGHT", 0, 0)
-        created:SetWidth(GuildNoteOverlay.NOTE_WIDTH)
+        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.NOTE_SHIFT, 0)
+        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.NOTE_SHIFT, 0)
         local button = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
         button:SetSize(GuildNoteOverlay.IGNORE_SIZE[1], GuildNoteOverlay.IGNORE_SIZE[2])
-        button:SetPoint("TOPRIGHT", created, "TOPRIGHT", -padding, -padding)
+        -- Along the bottom, below the text, so it never covers it.
+        button:SetPoint("BOTTOMRIGHT", created, "BOTTOMRIGHT", -padding, padding)
         button:SetText(GuildNoteOverlay.IGNORE_TEXT)
         button:SetScript("OnClick", function()
             self:IgnoreShown()
@@ -230,8 +194,10 @@ function Overlay:Attach()
             return text
         end
         created.suggested = line(nil, "GameFontHighlightSmall")
-        created.suggested:SetPoint("RIGHT", button, "LEFT", -4, 0)
         created.problems = line(created.suggested, "GameFontNormalSmall")
+        -- Placed when shown: under the note's lines, or first without them.
+        created.match = created:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        created.match:SetJustifyH("LEFT")
         created.tooLong = line(created.problems, "GameFontRedSmall")
         created:Hide()
         return created
@@ -239,285 +205,139 @@ function Overlay:Attach()
     if not ok or panel == nil then
         return false
     end
-    local okProfile, profile = pcall(function()
-        local created = self:Box(detail)
-        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.PROFILE_SHIFT, 0)
-        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.PROFILE_SHIFT, 0)
-        created.title = created:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        created.title:SetPoint("TOPLEFT", created, "TOPLEFT", padding, -padding)
-        created.title:SetPoint("RIGHT", created, "RIGHT", -padding, 0)
-        created.title:SetJustifyH("LEFT")
-        created.body = created:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        created.body:SetPoint("TOPLEFT", created.title, "BOTTOMLEFT", 0, -GuildNoteOverlay.LINE_GAP)
-        created.body:SetPoint("RIGHT", created, "RIGHT", -padding, 0)
-        created.body:SetJustifyH("LEFT")
-        if type(created.body.SetMaxLines) == "function" then
-            created.body:SetMaxLines(GuildNoteOverlay.PROFILE_LINES)
-        end
-        local edit = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
-        edit:SetSize(GuildNoteOverlay.IGNORE_SIZE[1], GuildNoteOverlay.IGNORE_SIZE[2])
-        edit:SetPoint("BOTTOMRIGHT", created, "BOTTOMRIGHT", -padding, padding)
-        edit:SetText(GuildNoteOverlay.EDIT_TEXT)
-        edit:SetScript("OnClick", function()
-            pcall(self.editProfile)
-        end)
-        edit:Hide()
-        created.edit = edit
-        local discord = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
-        discord:SetSize(GuildNoteOverlay.DISCORD_SIZE[1], GuildNoteOverlay.DISCORD_SIZE[2])
-        discord:SetPoint("BOTTOMLEFT", created, "BOTTOMLEFT", padding, padding)
-        discord:SetText(GuildNoteOverlay.DISCORD_TEXT)
-        discord:SetScript("OnClick", function()
-            if self.member ~= nil then
-                pcall(self.setDiscord, self.member)
-            end
-        end)
-        created.discord = discord
-        created:Hide()
-        return created
-    end)
-    self.profile = okProfile and profile or nil
-    self:BuildPromotion(detail)
     local hooked = pcall(hook, detail, "DisplayMember", function(_, _, memberInfo)
-        self:ShowMember(type(memberInfo) == "table" and memberInfo.name or nil)
+        self:SelectMember(type(memberInfo) == "table" and memberInfo.name or nil)
     end)
     if not hooked then
         return false
     end
     if type(detail.HookScript) == "function" then
         pcall(detail.HookScript, detail, "OnHide", function()
-            self:ShowMember(nil)
+            self:SelectMember(nil)
         end)
     end
     self.panel = panel
     return true
 end
 
--- Shows the panels for the member named `name`, or hides them. The note
--- panel is for officers, for a member whose note is out of date; the
--- profile panel for anyone, for a member the add-on has a record of.
+-- The detail panel shows the member named `name` (nil when it closes):
+-- opens the add-on's player panel for a newly selected member, then shows
+-- the note panel. Showing the same member again (the game redraws the
+-- detail panel on roster updates) doesn't reopen a player panel the user
+-- closed, but does retry one that couldn't open (the add-on didn't know
+-- them yet).
+function Overlay:SelectMember(name)
+    local changed = name ~= self.member
+    self:ShowMember(name)
+    if name == nil then
+        self.playerShown = nil
+    elseif changed or not self.playerShown then
+        local ok, shown = pcall(self.showPlayer, name)
+        self.playerShown = ok and shown ~= false
+    end
+end
+
+-- The note panel's line for `match` (see the matchFor option).
+function GuildNoteOverlay.MatchLine(match)
+    return string.format(GuildNoteOverlay.MATCH_TEXT, tostring(match.rankName), tostring(match.highestName),
+        tostring(match.highestRankName))
+end
+
+-- Shows the note panel for the member named `name`, or hides it: for
+-- officers, for a member whose note is out of date (what it should say,
+-- with Ignore) or who should be promoted to match their player (the rank,
+-- and why), or both.
 function Overlay:ShowMember(name)
     self.member = name
     local panel = self.panel
     if panel == nil then
         return
     end
-    self:ShowProfile(name)
-    self:ShowPromotion(name)
-    local row
+    local row, match
     if name ~= nil and self.isOfficer() then
         local ok, found = pcall(self.rowFor, name)
         row = ok and found or nil
+        local okMatch, matched = pcall(self.matchFor, name)
+        match = okMatch and type(matched) == "table" and matched or nil
     end
     self.shownRow = row
-    if row == nil then
+    if row == nil and match == nil then
         panel:Hide()
         return
     end
-    local lines = GuildNoteOverlay.Lines(row)
+    local noteLines = { panel.suggested, panel.problems, panel.tooLong }
+    local lines = row and GuildNoteOverlay.Lines(row) or { suggested = "", problems = "", tooLong = "" }
     panel.suggested:SetText(lines.suggested)
     panel.problems:SetText(lines.problems)
     panel.tooLong:SetText(lines.tooLong)
-    panel:SetHeight(self:PanelHeight(panel))
-    self:AlignWithNote(panel)
+    local index
+    for index = 1, #noteLines do
+        if row ~= nil then
+            noteLines[index]:Show()
+        else
+            noteLines[index]:Hide()
+        end
+    end
+    if row ~= nil then
+        panel.ignore:Show()
+    else
+        panel.ignore:Hide()
+    end
+    -- The match line goes under the last note line with text, else first.
+    local padding = GuildNoteOverlay.PANEL_PADDING
+    panel.match:SetText(match and GuildNoteOverlay.MatchLine(match) or "")
+    pcall(panel.match.ClearAllPoints, panel.match)
+    if match ~= nil then
+        local above
+        for index = 1, #noteLines do
+            if row ~= nil and (noteLines[index]:GetText() or "") ~= "" then
+                above = noteLines[index]
+            end
+        end
+        if above == nil then
+            panel.match:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -padding)
+        else
+            panel.match:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -GuildNoteOverlay.LINE_GAP)
+        end
+        panel.match:SetPoint("RIGHT", panel, "RIGHT", -padding, 0)
+        panel.match:Show()
+    else
+        panel.match:Hide()
+    end
+    panel:SetHeight(self:PanelHeight(panel, row ~= nil, match ~= nil))
     panel:Show()
 end
 
--- Moves the note panel down to the detail panel's public note, where the
--- client can say where that is; else it stays level with the panel's top.
-function Overlay:AlignWithNote(panel)
-    local detail = self:FindDetailFrame()
-    local note = detail and detail.NoteBackground
-    local offset = 0
-    if type(note) == "table" then
-        local okNote, noteTop = pcall(note.GetTop, note)
-        local okDetail, detailTop = pcall(detail.GetTop, detail)
-        if okNote and okDetail and type(noteTop) == "number" and type(detailTop) == "number" then
-            offset = noteTop - detailTop
-        end
-    end
-    pcall(panel.ClearAllPoints, panel)
-    panel:SetPoint("TOPLEFT", detail, "TOPRIGHT", 0, offset)
-end
-
--- Shows the mini profile of the member named `name`'s player, or hides it.
-function Overlay:ShowProfile(name)
-    local profile = self.profile
-    if profile == nil then
-        return
-    end
-    local summary
-    if name ~= nil then
-        local ok, found = pcall(self.profileFor, name)
-        summary = ok and type(found) == "table" and found or nil
-    end
-    if summary == nil then
-        profile:Hide()
-        return
-    end
-    profile.title:SetText(summary.title or name)
-    profile.body:SetText(table.concat(summary.lines or {}, "\n"))
-    local function height(text, lines)
-        local ok, found = pcall(text.GetStringHeight, text)
-        return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT * lines
-    end
-    -- Set Discord… along the bottom for a player the user may change (an
-    -- officer any, a member their own), and the user's own player gets an
-    -- Edit button beside it.
-    local button = 0
-    if summary.canSetDiscord or summary.own then
-        button = GuildNoteOverlay.EDIT_GAP + math.max(GuildNoteOverlay.IGNORE_SIZE[2],
-            GuildNoteOverlay.DISCORD_SIZE[2])
-    end
-    if summary.canSetDiscord then
-        profile.discord:Show()
-    else
-        profile.discord:Hide()
-    end
-    if summary.own then
-        profile.edit:Show()
-    else
-        profile.edit:Hide()
-    end
-    profile:SetHeight(height(profile.title, 1) + GuildNoteOverlay.LINE_GAP
-        + height(profile.body, math.max(#(summary.lines or {}), 1)) + button + 2 * GuildNoteOverlay.PANEL_PADDING)
-    profile:Show()
-end
-
--- Builds the promotion panel, hung under the detail panel's left edge like
--- the profile panel (which then hangs under it; see StackProfile): a title over
--- PROMOTION_LINES lines drawn by PromotionLines, made a child of the detail
--- panel so it shows and hides with it.
-function Overlay:BuildPromotion(detail)
-    local padding = GuildNoteOverlay.PANEL_PADDING
-    local ok, promotion = pcall(function()
-        local created = self:Box(detail)
-        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.PROFILE_SHIFT, 0)
-        created:SetWidth(GuildNoteOverlay.PROMOTION_WIDTH)
-        created.title = created:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        created.title:SetPoint("TOPLEFT", created, "TOPLEFT", padding, -padding)
-        created.title:SetText(GuildNoteOverlay.PROMOTION_TITLE)
-        created.state = addon.PromotionLines.State({
-            createFrame = self.environment.CreateFrame,
-            tooltip = self.environment.GameTooltip,
-            tick = function(key, item, ticked, note)
-                return self.tick(key, item, ticked, note)
-            end,
-            toggle = function(key)
-                self.toggle(key)
-                self:ShowPromotion(self.member)
-            end,
-            redraw = function()
-                self:ShowPromotion(self.member)
-            end,
-        })
-        created.lines = {}
-        local index
-        for index = 1, GuildNoteOverlay.PROMOTION_LINES do
-            local line = self.environment.CreateFrame("Frame", nil, created)
-            line:SetHeight(GuildNoteOverlay.PROMOTION_LINE_HEIGHT)
-            local top = -padding - GuildNoteOverlay.LINE_HEIGHT - GuildNoteOverlay.LINE_GAP
-                - (index - 1) * GuildNoteOverlay.PROMOTION_LINE_HEIGHT
-            line:SetPoint("TOPLEFT", created, "TOPLEFT", padding, top)
-            line:SetPoint("TOPRIGHT", created, "TOPRIGHT", -padding, top)
-            line.text = line:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            line.text:SetJustifyH("LEFT")
-            line.text:SetWordWrap(false)
-            addon.PromotionLines.Attach(line, created.state)
-            line:Hide()
-            created.lines[index] = line
-        end
-        created:Hide()
-        return created
-    end)
-    self.promotion = ok and promotion or nil
-end
-
--- Hangs the profile panel under the promotion panel's left edge while that
--- shows, PROMOTION_GAP below it and still as wide as the detail panel;
--- else under the detail panel.
-function Overlay:StackProfile()
-    local profile = self.profile
-    local detail = self:FindDetailFrame()
-    if profile == nil or detail == nil then
-        return
-    end
-    pcall(profile.ClearAllPoints, profile)
-    local promotion = self.promotion
-    if promotion ~= nil and promotion:IsShown() then
-        profile:SetPoint("TOPLEFT", promotion, "BOTTOMLEFT", 0, -GuildNoteOverlay.PROMOTION_GAP)
-        local ok, width = pcall(detail.GetWidth, detail)
-        if ok and type(width) == "number" and width > 0 then
-            profile:SetWidth(width)
-        else
-            profile:SetPoint("TOPRIGHT", promotion, "BOTTOMRIGHT", 0, -GuildNoteOverlay.PROMOTION_GAP)
-        end
-    else
-        profile:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.PROFILE_SHIFT, 0)
-        profile:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.PROFILE_SHIFT, 0)
-    end
-end
-
--- Shows the promotion status of the player of the member named `name`, or
--- hides it when this user may not see it.
-function Overlay:ShowPromotion(name)
-    local promotion = self.promotion
-    if promotion == nil then
-        return
-    end
-    local rows
-    if name ~= nil then
-        local ok, found = pcall(self.promotionFor, name)
-        rows = ok and type(found) == "table" and found[1] ~= nil and found or nil
-    end
-    if rows == nil then
-        promotion:Hide()
-        self:StackProfile()
-        return
-    end
-    local cap = GuildNoteOverlay.PROMOTION_LINES
-    local shown = {}
-    local index
-    for index = 1, math.min(#rows, cap) do
-        shown[index] = rows[index]
-    end
-    if #rows > cap then
-        shown[cap] = { kind = "promotion", text = GuildNoteOverlay.PROMOTION_MORE }
-    end
-    for index = 1, cap do
-        local line = promotion.lines[index]
-        if shown[index] ~= nil then
-            addon.PromotionLines.Draw(line, shown[index], promotion.state)
-            line:Show()
-        else
-            line.row = nil
-            line:Hide()
-        end
-    end
-    promotion:SetHeight(2 * GuildNoteOverlay.PANEL_PADDING + GuildNoteOverlay.LINE_HEIGHT
-        + GuildNoteOverlay.LINE_GAP + #shown * GuildNoteOverlay.PROMOTION_LINE_HEIGHT
-        + GuildNoteOverlay.PROMOTION_BOTTOM)
-    promotion:Show()
-    self:StackProfile()
+-- How tall `text` is as wrapped, where the client says; LINE_HEIGHT
+-- otherwise.
+function Overlay:LineHeight(text)
+    local ok, found = pcall(text.GetStringHeight, text)
+    return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT
 end
 
 -- The panel's height for the lines it shows now: each line as tall as its
--- wrapped text where the client says, the Ignore button's height at least
--- for the first.
-function Overlay:PanelHeight(panel)
-    local function height(text)
-        local ok, found = pcall(text.GetStringHeight, text)
-        return ok and type(found) == "number" and found > 0 and found or GuildNoteOverlay.LINE_HEIGHT
-    end
-    local total = math.max(height(panel.suggested), GuildNoteOverlay.IGNORE_SIZE[2])
-    local lines = { panel.problems, panel.tooLong }
-    local index
-    for index = 1, #lines do
-        local text = lines[index]
-        local ok, shown = pcall(text.GetText, text)
-        if ok and type(shown) == "string" and shown ~= "" then
-            total = total + GuildNoteOverlay.LINE_GAP + height(text)
+-- wrapped text where the client says; the note's lines when `note`, the
+-- match line when `match`, then room for Ignore along the bottom with the
+-- note.
+function Overlay:PanelHeight(panel, note, match)
+    local total = 0
+    if note then
+        total = self:LineHeight(panel.suggested)
+        local lines = { panel.problems, panel.tooLong }
+        local index
+        for index = 1, #lines do
+            local text = lines[index]
+            local ok, shown = pcall(text.GetText, text)
+            if ok and type(shown) == "string" and shown ~= "" then
+                total = total + GuildNoteOverlay.LINE_GAP + self:LineHeight(text)
+            end
         end
+    end
+    if match then
+        total = total + (note and GuildNoteOverlay.LINE_GAP or 0) + self:LineHeight(panel.match)
+    end
+    if note then
+        total = total + GuildNoteOverlay.IGNORE_GAP + GuildNoteOverlay.IGNORE_SIZE[2]
     end
     return total + 2 * GuildNoteOverlay.PANEL_PADDING
 end

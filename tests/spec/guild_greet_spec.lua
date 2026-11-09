@@ -40,9 +40,8 @@ local function load()
     )
 end
 
--- A scanned guild with Guild Greet over it. The world records what was sent,
--- the "greeted" messages announced, and what the prompts view was last asked
--- to show; `world.time` is the
+-- A scanned guild with Guild Greet over it. The world records what was sent
+-- and what the prompts view was last asked to show; `world.time` is the
 -- clock and `world.timers` the pending timers.
 local function setup(profile)
     local addon = load()
@@ -54,7 +53,7 @@ local function setup(profile)
     local normalizer = addon.NameNormalizer.Create(rules)
     local world = {
         addon = addon, names = names, database = database, store = store,
-        sent = {}, announced = {}, timers = {}, time = START, shown = {},
+        sent = {}, timers = {}, time = START, shown = {},
     }
     -- Each entry: name, note, and the roster's last-online time ({ years,
     -- months, days, hours }; nil while online). Tongs has been away 45 days,
@@ -104,6 +103,7 @@ local function setup(profile)
             return true
         end,
         announce = function(message)
+            world.announced = world.announced or {}
             table.insert(world.announced, message)
             return true
         end,
@@ -260,11 +260,11 @@ for index = 1, #fixtures.PROFILES do
     end)
 end
 
-test.test("guild greet: a prompt leaves the screen when its 2 minutes are up", function()
+test.test("guild greet: a prompt leaves the screen when its 90 seconds are up", function()
     local world = setup("Retail")
     world.greet:OnPresence("online", world.names.bolt)
 
-    advance(world, 119)
+    advance(world, 89)
     test.assertEqual(1, #world.shown)
     advance(world, 1)
     test.assertEqual(0, #world.shown)
@@ -561,45 +561,45 @@ end)
 
 -- Greeter coordination -------------------------------------------------------------
 
--- A "greeted" message from `greeter` about `name`, for an arrival at `at`.
-local function greeted(world, greeter, name, at)
-    local _, normalizer = world.greet.context()
-    return world.greet:OnGreeted({
-        v = world.addon.GuildGreet.PROTOCOL,
-        t = world.addon.GuildGreet.TYPE_GREETED,
-        c = normalizer:Key(name),
-        a = at or world.time,
-    }, world.names[greeter])
+-- The first word of a name as the roster spells it: how guildmates write it
+-- in chat ("Anvil" for Anvil-Area52 or Anvil Stone).
+local function spoken(name)
+    return string.match(name, "^[^%-%s]+")
+end
+
+-- `greeter` says `text` in guild chat: by default a greeting naming `name`.
+-- Returns whether it counted for any prompt.
+local function greeted(world, greeter, name, text)
+    return world.greet:OnGuildChat(text or ("Hi " .. spoken(name) .. "!"), world.names[greeter]) > 0
 end
 
 local coordinationIndex
 for coordinationIndex = 1, #fixtures.PROFILES do
     local profile = fixtures.PROFILES[coordinationIndex]
 
-    test.test(profile .. ": greeting someone tells other add-on users", function()
+    test.test(profile .. ": the user's own greeting counts once, even when it shows in guild chat", function()
         local world = setup(profile)
         local _, normalizer = world.greet.context()
+        world.store:SetGreetCap(3)
         world.greet:OnPresence("online", world.names.tongs)
-        advance(world, 10)
+        world.greet:OnPresence("online", world.names.bolt)
 
         world.handlers.greet(world.shown[1].player)
+        world.greet:OnGuildChat(world.sent[1], world.names.me)
 
-        test.assertEqual(1, #world.announced)
-        local message = world.announced[1]
-        test.assertEqual("greeted", message.t)
-        test.assertEqual(normalizer:Key(world.names.tongs), message.c)
-        test.assertEqual(START, message.a)
+        local tongs = world.greet.policy:PlayerOf(normalizer:Key(world.names.tongs))
+        test.assertEqual(1, world.greet.tally:Count(tongs, world.time))
     end)
 
-    test.test(profile .. ": two greetings from others close the prompt, for any of the player's characters", function()
+    test.test(profile .. ": two greetings in guild chat close the prompt, naming the character or the main", function()
         local world = setup(profile)
-        world.greet:OnPresence("online", world.names.anvil)
+        -- Tongs is Anvil's alt.
+        world.greet:OnPresence("online", world.names.tongs)
 
-        -- One greeting, about Anvil's alt, leaves the prompt up.
         test.assertTrue(greeted(world, "bishop", world.names.tongs))
         test.assertEqual(1, #world.shown)
 
-        test.assertTrue(greeted(world, "bolt", world.names.anvil))
+        test.assertTrue(greeted(world, "bolt", world.names.anvil, "wb " .. string.lower(spoken(world.names.anvil))))
         test.assertEqual(0, #world.shown)
     end)
 end
@@ -621,12 +621,11 @@ test.test("guild greet: the cap setting decides when the prompt closes", functio
     test.assertEqual(0, #world.shown)
 end)
 
-test.test("guild greet: a player who has had enough greetings isn't prompted until the welcome-back window passes", function()
+test.test("guild greet: a player greeted enough is prompted again once the welcome-back window passes", function()
     local world = setup("Retail")
-    -- Others greeted Bolt before this user heard Bolt log in.
+    world.greet:OnPresence("online", world.names.bolt)
     greeted(world, "bishop", world.names.bolt)
     greeted(world, "anvil", world.names.bolt)
-    world.greet:OnPresence("online", world.names.bolt)
     test.assertEqual(0, #world.shown)
 
     world.greet:OnPresence("offline", world.names.bolt)
@@ -636,24 +635,52 @@ test.test("guild greet: a player who has had enough greetings isn't prompted unt
     test.assertEqual("welcomeBack", world.shown[1].category)
 end)
 
-test.test("guild greet: duplicate, late, own, and unplaceable greetings don't count", function()
+test.test("guild greet: only lines naming the arrival count, once per greeter, never their own", function()
     local world = setup("Retail")
-    world.greet:OnPresence("online", world.names.anvil)
+    world.store:SetGreetCap(3)
+    world.greet:OnPresence("online", world.names.bishop)
 
-    test.assertTrue(greeted(world, "bishop", world.names.anvil))
-    test.assertFalse(greeted(world, "bishop", world.names.anvil))
-    test.assertFalse(greeted(world, "bolt", world.names.anvil, START - 15 * MINUTE))
-    test.assertFalse(greeted(world, "me", world.names.anvil))
-    test.assertFalse(greeted(world, "myAlt", world.names.anvil))
-    test.assertFalse(greeted(world, "bolt", world.names.friend))
-    test.assertFalse(world.greet:OnGreeted({ v = 1, t = "greeted", c = 42, a = START }, world.names.bolt))
-    test.assertFalse(world.greet:OnGreeted({ v = 99, t = "greeted", c = "anvil", a = START }, world.names.bolt))
+    -- Nameless greetings, and the name inside a longer word, don't count.
+    test.assertFalse(greeted(world, "bolt", nil, "wb!"))
+    test.assertFalse(greeted(world, "bolt", nil, "hi all"))
+    test.assertFalse(greeted(world, "bolt", nil, "who has bishops?"))
+    -- The arrival's own lines don't count.
+    test.assertFalse(greeted(world, "bishop", world.names.bishop))
+    -- Their alias does, in any case, but each greeter only once.
+    test.assertTrue(greeted(world, "bolt", nil, "hey RIP"))
+    test.assertFalse(greeted(world, "bolt", world.names.bishop))
+    -- The user's own typed greeting counts, once for all their characters.
+    test.assertTrue(greeted(world, "me", world.names.bishop))
+    test.assertFalse(greeted(world, "myAlt", world.names.bishop))
     test.assertEqual(1, #world.shown)
+    test.assertTrue(greeted(world, "anvil", world.names.bishop))
+    test.assertEqual(0, #world.shown)
 end)
 
-test.test("guild greet: someone who just joined is placed by the user's prompt for them", function()
+test.test("guild greet: a line naming two arrivals counts for both", function()
     local world = setup("Retail")
     world.store:SetGreetCap(1)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+
+    test.assertTrue(greeted(world, "bishop", nil, "hey Bolt and Rust"))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a guildmate from a connected realm is named without the realm", function()
+    local world = setup("Retail")
+    world.store:SetGreetCap(1)
+    world.greet:OnPresence("join", "Visitor-Stormrage")
+    world.store:SetGreetNumber("welcomeCap", 1)
+    test.assertEqual(1, #world.shown)
+
+    test.assertTrue(greeted(world, "bishop", nil, "welcome Visitor!"))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: someone who just joined is greeted by name before the roster knows them", function()
+    local world = setup("Retail")
+    world.store:SetGreetNumber("welcomeCap", 1)
 
     world.greet:OnPresence("join", world.names.newt)
     test.assertEqual(1, #world.shown)
@@ -661,21 +688,142 @@ test.test("guild greet: someone who just joined is placed by the user's prompt f
     test.assertEqual(0, #world.shown)
 end)
 
-test.test("guild greet: when two users greet at once, both count once and nothing breaks", function()
+test.test("guild greet: a prompt closes when its player goes offline", function()
     local world = setup("Retail")
     world.greet:OnPresence("online", world.names.anvil)
     world.greet:OnPresence("online", world.names.bolt)
 
-    -- This user greets Anvil as Bishop's greeting for Anvil arrives.
-    world.handlers.greet(world.shown[1].player)
-    test.assertTrue(greeted(world, "bishop", world.names.anvil))
-    test.assertFalse(greeted(world, "bishop", world.names.anvil))
-    test.assertEqual(1, #world.sent)
-    -- Only Bolt's prompt is left, and Anvil has had two greetings.
+    world.greet:OnPresence("offline", world.names.anvil)
+
     test.assertEqual(1, #world.shown)
+    test.assertContains(world.shown[1].label, "Bolt")
+end)
+
+test.test("guild greet: accented names match whatever their case, but a one-letter name never does", function()
+    local world = setup("Retail")
+    world.store:SetGreetCap(1)
+    local partition, normalizer = world.greet.context()
+    local bolt = partition:GetCharacter(normalizer:Key(world.names.bolt)).player
+    partition:SetAlias(bolt, "\195\137owyn", "manual")
+    world.greet:OnPresence("online", world.names.bolt)
+
+    -- "É" is one letter, two bytes.
+    partition:SetAlias(bolt, "\195\137", "manual")
+    test.assertFalse(greeted(world, "bishop", nil, "\195\169 verdade"))
+    partition:SetAlias(bolt, "\195\137owyn", "manual")
+    test.assertTrue(greeted(world, "bishop", nil, "welcome \195\169owyn"))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: an alias with a dash is matched whole, never cut like a realm", function()
+    local world = setup("Retail")
+    world.store:SetGreetCap(1)
+    local partition, normalizer = world.greet.context()
+    local bolt = partition:GetCharacter(normalizer:Key(world.names.bolt)).player
+    partition:SetAlias(bolt, "Tank-Healer", "manual")
+    world.greet:OnPresence("online", world.names.bolt)
+
+    test.assertFalse(greeted(world, "bishop", nil, "need a tank"))
+    test.assertTrue(greeted(world, "bishop", nil, "hey Tank-Healer"))
+end)
+
+test.test("guild greet: another character of the player going offline leaves the prompt", function()
+    local world = setup("Retail")
+    -- Tongs is Anvil's alt: both online at once, Tongs' prompt showing.
+    world.greet:OnPresence("online", world.names.tongs)
+    test.assertEqual(1, #world.shown)
+
+    world.greet:OnPresence("offline", world.names.anvil)
+    test.assertEqual(1, #world.shown)
+    world.greet:OnPresence("offline", world.names.tongs)
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a newcomer linked by a scan after joining still can't greet themselves, and going "
+    .. "offline closes the prompt", function()
+    local world = setup("Retail")
+    world.store:SetGreetNumber("welcomeCap", 1)
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual(1, #world.shown)
+
+    -- The scan records Newt, with a player of their own.
+    local partition, normalizer = world.greet.context()
+    partition:RecordCharacter(normalizer:Key(world.names.newt), { name = world.names.newt, level = 1 })
+    test.assertFalse(greeted(world, "newt", world.names.newt))
+    test.assertEqual(1, #world.shown)
+
+    world.greet:OnPresence("offline", world.names.newt)
+    test.assertEqual(0, #world.shown)
+end)
+
+-- Older versions' "greeted" message (GuildGreet.LEGACY_GREETED) --------------------
+
+-- A "greeted" message from `greeter` about `name`, for an arrival at `at`.
+local function legacyGreeted(world, greeter, name, at)
     local _, normalizer = world.greet.context()
-    local anvil = world.greet.policy:PlayerOf(normalizer:Key(world.names.anvil))
-    test.assertEqual(2, world.greet.tally:Count(anvil, world.time))
+    return world.greet:OnGreeted({
+        v = world.addon.GuildGreet.PROTOCOL,
+        t = world.addon.GuildGreet.TYPE_GREETED,
+        c = normalizer:Key(name),
+        a = at or world.time,
+    }, world.names[greeter])
+end
+
+test.test("guild greet: pressing Greet tells older versions, a typed greeting doesn't", function()
+    local world = setup("Retail")
+    local _, normalizer = world.greet.context()
+    world.store:SetGreetCap(3)
+    world.greet:OnPresence("online", world.names.tongs)
+
+    test.assertTrue(greeted(world, "me", world.names.tongs))
+    test.assertEqual(nil, world.announced, "typed by hand: nothing sent")
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.handlers.greet(world.shown[2].player)
+    test.assertEqual(1, #world.announced)
+    local message = world.announced[1]
+    test.assertEqual(1, message.v)
+    test.assertEqual("greeted", message.t)
+    test.assertEqual(normalizer:Key(world.names.bolt), message.c)
+    test.assertEqual(START, message.a)
+end)
+
+test.test("guild greet: an older version's greeted message counts once per greeter and closes the prompt", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.anvil)
+
+    -- Heard in guild chat and as the message: one greeting.
+    test.assertTrue(greeted(world, "bishop", world.names.anvil))
+    test.assertFalse(legacyGreeted(world, "bishop", world.names.anvil))
+    test.assertEqual(1, #world.shown)
+    -- The message alone counts, for any of the player's characters.
+    test.assertTrue(legacyGreeted(world, "bolt", world.names.tongs))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: own, late, unplaceable and malformed greeted messages don't count", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.anvil)
+
+    test.assertFalse(legacyGreeted(world, "me", world.names.anvil))
+    test.assertFalse(legacyGreeted(world, "myAlt", world.names.anvil))
+    test.assertFalse(legacyGreeted(world, "bolt", world.names.anvil, START - 15 * MINUTE))
+    test.assertFalse(legacyGreeted(world, "bolt", world.names.friend))
+    test.assertFalse(world.greet:OnGreeted({ v = 1, t = "greeted", c = 42, a = START }, world.names.bolt))
+    test.assertFalse(world.greet:OnGreeted({ v = 99, t = "greeted", c = "anvil", a = START }, world.names.bolt))
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild greet: with LEGACY_GREETED off, the greeted message is neither sent nor counted", function()
+    local world = setup("Retail")
+    world.addon.GuildGreet.LEGACY_GREETED = false
+    world.store:SetGreetCap(1)
+    world.greet:OnPresence("online", world.names.anvil)
+
+    test.assertFalse(legacyGreeted(world, "bishop", world.names.anvil))
+    test.assertEqual(1, #world.shown)
+    world.handlers.greet(world.shown[1].player)
+    test.assertEqual(nil, world.announced)
 end)
 
 test.test("guild greet: the greeting cap is saved account-wide, from 1 to 10, default 2", function()
@@ -706,19 +854,20 @@ test.test("guild greet settings: categories, thresholds and characters default o
 
     test.assertTrue(store:GreetCategoryEnabled("login"))
     test.assertEqual(15, store:GreetNumber("welcomeBackMinutes"))
-    test.assertEqual(30, store:GreetNumber("longAbsenceDays"))
+    test.assertEqual(3, store:GreetNumber("welcomeCap"))
+    test.assertEqual(nil, store:GreetNumber("longAbsenceDays"), "a long absence is a fixed 30 days")
     test.assertTrue(store:GreetOnCharacter("toolbox"))
 
     test.assertTrue(store:SetGreetCategoryEnabled("login", false))
     test.assertTrue(store:SetGreetNumber("welcomeBackMinutes", 120))
-    test.assertTrue(store:SetGreetNumber("longAbsenceDays", 1))
+    test.assertTrue(store:SetGreetNumber("welcomeCap", 1))
     test.assertTrue(store:SetGreetOnCharacter("toolbox", false))
 
     local again = addon.FellowshipStore.Create(database)
     test.assertFalse(again:GreetCategoryEnabled("login"))
     test.assertTrue(again:GreetCategoryEnabled("join"))
     test.assertEqual(120, again:GreetNumber("welcomeBackMinutes"))
-    test.assertEqual(1, again:GreetNumber("longAbsenceDays"))
+    test.assertEqual(1, again:GreetNumber("welcomeCap"))
     test.assertFalse(again:GreetOnCharacter("toolbox"))
     test.assertTrue(again:GreetOnCharacter("hammer"))
 
@@ -734,17 +883,18 @@ test.test("guild greet settings: ranges are enforced and unusable saved values a
 
     test.assertFalse(store:SetGreetNumber("welcomeBackMinutes", 0))
     test.assertFalse(store:SetGreetNumber("welcomeBackMinutes", 121))
-    test.assertFalse(store:SetGreetNumber("longAbsenceDays", 366))
-    test.assertFalse(store:SetGreetNumber("longAbsenceDays", 1.5))
+    test.assertFalse(store:SetGreetNumber("welcomeCap", 11))
+    test.assertFalse(store:SetGreetNumber("welcomeCap", 1.5))
+    test.assertFalse(store:SetGreetNumber("longAbsenceDays", 2))
     test.assertFalse(store:SetGreetNumber("nonsense", 3))
     test.assertEqual(nil, store:GreetNumber("nonsense"))
 
     database.greet = {
-        welcomeBackMinutes = "soon", longAbsenceDays = -4,
+        welcomeBackMinutes = "soon", welcomeCap = -4,
         categories = "corrupt", offCharacters = "corrupt",
     }
     test.assertEqual(15, store:GreetNumber("welcomeBackMinutes"))
-    test.assertEqual(30, store:GreetNumber("longAbsenceDays"))
+    test.assertEqual(3, store:GreetNumber("welcomeCap"))
     test.assertTrue(store:GreetCategoryEnabled("login"))
     test.assertTrue(store:GreetOnCharacter("toolbox"))
     test.assertFalse(store:SetGreetNumber("welcomeBackMinutes", 20))
@@ -769,14 +919,15 @@ test.test("guild greet: turning a category off stops its prompts only, and close
     test.assertEqual(1, #world.shown)
 end)
 
-test.test("guild greet: saved thresholds change the welcome-back and long-absence boundaries", function()
+test.test("guild greet: the saved threshold changes the welcome-back boundary; a long absence stays 30 days", function()
     local world = setup("Retail")
     world.store:SetGreetNumber("welcomeBackMinutes", 5)
-    world.store:SetGreetNumber("longAbsenceDays", 2)
+    -- Older saved data may still hold a long-absence setting; it's ignored.
+    world.store:GetGreetState().longAbsenceDays = 2
 
-    -- Anvil last logged in 2 days ago: a long absence now.
+    -- Anvil last logged in 2 days ago: a plain login.
     world.greet:OnPresence("online", world.names.anvil)
-    test.assertEqual("longAbsence", world.shown[1].category)
+    test.assertEqual("login", world.shown[1].category)
     world.handlers.close(world.shown[1].player)
 
     world.greet:OnPresence("offline", world.names.anvil)
@@ -830,7 +981,6 @@ test.test("guild greet: greeting still finishes when the guild data is gone", fu
     world.handlers.greet(player)
 
     test.assertEqual(1, #world.sent)
-    test.assertEqual(1, #world.announced)
     test.assertEqual(0, #world.shown)
 end)
 
@@ -852,8 +1002,8 @@ test.test("guild greet: a prompt shows 5 to 10 seconds after the arrival, picked
     test.assertEqual(0, #world.shown)
     advance(world, 1)
     test.assertEqual(1, #world.shown)
-    -- It still gets its full 2 minutes on screen.
-    advance(world, 119)
+    -- It still gets its full 90 seconds on screen.
+    advance(world, 89)
     test.assertEqual(1, #world.shown)
     advance(world, 1)
     test.assertEqual(0, #world.shown)
@@ -960,7 +1110,6 @@ test.test("guild greet: Greet locks 2, then 4 seconds after greetings in a row, 
         test.assertTrue(world.greet:Greet(world.shown[1].player) ~= nil)
         test.assertEqual(6, world.lockedFor)
         test.assertEqual(3, #world.sent)
-        test.assertEqual(3, #world.announced)
 
         -- The lock ends with no prompt showing, so the next starts at 2.
         advance(world, 6)
@@ -986,8 +1135,8 @@ test.test("guild greet: a prompt whose player others greeted enough during the l
     threeArrive(world)
     world.greet:Greet(world.shown[1].player)
 
-    test.assertTrue(greeted(world, "bolt", world.names.bishop, START))
-    test.assertTrue(greeted(world, "rust", world.names.bishop, START))
+    test.assertTrue(greeted(world, "bolt", world.names.bishop))
+    test.assertTrue(greeted(world, "rust", world.names.bishop))
 
     test.assertEqual(1, #world.shown, "only Anvil's prompt is left")
     advance(world, 2)

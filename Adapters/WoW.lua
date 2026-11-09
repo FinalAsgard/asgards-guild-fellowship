@@ -407,6 +407,33 @@ function Client:ObservePresence(onPresence)
     return true
 end
 
+-- Calls onMessage(message, sender) once for every guild chat line, the
+-- user's own included, with the sender's name as the game gives it. An
+-- event frame rather than a chat filter, which runs once per chat window.
+-- Lines the client hides from add-ons are skipped. Returns false when the
+-- client can't deliver the event.
+function Client:ObserveGuildChat(onMessage)
+    if type(onMessage) ~= "function" then
+        return false
+    end
+    local frame = self:CreateEventFrame()
+    if frame == nil
+        or not self:SetEventHandler(frame, function(_, _, message, sender)
+            if type(message) ~= "string" or type(sender) ~= "string" or self:IsSecretValue(message)
+                or self:IsSecretValue(sender)
+            then
+                return
+            end
+            pcall(onMessage, message, sender)
+        end)
+        or not self:RegisterEvent(frame, "CHAT_MSG_GUILD")
+    then
+        return false
+    end
+    self.guildChatFrame = frame
+    return true
+end
+
 -- Hides the game's "No player named ... is currently playing." line from
 -- the chat frames when hide(name) answers true for the name it gives.
 -- Returns false when the client has no chat filter API.
@@ -1261,6 +1288,19 @@ function Client:FormatDate(timestamp)
         return ""
     end
     local ok, text = callFunction(self.environment.date, "%Y-%m-%d", timestamp)
+    if ok and type(text) == "string" then
+        return text
+    end
+    return tostring(timestamp)
+end
+
+-- A timestamp as "2026-10-05 21:04:09" (local time), or the raw number
+-- when the client has no date function.
+function Client:FormatDateTime(timestamp)
+    if type(timestamp) ~= "number" then
+        return "?"
+    end
+    local ok, text = callFunction(self.environment.date, "%Y-%m-%d %H:%M:%S", timestamp)
     if ok and type(text) == "string" then
         return text
     end

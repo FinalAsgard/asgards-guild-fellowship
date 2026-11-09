@@ -39,13 +39,15 @@ local function characterEntry(inputs, key, isMain, altCount)
         kind = "character",
         key = key,
         name = inputs.normalizer:Display(live.name or character.name) or key,
+        -- The name's class color ("ffrrggbb"), as the roster colors it.
+        color = inputs.classColor and inputs.classColor(live.classToken or character.class) or nil,
         level = live.level or character.level,
         isMain = isMain,
         inGuild = inGuild,
         status = status,
         source = SOURCES[character.source],
         roles = roles,
-        -- Actions, matching the right-click menu.
+        -- The name's right-click menu, matching the roster's.
         canMakeMain = not isMain and inGuild,
         canDetach = altCount > 0,
     }
@@ -123,33 +125,36 @@ function PlayerPanelViewModel.Wrap(text, width, measure)
     return lines
 end
 
--- The player's Discord, location and bio, as "about" rows under an About
--- heading; nothing when none is set. `wrap(text) -> lines` breaks each
--- into lines that fit the panel.
-local function aboutRows(partition, playerId, wrap)
-    local discord = partition:PlayerProfileText(playerId, "discord")
-    local location = partition:PlayerProfileText(playerId, "location")
-    local bio = partition:PlayerProfileText(playerId, "bio")
-    if discord == nil and location == nil and bio == nil then
-        return {}
+-- The player's profile text of `field`, or nil when it's not set (or was
+-- cleared).
+local function profileText(partition, playerId, field)
+    local text = partition:PlayerProfileText(playerId, field)
+    if text == "" then
+        return nil
     end
-    local rows = { { kind = "section", text = "About" } }
-    local function add(text)
+    return text
+end
+
+-- The Bio tab: a Location heading and the player's location, then a Bio
+-- heading and their bio, each "Not set" when it isn't. Each heading names
+-- the field it edits. `wrap(text) -> lines` breaks each into lines that
+-- fit the panel.
+local function bioRows(location, bio, wrap)
+    local rows = {}
+    local function add(heading, field, text)
+        table.insert(rows, { kind = "section", text = heading, field = field })
+        if text == nil then
+            table.insert(rows, { kind = "empty", text = "Not set" })
+            return
+        end
         local lines = wrap(text)
         local index
         for index = 1, #lines do
             table.insert(rows, { kind = "about", text = lines[index] })
         end
     end
-    if discord ~= nil then
-        add("Discord: " .. discord)
-    end
-    if location ~= nil then
-        add("Location: " .. location)
-    end
-    if bio ~= nil then
-        add(bio)
-    end
+    add("Location", "location", location)
+    add("Bio", "bio", bio)
     return rows
 end
 
@@ -166,35 +171,41 @@ local function datesText(entry, formatDate)
 end
 
 -- inputs: partition, playerId, members (live facts by key), normalizer,
--- formatDate (function(timestamp) -> text), adStats (optional function(keys)
+-- formatDate (function(timestamp) -> text), classColor (optional
+-- function(classToken) -> "ffrrggbb" or nil), adStats (optional function(keys)
 -- -> the player's ad count line, or nil), rolesOf (optional function(key)
--- -> the character's role preferences as text, or nil), groupedWith
--- (optional function(keys) -> how often this user grouped with the player,
--- or nil), membership (optional function(keys) -> lines about the
--- player's membership dates, or nil; only officers get them), promotion
--- (optional function(keys, playerId) -> the Promotion tab's rows, see
--- PromotionsViewModel.PanelRows, or nil), wrap
--- (optional function(text) -> an About entry's lines as they fit the
--- panel; by default, lines of at most BIO_LINE bytes).
+-- -> the character's role preferences as text, or nil), grouped (optional
+-- function(keys) -> how many times this user grouped with the player and
+-- when last, or nil), joined (optional function(keys) -> when the player
+-- first joined, as text, or nil; only officers get it), membership
+-- (optional function(keys) -> lines about each character's join and rank
+-- dates, or nil; only officers get them), promotion (optional
+-- function(keys, playerId) -> the Promotion tab's rows, see
+-- PromotionsViewModel.PanelRows, or nil), wrap (optional function(text) ->
+-- a long line's lines as they fit the panel; by default, lines of at most
+-- BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
---   { id, label, alias, aliasSource, main, mainName, canMerge, discord,
---     dontSync, rows, promotionRows }
+--   { id, label, alias, main, mainName, canMerge, discord, location, bio,
+--     joined, grouped, rows, bioRows, logRows, promotionRows }
 -- where `main` is the main's character key, `canMerge` whether the player
 -- can be merged into another (only with no alts), `discord` the player's
--- Discord username or nil (for "Set Discord…"), `dontSync` whether guild
--- sync leaves this player alone, `promotionRows` the Promotion tab's rows
--- (nil when there's no such tab for this player), and `rows` is a flat
--- list for the Profile tab's scroll list:
---   { kind = "stat", text }  (the player's ad count, then how often you
---                             grouped with them, then membership dates,
---                             first, when there are any)
+-- Discord username or nil, `location` and `bio` the player's location and
+-- bio or nil, `bioRows` the Bio tab's rows:
+--   { kind = "section", text, field } ("Location" or "Bio", with the field
+--   it edits: "location" or "bio"), then { kind = "about", text } lines, or
+--   { kind = "empty", text = "Not set" },
+-- `joined` "Joined: …" or nil, `grouped`
+-- "Grouped together 3 times", 0 included (the header shows these),
+-- `promotionRows` the Promotion tab's rows (nil when there's no such tab
+-- for this player), `logRows` the Log tab's rows: the ad count, when they
+-- last grouped with this user, and each character's dates, wrapped, then
+-- the History section (characters that left the player):
+--   { kind = "log", text }, { kind = "section", text },
+--   { kind = "history", name, role, dates, reason } or { kind = "empty", text }
+-- and `rows` is a flat list for the Profile tab's scroll list:
 --   { kind = "section", text }
---   { kind = "about", text }  (under an About heading: "Discord: name",
---                              "Location: text", then the bio's lines;
---                              only what the player set)
---   { kind = "character", key, name, level, isMain, inGuild, status, source,
---     roles, canMakeMain, canDetach }
---   { kind = "history", name, role, dates, reason }
+--   { kind = "character", key, name, color, level, isMain, inGuild, status,
+--     source, roles, canMakeMain, canDetach }
 --   { kind = "empty", text }
 function PlayerPanelViewModel.Build(inputs)
     inputs.members = inputs.members or {}
@@ -210,29 +221,57 @@ function PlayerPanelViewModel.Build(inputs)
     local altCount = #keys - 1
     local rows = {}
     local index
+    local wrap = inputs.wrap or function(text)
+        return PlayerPanelViewModel.Wrap(text, PlayerPanelViewModel.BIO_LINE)
+    end
+    -- An optional input's answer (up to two values), or nil when it's
+    -- missing or fails.
+    local function ask(callback, ...)
+        if callback == nil then
+            return nil
+        end
+        local ok, first, second = pcall(callback, ...)
+        if not ok then
+            return nil
+        end
+        return first, second
+    end
 
-    if inputs.adStats ~= nil then
-        local ok, line = pcall(inputs.adStats, keys)
-        if ok and type(line) == "string" then
-            table.insert(rows, { kind = "stat", text = line })
+    -- The Log tab: the ad count, when they last grouped with this user, and
+    -- each character's dates, each wrapped to the panel.
+    local logRows = {}
+    local function log(text)
+        if type(text) ~= "string" then
+            return
+        end
+        local lines = wrap(text)
+        local lineIndex
+        for lineIndex = 1, #lines do
+            table.insert(logRows, { kind = "log", text = lines[lineIndex] })
         end
     end
-    if inputs.groupedWith ~= nil then
-        local ok, line = pcall(inputs.groupedWith, keys)
-        if ok and type(line) == "string" then
-            table.insert(rows, { kind = "stat", text = line })
+    log(ask(inputs.adStats, keys))
+    -- How often they grouped shows even when it's never.
+    local groupCount, groupLast = ask(inputs.grouped, keys)
+    if type(groupCount) ~= "number" then
+        groupCount = 0
+    end
+    local grouped = "Grouped together " .. groupCount .. (groupCount == 1 and " time" or " times")
+    if groupCount > 0 and type(groupLast) == "number" then
+        log("Last grouped together on " .. formatDate(groupLast))
+    end
+    local membership = ask(inputs.membership, keys)
+    if type(membership) == "table" then
+        for index = 1, #membership do
+            log(membership[index])
         end
     end
-    if inputs.membership ~= nil then
-        local ok, lines = pcall(inputs.membership, keys)
-        if ok and type(lines) == "table" then
-            for index = 1, #lines do
-                if type(lines[index]) == "string" then
-                    table.insert(rows, { kind = "stat", text = lines[index] })
-                end
-            end
-        end
+    if logRows[1] == nil then
+        table.insert(logRows, { kind = "empty", text = "Nothing logged yet" })
     end
+    local joined = ask(inputs.joined, keys)
+    joined = type(joined) == "string" and ("Joined: " .. joined) or nil
+
     local promotionRows
     if inputs.promotion ~= nil then
         local ok, promotion = pcall(inputs.promotion, keys, inputs.playerId)
@@ -240,12 +279,8 @@ function PlayerPanelViewModel.Build(inputs)
             promotionRows = promotion
         end
     end
-    local about = aboutRows(partition, inputs.playerId, inputs.wrap or function(text)
-        return PlayerPanelViewModel.Wrap(text, PlayerPanelViewModel.BIO_LINE)
-    end)
-    for index = 1, #about do
-        table.insert(rows, about[index])
-    end
+    local location = profileText(partition, inputs.playerId, "location")
+    local bio = profileText(partition, inputs.playerId, "bio")
     table.insert(rows, { kind = "section", text = "Main" })
     local mainRow = characterEntry(inputs, player.main, true, altCount)
     table.insert(rows, mainRow)
@@ -260,7 +295,8 @@ function PlayerPanelViewModel.Build(inputs)
         table.insert(rows, { kind = "empty", text = "No alts" })
     end
 
-    table.insert(rows, { kind = "section", text = "History" })
+    -- The Log tab ends with the History section.
+    table.insert(logRows, { kind = "section", text = "History" })
     -- Former characters only: an entry for a character that is back in this
     -- player and in the guild (moved back, or rejoined) is left out.
     local history = {}
@@ -273,7 +309,7 @@ function PlayerPanelViewModel.Build(inputs)
     end
     for index = #history, 1, -1 do
         local entry = history[index]
-        table.insert(rows, {
+        table.insert(logRows, {
             kind = "history",
             -- Shown as the roster spells names (no home realm); an
             -- out-of-guild name from a note is shown as written.
@@ -284,7 +320,7 @@ function PlayerPanelViewModel.Build(inputs)
         })
     end
     if history[1] == nil then
-        table.insert(rows, { kind = "empty", text = "No former characters" })
+        table.insert(logRows, { kind = "empty", text = "No former characters" })
     end
 
     local mainName = mainRow.name
@@ -292,64 +328,17 @@ function PlayerPanelViewModel.Build(inputs)
         id = inputs.playerId,
         label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
         alias = player.alias,
-        aliasSource = SOURCES[player.aliasSource],
         main = player.main,
         mainName = mainName,
         canMerge = altCount == 0,
         discord = (partition:PlayerProfileText(inputs.playerId, "discord")),
-        dontSync = player.noSync == true,
+        joined = joined,
+        grouped = grouped,
+        location = location,
+        bio = bio,
         rows = rows,
+        bioRows = bioRows(location, bio, wrap),
+        logRows = logRows,
         promotionRows = promotionRows,
-    }
-end
-
--- A character as the mini profile names it: "Name (level)".
-local function summaryName(inputs, key)
-    local character = inputs.partition:GetCharacter(key) or {}
-    local live = inputs.members[key] or {}
-    local name = inputs.normalizer:Display(live.name or character.name) or key
-    local level = live.level or character.level
-    return level ~= nil and (name .. " (" .. tostring(level) .. ")") or name
-end
-
--- The mini profile shown under a member in the game's guild roster: the
--- player's label as a title, then lines for the panel (it wraps them):
--- their main; a blank line, then Discord and location; a blank line, then
--- "Alts:" and each alt on its own line; and a blank line, then "Personal
--- Bio" and the bio. Anything not set is left blank after its label. inputs: partition, playerId,
--- members (live facts by key), normalizer. Returns nil when the player no
--- longer exists, or { title, lines }.
-function PlayerPanelViewModel.Summary(inputs)
-    inputs.members = inputs.members or {}
-    local partition = inputs.partition
-    local player = partition:GetPlayer(inputs.playerId)
-    if player == nil then
-        return nil
-    end
-    local lines = { "Main: " .. summaryName(inputs, player.main) }
-    local discord = partition:PlayerProfileText(inputs.playerId, "discord")
-    local location = partition:PlayerProfileText(inputs.playerId, "location")
-    local bio = partition:PlayerProfileText(inputs.playerId, "bio")
-    table.insert(lines, "")
-    table.insert(lines, "Discord:" .. (discord and (" " .. discord) or ""))
-    table.insert(lines, "Location:" .. (location and (" " .. location) or ""))
-    table.insert(lines, "")
-    table.insert(lines, "Alts:")
-    local keys = partition:CharactersOf(inputs.playerId)
-    local index
-    for index = 1, #keys do
-        if keys[index] ~= player.main then
-            table.insert(lines, summaryName(inputs, keys[index]))
-        end
-    end
-    table.insert(lines, "")
-    table.insert(lines, "Personal Bio")
-    table.insert(lines, bio or "")
-    local character = partition:GetCharacter(player.main) or {}
-    local live = inputs.members[player.main] or {}
-    local mainName = inputs.normalizer:Display(live.name or character.name) or player.main
-    return {
-        title = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
-        lines = lines,
     }
 end

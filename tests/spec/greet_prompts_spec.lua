@@ -37,9 +37,23 @@ local function newScreen()
                 SetJustifyH = function() end, SetWordWrap = function() end,
             }
         end
+        function frame:SetWidth(width)
+            self.width = width
+        end
+        -- With `screen.letterWidth`, a button's text measures that many
+        -- pixels a letter; without it the client can't measure text.
+        if screen.letterWidth ~= nil then
+            function frame:GetFontString()
+                return {
+                    GetStringWidth = function()
+                        return #(frame.text or "") * screen.letterWidth
+                    end,
+                }
+            end
+        end
         local name
         for _, name in ipairs({
-            "SetWidth", "SetHeight", "SetMovable", "SetClampedToScreen", "SetFrameStrata",
+            "SetHeight", "SetMovable", "SetClampedToScreen", "SetFrameStrata",
             "EnableMouse", "RegisterForDrag", "StartMoving", "StopMovingOrSizing",
         }) do
             frame[name] = function() end
@@ -61,9 +75,10 @@ local function newScreen()
     return screen
 end
 
-local function newPrompts(saved)
+local function newPrompts(saved, letterWidth)
     local addon = test.newAddon("Adapters/GreetPrompts.lua")
     local screen = newScreen()
+    screen.letterWidth = letterWidth
     local world = { saved = saved, screen = screen }
     world.prompts = addon.GreetPrompts.Create({ environment = screen }, {
         loadAnchor = function()
@@ -76,8 +91,8 @@ local function newPrompts(saved)
     return world, addon
 end
 
-local function prompt(player)
-    return { player = player, label = "Player " .. player }
+local function prompt(player, category)
+    return { player = player, label = "Player " .. player, category = category }
 end
 
 test.test("greet prompts: without a saved place they stack from the left side of the screen", function()
@@ -178,11 +193,50 @@ end)
 test.test("greet prompts: while Greet is locked, its buttons are disabled and count down", function()
     local world = newPrompts(nil)
 
-    world.prompts:Show({ prompt(1), prompt(2) }, {}, 3)
-    test.assertEqual("Greet (3)", world.prompts.rows[1].greet.text)
+    world.prompts:Show({ prompt(1, "welcomeBack"), prompt(2, "login") }, {}, 3)
+    test.assertEqual("Welcome Back (3)", world.prompts.rows[1].greet.text)
+    test.assertEqual("Greet (3)", world.prompts.rows[2].greet.text)
     test.assertEqual(false, world.prompts.rows[2].greet.enabled)
 
-    world.prompts:Show({ prompt(1) }, {}, 0)
-    test.assertEqual("Greet", world.prompts.rows[1].greet.text)
+    world.prompts:Show({ prompt(1, "welcomeBack") }, {}, 0)
+    test.assertEqual("Welcome Back", world.prompts.rows[1].greet.text)
     test.assertEqual(true, world.prompts.rows[1].greet.enabled)
+end)
+
+test.test("greet prompts: each button is named for its kind of greeting", function()
+    local world = newPrompts(nil)
+
+    world.prompts:Show({ prompt(1, "join"), prompt(2, "login"), prompt(3, "welcomeBack"),
+        prompt(4, "longAbsence"), prompt(5, "unknown") }, {})
+
+    test.assertEqual("Welcome to the Guild", world.prompts.rows[1].greet.text)
+    test.assertEqual("Greet", world.prompts.rows[2].greet.text)
+    test.assertEqual("Welcome Back", world.prompts.rows[3].greet.text)
+    test.assertEqual("Long Time No See!", world.prompts.rows[4].greet.text)
+    test.assertEqual("Greet", world.prompts.rows[5].greet.text)
+end)
+
+test.test("greet prompts: each button fits its own label, and every box is as wide as the longest needs", function()
+    -- 6 pixels a letter, plus 24 of padding.
+    local world = newPrompts(nil, 6)
+
+    world.prompts:Show({ prompt(1, "login"), prompt(2, "join") }, {})
+
+    local rows = world.prompts.rows
+    test.assertEqual(#"Greet" * 6 + 24, rows[1].greet.width)
+    test.assertEqual(#"Welcome to the Guild" * 6 + 24, rows[2].greet.width)
+    -- The boxes match, with room for "Welcome to the Guild (88)".
+    local room = #"Welcome to the Guild (88)" * 6 + 24
+    test.assertEqual(14 + 118 + 10 + room + 6 + 24 + 6, rows[1].frame.width)
+    test.assertEqual(rows[1].frame.width, rows[2].frame.width)
+    test.assertEqual(rows[1].frame.width, world.prompts.anchor.width)
+
+    -- While locked, a button grows to fit its countdown.
+    world.prompts:Show({ prompt(1, "login") }, {}, 3)
+    test.assertEqual(#"Greet (3)" * 6 + 24, rows[1].greet.width)
+
+    -- A client that can't measure text gets the fixed width.
+    world = newPrompts(nil)
+    world.prompts:Show({ prompt(1, "login") }, {})
+    test.assertEqual(170, world.prompts.rows[1].greet.width)
 end)
