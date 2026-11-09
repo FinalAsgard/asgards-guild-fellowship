@@ -305,8 +305,8 @@ if clientProfile.supported then
                 onPromotionsTick = function(key, item, ticked, note)
                     return promotions.tick(key, item, ticked, note)
                 end,
-                onPanelPromotionToggle = function(key)
-                    return promotions.togglePanel(key)
+                onPanelPromotionToggle = function(key, expanded)
+                    return promotions.togglePanel(key, expanded)
                 end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
@@ -2294,7 +2294,7 @@ if clientProfile.supported then
         return promotions.panelRows({ key }, character.player, rosterExpanded)
     end
     promotions.toggleRoster = function(key)
-        rosterExpanded[key] = not rosterExpanded[key] or nil
+        rosterExpanded[key] = not rosterExpanded[key]
     end
     -- Requirements or ticks changed: redraw the page, the player panel and
     -- the roster's Ready markers, here and on the game's guild roster.
@@ -2346,11 +2346,12 @@ if clientProfile.supported then
     promotions.rankName = function(rank)
         return (client:GetGuildRankNames() or {})[rank + 1] or ("Rank " .. rank)
     end
-    -- The characters whose checklists are open on the player panel's
-    -- Promotion tab, for the session.
+    -- The characters whose checklists were opened (true) or closed (false)
+    -- on the player panel's Promotion tab, for the session; the top one
+    -- opens until it's closed.
     local panelExpanded = {}
-    promotions.togglePanel = function(key)
-        panelExpanded[key] = not panelExpanded[key] or nil
+    promotions.togglePanel = function(key, expanded)
+        panelExpanded[key] = not expanded
         rosterController:RedrawPanel()
         return true
     end
@@ -2398,6 +2399,7 @@ if clientProfile.supported then
         return addon.PromotionsViewModel.PanelRows(characters, {
             officer = officer,
             expanded = expanded or panelExpanded,
+            openFirst = true,
             highestRankName = highest and (inputs.rankNames[highest + 1] or ("Rank " .. highest)) or nil,
             nameOf = nameOf,
             formatDate = function(timestamp)

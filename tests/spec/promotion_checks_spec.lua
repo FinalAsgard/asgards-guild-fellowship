@@ -591,6 +591,21 @@ test.test("a member's own panel shows progress and details read-only, without no
     end
 end)
 
+test.test("the panel's Promotion tab can open its first checklist until it's closed", function()
+    local inputs, addon = newGuild({ main = 2, bolt = 4, alt = 4 })
+    addItem(inputs, 4, "Attend an event")
+
+    local rows = panelFor(inputs, addon, { "main", "bolt", "alt" }, { officer = true, openFirst = true })
+    test.assertEqual(nil, rowWith(rows, "main: Veteran").toggle, "nothing to open without requirements")
+    test.assertTrue(rowWith(rows, "bolt: Initiate").expanded, "the first with a checklist opens")
+    test.assertFalse(rowWith(rows, "alt: Initiate").expanded, "only the first")
+
+    rows = panelFor(inputs, addon, { "main", "bolt", "alt" }, { officer = true, openFirst = true,
+        expanded = { bolt = false } })
+    test.assertFalse(rowWith(rows, "bolt: Initiate").expanded, "closed once the user closes it")
+    test.assertFalse(rowWith(rows, "alt: Initiate").expanded)
+end)
+
 test.test("the panel's Promotion tab shows one line per character, each opening to its checklist", function()
     local inputs, addon = newGuild({ main = 2, bolt = 4 })
     addItem(inputs, 4, "Attend an event")
@@ -748,7 +763,7 @@ local function panelOf(world, name)
     end
     local rows, header = draw()
     if header ~= nil and header.toggle and not header.expanded then
-        world.addon.promotions.togglePanel(key)
+        world.addon.promotions.togglePanel(key, false)
         rows, header = draw()
     end
     return rows, header, key
@@ -946,9 +961,13 @@ for profileIndex = 1, #fixtures.PROFILES do
         local boltKeys = partition:CharactersOf(boltPlayer)
 
         local panel = promotions.panelRows(boltKeys, boltPlayer)
-        test.assertEqual(nil, rowWith(panel, "Read the rules"), "a checklist starts closed")
         test.assertTrue(rowWith(panel, "Initiate -> Member").toggle)
-        test.assertTrue(promotions.togglePanel(boltKey))
+        test.assertTrue(rowWith(panel, "Initiate -> Member").expanded, "the top checklist starts open")
+        test.assertTrue(rowWith(panel, "Read the rules") ~= nil)
+        test.assertTrue(promotions.togglePanel(boltKey, true))
+        panel = promotions.panelRows(boltKeys, boltPlayer)
+        test.assertEqual(nil, rowWith(panel, "Read the rules"), "closing the top checklist keeps it closed")
+        test.assertTrue(promotions.togglePanel(boltKey, false))
         panel = promotions.panelRows(boltKeys, boltPlayer)
         local item = rowWith(panel, "Read the rules")
         test.assertTrue(item.canCheck)

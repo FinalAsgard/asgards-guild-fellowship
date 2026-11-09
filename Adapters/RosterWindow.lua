@@ -603,9 +603,9 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
             end
             return options.onPromotionsTick(key, item, ticked, note)
         end,
-        toggle = function(key)
+        toggle = function(key, expanded)
             if options.onPanelPromotionToggle ~= nil then
-                options.onPanelPromotionToggle(key)
+                options.onPanelPromotionToggle(key, expanded)
             end
         end,
         redraw = function()
