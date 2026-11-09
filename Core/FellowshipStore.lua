@@ -401,6 +401,32 @@ function Store:SetFrameState(state)
     return true
 end
 
+-- Where the player panel was last left on screen ({ point, relativePoint,
+-- x, y }), shared by every character, or nil when it was never moved or an
+-- unusable value is stored.
+function Store:GetPlayerPanelPosition()
+    local position = type(self.database) == "table" and self.database.playerPanel or nil
+    if type(position) ~= "table" then
+        return nil
+    end
+    return position
+end
+
+-- Saves where the player panel was left. An unusable existing value is
+-- left alone.
+function Store:SetPlayerPanelPosition(position)
+    if type(self.database) ~= "table" or type(position) ~= "table" then
+        return false
+    end
+    if self.database.playerPanel ~= nil and type(self.database.playerPanel) ~= "table" then
+        return false
+    end
+    self.database.playerPanel = {
+        point = position.point, relativePoint = position.relativePoint, x = position.x, y = position.y,
+    }
+    return true
+end
+
 -- The minimap button's saved state (LibDBIcon's angle and hidden flag),
 -- created on first use. Nil when an unusable value is stored there; it is
 -- then left alone.
