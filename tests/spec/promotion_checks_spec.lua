@@ -604,6 +604,13 @@ test.test("the panel's Promotion tab can open its first checklist until it's clo
         expanded = { bolt = false } })
     test.assertFalse(rowWith(rows, "bolt: Initiate").expanded, "closed once the user closes it")
     test.assertFalse(rowWith(rows, "alt: Initiate").expanded)
+
+    -- A promotion date alone can be opened, but doesn't take the default.
+    rows = panelFor(inputs, addon, { "main", "bolt", "alt" }, { officer = true, openFirst = true,
+        lastPromotion = { time = NOW, rank = 2, promoter = OFFICER } })
+    test.assertTrue(rowWith(rows, "main: Veteran").toggle)
+    test.assertFalse(rowWith(rows, "main: Veteran").expanded)
+    test.assertTrue(rowWith(rows, "bolt: Initiate").expanded)
 end)
 
 test.test("the panel's Promotion tab shows one line per character, each opening to its checklist", function()

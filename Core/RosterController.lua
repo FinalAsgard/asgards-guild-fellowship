@@ -951,7 +951,8 @@ function Controller:RedrawPanel()
     local model = addon.PlayerPanelViewModel.Build({
         partition = self.current.partition,
         playerId = self.selected,
-        members = self.liveMembers or self:LiveMembers(normalizer),
+        -- The window's snapshot is only kept current while it shows.
+        members = (self.window:IsShown() and self.liveMembers) or self:LiveMembers(normalizer),
         normalizer = normalizer,
         formatDate = function(timestamp)
             return self.client:FormatDate(timestamp)

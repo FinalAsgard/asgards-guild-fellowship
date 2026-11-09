@@ -315,8 +315,19 @@ function Greet:OnPresence(kind, rawName)
     end
     if kind == "offline" then
         self.policy:WentOffline(key, now)
-        -- Nobody to greet any more.
-        if self.queue:Remove(self.policy:PlayerOf(key)) then
+        -- Nobody to greet any more: the prompt raised for this character,
+        -- not one for another of its player's characters still online.
+        -- Matched by character, so a prompt raised before a scan linked
+        -- them still closes.
+        local removed = false
+        local prompts = self.queue:All(now)
+        local index
+        for index = 1, #prompts do
+            if prompts[index].key == key then
+                removed = self.queue:Remove(prompts[index].player) or removed
+            end
+        end
+        if removed then
             self:Refresh()
         end
         return
@@ -465,14 +476,21 @@ function Greet:ownGreeter()
     return selfKey and self.policy:PlayerOf(selfKey) or "self"
 end
 
--- Whether `lowered` (a chat line in lowercase) contains `name` as a whole
--- word: not inside a longer word. Letters outside ASCII count as part of a
--- word, so accented names aren't matched inside longer ones.
+-- Whether `lowered` (a chat line, case-folded with NameNormalizer.Fold)
+-- contains `name` as a whole word: not inside a longer word. Letters
+-- outside ASCII count as part of a word, so accented names aren't matched
+-- inside longer ones. A name shorter than MIN_NAME_LETTERS characters (not
+-- bytes: "é" is one) never matches.
 local function namesWord(lowered, name)
-    if type(name) ~= "string" or #name < GuildGreet.MIN_NAME_LETTERS then
+    if type(name) ~= "string" then
         return false
     end
-    name = string.lower(name)
+    -- UTF-8 continuation bytes don't start a character.
+    local letters = #name - select(2, string.gsub(name, "[\128-\191]", ""))
+    if letters < GuildGreet.MIN_NAME_LETTERS then
+        return false
+    end
+    name = addon.NameNormalizer.Fold(name)
     local function wordByte(index)
         local byte = string.byte(lowered, index)
         return byte ~= nil and (byte >= 128 or string.find(string.char(byte), "^%w") ~= nil)
@@ -490,13 +508,17 @@ local function namesWord(lowered, name)
     end
 end
 
--- Whether a chat line names `prompt`'s player: their character, main or
--- alias, or a part of a two-part name, each also without a realm (a
--- connected realm's "Anvil-Stormrage" is written "Anvil").
+-- Whether a chat line names `prompt`'s player: their alias as a whole, or
+-- their character or main, or a part of a two-part name, each also without
+-- a realm (a connected realm's "Anvil-Stormrage" is written "Anvil"; an
+-- alias "Tank-Healer" is never cut to "Tank").
 function Greet:NamedIn(lowered, prompt)
     local names = self:Names(prompt.key, prompt.rawName)
+    if namesWord(lowered, names.name) then
+        return true
+    end
     local _, name
-    for _, name in ipairs({ names.name, names.character, names.characterfirst, names.characterlast,
+    for _, name in ipairs({ names.character, names.characterfirst, names.characterlast,
         names.main, names.mainfirst, names.mainlast })
     do
         if namesWord(lowered, name)
@@ -521,13 +543,16 @@ function Greet:OnGuildChat(message, sender)
         return 0
     end
     local greeter = self:IsOwn(senderKey) and self:ownGreeter() or self.policy:PlayerOf(senderKey)
-    local lowered = string.lower(message)
+    local lowered = addon.NameNormalizer.Fold(message)
     local counted, closed = 0, false
     local prompts = self.queue:All(now)
     local index
     for index = 1, #prompts do
         local prompt = prompts[index]
-        if greeter ~= prompt.player and self:NamedIn(lowered, prompt) then
+        -- The player's own lines don't count, even when a scan linked
+        -- them after the prompt was raised.
+        local own = greeter == prompt.player or greeter == self.policy:PlayerOf(prompt.key)
+        if not own and self:NamedIn(lowered, prompt) then
             local before = self.tally:Count(prompt.player, now)
             if self.tally:Add(prompt.player, greeter, prompt.raisedAt, now) > before then
                 counted = counted + 1

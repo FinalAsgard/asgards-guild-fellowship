@@ -200,6 +200,9 @@ test.test("the player panel's position is saved account-wide and an unusable val
     test.assertEqual(700, position.y)
     test.assertEqual(nil, position.extra)
 
+    database.playerPanel = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = "far", y = 700 }
+    test.assertEqual(nil, store:GetPlayerPanelPosition(), "a field of the wrong type")
+
     database.playerPanel = "corrupt"
     test.assertEqual(nil, store:GetPlayerPanelPosition())
     test.assertFalse(store:SetPlayerPanelPosition({ point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 }))

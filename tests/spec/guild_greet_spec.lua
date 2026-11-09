@@ -694,6 +694,63 @@ test.test("guild greet: a prompt closes when its player goes offline", function(
     test.assertContains(world.shown[1].label, "Bolt")
 end)
 
+test.test("guild greet: accented names match whatever their case, but a one-letter name never does", function()
+    local world = setup("Retail")
+    world.store:SetGreetCap(1)
+    local partition, normalizer = world.greet.context()
+    local bolt = partition:GetCharacter(normalizer:Key(world.names.bolt)).player
+    partition:SetAlias(bolt, "\195\137owyn", "manual")
+    world.greet:OnPresence("online", world.names.bolt)
+
+    -- "É" is one letter, two bytes.
+    partition:SetAlias(bolt, "\195\137", "manual")
+    test.assertFalse(greeted(world, "bishop", nil, "\195\169 verdade"))
+    partition:SetAlias(bolt, "\195\137owyn", "manual")
+    test.assertTrue(greeted(world, "bishop", nil, "welcome \195\169owyn"))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: an alias with a dash is matched whole, never cut like a realm", function()
+    local world = setup("Retail")
+    world.store:SetGreetCap(1)
+    local partition, normalizer = world.greet.context()
+    local bolt = partition:GetCharacter(normalizer:Key(world.names.bolt)).player
+    partition:SetAlias(bolt, "Tank-Healer", "manual")
+    world.greet:OnPresence("online", world.names.bolt)
+
+    test.assertFalse(greeted(world, "bishop", nil, "need a tank"))
+    test.assertTrue(greeted(world, "bishop", nil, "hey Tank-Healer"))
+end)
+
+test.test("guild greet: another character of the player going offline leaves the prompt", function()
+    local world = setup("Retail")
+    -- Tongs is Anvil's alt: both online at once, Tongs' prompt showing.
+    world.greet:OnPresence("online", world.names.tongs)
+    test.assertEqual(1, #world.shown)
+
+    world.greet:OnPresence("offline", world.names.anvil)
+    test.assertEqual(1, #world.shown)
+    world.greet:OnPresence("offline", world.names.tongs)
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a newcomer linked by a scan after joining still can't greet themselves, and going "
+    .. "offline closes the prompt", function()
+    local world = setup("Retail")
+    world.store:SetGreetNumber("welcomeCap", 1)
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual(1, #world.shown)
+
+    -- The scan records Newt, with a player of their own.
+    local partition, normalizer = world.greet.context()
+    partition:RecordCharacter(normalizer:Key(world.names.newt), { name = world.names.newt, level = 1 })
+    test.assertFalse(greeted(world, "newt", world.names.newt))
+    test.assertEqual(1, #world.shown)
+
+    world.greet:OnPresence("offline", world.names.newt)
+    test.assertEqual(0, #world.shown)
+end)
+
 test.test("guild greet: the greeting cap is saved account-wide, from 1 to 10, default 2", function()
     local addon = test.newAddon("Core/FellowshipStore.lua")
     local database = { schemaVersion = 1, guilds = {} }

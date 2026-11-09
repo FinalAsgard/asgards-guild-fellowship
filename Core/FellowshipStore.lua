@@ -406,7 +406,9 @@ end
 -- unusable value is stored.
 function Store:GetPlayerPanelPosition()
     local position = type(self.database) == "table" and self.database.playerPanel or nil
-    if type(position) ~= "table" then
+    if type(position) ~= "table" or type(position.point) ~= "string" or type(position.relativePoint) ~= "string"
+        or type(position.x) ~= "number" or type(position.y) ~= "number"
+    then
         return nil
     end
     return position
