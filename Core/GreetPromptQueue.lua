@@ -10,7 +10,7 @@ local _, addon = ...
 -- releasing the hold shows only those still current. Pure: time is passed
 -- in.
 local GreetPromptQueue = {
-    LIFETIME_SECONDS = 2 * 60,
+    LIFETIME_SECONDS = 90,
 }
 addon.GreetPromptQueue = GreetPromptQueue
 
@@ -78,21 +78,23 @@ function Queue:Visible(now)
     return due
 end
 
+-- Every prompt that hasn't expired by `now`, shown yet or not, held or
+-- not, oldest first.
+function Queue:All(now)
+    local all = {}
+    local index
+    for index = 1, #self.prompts do
+        if self.prompts[index].expiresAt > now then
+            table.insert(all, self.prompts[index])
+        end
+    end
+    return all
+end
+
 -- The waiting prompt for `player`, or nil.
 function Queue:Get(player)
     local index = indexOf(self.prompts, player)
     return index and self.prompts[index] or nil
-end
-
--- The waiting prompt raised for the character `key`, or nil.
-function Queue:ForCharacter(key)
-    local index
-    for index = 1, #self.prompts do
-        if self.prompts[index].key == key then
-            return self.prompts[index]
-        end
-    end
-    return nil
 end
 
 -- Removes the prompt for `player` (greeted or closed). False when there was
