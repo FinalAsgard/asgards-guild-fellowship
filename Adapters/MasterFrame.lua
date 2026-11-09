@@ -65,6 +65,34 @@ local function restoreGeometry(frame, state, parent)
     end
 end
 
+-- Places pop-out `panel` where the user last left it (`saved`: { point,
+-- relativePoint, x, y } on the screen `parent`), or, with nothing usable
+-- saved, beside the master frame `anchor`.
+function MasterFrame.PlacePopOut(panel, anchor, saved, parent)
+    panel:ClearAllPoints()
+    if type(saved) == "table" and type(saved.point) == "string" and type(saved.relativePoint) == "string"
+        and type(saved.x) == "number" and type(saved.y) == "number"
+        and pcall(panel.SetPoint, panel, saved.point, parent, saved.relativePoint, saved.x, saved.y)
+    then
+        return
+    end
+    panel:ClearAllPoints()
+    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", MasterFrame.SIDE_OFFSET, 0)
+end
+
+-- Where pop-out `panel` sits on the screen `parent`, to save: { point,
+-- relativePoint, x, y }, or nil while it's still placed beside the master
+-- frame (never moved), which isn't saved, so it keeps following the frame.
+function MasterFrame.PopOutPosition(panel, parent)
+    local point, relativeTo, relativePoint, x, y = panel:GetPoint(1)
+    if type(point) ~= "string" or (relativeTo ~= nil and relativeTo ~= parent)
+        or type(x) ~= "number" or type(y) ~= "number"
+    then
+        return nil
+    end
+    return { point = point, relativePoint = relativePoint or point, x = x, y = y }
+end
+
 local function readGeometry(frame)
     local point, _, relativePoint, x, y = frame:GetPoint(1)
     local width, height = frame:GetSize()

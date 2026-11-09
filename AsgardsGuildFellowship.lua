@@ -338,6 +338,16 @@ if clientProfile.supported then
                         store:SetFrameState(state)
                     end
                 end,
+                loadPlayerPanelPosition = function()
+                    local store = rosterController:Store()
+                    return store and store:GetPlayerPanelPosition()
+                end,
+                savePlayerPanelPosition = function(position)
+                    local store = rosterController:Store()
+                    if store ~= nil then
+                        store:SetPlayerPanelPosition(position)
+                    end
+                end,
                 onToggleGroup = function(playerId)
                     rosterController:ToggleGroup(playerId)
                 end,

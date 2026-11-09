@@ -186,6 +186,26 @@ test.test("master frame geometry is saved account-wide and an unusable value is 
     test.assertEqual("corrupt", database.frame)
 end)
 
+test.test("the player panel's position is saved account-wide and an unusable value is kept", function()
+    local database = foundationRoot()
+    local store = newStore(database)
+
+    test.assertEqual(nil, store:GetPlayerPanelPosition())
+    test.assertTrue(store:SetPlayerPanelPosition({ point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 900,
+        y = 700, extra = "dropped" }))
+    local position = newStore(database):GetPlayerPanelPosition()
+    test.assertEqual("TOPLEFT", position.point)
+    test.assertEqual("BOTTOMLEFT", position.relativePoint)
+    test.assertEqual(900, position.x)
+    test.assertEqual(700, position.y)
+    test.assertEqual(nil, position.extra)
+
+    database.playerPanel = "corrupt"
+    test.assertEqual(nil, store:GetPlayerPanelPosition())
+    test.assertFalse(store:SetPlayerPanelPosition({ point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 }))
+    test.assertEqual("corrupt", database.playerPanel)
+end)
+
 test.test("the master frame starts where the roster window was saved, at its own size", function()
     local database = foundationRoot()
     database.window = { point = "TOPLEFT", relativePoint = "TOPLEFT", x = 40, y = -60, width = 640, height = 440 }

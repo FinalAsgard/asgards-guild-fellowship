@@ -72,7 +72,7 @@ The roster is the **Roster** tab of [the add-on's window](#the-add-ons-window).
 - The guild window gets a **Guild Fellowship** button left of **Invite Member**. If the add-on can't find that button, it skips this one quietly.
 - `/agf help` lists the commands with the version, client, and library status.
 
-Opening the window never scans the guild, so it's always quick. The Conflicts window and the player panel open beside the window, and close with it.
+Opening the window never scans the guild, so it's always quick. The Conflicts window and the player panel open beside the window, and close with it. Once you drag the player panel somewhere else, it opens there from then on, across reloads and on every character.
 
 ### Guild size
 

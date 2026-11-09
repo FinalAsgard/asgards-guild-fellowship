@@ -430,8 +430,17 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
             self:Raise()
         end
     end)
-    panel:ClearAllPoints()
-    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", addon.MasterFrame.SIDE_OFFSET, 0)
+    -- Where the user last left it, else beside the window; saved once it's
+    -- been moved, when a drag ends and when it closes.
+    addon.MasterFrame.PlacePopOut(panel, anchor, options.loadPlayerPanelPosition(), UIParent)
+    local function savePosition()
+        local position = addon.MasterFrame.PopOutPosition(panel, UIParent)
+        if position ~= nil then
+            options.savePlayerPanelPosition(position)
+        end
+    end
+    panel:HookScript("OnMouseUp", savePosition)
+    panel:HookScript("OnHide", savePosition)
     local edit = { panel = panel }
 
     -- "Don't sync": keep this client's own version of the player.
@@ -2060,6 +2069,8 @@ end
 -- options.onTurnBackOn(zoneKey) when a zone's "Turn back on" is pressed;
 -- options.loadGeometry() returns saved geometry or nil;
 -- options.saveGeometry(state) stores it;
+-- options.loadPlayerPanelPosition() returns where the player panel was last
+-- left, or nil, and options.savePlayerPanelPosition(position) stores it;
 -- options.onToggleGroup(playerId) runs when a player header is clicked;
 -- options.onRescan() runs when the Rescan button is clicked;
 -- options.onAcceptConflict(character, kind), onRejectConflict(character,
