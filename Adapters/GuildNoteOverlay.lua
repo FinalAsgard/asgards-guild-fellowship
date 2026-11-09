@@ -58,6 +58,8 @@ local GuildNoteOverlay = {
     LINE_GAP = 3,
     LINE_HEIGHT = 12,
     IGNORE_SIZE = { 64, 18 },
+    -- The room between the text and Ignore, along the panel's bottom.
+    IGNORE_GAP = 6,
     -- Member list methods that redraw its rows (scrolling, sorting, and
     -- roster refreshes all end in one of these); hooked where they exist.
     LIST_REFRESHES = { "RefreshListDisplay", "RefreshLayout", "Update" },
@@ -173,7 +175,8 @@ function Overlay:Attach()
         created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.NOTE_SHIFT, 0)
         local button = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
         button:SetSize(GuildNoteOverlay.IGNORE_SIZE[1], GuildNoteOverlay.IGNORE_SIZE[2])
-        button:SetPoint("TOPRIGHT", created, "TOPRIGHT", -padding, -padding)
+        -- Along the bottom, below the text, so it never covers it.
+        button:SetPoint("BOTTOMRIGHT", created, "BOTTOMRIGHT", -padding, padding)
         button:SetText(GuildNoteOverlay.IGNORE_TEXT)
         button:SetScript("OnClick", function()
             self:IgnoreShown()
@@ -191,7 +194,6 @@ function Overlay:Attach()
             return text
         end
         created.suggested = line(nil, "GameFontHighlightSmall")
-        created.suggested:SetPoint("RIGHT", button, "LEFT", -4, 0)
         created.problems = line(created.suggested, "GameFontNormalSmall")
         -- Placed when shown: under the note's lines, or first without them.
         created.match = created:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -290,11 +292,6 @@ function Overlay:ShowMember(name)
         end
         if above == nil then
             panel.match:SetPoint("TOPLEFT", panel, "TOPLEFT", padding, -padding)
-        elseif above == panel.suggested then
-            -- Below Ignore too, which sits beside the suggestion.
-            panel.match:SetPoint("TOPLEFT", panel, "TOPLEFT", padding,
-                -padding - math.max(self:LineHeight(above), GuildNoteOverlay.IGNORE_SIZE[2])
-                - GuildNoteOverlay.LINE_GAP)
         else
             panel.match:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -GuildNoteOverlay.LINE_GAP)
         end
@@ -315,13 +312,13 @@ function Overlay:LineHeight(text)
 end
 
 -- The panel's height for the lines it shows now: each line as tall as its
--- wrapped text where the client says, the Ignore button's height at least
--- for the note's first; the note's lines when `note`, the match line when
--- `match`.
+-- wrapped text where the client says; the note's lines when `note`, the
+-- match line when `match`, then room for Ignore along the bottom with the
+-- note.
 function Overlay:PanelHeight(panel, note, match)
     local total = 0
     if note then
-        total = math.max(self:LineHeight(panel.suggested), GuildNoteOverlay.IGNORE_SIZE[2])
+        total = self:LineHeight(panel.suggested)
         local lines = { panel.problems, panel.tooLong }
         local index
         for index = 1, #lines do
@@ -334,6 +331,9 @@ function Overlay:PanelHeight(panel, note, match)
     end
     if match then
         total = total + (note and GuildNoteOverlay.LINE_GAP or 0) + self:LineHeight(panel.match)
+    end
+    if note then
+        total = total + GuildNoteOverlay.IGNORE_GAP + GuildNoteOverlay.IGNORE_SIZE[2]
     end
     return total + 2 * GuildNoteOverlay.PANEL_PADDING
 end

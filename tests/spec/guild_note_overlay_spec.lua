@@ -185,9 +185,11 @@ local function registerProfileTests(profile)
         -- Under the detail panel, never drawn inside it.
         test.assertEqual("BOTTOMLEFT", panel.points[1][3])
         test.assertEqual(0, panel.points[1][5])
-        -- Tall enough for its lines: the suggestion beside Ignore, then
-        -- the problems.
-        test.assertEqual(18 + 3 + 12 + 16, panel.height)
+        -- Tall enough for its lines, the suggestion then the problems, with
+        -- Ignore along the bottom below them, never over the text.
+        test.assertEqual(12 + 3 + 12 + 6 + 18 + 16, panel.height)
+        test.assertEqual("BOTTOMRIGHT", panel.button.points[1][1])
+        test.assertEqual(panel, panel.suggested.points[2][2], "the suggestion runs the full width")
 
         -- A member whose note is up to date: nothing shows.
         detail:DisplayMember(1, { name = "Toolbox" })
@@ -283,7 +285,7 @@ local function registerProfileTests(profile)
         test.assertTrue(panel.match.shown)
         test.assertEqual(panel.problems, panel.match.points[1][2], "under the problems")
         test.assertTrue(panel.button.shown)
-        test.assertEqual(18 + 3 + 12 + 3 + 12 + 16, panel.height)
+        test.assertEqual(12 + 3 + 12 + 3 + 12 + 6 + 18 + 16, panel.height)
 
         -- Note fine: the match line alone, first, with no Ignore.
         detail:DisplayMember(1, { name = "Wrench" })
