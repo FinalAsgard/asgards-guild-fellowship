@@ -216,21 +216,27 @@ test.test("greet prompts: each button is named for its kind of greeting", functi
     test.assertEqual("Greet", world.prompts.rows[5].greet.text)
 end)
 
-test.test("greet prompts: every button is as wide as the longest label with a countdown needs", function()
-    -- 6 pixels a letter: "Welcome to the Guild (88)" is 25 letters.
+test.test("greet prompts: each button fits its own label, and every box is as wide as the longest needs", function()
+    -- 6 pixels a letter, plus 24 of padding.
     local world = newPrompts(nil, 6)
 
     world.prompts:Show({ prompt(1, "login"), prompt(2, "join") }, {})
 
     local rows = world.prompts.rows
-    test.assertEqual(25 * 6 + 24, rows[1].greet.width)
-    test.assertEqual(rows[1].greet.width, rows[2].greet.width)
-    -- The prompt grows with the button, keeping the name's room.
-    test.assertEqual(14 + 118 + 10 + rows[1].greet.width + 6 + 24 + 6, rows[1].frame.width)
+    test.assertEqual(#"Greet" * 6 + 24, rows[1].greet.width)
+    test.assertEqual(#"Welcome to the Guild" * 6 + 24, rows[2].greet.width)
+    -- The boxes match, with room for "Welcome to the Guild (88)".
+    local room = #"Welcome to the Guild (88)" * 6 + 24
+    test.assertEqual(14 + 118 + 10 + room + 6 + 24 + 6, rows[1].frame.width)
+    test.assertEqual(rows[1].frame.width, rows[2].frame.width)
     test.assertEqual(rows[1].frame.width, world.prompts.anchor.width)
+
+    -- While locked, a button grows to fit its countdown.
+    world.prompts:Show({ prompt(1, "login") }, {}, 3)
+    test.assertEqual(#"Greet (3)" * 6 + 24, rows[1].greet.width)
 
     -- A client that can't measure text gets the fixed width.
     world = newPrompts(nil)
-    world.prompts:Show({ prompt(1, "join") }, {})
+    world.prompts:Show({ prompt(1, "login") }, {})
     test.assertEqual(170, world.prompts.rows[1].greet.width)
 end)

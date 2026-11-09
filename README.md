@@ -242,7 +242,7 @@ On Retail, the game hides chat from add-ons during encounters and keystone runs.
 
 ## Guild Greet
 
-When someone joins the guild or a guild member comes online, a small prompt appears (at the left side of the screen unless you move it) with just the name they go by and a button named for the kind of greeting: **Welcome to the Guild** for someone who just joined, **Greet** for a login, **Welcome Back**, or **Long Time No See!** for a long absence. The buttons are all the same width, so they line up. Press it to post a random greeting of that kind to guild chat. Nothing is ever posted unless you press the button.
+When someone joins the guild or a guild member comes online, a small prompt appears (at the left side of the screen unless you move it) with just the name they go by and a button named for the kind of greeting: **Welcome to the Guild** for someone who just joined, **Greet** for a login, **Welcome Back**, or **Long Time No See!** for a long absence. Each button is sized to fit its label. Press it to post a random greeting of that kind to guild chat. Nothing is ever posted unless you press the button.
 
 - **Join**: someone joins the guild. They get this instead of a login prompt.
 - **Long absence**: someone's first login this session when none of their characters had logged in for 30 days or more (you can change the days), going by the guild roster's last-online times when you logged in.

@@ -2,8 +2,9 @@ local _, addon = ...
 
 -- Guild Greet's prompts: small boxes stacked down from an anchor, oldest on
 -- top, each with just the player's name, a button named for the kind of
--- greeting ("Welcome Back"), and a close button. Every greeting button is
--- as wide as the longest label needs, so they line up.
+-- greeting ("Welcome Back") and sized to its text, and a close button. The
+-- boxes are all as wide as the longest label needs, so the stack lines up;
+-- a shorter button leaves the name more room.
 -- The anchor defaults to the left side of the screen (the right side holds
 -- the quest log). Unlocking it shows a handle above the stack that drags it
 -- anywhere; the new place is saved when the drag ends. Frames are made on
@@ -17,7 +18,7 @@ local GreetPrompts = {
     NAME_WIDTH = 118,
     -- The greeting button's width when the client can't measure its labels.
     BUTTON_WIDTH = 170,
-    -- Room on either side of the longest label.
+    -- Room around a button's label.
     BUTTON_TEXT_PADDING = 24,
     BUTTON_HEIGHT = 24,
     CLOSE_SIZE = 24,
@@ -77,9 +78,21 @@ function Prompts:placeAnchor()
     end
 end
 
--- How wide every greeting button is: the longest label with a countdown,
--- as the button's font draws it, plus padding. BUTTON_WIDTH when the client
--- can't measure text.
+-- How wide `button` needs to be for its current text, as its font draws
+-- it, plus padding; nil when the client can't measure text.
+local function fittedWidth(button)
+    local ok, width = pcall(function()
+        return button:GetFontString():GetStringWidth()
+    end)
+    if not ok or type(width) ~= "number" or width <= 0 then
+        return nil
+    end
+    return math.ceil(width) + GreetPrompts.BUTTON_TEXT_PADDING
+end
+
+-- The room a prompt keeps for its greeting button: the longest label with
+-- a countdown, as the button's font draws it, plus padding. BUTTON_WIDTH
+-- when the client can't measure text.
 function Prompts:measureButton(parent)
     local createFrame = self.environment.CreateFrame
     local width
@@ -102,7 +115,8 @@ function Prompts:measureButton(parent)
     return math.ceil(width) + GreetPrompts.BUTTON_TEXT_PADDING
 end
 
--- A prompt's width: padding, the name, the greeting button and Close.
+-- A prompt's width: padding, the name, room for the widest greeting button,
+-- and Close.
 function Prompts:width()
     return GreetPrompts.PADDING + GreetPrompts.NAME_WIDTH + 10 + self.buttonWidth + 6
         + GreetPrompts.CLOSE_SIZE + 6
@@ -249,7 +263,8 @@ end
 
 -- Draws `prompts` (from GreetPromptQueue:Visible), hiding unused boxes.
 -- `handlers.greet(player)` and `handlers.close(player)` answer the buttons.
--- Each greeting button is named for its prompt's category. While
+-- Each greeting button is named for its prompt's category and sized to
+-- fit its text. While
 -- `lockedFor` (whole seconds) is above 0, each is disabled and counts down,
 -- as "Welcome Back (3)".
 function Prompts:Show(prompts, handlers, lockedFor)
@@ -266,6 +281,7 @@ function Prompts:Show(prompts, handlers, lockedFor)
             row.name:SetText(prompt.label or "")
             local locked = type(lockedFor) == "number" and lockedFor > 0
             row.greet:SetText(GreetPrompts.Label(prompt.category, lockedFor))
+            row.greet:SetWidth(fittedWidth(row.greet) or self.buttonWidth)
             if type(row.greet.SetEnabled) == "function" then
                 row.greet:SetEnabled(not locked)
             end
