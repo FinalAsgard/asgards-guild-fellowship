@@ -138,6 +138,14 @@ if clientProfile.supported then
         onDiscordChanged = function(key, text)
             return syncSession:LocalDiscordEdit(key, text)
         end,
+        -- Their own player's is their own edit; an officer's for someone
+        -- else is stamped on that player's main.
+        onProfileTextChanged = function(key, kind, text)
+            if rosterController:IsOwnPlayer(key) then
+                return syncSession:LocalProfileEdit(kind, text)
+            end
+            return syncSession:LocalPlayerTextEdit(key, kind, text)
+        end,
         onDeclaredChanged = function(key, before)
             syncSession:LocalDeclaredEdit(key, before)
         end,
@@ -393,6 +401,9 @@ if clientProfile.supported then
                 end,
                 onSetAlias = function(key, text)
                     rosterController:SetAlias(key, text)
+                end,
+                onSetProfileText = function(key, kind, text)
+                    rosterController:SetProfileText(key, kind, text)
                 end,
                 onSetDiscord = function(key, text)
                     rosterController:SetDiscord(key, text)

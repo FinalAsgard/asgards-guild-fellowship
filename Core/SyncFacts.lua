@@ -77,7 +77,11 @@ SyncFacts.PROFILE_KINDS = {
 -- of the same name, in the order they're shown.
 SyncFacts.TEXT_KINDS = { SyncFacts.KIND_DISCORD, SyncFacts.KIND_LOCATION, SyncFacts.KIND_BIO }
 -- The profile text kinds an officer may also set for someone else.
-SyncFacts.OFFICER_TEXT_KINDS = { [SyncFacts.KIND_DISCORD] = true }
+SyncFacts.OFFICER_TEXT_KINDS = {
+    [SyncFacts.KIND_DISCORD] = true,
+    [SyncFacts.KIND_LOCATION] = true,
+    [SyncFacts.KIND_BIO] = true,
+}
 addon.SyncFacts = SyncFacts
 
 local Facts = {}
@@ -441,7 +445,7 @@ function Facts:DateRefusal(fact)
 end
 
 -- Refusal for a valid profile fact: only the character itself may write
--- one, or an officer a Discord username. "Don't sync" is about officers'
+-- one, or an officer a Discord username, location or bio. "Don't sync" is about officers'
 -- data, so it applies only to an officer's.
 function Facts:ProfileRefusal(fact)
     local own = fact.by == fact.character

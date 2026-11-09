@@ -306,6 +306,119 @@ end
 -- client has no dialogs.
 RosterWindow.ShowDiscordDialog = showDiscordDialog
 
+-- A text dialog for the Bio tab's location Edit. Saving empty clears it.
+local function showLocationDialog(label, current, onSave)
+    return showTextDialog("SET_LOCATION", "Location for %s (leave empty to clear):",
+        addon.FellowshipStore.PROFILE_FIELDS.location, label, current, onSave)
+end
+
+local BIO_EDITOR_WIDTH = 420
+local BIO_EDITOR_HEIGHT = 260
+
+-- The Bio tab's bio editor: a window with a several-line box (a long bio
+-- scrolls), how many characters are used, and Save and Cancel. Made on
+-- first use. `editor.open(title, current, onSave)` shows it.
+local function buildBioEditor(framework, frameName)
+    local panel = framework:CreateSimplePanel(UIParent, BIO_EDITOR_WIDTH, BIO_EDITOR_HEIGHT, "Edit bio",
+        frameName .. "BioEditor")
+    panel.DontRightClickClose = true
+    panel:SetFrameStrata("DIALOG")
+    panel:ClearAllPoints()
+    panel:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+    local editor = { panel = panel }
+    local maxLetters = addon.FellowshipStore.PROFILE_FIELDS.bio
+
+    local prompt = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    prompt:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -32)
+    prompt:SetPoint("RIGHT", panel, "RIGHT", -12, 0)
+    prompt:SetJustifyH("LEFT")
+    prompt:SetWordWrap(false)
+
+    local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -54)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -32, 44)
+    local background = scroll:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints(scroll)
+    background:SetColorTexture(0, 0, 0, 0.5)
+    local box = CreateFrame("EditBox", nil, scroll)
+    box:SetMultiLine(true)
+    box:SetFontObject("ChatFontNormal")
+    box:SetTextInsets(6, 6, 4, 4)
+    box:SetAutoFocus(false)
+    box:SetMaxLetters(maxLetters)
+    box:SetWidth(BIO_EDITOR_WIDTH - 44)
+    box:SetHeight(BIO_EDITOR_HEIGHT - 98)
+    scroll:SetScrollChild(box)
+    scroll:SetScript("OnSizeChanged", function(_, width)
+        if type(width) == "number" and width > 0 then
+            box:SetWidth(width)
+        end
+    end)
+    -- The line being typed stays in view.
+    box:SetScript("OnCursorChanged", function(_, _, y, _, height)
+        local okScroll, offset = pcall(scroll.GetVerticalScroll, scroll)
+        local okHeight, visible = pcall(scroll.GetHeight, scroll)
+        if not okScroll or not okHeight or type(y) ~= "number" or type(height) ~= "number" then
+            return
+        end
+        local cursorTop = -y
+        if cursorTop < offset then
+            pcall(scroll.SetVerticalScroll, scroll, cursorTop)
+        elseif cursorTop + height > offset + visible then
+            pcall(scroll.SetVerticalScroll, scroll, cursorTop + height - visible)
+        end
+    end)
+    -- A click below the text still edits it.
+    scroll:SetScript("OnMouseDown", function()
+        box:SetFocus()
+    end)
+    box:SetScript("OnEscapePressed", function()
+        panel:Hide()
+    end)
+
+    local counter = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    counter:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, 16)
+    local function count()
+        counter:SetText(#(box:GetText() or "") .. "/" .. maxLetters)
+    end
+    box:SetScript("OnTextChanged", count)
+
+    local cancel = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    cancel:SetSize(80, 22)
+    cancel:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 10)
+    cancel:SetText(CANCEL or "Cancel")
+    cancel:SetScript("OnClick", function()
+        panel:Hide()
+    end)
+    local save = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    save:SetSize(80, 22)
+    save:SetPoint("RIGHT", cancel, "LEFT", -6, 0)
+    save:SetText(SAVE or "Save")
+    save:SetScript("OnClick", function()
+        local text = string.gsub(box:GetText() or "", "^%s*(.-)%s*$", "%1")
+        local onSave = editor.onSave
+        panel:Hide()
+        if onSave ~= nil then
+            onSave(text)
+        end
+    end)
+    panel:HookScript("OnHide", function()
+        editor.onSave = nil
+        box:ClearFocus()
+    end)
+
+    function editor.open(title, current, onSave)
+        editor.onSave = onSave
+        prompt:SetText("Bio for " .. tostring(title) .. " (leave empty to clear):")
+        box:SetText(current or "")
+        count()
+        panel:Show()
+        box:SetFocus()
+    end
+    panel:Hide()
+    return editor
+end
+
 local PICKER_WIDTH = 360
 local PICKER_HEIGHT = 380
 
@@ -413,7 +526,9 @@ local PANEL_LIST_TOP = 96
 -- `actions.openSetAlias(key, title)` and `actions.openSetMain(key, name,
 -- merge)` open the dialogs the right-click menu uses (`merge` titles the
 -- picker "Merge into player"); `actions.openSetDiscord(key, title,
--- current)` opens the "Set Discord…" dialog.
+-- current)` opens the "Set Discord…" dialog, and
+-- `actions.openSetProfileText(key, title, field, current)` the Bio tab's
+-- editor for "location" or "bio".
 local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     local panel = framework:CreateSimplePanel(UIParent, PANEL_WIDTH, PANEL_HEIGHT, "Player", frameName .. "Player")
     -- Like every panel here, closed only with its close button or Escape.
@@ -511,8 +626,9 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.setDiscord = setDiscord
     edit.setMain = setMain
 
-    -- The tabs above the list: Profile (the player's details and
-    -- characters), Promotion (each character's checklist, for an officer,
+    -- The tabs above the list: Profile (the player's main and alts), Bio
+    -- (their location and bio, each with Edit for a player this user may
+    -- change), Promotion (each character's checklist, for an officer,
     -- or a member's own player; hidden for others), and Log (the ad count,
     -- grouping and each character's dates). They're the game's own top
     -- tabs: Retail's template, else Forever's, else a plain button (lit
@@ -520,7 +636,7 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
     edit.tab = "profile"
     edit.tabs = {}
     local TAB_TEMPLATES = { "PanelTopTabButtonTemplate", "TabButtonTemplate" }
-    local tabNames = { { "profile", "Profile" }, { "promotion", "Promotion" }, { "log", "Log" } }
+    local tabNames = { { "profile", "Profile" }, { "bio", "Bio" }, { "promotion", "Promotion" }, { "log", "Log" } }
     local previousTab
     local tabIndex
     for tabIndex = 1, #tabNames do
@@ -659,6 +775,18 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 end
             end
         end)
+        -- A Bio tab heading's Edit, for a player this user may change.
+        line.edit = CreateFrame("Button", nil, line, "UIPanelButtonTemplate")
+        line.edit:SetSize(56, 18)
+        line.edit:SetPoint("RIGHT", line, "RIGHT", -6, 0)
+        line.edit:SetText("Edit")
+        line.edit:SetScript("OnClick", function()
+            local row, model = line.row, edit.model
+            if row ~= nil and row.field ~= nil and model ~= nil then
+                actions.openSetProfileText(model.main, model.label, row.field, model[row.field])
+            end
+        end)
+        line.edit:Hide()
         -- A Promotion row's check box, note box and button (see
         -- PromotionLines).
         addon.PromotionLines.Attach(line, edit.promotionLines)
@@ -691,6 +819,11 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 elseif row.kind == "history" then
                     text = "  " .. row.name .. "  |cff9d9d9d" .. row.role .. ", " .. row.reason ..
                         (row.dates ~= "" and (", " .. row.dates) or "") .. "|r"
+                end
+                if row.field ~= nil and edit.model ~= nil and edit.model.canEdit ~= false then
+                    line.edit:Show()
+                else
+                    line.edit:Hide()
                 end
                 -- Promotion rows draw themselves; the others' text uses the
                 -- line's full width.
@@ -1960,6 +2093,23 @@ local function build(framework, options)
             options.onMenuUnavailable()
         end
     end
+    local bioEditor
+    local function openSetProfileText(key, title, field, current)
+        local function save(text)
+            options.onSetProfileText(key, field, text)
+        end
+        if field == "bio" then
+            local ok = pcall(function()
+                bioEditor = bioEditor or buildBioEditor(framework, frameName)
+                bioEditor.open(title, current, save)
+            end)
+            if not ok then
+                options.onMenuUnavailable()
+            end
+        elseif not showLocationDialog(title, current, save) then
+            options.onMenuUnavailable()
+        end
+    end
     local function openRowMenu(row, line)
         local entries = options.menuFor(row)
         if entries[1] == nil then
@@ -2063,6 +2213,7 @@ local function build(framework, options)
     local playerPanel = buildPlayerPanel(framework, options, frameName, frame, {
         openSetAlias = openSetAlias,
         openSetDiscord = openSetDiscord,
+        openSetProfileText = openSetProfileText,
         openSetMain = openSetMain,
     })
     conflictsButton:SetScript("OnClick", function()
@@ -2103,7 +2254,8 @@ end
 -- shown, and options.onPurge(key) / onPurgeAll() purge them;
 -- options.menuFor(row) lists a row's organize actions, and onSetMain(key,
 -- playerId), onMakeMain(key), onSetAlias(key, text), onDetach(key),
--- onSetDiscord(key, text) (from the player panel),
+-- onSetDiscord(key, text) and onSetProfileText(key, field, text) (from
+-- the player panel; `field` "location" or "bio"),
 -- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them;
 -- options.onSearch(text), onToggleOnlineOnly(), onExpandAll(), and
 -- onCollapseAll() drive the controls row; options.onSelectCharacter(key)
@@ -2435,7 +2587,9 @@ function Window:ShowPlayer(model)
             end
             edit.placeTabs()
             local data = current.rows
-            if edit.tab == "promotion" then
+            if edit.tab == "bio" then
+                data = current.bioRows
+            elseif edit.tab == "promotion" then
                 data = current.promotionRows
             elseif edit.tab == "log" then
                 data = current.logRows

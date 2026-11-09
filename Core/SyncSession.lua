@@ -473,16 +473,30 @@ end
 -- suggestion for officers to decide. Returns the facts stamped, or nil
 -- when nothing could be (no server time yet, or unusable text).
 function Session:LocalDiscordEdit(key, text)
+    return self:LocalPlayerTextEdit(key, addon.SyncFacts.KIND_DISCORD, text)
+end
+
+-- The same for any text an officer may set for someone else (see
+-- SyncFacts.OFFICER_TEXT_KINDS): the Discord username, location or bio.
+-- Only a Discord username can be a member's suggestion; a member's own
+-- location and bio go through LocalProfileEdit.
+function Session:LocalPlayerTextEdit(key, kind, text)
+    if not addon.SyncFacts.OFFICER_TEXT_KINDS[kind] then
+        return nil
+    end
     local partition = self.context()
     local character = partition and partition:GetCharacter(key)
     local player = character and partition:GetPlayer(character.player)
     if player == nil then
         return nil
     end
-    local before = partition:PlayerProfileText(character.player, addon.SyncFacts.KIND_DISCORD) or ""
+    if kind ~= addon.SyncFacts.KIND_DISCORD and not self.isOfficer(self.selfKey()) then
+        return nil
+    end
+    local before = partition:PlayerProfileText(character.player, kind) or ""
     local stamped
     self:StampAndSend(function(facts, author, now)
-        stamped = { facts:StampText(player.main, addon.SyncFacts.KIND_DISCORD, text, now, author) }
+        stamped = { facts:StampText(player.main, kind, text, now, author) }
         return stamped
     end, function(fact)
         return fact.text ~= before

@@ -31,6 +31,11 @@ Controller.__index = Controller
 --                 player panel ("" clears it): official at once for an
 --                 officer, a suggestion for a member; nil when it wasn't
 --                 saved
+--   onProfileTextChanged optional function(key, kind, text) -> facts or
+--                 nil: this user set the location or bio ("location" or
+--                 "bio") of `key`'s player from the player panel ("" clears
+--                 it): their own player's as their own, an officer's for
+--                 anyone else; nil when it wasn't saved
 --   onAliasChanged  optional function(key, before): after a manual alias
 --                 change to the player of `key`, with the alias before it
 --                 ("" for none) (for guild sync)
@@ -92,6 +97,7 @@ function RosterController.Create(options)
         onMainLinksChanged = options.onMainLinksChanged,
         onAliasChanged = options.onAliasChanged,
         onDiscordChanged = options.onDiscordChanged,
+        onProfileTextChanged = options.onProfileTextChanged,
         onDeclaredChanged = options.onDeclaredChanged,
         onScanFinished = options.onScanFinished,
         onChanged = options.onChanged,
@@ -791,6 +797,28 @@ function Controller:SetDiscord(key, text)
         return false
     end
     self:Refresh()
+    return true
+end
+
+-- The Bio tab's Edit: sets the location or bio (`kind`) of `key`'s player
+-- to `text` ("" clears it), for the user's own player or, as an officer,
+-- anyone's, and redraws.
+function Controller:SetProfileText(key, kind, text)
+    if self.onProfileTextChanged == nil or (self.current == nil and self:QuietContext() == nil) then
+        return false
+    end
+    local label = kind == "bio" and "That bio" or "That location"
+    if not self:CanEditPlayer(key) then
+        self:Print(label .. " wasn't saved: " .. NOT_OWN_PLAYER .. ".")
+        return false
+    end
+    if self.onProfileTextChanged(key, kind, text) == nil then
+        self:Print(label .. " wasn't saved: this character isn't in the guild roster yet, or the server time "
+            .. "isn't known yet.")
+        return false
+    end
+    -- The panel can be open without the window.
+    self:Invalidate()
     return true
 end
 

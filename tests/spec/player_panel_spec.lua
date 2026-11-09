@@ -130,7 +130,7 @@ test.test("character rows carry the class for the name's color, and Discord move
     local characters = rowsOf(model, "character")
     test.assertEqual("ffc69b6d", characters[1].color)
     test.assertEqual(nil, characters[2].color, "no class known")
-    test.assertEqual(0, #rowsOf(model, "about"), "only Discord was set, and it's in the header")
+    test.assertEqual(0, #rowsOf(model, "about", "bioRows"), "only Discord was set, and it's in the header")
 end)
 
 test.test("panel rows offer the same actions as the right-click menu", function()
@@ -234,6 +234,7 @@ local function controllerSetup(_, options)
         getDatabase = function() return database end,
         createWindow = function() return window end,
         onDiscordChanged = options.onDiscordChanged,
+        onProfileTextChanged = options.onProfileTextChanged,
         isOfficer = function() return options.officer == true end,
     })
     controller:OnSavedDataReady()
@@ -379,6 +380,33 @@ for _, profile in ipairs({ "Forever", "Retail" }) do
         test.assertTrue(controller:SetAlias(otherKey, "Visi"))
         test.assertEqual(1, edits)
     end)
+
+    test.test(profile .. ": the Bio tab's location and bio are editable for their own player, or by an officer",
+        function()
+        local sent = {}
+        local function record(key, kind, text)
+            table.insert(sent, kind .. "=" .. text)
+            return { {} }
+        end
+        local controller, window, client = controllerSetup(nil, { profile = profile,
+            onProfileTextChanged = record })
+        local printed
+        client.Print = function(_, message) printed = message end
+        local _, _, normalizer = controller:QuietContext()
+        local otherKey = normalizer:Key(other)
+
+        controller:SelectPlayerOf(normalizer:Key(alt))
+        test.assertEqual("location", window.player.bioRows[1].field)
+        test.assertTrue(controller:SetProfileText(window.player.main, "location", "Ohio"))
+        test.assertTrue(controller:SetProfileText(window.player.main, "bio", "Healer"))
+        test.assertFalse(controller:SetProfileText(otherKey, "bio", "Spam"))
+        test.assertEqual("location=Ohio,bio=Healer", table.concat(sent, ","))
+        test.assertContains(printed, "That bio wasn't saved: members can only change their own player")
+
+        local officer = controllerSetup(nil, { profile = profile, officer = true, onProfileTextChanged = record })
+        test.assertTrue(officer:SetProfileText(otherKey, "bio", "Raider"))
+        test.assertEqual("bio=Raider", sent[3])
+    end)
 end
 
 test.test("set discord: an edit that couldn't be saved is reported", function()
@@ -486,15 +514,49 @@ test.test("the panel model wraps the bio with the window's wrapper when given", 
         return { "[" .. text .. "]" }
     end)
 
-    local about = rowsOf(model, "about")
+    local about = rowsOf(model, "about", "bioRows")
     test.assertEqual("[Raid lead on weekends]", about[1].text)
 
-    -- Discord and Location are wrapped too, with their labels.
+    -- The location is wrapped too.
     state.partition:SetProfileText("toolbox-area52", "location", "Stormwind", START, "toolbox-area52")
     about = rowsOf(state.build(nil, function(text)
         return { "[" .. text .. "]" }
-    end), "about")
-    test.assertEqual("[Location: Stormwind]", about[1].text)
+    end), "about", "bioRows")
+    test.assertEqual("[Stormwind]", about[1].text)
+    test.assertEqual("[Raid lead on weekends]", about[2].text)
+end)
+
+test.test("the Bio tab shows Location and Bio headings, each Not set until the player sets it", function()
+    local state = setup()
+
+    local model = state.build()
+    local function texts(rows)
+        local found = {}
+        local index
+        for index = 1, #rows do
+            table.insert(found, rows[index].kind .. ":" .. rows[index].text .. ":" .. tostring(rows[index].field))
+        end
+        return table.concat(found, "|")
+    end
+    test.assertEqual("section:Location:location|empty:Not set:nil|section:Bio:bio|empty:Not set:nil",
+        texts(model.bioRows))
+    test.assertEqual(nil, model.location)
+    test.assertEqual(nil, model.bio)
+    test.assertEqual(0, #rowsOf(model, "about"), "the Profile tab has no About section")
+
+    state.partition:SetProfileText("toolbox-area52", "location", "Stormwind", START, "toolbox-area52")
+    state.partition:SetProfileText("toolbox-area52", "bio", "Tank", START, "toolbox-area52")
+    model = state.build()
+    test.assertEqual("section:Location:location|about:Stormwind:nil|section:Bio:bio|about:Tank:nil",
+        texts(model.bioRows))
+    test.assertEqual("Stormwind", model.location)
+    test.assertEqual("Tank", model.bio)
+
+    -- Cleared reads as not set.
+    state.partition:SetProfileText("toolbox-area52", "location", "", START + 1, "toolbox-area52")
+    model = state.build()
+    test.assertEqual(nil, model.location)
+    test.assertEqual("empty", model.bioRows[2].kind)
 end)
 
 test.test("the mini profile lists the main, then Discord and location, alts, and the bio", function()

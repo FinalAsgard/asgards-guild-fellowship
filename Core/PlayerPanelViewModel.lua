@@ -125,29 +125,36 @@ function PlayerPanelViewModel.Wrap(text, width, measure)
     return lines
 end
 
--- The player's location and bio, as "about" rows under an About heading;
--- nothing when neither is set. (Their Discord is in the panel's header.)
--- `wrap(text) -> lines` breaks each into lines that fit the panel.
-local function aboutRows(partition, playerId, wrap)
-    local location = partition:PlayerProfileText(playerId, "location")
-    local bio = partition:PlayerProfileText(playerId, "bio")
-    if location == nil and bio == nil then
-        return {}
+-- The player's profile text of `field`, or nil when it's not set (or was
+-- cleared).
+local function profileText(partition, playerId, field)
+    local text = partition:PlayerProfileText(playerId, field)
+    if text == "" then
+        return nil
     end
-    local rows = { { kind = "section", text = "About" } }
-    local function add(text)
+    return text
+end
+
+-- The Bio tab: a Location heading and the player's location, then a Bio
+-- heading and their bio, each "Not set" when it isn't. Each heading names
+-- the field it edits. `wrap(text) -> lines` breaks each into lines that
+-- fit the panel.
+local function bioRows(location, bio, wrap)
+    local rows = {}
+    local function add(heading, field, text)
+        table.insert(rows, { kind = "section", text = heading, field = field })
+        if text == nil then
+            table.insert(rows, { kind = "empty", text = "Not set" })
+            return
+        end
         local lines = wrap(text)
         local index
         for index = 1, #lines do
             table.insert(rows, { kind = "about", text = lines[index] })
         end
     end
-    if location ~= nil then
-        add("Location: " .. location)
-    end
-    if bio ~= nil then
-        add(bio)
-    end
+    add("Location", "location", location)
+    add("Bio", "bio", bio)
     return rows
 end
 
@@ -178,11 +185,16 @@ end
 -- a long line's lines as they fit the panel; by default, lines of at most
 -- BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
---   { id, label, alias, main, mainName, canMerge, discord,
---     joined, grouped, rows, logRows, promotionRows }
+--   { id, label, alias, main, mainName, canMerge, discord, location, bio,
+--     joined, grouped, rows, bioRows, logRows, promotionRows }
 -- where `main` is the main's character key, `canMerge` whether the player
 -- can be merged into another (only with no alts), `discord` the player's
--- Discord username or nil, `joined` "Joined: …" or nil, `grouped`
+-- Discord username or nil, `location` and `bio` the player's location and
+-- bio or nil, `bioRows` the Bio tab's rows:
+--   { kind = "section", text, field } ("Location" or "Bio", with the field
+--   it edits: "location" or "bio"), then { kind = "about", text } lines, or
+--   { kind = "empty", text = "Not set" },
+-- `joined` "Joined: …" or nil, `grouped`
 -- "Grouped together 3 times", 0 included (the header shows these),
 -- `promotionRows` the Promotion tab's rows (nil when there's no such tab
 -- for this player), `logRows` the Log tab's rows: the ad count, when they
@@ -192,9 +204,6 @@ end
 --   { kind = "history", name, role, dates, reason } or { kind = "empty", text }
 -- and `rows` is a flat list for the Profile tab's scroll list:
 --   { kind = "section", text }
---   { kind = "about", text }  (under an About heading: "Location: text",
---                              then the bio's lines; only what the player
---                              set)
 --   { kind = "character", key, name, color, level, isMain, inGuild, status,
 --     source, roles, canMakeMain, canDetach }
 --   { kind = "empty", text }
@@ -270,10 +279,8 @@ function PlayerPanelViewModel.Build(inputs)
             promotionRows = promotion
         end
     end
-    local about = aboutRows(partition, inputs.playerId, wrap)
-    for index = 1, #about do
-        table.insert(rows, about[index])
-    end
+    local location = profileText(partition, inputs.playerId, "location")
+    local bio = profileText(partition, inputs.playerId, "bio")
     table.insert(rows, { kind = "section", text = "Main" })
     local mainRow = characterEntry(inputs, player.main, true, altCount)
     table.insert(rows, mainRow)
@@ -327,7 +334,10 @@ function PlayerPanelViewModel.Build(inputs)
         discord = (partition:PlayerProfileText(inputs.playerId, "discord")),
         joined = joined,
         grouped = grouped,
+        location = location,
+        bio = bio,
         rows = rows,
+        bioRows = bioRows(location, bio, wrap),
         logRows = logRows,
         promotionRows = promotionRows,
     }
