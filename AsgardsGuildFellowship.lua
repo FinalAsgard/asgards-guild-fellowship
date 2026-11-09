@@ -2286,27 +2286,6 @@ if clientProfile.supported then
             checks:Prune()
         end
     end
-    -- The game guild roster's promotion panel, for the member named `name`
-    -- selected there: that character's rows only (as panelRows, so who may
-    -- see them is decided by its player), its checklist open at first. Its
-    -- own open checklists, kept while the same member stays selected.
-    local rosterExpanded, rosterSelected = {}, nil
-    promotions.rosterRows = function(name)
-        local guild, partition, normalizer = rosterController:QuietContext()
-        local key = guild and normalizer:Key(name)
-        local character = key and partition:GetCharacter(key)
-        if character == nil or character.player == nil then
-            return nil
-        end
-        if key ~= rosterSelected then
-            rosterSelected = key
-            rosterExpanded = { [key] = true }
-        end
-        return promotions.panelRows({ key }, character.player, rosterExpanded)
-    end
-    promotions.toggleRoster = function(key)
-        rosterExpanded[key] = not rosterExpanded[key]
-    end
     -- Requirements or ticks changed: redraw the page, the player panel and
     -- the roster's Ready markers, here and on the game's guild roster.
     promotions.changed = function()
@@ -3497,60 +3476,10 @@ if clientProfile.supported then
                 auditCache = nil
             end
         end,
-        -- Anyone sees the selected member's player in brief.
-        profileFor = function(name)
-            local guild, partition, normalizer = rosterController:QuietContext()
-            local key = guild and normalizer:Key(name)
-            local character = key and partition:GetCharacter(key)
-            if character == nil then
-                return nil
-            end
-            local summary = addon.PlayerPanelViewModel.Summary({
-                partition = partition,
-                playerId = character.player,
-                members = rosterController:LiveMembers(normalizer),
-                normalizer = normalizer,
-            })
-            local selfKey = rosterController:SelfKey()
-            local own = selfKey and partition:GetCharacter(selfKey)
-            if summary ~= nil and own ~= nil and own.player == character.player then
-                summary.own = true
-            end
-            if summary ~= nil then
-                summary.canSetDiscord = rosterController:CanEditPlayer(key)
-            end
-            return summary
-        end,
-        editProfile = function()
-            rosterController:Open("profile")
-        end,
-        -- The player panel's Set Discord… box, from the mini profile.
-        setDiscord = function(name)
-            local guild, partition, normalizer = rosterController:QuietContext()
-            local key = guild and normalizer:Key(name)
-            local character = key and partition:GetCharacter(key)
-            local player = character and partition:GetPlayer(character.player)
-            if player == nil then
-                return
-            end
-            local summary = addon.PlayerPanelViewModel.Summary({ partition = partition, playerId = character.player,
-                normalizer = normalizer })
-            local label = summary and summary.title or name
-            local current = partition:PlayerProfileText(character.player, "discord")
-            addon.RosterWindow.ShowDiscordDialog(label, current, function(text)
-                rosterController:SetDiscord(player.main, text)
-            end)
-        end,
-        -- The selected member's player's promotion status: officers work on
-        -- anyone's; a member sees only their own, read-only.
-        promotionFor = function(name)
-            return promotions.rosterRows(name)
-        end,
-        tick = function(key, item, ticked, note)
-            return promotions.tick(key, item, ticked, note)
-        end,
-        toggle = function(key)
-            promotions.toggleRoster(key)
+        -- Selecting a member there opens the player panel for their
+        -- player, for anyone.
+        showPlayer = function(name)
+            rosterController:ShowPlayerNamed(name)
         end,
         -- Officers see which members are ready for promotion, and which
         -- alts to promote to match their player (that flag wins): worked

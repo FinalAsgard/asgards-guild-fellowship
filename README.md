@@ -141,9 +141,9 @@ What a note should say:
 
 **Ignore** hides a mismatch you've chosen to leave alone. It comes back when the note or the add-on's record for that character changes. The list is worked out again after every scan, sync and change in the roster. Departed characters are skipped.
 
-### Mini profile in the guild roster
+### Player panel from the guild roster
 
-Select any member in the game's guild roster and, if the add-on knows their player, a small panel under the game's member details (under the [Promotion](#in-the-games-guild-roster) panel, when that shows) shows that player in brief, under their alias and main as the title: their main, then their Discord and location, then their alts one per line, then their bio under **Personal Bio**. Anything they haven't set is left blank. Levels follow each character's name. It has a **Set Discord…** button that opens the same box as **Set Discord…** in the [player panel](#organizing-by-hand), filled in with the player's current Discord name (empty it and save to clear it): an officer's edit is saved and sent to the guild at once, and a member's becomes a suggestion for an officer to approve. Officers get the button on anyone's mini profile; members only on their own player's. The panel and the Promotion panel above it update as soon as the name is saved. On your own characters the panel also has an **Edit** button that opens [My Profile](#my-profile). Everyone sees it, not just officers.
+Select any member in the game's guild roster and, if the add-on knows their player, the add-on's [player panel](#organizing-by-hand) opens for that player, with all its tabs (Profile, Bio, Promotion where you may see it, and Log), whether or not the add-on's window is open. It stays open until you close it. Selecting another member switches it to their player. The game redrawing the same member (on a roster update) doesn't reopen a panel you closed; select someone else, or close and reselect the member, to open it again. Everyone gets it, not just officers.
 
 ### Mains, alts, and departures
 
@@ -446,11 +446,10 @@ On officers' rosters, a character who meets every requirement shows **Ready** be
 
 ### In the game's guild roster
 
-Select a member in the game's guild roster and a **Promotion** panel opens right under the game's member details, above the [mini profile](#mini-profile-in-the-guild-roster), and wider than both so requirement titles fit. It's for that character only (the add-on's player panel shows all of a player's characters), with its checklist open:
+Select a member in the game's guild roster and the add-on's [player panel](#player-panel-from-the-guild-roster) opens for their player. Its **Promotion** tab shows all of that player's characters, the top checklist open:
 
 - Officers see anyone's, and work on it there: tick and untick, notes, overrides with a reason, opening and closing each character's checklist.
-- Members see it only when they select one of their own characters, read-only, and never for anyone else's.
-- A long list shows its first 18 lines; the add-on's player panel has the rest.
+- Members get the tab only on their own player, read-only, and never on anyone else's.
 
 ### Your own progress
 
@@ -628,7 +627,7 @@ Below your characters, **Your other characters on this computer** lists the char
 
 Below the alias are your **Discord** username (up to 32 characters), **Location** (up to 40, for example "Ohio, evenings") and a **Bio** (up to 500, in a taller box that wraps onto several lines). Each box shows how many characters you've used. Type in one and press Enter (or click elsewhere) to save it; Escape puts back what was saved. Empty a box and save to stop sharing it.
 
-These belong to your player, not to one character: whichever of your characters you're on, you see and edit the same values, and the newest edit wins. They're saved and sent to the guild at once, with no officer approving them, and only your own characters and officers can change your location and bio (officers from your player panel's **Bio** tab). Your Discord name can also be set or cleared by an officer with **Set Discord…** (in the player panel or the guild roster's mini profile). Other members can't change any of them. If someone's add-on passes on a change in your name that you never made, yours sends your real values back out, and you're warned who passed it on, as for role preferences. Guildmates see your Discord in your player panel's header, and your location and bio on its **Bio** tab, where you can also edit them.
+These belong to your player, not to one character: whichever of your characters you're on, you see and edit the same values, and the newest edit wins. They're saved and sent to the guild at once, with no officer approving them, and only your own characters and officers can change your location and bio (officers from your player panel's **Bio** tab). Your Discord name can also be set or cleared by an officer with **Set Discord…** (in the player panel). Other members can't change any of them. If someone's add-on passes on a change in your name that you never made, yours sends your real values back out, and you're warned who passed it on, as for role preferences. Guildmates see your Discord in your player panel's header, and your location and bio on its **Bio** tab, where you can also edit them.
 
 ### Characters and roles
 

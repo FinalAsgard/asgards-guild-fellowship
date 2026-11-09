@@ -780,7 +780,7 @@ function Controller:Detach(key)
     return self:Organize("Detach", key)
 end
 
--- "Set Discord…" from the player panel or the game roster's mini profile:
+-- "Set Discord…" from the player panel:
 -- sets the Discord username of `key`'s player to `text` ("" clears it), as
 -- an officer's or as a member's suggestion about their own player, and
 -- redraws. The add-on's window needn't have been opened.
@@ -909,6 +909,29 @@ end
 function Controller:SelectPlayerOf(key)
     local character = self.current and self.current.partition:GetCharacter(key)
     return character ~= nil and self:SelectPlayer(character.player)
+end
+
+-- The game's guild roster selected `name`: opens the player panel for its
+-- player, without the add-on's window. False when the add-on has no record
+-- of them, or the panel can't be drawn.
+function Controller:ShowPlayerNamed(name)
+    local guild, partition, normalizer = self:QuietContext()
+    local key = guild and type(name) == "string" and normalizer:Key(name)
+    local character = key and partition:GetCharacter(key)
+    if character == nil or character.player == nil then
+        return false
+    end
+    if self.window == nil then
+        local window = self.createWindow()
+        if window == nil then
+            return false
+        end
+        self.window = window
+    end
+    if self.current == nil or self.current.partition ~= partition then
+        self.current = { guild = guild, partition = partition }
+    end
+    return self:SelectPlayer(character.player)
 end
 
 function Controller:ClosePanel()

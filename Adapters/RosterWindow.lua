@@ -302,9 +302,6 @@ local function showDiscordDialog(label, current, onSave)
     return showTextDialog("SET_DISCORD", "Discord username for %s (leave empty to clear):",
         addon.FellowshipStore.PROFILE_FIELDS.discord, label, current, onSave)
 end
--- The same dialog, for the game roster's mini profile: false when the
--- client has no dialogs.
-RosterWindow.ShowDiscordDialog = showDiscordDialog
 
 -- A text dialog for the Bio tab's location Edit. Saving empty clears it.
 local function showLocationDialog(label, current, onSave)
