@@ -808,6 +808,11 @@ function Controller:SetProfileText(key, kind, text)
         return false
     end
     local label = kind == "bio" and "That bio" or "That location"
+    if not addon.FellowshipStore.IsProfileText(kind, text) then
+        self:Print(label .. " wasn't saved: it's longer than " .. tostring(addon.FellowshipStore.PROFILE_FIELDS[kind])
+            .. " bytes (an accented letter takes two).")
+        return false
+    end
     if not self:CanEditPlayer(key) then
         self:Print(label .. " wasn't saved: " .. NOT_OWN_PLAYER .. ".")
         return false

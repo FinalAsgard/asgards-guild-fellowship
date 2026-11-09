@@ -133,6 +133,7 @@ local function build(world, options)
         showPlayer = function(name)
             options.shownPlayers = options.shownPlayers or {}
             table.insert(options.shownPlayers, name)
+            return not (options.unknown or {})[name]
         end,
         matchFor = function(name)
             return (options.matches or {})[name]
@@ -301,6 +302,25 @@ local function registerProfileTests(profile)
         options.officer = false
         detail:DisplayMember(1, { name = "Wrench" })
         test.assertFalse(panel.shown)
+    end)
+
+    test.test(profile .. ": a player panel that couldn't open is tried again when the member is shown again",
+        function()
+        local world = fixtures.newEnvironment(profile)
+        local detail = installGuildRoster(world.environment)
+        local options = { officer = false, unknown = { ["Newt-Area52"] = true } }
+        local overlay = build(world, options)
+        overlay:Start()
+
+        detail:DisplayMember(1, { name = "Newt-Area52" })
+        test.assertEqual(1, #options.shownPlayers)
+        -- The scan records Newt; the game shows them again.
+        options.unknown = {}
+        detail:DisplayMember(1, { name = "Newt-Area52" })
+        test.assertEqual(2, #options.shownPlayers)
+        -- Opened now: shown again, it stays as the user left it.
+        detail:DisplayMember(1, { name = "Newt-Area52" })
+        test.assertEqual(2, #options.shownPlayers)
     end)
 
     test.test(profile .. ": selecting a member opens the add-on's player panel, for anyone, once per selection",

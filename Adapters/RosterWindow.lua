@@ -375,8 +375,12 @@ local function buildBioEditor(framework, frameName)
 
     local counter = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     counter:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, 16)
+    -- The limit is in bytes (an accented letter takes two), so the count
+    -- is too, red once it's over.
     local function count()
-        counter:SetText(#(box:GetText() or "") .. "/" .. maxLetters)
+        local used = #(box:GetText() or "")
+        counter:SetText((used > maxLetters and "|cffff2020" or "") .. used .. "/" .. maxLetters .. " bytes"
+            .. (used > maxLetters and "|r" or ""))
     end
     box:SetScript("OnTextChanged", count)
 
@@ -393,6 +397,11 @@ local function buildBioEditor(framework, frameName)
     save:SetText(SAVE or "Save")
     save:SetScript("OnClick", function()
         local text = string.gsub(box:GetText() or "", "^%s*(.-)%s*$", "%1")
+        -- Too long: stays open to be trimmed.
+        if #text > maxLetters then
+            count()
+            return
+        end
         local onSave = editor.onSave
         panel:Hide()
         if onSave ~= nil then
@@ -801,7 +810,7 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                     text = "|cffffd100" .. row.text .. "|r"
                 elseif row.kind == "empty" then
                     text = "|cff9d9d9d" .. row.text .. "|r"
-                elseif row.kind == "log" then
+                elseif row.kind == "log" or row.kind == "stat" then
                     text = row.text
                 elseif row.kind == "about" then
                     text = "  " .. row.text

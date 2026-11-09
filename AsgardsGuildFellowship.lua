@@ -3515,7 +3515,7 @@ if clientProfile.supported then
         -- Selecting a member there opens the player panel for their
         -- player, for anyone.
         showPlayer = function(name)
-            rosterController:ShowPlayerNamed(name)
+            return rosterController:ShowPlayerNamed(name)
         end,
         -- Officers see why a selected alt should be promoted to match.
         matchFor = function(name)

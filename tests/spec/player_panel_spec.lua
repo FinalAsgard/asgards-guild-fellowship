@@ -398,6 +398,11 @@ for _, profile in ipairs({ "Forever", "Retail" }) do
         local officer = controllerSetup(nil, { profile = profile, officer = true, onProfileTextChanged = record })
         test.assertTrue(officer:SetProfileText(otherKey, "bio", "Raider"))
         test.assertEqual("bio=Raider", sent[3])
+
+        -- 251 accented letters fit 500 letters but not 500 bytes.
+        test.assertFalse(controller:SetProfileText(window.player.main, "bio", string.rep("\195\169", 251)))
+        test.assertContains(printed, "longer than 500 bytes")
+        test.assertEqual(3, #sent, "nothing sent")
     end)
 end
 

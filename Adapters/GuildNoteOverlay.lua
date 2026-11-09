@@ -85,7 +85,7 @@ Overlay.__index = Overlay
 --               highest character, else nil (and for members)
 --   showPlayer  function(name) -> opens the add-on's player panel for the
 --               player of the roster member named `name`, when it knows
---               them
+--               them; false when it couldn't
 --   readyCheck  function() -> a function(name) giving the roster member
 --               named `name`'s flag: "ready" (ready for promotion), or
 --               "match" and the rank name to promote them to (which wins
@@ -224,12 +224,16 @@ end
 -- opens the add-on's player panel for a newly selected member, then shows
 -- the note panel. Showing the same member again (the game redraws the
 -- detail panel on roster updates) doesn't reopen a player panel the user
--- closed.
+-- closed, but does retry one that couldn't open (the add-on didn't know
+-- them yet).
 function Overlay:SelectMember(name)
     local changed = name ~= self.member
     self:ShowMember(name)
-    if changed and name ~= nil then
-        pcall(self.showPlayer, name)
+    if name == nil then
+        self.playerShown = nil
+    elseif changed or not self.playerShown then
+        local ok, shown = pcall(self.showPlayer, name)
+        self.playerShown = ok and shown ~= false
     end
 end
 
