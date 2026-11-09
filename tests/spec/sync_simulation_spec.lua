@@ -499,6 +499,13 @@ test.test("a forged relay while the officer is online is corrected at once", fun
     test.assertEqual("The Tool", aliasOf(officer, "toolbox-area52"))
     local log = partitionOf(officer):GetForgeries()
     test.assertEqual("hammer-area52", log[1].relayedBy)
+
+    -- The officer can see what was caught.
+    local printed = #officer.messages
+    fixtures.slash(officer, "probe forgeries")
+    local shown = table.concat(officer.messages, "\n", printed + 1)
+    test.assertTrue(string.find(shown, "from hammer-area52: alias of toolbox-area52, alias \"Fool\"", 1, true)
+        ~= nil, shown)
 end)
 
 -- `name` leaves `world`'s guild, and a full scan of its roster notices.
