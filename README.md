@@ -592,7 +592,7 @@ Guildmates running the add-on share where they are, so you can see where the gui
 - While you're in a party or raid, guildmates outside it are slightly dimmed on every map and the minimap. A marker with nobody from your group is dimmed as a whole.
 - Your own characters never show.
 
-Guildmates in your zone move every 10 seconds or so; everyone else updates about every 2 minutes, and promptly after a zone change. Same-zone updates go by whisper when only one or two guildmates are near; with three or more, one update goes to the whole guild instead, so a crowded zone doesn't flood add-on messages. If whispers don't work, the add-on falls back to the guild-wide updates alone.
+Every guildmate's dot updates about every 2 minutes, and promptly after a zone change. Between updates, a dot shows where they were at their last one. (Faster updates for guildmates in your zone are turned off for now: they were whispered, and a whisper to someone who had just logged off showed the sender "No player named ... is currently playing.")
 
 A dot disappears when the guildmate:
 
@@ -600,8 +600,6 @@ A dot disappears when the guildmate:
 - turns sharing off,
 - hasn't sent an update for 5 minutes, or
 - logs off or leaves the guild (as soon as the game says so, or the guild roster shows it).
-
-Same-zone whispers stop as soon as a guildmate logs off. If one was already on its way, the game's "No player named ... is currently playing." reply is kept out of your chat.
 
 Nothing is sent during combat, a boss encounter or a keystone run. Location messages from outside the guild, or from add-on versions yours doesn't understand, are ignored.
 
