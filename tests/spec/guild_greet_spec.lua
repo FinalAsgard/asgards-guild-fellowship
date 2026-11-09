@@ -102,6 +102,11 @@ local function setup(profile)
             table.insert(world.sent, text)
             return true
         end,
+        announce = function(message)
+            world.announced = world.announced or {}
+            table.insert(world.announced, message)
+            return true
+        end,
         -- Prompts show at once unless a spec sets `world.showDelay`.
         showDelay = function()
             return world.showDelay or 0
@@ -749,6 +754,76 @@ test.test("guild greet: a newcomer linked by a scan after joining still can't gr
 
     world.greet:OnPresence("offline", world.names.newt)
     test.assertEqual(0, #world.shown)
+end)
+
+-- Older versions' "greeted" message (GuildGreet.LEGACY_GREETED) --------------------
+
+-- A "greeted" message from `greeter` about `name`, for an arrival at `at`.
+local function legacyGreeted(world, greeter, name, at)
+    local _, normalizer = world.greet.context()
+    return world.greet:OnGreeted({
+        v = world.addon.GuildGreet.PROTOCOL,
+        t = world.addon.GuildGreet.TYPE_GREETED,
+        c = normalizer:Key(name),
+        a = at or world.time,
+    }, world.names[greeter])
+end
+
+test.test("guild greet: pressing Greet tells older versions, a typed greeting doesn't", function()
+    local world = setup("Retail")
+    local _, normalizer = world.greet.context()
+    world.store:SetGreetCap(3)
+    world.greet:OnPresence("online", world.names.tongs)
+
+    test.assertTrue(greeted(world, "me", world.names.tongs))
+    test.assertEqual(nil, world.announced, "typed by hand: nothing sent")
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.handlers.greet(world.shown[2].player)
+    test.assertEqual(1, #world.announced)
+    local message = world.announced[1]
+    test.assertEqual(1, message.v)
+    test.assertEqual("greeted", message.t)
+    test.assertEqual(normalizer:Key(world.names.bolt), message.c)
+    test.assertEqual(START, message.a)
+end)
+
+test.test("guild greet: an older version's greeted message counts once per greeter and closes the prompt", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.anvil)
+
+    -- Heard in guild chat and as the message: one greeting.
+    test.assertTrue(greeted(world, "bishop", world.names.anvil))
+    test.assertFalse(legacyGreeted(world, "bishop", world.names.anvil))
+    test.assertEqual(1, #world.shown)
+    -- The message alone counts, for any of the player's characters.
+    test.assertTrue(legacyGreeted(world, "bolt", world.names.tongs))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: own, late, unplaceable and malformed greeted messages don't count", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.anvil)
+
+    test.assertFalse(legacyGreeted(world, "me", world.names.anvil))
+    test.assertFalse(legacyGreeted(world, "myAlt", world.names.anvil))
+    test.assertFalse(legacyGreeted(world, "bolt", world.names.anvil, START - 15 * MINUTE))
+    test.assertFalse(legacyGreeted(world, "bolt", world.names.friend))
+    test.assertFalse(world.greet:OnGreeted({ v = 1, t = "greeted", c = 42, a = START }, world.names.bolt))
+    test.assertFalse(world.greet:OnGreeted({ v = 99, t = "greeted", c = "anvil", a = START }, world.names.bolt))
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild greet: with LEGACY_GREETED off, the greeted message is neither sent nor counted", function()
+    local world = setup("Retail")
+    world.addon.GuildGreet.LEGACY_GREETED = false
+    world.store:SetGreetCap(1)
+    world.greet:OnPresence("online", world.names.anvil)
+
+    test.assertFalse(legacyGreeted(world, "bishop", world.names.anvil))
+    test.assertEqual(1, #world.shown)
+    world.handlers.greet(world.shown[1].player)
+    test.assertEqual(nil, world.announced)
 end)
 
 test.test("guild greet: the greeting cap is saved account-wide, from 1 to 10, default 2", function()

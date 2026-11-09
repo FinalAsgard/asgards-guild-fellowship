@@ -3265,6 +3265,11 @@ if clientProfile.supported then
         inInstance = function()
             return client:IsInInstance()
         end,
+        -- Older versions' "greeted" message (GuildGreet.LEGACY_GREETED),
+        -- heard within seconds, however much sync traffic is waiting.
+        announce = function(message)
+            return comm:BroadcastLive(message)
+        end,
         view = greetPrompts,
     })
     -- The Guild Recruit window stays where it's dragged; the place is saved
@@ -3888,8 +3893,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     end)
     if comm:Start(function(message, sender)
         if message.t == addon.GuildGreet.TYPE_GREETED then
-            -- From an older version: greetings are counted from guild chat.
-            return
+            guildGreet:OnGreeted(message, sender)
         elseif addon.GuildRecruit.TYPES[message.t] ~= nil then
             guildRecruit:OnMessage(message, sender)
         elseif addon.GuildWelcome.TYPES[message.t] ~= nil then

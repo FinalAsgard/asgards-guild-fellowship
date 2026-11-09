@@ -81,17 +81,23 @@ test.test("greeter coordination: two greetings close everyone else's prompt", fu
         test.assertEqual(1, #waiting(channel.worlds[index]))
     end
 
+    local before = #toolbox.sentMessages
     toolbox.addon.guildGreet:Greet(waiting(toolbox)[1].player)
+    -- The "greeted" message goes out at once, at normal priority, not
+    -- sync's bulk: under the live prefix and, for older versions, the sync
+    -- prefix.
+    test.assertEqual(before + 2, #toolbox.sentMessages)
+    test.assertEqual("NORMAL", toolbox.sentMessages[before + 1].priority)
+    test.assertEqual("NORMAL", toolbox.sentMessages[before + 2].priority)
+    test.assertTrue(toolbox.sentMessages[before + 1].prefix ~= toolbox.sentMessages[before + 2].prefix)
     fixtures.deliver(channel)
-    -- One greeting isn't enough to close the others' prompts.
+    -- One greeting isn't enough to close the others' prompts, though each
+    -- hears it twice: in guild chat and as the "greeted" message older
+    -- versions need.
     test.assertEqual(1, #waiting(wrench))
     test.assertEqual(1, #toolbox.posted)
-
-    -- Nothing goes over the add-on channel for it.
-    local index2
-    for index2 = 1, #toolbox.sentMessages do
-        test.assertFalse(string.find(toolbox.sentMessages[index2].text, "greeted", 1, true) ~= nil)
-    end
+    local grandmaster = waiting(wrench)[1].player
+    test.assertEqual(1, wrench.addon.guildGreet.tally:Count(grandmaster, wrench.time))
 
     hammer.addon.guildGreet:Greet(waiting(hammer)[1].player)
     fixtures.deliver(channel)

@@ -22,9 +22,16 @@ local _, addon = ...
 -- A prompt whose player has had enough greetings meanwhile closes as usual.
 -- Once a cooldown ends with no prompt showing, the next starts at 2 again.
 local GuildGreet = {
-    -- Older versions' add-on message saying they greeted someone. Their
-    -- greetings are counted from guild chat now, so it's ignored.
+    -- The "greeted" message older versions (v0.9.4 and before) close their
+    -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
+    -- character's key, a = when they arrived (server time) }. The greeter
+    -- is whoever the game says sent it. Greetings are counted from guild
+    -- chat now, but it's still sent after a Greet press, and counted when
+    -- heard, so guildmates who haven't updated aren't nudged into greeting
+    -- again. Turn LEGACY_GREETED off (and remove it) once they have.
+    PROTOCOL = 1,
     TYPE_GREETED = "greeted",
+    LEGACY_GREETED = true,
     -- Name parts shorter than this never count as naming someone, so a
     -- one-letter part of a two-part name doesn't match "a".
     MIN_NAME_LETTERS = 2,
@@ -49,6 +56,8 @@ Greet.__index = Greet
 --   after         function(seconds, callback) -> false when there's no timer
 --   random        function(low, high) -> a whole number
 --   send          function(text) -> true when posted to guild chat
+--   announce      function(message) -> sends a "greeted" message to the
+--                 guild's add-on users. Optional.
 --   showDelay     function() -> seconds a new prompt waits before showing.
 --                 Optional; a random 5 to 10 otherwise.
 --   inInstance    function() -> true in a dungeon, raid, battleground,
@@ -65,6 +74,9 @@ function GuildGreet.Create(options)
         after = options.after,
         random = options.random,
         send = options.send,
+        announce = options.announce or function()
+            return false
+        end,
         view = options.view,
         showDelay = options.showDelay,
         inInstance = options.inInstance or function()
@@ -454,7 +466,8 @@ function Greet:startCooldown(now)
 end
 
 -- Posts a random greeting from `prompt`'s category, using the names as they
--- are now, and counts it. Returns the text sent, or nil.
+-- are now, counts it, and tells older versions (see LEGACY_GREETED).
+-- Returns the text sent, or nil.
 function Greet:post(prompt, now)
     local greeting = self:Library():Pick(prompt.category)
     local text
@@ -466,8 +479,48 @@ function Greet:post(prompt, now)
     end
     if text ~= nil then
         self.tally:Add(prompt.player, self:ownGreeter(), prompt.raisedAt, now)
+        if GuildGreet.LEGACY_GREETED then
+            pcall(self.announce, {
+                v = GuildGreet.PROTOCOL, t = GuildGreet.TYPE_GREETED, c = prompt.key, a = prompt.raisedAt,
+            })
+        end
     end
     return text
+end
+
+-- Another add-on user's "greeted" message (see LEGACY_GREETED), from
+-- `sender` (a name as the game reports it). Counts their greeting, once per
+-- greeter however it's heard (their line in guild chat too), and closes
+-- the user's prompt once the player has had enough. Messages from the
+-- user's own characters, about players this add-on can't place, or for an
+-- arrival that's long past are ignored. Returns true when it was counted.
+function Greet:OnGreeted(message, sender)
+    if not GuildGreet.LEGACY_GREETED or type(message) ~= "table" or message.v ~= GuildGreet.PROTOCOL
+        or message.t ~= GuildGreet.TYPE_GREETED or type(message.c) ~= "string" or type(message.a) ~= "number"
+    then
+        return false
+    end
+    local partition, normalizer = self.context()
+    local now = self.now()
+    local senderKey = normalizer and normalizer:Key(sender)
+    if senderKey == nil or type(now) ~= "number" or self:IsOwn(senderKey) then
+        return false
+    end
+    -- A player is placed by the database, or by a prompt the user has for
+    -- them (someone who just joined isn't in the database yet).
+    local player = self.policy:PlayerOf(message.c)
+    local prompt = self.queue:Get(player)
+    if partition:GetCharacter(message.c) == nil and prompt == nil then
+        return false
+    end
+    local before = self.tally:Count(player, now)
+    if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
+        return false
+    end
+    if prompt ~= nil and self.tally:Reached(player, self:Cap(prompt.category), now) and self.queue:Remove(player) then
+        self:Refresh()
+    end
+    return true
 end
 
 -- Who the user counts as when they greet, on any of their characters.
