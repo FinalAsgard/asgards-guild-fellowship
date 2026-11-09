@@ -6,7 +6,7 @@ local _, addon = ...
 -- match their player (the same arrow, tinted), which members' public
 -- notes are out of date (a marker on their rows) and what a selected
 -- member's note should say (see NoteAudit), in a small panel to the right
--- of the member detail panel, level with its note. For everyone, selecting
+-- hung under the member detail panel, as wide as it. For everyone, selecting
 -- a member the add-on knows opens the add-on's player panel for their
 -- player. Forever and Retail share the Communities guild roster, so one
 -- overlay serves both.
@@ -46,9 +46,10 @@ local GuildNoteOverlay = {
     -- from the plain arrow; it's checked in game on the PRD's HITL issue.
     MATCH_TINT = { 0.30, 0.65, 1.00 },
     MATCH_TOOLTIP = "Promote to match: %s",
-    -- The note panel: its edge, the room inside it, the gap between lines,
-    -- and its width.
-    NOTE_WIDTH = 240,
+    -- The note panel: this far right of the detail panel's edges (to clear
+    -- the guild roster window's own edge), then its edge, the room inside
+    -- it, and the gap between lines.
+    NOTE_SHIFT = 6,
     PANEL_EDGE = 1,
     PANEL_PADDING = 8,
     LINE_GAP = 3,
@@ -158,8 +159,8 @@ function Overlay:Attach()
     local padding = GuildNoteOverlay.PANEL_PADDING
     local ok, panel = pcall(function()
         local created = self:Box(detail)
-        created:SetPoint("TOPLEFT", detail, "TOPRIGHT", 0, 0)
-        created:SetWidth(GuildNoteOverlay.NOTE_WIDTH)
+        created:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", GuildNoteOverlay.NOTE_SHIFT, 0)
+        created:SetPoint("TOPRIGHT", detail, "BOTTOMRIGHT", GuildNoteOverlay.NOTE_SHIFT, 0)
         local button = self.environment.CreateFrame("Button", nil, created, "UIPanelButtonTemplate")
         button:SetSize(GuildNoteOverlay.IGNORE_SIZE[1], GuildNoteOverlay.IGNORE_SIZE[2])
         button:SetPoint("TOPRIGHT", created, "TOPRIGHT", -padding, -padding)
@@ -240,25 +241,7 @@ function Overlay:ShowMember(name)
     panel.problems:SetText(lines.problems)
     panel.tooLong:SetText(lines.tooLong)
     panel:SetHeight(self:PanelHeight(panel))
-    self:AlignWithNote(panel)
     panel:Show()
-end
-
--- Moves the note panel down to the detail panel's public note, where the
--- client can say where that is; else it stays level with the panel's top.
-function Overlay:AlignWithNote(panel)
-    local detail = self:FindDetailFrame()
-    local note = detail and detail.NoteBackground
-    local offset = 0
-    if type(note) == "table" then
-        local okNote, noteTop = pcall(note.GetTop, note)
-        local okDetail, detailTop = pcall(detail.GetTop, detail)
-        if okNote and okDetail and type(noteTop) == "number" and type(detailTop) == "number" then
-            offset = noteTop - detailTop
-        end
-    end
-    pcall(panel.ClearAllPoints, panel)
-    panel:SetPoint("TOPLEFT", detail, "TOPRIGHT", 0, offset)
 end
 
 -- The panel's height for the lines it shows now: each line as tall as its

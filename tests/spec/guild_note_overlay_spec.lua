@@ -45,7 +45,7 @@ end
 -- (the same frames on Forever and Retail), hooksecurefunc, and a
 -- CreateFrame that records the overlay's panel. Returns the detail panel.
 local function installGuildRoster(environment)
-    local detail = { displayed = {}, hooks = {}, NoteBackground = fakeWidget() }
+    local detail = { displayed = {}, hooks = {} }
     function detail:DisplayMember(clubId, memberInfo)
         table.insert(self.displayed, memberInfo.name)
     end
@@ -179,13 +179,9 @@ local function registerProfileTests(profile)
         test.assertTrue(panel.shown)
         test.assertEqual("Should be: >TheTool Healer", panel.suggested.text)
         test.assertEqual("No main marker; Wrong alias", panel.problems.text)
-        -- To the right of the detail panel, never drawn inside it.
-        test.assertEqual(1, #panel.points)
-        test.assertEqual("TOPLEFT", panel.points[1][1])
-        test.assertEqual(detail, panel.points[1][2])
-        test.assertEqual("TOPRIGHT", panel.points[1][3])
+        -- Under the detail panel, never drawn inside it.
+        test.assertEqual("BOTTOMLEFT", panel.points[1][3])
         test.assertEqual(0, panel.points[1][5])
-        test.assertEqual(240, panel.width)
         -- Tall enough for its lines: the suggestion beside Ignore, then
         -- the problems.
         test.assertEqual(18 + 3 + 12 + 16, panel.height)
@@ -247,20 +243,23 @@ local function registerProfileTests(profile)
         test.assertTrue(detail.panel.shown)
     end)
 
-    test.test(profile .. ": the note panel sits level with the detail panel's public note", function()
+    test.test(profile .. ": the note panel hangs under the detail panel, as wide as it", function()
         local world = fixtures.newEnvironment(profile)
         local detail = installGuildRoster(world.environment)
-        function detail:GetTop() return 500 end
-        function detail.NoteBackground:GetTop() return 380 end
         local overlay = build(world, { rows = { Hammer = ROW } })
 
         overlay:Attach()
         detail:DisplayMember(1, { name = "Hammer" })
 
         local panel = detail.panel
-        test.assertEqual(1, #panel.points)
-        test.assertEqual("TOPRIGHT", panel.points[1][3])
-        test.assertEqual(-120, panel.points[1][5])
+        test.assertTrue(panel.shown)
+        test.assertEqual(2, #panel.points)
+        test.assertEqual("TOPLEFT", panel.points[1][1])
+        test.assertEqual(detail, panel.points[1][2])
+        test.assertEqual("BOTTOMLEFT", panel.points[1][3])
+        test.assertEqual("TOPRIGHT", panel.points[2][1])
+        test.assertEqual("BOTTOMRIGHT", panel.points[2][3])
+        test.assertEqual(nil, panel.width, "its width follows the detail panel")
     end)
 
     test.test(profile .. ": selecting a member opens the add-on's player panel, for anyone, once per selection",
