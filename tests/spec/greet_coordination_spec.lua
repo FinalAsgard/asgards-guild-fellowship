@@ -30,8 +30,17 @@ local function login(channel, playerName, options)
         missingLibraries = options.missingLibraries,
     })
     world.posted = {}
+    -- Guild chat reaches everyone in the guild who's on the channel, the
+    -- sender included, as the game echoes it.
     world.environment.SendChatMessage = function(text, chatType)
         table.insert(world.posted, chatType .. ":" .. text)
+        if chatType == "GUILD" then
+            local index
+            for index = 1, #(channel and channel.worlds or { world }) do
+                local listener = channel and channel.worlds[index] or world
+                fixtures.fire(listener, "CHAT_MSG_GUILD", text, playerName)
+            end
+        end
     end
     world.environment.ERR_FRIEND_ONLINE_SS = "|Hplayer:%s|h[%s]|h has come online."
     if channel ~= nil then
@@ -78,9 +87,11 @@ test.test("greeter coordination: two greetings close everyone else's prompt", fu
     test.assertEqual(1, #waiting(wrench))
     test.assertEqual(1, #toolbox.posted)
 
-    -- The "greeted" message goes out at normal priority, not sync's bulk.
-    local last = toolbox.sentMessages[#toolbox.sentMessages]
-    test.assertEqual("NORMAL", last.priority)
+    -- Nothing goes over the add-on channel for it.
+    local index2
+    for index2 = 1, #toolbox.sentMessages do
+        test.assertFalse(string.find(toolbox.sentMessages[index2].text, "greeted", 1, true) ~= nil)
+    end
 
     hammer.addon.guildGreet:Greet(waiting(hammer)[1].player)
     fixtures.deliver(channel)
@@ -123,6 +134,26 @@ test.test("greeter coordination: a newcomer's prompt closes after the welcome ca
     fixtures.deliver(channel)
     test.assertEqual(0, #waiting(last))
     test.assertEqual(0, #last.posted)
+end)
+
+test.test("greeter coordination: greetings typed by hand, with or without the add-on, close prompts", function()
+    local channel = fixtures.newChannel()
+    local toolbox = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    fixtures.deliver(channel)
+    comesOnline(toolbox, "Grandmaster-Area52")
+    comesOnline(hammer, "Grandmaster-Area52")
+
+    -- Wrench has no add-on running here; Hammer types a greeting by hand.
+    local index
+    for index = 1, #channel.worlds do
+        fixtures.fire(channel.worlds[index], "CHAT_MSG_GUILD", "welcome back grandmaster!", "Wrench-Area52")
+        fixtures.fire(channel.worlds[index], "CHAT_MSG_GUILD", "o/ Grandmaster", "Hammer-Area52")
+    end
+
+    test.assertEqual(0, #waiting(toolbox))
+    test.assertEqual(0, #waiting(hammer))
+    test.assertEqual(0, #toolbox.posted)
 end)
 
 test.test("greeter coordination: without the comm libraries, Greet still works", function()
