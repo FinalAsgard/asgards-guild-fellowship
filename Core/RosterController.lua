@@ -281,7 +281,15 @@ function Controller:OnRosterUpdate()
     self.rosterGeneration = (self.rosterGeneration or 0) + 1
     self.snapshot = nil
     self.scheduler:OnRosterUpdate()
-    self:Invalidate()
+    self:Invalidate(true)
+end
+
+-- A stamp for things worked out from saved data and the roster's notes,
+-- ranks and levels (the guild note audit): it changes when saved data or
+-- what the roster says about anyone changes, not on every roster update.
+-- Read the roster (LiveMembers) first, so a new update is counted.
+function Controller:AuditStamp(partition)
+    return partition.key .. "#" .. tostring(self.dataRevision or 0) .. "#" .. tostring(self.rosterVersion or 0)
 end
 
 -- `/agf rescan` and the Rescan button.
@@ -1057,6 +1065,29 @@ function Controller:ToggleOnlineOnly()
     return self.onlineOnly
 end
 
+-- True when two roster reads hold the same characters with the same notes,
+-- ranks and levels.
+local function sameRosterFacts(members, last)
+    if last == nil then
+        return false
+    end
+    local count = 0
+    local key, member
+    for key, member in pairs(members) do
+        local before = last[key]
+        if before == nil or before.note ~= member.note or before.rankIndex ~= member.rankIndex
+            or before.level ~= member.level
+        then
+            return false
+        end
+        count = count + 1
+    end
+    for _ in pairs(last) do
+        count = count - 1
+    end
+    return count == 0
+end
+
 -- Live roster facts for display, keyed by character key. Unlike a scan,
 -- this tolerates a partial roster.
 --
@@ -1081,6 +1112,11 @@ function Controller:LiveMembers(normalizer)
     end
     if next(members) ~= nil then
         self.snapshot = { normalizer = normalizer, generation = self.rosterGeneration, members = members }
+        -- What the roster says about anyone changed (see AuditStamp).
+        if not sameRosterFacts(members, self.lastMembers) then
+            self.rosterVersion = (self.rosterVersion or 0) + 1
+        end
+        self.lastMembers = members
     end
     return members
 end
@@ -1089,6 +1125,7 @@ end
 -- setting): bump the revision and redraw.
 function Controller:Refresh()
     self.revision = (self.revision or 0) + 1
+    self.dataRevision = (self.dataRevision or 0) + 1
     self:Redraw()
     self:NotifyChanged()
 end
@@ -1101,9 +1138,13 @@ end
 
 -- Data changed: the rows are stale even while the window is hidden, so the
 -- next open rebuilds them. Only a shown window redraws now, or the player
--- panel when it's open on its own.
-function Controller:Invalidate()
+-- panel when it's open on its own. `fromRoster` when it's only the live
+-- roster that may have changed (a roster update), not saved data.
+function Controller:Invalidate(fromRoster)
     self.revision = (self.revision or 0) + 1
+    if not fromRoster then
+        self.dataRevision = (self.dataRevision or 0) + 1
+    end
     if self.window ~= nil and self.window:IsShown() then
         self:Redraw()
     elseif self.selected ~= nil then

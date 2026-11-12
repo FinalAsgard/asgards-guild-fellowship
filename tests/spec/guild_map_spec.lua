@@ -1623,7 +1623,7 @@ local function registerWholeAddonTests(profile)
                 table.remove(viewer.guild.members, 3)
             end
             fixtures.fire(viewer, "GUILD_ROSTER_UPDATE")
-            fixtures.runTimers(viewer)
+            fixtures.runTimers(viewer, 1)
             test.assertEqual(0, #viewer.pins.icons, kinds[index])
 
             -- And it gets no more whispers from the viewer.

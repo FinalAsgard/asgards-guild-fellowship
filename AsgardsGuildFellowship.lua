@@ -3417,10 +3417,9 @@ if clientProfile.supported then
             guildGreet:OnCategoryChanged(entry.category, value)
         end
     end)
-    client:ObserveGuildRoster(function()
-        addon.PerfCounters.Bump("rosterUpdates")
+    -- What follows a roster update, run once per burst of them (see below).
+    local function afterRosterUpdates()
         addon.PerfCounters.Bump("rosterRefreshes")
-        rosterController:OnRosterUpdate()
         recordOwnCharacter()
         -- A promotion or demotion shows or hides the officers' tabs, and an
         -- officer's add-on keeps the guild log up to date.
@@ -3458,6 +3457,33 @@ if clientProfile.supported then
         guildRecruit:OnRosterUpdate()
         settingsPanel:Refresh()
         frameSettings:Refresh()
+    end
+    -- Roster updates come in bursts (logins, the game's own guild window,
+    -- other add-ons asking). The scan and the roster window hear each at
+    -- once (the scan coalesces them itself). The rest runs at once for the
+    -- first update after a quiet second, then at most once a second while
+    -- more keep coming, once more after the last of them.
+    local ROSTER_BURST_SECONDS = 1
+    local rosterBurst = { open = false, more = false }
+    local function endRosterBurst()
+        if rosterBurst.more then
+            rosterBurst.more = false
+            afterRosterUpdates()
+            rosterBurst.open = client:After(ROSTER_BURST_SECONDS, endRosterBurst)
+        else
+            rosterBurst.open = false
+        end
+    end
+    client:ObserveGuildRoster(function()
+        addon.PerfCounters.Bump("rosterUpdates")
+        rosterController:OnRosterUpdate()
+        if rosterBurst.open then
+            rosterBurst.more = true
+            return
+        end
+        afterRosterUpdates()
+        -- Without a timer, every update runs at once.
+        rosterBurst.open = client:After(ROSTER_BURST_SECONDS, endRosterBurst)
     end)
     -- Chat tags read the same guild context as the roster.
     chatAnnotator = addon.ChatAnnotator.Create({
@@ -3488,11 +3514,12 @@ if clientProfile.supported then
         if guild == nil then
             return nil
         end
-        local stamp = partition.key .. "#" .. tostring(rosterController.revision or 0)
+        local members = rosterController:LiveMembers(normalizer)
+        local stamp = rosterController:AuditStamp(partition)
         if auditCache == nil or auditCache.stamp ~= stamp then
             local rows = addon.NoteAudit.Build({
                 partition = partition,
-                members = rosterController:LiveMembers(normalizer),
+                members = members,
                 normalizer = normalizer,
                 rules = clientProfile.nameRules,
             })

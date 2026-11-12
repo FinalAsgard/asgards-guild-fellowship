@@ -185,3 +185,50 @@ for index = 1, #PROFILES do
         test.assertTrue(guild.name ~= otherGuild.name)
     end)
 end
+
+for index = 1, #PROFILES do
+    local profile = PROFILES[index]
+
+    test.test(profile .. ": a burst of roster updates refreshes at once, then once more after it", function()
+        local world, addon = loggedIn(profile)
+        fixtures.runTimers(world, 5)
+        local before = addon.PerfCounters.Get("rosterRefreshes")
+
+        local burst
+        for burst = 1, 6 do
+            fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        end
+        test.assertEqual(before + 1, addon.PerfCounters.Get("rosterRefreshes"), "the first at once")
+        fixtures.runTimers(world, 1)
+        test.assertEqual(before + 2, addon.PerfCounters.Get("rosterRefreshes"), "the rest once")
+        fixtures.runTimers(world, 5)
+        test.assertEqual(before + 2, addon.PerfCounters.Get("rosterRefreshes"))
+
+        -- After a quiet second, a lone update refreshes at once again.
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        test.assertEqual(before + 3, addon.PerfCounters.Get("rosterRefreshes"))
+    end)
+
+    test.test(profile .. ": the note audit's stamp changes with saved data or the roster's notes, not every update",
+        function()
+            local world, addon = loggedIn(profile)
+            local controller = addon.rosterController
+            local function stamp()
+                local _, partition, normalizer = controller:QuietContext()
+                controller:LiveMembers(normalizer)
+                return controller:AuditStamp(partition)
+            end
+            local first = stamp()
+
+            fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+            test.assertEqual(first, stamp(), "same roster, same stamp")
+
+            world.guild.members[2].note = "A new note"
+            fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+            local noted = stamp()
+            test.assertTrue(noted ~= first, "a note changed")
+
+            controller:Refresh()
+            test.assertTrue(stamp() ~= noted, "saved data changed")
+        end)
+end
