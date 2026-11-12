@@ -3868,13 +3868,17 @@ if clientProfile.supported then
                 mapPins:Refresh()
             end
             shareLocation()
-            sharing = client:After(addon.LocationScheduler.TICK_SECONDS, tick)
+            local scheduler = addon.LocationScheduler
+            sharing = client:After(scheduler.NEAR_ENABLED and scheduler.NEAR_TICK_SECONDS or scheduler.TICK_SECONDS,
+                tick)
         end
         tick()
-        -- A new zone goes out promptly (within the scheduler's minimum gap),
-        -- and the minimap shows the new zone's guildmates.
+        -- A new zone goes out promptly (within the scheduler's minimum gap:
+        -- asked again once it has passed), and the minimap shows the new
+        -- zone's guildmates.
         client:ObserveZone(function()
             shareLocation()
+            client:After(addon.LocationScheduler.MIN_GAP_SECONDS, shareLocation)
             mapPins:Refresh()
         end)
     end
@@ -3974,6 +3978,10 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     local busy = client:ObserveCombat(function(inCombat)
         guildGreet:OnCombatChanged(inCombat)
         guildRecruit:OnCombatChanged(inCombat)
+        -- A location held back by combat goes out once it ends.
+        if not inCombat and shareLocationNow ~= nil then
+            client:After(1, shareLocationNow)
+        end
     end)
     if busy then
         guildGreet:OnCombatChanged(true)

@@ -27,9 +27,12 @@ local LocationScheduler = {
     -- With this many guildmates near, one gm-near goes to the guild instead
     -- of a whisper to each.
     NEAR_GUILD_MIN = 3,
-    -- How often the caller should ask (Tick), so a zone change made inside
-    -- the minimum gap still goes out soon after it ends.
-    TICK_SECONDS = 5,
+    -- How often the caller should ask (Tick): enough for the 2-minute
+    -- broadcast and for guildmates who went quiet to drop off the map. A
+    -- zone change, or the end of combat, asks again on its own.
+    TICK_SECONDS = 30,
+    -- How often while the fast same-zone updates are on.
+    NEAR_TICK_SECONDS = 5,
 }
 addon.LocationScheduler = LocationScheduler
 

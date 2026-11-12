@@ -1411,7 +1411,9 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(0, #whispers(sharer))
 
         spot.x = 0.75
-        fixtures.runTimers(sharer, 5)
+        -- The tick already set (every 30 seconds) asks next; from then on
+        -- it asks every 5.
+        fixtures.runTimers(sharer, sharer.addon.LocationScheduler.TICK_SECONDS)
         local sent = whispers(sharer)
         test.assertEqual(1, #sent)
         test.assertEqual(guild.members[1].name, sent[1].recipient)
@@ -1443,7 +1445,7 @@ local function registerWholeAddonTests(profile)
             sharer.addon.LocationScheduler.NEAR_ENABLED = true
 
             spot.x = 0.75
-            fixtures.runTimers(sharer, 5)
+            fixtures.runTimers(sharer, sharer.addon.LocationScheduler.TICK_SECONDS)
             test.assertEqual(0, #whispers(sharer))
             local last = sharer.sentMessages[#sharer.sentMessages]
             test.assertEqual("GUILD", last.distribution)
@@ -1503,8 +1505,9 @@ local function registerWholeAddonTests(profile)
         fixtures.deliver(channel)
         test.assertEqual(1, #viewer.pins.icons)
 
+        -- Entering or leaving an instance is a zone change.
         sharer.inInstance = "party"
-        fixtures.runTimers(sharer, 5)
+        fixtures.fire(sharer, "ZONE_CHANGED_NEW_AREA")
         test.assertEqual(1, sentOfType(sharer, "gm-hide"))
         fixtures.deliver(channel)
         test.assertEqual(0, #viewer.pins.icons)
@@ -1515,7 +1518,7 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(0, sentOfType(sharer, "gm-near"))
 
         sharer.inInstance = nil
-        fixtures.runTimers(sharer, 5)
+        fixtures.fire(sharer, "ZONE_CHANGED_NEW_AREA")
         test.assertEqual(2, sentOfType(sharer, "gm-loc"))
         fixtures.deliver(channel)
         test.assertEqual(1, #viewer.pins.icons)
@@ -1540,11 +1543,53 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(0, sentOfType(sharer, "gm-hide"))
 
         inCombat = false
-        fixtures.runTimers(sharer, 5)
+        fixtures.fire(sharer, "PLAYER_REGEN_ENABLED")
+        fixtures.runTimers(sharer, 1)
         test.assertEqual(1, sentOfType(sharer, "gm-hide"))
     end)
 
-    test.test(profile .. ": in the whole add-on, a guildmate's dot clears after 5 minutes without an update", function()
+    test.test(profile .. ": in the whole add-on, the location timer asks every 30 seconds, not every 5", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        -- Logging in is a zone change too, asked again 10 seconds later.
+        fixtures.runTimers(sharer, 15)
+        local asked = 0
+        local position = sharer.environment.C_Map.GetPlayerMapPosition
+        sharer.environment.C_Map.GetPlayerMapPosition = function(...)
+            asked = asked + 1
+            return position(...)
+        end
+
+        fixtures.runTimers(sharer, 14)
+        test.assertEqual(0, asked, "nothing asked before the next 30-second tick")
+        fixtures.runTimers(sharer, 1)
+        test.assertTrue(asked > 0, "asked at 30 seconds")
+        -- The 2-minute broadcast still goes out on time.
+        local sent = locationMessages(sharer)
+        fixtures.runTimers(sharer, 90)
+        test.assertEqual(sent + 1, locationMessages(sharer))
+    end)
+
+    test.test(profile .. ": in the whole add-on, a zone change inside the 10-second gap goes out once it ends",
+        function()
+            local channel = fixtures.newChannel()
+            local guild = fixtures.GUILDS[profile]
+            local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 },
+                "MAGE")
+            test.assertEqual(1, locationMessages(sharer))
+
+            fixtures.runTimers(sharer, 3)
+            sharer.zone.mapID = 1453
+            fixtures.fire(sharer, "ZONE_CHANGED_NEW_AREA")
+            test.assertEqual(1, locationMessages(sharer), "held within the gap")
+            fixtures.runTimers(sharer, sharer.addon.LocationScheduler.MIN_GAP_SECONDS)
+
+            test.assertEqual(2, locationMessages(sharer), "sent once the gap ended")
+        end)
+
+    test.test(profile .. ": in the whole add-on, a guildmate's dot clears 5 minutes without an update, within a tick",
+        function()
         local channel = fixtures.newChannel()
         local guild = fixtures.GUILDS[profile]
         local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
@@ -1555,7 +1600,7 @@ local function registerWholeAddonTests(profile)
         -- The sharer's updates stop arriving.
         fixtures.runTimers(viewer, 295)
         test.assertEqual(1, #viewer.pins.icons)
-        fixtures.runTimers(viewer, 5)
+        fixtures.runTimers(viewer, viewer.addon.LocationScheduler.TICK_SECONDS + 5)
         test.assertEqual(0, #viewer.pins.icons)
         test.assertEqual(0, #viewer.pins.minimap)
     end)
