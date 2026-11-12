@@ -546,10 +546,10 @@ function Store:SetGreetEnabled(enabled)
 end
 
 -- Whether Guild Greet prompts inside a dungeon, raid, battleground or arena.
--- On unless turned off; unusable saved data counts as on.
+-- Off unless turned on; unusable saved data counts as off.
 function Store:GreetInInstances()
     local state = type(self.database) == "table" and self.database.greet or nil
-    return type(state) ~= "table" or state.inInstances ~= false
+    return type(state) == "table" and state.inInstances == true
 end
 
 -- Turns Guild Greet's prompts inside instances on or off. An unusable
@@ -593,6 +593,30 @@ function Store:SetGreetCap(cap)
         return false
     end
     state.cap = cap
+    return true
+end
+
+-- How much the user has greeted lately (GreetWeight's { weight, at }),
+-- shared by every character on the account, or nil when none or unusable.
+function Store:GreetWeight()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local saved = type(state) == "table" and state.weight or nil
+    if not addon.GreetWeight.IsRecord(saved) then
+        return nil
+    end
+    return saved
+end
+
+-- Saves the greet weight record. An unusable existing value is left alone.
+function Store:SetGreetWeight(record)
+    if not addon.GreetWeight.IsRecord(record) then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.weight ~= nil and not addon.GreetWeight.IsRecord(state.weight)) then
+        return false
+    end
+    state.weight = { weight = record.weight, at = record.at }
     return true
 end
 

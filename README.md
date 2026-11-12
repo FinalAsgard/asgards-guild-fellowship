@@ -32,6 +32,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf probe forgeries` | Lists the last 10 guild sync edits your add-on caught as forged in your name: when, who passed each on, what it changed, its stamp, and what your own record of your edits held for it (anyone). |
 | `/agf probe player <name or alias>` | Shows how your add-on holds a player: its alias, who set it and when, and through which character; each character's link and Discord name with who set them and when; and the player's last 10 logged changes (anyone). |
 | `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** and **Promote to match** flags reach the game's guild roster (officers only). |
+| `/agf probe greet` | Shows your greet weight, how many guildmates with the add-on count as online, and how much longer your greet prompts wait because of it. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
@@ -245,7 +246,7 @@ When someone joins the guild or a guild member comes online, a small prompt appe
 - **Welcome back**: someone you saw log off comes back 15 minutes or more later (you can change the minutes). Coming back sooner (a relog or a disconnect) gets no prompt.
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
 - Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
-- A prompt shows 5 to 10 seconds (at random) after someone arrives, so your greeting doesn't reach them while their game is still loading. It disappears 90 seconds after it shows, or as soon as that person goes offline; the **X** closes one without greeting.
+- A prompt shows 5 to 10 seconds (at random) after someone arrives, so your greeting doesn't reach them while their game is still loading. It disappears 90 seconds after it shows, or as soon as that person goes offline, leaves the guild or is removed from it (even before it shows); the **X** closes one without greeting.
 - To move the prompts, tick **Unlock greet prompts** in the Guild Greet settings and drag the gold bar that appears. The place is saved for every character. The bar stays while the add-on's window is open, on any tab. Untick it, or close the window or the AddOns options, to hide it; it also locks again after a reload.
 - In combat or a boss encounter, prompts wait. When it's over, any that are still under 90 seconds old appear.
 - On Retail, the game hides some system messages from add-ons during encounters and keystone runs. Logins it hides get no prompt; nothing breaks.
@@ -260,7 +261,7 @@ Greetings can use these placeholders, in any capitalization:
 | `{character}` | The character that just logged in. |
 | `{characterFirst}`, `{characterLast}` | The first or last part of that character's name. |
 
-First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** settings. Greetings and settings are shared by every character on this game install, and **Greet from this character** turns it off on just the one you're playing, say an alt in another guild (hover its info icon for a reminder). Turn off **Greet while in a dungeon, raid or other instance** to get no greet prompts inside dungeons, raids, battlegrounds, arenas and keystone runs. Guildmates who come online while you're inside aren't prompted for later.
+First and last parts only differ on WoW Forever, where names have two parts, so "Hello Mr. {mainLast}" greets Tool Box as "Hello Mr. Box". On Retail, names are one word, so `{mainFirst}` and `{mainLast}` are the same as `{main}`, and `{characterFirst}` and `{characterLast}` are the same as `{character}`. Starter greetings are included. The same greeting is never picked twice in a row. Guild Greet is on by default; turn it off in the **Guild Greet** settings. Greetings and settings are shared by every character on this game install, and **Greet from this character** turns it off on just the one you're playing, say an alt in another guild (hover its info icon for a reminder). You get no greet prompts inside dungeons, raids, battlegrounds, arenas and keystone runs, and guildmates who come online while you're inside aren't prompted for later; turn on **Greet guild members during dungeons and raids** to be prompted there too.
 
 ### Greeting together
 
@@ -271,6 +272,8 @@ Once a player has had enough greetings, your prompt for them quietly closes, and
 How many is enough is set under **Close my prompt after** in the Guild Greet settings, each from 1 to 10: **Greetings** (2 by default) for a login, welcome back or long absence, and **Guild join welcomes** (3 by default) for someone who just joined the guild.
 
 After each greeting, Greet is locked for a moment so nobody floods guild chat: 2 seconds after your first greeting in a row, 4 after the second, 6 after the third, and so on. While it's locked, the greeting buttons are greyed out and count down, as **Welcome Back (3)**. Press again once they unlock; the game only lets an add-on post to chat when you press a button, so nothing is sent for you later. A prompt whose player gets enough greetings from others in the meantime closes as usual. Once a lock runs out with no prompts showing, the next one starts at 2 seconds again.
+
+So the same few quick greeters don't take every greeting, each greeting you post adds 1 to your greet weight, up to 6. While 3 or more guildmates with the add-on are online (counting you), your new prompts wait 2.5 seconds longer per weight, up to 15 seconds, on top of the usual 5 to 10. That gives everyone else a chance to greet first: greetings during the wait count as usual, and once the person has had enough, your prompt never shows. The weight fades by 1 every 5 minutes, also while you're offline, and it's shared by all your characters. A guildmate counts once your add-on has heard theirs since you logged in (their own login announcement, their location updates, or any other add-on message), unless they're inside a dungeon, raid or other instance, where greeting is off by default. `/agf probe greet` shows where you stand.
 
 Greeting messages, recruitment ad times, and the officer channel probe travel apart from guild sync's traffic, so a busy sync (a big guild logging in at once) doesn't hold them up.
 

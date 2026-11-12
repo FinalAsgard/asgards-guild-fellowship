@@ -21,6 +21,11 @@ local _, addon = ...
 -- post: the prompts stay, and the user presses Greet again once it unlocks.
 -- A prompt whose player has had enough greetings meanwhile closes as usual.
 -- Once a cooldown ends with no prompt showing, the next starts at 2 again.
+--
+-- So the same quick greeters don't take every greeting, each press of Greet
+-- adds to the user's greet weight (GreetWeight), and while enough add-on
+-- users are online a new prompt waits longer the more weight there is.
+-- Greetings from others during the wait count as usual.
 local GuildGreet = {
     -- The "greeted" message older versions (v0.9.4 and before) close their
     -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
@@ -60,6 +65,9 @@ Greet.__index = Greet
 --                 guild's add-on users. Optional.
 --   showDelay     function() -> seconds a new prompt waits before showing.
 --                 Optional; a random 5 to 10 otherwise.
+--   addonOnline   function() -> how many guildmates with the add-on are
+--                 online, counting the user, or nil when unknown. Optional;
+--                 without it, greet weight never delays a prompt.
 --   inInstance    function() -> true in a dungeon, raid, battleground,
 --                 arena or keystone run, where the user can turn prompts
 --                 off. Optional.
@@ -79,6 +87,7 @@ function GuildGreet.Create(options)
         end,
         view = options.view,
         showDelay = options.showDelay,
+        addonOnline = options.addonOnline,
         inInstance = options.inInstance or function()
             return false
         end,
@@ -170,7 +179,7 @@ function Greet:IsEnabled()
     return store:GreetEnabled() and (selfKey == nil or store:GreetOnCharacter(selfKey))
 end
 
--- True inside an instance when the user turned prompts off there.
+-- True inside an instance unless the user turned prompts on there.
 function Greet:QuietHere()
     local store = self.store()
     if store == nil or store:GreetInInstances() then
@@ -315,8 +324,9 @@ function Greet:OnRosterUpdate(readRoster)
     self.policy:Seed(online)
 end
 
--- A guild member came online ("online"), went offline ("offline"), or
--- someone joined the guild ("join").
+-- A guild member came online ("online"), went offline ("offline"), left
+-- the guild ("leave") or was removed from it ("removed"), or someone joined
+-- the guild ("join").
 -- `rawName` is the name the game's message reported.
 function Greet:OnPresence(kind, rawName)
     local _, normalizer = self.context()
@@ -325,8 +335,10 @@ function Greet:OnPresence(kind, rawName)
     if key == nil or type(now) ~= "number" then
         return
     end
-    if kind == "offline" then
-        self.policy:WentOffline(key, now)
+    if kind == "offline" or kind == "leave" or kind == "removed" then
+        if kind == "offline" then
+            self.policy:WentOffline(key, now)
+        end
         -- Nobody to greet any more: the prompt raised for this character,
         -- not one for another of its player's characters still online.
         -- Matched by character, so a prompt raised before a scan linked
@@ -361,7 +373,7 @@ function Greet:OnPresence(kind, rawName)
     prompt.label = self:Names(key, rawName).name
     -- Redraw when it's due and when it expires, so it comes and goes on time.
     -- Without a timer to show it later, it shows at once.
-    local delay = self:ShowDelay()
+    local delay = self:ShowDelay() + self:WeightDelay(now)
     if delay > 0 and not self.after(delay, function()
         self:Refresh()
     end) then
@@ -388,6 +400,63 @@ function Greet:ShowDelay()
     return delay
 end
 
+-- The user's greet weight at `now`.
+function Greet:Weight(now)
+    local store = self.store()
+    return addon.GreetWeight.Current(store and store:GreetWeight(), now)
+end
+
+-- How many guildmates with the add-on are online, counting the user, or nil
+-- when unknown.
+function Greet:AddonOnline()
+    if self.addonOnline == nil then
+        return nil
+    end
+    local ok, count = pcall(self.addonOnline)
+    if not ok or type(count) ~= "number" then
+        return nil
+    end
+    return count
+end
+
+-- Extra seconds a prompt raised at `now` waits for the user's greet weight.
+function Greet:WeightDelay(now)
+    local weight = self:Weight(now)
+    if weight <= 0 then
+        return 0
+    end
+    return addon.GreetWeight.ExtraDelay(weight, self:AddonOnline())
+end
+
+-- Probe lines: the user's greet weight and what it does now.
+function Greet:WeightProbeLines(now)
+    return addon.GreetWeight.ProbeLines(self:Weight(now), self:AddonOnline())
+end
+
+-- Closes the prompts for characters a roster scan saw leave the guild (in
+-- case the game's message about it was missed). Returns true when any
+-- closed.
+function Greet:dropDeparted(now)
+    local prompts = self.queue:All(now)
+    -- With nothing waiting, the guild's data isn't looked at (or created).
+    if prompts[1] == nil then
+        return false
+    end
+    local partition = self.context()
+    if partition == nil then
+        return false
+    end
+    local removed = false
+    local index
+    for index = 1, #prompts do
+        local character = partition:GetCharacter(prompts[index].key)
+        if character ~= nil and character.departed ~= nil then
+            removed = self.queue:Remove(prompts[index].player) or removed
+        end
+    end
+    return removed
+end
+
 -- Whole seconds until Greet unlocks: 0 when it isn't locked.
 function Greet:LockedFor(now)
     if self.readyAt == nil or type(now) ~= "number" or now >= self.readyAt then
@@ -403,6 +472,7 @@ function Greet:Refresh()
     if type(now) ~= "number" or self.view == nil then
         return
     end
+    self:dropDeparted(now)
     local prompts = self.queue:Visible(now)
     local lockedFor = self:LockedFor(now)
     if lockedFor == 0 then
@@ -426,8 +496,11 @@ end
 -- closes the prompt, and locks Greet for the next cooldown. Returns the text
 -- sent, or nil.
 function Greet:Greet(player)
-    local prompt = self.queue:Get(player)
     local now = self.now()
+    if type(now) == "number" and self:dropDeparted(now) then
+        self:Refresh()
+    end
+    local prompt = self.queue:Get(player)
     if prompt == nil or type(now) ~= "number" or self:LockedFor(now) > 0 then
         return nil
     end
@@ -438,6 +511,10 @@ function Greet:Greet(player)
     end
     if text ~= nil then
         self:startCooldown(now)
+        local store = self.store()
+        if store ~= nil then
+            store:SetGreetWeight(addon.GreetWeight.Added(store:GreetWeight(), now))
+        end
     end
     self:Refresh()
     return text

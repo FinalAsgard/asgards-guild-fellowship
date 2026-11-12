@@ -54,6 +54,7 @@ local MANIFEST_FILES = {
     "Core/GreetingLibrary.lua",
     "Core/GreetPromptQueue.lua",
     "Core/GreetTally.lua",
+    "Core/GreetWeight.lua",
     "Core/GuildGreet.lua",
     "Core/RecruitLedger.lua",
     "Core/RecruitPolicy.lua",

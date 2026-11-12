@@ -586,14 +586,15 @@ if clientProfile.supported then
     settings:Add("guildGreet", {
         id = "greetInInstances",
         kind = "toggle",
-        label = "Greet while in a dungeon, raid or other instance",
+        label = "Greet guild members during dungeons and raids",
         info = function()
-            return "Turn this off to get no greet prompts inside dungeons, raids, battlegrounds, arenas and " ..
-                "keystone runs. Guildmates who come online while you're inside aren't prompted for later."
+            return "Off by default: you get no greet prompts inside dungeons, raids, battlegrounds, arenas and " ..
+                "keystone runs. Guildmates who come online while you're inside aren't prompted for later. " ..
+                "Turn this on to be prompted there too."
         end,
         get = function()
             local store = rosterController:Store()
-            return store == nil or store:GreetInInstances()
+            return store ~= nil and store:GreetInInstances()
         end,
         set = function(enabled)
             local store = rosterController:Store()
@@ -601,7 +602,7 @@ if clientProfile.supported then
                 return nil, "saved data is unavailable"
             end
             if not store:SetGreetInInstances(enabled) then
-                return nil, "the saved setting is unreadable, so it stays on"
+                return nil, "the saved setting is unreadable, so it stays off"
             end
             return true
         end,
@@ -2732,7 +2733,8 @@ if clientProfile.supported then
         " notes changed; probe forgeries: the guild sync edits caught as forged in your name; probe log: the" ..
         " guild event log; probe officer: the officer channel; probe ready: the Ready flags on the game's" ..
         " guild roster; officers; probe player <name or alias>: a player's alias, links and Discord, with who" ..
-        " set each and when, and its logged changes)",
+        " set each and when, and its logged changes; probe greet: your greet weight and how long it holds your" ..
+        " prompts back)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
@@ -2745,7 +2747,7 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer, probe ready or probe player <name>.")
+                        " probe officer, probe ready, probe player <name> or probe greet.")
                 end
                 return
             end
@@ -2808,11 +2810,21 @@ if clientProfile.supported then
                 probeReady()
                 return
             end
+            if what == "greet" then
+                rosterController:Print("Greet weight probe:")
+                local lines = guildGreet:WeightProbeLines(client:Timestamp())
+                local index
+                for index = 1, #lines do
+                    client:Print("  " .. lines[index])
+                end
+                return
+            end
             if what ~= "log" then
                 rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe forgeries, " ..
                     addon.Identity.slashCommand .. " probe log, " ..
                     addon.Identity.slashCommand .. " probe officer, " .. addon.Identity.slashCommand ..
-                    " probe ready or " .. addon.Identity.slashCommand .. " probe player <name>.")
+                    " probe ready, " .. addon.Identity.slashCommand .. " probe player <name> or " ..
+                    addon.Identity.slashCommand .. " probe greet.")
                 return
             end
             if guildLogOf() == nil then
@@ -3279,6 +3291,40 @@ if clientProfile.supported then
         end,
     })
     -- Guild Greet reads the same guild context as the roster.
+    -- How many guildmates with the add-on are online, counting the user: the
+    -- players online whose add-on this add-on heard since it loaded (their
+    -- login announcement, location updates or any other add-on message),
+    -- unless their location last said they're inside an instance, where
+    -- they get no greet prompts by default. Nil without a guild.
+    local function addonOnline()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        local selfCharacter = partition:GetCharacter(rosterController:SelfKey() or "")
+        local selfPlayer = selfCharacter and selfCharacter.player
+        local counted = {}
+        local count = 1
+        local key, member
+        for key, member in pairs(rosterController:LiveMembers(normalizer)) do
+            local character = member.online and partition:GetCharacter(key)
+            local player = character and character.player or key
+            if character and player ~= selfPlayer and not counted[player]
+                and not (locationBoard ~= nil and locationBoard:Inside(key))
+            then
+                local keys = character.player and partition:CharactersOf(character.player) or { key }
+                local index
+                for index = 1, #keys do
+                    if lastHeard[keys[index]] ~= nil then
+                        counted[player] = true
+                        count = count + 1
+                        break
+                    end
+                end
+            end
+        end
+        return count
+    end
     guildGreet = addon.GuildGreet.Create({
         context = function()
             local guild, partition, normalizer = rosterController:QuietContext()
@@ -3313,6 +3359,7 @@ if clientProfile.supported then
         announce = function(message)
             return comm:BroadcastLive(message)
         end,
+        addonOnline = addonOnline,
         view = greetPrompts,
     })
     -- The Guild Recruit window stays where it's dragged; the place is saved
@@ -4045,7 +4092,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         if kind == "join" or kind == "leave" then
             recordLiveMembership(kind, name)
         end
-        if dropLocationOf ~= nil and (kind == "offline" or kind == "leave" or kind == "notFound") then
+        if dropLocationOf ~= nil and (kind == "offline" or kind == "leave" or kind == "removed"
+            or kind == "notFound")
+        then
             dropLocationOf(name)
         end
         if kind == "notFound" then

@@ -9,6 +9,7 @@ local function load()
         "Core/PlayerService.lua",
         "Core/RosterViewModel.lua",
         "Core/GreetingLibrary.lua",
+        "Core/GreetWeight.lua",
         "Core/GuildGreet.lua",
         "Core/GuildMailAudience.lua",
         "Core/GuildMailComposer.lua",

@@ -57,11 +57,15 @@ function Scheduler:Tick(state)
         return nil
     end
     if state.sharing == false or state.inInstance then
-        if self.hidden then
+        -- One gm-hide, and another when the reason changes (sharing off
+        -- and entering an instance, or leaving one with sharing off), so
+        -- guildmates know who's inside.
+        local reason = state.inInstance and "instance" or "off"
+        if self.hidden == reason then
             return nil
         end
-        self.hidden = true
-        return addon.LocationProtocol.Hide(state.character)
+        self.hidden = reason
+        return addon.LocationProtocol.Hide(state.character, state.inInstance == true)
     end
     if self.hidden then
         -- Back on, or out of the instance: the location goes out at once.
