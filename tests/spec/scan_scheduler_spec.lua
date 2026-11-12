@@ -119,10 +119,14 @@ test.test("an incremental check of an unchanged roster isn't planned at all", fu
     setup.login()
     local counted = countPlans(setup)
 
+    -- The login scan stored new characters, so the first check plans once
+    -- and finds nothing; from then on, an unchanged roster isn't planned.
+    update(setup)
+    test.assertEqual(1, counted.plans)
     update(setup)
     update(setup)
 
-    test.assertEqual(0, counted.plans)
+    test.assertEqual(1, counted.plans)
     test.assertEqual(1, #setup.finished)
 end)
 
@@ -175,6 +179,30 @@ test.test("an incremental check is planned again once the store changed what a s
     test.assertEqual(1, counted.plans)
     update(setup)
     test.assertEqual(1, counted.plans, "then quiet again")
+end)
+
+test.test("a note a scan itself forgets is read on the next check, not skipped", function()
+    local setup = build()
+    setup.login()
+    local counted = countPlans(setup)
+    local wrench = setup.normalizer:Key(setup.world.guild.members[3].name)
+    -- Applying a moved note forgets other notes of the former player.
+    local apply = setup.addon.ReconcileEngine.Apply
+    setup.addon.ReconcileEngine.Apply = function(partition, plan, checkpoint)
+        local result = apply(partition, plan, checkpoint)
+        partition:ForgetNoteFingerprint(wrench)
+        return result
+    end
+
+    setup.world.guild.members[2].note = "Tank >Toolbox"
+    update(setup)
+    test.assertEqual(1, counted.plans)
+    setup.addon.ReconcileEngine.Apply = apply
+
+    update(setup)
+    test.assertEqual(2, counted.plans, "the forgotten note is read")
+    update(setup)
+    test.assertEqual(2, counted.plans, "then quiet again")
 end)
 
 test.test("full scans and manual rescans are never skipped", function()

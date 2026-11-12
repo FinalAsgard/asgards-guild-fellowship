@@ -610,4 +610,9 @@ test.test("player panel: the Log tab lists the player's logged changes, newest f
     end
     test.assertEqual('200: Discord changed from "zoll" to "ognomicus", by Toolbox (guild sync)', texts[1])
     test.assertEqual('100: Alias changed from none to "Zoll", by Toolbox (here)', texts[2])
+    -- With changes logged, no "nothing logged" line contradicts them.
+    for index = 1, #model.logRows do
+        test.assertTrue(model.logRows[index].kind ~= "empty" or model.logRows[index].text == "No former characters",
+            model.logRows[index].text)
+    end
 end)

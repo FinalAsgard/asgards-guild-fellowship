@@ -434,7 +434,7 @@ function Greet:WeightProbeLines(now)
 end
 
 -- Closes the prompts for characters a roster scan saw leave the guild (in
--- case the game's message about it was missed). Returns true when any
+-- case the game's message about it was missed), or that were since purged. Returns true when any
 -- closed.
 function Greet:dropDeparted(now)
     local prompts = self.queue:All(now)
@@ -450,7 +450,12 @@ function Greet:dropDeparted(now)
     local index
     for index = 1, #prompts do
         local character = partition:GetCharacter(prompts[index].key)
-        if character ~= nil and character.departed ~= nil then
+        -- A login prompt is only raised for a stored guild member, so one
+        -- whose character is gone (purged after a scan saw them leave) is
+        -- closed too; a join prompt can come before the first scan.
+        if (character ~= nil and character.departed ~= nil)
+            or (character == nil and prompts[index].category ~= addon.GreetPolicy.JOIN)
+        then
             removed = self.queue:Remove(prompts[index].player) or removed
         end
     end

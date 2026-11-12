@@ -648,3 +648,29 @@ test.test("an officer's own edits are logged on the players they change, and so 
     end
     test.assertTrue(kinds.alias and kinds.joined and kinds.discord)
 end)
+
+test.test("a character moved by hand is logged on the player it left as well as the one it joined", function()
+    local network = newNetwork()
+    local officer = newOfficer(network)
+    officer.time = NOW + 100
+    local partition = officer.partition
+    partition:JoinPlayerOf("alt5-area52", OFFICER, "manual")
+    local former = partition:GetCharacter(OFFICER).player
+    local hammer = partition:GetCharacter("hammer-area52").player
+    local earlier = #partition:GetChanges(former)
+
+    partition:JoinPlayerOf("alt5-area52", "hammer-area52", "manual")
+    officer.session:LocalEdit({ ["alt5-area52"] = true, [OFFICER] = true, ["hammer-area52"] = true },
+        { ["alt5-area52"] = OFFICER, [OFFICER] = OFFICER, ["hammer-area52"] = "hammer-area52" })
+
+    local changes = partition:GetChanges(former)
+    test.assertEqual(earlier + 1, #changes)
+    local left = changes[#changes]
+    test.assertEqual("left", left.kind)
+    test.assertEqual("alt5-area52", left.character)
+    test.assertEqual("hammer-area52", left.to)
+    test.assertEqual(OFFICER, left.by)
+    test.assertEqual("local", left.via)
+    local joined = partition:GetChanges(hammer)
+    test.assertEqual("link", joined[#joined].kind)
+end)

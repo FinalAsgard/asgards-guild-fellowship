@@ -774,6 +774,23 @@ test.test("guild greet: a prompt for someone a roster scan saw leave closes, and
         test.assertEqual(0, #world.shown)
     end)
 
+test.test("guild greet: a login prompt for a purged character closes, but a join prompt before its scan stays",
+    function()
+        local world = setup("Retail")
+        local partition, normalizer = world.greet.context()
+        world.greet:OnPresence("online", world.names.bolt)
+        world.greet:OnPresence("join", "Newcomer")
+        test.assertEqual(2, #world.shown)
+
+        local bolt = normalizer:Key(world.names.bolt)
+        partition:MarkDeparted(bolt, world.time)
+        partition:Purge(bolt, world.time)
+        world.greet:Refresh()
+
+        test.assertEqual(1, #world.shown)
+        test.assertContains(world.shown[1].label, "Newcomer")
+    end)
+
 test.test("guild greet: accented names match whatever their case, but a one-letter name never does", function()
     local world = setup("Retail")
     world.store:SetGreetCap(1)

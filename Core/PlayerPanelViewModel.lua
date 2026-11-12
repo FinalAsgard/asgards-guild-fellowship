@@ -268,7 +268,10 @@ function PlayerPanelViewModel.Build(inputs)
             log(membership[index])
         end
     end
-    if logRows[1] == nil then
+    local changes = partition:GetChanges(inputs.playerId)
+    -- With changes below, the activity lines' empty state would contradict
+    -- them, so it only shows when there's nothing at all.
+    if logRows[1] == nil and changes[1] == nil then
         table.insert(logRows, { kind = "empty", text = "Nothing logged yet" })
     end
     local joined = ask(inputs.joined, keys)
@@ -299,7 +302,6 @@ function PlayerPanelViewModel.Build(inputs)
 
     -- Then what changed about the player and who changed it, newest first.
     table.insert(logRows, { kind = "section", text = "Changes" })
-    local changes = partition:GetChanges(inputs.playerId)
     local function nameOf(key)
         local character = type(key) == "string" and partition:GetCharacter(key) or nil
         return (inputs.normalizer and inputs.normalizer:Display((character and character.name) or key))

@@ -333,6 +333,7 @@ function Session:LocalEdit(keys, before)
                 self:LogLocal(facts.partition, fact.character, {
                     kind = "link", character = fact.character, from = before[fact.character], to = fact.main,
                 }, author, now)
+                self:logFormerPlayer(facts.partition, keys, before, fact, author, now)
             end
         end
         return stamped
@@ -384,6 +385,23 @@ function Session:UpgradeLegacy()
     return self:StampAndSend(function(facts, officer, now)
         return facts:StampLegacy(officer, now)
     end)
+end
+
+-- After `fact.character` was moved by hand: logs that it left to the
+-- player it came from, when that player still has characters (found by the
+-- characters in `keys` that shared its main in `before`).
+function Session:logFormerPlayer(partition, keys, before, fact, author, now)
+    local moved = partition:GetCharacter(fact.character)
+    local key
+    for key in pairs(keys) do
+        local other = key ~= fact.character and before[key] == before[fact.character]
+            and partition:GetCharacter(key) or nil
+        if other ~= nil and moved ~= nil and other.player ~= moved.player then
+            partition:LogChange(other.player, { kind = "left", character = fact.character, to = fact.main,
+                at = now, by = author, via = "local" })
+            return
+        end
+    end
 end
 
 -- Logs this user's own edit, `entry` (see FellowshipStore's LogChange), to

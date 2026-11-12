@@ -555,7 +555,8 @@ end
 
 -- Logs to each player concerned what changed for `keys` since `before` (a
 -- Snapshot of them), as an edit by `by` that came `via` "sync" or "local"
--- (see FellowshipStore's LogChange).
+-- (see FellowshipStore's LogChange). Returns the players `keys` belong to
+-- now (a set of ids).
 function Facts:LogChanges(keys, before, by, via)
     local partition = self.partition
     local after = self:Snapshot(keys, before.players)
@@ -594,6 +595,7 @@ function Facts:LogChanges(keys, before, by, via)
             end
         end
     end
+    return after.players
 end
 
 -- Makes the roster agree with one accepted fact. Officer data beats guild
@@ -615,8 +617,9 @@ function Facts:Change(fact)
     local before = fact.kind ~= SyncFacts.KIND_DECLARED and self:Snapshot(keys) or nil
     self:Apply(fact)
     if before ~= nil then
-        self:LogChanges(keys, before, fact.by, "sync")
+        return self:LogChanges(keys, before, fact.by, "sync")
     end
+    return nil
 end
 
 -- Changes the roster and stamps for one accepted officer or profile text
@@ -831,16 +834,39 @@ function Facts:ApplyAll(facts, checkpoint)
     end
     checkpoint = checkpoint or function() end
     local applied = 0
+    -- The players the facts changed, and whose edit last changed each.
+    local touched = {}
     local index
     for index = 1, #facts do
         if self:Refusal(facts[index]) == nil then
-            self:Change(facts[index])
+            local players = self:Change(facts[index])
+            local id
+            for id in pairs(players or {}) do
+                touched[id] = facts[index].by
+            end
             applied = applied + 1
         end
         checkpoint()
     end
     if applied > 0 then
+        -- Restoring acting mains can pick another main for a player a fact
+        -- just changed; the log ends on the main the player keeps.
+        local mains = {}
+        local id, by
+        for id in pairs(touched) do
+            local player = self.partition:GetPlayer(id)
+            mains[id] = player and player.main
+            checkpoint()
+        end
         addon.ReconcileEngine.EnsureActingMains(self.partition, {}, self.now(), checkpoint)
+        for id, by in pairs(touched) do
+            local player = self.partition:GetPlayer(id)
+            if player ~= nil and mains[id] ~= nil and player.main ~= mains[id] then
+                self.partition:LogChange(id, { at = self.now(), kind = "main", from = mains[id], to = player.main,
+                    by = by, via = "sync" })
+            end
+            checkpoint()
+        end
         -- A guildmate on an older version can still pass on a copy of
         -- another player's alias stamp; it isn't passed on from here.
         self.partition:RepairAliasStamps()

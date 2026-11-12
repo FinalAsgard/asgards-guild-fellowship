@@ -630,3 +630,29 @@ test.test("changes received through sync are logged on the players they change",
     -- Zollalt's own player was emptied and is gone.
     test.assertEqual(nil, setup.partition:GetPlayer(oldPlayer))
 end)
+
+test.test("a player whose main a fact moves away logs the main it keeps, after acting mains settle", function()
+    local PMAIN, PGONE, PALT, XMAIN = "pmain-area52", "pgone-area52", "palt-area52", "xmain-area52"
+    -- Levels fall with order: the departed alt outranks the one still here.
+    local setup = newSetup({ OFFICER, PMAIN, PGONE, PALT, XMAIN })
+    local partition = setup.partition
+    partition:JoinPlayerOf(PGONE, PMAIN, "note")
+    partition:JoinPlayerOf(PALT, PMAIN, "note")
+    partition:MarkDeparted(PGONE, NOW - 100)
+    local player = partition:GetCharacter(PALT).player
+
+    setup.facts:ApplyAll({ fact(PMAIN, XMAIN) })
+
+    test.assertEqual(PALT, partition:GetPlayer(player).main)
+    local changes = partition:GetChanges(player)
+    local last
+    local index
+    for index = 1, #changes do
+        if changes[index].kind == "main" then
+            last = changes[index]
+        end
+    end
+    test.assertTrue(last ~= nil, "the main change is logged")
+    test.assertEqual(PALT, last.to)
+    test.assertEqual(OFFICER, last.by)
+end)

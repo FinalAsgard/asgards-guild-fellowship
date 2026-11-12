@@ -296,6 +296,10 @@ function Scheduler:Run(mode, force)
     if planMode == "incremental" and addon.PerfCounters ~= nil then
         addon.PerfCounters.Bump("scansPlanned")
     end
+    -- The epoch this scan read the store at. Anything that moves it during
+    -- the scan (another edit while planning yields, or Apply itself
+    -- forgetting a note) makes the next check plan again.
+    local epoch = partition:ScanEpoch()
     local plan = engine.Plan({
         partition = partition,
         members = members,
@@ -311,11 +315,11 @@ function Scheduler:Run(mode, force)
     if planMode == "incremental" and next(plan.processed) == nil and plan.rejoins[1] == nil
         and not factsChanged(partition, members)
     then
-        self.reconciled = { partition = partition.key, epoch = partition:ScanEpoch(), members = members }
+        self.reconciled = { partition = partition.key, epoch = epoch, members = members }
         return { idle = true }
     end
     local result = engine.Apply(partition, plan, checkpoint)
-    self.reconciled = { partition = partition.key, epoch = partition:ScanEpoch(), members = members }
+    self.reconciled = { partition = partition.key, epoch = epoch, members = members }
     if planMode ~= "incremental" then
         partition:MarkScanned(now)
     end

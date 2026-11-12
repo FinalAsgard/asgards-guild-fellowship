@@ -2036,6 +2036,9 @@ if clientProfile.supported then
     local HEARD_THROTTLE_SECONDS = 60
     local HEARD_FLUSH_SECONDS = 300
     local lastHeard = {}
+    -- Every character heard since loading, kept even before a scan has
+    -- stored them (Guild Greet counts add-on users online by it).
+    local heardThisSession = {}
     local heardKeys, heardFlushing = {}, false
     local function flushHeard()
         heardFlushing = false
@@ -2067,6 +2070,9 @@ if clientProfile.supported then
         local now = client:Timestamp()
         local guild, partition, normalizer = rosterController:QuietContext()
         local key = guild and normalizer:Key(sender)
+        if key ~= nil then
+            heardThisSession[key] = true
+        end
         if key == nil or now == nil or (lastHeard[key] ~= nil and now - lastHeard[key] < HEARD_THROTTLE_SECONDS)
             or partition:GetCharacter(key) == nil
         then
@@ -3315,7 +3321,7 @@ if clientProfile.supported then
                 local keys = character.player and partition:CharactersOf(character.player) or { key }
                 local index
                 for index = 1, #keys do
-                    if lastHeard[keys[index]] ~= nil then
+                    if heardThisSession[keys[index]] then
                         counted[player] = true
                         count = count + 1
                         break
@@ -3518,8 +3524,22 @@ if clientProfile.supported then
             dropOfflineLocations()
             mapPins:Refresh()
         end
-        -- The first loaded roster tells Guild Greet who was already online
-        -- and how long everyone else has been away.
+        -- The first loaded roster runs Guild Recruit's login check; a rank
+        -- change later can grant or take away invite permission.
+        guildRecruit:OnRosterUpdate()
+        settingsPanel:Refresh()
+        frameSettings:Refresh()
+    end
+    -- Roster updates come in bursts (logins, the game's own guild window,
+    -- other add-ons asking). The scan and the roster window hear each at
+    -- once (the scan coalesces them itself). The rest runs at once for the
+    -- first update after a quiet second, then at most once a second while
+    -- more keep coming, once more after the last of them.
+    local ROSTER_BURST_SECONDS = 1
+    -- The first loaded roster tells Guild Greet who was already online and
+    -- how long everyone else has been away. Tried on every update, burst or
+    -- not, until it takes, so nobody coming online meanwhile is missed.
+    local function seedGreet()
         guildGreet:OnRosterUpdate(function()
             local guild, _, normalizer = rosterController:QuietContext()
             if guild == nil then
@@ -3535,18 +3555,7 @@ if clientProfile.supported then
             end
             return members
         end)
-        -- The first loaded roster runs Guild Recruit's login check; a rank
-        -- change later can grant or take away invite permission.
-        guildRecruit:OnRosterUpdate()
-        settingsPanel:Refresh()
-        frameSettings:Refresh()
     end
-    -- Roster updates come in bursts (logins, the game's own guild window,
-    -- other add-ons asking). The scan and the roster window hear each at
-    -- once (the scan coalesces them itself). The rest runs at once for the
-    -- first update after a quiet second, then at most once a second while
-    -- more keep coming, once more after the last of them.
-    local ROSTER_BURST_SECONDS = 1
     local rosterBurst = { open = false, more = false }
     local function endRosterBurst()
         if rosterBurst.more then
@@ -3560,6 +3569,7 @@ if clientProfile.supported then
     client:ObserveGuildRoster(function()
         addon.PerfCounters.Bump("rosterUpdates")
         rosterController:OnRosterUpdate()
+        seedGreet()
         if rosterBurst.open then
             rosterBurst.more = true
             return
