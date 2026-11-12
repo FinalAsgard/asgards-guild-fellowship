@@ -57,6 +57,9 @@ local MapPins = {
     AREA_LIST_TITLE_GAP = 64,
     AREA_LIST_INSET = 16,
     AREA_LIST_PADDING = 6,
+    -- Redraws asked for within this many seconds of one are drawn once,
+    -- at its end.
+    BATCH_SECONDS = 0.5,
 }
 addon.MapPins = MapPins
 
@@ -80,6 +83,9 @@ Pins.__index = Pins
 --           `display` "dots" or "count"
 --           (see LocationBoard), and `people` dots as above, those from the
 --           roster with fromRoster set and no position
+--   nearby  optional function(zone) -> the dots in map `zone` (the
+--           player's), as for dots: all the minimap needs while the world
+--           map is closed. Without it, dots is used.
 function MapPins.Create(options)
     return setmetatable({
         client = options.client,
@@ -96,6 +102,7 @@ function MapPins.Create(options)
         shown = options.shown or function()
             return true
         end,
+        nearby = options.nearby,
         icons = {},
         drawnMarkers = {},
         -- The minimap's own dots: a frame is drawn on one map only.
@@ -159,13 +166,14 @@ function Pins:Start()
     local hook = self.environment.hooksecurefunc
     if type(worldMap) == "table" and type(worldMap.OnMapChanged) == "function" and type(hook) == "function" then
         pcall(hook, worldMap, "OnMapChanged", function()
-            self:Refresh()
+            self:Draw()
         end)
     end
-    -- Nothing is drawn on the world map while it's closed: draw on opening.
+    -- Nothing is drawn on the world map while it's closed: draw on opening,
+    -- at once.
     if type(worldMap) == "table" and type(worldMap.HookScript) == "function" then
         pcall(worldMap.HookScript, worldMap, "OnShow", function()
-            self:Refresh()
+            self:Draw()
         end)
     end
     self:StartAreaList()
@@ -465,15 +473,41 @@ local function rgb(color)
 end
 
 -- Draws the dots as they are now, replacing the ones drawn before.
+-- Asks for a redraw. The first after a quiet moment draws at once; more
+-- within BATCH_SECONDS are drawn once, when it ends.
 function Pins:Refresh()
+    if self.pins == nil then
+        return
+    end
+    if self.batching then
+        self.more = true
+        return
+    end
+    self:Draw()
+    self:startBatch()
+end
+
+function Pins:startBatch()
+    -- Without a timer, every redraw is drawn at once.
+    self.batching = self.client:After(MapPins.BATCH_SECONDS, function()
+        if self.more then
+            self.more = false
+            self:Draw()
+            self:startBatch()
+        else
+            self.batching = false
+        end
+    end)
+end
+
+-- Draws now. While the world map is closed, only the minimap's dots are
+-- worked out: the guildmates in the player's zone.
+function Pins:Draw()
     if self.pins == nil then
         return
     end
     pcall(self.pins.RemoveAllWorldMapIcons, self.pins, self)
     self.refreshes = (self.refreshes or 0) + 1
-    if addon.PerfCounters ~= nil then
-        addon.PerfCounters.Bump("mapRedraws")
-    end
     local okShown, shown = pcall(self.shown)
     if okShown and shown == false then
         self.drawnMarkers = {}
@@ -481,6 +515,19 @@ function Pins:Refresh()
             pcall(self.pins.RemoveAllMinimapIcons, self.pins, self)
         end
         return
+    end
+    -- Each dot and marker shows on its own map only, so only those for the
+    -- map open now are drawn, and none while the world map is closed.
+    local open = self:OpenMap()
+    if open == false then
+        if addon.PerfCounters ~= nil then
+            addon.PerfCounters.Bump("mapRedrawsMinimap")
+        end
+        self:DrawNearby()
+        return
+    end
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump("mapRedraws")
     end
     local okDots, dots = pcall(self.dots)
     if not okDots or type(dots) ~= "table" then
@@ -490,9 +537,6 @@ function Pins:Refresh()
     if type(showFlag) ~= "number" then
         showFlag = MapPins.SHOW_CURRENT
     end
-    -- Each dot and marker shows on its own map only, so only those for the
-    -- map open now are drawn, and none while the world map is closed.
-    local open = self:OpenMap()
     local width = self:DotWidth()
     local placed = {}
     local drawn = 0
@@ -642,6 +686,28 @@ end
 
 -- Draws the dots in the player's zone on the minimap, replacing the ones
 -- drawn before. Nothing when the pins library can't draw on the minimap.
+-- The minimap alone, from the dots in the player's zone.
+function Pins:DrawNearby()
+    local dots
+    if self.nearby ~= nil then
+        local okZone, zone = pcall(self.zone)
+        if not okZone or zone == nil then
+            if type(self.pins.RemoveAllMinimapIcons) == "function" then
+                pcall(self.pins.RemoveAllMinimapIcons, self.pins, self)
+            end
+            return
+        end
+        local ok, nearby = pcall(self.nearby, zone)
+        dots = ok and nearby or nil
+    else
+        local ok, all = pcall(self.dots)
+        dots = ok and all or nil
+    end
+    if type(dots) == "table" then
+        self:DrawMinimap(dots)
+    end
+end
+
 function Pins:DrawMinimap(dots)
     if type(self.pins.AddMinimapIconMap) ~= "function" or type(self.pins.RemoveAllMinimapIcons) ~= "function" then
         return

@@ -3799,6 +3799,25 @@ if clientProfile.supported then
             return dots
         end,
         markers = locationMarkers,
+        -- The minimap only needs the guildmates heard in the player's zone.
+        nearby = function(zone)
+            local entries = locationBoard:All()
+            local inZone = {}
+            local index
+            for index = 1, #entries do
+                if entries[index].mapId == zone then
+                    table.insert(inZone, entries[index])
+                end
+            end
+            local dots = {}
+            local described = describeLocations(inZone)
+            for index = 1, #described do
+                if not described[index].grouped then
+                    table.insert(dots, described[index])
+                end
+            end
+            return dots
+        end,
         zone = function()
             local spot = client:GetPlayerPosition()
             return spot and spot.mapId or nil
