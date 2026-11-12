@@ -85,6 +85,9 @@ end
 
 -- The speaker's tag ({ text, kind }), or nil.
 function Annotator:TagFor(sender)
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump("chatTags")
+    end
     local partition, normalizer = self.context()
     if partition == nil or normalizer == nil then
         return nil

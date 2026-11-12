@@ -2634,6 +2634,7 @@ if clientProfile.supported then
             return officers
         end
         local selfKey = rosterController:SelfKey()
+        addon.PerfCounters.Bump("rosterReads")
         local index
         for index = 1, count do
             local member = client:GetGuildMember(index)
@@ -2835,6 +2836,7 @@ if clientProfile.supported then
                 return false
             end
             local selfKey = syncSession.selfKey()
+            addon.PerfCounters.Bump("rosterReads")
             local index
             for index = 1, count do
                 local member = client:GetGuildMember(index)
@@ -2937,6 +2939,15 @@ if clientProfile.supported then
             rosterController:Print("Not advertised: " .. tostring(reason) .. ".")
         end
     end)
+    router:Register("perf", "show the add-on's memory and CPU use, and counts of its costly work since login",
+        function()
+            rosterController:Print("Performance:")
+            local lines = addon.PerfCounters.Lines(client:AddOnUsage())
+            local index
+            for index = 1, #lines do
+                client:Print("  " .. lines[index])
+            end
+        end)
     router:Register("sync", "show guild sync status", function()
         local lines = addon.RosterViewModel.SyncStatusLines(syncSession:Status(), client:Timestamp())
         local index
@@ -3411,6 +3422,8 @@ if clientProfile.supported then
         end
     end)
     client:ObserveGuildRoster(function()
+        addon.PerfCounters.Bump("rosterUpdates")
+        addon.PerfCounters.Bump("rosterRefreshes")
         rosterController:OnRosterUpdate()
         recordOwnCharacter()
         -- A promotion or demotion shows or hides the officers' tabs, and an
@@ -3434,6 +3447,7 @@ if clientProfile.supported then
             if count == nil or count == 0 then
                 return nil
             end
+            addon.PerfCounters.Bump("rosterReads")
             local members = {}
             local index
             for index = 1, count do

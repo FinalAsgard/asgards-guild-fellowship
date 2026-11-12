@@ -231,6 +231,9 @@ end
 -- Facts about the roster member at `index`, or nil when the client can't
 -- say (the roster loads asynchronously, so early reads may be empty).
 function Client:GetGuildMember(index)
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump("rosterMembers")
+    end
     local ok, name, rankName, rankIndex, level, _, zone, note, _, online, _, classToken, _, _, _, _, _, guid =
         callFunction(self.environment.GetGuildRosterInfo, index)
     if not ok or type(name) ~= "string" or name == "" then
@@ -1279,6 +1282,46 @@ function Client:PreciseMilliseconds()
         return now * 1000
     end
     return nil
+end
+
+-- What `/agf perf` reports about this add-on's cost: { memoryKB?, cpuMs?,
+-- profiling, profilingHint, recentMs?, sessionMs? }. Memory is in KB;
+-- `cpuMs` is the CPU time since profiling began, only while the
+-- scriptProfile setting is on; `recentMs` and `sessionMs` are the game's
+-- add-on profiler's average milliseconds per frame (Retail), when it has
+-- one. Anything the client can't report is nil.
+function Client:AddOnUsage()
+    local environment = self.environment
+    local name = addon.Identity.addonName
+    local usage = { profilingHint = "/console scriptProfile 1" }
+    callFunction(environment.UpdateAddOnMemoryUsage)
+    local ok, memory = callFunction(environment.GetAddOnMemoryUsage, name)
+    if ok and type(memory) == "number" then
+        usage.memoryKB = memory
+    end
+    local cvars = environment.C_CVar
+    local profiled
+    ok, profiled = callFunction(type(cvars) == "table" and cvars.GetCVarBool or nil, "scriptProfile")
+    if not ok then
+        ok, profiled = callFunction(environment.GetCVarBool, "scriptProfile")
+    end
+    usage.profiling = ok and profiled == true
+    if usage.profiling then
+        callFunction(environment.UpdateAddOnCPUUsage)
+        local cpuOk, cpu = callFunction(environment.GetAddOnCPUUsage, name)
+        if cpuOk and type(cpu) == "number" then
+            usage.cpuMs = cpu
+        end
+    end
+    local profiler, enum = environment.C_AddOnProfiler, environment.Enum
+    local metrics = type(enum) == "table" and enum.AddOnProfilerMetric or nil
+    if type(profiler) == "table" and type(metrics) == "table" then
+        local recentOk, recent = callFunction(profiler.GetAddOnMetric, name, metrics.RecentAverageTime)
+        local sessionOk, session = callFunction(profiler.GetAddOnMetric, name, metrics.SessionAverageTime)
+        usage.recentMs = recentOk and type(recent) == "number" and recent or nil
+        usage.sessionMs = sessionOk and type(session) == "number" and session or nil
+    end
+    return usage
 end
 
 -- A timestamp as "2026-10-05", or the raw number when the client has no

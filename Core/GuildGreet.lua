@@ -589,6 +589,9 @@ end
 -- prompts once their player has had enough. Returns how many prompts it
 -- counted for.
 function Greet:OnGuildChat(message, sender)
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump("greetChecks")
+    end
     local _, normalizer = self.context()
     local now = self.now()
     local senderKey = normalizer and normalizer:Key(sender)

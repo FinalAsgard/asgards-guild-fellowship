@@ -196,6 +196,9 @@ end
 -- roster is empty, partial, or changed (size, order, or members) while it
 -- was read.
 function Scheduler:ReadRoster(normalizer)
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump("rosterReads")
+    end
     local count = self.client:GetGuildRosterCount()
     if count == nil or count <= 0 then
         return nil
@@ -255,6 +258,9 @@ function Scheduler:Run(mode, force)
         self:Checkpoint()
     end
     local now = self.client:Timestamp() or 0
+    if planMode == "incremental" and addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump("scansPlanned")
+    end
     local plan = engine.Plan({
         partition = partition,
         members = members,

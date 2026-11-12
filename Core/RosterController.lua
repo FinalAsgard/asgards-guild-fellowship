@@ -6,6 +6,13 @@ local _, addon = ...
 -- Opening the window never scans: it only reads live roster facts for
 -- display. Scans are the ScanScheduler's job (daily at login, new members
 -- as they appear, and on request).
+-- Counts an expensive operation for `/agf perf`.
+local function bump(name)
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump(name)
+    end
+end
+
 local RosterController = {}
 addon.RosterController = RosterController
 
@@ -214,6 +221,7 @@ function Controller:RosterKeyFor(name, guid)
 end
 
 function Controller:FindInRoster(normalizer, fullName, guid)
+    bump("rosterReads")
     local firstName = normalizer:FirstName(fullName)
     local byName
     local count = self.client:GetGuildRosterCount() or 0
@@ -1045,6 +1053,7 @@ end
 -- Live roster facts for display, keyed by character key. Unlike a scan,
 -- this tolerates a partial roster.
 function Controller:LiveMembers(normalizer)
+    bump("rosterReads")
     local members = {}
     local count = self.client:GetGuildRosterCount() or 0
     local index

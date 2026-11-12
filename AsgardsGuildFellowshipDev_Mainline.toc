@@ -18,6 +18,7 @@ Libs/HereBeDragons/HereBeDragons-2.0.lua
 Libs/HereBeDragons-Pins/HereBeDragons-Pins-2.0.lua
 
 Core/Identity.lua
+Core/PerfCounters.lua
 Adapters/ClientProfile.lua
 Adapters/WoW.lua
 Adapters/MasterFrame.lua

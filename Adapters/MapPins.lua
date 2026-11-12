@@ -471,6 +471,9 @@ function Pins:Refresh()
     end
     pcall(self.pins.RemoveAllWorldMapIcons, self.pins, self)
     self.refreshes = (self.refreshes or 0) + 1
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump("mapRedraws")
+    end
     local okShown, shown = pcall(self.shown)
     if okShown and shown == false then
         self.drawnMarkers = {}
