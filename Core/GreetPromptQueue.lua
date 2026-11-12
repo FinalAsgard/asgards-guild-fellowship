@@ -91,6 +91,18 @@ function Queue:All(now)
     return all
 end
 
+-- Whether any prompt hasn't expired by `now`, shown yet or not, held or
+-- not; cheaper than All, building no list.
+function Queue:HasAny(now)
+    local index
+    for index = 1, #self.prompts do
+        if self.prompts[index].expiresAt > now then
+            return true
+        end
+    end
+    return false
+end
+
 -- The waiting prompt for `player`, or nil.
 function Queue:Get(player)
     local index = indexOf(self.prompts, player)

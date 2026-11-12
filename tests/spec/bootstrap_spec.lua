@@ -3,6 +3,7 @@ local fixtures = require("tests.client_fixtures")
 
 local MANIFEST_FILES = {
     "Core/Identity.lua",
+    "Core/PerfCounters.lua",
     "Adapters/ClientProfile.lua",
     "Adapters/WoW.lua",
     "Adapters/MasterFrame.lua",

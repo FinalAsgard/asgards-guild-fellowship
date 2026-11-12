@@ -591,6 +591,22 @@ for coordinationIndex = 1, #fixtures.PROFILES do
         test.assertEqual(1, world.greet.tally:Count(tongs, world.time))
     end)
 
+    test.test(profile .. ": with no prompt waiting, guild chat isn't looked at; with one, it still counts", function()
+        local world = setup(profile)
+        local asked = 0
+        local context = world.greet.context
+        world.greet.context = function()
+            asked = asked + 1
+            return context()
+        end
+
+        test.assertFalse(greeted(world, "bishop", world.names.tongs))
+        test.assertEqual(0, asked, "no context, name or text work")
+
+        world.greet:OnPresence("online", world.names.tongs)
+        test.assertTrue(greeted(world, "bishop", world.names.tongs))
+    end)
+
     test.test(profile .. ": two greetings in guild chat close the prompt, naming the character or the main", function()
         local world = setup(profile)
         -- Tongs is Anvil's alt.
@@ -1019,6 +1035,32 @@ test.test("guild greet: a player greeted enough while their prompt waits never g
     advance(world, 10)
 
     test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: guild chat is watched from the arrival, before the prompt shows, until enough greetings", function()
+    local world = setup("Retail")
+    world.showDelay = 10
+    world.store:SetGreetCap(2)
+    local asked = 0
+    local context = world.greet.context
+    world.greet.context = function()
+        asked = asked + 1
+        return context()
+    end
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(0, #world.shown)
+    -- Welcomes in the moments before the prompt shows still count.
+    test.assertTrue(greeted(world, "bishop", world.names.bolt))
+    advance(world, 10)
+    test.assertEqual(1, #world.shown)
+    test.assertTrue(greeted(world, "rust", world.names.bolt))
+    test.assertEqual(0, #world.shown)
+
+    -- With enough greetings, guild chat isn't looked at any more.
+    asked = 0
+    test.assertFalse(greeted(world, "anvil", world.names.bolt))
+    test.assertEqual(0, asked)
 end)
 
 test.test("guild greet: a failing random pick still delays the prompt", function()

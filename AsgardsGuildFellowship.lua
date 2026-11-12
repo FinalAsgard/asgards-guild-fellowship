@@ -2628,20 +2628,21 @@ if clientProfile.supported then
     -- reports them.
     local function onlineOfficers()
         local guild, _, normalizer = rosterController:QuietContext()
-        local count = client:GetGuildRosterCount()
         local officers = {}
-        if guild == nil or count == nil then
+        if guild == nil then
             return officers
         end
         local selfKey = rosterController:SelfKey()
-        local index
-        for index = 1, count do
-            local member = client:GetGuildMember(index)
-            local key = member and member.online and normalizer:Key(member.name)
-            if key and key ~= selfKey and officerAuthority:IsOfficer(key) then
+        local key, member
+        for key, member in pairs(rosterController:LiveMembers(normalizer)) do
+            if member.online and key ~= selfKey and officerAuthority:IsOfficer(key) then
                 table.insert(officers, { key = key, name = member.name, rank = member.rankIndex })
             end
         end
+        -- In a steady order, whatever order the roster copy keeps.
+        table.sort(officers, function(first, second)
+            return first.key < second.key
+        end)
         return officers
     end
     -- Guild log messages go to the add-on officer channel. Officers whose
@@ -2866,16 +2867,13 @@ if clientProfile.supported then
         -- send.
         officerOnline = function()
             local guild, _, normalizer = rosterController:QuietContext()
-            local count = client:GetGuildRosterCount()
-            if guild == nil or count == nil then
+            if guild == nil then
                 return false
             end
             local selfKey = syncSession.selfKey()
-            local index
-            for index = 1, count do
-                local member = client:GetGuildMember(index)
-                local key = member and member.online and normalizer:Key(member.name)
-                if key and key ~= selfKey and officerAuthority:IsOfficer(key) then
+            local key, member
+            for key, member in pairs(rosterController:LiveMembers(normalizer)) do
+                if member.online and key ~= selfKey and officerAuthority:IsOfficer(key) then
                     return true
                 end
             end
@@ -2973,6 +2971,15 @@ if clientProfile.supported then
             rosterController:Print("Not advertised: " .. tostring(reason) .. ".")
         end
     end)
+    router:Register("perf", "show the add-on's memory and CPU use, and counts of its costly work since login",
+        function()
+            rosterController:Print("Performance:")
+            local lines = addon.PerfCounters.Lines(client:AddOnUsage())
+            local index
+            for index = 1, #lines do
+                client:Print("  " .. lines[index])
+            end
+        end)
     router:Register("sync", "show guild sync status", function()
         local lines = addon.RosterViewModel.SyncStatusLines(syncSession:Status(), client:Timestamp())
         local index
@@ -3446,8 +3453,9 @@ if clientProfile.supported then
             guildGreet:OnCategoryChanged(entry.category, value)
         end
     end)
-    client:ObserveGuildRoster(function()
-        rosterController:OnRosterUpdate()
+    -- What follows a roster update, run once per burst of them (see below).
+    local function afterRosterUpdates()
+        addon.PerfCounters.Bump("rosterRefreshes")
         recordOwnCharacter()
         -- A promotion or demotion shows or hides the officers' tabs, and an
         -- officer's add-on keeps the guild log up to date.
@@ -3466,17 +3474,17 @@ if clientProfile.supported then
         -- The first loaded roster tells Guild Greet who was already online
         -- and how long everyone else has been away.
         guildGreet:OnRosterUpdate(function()
-            local count = client:GetGuildRosterCount()
-            if count == nil or count == 0 then
+            local guild, _, normalizer = rosterController:QuietContext()
+            if guild == nil then
                 return nil
             end
             local members = {}
-            local index
-            for index = 1, count do
-                local member = client:GetGuildMember(index)
-                if member ~= nil then
-                    table.insert(members, member)
-                end
+            local _, member
+            for _, member in pairs(rosterController:LiveMembers(normalizer)) do
+                table.insert(members, member)
+            end
+            if members[1] == nil then
+                return nil
             end
             return members
         end)
@@ -3485,6 +3493,33 @@ if clientProfile.supported then
         guildRecruit:OnRosterUpdate()
         settingsPanel:Refresh()
         frameSettings:Refresh()
+    end
+    -- Roster updates come in bursts (logins, the game's own guild window,
+    -- other add-ons asking). The scan and the roster window hear each at
+    -- once (the scan coalesces them itself). The rest runs at once for the
+    -- first update after a quiet second, then at most once a second while
+    -- more keep coming, once more after the last of them.
+    local ROSTER_BURST_SECONDS = 1
+    local rosterBurst = { open = false, more = false }
+    local function endRosterBurst()
+        if rosterBurst.more then
+            rosterBurst.more = false
+            afterRosterUpdates()
+            rosterBurst.open = client:After(ROSTER_BURST_SECONDS, endRosterBurst)
+        else
+            rosterBurst.open = false
+        end
+    end
+    client:ObserveGuildRoster(function()
+        addon.PerfCounters.Bump("rosterUpdates")
+        rosterController:OnRosterUpdate()
+        if rosterBurst.open then
+            rosterBurst.more = true
+            return
+        end
+        afterRosterUpdates()
+        -- Without a timer, every update runs at once.
+        rosterBurst.open = client:After(ROSTER_BURST_SECONDS, endRosterBurst)
     end)
     -- Chat tags read the same guild context as the roster.
     chatAnnotator = addon.ChatAnnotator.Create({
@@ -3506,6 +3541,11 @@ if clientProfile.supported then
             local store = rosterController:Store()
             return store and store:ChatTagColor(kind)
         end,
+        -- Tags follow local edits, scans and guild sync.
+        revision = function()
+            local guild, partition = rosterController:QuietContext()
+            return (guild and partition.key or "") .. "#" .. rosterController:DataRevision()
+        end,
     })
     -- Officers see out-of-date guild notes in the game's guild roster. The
     -- audit is cached until the roster's data changes.
@@ -3515,11 +3555,12 @@ if clientProfile.supported then
         if guild == nil then
             return nil
         end
-        local stamp = partition.key .. "#" .. tostring(rosterController.revision or 0)
+        local members = rosterController:LiveMembers(normalizer)
+        local stamp = rosterController:AuditStamp(partition)
         if auditCache == nil or auditCache.stamp ~= stamp then
             local rows = addon.NoteAudit.Build({
                 partition = partition,
-                members = rosterController:LiveMembers(normalizer),
+                members = members,
                 normalizer = normalizer,
                 rules = clientProfile.nameRules,
             })
@@ -3799,6 +3840,25 @@ if clientProfile.supported then
             return dots
         end,
         markers = locationMarkers,
+        -- The minimap only needs the guildmates heard in the player's zone.
+        nearby = function(zone)
+            local entries = locationBoard:All()
+            local inZone = {}
+            local index
+            for index = 1, #entries do
+                if entries[index].mapId == zone then
+                    table.insert(inZone, entries[index])
+                end
+            end
+            local dots = {}
+            local described = describeLocations(inZone)
+            for index = 1, #described do
+                if not described[index].grouped then
+                    table.insert(dots, described[index])
+                end
+            end
+            return dots
+        end,
         zone = function()
             local spot = client:GetPlayerPosition()
             return spot and spot.mapId or nil
@@ -3890,13 +3950,17 @@ if clientProfile.supported then
                 mapPins:Refresh()
             end
             shareLocation()
-            sharing = client:After(addon.LocationScheduler.TICK_SECONDS, tick)
+            local scheduler = addon.LocationScheduler
+            sharing = client:After(scheduler.NEAR_ENABLED and scheduler.NEAR_TICK_SECONDS or scheduler.TICK_SECONDS,
+                tick)
         end
         tick()
-        -- A new zone goes out promptly (within the scheduler's minimum gap),
-        -- and the minimap shows the new zone's guildmates.
+        -- A new zone goes out promptly (within the scheduler's minimum gap:
+        -- asked again once it has passed), and the minimap shows the new
+        -- zone's guildmates.
         client:ObserveZone(function()
             shareLocation()
+            client:After(addon.LocationScheduler.MIN_GAP_SECONDS, shareLocation)
             mapPins:Refresh()
         end)
     end
@@ -3996,6 +4060,10 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     local busy = client:ObserveCombat(function(inCombat)
         guildGreet:OnCombatChanged(inCombat)
         guildRecruit:OnCombatChanged(inCombat)
+        -- A location held back by combat goes out once it ends.
+        if not inCombat and shareLocationNow ~= nil then
+            client:After(1, shareLocationNow)
+        end
     end)
     if busy then
         guildGreet:OnCombatChanged(true)
@@ -4057,16 +4125,20 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             -- The money line, and whether the postage is affordable.
             guildMail:Refresh()
         end
+        -- Errors, money and blocked calls only matter while mailing.
+        client:SetMailListening(guildMail:WantsGameEvents())
     end)
     -- Without a chat filter API, chat is simply left untagged.
-    client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
-        return chatAnnotator:Annotate(event, message, sender)
+    client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender, lineId)
+        return chatAnnotator:Annotate(event, message, sender, lineId)
     end)
     -- The game answers a whisper to someone who just logged off with "No
     -- player named ... is currently playing."; when the add-on sent that
     -- whisper, the line is hidden.
     client:HidePlayerNotFound(function(name)
         return comm:WhisperedRecently(name)
+    end, function()
+        return comm:WhisperedAnyRecently()
     end)
 end)
 

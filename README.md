@@ -27,6 +27,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf mail` | Opens [Guild Mail](#guild-mail), to mail the guild ranks you pick (officers only). |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
 | `/agf setdate join\|rank <character> <YYYY-MM-DD>` | Sets a character's join date, or the date it reached its current rank, when you know better than the add-on (officers only; see [Dates behind the checks](#dates-behind-the-checks)). |
+| `/agf perf` | Shows the add-on's memory use, its CPU use (when the game's script profiling is on, or how to turn it on), and counts since login of its costly work: roster reads, roster-update refreshes, scans, map redraws, chat tags and greet checks (anyone). |
 | `/agf probe` | Shows when the roster last had a full scan, and how many guild notes the latest scan picked up as changed (anyone). |
 | `/agf probe forgeries` | Lists the last 10 guild sync edits your add-on caught as forged in your name: when, who passed each on, what it changed, its stamp, and what your own record of your edits held for it (anyone). |
 | `/agf probe player <name or alias>` | Shows how your add-on holds a player: its alias, who set it and when, and through which character; each character's link and Discord name with who set them and when; and the player's last 10 logged changes (anyone). |

@@ -963,6 +963,8 @@ test.test("a member's suggestions wait until an officer is online", function()
     local hammer = login(channel, "Hammer-Area52")
     hammer.guild.members[1].online = false
     hammer.guild.members[2].online = false
+    -- The game's roster says so with a roster update.
+    fixtures.fire(hammer, "GUILD_ROSTER_UPDATE")
 
     linkAlt(hammer, "wrench-area52", "hammer-area52")
     test.assertEqual(0, #hammer.sentMessages, "no officer online: nothing sent")

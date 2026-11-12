@@ -533,11 +533,21 @@ function Sender:capReached(index)
     return true
 end
 
+-- Whether the last failed mail still waits for the game's error saying why.
+function Sender:AwaitsReason()
+    return self.lastFailed ~= nil and self.reasons[self.lastFailed] == nil
+end
+
 -- The game showed an error `message`. Soon after a send, it fails that
 -- mail with the message as its reason; right after a failure without a
 -- reason, it becomes that failure's reason. The cap error instead pauses
 -- on that mail. Returns true when it was used.
 function Sender:OnError(message)
+    -- With no mail waiting for an answer and no failure waiting for its
+    -- reason, no error can be about a mail.
+    if not (self.inFlight and self.fresh) and self.lastFailed == nil then
+        return false
+    end
     if type(message) ~= "string" or message == "" then
         return false
     end

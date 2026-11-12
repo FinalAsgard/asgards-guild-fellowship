@@ -231,6 +231,9 @@ end
 -- Facts about the roster member at `index`, or nil when the client can't
 -- say (the roster loads asynchronously, so early reads may be empty).
 function Client:GetGuildMember(index)
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump("rosterMembers")
+    end
     local ok, name, rankName, rankIndex, level, _, zone, note, _, online, _, classToken, _, _, _, _, _, guid =
         callFunction(self.environment.GetGuildRosterInfo, index)
     if not ok or type(name) ~= "string" or name == "" then
@@ -313,7 +316,10 @@ function Client:AddChatMessageFilter(events, filter)
     end
 
     local function handler(_, event, message, sender, ...)
-        local ok, replacement = pcall(filter, event, message, sender)
+        -- The chat line's ID: the same line shown in several chat tabs
+        -- comes with the same one.
+        local lineId = select(9, ...)
+        local ok, replacement = pcall(filter, event, message, sender, lineId)
         if ok and replacement == true then
             return true
         end
@@ -436,8 +442,9 @@ end
 
 -- Hides the game's "No player named ... is currently playing." line from
 -- the chat frames when hide(name) answers true for the name it gives.
--- Returns false when the client has no chat filter API.
-function Client:HidePlayerNotFound(hide)
+-- While `active()`, when given, answers false, system lines aren't looked
+-- at. Returns false when the client has no chat filter API.
+function Client:HidePlayerNotFound(hide, active)
     if type(hide) ~= "function" then
         return false
     end
@@ -453,6 +460,9 @@ function Client:HidePlayerNotFound(hide)
         return false
     end
     return self:AddChatMessageFilter({ "CHAT_MSG_SYSTEM" }, function(_, message)
+        if active ~= nil and not active() then
+            return nil
+        end
         if type(message) ~= "string" or self:IsSecretValue(message) then
             return nil
         end
@@ -1281,6 +1291,46 @@ function Client:PreciseMilliseconds()
     return nil
 end
 
+-- What `/agf perf` reports about this add-on's cost: { memoryKB?, cpuMs?,
+-- profiling, profilingHint, recentMs?, sessionMs? }. Memory is in KB;
+-- `cpuMs` is the CPU time since profiling began, only while the
+-- scriptProfile setting is on; `recentMs` and `sessionMs` are the game's
+-- add-on profiler's average milliseconds per frame (Retail), when it has
+-- one. Anything the client can't report is nil.
+function Client:AddOnUsage()
+    local environment = self.environment
+    local name = addon.Identity.addonName
+    local usage = { profilingHint = "/console scriptProfile 1" }
+    callFunction(environment.UpdateAddOnMemoryUsage)
+    local ok, memory = callFunction(environment.GetAddOnMemoryUsage, name)
+    if ok and type(memory) == "number" then
+        usage.memoryKB = memory
+    end
+    local cvars = environment.C_CVar
+    local profiled
+    ok, profiled = callFunction(type(cvars) == "table" and cvars.GetCVarBool or nil, "scriptProfile")
+    if not ok then
+        ok, profiled = callFunction(environment.GetCVarBool, "scriptProfile")
+    end
+    usage.profiling = ok and profiled == true
+    if usage.profiling then
+        callFunction(environment.UpdateAddOnCPUUsage)
+        local cpuOk, cpu = callFunction(environment.GetAddOnCPUUsage, name)
+        if cpuOk and type(cpu) == "number" then
+            usage.cpuMs = cpu
+        end
+    end
+    local profiler, enum = environment.C_AddOnProfiler, environment.Enum
+    local metrics = type(enum) == "table" and enum.AddOnProfilerMetric or nil
+    if type(profiler) == "table" and type(metrics) == "table" then
+        local recentOk, recent = callFunction(profiler.GetAddOnMetric, name, metrics.RecentAverageTime)
+        local sessionOk, session = callFunction(profiler.GetAddOnMetric, name, metrics.SessionAverageTime)
+        usage.recentMs = recentOk and type(recent) == "number" and recent or nil
+        usage.sessionMs = sessionOk and type(session) == "number" and session or nil
+    end
+    return usage
+end
+
 -- A timestamp as "2026-10-05", or the raw number when the client has no
 -- date function.
 function Client:FormatDate(timestamp)
@@ -1498,7 +1548,9 @@ end
 -- add-on name and function name), and when it shows an error ("error",
 -- with the event's arguments: an error number, then the text), and when
 -- the character's money changes ("money"). Returns false when the client
--- can't deliver the events.
+-- can't deliver the events. Errors, money and blocked calls come only while
+-- SetMailListening(true): they fire all session (every "Out of range" in
+-- combat, every coin looted) and only matter while mailing.
 Compatibility.MAIL_EVENTS = {
     PLAYER_MONEY = "money",
     MAIL_SHOW = "open",
@@ -1508,6 +1560,13 @@ Compatibility.MAIL_EVENTS = {
     ADDON_ACTION_BLOCKED = "blocked",
     ADDON_ACTION_FORBIDDEN = "blocked",
     UI_ERROR_MESSAGE = "error",
+}
+-- The mail events heard only while listening (see SetMailListening).
+Compatibility.MAIL_LISTENING_EVENTS = {
+    PLAYER_MONEY = true,
+    ADDON_ACTION_BLOCKED = true,
+    ADDON_ACTION_FORBIDDEN = true,
+    UI_ERROR_MESSAGE = true,
 }
 
 function Client:ObserveMail(onMail)
@@ -1526,7 +1585,7 @@ function Client:ObserveMail(onMail)
     local registered = false
     local eventName
     for eventName in pairs(Compatibility.MAIL_EVENTS) do
-        if self:RegisterEvent(frame, eventName) then
+        if not Compatibility.MAIL_LISTENING_EVENTS[eventName] and self:RegisterEvent(frame, eventName) then
             registered = true
         end
     end
@@ -1549,7 +1608,27 @@ function Client:ObserveMail(onMail)
         registered = true
     end
     self.mailFrame = frame
+    self.mailListening = false
     return registered
+end
+
+-- Starts (true) or stops (false) hearing the mail events only needed while
+-- mailing (Compatibility.MAIL_LISTENING_EVENTS): while the mailbox is open
+-- or a mail waits for the game's answer.
+function Client:SetMailListening(listening)
+    listening = listening == true
+    if self.mailFrame == nil or self.mailListening == listening then
+        return
+    end
+    self.mailListening = listening
+    local eventName
+    for eventName in pairs(Compatibility.MAIL_LISTENING_EVENTS) do
+        if listening then
+            self:RegisterEvent(self.mailFrame, eventName)
+        else
+            callMethod(self.mailFrame, "UnregisterEvent", eventName)
+        end
+    end
 end
 
 function Client:GetAccountDatabase()

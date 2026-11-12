@@ -589,8 +589,18 @@ end
 -- prompts once their player has had enough. Returns how many prompts it
 -- counted for.
 function Greet:OnGuildChat(message, sender)
-    local _, normalizer = self.context()
     local now = self.now()
+    -- With no prompt waiting, a chat line can't count for anyone.
+    if type(now) ~= "number" or not self.queue:HasAny(now) then
+        if addon.PerfCounters ~= nil then
+            addon.PerfCounters.Bump("greetChecksSkipped")
+        end
+        return 0
+    end
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump("greetChecks")
+    end
+    local _, normalizer = self.context()
     local senderKey = normalizer and normalizer:Key(sender)
     if type(message) ~= "string" or senderKey == nil or type(now) ~= "number" then
         return 0

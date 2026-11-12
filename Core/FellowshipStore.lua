@@ -1170,6 +1170,7 @@ function Partition:RecordCharacter(key, facts)
         character = { player = id, source = FellowshipStore.SOURCE_ROSTER }
         self.data.characters[key] = character
         self.members = nil
+        self:ScanInputsChanged()
     end
 
     -- The name exactly as the roster spells it (capitalization, realm
@@ -1207,7 +1208,20 @@ function Partition:ForgetNoteFingerprint(key)
     local character = self.data.characters[key]
     if character ~= nil then
         character.note = nil
+        self:ScanInputsChanged()
     end
+end
+
+-- A roster scan's plan depends on the roster and on which characters are
+-- stored, departed, and have their notes read. ScanEpoch changes whenever
+-- one of those stored things does (in memory only), so a scan can tell
+-- that a roster it already reconciled still is.
+function Partition:ScanInputsChanged()
+    self.scanEpoch = (self.scanEpoch or 0) + 1
+end
+
+function Partition:ScanEpoch()
+    return self.scanEpoch or 0
 end
 
 -- Leaves an out-of-date note alone while the note (its fingerprint) and the
@@ -2045,6 +2059,7 @@ function Partition:MarkDeparted(key, timestamp)
         return false
     end
     character.departed = timestamp
+    self:ScanInputsChanged()
     return true
 end
 
@@ -2056,6 +2071,7 @@ function Partition:MarkRejoined(key)
         return false
     end
     character.departed = nil
+    self:ScanInputsChanged()
     return true
 end
 
@@ -2150,6 +2166,7 @@ function Partition:Purge(key, timestamp)
 
     self.data.characters[key] = nil
     self.members = nil
+    self:ScanInputsChanged()
     if player ~= nil then
         local remaining = self:CharactersOf(playerId)
         if remaining[1] == nil then
