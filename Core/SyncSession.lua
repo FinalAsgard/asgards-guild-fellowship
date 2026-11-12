@@ -325,7 +325,17 @@ end
 -- facts sent, or nil when nothing was sent.
 function Session:LocalEdit(keys, before)
     return self:StampAndSend(function(facts, author, now)
-        return facts:Stamp(keys, author, now)
+        local stamped = facts:Stamp(keys, author, now)
+        local index
+        for index = 1, #stamped do
+            local fact = stamped[index]
+            if before ~= nil and before[fact.character] ~= fact.main then
+                self:LogLocal(facts.partition, fact.character, {
+                    kind = "link", character = fact.character, from = before[fact.character], to = fact.main,
+                }, author, now)
+            end
+        end
+        return stamped
     end, function(fact)
         return before == nil or before[fact.character] ~= fact.main
     end, function(fact)
@@ -338,7 +348,11 @@ end
 -- replaced ("" for none).
 function Session:LocalAliasEdit(key, before)
     return self:StampAndSend(function(facts, author, now)
-        return { facts:StampAlias(key, author, now) }
+        local fact = facts:StampAlias(key, author, now)
+        if fact ~= nil and before ~= nil and fact.alias ~= before then
+            self:LogLocal(facts.partition, key, { kind = "alias", from = before, to = fact.alias }, author, now)
+        end
+        return { fact }
     end, function(fact)
         return before == nil or fact.alias ~= before
     end, function()
@@ -370,6 +384,17 @@ function Session:UpgradeLegacy()
     return self:StampAndSend(function(facts, officer, now)
         return facts:StampLegacy(officer, now)
     end)
+end
+
+-- Logs this user's own edit, `entry` (see FellowshipStore's LogChange), to
+-- the player of `key`, as made by `author` at `now`.
+function Session:LogLocal(partition, key, entry, author, now)
+    local character = partition:GetCharacter(key)
+    if character == nil then
+        return
+    end
+    entry.at, entry.by, entry.via = now, author, "local"
+    partition:LogChange(character.player, entry)
 end
 
 -- Stamps with `stamp(facts, author, now)` -> list of facts, and broadcasts
@@ -458,9 +483,14 @@ function Session:LocalProfileEdit(kind, text)
     if partition == nil or key == nil or now == nil then
         return nil
     end
+    local character = partition:GetCharacter(key)
+    local before = character and partition:PlayerProfileText(character.player, kind) or ""
     local fact = self:Facts(partition):StampText(key, kind, text, now)
     if fact == nil then
         return nil
+    end
+    if text ~= before then
+        self:LogLocal(partition, key, { kind = kind, from = before, to = text }, key, now)
     end
     self:SendWhenAcceptable({ fact }, now)
     return fact
@@ -497,6 +527,9 @@ function Session:LocalPlayerTextEdit(key, kind, text)
     local stamped
     self:StampAndSend(function(facts, author, now)
         stamped = { facts:StampText(player.main, kind, text, now, author) }
+        if stamped[1] ~= nil and text ~= before then
+            self:LogLocal(partition, player.main, { kind = kind, from = before, to = text }, author, now)
+        end
         return stamped
     end, function(fact)
         return fact.text ~= before

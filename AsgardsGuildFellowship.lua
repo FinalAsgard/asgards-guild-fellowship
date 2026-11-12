@@ -2730,7 +2730,8 @@ if clientProfile.supported then
         "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..
         " notes changed; probe forgeries: the guild sync edits caught as forged in your name; probe log: the" ..
         " guild event log; probe officer: the officer channel; probe ready: the Ready flags on the game's" ..
-        " guild roster; officers)",
+        " guild roster; officers; probe player <name or alias>: a player's alias, links and Discord, with who" ..
+        " set each and when, and its logged changes)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
@@ -2743,7 +2744,7 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer or probe ready.")
+                        " probe officer, probe ready or probe player <name>.")
                 end
                 return
             end
@@ -2763,6 +2764,41 @@ if clientProfile.supported then
                 end
                 return
             end
+            if what == "player" then
+                local _, partition, normalizer = rosterController:QuietContext()
+                if partition == nil then
+                    rosterController:Print("Not in a guild.")
+                    return
+                end
+                local query = string.match(arguments or "", "^%s*%S+%s+(.-)%s*$")
+                local ids = addon.PlayerAudit.FindPlayers(partition, query, function(name)
+                    return normalizer:Key(name)
+                end)
+                if ids[1] == nil then
+                    rosterController:Print("Use " .. addon.Identity.slashCommand ..
+                        " probe player <character name or alias>; no player matches " ..
+                        (query and query ~= "" and ('"' .. query .. '"') or "nothing") .. ".")
+                    return
+                end
+                rosterController:Print("Player probe:")
+                local function nameOf(key)
+                    local character = type(key) == "string" and partition:GetCharacter(key) or nil
+                    return normalizer:Display((character and character.name) or key) or tostring(key)
+                end
+                local index, lineIndex
+                for index = 1, #ids do
+                    local lines = addon.PlayerAudit.ProbeLines(partition, ids[index], {
+                        name = nameOf,
+                        formatTime = function(timestamp)
+                            return client:FormatDateTime(timestamp)
+                        end,
+                    })
+                    for lineIndex = 1, #lines do
+                        client:Print("  " .. lines[lineIndex])
+                    end
+                end
+                return
+            end
             if what == "officer" then
                 probeOfficerChannel()
                 return
@@ -2774,8 +2810,8 @@ if clientProfile.supported then
             if what ~= "log" then
                 rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe forgeries, " ..
                     addon.Identity.slashCommand .. " probe log, " ..
-                    addon.Identity.slashCommand .. " probe officer or " .. addon.Identity.slashCommand ..
-                    " probe ready.")
+                    addon.Identity.slashCommand .. " probe officer, " .. addon.Identity.slashCommand ..
+                    " probe ready or " .. addon.Identity.slashCommand .. " probe player <name>.")
                 return
             end
             if guildLogOf() == nil then

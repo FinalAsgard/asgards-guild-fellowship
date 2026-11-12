@@ -12,6 +12,7 @@ local function load()
         "Core/ReconcileEngine.lua",
         "Core/PlayerService.lua",
         "Core/RosterViewModel.lua",
+        "Core/PlayerAudit.lua",
         "Core/PlayerPanelViewModel.lua"
     )
 end
@@ -153,7 +154,8 @@ test.test("a player with no alts or history says so", function()
     test.assertEqual("No alts", rowsOf(model, "empty")[1].text)
     local logEmpties = rowsOf(model, "empty", "logRows")
     test.assertEqual("Nothing logged yet", logEmpties[1].text)
-    test.assertEqual("No former characters", logEmpties[2].text)
+    test.assertEqual("No changes logged yet", logEmpties[2].text)
+    test.assertEqual("No former characters", logEmpties[3].text)
     test.assertFalse(rowsOf(model, "character")[1].canDetach)
     test.assertTrue(model.canMerge)
 end)
@@ -439,10 +441,11 @@ test.test("player panel: the ad record leads the Log tab, which says so when the
     -- Every one of the player's characters is asked about.
     test.assertEqual(2, #asked)
 
-    -- Nothing logged: the note, then the History section.
+    -- Nothing logged: the note, then the Changes and History sections.
     local function onlyEmpty(built)
         return built.logRows[1].kind == "empty" and built.logRows[1].text == "Nothing logged yet"
-            and built.logRows[2].kind == "section" and built.logRows[2].text == "History"
+            and built.logRows[2].kind == "section" and built.logRows[2].text == "Changes"
+            and built.logRows[4].kind == "section" and built.logRows[4].text == "History"
     end
     test.assertTrue(onlyEmpty(state.build(function()
         return nil
@@ -576,4 +579,35 @@ test.test("promotion rows go to the panel's Promotion tab, not the profile list"
     model = context.addon.PlayerPanelViewModel.Build({ partition = context.partition, playerId = context.playerId,
         normalizer = normalizer })
     test.assertEqual(nil, model.promotionRows, "no tab without promotion rows")
+end)
+
+test.test("player panel: the Log tab lists the player's logged changes, newest first, with who made them", function()
+    local addon = load()
+    local partition = addon.FellowshipStore.Create({ schemaVersion = 1, guilds = {} })
+        :Partition({ name = "Knights", realm = "Area52" })
+    partition:RecordCharacter("zoll-area52", { name = "Zoll" })
+    partition:RecordCharacter("toolbox-area52", { name = "Toolbox" })
+    local id = partition:GetCharacter("zoll-area52").player
+    partition:LogChange(id, { at = 100, kind = "alias", from = "", to = "Zoll", by = "toolbox-area52", via = "local" })
+    partition:LogChange(id, { at = 200, kind = "discord", from = "zoll", to = "ognomicus", by = "toolbox-area52",
+        via = "sync" })
+
+    local model = addon.PlayerPanelViewModel.Build({
+        partition = partition,
+        playerId = id,
+        normalizer = addon.NameNormalizer.Create(RULES),
+        wrap = function(text)
+            return { text }
+        end,
+    })
+
+    local texts = {}
+    local index
+    for index = 1, #model.logRows do
+        if model.logRows[index].kind == "log" then
+            table.insert(texts, model.logRows[index].text)
+        end
+    end
+    test.assertEqual('200: Discord changed from "zoll" to "ognomicus", by Toolbox (guild sync)', texts[1])
+    test.assertEqual('100: Alias changed from none to "Zoll", by Toolbox (here)', texts[2])
 end)

@@ -199,7 +199,9 @@ end
 -- `promotionRows` the Promotion tab's rows (nil when there's no such tab
 -- for this player), `logRows` the Log tab's rows: the ad count, when they
 -- last grouped with this user, and each character's dates, wrapped, then
--- the History section (characters that left the player):
+-- the Changes section (what changed about the player, and who changed it,
+-- newest first), then the History section (characters that left the
+-- player):
 --   { kind = "log", text }, { kind = "section", text },
 --   { kind = "history", name, role, dates, reason } or { kind = "empty", text }
 -- and `rows` is a flat list for the Profile tab's scroll list:
@@ -293,6 +295,25 @@ function PlayerPanelViewModel.Build(inputs)
     end
     if altCount == 0 then
         table.insert(rows, { kind = "empty", text = "No alts" })
+    end
+
+    -- Then what changed about the player and who changed it, newest first.
+    table.insert(logRows, { kind = "section", text = "Changes" })
+    local changes = partition:GetChanges(inputs.playerId)
+    local function nameOf(key)
+        local character = type(key) == "string" and partition:GetCharacter(key) or nil
+        return (inputs.normalizer and inputs.normalizer:Display((character and character.name) or key))
+            or tostring(key)
+    end
+    for index = #changes, 1, -1 do
+        local entry = changes[index]
+        if type(entry) == "table" and addon.PlayerAudit ~= nil then
+            log((type(entry.at) == "number" and (formatDate(entry.at) .. ": ") or "") ..
+                addon.PlayerAudit.ChangeText(entry, nameOf))
+        end
+    end
+    if changes[1] == nil then
+        table.insert(logRows, { kind = "empty", text = "No changes logged yet" })
     end
 
     -- The Log tab ends with the History section.

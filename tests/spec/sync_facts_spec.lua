@@ -414,3 +414,219 @@ test.test("after don't sync is turned off, officer data wins over the member's o
     test.assertEqual(OFFICER, mainOf(setup.partition, MEMBER))
     test.assertEqual(nil, setup.partition:GetPlayer(setup.partition:GetCharacter(OFFICER).player).alias)
 end)
+
+-- Two guildmates' players, where this client wrongly holds one of Tikit's
+-- characters in Zoll's player (a stale link), with each player's alias
+-- stamped by an officer: Tikit's earlier than Zoll's.
+local ZOLL, ZOLL_ALT, TIKIT, TIKIT_ALT = "zoll-area52", "zollalt-area52", "tikit-area52", "tikitalt-area52"
+local function staleSetup(withTikit)
+    local setup = newSetup({ OFFICER, ZOLL, ZOLL_ALT, TIKIT_ALT, TIKIT })
+    local partition = setup.partition
+    partition:JoinPlayerOf(ZOLL_ALT, ZOLL, "sync")
+    partition:JoinPlayerOf(TIKIT_ALT, ZOLL, "sync")
+    if withTikit then
+        partition:JoinPlayerOf(TIKIT, ZOLL, "sync")
+    else
+        partition:SetAlias(partition:GetCharacter(TIKIT).player, "Tikit", "sync")
+        partition:SetAliasStamp(TIKIT, NOW, OFFICER)
+    end
+    partition:SetAlias(partition:GetCharacter(ZOLL).player, "Zoll", "sync")
+    partition:SetAliasStamp(ZOLL, NOW + 5000, OFFICER)
+    return setup
+end
+
+-- The officer facts of the right roster: Tikit's player is Tikitalt (its
+-- main) and Tikit; Zoll's is Zoll (its main) and Zollalt. In the order
+-- OfficerFacts sends them.
+local function rightFacts()
+    return {
+        fact(TIKIT, TIKIT_ALT, NOW),
+        fact(TIKIT_ALT, TIKIT_ALT, NOW),
+        fact(ZOLL, ZOLL, NOW + 5000),
+        fact(ZOLL_ALT, ZOLL, NOW + 5000),
+        { kind = "alias", character = TIKIT_ALT, alias = "Tikit", at = NOW, by = OFFICER },
+        { kind = "alias", character = ZOLL, alias = "Zoll", at = NOW + 5000, by = OFFICER },
+    }
+end
+
+local function aliasOf(partition, key)
+    return partition:GetPlayer(partition:GetCharacter(key).player).alias
+end
+
+test.test("a main that is someone else's alt here leaves for its own player, not taking theirs over", function()
+    local setup = staleSetup(false)
+    local zollPlayer = setup.partition:GetCharacter(ZOLL).player
+
+    setup.facts:ApplyAll({ fact(TIKIT, TIKIT_ALT, NOW) })
+
+    -- Zoll's player keeps its main and alias; Tikit joins Tikitalt in a
+    -- player of their own.
+    test.assertEqual(ZOLL, setup.partition:GetPlayer(zollPlayer).main)
+    test.assertEqual("Zoll", setup.partition:GetPlayer(zollPlayer).alias)
+    test.assertEqual(TIKIT_ALT, mainOf(setup.partition, TIKIT))
+    test.assertTrue(setup.partition:GetCharacter(TIKIT).player ~= zollPlayer)
+    test.assertEqual(nil, aliasOf(setup.partition, TIKIT))
+end)
+
+test.test("a stale link can't hand one player's alias to another", function()
+    local setup = staleSetup(false)
+
+    setup.facts:ApplyAll(rightFacts())
+
+    test.assertEqual("Tikit", aliasOf(setup.partition, TIKIT))
+    test.assertEqual("Zoll", aliasOf(setup.partition, ZOLL))
+    test.assertEqual(ZOLL, mainOf(setup.partition, ZOLL_ALT))
+    local shared = {}
+    local _, held
+    for _, held in ipairs(setup.facts:OfficerFacts()) do
+        if held.kind == "alias" then
+            shared[held.character] = held.alias .. "@" .. held.at
+        end
+    end
+    test.assertEqual("Tikit@" .. NOW, shared[TIKIT_ALT])
+    test.assertEqual("Zoll@" .. (NOW + 5000), shared[ZOLL])
+end)
+
+test.test("an alias stamp stops counting once the character it was set through leaves the player", function()
+    -- Both of Tikit's characters wrongly sit in Zoll's player here.
+    local setup = staleSetup(true)
+
+    setup.facts:ApplyAll(rightFacts())
+
+    test.assertEqual(TIKIT_ALT, mainOf(setup.partition, TIKIT))
+    test.assertEqual(ZOLL, mainOf(setup.partition, ZOLL_ALT))
+    test.assertTrue(setup.partition:GetCharacter(TIKIT).player ~= setup.partition:GetCharacter(ZOLL).player)
+    -- Tikit's player kept the old record, but not Zoll's alias stamp: the
+    -- officer's alias for Tikit won over it.
+    test.assertEqual("Tikit", aliasOf(setup.partition, TIKIT))
+    test.assertEqual("Zoll", aliasOf(setup.partition, ZOLL))
+    for _, held in ipairs(setup.facts:OfficerFacts()) do
+        if held.kind == "alias" and held.character == TIKIT_ALT then
+            test.assertEqual("Tikit", held.alias)
+        end
+    end
+end)
+
+test.test("a player's alias stays with it when its main changes within the player", function()
+    local setup = newSetup({ OFFICER, ZOLL, ZOLL_ALT, "zollthird-area52" })
+    setup.partition:JoinPlayerOf(ZOLL_ALT, ZOLL, "sync")
+    setup.partition:JoinPlayerOf("zollthird-area52", ZOLL, "sync")
+    setup.partition:SetAlias(setup.partition:GetCharacter(ZOLL).player, "Zoll", "sync")
+    setup.partition:SetAliasStamp(ZOLL, NOW, OFFICER)
+
+    setup.facts:ApplyAll({ fact("zollthird-area52", ZOLL_ALT, NOW + 10) })
+
+    test.assertEqual(ZOLL_ALT, mainOf(setup.partition, ZOLL))
+    test.assertEqual("Zoll", aliasOf(setup.partition, ZOLL_ALT))
+    local held = setup.facts:AliasFactOf(ZOLL_ALT)
+    test.assertEqual(ZOLL_ALT, held.character)
+    test.assertEqual(NOW, held.at)
+end)
+
+test.test("a client holding the right roster isn't misled by one that held a stale link", function()
+    local stale = staleSetup(false)
+    stale.facts:ApplyAll(rightFacts())
+    local healthy = newSetup({ OFFICER, ZOLL, ZOLL_ALT, TIKIT_ALT, TIKIT })
+    healthy.facts:ApplyAll(rightFacts())
+
+    healthy.facts:ApplyAll(stale.facts:OfficerFacts())
+
+    test.assertEqual("Tikit", aliasOf(healthy.partition, TIKIT))
+    test.assertEqual("Zoll", aliasOf(healthy.partition, ZOLL))
+end)
+
+test.test("two players holding one alias stamp lose it, keeping their aliases", function()
+    local setup = newSetup({ OFFICER, ZOLL, TIKIT })
+    local partition = setup.partition
+    partition:SetAlias(partition:GetCharacter(ZOLL).player, "Tikit", "sync")
+    partition:SetAliasStamp(ZOLL, NOW, OFFICER)
+    partition:SetAlias(partition:GetCharacter(TIKIT).player, "Tikit", "sync")
+    partition:SetAliasStamp(TIKIT, NOW, OFFICER)
+
+    test.assertEqual(2, partition:RepairAliasStamps())
+
+    test.assertEqual("Tikit", aliasOf(partition, ZOLL))
+    test.assertEqual("Tikit", aliasOf(partition, TIKIT))
+    test.assertEqual(0, (partition:GetAliasStamp(ZOLL)))
+    test.assertEqual(0, (partition:GetAliasStamp(TIKIT)))
+    -- The guild's officer data for Zoll wins again.
+    setup.facts:ApplyAll({ { kind = "alias", character = ZOLL, alias = "Zoll", at = NOW - 100, by = OFFICER } })
+    test.assertEqual("Zoll", aliasOf(partition, ZOLL))
+end)
+
+test.test("the officer whose ledger shows which player an alias stamp was for keeps it there", function()
+    local setup = newSetup({ OFFICER, ZOLL, TIKIT })
+    local partition = setup.partition
+    partition:SetLedger({ since = NOW - 1000, facts = { ["alias|" .. TIKIT] = { at = NOW, alias = "Tikit" } } })
+    partition:SetAlias(partition:GetCharacter(ZOLL).player, "Tikit", "sync")
+    partition:SetAliasStamp(ZOLL, NOW, OFFICER)
+    partition:SetAlias(partition:GetCharacter(TIKIT).player, "Tikit", "sync")
+    partition:SetAliasStamp(TIKIT, NOW, OFFICER)
+
+    test.assertEqual(1, partition:RepairAliasStamps())
+
+    test.assertEqual(0, (partition:GetAliasStamp(ZOLL)))
+    test.assertEqual(NOW, (partition:GetAliasStamp(TIKIT)))
+end)
+
+test.test("a player keeps its alias stamp when the character it was set through is purged", function()
+    local setup = newSetup({ OFFICER, ZOLL, ZOLL_ALT })
+    local partition = setup.partition
+    partition:JoinPlayerOf(ZOLL_ALT, ZOLL, "sync")
+    partition:SetAlias(partition:GetCharacter(ZOLL).player, "Zoll", "sync")
+    partition:SetAliasStamp(ZOLL, NOW, OFFICER)
+    partition:MarkDeparted(ZOLL, NOW + 10)
+
+    partition:Purge(ZOLL, NOW + 20)
+
+    test.assertEqual(NOW, (partition:GetAliasStamp(ZOLL_ALT)))
+end)
+
+test.test("an alias stamp from before anchors is anchored to its player's main on load", function()
+    local database = { schemaVersion = 2, guilds = {} }
+    local setup = newSetup({ OFFICER, ZOLL })
+    local data = setup.partition.data
+    local player = setup.partition:GetPlayer(setup.partition:GetCharacter(ZOLL).player)
+    player.alias, player.aliasAt, player.aliasBy = "Zoll", NOW, OFFICER
+    database.guilds[setup.addon.FellowshipStore.PartitionKey(GUILD)] = data
+
+    local partition = setup.addon.FellowshipStore.Create(database):Partition(GUILD)
+
+    test.assertEqual(ZOLL, partition:GetPlayer(partition:GetCharacter(ZOLL).player).aliasFor)
+    test.assertEqual(NOW, (partition:GetAliasStamp(ZOLL)))
+end)
+
+test.test("changes received through sync are logged on the players they change", function()
+    local setup = newSetup({ OFFICER, ZOLL, ZOLL_ALT })
+    local facts = setup.addon.SyncFacts.Create(setup.partition, {
+        isOfficer = function(key)
+            return setup.officers[key] == true
+        end,
+        now = function()
+            return NOW + 60
+        end,
+    })
+    local oldPlayer = setup.partition:GetCharacter(ZOLL_ALT).player
+
+    facts:ApplyAll({
+        fact(ZOLL_ALT, ZOLL, NOW),
+        { kind = "alias", character = ZOLL, alias = "Zoll", at = NOW, by = OFFICER },
+        { kind = "discord", character = ZOLL, text = "zoll#1", at = NOW, by = OFFICER },
+    })
+
+    local changes = setup.partition:GetChanges(setup.partition:GetCharacter(ZOLL).player)
+    test.assertEqual(3, #changes)
+    test.assertEqual("joined", changes[1].kind)
+    test.assertEqual(ZOLL_ALT, changes[1].character)
+    test.assertEqual(ZOLL_ALT, changes[1].from)
+    test.assertEqual("alias", changes[2].kind)
+    test.assertEqual("", changes[2].from)
+    test.assertEqual("Zoll", changes[2].to)
+    test.assertEqual(OFFICER, changes[2].by)
+    test.assertEqual("sync", changes[2].via)
+    test.assertEqual(NOW + 60, changes[2].at)
+    test.assertEqual("discord", changes[3].kind)
+    test.assertEqual("zoll#1", changes[3].to)
+    -- Zollalt's own player was emptied and is gone.
+    test.assertEqual(nil, setup.partition:GetPlayer(oldPlayer))
+end)

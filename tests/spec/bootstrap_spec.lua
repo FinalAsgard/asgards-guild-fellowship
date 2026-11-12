@@ -40,6 +40,7 @@ local MANIFEST_FILES = {
     "Core/SuggestionService.lua",
     "Core/SuggestionBundles.lua",
     "Core/SyncLedger.lua",
+    "Core/PlayerAudit.lua",
     "Core/SyncSession.lua",
     "Core/ScanScheduler.lua",
     "Core/PageNavigator.lua",
