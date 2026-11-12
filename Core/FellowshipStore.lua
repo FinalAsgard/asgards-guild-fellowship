@@ -537,10 +537,10 @@ function Store:SetGreetEnabled(enabled)
 end
 
 -- Whether Guild Greet prompts inside a dungeon, raid, battleground or arena.
--- On unless turned off; unusable saved data counts as on.
+-- Off unless turned on; unusable saved data counts as off.
 function Store:GreetInInstances()
     local state = type(self.database) == "table" and self.database.greet or nil
-    return type(state) ~= "table" or state.inInstances ~= false
+    return type(state) == "table" and state.inInstances == true
 end
 
 -- Turns Guild Greet's prompts inside instances on or off. An unusable

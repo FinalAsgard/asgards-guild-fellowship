@@ -1134,12 +1134,17 @@ test.test("guild greet: a press while Greet is locked adds no weight", function(
     test.assertEqual(1, world.store:GreetWeight().weight)
 end)
 
-test.test("greet: prompts in instances are on by default, and turned off none show inside one", function()
+test.test("greet: prompts in instances are off by default, and turned on show inside one", function()
     local world = setup("Retail")
     world.inInstance = true
 
-    -- On by default: inside an instance, arrivals are prompted as anywhere.
-    test.assertTrue(world.store:GreetInInstances())
+    -- Off by default: inside an instance, nobody is prompted.
+    test.assertFalse(world.store:GreetInInstances())
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(0, #world.shown)
+
+    -- Turned on, arrivals inside are prompted as anywhere.
+    test.assertTrue(world.store:SetGreetInInstances(true))
     world.greet:OnPresence("online", world.names.bolt)
     test.assertEqual(1, #world.shown)
 
@@ -1161,7 +1166,7 @@ test.test("greet: prompts in instances are on by default, and turned off none sh
     -- The setting is kept, and an unusable saved value is left alone.
     test.assertFalse(world.store:GreetInInstances())
     world.database.greet.inInstances = "yes"
-    test.assertTrue(world.store:GreetInInstances())
+    test.assertFalse(world.store:GreetInInstances())
     test.assertFalse(world.store:SetGreetInInstances(false))
     test.assertFalse(world.store:SetGreetInInstances("off"))
 end)

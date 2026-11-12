@@ -210,6 +210,57 @@ test.test("inside an instance, one gm-hide goes out and the location resumes on 
     test.assertEqual("gm-loc", scheduler:Tick(state).t)
 end)
 
+test.test("a gm-hide says when it's from inside an instance, and goes again when the reason changes", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local scheduler = addon.LocationScheduler.Create()
+    local state = { now = 1000, character = "toolbox-area52", spot = SPOT, sharing = false }
+
+    local hide = scheduler:Tick(state)
+    test.assertEqual("gm-hide", hide.t)
+    test.assertEqual(nil, hide.i)
+    state.now = 1001
+    test.assertEqual(nil, scheduler:Tick(state))
+
+    -- Sharing off, then into a dungeon: one more, marked inside.
+    state.inInstance = true
+    state.now = 1002
+    hide = scheduler:Tick(state)
+    test.assertEqual(true, hide.i)
+    test.assertTrue(protocol.IsValid(hide))
+    state.now = 1003
+    test.assertEqual(nil, scheduler:Tick(state))
+
+    -- Out again with sharing still off: one unmarked.
+    state.inInstance = false
+    state.now = 1004
+    test.assertEqual(nil, scheduler:Tick(state).i)
+
+    -- Older versions' gm-hide has no `i`; a wrong one is ignored.
+    test.assertTrue(protocol.IsValid({ v = 1, t = "gm-hide", c = "toolbox-area52" }))
+    test.assertFalse(protocol.IsValid({ v = 1, t = "gm-hide", c = "toolbox-area52", i = "yes" }))
+end)
+
+test.test("the board knows who's inside an instance until they send a location or go offline", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local board = addon.LocationBoard.Create()
+
+    board:OnHide(protocol.Hide("hammer-area52", true), "hammer-area52")
+    test.assertTrue(board:Inside("hammer-area52"))
+    board:OnLocation(protocol.Location("hammer-area52", SPOT), "hammer-area52", 1000)
+    test.assertFalse(board:Inside("hammer-area52"))
+
+    board:OnHide(protocol.Hide("hammer-area52", true), "hammer-area52")
+    board:OnHide(protocol.Hide("hammer-area52", false), "hammer-area52")
+    test.assertFalse(board:Inside("hammer-area52"), "sharing turned off outside")
+
+    board:OnHide(protocol.Hide("hammer-area52", true), "hammer-area52")
+    board:Drop("hammer-area52")
+    test.assertFalse(board:Inside("hammer-area52"))
+    test.assertFalse(board:Inside(nil))
+end)
+
 test.test("board entries expire 5 minutes after their last update", function()
     local addon = load()
     local protocol = addon.LocationProtocol

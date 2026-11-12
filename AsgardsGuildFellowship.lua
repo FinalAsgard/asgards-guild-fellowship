@@ -586,14 +586,15 @@ if clientProfile.supported then
     settings:Add("guildGreet", {
         id = "greetInInstances",
         kind = "toggle",
-        label = "Greet while in a dungeon, raid or other instance",
+        label = "Greet guild members during dungeons and raids",
         info = function()
-            return "Turn this off to get no greet prompts inside dungeons, raids, battlegrounds, arenas and " ..
-                "keystone runs. Guildmates who come online while you're inside aren't prompted for later."
+            return "Off by default: you get no greet prompts inside dungeons, raids, battlegrounds, arenas and " ..
+                "keystone runs. Guildmates who come online while you're inside aren't prompted for later. " ..
+                "Turn this on to be prompted there too."
         end,
         get = function()
             local store = rosterController:Store()
-            return store == nil or store:GreetInInstances()
+            return store ~= nil and store:GreetInInstances()
         end,
         set = function(enabled)
             local store = rosterController:Store()
@@ -601,7 +602,7 @@ if clientProfile.supported then
                 return nil, "saved data is unavailable"
             end
             if not store:SetGreetInInstances(enabled) then
-                return nil, "the saved setting is unreadable, so it stays on"
+                return nil, "the saved setting is unreadable, so it stays off"
             end
             return true
         end,
@@ -3246,15 +3247,15 @@ if clientProfile.supported then
     })
     -- Guild Greet reads the same guild context as the roster.
     -- How many guildmates with the add-on are online, counting the user: the
-    -- players online whose add-on was ever heard on any of their
-    -- characters, by this add-on or an officer's (as promotion requirements
-    -- count it). Nil without a guild.
+    -- players online whose add-on this add-on heard since it loaded (their
+    -- login announcement, location updates or any other add-on message),
+    -- unless their location last said they're inside an instance, where
+    -- they get no greet prompts by default. Nil without a guild.
     local function addonOnline()
         local guild, partition, normalizer = rosterController:QuietContext()
         if guild == nil then
             return nil
         end
-        local dates = datesOf(partition)
         local selfCharacter = partition:GetCharacter(rosterController:SelfKey() or "")
         local selfPlayer = selfCharacter and selfCharacter.player
         local counted = {}
@@ -3263,11 +3264,17 @@ if clientProfile.supported then
         for key, member in pairs(rosterController:LiveMembers(normalizer)) do
             local character = member.online and partition:GetCharacter(key)
             local player = character and character.player or key
-            if character and player ~= selfPlayer and not counted[player] then
+            if character and player ~= selfPlayer and not counted[player]
+                and not (locationBoard ~= nil and locationBoard:Inside(key))
+            then
                 local keys = character.player and partition:CharactersOf(character.player) or { key }
-                if dates:LastHeard(keys) ~= nil then
-                    counted[player] = true
-                    count = count + 1
+                local index
+                for index = 1, #keys do
+                    if lastHeard[keys[index]] ~= nil then
+                        counted[player] = true
+                        count = count + 1
+                        break
+                    end
                 end
             end
         end

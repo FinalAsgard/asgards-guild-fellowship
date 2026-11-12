@@ -179,7 +179,7 @@ function Greet:IsEnabled()
     return store:GreetEnabled() and (selfKey == nil or store:GreetOnCharacter(selfKey))
 end
 
--- True inside an instance when the user turned prompts off there.
+-- True inside an instance unless the user turned prompts on there.
 function Greet:QuietHere()
     local store = self.store()
     if store == nil or store:GreetInInstances() then

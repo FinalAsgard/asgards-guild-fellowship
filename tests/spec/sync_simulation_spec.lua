@@ -508,7 +508,7 @@ test.test("a forged relay while the officer is online is corrected at once", fun
         ~= nil, shown)
 end)
 
-test.test("probe greet counts the guildmates online whose add-on was heard, and the user", function()
+test.test("probe greet counts the guildmates online whose add-on was heard this session, and the user", function()
     local channel = fixtures.newChannel()
     local officer = login(channel, "Toolbox-Area52")
     local hammer = login(channel, "Hammer-Area52")
@@ -529,6 +529,21 @@ test.test("probe greet counts the guildmates online whose add-on was heard, and 
     local shown = probed()
     test.assertTrue(string.find(shown, "counting you: 3", 1, true) ~= nil, shown)
     test.assertTrue(string.find(shown, "New prompts wait 5.0 seconds longer", 1, true) ~= nil, shown)
+
+    -- Wrench goes into a dungeon: no longer counted, so no extra wait.
+    wrench.inInstance = "party"
+    fixtures.runTimers(wrench, 30)
+    fixtures.deliver(channel)
+    shown = probed()
+    test.assertTrue(string.find(shown, "counting you: 2", 1, true) ~= nil, shown)
+    test.assertTrue(string.find(shown, "No extra wait", 1, true) ~= nil, shown)
+
+    -- A reload forgets who was heard until they're heard again.
+    local reloaded = login(channel, "Hammer-Area52", { database = hammer.database })
+    local printed = #reloaded.messages
+    fixtures.slash(reloaded, "probe greet")
+    shown = table.concat(reloaded.messages, "\n", printed + 1)
+    test.assertTrue(string.find(shown, "counting you: 1", 1, true) ~= nil, shown)
 end)
 
 -- `name` leaves `world`'s guild, and a full scan of its roster notices.
