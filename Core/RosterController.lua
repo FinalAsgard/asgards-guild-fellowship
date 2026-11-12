@@ -132,11 +132,18 @@ function Controller:Print(message)
     self.client:Print(addon.Identity.chatPrefix .. " " .. message)
 end
 
+-- The name normalizer for `guild`, made once per guild and reused: it only
+-- depends on the guild's home realm and the client's name rules.
 function Controller:Normalizer(guild)
-    return addon.NameNormalizer.Create({
-        homeRealm = guild.realm,
-        twoPartNames = self.nameRules.twoPartNames,
-    })
+    local key = addon.FellowshipStore.PartitionKey(guild) or tostring(guild.realm)
+    self.normalizers = self.normalizers or {}
+    if self.normalizers[key] == nil then
+        self.normalizers[key] = addon.NameNormalizer.Create({
+            homeRealm = guild.realm,
+            twoPartNames = self.nameRules.twoPartNames,
+        })
+    end
+    return self.normalizers[key]
 end
 
 function Controller:Store()
@@ -221,16 +228,13 @@ function Controller:RosterKeyFor(name, guid)
 end
 
 function Controller:FindInRoster(normalizer, fullName, guid)
-    bump("rosterReads")
     local firstName = normalizer:FirstName(fullName)
     local byName
-    local count = self.client:GetGuildRosterCount() or 0
-    local index
-    for index = 1, count do
-        local member = self.client:GetGuildMember(index)
+    local key, member
+    for key, member in pairs(self:LiveMembers(normalizer)) do
         if member ~= nil then
             if guid ~= nil and member.guid == guid then
-                return normalizer:Key(member.name)
+                return key
             end
             -- A member whose GUID differs is someone else with that first
             -- name (an outsider in the party, say).
@@ -273,6 +277,9 @@ function Controller:OnSavedDataReady()
 end
 
 function Controller:OnRosterUpdate()
+    -- The shared roster copy is stale now (see LiveMembers).
+    self.rosterGeneration = (self.rosterGeneration or 0) + 1
+    self.snapshot = nil
     self.scheduler:OnRosterUpdate()
     self:Invalidate()
 end
@@ -1052,7 +1059,15 @@ end
 
 -- Live roster facts for display, keyed by character key. Unlike a scan,
 -- this tolerates a partial roster.
+--
+-- The roster is read once per roster update and that one copy is shared by
+-- every caller until the next update (OnRosterUpdate): callers must treat
+-- it as read-only. An empty roster (not loaded yet) is read again next time.
 function Controller:LiveMembers(normalizer)
+    local snapshot = self.snapshot
+    if snapshot ~= nil and snapshot.normalizer == normalizer and snapshot.generation == self.rosterGeneration then
+        return snapshot.members
+    end
     bump("rosterReads")
     local members = {}
     local count = self.client:GetGuildRosterCount() or 0
@@ -1063,6 +1078,9 @@ function Controller:LiveMembers(normalizer)
         if key ~= nil then
             members[key] = member
         end
+    end
+    if next(members) ~= nil then
+        self.snapshot = { normalizer = normalizer, generation = self.rosterGeneration, members = members }
     end
     return members
 end

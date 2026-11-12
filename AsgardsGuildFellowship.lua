@@ -2628,21 +2628,21 @@ if clientProfile.supported then
     -- reports them.
     local function onlineOfficers()
         local guild, _, normalizer = rosterController:QuietContext()
-        local count = client:GetGuildRosterCount()
         local officers = {}
-        if guild == nil or count == nil then
+        if guild == nil then
             return officers
         end
         local selfKey = rosterController:SelfKey()
-        addon.PerfCounters.Bump("rosterReads")
-        local index
-        for index = 1, count do
-            local member = client:GetGuildMember(index)
-            local key = member and member.online and normalizer:Key(member.name)
-            if key and key ~= selfKey and officerAuthority:IsOfficer(key) then
+        local key, member
+        for key, member in pairs(rosterController:LiveMembers(normalizer)) do
+            if member.online and key ~= selfKey and officerAuthority:IsOfficer(key) then
                 table.insert(officers, { key = key, name = member.name, rank = member.rankIndex })
             end
         end
+        -- In a steady order, whatever order the roster copy keeps.
+        table.sort(officers, function(first, second)
+            return first.key < second.key
+        end)
         return officers
     end
     -- Guild log messages go to the add-on officer channel. Officers whose
@@ -2831,17 +2831,13 @@ if clientProfile.supported then
         -- send.
         officerOnline = function()
             local guild, _, normalizer = rosterController:QuietContext()
-            local count = client:GetGuildRosterCount()
-            if guild == nil or count == nil then
+            if guild == nil then
                 return false
             end
             local selfKey = syncSession.selfKey()
-            addon.PerfCounters.Bump("rosterReads")
-            local index
-            for index = 1, count do
-                local member = client:GetGuildMember(index)
-                local key = member and member.online and normalizer:Key(member.name)
-                if key and key ~= selfKey and officerAuthority:IsOfficer(key) then
+            local key, member
+            for key, member in pairs(rosterController:LiveMembers(normalizer)) do
+                if member.online and key ~= selfKey and officerAuthority:IsOfficer(key) then
                     return true
                 end
             end
@@ -3443,18 +3439,17 @@ if clientProfile.supported then
         -- The first loaded roster tells Guild Greet who was already online
         -- and how long everyone else has been away.
         guildGreet:OnRosterUpdate(function()
-            local count = client:GetGuildRosterCount()
-            if count == nil or count == 0 then
+            local guild, _, normalizer = rosterController:QuietContext()
+            if guild == nil then
                 return nil
             end
-            addon.PerfCounters.Bump("rosterReads")
             local members = {}
-            local index
-            for index = 1, count do
-                local member = client:GetGuildMember(index)
-                if member ~= nil then
-                    table.insert(members, member)
-                end
+            local _, member
+            for _, member in pairs(rosterController:LiveMembers(normalizer)) do
+                table.insert(members, member)
+            end
+            if members[1] == nil then
+                return nil
             end
             return members
         end)

@@ -120,3 +120,68 @@ for index = 1, #PROFILES do
         test.assertContains(table.concat(world.messages, "\n", printed + 1), "perf")
     end)
 end
+
+-- Counts the game's roster member calls `world` answers from now on.
+local function countRosterCalls(world)
+    local counted = { calls = 0 }
+    local read = world.environment.GetGuildRosterInfo
+    world.environment.GetGuildRosterInfo = function(...)
+        counted.calls = counted.calls + 1
+        return read(...)
+    end
+    return counted
+end
+
+for index = 1, #PROFILES do
+    local profile = PROFILES[index]
+
+    test.test(profile .. ": one roster update is read once, however many callers ask", function()
+        local world, addon = loggedIn(profile)
+        local controller = addon.rosterController
+        local counted = countRosterCalls(world)
+        local size = #world.guild.members
+
+        -- Everything the update refreshes, and the scan's own read.
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        fixtures.runTimers(world, 5)
+        local afterUpdate = counted.calls
+        test.assertTrue(afterUpdate <= 2 * size, "the shared copy and the scan's read: " .. afterUpdate)
+        -- More callers read nothing more.
+        local guild, _, normalizer = controller:QuietContext()
+        test.assertTrue(guild ~= nil)
+        local first = controller:LiveMembers(normalizer)
+        local again = controller:LiveMembers(normalizer)
+        controller:RosterKeyFor(world.guild.members[2].name, "Player-1-" .. world.guild.members[2].name)
+        addon.mapPins:Refresh()
+
+        test.assertEqual(afterUpdate, counted.calls)
+        test.assertTrue(first == again, "the same copy")
+
+        -- The next roster update makes the next read fresh.
+        world.guild.members[2].online = not world.guild.members[2].online
+        fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+        local key = normalizer:Key(world.guild.members[2].name)
+        test.assertEqual(world.guild.members[2].online, controller:LiveMembers(normalizer)[key].online)
+    end)
+
+    test.test(profile .. ": the guild context is reused, and a new guild gets its own", function()
+        local world, addon = loggedIn(profile)
+        local controller = addon.rosterController
+
+        local guild, partition, normalizer = controller:QuietContext()
+        local _, samePartition, sameNormalizer = controller:QuietContext()
+        test.assertTrue(partition == samePartition and normalizer == sameNormalizer, "reused")
+        local members = controller:LiveMembers(normalizer)
+
+        -- The character joins another guild.
+        world.guild.name = "Other Guild"
+        local otherGuild, otherPartition, otherNormalizer = controller:QuietContext()
+
+        test.assertEqual("Other Guild", otherGuild.name)
+        test.assertTrue(otherPartition ~= partition, "another guild's records")
+        test.assertTrue(otherPartition.key ~= partition.key)
+        test.assertTrue(otherNormalizer ~= normalizer, "another guild's normalizer")
+        test.assertTrue(controller:LiveMembers(otherNormalizer) ~= members, "another guild's roster copy")
+        test.assertTrue(guild.name ~= otherGuild.name)
+    end)
+end
