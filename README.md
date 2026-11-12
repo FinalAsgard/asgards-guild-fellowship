@@ -30,6 +30,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf probe` | Shows when the roster last had a full scan, and how many guild notes the latest scan picked up as changed (anyone). |
 | `/agf probe forgeries` | Lists the last 10 guild sync edits your add-on caught as forged in your name: when, who passed each on, what it changed, its stamp, and what your own record of your edits held for it (anyone). |
 | `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** and **Promote to match** flags reach the game's guild roster (officers only). |
+| `/agf probe greet` | Shows your greet weight, how many guildmates with the add-on count as online, and how much longer your greet prompts wait because of it. |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
@@ -269,6 +270,8 @@ Once a player has had enough greetings, your prompt for them quietly closes, and
 How many is enough is set under **Close my prompt after** in the Guild Greet settings, each from 1 to 10: **Greetings** (2 by default) for a login, welcome back or long absence, and **Guild join welcomes** (3 by default) for someone who just joined the guild.
 
 After each greeting, Greet is locked for a moment so nobody floods guild chat: 2 seconds after your first greeting in a row, 4 after the second, 6 after the third, and so on. While it's locked, the greeting buttons are greyed out and count down, as **Welcome Back (3)**. Press again once they unlock; the game only lets an add-on post to chat when you press a button, so nothing is sent for you later. A prompt whose player gets enough greetings from others in the meantime closes as usual. Once a lock runs out with no prompts showing, the next one starts at 2 seconds again.
+
+So the same few quick greeters don't take every greeting, each greeting you post adds 1 to your greet weight, up to 6. While 3 or more guildmates with the add-on are online (counting you), your new prompts wait 2.5 seconds longer per weight, up to 15 seconds, on top of the usual 5 to 10. That gives everyone else a chance to greet first: greetings during the wait count as usual, and once the person has had enough, your prompt never shows. The weight fades by 1 every 5 minutes, also while you're offline, and it's shared by all your characters. A guildmate counts as having the add-on once it has been heard from any of their characters. `/agf probe greet` shows where you stand.
 
 Greeting messages, recruitment ad times, and the officer channel probe travel apart from guild sync's traffic, so a busy sync (a big guild logging in at once) doesn't hold them up.
 

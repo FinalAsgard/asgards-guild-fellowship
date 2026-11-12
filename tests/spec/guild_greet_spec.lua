@@ -36,6 +36,7 @@ local function load()
         "Core/GreetingLibrary.lua",
         "Core/GreetPromptQueue.lua",
         "Core/GreetTally.lua",
+        "Core/GreetWeight.lua",
         "Core/GuildGreet.lua"
     )
 end
@@ -113,6 +114,10 @@ local function setup(profile)
         end,
         inInstance = function()
             return world.inInstance == true
+        end,
+        -- Unknown (no greet weight delay) unless a spec sets it.
+        addonOnline = function()
+            return world.addonOnline
         end,
         view = {
             Show = function(_, prompts, handlers, lockedFor)
@@ -1044,6 +1049,89 @@ test.test("guild greet: without timers, a prompt shows at once instead of never"
     world.greet:OnPresence("online", world.names.bolt)
 
     test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild greet: each Greet adds weight, and with 3 add-on users online new prompts wait 2.5s a weight", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:Greet(world.shown[1].player)
+    advance(world, 2)
+    world.greet:Greet(world.shown[1].player)
+    -- The first press's 1 faded for the 2 seconds before the second.
+    test.assertTrue(math.abs(world.store:GreetWeight().weight - (2 - 0.2 * 2 / 60)) < 1e-9)
+    world.store:SetGreetWeight({ weight = 2, at = world.time })
+    world.addonOnline = 3
+
+    -- 2 weight: 5 seconds on top of the usual delay (0 here).
+    advance(world, 30)
+    local weight = world.greet:Weight(world.time)
+    test.assertEqual(1.9, math.floor(weight * 10 + 0.5) / 10, "0.2 a minute fades 0.1 in 30 seconds")
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertEqual(0, #world.shown)
+    advance(world, 4)
+    test.assertEqual(0, #world.shown)
+    advance(world, 1)
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild greet: greet weight never delays with fewer than 3 add-on users online, or when unknown", function()
+    local world = setup("Retail")
+    world.store:SetGreetWeight({ weight = 6, at = world.time })
+
+    world.addonOnline = 2
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(1, #world.shown)
+
+    world.addonOnline = nil
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(2, #world.shown)
+end)
+
+test.test("guild greet: weight caps at 6 (15 seconds) and fades 1 every 5 minutes, also while away", function()
+    local world = setup("Retail")
+    world.store:SetGreetWeight({ weight = 6, at = world.time })
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:Greet(world.shown[1].player)
+    test.assertEqual(6, world.store:GreetWeight().weight, "no more than 6")
+    world.addonOnline = 5
+
+    -- Logged out for 10 minutes: 2 faded.
+    advance(world, 600)
+    test.assertEqual(4, world.greet:Weight(world.time))
+    world.greet:OnPresence("online", world.names.rust)
+    advance(world, 9)
+    test.assertEqual(0, #world.shown)
+    advance(world, 1)
+    test.assertEqual(1, #world.shown)
+
+    -- Gone entirely after 30 minutes.
+    advance(world, 1800)
+    test.assertEqual(0, world.greet:Weight(world.time))
+end)
+
+test.test("guild greet: others' greetings during the extra wait count, and the prompt never shows once enough", function()
+    local world = setup("Retail")
+    world.addonOnline = 4
+    world.store:SetGreetCap(2)
+    world.store:SetGreetWeight({ weight = 6, at = world.time })
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertTrue(greeted(world, "bishop", world.names.bolt))
+    test.assertTrue(greeted(world, "rust", world.names.bolt))
+    advance(world, 15)
+
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a press while Greet is locked adds no weight", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:Greet(world.shown[1].player)
+    test.assertEqual(nil, world.greet:Greet(world.shown[1].player))
+
+    test.assertEqual(1, world.store:GreetWeight().weight)
 end)
 
 test.test("greet: prompts in instances are on by default, and turned off none show inside one", function()

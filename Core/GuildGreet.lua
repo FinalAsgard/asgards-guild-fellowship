@@ -21,6 +21,11 @@ local _, addon = ...
 -- post: the prompts stay, and the user presses Greet again once it unlocks.
 -- A prompt whose player has had enough greetings meanwhile closes as usual.
 -- Once a cooldown ends with no prompt showing, the next starts at 2 again.
+--
+-- So the same quick greeters don't take every greeting, each press of Greet
+-- adds to the user's greet weight (GreetWeight), and while enough add-on
+-- users are online a new prompt waits longer the more weight there is.
+-- Greetings from others during the wait count as usual.
 local GuildGreet = {
     -- The "greeted" message older versions (v0.9.4 and before) close their
     -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
@@ -60,6 +65,9 @@ Greet.__index = Greet
 --                 guild's add-on users. Optional.
 --   showDelay     function() -> seconds a new prompt waits before showing.
 --                 Optional; a random 5 to 10 otherwise.
+--   addonOnline   function() -> how many guildmates with the add-on are
+--                 online, counting the user, or nil when unknown. Optional;
+--                 without it, greet weight never delays a prompt.
 --   inInstance    function() -> true in a dungeon, raid, battleground,
 --                 arena or keystone run, where the user can turn prompts
 --                 off. Optional.
@@ -79,6 +87,7 @@ function GuildGreet.Create(options)
         end,
         view = options.view,
         showDelay = options.showDelay,
+        addonOnline = options.addonOnline,
         inInstance = options.inInstance or function()
             return false
         end,
@@ -361,7 +370,7 @@ function Greet:OnPresence(kind, rawName)
     prompt.label = self:Names(key, rawName).name
     -- Redraw when it's due and when it expires, so it comes and goes on time.
     -- Without a timer to show it later, it shows at once.
-    local delay = self:ShowDelay()
+    local delay = self:ShowDelay() + self:WeightDelay(now)
     if delay > 0 and not self.after(delay, function()
         self:Refresh()
     end) then
@@ -386,6 +395,39 @@ function Greet:ShowDelay()
         return GuildGreet.SHOW_DELAY_MIN
     end
     return delay
+end
+
+-- The user's greet weight at `now`.
+function Greet:Weight(now)
+    local store = self.store()
+    return addon.GreetWeight.Current(store and store:GreetWeight(), now)
+end
+
+-- How many guildmates with the add-on are online, counting the user, or nil
+-- when unknown.
+function Greet:AddonOnline()
+    if self.addonOnline == nil then
+        return nil
+    end
+    local ok, count = pcall(self.addonOnline)
+    if not ok or type(count) ~= "number" then
+        return nil
+    end
+    return count
+end
+
+-- Extra seconds a prompt raised at `now` waits for the user's greet weight.
+function Greet:WeightDelay(now)
+    local weight = self:Weight(now)
+    if weight <= 0 then
+        return 0
+    end
+    return addon.GreetWeight.ExtraDelay(weight, self:AddonOnline())
+end
+
+-- Probe lines: the user's greet weight and what it does now.
+function Greet:WeightProbeLines(now)
+    return addon.GreetWeight.ProbeLines(self:Weight(now), self:AddonOnline())
 end
 
 -- Whole seconds until Greet unlocks: 0 when it isn't locked.
@@ -438,6 +480,10 @@ function Greet:Greet(player)
     end
     if text ~= nil then
         self:startCooldown(now)
+        local store = self.store()
+        if store ~= nil then
+            store:SetGreetWeight(addon.GreetWeight.Added(store:GreetWeight(), now))
+        end
     end
     self:Refresh()
     return text

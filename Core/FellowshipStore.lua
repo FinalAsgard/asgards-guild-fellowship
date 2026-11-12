@@ -587,6 +587,30 @@ function Store:SetGreetCap(cap)
     return true
 end
 
+-- How much the user has greeted lately (GreetWeight's { weight, at }),
+-- shared by every character on the account, or nil when none or unusable.
+function Store:GreetWeight()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local saved = type(state) == "table" and state.weight or nil
+    if not addon.GreetWeight.IsRecord(saved) then
+        return nil
+    end
+    return saved
+end
+
+-- Saves the greet weight record. An unusable existing value is left alone.
+function Store:SetGreetWeight(record)
+    if not addon.GreetWeight.IsRecord(record) then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.weight ~= nil and not addon.GreetWeight.IsRecord(state.weight)) then
+        return false
+    end
+    state.weight = { weight = record.weight, at = record.at }
+    return true
+end
+
 -- Whether Guild Greet prompts for `category` (a GreetPolicy category). On
 -- unless turned off; an unusable saved value counts as on.
 function Store:GreetCategoryEnabled(category)

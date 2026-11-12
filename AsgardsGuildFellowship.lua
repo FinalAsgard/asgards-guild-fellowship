@@ -2730,7 +2730,7 @@ if clientProfile.supported then
         "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..
         " notes changed; probe forgeries: the guild sync edits caught as forged in your name; probe log: the" ..
         " guild event log; probe officer: the officer channel; probe ready: the Ready flags on the game's" ..
-        " guild roster; officers)",
+        " guild roster; officers; probe greet: your greet weight and how long it holds your prompts back)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
@@ -2743,7 +2743,7 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer or probe ready.")
+                        " probe officer, probe ready or probe greet.")
                 end
                 return
             end
@@ -2771,11 +2771,20 @@ if clientProfile.supported then
                 probeReady()
                 return
             end
+            if what == "greet" then
+                rosterController:Print("Greet weight probe:")
+                local lines = guildGreet:WeightProbeLines(client:Timestamp())
+                local index
+                for index = 1, #lines do
+                    client:Print("  " .. lines[index])
+                end
+                return
+            end
             if what ~= "log" then
                 rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe forgeries, " ..
                     addon.Identity.slashCommand .. " probe log, " ..
-                    addon.Identity.slashCommand .. " probe officer or " .. addon.Identity.slashCommand ..
-                    " probe ready.")
+                    addon.Identity.slashCommand .. " probe officer, " .. addon.Identity.slashCommand ..
+                    " probe ready or " .. addon.Identity.slashCommand .. " probe greet.")
                 return
             end
             if guildLogOf() == nil then
@@ -3236,6 +3245,34 @@ if clientProfile.supported then
         end,
     })
     -- Guild Greet reads the same guild context as the roster.
+    -- How many guildmates with the add-on are online, counting the user: the
+    -- players online whose add-on was ever heard on any of their
+    -- characters, by this add-on or an officer's (as promotion requirements
+    -- count it). Nil without a guild.
+    local function addonOnline()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        local dates = datesOf(partition)
+        local selfCharacter = partition:GetCharacter(rosterController:SelfKey() or "")
+        local selfPlayer = selfCharacter and selfCharacter.player
+        local counted = {}
+        local count = 1
+        local key, member
+        for key, member in pairs(rosterController:LiveMembers(normalizer)) do
+            local character = member.online and partition:GetCharacter(key)
+            local player = character and character.player or key
+            if character and player ~= selfPlayer and not counted[player] then
+                local keys = character.player and partition:CharactersOf(character.player) or { key }
+                if dates:LastHeard(keys) ~= nil then
+                    counted[player] = true
+                    count = count + 1
+                end
+            end
+        end
+        return count
+    end
     guildGreet = addon.GuildGreet.Create({
         context = function()
             local guild, partition, normalizer = rosterController:QuietContext()
@@ -3270,6 +3307,7 @@ if clientProfile.supported then
         announce = function(message)
             return comm:BroadcastLive(message)
         end,
+        addonOnline = addonOnline,
         view = greetPrompts,
     })
     -- The Guild Recruit window stays where it's dragged; the place is saved
