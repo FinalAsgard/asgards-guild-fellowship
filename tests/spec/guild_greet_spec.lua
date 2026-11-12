@@ -591,6 +591,22 @@ for coordinationIndex = 1, #fixtures.PROFILES do
         test.assertEqual(1, world.greet.tally:Count(tongs, world.time))
     end)
 
+    test.test(profile .. ": with no prompt waiting, guild chat isn't looked at; with one, it still counts", function()
+        local world = setup(profile)
+        local asked = 0
+        local context = world.greet.context
+        world.greet.context = function()
+            asked = asked + 1
+            return context()
+        end
+
+        test.assertFalse(greeted(world, "bishop", world.names.tongs))
+        test.assertEqual(0, asked, "no context, name or text work")
+
+        world.greet:OnPresence("online", world.names.tongs)
+        test.assertTrue(greeted(world, "bishop", world.names.tongs))
+    end)
+
     test.test(profile .. ": two greetings in guild chat close the prompt, naming the character or the main", function()
         local world = setup(profile)
         -- Tongs is Anvil's alt.

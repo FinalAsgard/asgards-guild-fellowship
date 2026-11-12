@@ -1702,6 +1702,44 @@ local function registerWholeAddonTests(profile)
             end
         end)
 
+    test.test(profile .. ": in the whole add-on, system lines aren't looked at unless the add-on whispered lately",
+        function()
+            local filters = {}
+            local checked = 0
+            local channel = fixtures.newChannel()
+            local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR", nil,
+                function(environment)
+                    environment.ChatFrame_AddMessageEventFilter = function(event, filter)
+                        filters[event] = filters[event] or {}
+                        table.insert(filters[event], filter)
+                    end
+                    environment.issecretvalue = function()
+                        checked = checked + 1
+                        return false
+                    end
+                end)
+            local function hidden(message)
+                local filter
+                for _, filter in ipairs(filters.CHAT_MSG_SYSTEM or {}) do
+                    if filter(nil, "CHAT_MSG_SYSTEM", message, "") == true then
+                        return true
+                    end
+                end
+                return false
+            end
+
+            checked = 0
+            test.assertFalse(hidden("No player named 'Stranger' is currently playing."))
+            test.assertEqual(0, checked, "nothing whispered: the line isn't even checked")
+
+            test.assertTrue(viewer.addon.comm:Whisper({ t = "gm-near" }, "Stranger"))
+            test.assertTrue(hidden("No player named 'Stranger' is currently playing."))
+            fixtures.runTimers(viewer, viewer.addon.Comm.WHISPER_ANSWER_SECONDS + 1)
+            checked = 0
+            test.assertFalse(hidden("No player named 'Stranger' is currently playing."))
+            test.assertEqual(0, checked, "the whisper is long past")
+        end)
+
     test.test(profile .. ": in the whole add-on, a party member gets no dot and others outside it are dimmed", function()
         local channel = fixtures.newChannel()
         local guild = fixtures.GUILDS[profile]

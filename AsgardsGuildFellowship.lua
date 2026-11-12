@@ -4053,6 +4053,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- whisper, the line is hidden.
     client:HidePlayerNotFound(function(name)
         return comm:WhisperedRecently(name)
+    end, function()
+        return comm:WhisperedAnyRecently()
     end)
 end)
 

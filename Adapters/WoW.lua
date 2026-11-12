@@ -439,8 +439,9 @@ end
 
 -- Hides the game's "No player named ... is currently playing." line from
 -- the chat frames when hide(name) answers true for the name it gives.
--- Returns false when the client has no chat filter API.
-function Client:HidePlayerNotFound(hide)
+-- While `active()`, when given, answers false, system lines aren't looked
+-- at. Returns false when the client has no chat filter API.
+function Client:HidePlayerNotFound(hide, active)
     if type(hide) ~= "function" then
         return false
     end
@@ -456,6 +457,9 @@ function Client:HidePlayerNotFound(hide)
         return false
     end
     return self:AddChatMessageFilter({ "CHAT_MSG_SYSTEM" }, function(_, message)
+        if active ~= nil and not active() then
+            return nil
+        end
         if type(message) ~= "string" or self:IsSecretValue(message) then
             return nil
         end
