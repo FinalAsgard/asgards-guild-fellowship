@@ -160,6 +160,29 @@ local function factsChanged(partition, members)
     return false
 end
 
+-- True when `members` (a roster read) holds the same characters, with the
+-- same notes, ranks and levels, as `last`.
+local function sameRoster(members, last)
+    if last == nil then
+        return false
+    end
+    local count = 0
+    local key, member
+    for key, member in pairs(members) do
+        local before = last[key]
+        if before == nil or before.note ~= member.note or before.rankIndex ~= member.rankIndex
+            or before.level ~= member.level
+        then
+            return false
+        end
+        count = count + 1
+    end
+    for _ in pairs(last) do
+        count = count - 1
+    end
+    return count == 0
+end
+
 -- Coalesces a burst of roster updates into one incremental check.
 function Scheduler:ScheduleIncremental()
     if self.incrementalPending then
@@ -254,6 +277,18 @@ function Scheduler:Run(mode, force)
     if mode == "full" and not partition:HasBeenScanned() then
         planMode = "initial"
     end
+    -- An incremental check of the very roster the last scan reconciled,
+    -- with nothing it depends on changed in the store since, would find
+    -- nothing to do: it isn't planned at all.
+    local reconciled = self.reconciled
+    if planMode == "incremental" and reconciled ~= nil and reconciled.partition == partition.key
+        and reconciled.epoch == partition:ScanEpoch() and sameRoster(members, reconciled.members)
+    then
+        if addon.PerfCounters ~= nil then
+            addon.PerfCounters.Bump("scansSkipped")
+        end
+        return { idle = true }
+    end
     local checkpoint = function()
         self:Checkpoint()
     end
@@ -276,9 +311,11 @@ function Scheduler:Run(mode, force)
     if planMode == "incremental" and next(plan.processed) == nil and plan.rejoins[1] == nil
         and not factsChanged(partition, members)
     then
+        self.reconciled = { partition = partition.key, epoch = partition:ScanEpoch(), members = members }
         return { idle = true }
     end
     local result = engine.Apply(partition, plan, checkpoint)
+    self.reconciled = { partition = partition.key, epoch = partition:ScanEpoch(), members = members }
     if planMode ~= "incremental" then
         partition:MarkScanned(now)
     end
