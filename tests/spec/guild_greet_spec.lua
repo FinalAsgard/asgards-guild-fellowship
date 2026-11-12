@@ -1037,6 +1037,32 @@ test.test("guild greet: a player greeted enough while their prompt waits never g
     test.assertEqual(0, #world.shown)
 end)
 
+test.test("guild greet: guild chat is watched from the arrival, before the prompt shows, until enough greetings", function()
+    local world = setup("Retail")
+    world.showDelay = 10
+    world.store:SetGreetCap(2)
+    local asked = 0
+    local context = world.greet.context
+    world.greet.context = function()
+        asked = asked + 1
+        return context()
+    end
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(0, #world.shown)
+    -- Welcomes in the moments before the prompt shows still count.
+    test.assertTrue(greeted(world, "bishop", world.names.bolt))
+    advance(world, 10)
+    test.assertEqual(1, #world.shown)
+    test.assertTrue(greeted(world, "rust", world.names.bolt))
+    test.assertEqual(0, #world.shown)
+
+    -- With enough greetings, guild chat isn't looked at any more.
+    asked = 0
+    test.assertFalse(greeted(world, "anvil", world.names.bolt))
+    test.assertEqual(0, asked)
+end)
+
 test.test("guild greet: a failing random pick still delays the prompt", function()
     local world = setup("Retail")
     world.greet.showDelay = nil

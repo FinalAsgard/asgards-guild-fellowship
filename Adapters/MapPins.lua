@@ -472,7 +472,6 @@ local function rgb(color)
         tonumber(string.sub(color, 7, 8), 16) / 255
 end
 
--- Draws the dots as they are now, replacing the ones drawn before.
 -- Asks for a redraw. The first after a quiet moment draws at once; more
 -- within BATCH_SECONDS are drawn once, when it ends.
 function Pins:Refresh()
