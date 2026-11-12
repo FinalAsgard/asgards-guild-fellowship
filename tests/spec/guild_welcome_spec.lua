@@ -7,6 +7,7 @@ local function load()
         "Core/SyncFacts.lua",
         "Core/RecruitConfig.lua",
         "Core/GreetingLibrary.lua",
+        "Core/GreetWeight.lua",
         "Core/GuildGreet.lua",
         "Core/GuildMailComposer.lua",
         "Core/GuildWelcome.lua"

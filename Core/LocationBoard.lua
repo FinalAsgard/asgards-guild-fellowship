@@ -15,6 +15,8 @@ function LocationBoard.Create(options)
     options = options or {}
     return setmetatable({
         entries = {},
+        -- Characters whose last word was a gm-hide from inside an instance.
+        inside = {},
         isOwn = options.isOwn or function()
             return false
         end,
@@ -28,6 +30,7 @@ function Board:OnLocation(message, senderKey, now, senderName)
     if message.c ~= senderKey or self.isOwn(senderKey) then
         return false
     end
+    self.inside[senderKey] = nil
     self.entries[senderKey] = {
         key = senderKey,
         name = senderName,
@@ -44,7 +47,11 @@ end
 -- A valid `gm-hide` from character `senderKey`: that guildmate is off the
 -- map. Returns true when the board changed.
 function Board:OnHide(message, senderKey)
-    if message.c ~= senderKey or self.entries[senderKey] == nil then
+    if message.c ~= senderKey then
+        return false
+    end
+    self.inside[senderKey] = message.i == true or nil
+    if self.entries[senderKey] == nil then
         return false
     end
     self.entries[senderKey] = nil
@@ -75,6 +82,9 @@ end
 -- Drops character `key` (the game reported it offline, or a whisper to it
 -- found nobody playing). Returns true when the board changed.
 function Board:Drop(key)
+    if key ~= nil then
+        self.inside[key] = nil
+    end
     if key == nil or self.entries[key] == nil then
         return false
     end
@@ -88,6 +98,11 @@ end
 function Board:Keep(keep)
     local changed = false
     local key
+    for key in pairs(self.inside) do
+        if not keep(key) then
+            self.inside[key] = nil
+        end
+    end
     for key in pairs(self.entries) do
         if not keep(key) then
             self.entries[key] = nil
@@ -95,6 +110,12 @@ function Board:Keep(keep)
         end
     end
     return changed
+end
+
+-- Whether character `key` last said it's inside an instance (a gm-hide
+-- with `i`), and hasn't sent a location or gone offline since.
+function Board:Inside(key)
+    return key ~= nil and self.inside[key] == true
 end
 
 -- Every guildmate on the board, sorted by key: each { key, name, mapId, x,

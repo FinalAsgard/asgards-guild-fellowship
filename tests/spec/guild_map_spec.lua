@@ -210,6 +210,57 @@ test.test("inside an instance, one gm-hide goes out and the location resumes on 
     test.assertEqual("gm-loc", scheduler:Tick(state).t)
 end)
 
+test.test("a gm-hide says when it's from inside an instance, and goes again when the reason changes", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local scheduler = addon.LocationScheduler.Create()
+    local state = { now = 1000, character = "toolbox-area52", spot = SPOT, sharing = false }
+
+    local hide = scheduler:Tick(state)
+    test.assertEqual("gm-hide", hide.t)
+    test.assertEqual(nil, hide.i)
+    state.now = 1001
+    test.assertEqual(nil, scheduler:Tick(state))
+
+    -- Sharing off, then into a dungeon: one more, marked inside.
+    state.inInstance = true
+    state.now = 1002
+    hide = scheduler:Tick(state)
+    test.assertEqual(true, hide.i)
+    test.assertTrue(protocol.IsValid(hide))
+    state.now = 1003
+    test.assertEqual(nil, scheduler:Tick(state))
+
+    -- Out again with sharing still off: one unmarked.
+    state.inInstance = false
+    state.now = 1004
+    test.assertEqual(nil, scheduler:Tick(state).i)
+
+    -- Older versions' gm-hide has no `i`; a wrong one is ignored.
+    test.assertTrue(protocol.IsValid({ v = 1, t = "gm-hide", c = "toolbox-area52" }))
+    test.assertFalse(protocol.IsValid({ v = 1, t = "gm-hide", c = "toolbox-area52", i = "yes" }))
+end)
+
+test.test("the board knows who's inside an instance until they send a location or go offline", function()
+    local addon = load()
+    local protocol = addon.LocationProtocol
+    local board = addon.LocationBoard.Create()
+
+    board:OnHide(protocol.Hide("hammer-area52", true), "hammer-area52")
+    test.assertTrue(board:Inside("hammer-area52"))
+    board:OnLocation(protocol.Location("hammer-area52", SPOT), "hammer-area52", 1000)
+    test.assertFalse(board:Inside("hammer-area52"))
+
+    board:OnHide(protocol.Hide("hammer-area52", true), "hammer-area52")
+    board:OnHide(protocol.Hide("hammer-area52", false), "hammer-area52")
+    test.assertFalse(board:Inside("hammer-area52"), "sharing turned off outside")
+
+    board:OnHide(protocol.Hide("hammer-area52", true), "hammer-area52")
+    board:Drop("hammer-area52")
+    test.assertFalse(board:Inside("hammer-area52"))
+    test.assertFalse(board:Inside(nil))
+end)
+
 test.test("board entries expire 5 minutes after their last update", function()
     local addon = load()
     local protocol = addon.LocationProtocol
@@ -755,7 +806,7 @@ local function registerProfileTests(profile)
         local mapPins = buildPins(world, dots)
 
         test.assertTrue(mapPins:Start())
-        mapPins:Refresh()
+        mapPins:Draw()
 
         test.assertEqual(2, #pins.icons)
         local icon = pins.icons[1]
@@ -777,7 +828,7 @@ local function registerProfileTests(profile)
 
         -- Redrawn as the board changes, reusing its frames.
         table.remove(dots, 1)
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(1, #pins.icons)
         test.assertEqual(icon.icon, pins.icons[1].icon)
         test.assertEqual(1453, pins.icons[1].mapId)
@@ -790,7 +841,7 @@ local function registerProfileTests(profile)
         local zone = { mapId = 1429 }
         local mapPins = buildPins(world, dots, nil, zone)
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
 
         -- Only Hammer is in the player's zone.
         test.assertEqual(1, #pins.minimap)
@@ -811,21 +862,21 @@ local function registerProfileTests(profile)
 
         -- Moving, then leaving the board.
         dots[1] = { key = "hammer-area52", mapId = 1429, x = 0.7, y = 0.6, class = "MAGE", name = "Hammer", level = 42 }
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(1, #pins.minimap)
         test.assertEqual(0.7, pins.minimap[1].x)
         test.assertEqual(pin.icon, pins.minimap[1].icon)
         table.remove(dots, 1)
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(0, #pins.minimap)
 
         -- In another zone, the player sees that zone's guildmates.
         zone.mapId = 1453
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(1, #pins.minimap)
         -- And none where the client can't place the player.
         zone.mapId = nil
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(0, #pins.minimap)
     end)
 
@@ -837,17 +888,17 @@ local function registerProfileTests(profile)
         local markers = { { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } } }
         local mapPins = buildPins(world, { DOTS[1], DOTS[2] }, markers, { mapId = 1429 }, shown)
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(3, #pins.icons)
         test.assertEqual(1, #pins.minimap)
 
         shown.value = false
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(0, #pins.icons)
         test.assertEqual(0, #pins.minimap)
 
         shown.value = true
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(3, #pins.icons)
         test.assertEqual(1, #pins.minimap)
     end)
@@ -870,7 +921,7 @@ local function registerProfileTests(profile)
         }
         local mapPins = buildPins(world, {}, markers)
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
 
         local zone = iconsOn(pins, 1415)[1]
         local x, y = translated(0.4, 0.6, 1429, 1415)
@@ -926,7 +977,7 @@ local function registerProfileTests(profile)
         }
         local mapPins = buildPins(world, {}, markers)
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
 
         local drawn = iconsOn(pins, 947)
         test.assertEqual(0.25, drawn[1].x)
@@ -948,7 +999,7 @@ local function registerProfileTests(profile)
         }
         local mapPins = buildPins(world, {}, markers)
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
 
         test.assertEqual(0, #iconsOn(pins, 947))
         local drawn = worldIcons(pins)
@@ -968,7 +1019,7 @@ local function registerProfileTests(profile)
         world.environment.LibStub.libs["HereBeDragons-2.0"] = nil
         local direct = buildPins(world, {}, { markers[1] })
         direct:Start()
-        direct:Refresh()
+        direct:Draw()
         local onWorld = iconsOn(pins, 947)
         test.assertEqual(1, #onWorld)
         test.assertEqual(0.80, onWorld[1].x)
@@ -986,7 +1037,7 @@ local function registerProfileTests(profile)
         third.mapId, third.x, third.y = first.mapId, first.x + 0.005, first.y
         local mapPins = buildPins(world, { first, second, third })
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
 
         -- A dot's width is a hundredth of the map when the map can't say.
         local drawn = iconsOn(pins, 1429)
@@ -1006,7 +1057,7 @@ local function registerProfileTests(profile)
         end
         local crowded = buildPins(world, crowd)
         crowded:Start()
-        crowded:Refresh()
+        crowded:Draw()
         drawn = {}
         for index = 1, #pins.icons do
             if pins.icons[index].ref == crowded then
@@ -1025,7 +1076,7 @@ local function registerProfileTests(profile)
         world.environment.WorldMapFrame = { GetCanvas = function()
             return { GetWidth = function() return 1000 end }
         end }
-        mapPins:Refresh()
+        mapPins:Draw()
         drawn = iconsOn(pins, 1429)
         test.assertEqual(0.4 + 10 / 1000, drawn[2].x)
     end)
@@ -1042,7 +1093,7 @@ local function registerProfileTests(profile)
         local markers = { { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } } }
         local mapPins = buildPins(world, { DOTS[1], DOTS[2] }, markers, { mapId = 1429 })
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
 
         -- Closed: nothing on the world map, the minimap still drawn.
         test.assertEqual(0, #pins.icons)
@@ -1056,10 +1107,82 @@ local function registerProfileTests(profile)
 
         -- On the continent: its marker only.
         worldMap.mapId = 1415
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(1, #pins.icons)
         test.assertEqual(1415, pins.icons[1].mapId)
         test.assertTrue(pins.icons[1].icon.marker ~= nil)
+    end)
+
+    test.test(profile .. ": while the world map is closed, only the minimap's guildmates are worked out", function()
+        local world = fixtures.newEnvironment(profile)
+        local pins = installMap(world.environment)
+        local worldMap = { shown = false, mapId = 1429 }
+        function worldMap:IsShown() return self.shown end
+        function worldMap:GetMapID() return self.mapId end
+        function worldMap:HookScript(scriptName, hook) self[scriptName] = hook end
+        world.environment.WorldMapFrame = worldMap
+        local addon = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua", "Adapters/MapPins.lua",
+            "Core/LocationBoard.lua")
+        local asked = { dots = 0, nearby = 0, markers = 0 }
+        local mapPins = addon.MapPins.Create({
+            client = addon.Compatibility.Create(world.environment),
+            dots = function()
+                asked.dots = asked.dots + 1
+                return { DOTS[1], DOTS[2] }
+            end,
+            nearby = function(zone)
+                asked.nearby = asked.nearby + 1
+                test.assertEqual(1429, zone)
+                return { DOTS[1] }
+            end,
+            markers = function()
+                asked.markers = asked.markers + 1
+                return {}
+            end,
+            zone = function()
+                return 1429
+            end,
+        })
+        mapPins:Start()
+
+        mapPins:Draw()
+        test.assertEqual(0, asked.dots, "no world map dots, so no roster dots")
+        test.assertEqual(0, asked.markers)
+        test.assertEqual(1, asked.nearby)
+        test.assertEqual(1, #pins.minimap)
+        test.assertEqual(0, #pins.icons)
+
+        -- Opening the map draws everything at once.
+        worldMap.shown = true
+        worldMap.OnShow()
+        test.assertEqual(1, asked.dots)
+        test.assertEqual(1, asked.markers)
+        test.assertEqual(1, #pins.icons)
+    end)
+
+    test.test(profile .. ": redraws asked for close together are drawn once", function()
+        local world = fixtures.newEnvironment(profile)
+        installMap(world.environment)
+        local drawn = 0
+        local mapPins, addon = buildPins(world, { DOTS[1] })
+        local dots = mapPins.dots
+        mapPins.dots = function()
+            drawn = drawn + 1
+            return dots()
+        end
+        mapPins:Start()
+
+        mapPins:Refresh()
+        test.assertEqual(1, drawn, "the first at once")
+        mapPins:Refresh()
+        mapPins:Refresh()
+        mapPins:Refresh()
+        test.assertEqual(1, drawn)
+        fixtures.runTimers(world, 1)
+        test.assertEqual(2, drawn, "the rest once")
+        fixtures.runTimers(world, 5)
+        test.assertEqual(2, drawn)
+        test.assertEqual(0.5, addon.MapPins.BATCH_SECONDS)
     end)
 
     test.test(profile .. ": pointing at a zone or continent lists its guildmates on the map", function()
@@ -1090,7 +1213,7 @@ local function registerProfileTests(profile)
         }
         local mapPins = buildPins(world, {}, markers)
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
         local list = mapPins.areaList
         local function tick()
             mapPins.areaWatcher.scripts.OnUpdate(mapPins.areaWatcher, 0.2)
@@ -1127,7 +1250,7 @@ local function registerProfileTests(profile)
 
         -- Nothing listed once nobody's left there.
         table.remove(markers, 2)
-        mapPins:Refresh()
+        mapPins:Draw()
         tick()
         test.assertFalse(list.shown)
     end)
@@ -1149,7 +1272,7 @@ local function registerProfileTests(profile)
         }
         local mapPins = buildPins(world, { hammer, wrench }, markers, { mapId = 1429 })
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
 
         local zoneDots = iconsOn(pins, 1429)
         test.assertEqual(1, zoneDots[1].icon.alpha)
@@ -1181,7 +1304,7 @@ local function registerProfileTests(profile)
         end
         local mapPins = buildPins(world, {}, markers)
         mapPins:Start()
-        mapPins:Refresh()
+        mapPins:Draw()
         test.assertEqual(0, #pins.icons)
 
         table.insert(markers, { area = 1429, mapId = 1415, display = "dots", people = { DOTS[1] } })
@@ -1195,7 +1318,7 @@ local function registerProfileTests(profile)
         local mapPins = buildPins(world, DOTS)
 
         test.assertFalse(mapPins:Start())
-        mapPins:Refresh()
+        mapPins:Draw()
     end)
 end
 
@@ -1203,6 +1326,16 @@ end
 
 -- Logs in a world on the shared channel as `playerName`, standing at `spot`
 -- ({ mapID, x, y }) when given.
+-- Delivers the channel's messages, then lets each world draw the map
+-- redraws they asked for (see login).
+local function deliver(channel)
+    fixtures.deliver(channel)
+    local index
+    for index = 1, #channel.worlds do
+        fixtures.runTimers(channel.worlds[index])
+    end
+end
+
 local function login(profile, channel, playerName, spot, class, guild, prepare)
     local world = fixtures.newEnvironment(profile, { playerName = playerName, guild = guild })
     local pins = installMap(world.environment)
@@ -1224,6 +1357,10 @@ local function login(profile, channel, playerName, spot, class, guild, prepare)
     end
     fixtures.joinChannel(channel, world)
     world.addon = fixtures.loadAddon(world)
+    -- Map redraws asked for together are drawn once at the end of a short
+    -- batch (MapPins.BATCH_SECONDS); here they end with the next timers run,
+    -- so the clock stays on whole seconds.
+    world.addon.MapPins.BATCH_SECONDS = 0
     fixtures.fire(world, "ADDON_LOADED", world.addonName)
     world.loggedIn = true
     fixtures.fire(world, "PLAYER_LOGIN")
@@ -1265,7 +1402,7 @@ local function registerWholeAddonTests(profile)
 
         test.assertEqual(1, locationMessages(sharer))
         test.assertEqual("BULK", sharer.sentMessages[#sharer.sentMessages].priority)
-        fixtures.deliver(channel)
+        deliver(channel)
 
         local icons = viewer.pins.icons
         test.assertEqual(1, #icons)
@@ -1291,7 +1428,7 @@ local function registerWholeAddonTests(profile)
         end)
         login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
 
-        fixtures.deliver(channel)
+        deliver(channel)
 
         local pins = viewer.pins
         test.assertEqual(1, #iconsOn(pins, 1429))
@@ -1359,7 +1496,7 @@ local function registerWholeAddonTests(profile)
         -- Once the officer shares a position, that replaces the roster's.
         local officer = login(profile, channel, guild.members[1].name, { mapID = 1429, x = 0.25, y = 0.5 }, "WARRIOR")
         test.assertEqual(1, locationMessages(officer))
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(1, #iconsOn(pins, 1429))
         test.assertEqual(0, #iconsOn(pins, zoneId))
         people = iconsOn(pins, 1415)[1].icon.marker.people
@@ -1386,7 +1523,7 @@ local function registerWholeAddonTests(profile)
             local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
             local spot = { mapID = 1429, x = 0.25, y = 0.5 }
             local sharer = login(profile, channel, guild.members[3].name, spot, "MAGE")
-            fixtures.deliver(channel)
+            deliver(channel)
             local broadcasts = locationMessages(sharer)
 
             spot.x = 0.75
@@ -1407,18 +1544,20 @@ local function registerWholeAddonTests(profile)
         local spot = { mapID = 1429, x = 0.25, y = 0.5 }
         local sharer = login(profile, channel, guild.members[3].name, spot, "MAGE")
         sharer.addon.LocationScheduler.NEAR_ENABLED = true
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(0, #whispers(sharer))
 
         spot.x = 0.75
-        fixtures.runTimers(sharer, 5)
+        -- The tick already set (every 30 seconds) asks next; from then on
+        -- it asks every 5.
+        fixtures.runTimers(sharer, sharer.addon.LocationScheduler.TICK_SECONDS)
         local sent = whispers(sharer)
         test.assertEqual(1, #sent)
         test.assertEqual(guild.members[1].name, sent[1].recipient)
         test.assertEqual("BULK", sent[1].priority)
         -- Not yet time for the guild broadcast.
         test.assertEqual(1, locationMessages(sharer))
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(0.75, viewer.pins.icons[1].x)
         -- In the same zone, so on the minimap too.
         test.assertEqual(1, #viewer.pins.minimap)
@@ -1437,20 +1576,20 @@ local function registerWholeAddonTests(profile)
             local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
             local spot = { mapID = 1429, x = 0.25, y = 0.5 }
             local sharer = login(profile, channel, guild.members[3].name, spot, "MAGE")
-            fixtures.deliver(channel)
+            deliver(channel)
             -- The test guild is small, so one guildmate nearby counts as a crowd.
             sharer.addon.LocationScheduler.NEAR_GUILD_MIN = 1
             sharer.addon.LocationScheduler.NEAR_ENABLED = true
 
             spot.x = 0.75
-            fixtures.runTimers(sharer, 5)
+            fixtures.runTimers(sharer, sharer.addon.LocationScheduler.TICK_SECONDS)
             test.assertEqual(0, #whispers(sharer))
             local last = sharer.sentMessages[#sharer.sentMessages]
             test.assertEqual("GUILD", last.distribution)
             local _, message = sharer.environment.LibStub.libs["AceSerializer-3.0"]:Deserialize(last.text)
             test.assertEqual("gm-near", message.t)
             -- Heard over the guild like any location.
-            fixtures.deliver(channel)
+            deliver(channel)
             test.assertEqual(0.75, viewer.pins.icons[1].x)
         end)
 
@@ -1473,12 +1612,12 @@ local function registerWholeAddonTests(profile)
         local guild = fixtures.GUILDS[profile]
         local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
         local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(1, #viewer.pins.icons)
 
         test.assertTrue(sharer.addon.settings:Set("shareLocation", false))
         test.assertEqual(1, sentOfType(sharer, "gm-hide"))
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(0, #viewer.pins.icons)
         test.assertEqual(0, #viewer.pins.minimap)
 
@@ -1491,7 +1630,7 @@ local function registerWholeAddonTests(profile)
         test.assertTrue(sharer.addon.settings:Set("shareLocation", true))
         fixtures.runTimers(sharer, 5)
         test.assertEqual(2, sentOfType(sharer, "gm-loc"))
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(1, #viewer.pins.icons)
     end)
 
@@ -1500,13 +1639,14 @@ local function registerWholeAddonTests(profile)
         local guild = fixtures.GUILDS[profile]
         local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
         local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(1, #viewer.pins.icons)
 
+        -- Entering or leaving an instance is a zone change.
         sharer.inInstance = "party"
-        fixtures.runTimers(sharer, 5)
+        fixtures.fire(sharer, "ZONE_CHANGED_NEW_AREA")
         test.assertEqual(1, sentOfType(sharer, "gm-hide"))
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(0, #viewer.pins.icons)
 
         fixtures.runTimers(sharer, 300)
@@ -1515,9 +1655,9 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(0, sentOfType(sharer, "gm-near"))
 
         sharer.inInstance = nil
-        fixtures.runTimers(sharer, 5)
+        fixtures.fire(sharer, "ZONE_CHANGED_NEW_AREA")
         test.assertEqual(2, sentOfType(sharer, "gm-loc"))
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(1, #viewer.pins.icons)
     end)
 
@@ -1526,7 +1666,7 @@ local function registerWholeAddonTests(profile)
         local guild = fixtures.GUILDS[profile]
         login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
         local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
-        fixtures.deliver(channel)
+        deliver(channel)
 
         local inCombat = true
         sharer.environment.InCombatLockdown = function()
@@ -1540,22 +1680,64 @@ local function registerWholeAddonTests(profile)
         test.assertEqual(0, sentOfType(sharer, "gm-hide"))
 
         inCombat = false
-        fixtures.runTimers(sharer, 5)
+        fixtures.fire(sharer, "PLAYER_REGEN_ENABLED")
+        fixtures.runTimers(sharer, 1)
         test.assertEqual(1, sentOfType(sharer, "gm-hide"))
     end)
 
-    test.test(profile .. ": in the whole add-on, a guildmate's dot clears after 5 minutes without an update", function()
+    test.test(profile .. ": in the whole add-on, the location timer asks every 30 seconds, not every 5", function()
+        local channel = fixtures.newChannel()
+        local guild = fixtures.GUILDS[profile]
+        local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
+        -- Logging in is a zone change too, asked again 10 seconds later.
+        fixtures.runTimers(sharer, 15)
+        local asked = 0
+        local position = sharer.environment.C_Map.GetPlayerMapPosition
+        sharer.environment.C_Map.GetPlayerMapPosition = function(...)
+            asked = asked + 1
+            return position(...)
+        end
+
+        fixtures.runTimers(sharer, 14)
+        test.assertEqual(0, asked, "nothing asked before the next 30-second tick")
+        fixtures.runTimers(sharer, 1)
+        test.assertTrue(asked > 0, "asked at 30 seconds")
+        -- The 2-minute broadcast still goes out on time.
+        local sent = locationMessages(sharer)
+        fixtures.runTimers(sharer, 90)
+        test.assertEqual(sent + 1, locationMessages(sharer))
+    end)
+
+    test.test(profile .. ": in the whole add-on, a zone change inside the 10-second gap goes out once it ends",
+        function()
+            local channel = fixtures.newChannel()
+            local guild = fixtures.GUILDS[profile]
+            local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 },
+                "MAGE")
+            test.assertEqual(1, locationMessages(sharer))
+
+            fixtures.runTimers(sharer, 3)
+            sharer.zone.mapID = 1453
+            fixtures.fire(sharer, "ZONE_CHANGED_NEW_AREA")
+            test.assertEqual(1, locationMessages(sharer), "held within the gap")
+            fixtures.runTimers(sharer, sharer.addon.LocationScheduler.MIN_GAP_SECONDS)
+
+            test.assertEqual(2, locationMessages(sharer), "sent once the gap ended")
+        end)
+
+    test.test(profile .. ": in the whole add-on, a guildmate's dot clears 5 minutes without an update, within a tick",
+        function()
         local channel = fixtures.newChannel()
         local guild = fixtures.GUILDS[profile]
         local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
         login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(1, #viewer.pins.icons)
 
         -- The sharer's updates stop arriving.
         fixtures.runTimers(viewer, 295)
         test.assertEqual(1, #viewer.pins.icons)
-        fixtures.runTimers(viewer, 5)
+        fixtures.runTimers(viewer, viewer.addon.LocationScheduler.TICK_SECONDS + 5)
         test.assertEqual(0, #viewer.pins.icons)
         test.assertEqual(0, #viewer.pins.minimap)
     end)
@@ -1569,7 +1751,7 @@ local function registerWholeAddonTests(profile)
             local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
             local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 },
                 "MAGE")
-            fixtures.deliver(channel)
+            deliver(channel)
             test.assertEqual(1, #viewer.pins.icons, kinds[index])
 
             if kinds[index] == "offline" then
@@ -1578,7 +1760,7 @@ local function registerWholeAddonTests(profile)
                 table.remove(viewer.guild.members, 3)
             end
             fixtures.fire(viewer, "GUILD_ROSTER_UPDATE")
-            fixtures.runTimers(viewer)
+            fixtures.runTimers(viewer, 1)
             test.assertEqual(0, #viewer.pins.icons, kinds[index])
 
             -- And it gets no more whispers from the viewer.
@@ -1622,7 +1804,7 @@ local function registerWholeAddonTests(profile)
                 viewer.addon.LocationScheduler.NEAR_ENABLED = true
                 local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 },
                     "MAGE")
-                fixtures.deliver(channel)
+                deliver(channel)
                 fixtures.runTimers(viewer, 10)
                 local whispered = whispersTo(viewer, sharer.playerName)
                 test.assertTrue(whispered > 0, kinds[index])
@@ -1657,6 +1839,44 @@ local function registerWholeAddonTests(profile)
             end
         end)
 
+    test.test(profile .. ": in the whole add-on, system lines aren't looked at unless the add-on whispered lately",
+        function()
+            local filters = {}
+            local checked = 0
+            local channel = fixtures.newChannel()
+            local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR", nil,
+                function(environment)
+                    environment.ChatFrame_AddMessageEventFilter = function(event, filter)
+                        filters[event] = filters[event] or {}
+                        table.insert(filters[event], filter)
+                    end
+                    environment.issecretvalue = function()
+                        checked = checked + 1
+                        return false
+                    end
+                end)
+            local function hidden(message)
+                local filter
+                for _, filter in ipairs(filters.CHAT_MSG_SYSTEM or {}) do
+                    if filter(nil, "CHAT_MSG_SYSTEM", message, "") == true then
+                        return true
+                    end
+                end
+                return false
+            end
+
+            checked = 0
+            test.assertFalse(hidden("No player named 'Stranger' is currently playing."))
+            test.assertEqual(0, checked, "nothing whispered: the line isn't even checked")
+
+            test.assertTrue(viewer.addon.comm:Whisper({ t = "gm-near" }, "Stranger"))
+            test.assertTrue(hidden("No player named 'Stranger' is currently playing."))
+            fixtures.runTimers(viewer, viewer.addon.Comm.WHISPER_ANSWER_SECONDS + 1)
+            checked = 0
+            test.assertFalse(hidden("No player named 'Stranger' is currently playing."))
+            test.assertEqual(0, checked, "the whisper is long past")
+        end)
+
     test.test(profile .. ": in the whole add-on, a party member gets no dot and others outside it are dimmed", function()
         local channel = fixtures.newChannel()
         local guild = fixtures.GUILDS[profile]
@@ -1666,7 +1886,7 @@ local function registerWholeAddonTests(profile)
                 environment.C_Map.GetMapInfo = treeMaps().GetMapInfo
             end)
         login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
-        fixtures.deliver(channel)
+        deliver(channel)
         local pins = viewer.pins
         test.assertEqual(1, iconsOn(pins, 1429)[1].icon.alpha)
 
@@ -1678,6 +1898,7 @@ local function registerWholeAddonTests(profile)
         environment.UnitExists = function(unit) return units[unit] ~= nil end
         environment.UnitName = function(unit) return units[unit] end
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        fixtures.runTimers(viewer)
         test.assertEqual(DIM_ALPHA, iconsOn(pins, 1429)[1].icon.alpha)
         test.assertEqual(DIM_ALPHA, pins.minimap[1].icon.alpha)
 
@@ -1685,6 +1906,7 @@ local function registerWholeAddonTests(profile)
         -- but still counted, undimmed, in the continent and world markers.
         units.party1 = unitName(profile, guild.members[3].name)
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        fixtures.runTimers(viewer)
         test.assertEqual(0, #iconsOn(pins, 1429))
         test.assertEqual(0, #pins.minimap)
         local zone = iconsOn(pins, 1415)[1].icon
@@ -1696,6 +1918,7 @@ local function registerWholeAddonTests(profile)
         environment.IsInGroup = function() return false end
         units.party1 = nil
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        fixtures.runTimers(viewer)
         test.assertEqual(1, #iconsOn(pins, 1429))
         test.assertEqual(1, iconsOn(pins, 1429)[1].icon.alpha)
         test.assertEqual(1, #pins.minimap)
@@ -1706,7 +1929,7 @@ local function registerWholeAddonTests(profile)
         local guild = fixtures.GUILDS[profile]
         local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
         login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
-        fixtures.deliver(channel)
+        deliver(channel)
         local pins = viewer.pins
 
         -- A party with the sharer...
@@ -1721,6 +1944,7 @@ local function registerWholeAddonTests(profile)
             return units[unit] ~= nil and units[unit] == units[other]
         end
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        fixtures.runTimers(viewer)
         test.assertEqual(0, #iconsOn(pins, 1429))
 
         -- ...converted to a raid, the sharer in another subgroup: the game
@@ -1729,12 +1953,14 @@ local function registerWholeAddonTests(profile)
         units = { player = guild.members[1].name, raid1 = guild.members[1].name, raid2 = "Stranger",
             raid7 = unitName(profile, guild.members[3].name) }
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        fixtures.runTimers(viewer)
         test.assertEqual(0, #iconsOn(pins, 1429))
         test.assertEqual(0, #pins.minimap)
 
         -- The sharer leaves the raid: drawn again, dimmed.
         units.raid7 = nil
         fixtures.fire(viewer, "GROUP_ROSTER_UPDATE")
+        fixtures.runTimers(viewer)
         test.assertEqual(1, #iconsOn(pins, 1429))
         test.assertEqual(DIM_ALPHA, iconsOn(pins, 1429)[1].icon.alpha)
     end)
@@ -1744,15 +1970,19 @@ local function registerWholeAddonTests(profile)
         local guild = fixtures.GUILDS[profile]
         local viewer = login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
         login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
-        fixtures.deliver(channel)
+        deliver(channel)
         test.assertEqual(1, #viewer.pins.minimap)
 
         test.assertTrue(viewer.addon.settings:Set("showGuildMap", false))
+
+        fixtures.runTimers(viewer)
         test.assertEqual(0, #viewer.pins.icons)
         test.assertEqual(0, #viewer.pins.minimap)
         test.assertFalse(viewer.database.guildMap.show)
 
         test.assertTrue(viewer.addon.settings:Set("showGuildMap", true))
+
+        fixtures.runTimers(viewer)
         test.assertEqual(1, #viewer.pins.icons)
     end)
 
@@ -1761,7 +1991,7 @@ local function registerWholeAddonTests(profile)
         local guild = fixtures.GUILDS[profile]
         login(profile, channel, nil, { mapID = 1429, x = 0.5, y = 0.5 }, "WARRIOR")
         local sharer = login(profile, channel, guild.members[3].name, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE")
-        fixtures.deliver(channel)
+        deliver(channel)
         sharer.whisperFails = true
 
         fixtures.runTimers(sharer, 5)
@@ -1783,7 +2013,7 @@ local function registerWholeAddonTests(profile)
         local outsider = login(profile, channel, stranger, { mapID = 1429, x = 0.25, y = 0.5 }, "MAGE", theirGuild)
         test.assertEqual(1, locationMessages(outsider))
 
-        fixtures.deliver(channel)
+        deliver(channel)
 
         test.assertEqual(0, #viewer.pins.icons)
     end)

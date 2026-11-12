@@ -508,6 +508,44 @@ test.test("a forged relay while the officer is online is corrected at once", fun
         ~= nil, shown)
 end)
 
+test.test("probe greet counts the guildmates online whose add-on was heard this session, and the user", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local hammer = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+    local function probed()
+        local printed = #hammer.messages
+        fixtures.slash(hammer, "probe greet")
+        return table.concat(hammer.messages, "\n", printed + 1)
+    end
+    test.assertTrue(string.find(probed(), "counting you: 1", 1, true) ~= nil)
+
+    -- Toolbox and Wrench announce; Grandmaster is online without the add-on.
+    announce(officer)
+    announce(wrench)
+    fixtures.deliver(channel)
+    hammer.addon.guildGreet.store():SetGreetWeight({ weight = 2, at = hammer.time })
+
+    local shown = probed()
+    test.assertTrue(string.find(shown, "counting you: 3", 1, true) ~= nil, shown)
+    test.assertTrue(string.find(shown, "New prompts wait 5.0 seconds longer", 1, true) ~= nil, shown)
+
+    -- Wrench goes into a dungeon: no longer counted, so no extra wait.
+    wrench.inInstance = "party"
+    fixtures.runTimers(wrench, 30)
+    fixtures.deliver(channel)
+    shown = probed()
+    test.assertTrue(string.find(shown, "counting you: 2", 1, true) ~= nil, shown)
+    test.assertTrue(string.find(shown, "No extra wait", 1, true) ~= nil, shown)
+
+    -- A reload forgets who was heard until they're heard again.
+    local reloaded = login(channel, "Hammer-Area52", { database = hammer.database })
+    local printed = #reloaded.messages
+    fixtures.slash(reloaded, "probe greet")
+    shown = table.concat(reloaded.messages, "\n", printed + 1)
+    test.assertTrue(string.find(shown, "counting you: 1", 1, true) ~= nil, shown)
+end)
+
 -- `name` leaves `world`'s guild, and a full scan of its roster notices.
 local function leaveGuild(world, name)
     local members = world.guild.members
@@ -642,6 +680,53 @@ test.test("an alias set after a main change lands on the right player", function
     test.assertEqual("Smith", aliasOf(member, "toolbox-area52"))
     test.assertEqual("Smith", aliasOf(member, "hammer-area52"))
     test.assertEqual(nil, aliasOf(member, "wrench-area52"))
+end)
+
+test.test("a member holding a stale link doesn't hand one player's alias to another, or pass it on", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local stale = login(channel, "Hammer-Area52")
+    local wrench = login(channel, "Wrench-Area52")
+    fixtures.deliver(channel)
+    -- On Hammer's install, Wrench wrongly sits in the Grandmaster's player.
+    partitionOf(stale):JoinPlayerOf("wrench-area52", "grandmaster-area52", "manual")
+
+    -- The officer names Wrench's player and links Hammer to it, then names
+    -- the Grandmaster's. Hammer's link (named before Wrench's) arrives first.
+    test.assertTrue(officer.addon.rosterController:SetAlias("wrench-area52", "Wrenchy"))
+    linkAlt(officer, "hammer-area52", "wrench-area52")
+    officer.time = officer.time + 60
+    test.assertTrue(officer.addon.rosterController:SetAlias("grandmaster-area52", "Gramps"))
+    fixtures.deliver(channel)
+
+    -- The Grandmaster's player is left alone; Wrench and Hammer are a
+    -- player of their own.
+    test.assertEqual("wrench-area52", mainOf(stale, "hammer-area52"))
+    test.assertEqual("grandmaster-area52", mainOf(stale, "grandmaster-area52"))
+    test.assertEqual("Gramps", aliasOf(stale, "grandmaster-area52"))
+    test.assertTrue(aliasOf(stale, "wrench-area52") ~= "Gramps", "the Grandmaster's alias stays with them")
+
+    -- Hammer's next sync catches up on Wrench's alias, and passes nothing
+    -- wrong on.
+    announce(stale)
+    fixtures.deliver(channel)
+    fixtures.runTimers(officer, 5)
+    fixtures.runTimers(wrench, 5)
+    fixtures.deliver(channel)
+    fixtures.deliver(channel)
+    test.assertEqual("Wrenchy", aliasOf(stale, "wrench-area52"))
+    test.assertEqual("Wrenchy", aliasOf(wrench, "wrench-area52"))
+    test.assertEqual("Gramps", aliasOf(wrench, "grandmaster-area52"))
+    test.assertEqual("Wrenchy", aliasOf(officer, "wrench-area52"))
+
+    -- Probing the player shows its alias's stamp and what changed.
+    local printed = #stale.messages
+    fixtures.slash(stale, "probe player Wrenchy")
+    local shown = table.concat(stale.messages, "\n", printed + 1)
+    test.assertTrue(string.find(shown, 'Player Wrench, alias "Wrenchy"', 1, true) ~= nil, shown)
+    test.assertTrue(string.find(shown, "Alias stamped", 1, true) ~= nil, shown)
+    test.assertTrue(string.find(shown, 'Alias changed from none to "Wrenchy", by Toolbox (guild sync)', 1, true)
+        ~= nil, shown)
 end)
 
 -- Upgrading from before sync --------------------------------------------------
@@ -916,6 +1001,8 @@ test.test("a member's suggestions wait until an officer is online", function()
     local hammer = login(channel, "Hammer-Area52")
     hammer.guild.members[1].online = false
     hammer.guild.members[2].online = false
+    -- The game's roster says so with a roster update.
+    fixtures.fire(hammer, "GUILD_ROSTER_UPDATE")
 
     linkAlt(hammer, "wrench-area52", "hammer-area52")
     test.assertEqual(0, #hammer.sentMessages, "no officer online: nothing sent")

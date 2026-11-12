@@ -18,6 +18,7 @@ Libs/HereBeDragons/HereBeDragons-2.0.lua
 Libs/HereBeDragons-Pins/HereBeDragons-Pins-2.0.lua
 
 Core/Identity.lua
+Core/PerfCounters.lua
 Adapters/ClientProfile.lua
 Adapters/WoW.lua
 Adapters/MasterFrame.lua
@@ -55,6 +56,7 @@ Core/SyncDigest.lua
 Core/SuggestionService.lua
 Core/SuggestionBundles.lua
 Core/SyncLedger.lua
+Core/PlayerAudit.lua
 Core/SyncSession.lua
 Core/ScanScheduler.lua
 Core/PageNavigator.lua
@@ -67,6 +69,7 @@ Core/GreetPolicy.lua
 Core/GreetingLibrary.lua
 Core/GreetPromptQueue.lua
 Core/GreetTally.lua
+Core/GreetWeight.lua
 Core/GuildGreet.lua
 Core/RecruitLedger.lua
 Core/RecruitPolicy.lua

@@ -9,6 +9,7 @@ local function load()
         "Core/PlayerService.lua",
         "Core/RosterViewModel.lua",
         "Core/GreetingLibrary.lua",
+        "Core/GreetWeight.lua",
         "Core/GuildGreet.lua",
         "Core/GuildMailAudience.lua",
         "Core/GuildMailComposer.lua",
@@ -2185,6 +2186,69 @@ test.test("guild mail: /agf mail tells a non-officer it's for officers", functio
     test.assertContains(world.messages[before + 1], addon.GuildMail.OFFICERS_ONLY)
 end)
 
+-- Whether any of `world`'s frames hears `eventName`.
+local function hears(world, eventName)
+    local index
+    for index = 1, #world.frames do
+        if world.frames[index].registeredEvents[eventName] then
+            return true
+        end
+    end
+    return false
+end
+
+local mailProfileIndex
+for mailProfileIndex = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[mailProfileIndex]
+
+    test.test(profile .. ": guild mail hears game errors, money and blocked calls only while the mailbox is open",
+        function()
+            local world = fixtures.newEnvironment(profile, {})
+            fixtures.loadAddon(world)
+            fixtures.fire(world, "ADDON_LOADED", world.addonName)
+            world.loggedIn = true
+            fixtures.fire(world, "PLAYER_LOGIN")
+            local gated = { "UI_ERROR_MESSAGE", "PLAYER_MONEY", "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN" }
+            local index
+
+            test.assertTrue(hears(world, "MAIL_SHOW"))
+            for index = 1, #gated do
+                test.assertFalse(hears(world, gated[index]), gated[index] .. " before the mailbox opens")
+            end
+            fixtures.fire(world, "MAIL_SHOW")
+            for index = 1, #gated do
+                test.assertTrue(hears(world, gated[index]), gated[index] .. " while it's open")
+            end
+            fixtures.fire(world, "MAIL_CLOSED")
+            for index = 1, #gated do
+                test.assertFalse(hears(world, gated[index]), gated[index] .. " once it closed")
+            end
+        end)
+end
+
+test.test("guild mail: a mail still waiting for the game's answer keeps game errors heard after the mailbox closes",
+    function()
+        local _, world = newMail()
+        test.assertFalse(world.mail:WantsGameEvents())
+        readyToSend(world)
+        test.assertTrue(world.mail:WantsGameEvents())
+        world.mail:RequestSend()
+        world.mail:Confirm()
+
+        world.mail:OnMailboxClosed()
+        test.assertTrue(world.mail:WantsGameEvents(), "the mail in flight")
+        world.mail:OnFailed(nil)
+        test.assertTrue(world.mail:OnError("Mailbox full"), "the failure's reason still arrives")
+        test.assertFalse(world.mail:WantsGameEvents())
+    end)
+
+test.test("guild mail: an error with nothing waiting on the game is ignored without reading it", function()
+    local _, world = newMail()
+
+    test.assertFalse(world.mail:OnError({ "not even text" }))
+    test.assertFalse(world.mail:OnError("Out of range."))
+end)
+
 -- Saved draft ---------------------------------------------------------------
 
 test.test("guild mail: the draft and filter choices are saved as they change", function()
@@ -2364,7 +2428,10 @@ test.test("guild mail outbox: Send saves the send, and each answer as it comes",
     test.assertEqual(30, entry.perMail)
     test.assertEqual(addon.GuildMailSender.SENDING, entry.state)
     test.assertEqual("Ann Bell", entry.recipients[1].name)
-    test.assertEqual("Join us on Discord!", entry.recipients[1].body)
+    -- Kept as the values its placeholders were filled with (none here),
+    -- not as the filled-in text.
+    test.assertEqual(nil, entry.recipients[1].body)
+    test.assertEqual("table", type(entry.recipients[1].values))
     test.assertTrue(entry.recipients[1].inFlight)
 
     world.mail:OnSent()
@@ -2500,6 +2567,80 @@ test.test("guild mail outbox: finished and unusable entries aren't put back", fu
     test.assertFalse(after.view.model.sending)
     test.assertEqual(nil, after.view.model.progressText)
 end)
+
+test.test("guild mail outbox: each recipient keeps only its placeholder values, and is mailed word for word after a reload",
+    function()
+        local _, world = newMail()
+        readyToSend(world)
+        world.mail:SetSubject("News for {name}")
+        world.mail:SetBody("Hi {character}! A long message that every recipient would otherwise store in full.")
+        world.mail:RequestSend()
+        world.mail:Confirm()
+        world.mail:OnSent()
+        world.outbox[1].recipients[2].inFlight = nil
+        local saved = world.outbox[1].recipients[2]
+        test.assertEqual(nil, saved.subject)
+        test.assertEqual(nil, saved.body)
+        test.assertEqual("Gus Reed", saved.values.name)
+        test.assertEqual("Gus Reed", saved.values.character)
+        test.assertEqual(nil, saved.values.main, "only the placeholders the mail uses")
+
+        local _, after = reload(world)
+        after.mail:ResumeEntry(1)
+        after.mail:Confirm()
+
+        local last = after.sent[#after.sent]
+        test.assertEqual("News for Gus Reed", last.subject)
+        test.assertEqual("Hi Gus Reed! A long message that every recipient would otherwise store in full.", last.body)
+        -- Viewing the send shows the first recipient's mail as it went.
+        after.mail:ViewEntry(1)
+        test.assertEqual("News for Ann Bell", after.view.model.entry.preview.subject)
+    end)
+
+test.test("guild mail outbox: a mail that doesn't rebuild from its values is kept in full", function()
+    local addon = newMail()
+    local composer = addon.GuildMailComposer
+    local names = { name = "Annie", character = "Ann Bell" }
+
+    test.assertEqual(nil, composer.Values("Hi {name}", "", { subject = "Hi Ann", body = "", names = names }))
+    test.assertEqual(nil, composer.Values("Hi", "", { subject = "Hi", body = "" }), "no values to rebuild from")
+    local values = composer.Values("Hi {NAME}", "{character}", { subject = "Hi Annie", body = "Ann Bell",
+        names = names })
+    test.assertEqual("Annie", values.name)
+    test.assertEqual("Hi Annie", (composer.Rebuild("Hi {NAME}", "{character}", values)))
+end)
+
+test.test("guild mail outbox: an older entry is compacted only where its text rebuilds exactly, and loses nothing",
+    function()
+        local entry = {
+            subject = "News for {name}", body = "Hi {character}!", by = "tool box-camelot", at = 4000, perMail = 30,
+            state = "done",
+            recipients = {
+                { key = "ann bell-camelot", name = "Ann Bell", rank = 2, subject = "News for Ann Bell",
+                    body = "Hi Ann Bell!", status = "sent" },
+                -- Filled in with a name Gus no longer goes by.
+                { key = "gus reed-camelot", name = "Gus Reed", rank = 2, subject = "News for Gustav",
+                    body = "Hi Gus Reed!", status = "sent" },
+            },
+        }
+        local addon, world = newMail({ outbox = { entry } })
+
+        world.mail:OnMailboxOpened()
+
+        test.assertEqual(1, #world.outbox)
+        test.assertEqual(2, #entry.recipients)
+        local ann, gus = entry.recipients[1], entry.recipients[2]
+        test.assertEqual(nil, ann.subject)
+        test.assertEqual("Ann Bell", ann.values.name)
+        test.assertEqual("sent", ann.status)
+        test.assertEqual("News for Gustav", gus.subject)
+        test.assertEqual("Hi Gus Reed!", gus.body)
+        test.assertEqual(nil, gus.values)
+        -- Shown as before.
+        local subject, body = addon.GuildMailComposer.Rebuild(entry.subject, entry.body, ann.values)
+        test.assertEqual("News for Ann Bell", subject)
+        test.assertEqual("Hi Ann Bell!", body)
+    end)
 
 -- Guild Mail tab ----------------------------------------------------------------
 

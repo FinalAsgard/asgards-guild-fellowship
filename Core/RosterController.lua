@@ -6,6 +6,13 @@ local _, addon = ...
 -- Opening the window never scans: it only reads live roster facts for
 -- display. Scans are the ScanScheduler's job (daily at login, new members
 -- as they appear, and on request).
+-- Counts an expensive operation for `/agf perf`.
+local function bump(name)
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump(name)
+    end
+end
+
 local RosterController = {}
 addon.RosterController = RosterController
 
@@ -125,11 +132,18 @@ function Controller:Print(message)
     self.client:Print(addon.Identity.chatPrefix .. " " .. message)
 end
 
+-- The name normalizer for `guild`, made once per guild and reused: it only
+-- depends on the guild's home realm and the client's name rules.
 function Controller:Normalizer(guild)
-    return addon.NameNormalizer.Create({
-        homeRealm = guild.realm,
-        twoPartNames = self.nameRules.twoPartNames,
-    })
+    local key = addon.FellowshipStore.PartitionKey(guild) or tostring(guild.realm)
+    self.normalizers = self.normalizers or {}
+    if self.normalizers[key] == nil then
+        self.normalizers[key] = addon.NameNormalizer.Create({
+            homeRealm = guild.realm,
+            twoPartNames = self.nameRules.twoPartNames,
+        })
+    end
+    return self.normalizers[key]
 end
 
 function Controller:Store()
@@ -216,13 +230,11 @@ end
 function Controller:FindInRoster(normalizer, fullName, guid)
     local firstName = normalizer:FirstName(fullName)
     local byName
-    local count = self.client:GetGuildRosterCount() or 0
-    local index
-    for index = 1, count do
-        local member = self.client:GetGuildMember(index)
+    local key, member
+    for key, member in pairs(self:LiveMembers(normalizer)) do
         if member ~= nil then
             if guid ~= nil and member.guid == guid then
-                return normalizer:Key(member.name)
+                return key
             end
             -- A member whose GUID differs is someone else with that first
             -- name (an outsider in the party, say).
@@ -265,8 +277,25 @@ function Controller:OnSavedDataReady()
 end
 
 function Controller:OnRosterUpdate()
+    -- The shared roster copy is stale now (see LiveMembers).
+    self.rosterGeneration = (self.rosterGeneration or 0) + 1
+    self.snapshot = nil
     self.scheduler:OnRosterUpdate()
-    self:Invalidate()
+    self:Invalidate(true)
+end
+
+-- Changes whenever saved data the roster shows changes (local edits,
+-- scans, guild sync), not on roster updates alone.
+function Controller:DataRevision()
+    return self.dataRevision or 0
+end
+
+-- A stamp for things worked out from saved data and the roster's notes,
+-- ranks and levels (the guild note audit): it changes when saved data or
+-- what the roster says about anyone changes, not on every roster update.
+-- Read the roster (LiveMembers) first, so a new update is counted.
+function Controller:AuditStamp(partition)
+    return partition.key .. "#" .. tostring(self.dataRevision or 0) .. "#" .. tostring(self.rosterVersion or 0)
 end
 
 -- `/agf rescan` and the Rescan button.
@@ -1042,9 +1071,41 @@ function Controller:ToggleOnlineOnly()
     return self.onlineOnly
 end
 
+-- True when two roster reads hold the same characters with the same notes,
+-- ranks and levels.
+local function sameRosterFacts(members, last)
+    if last == nil then
+        return false
+    end
+    local count = 0
+    local key, member
+    for key, member in pairs(members) do
+        local before = last[key]
+        if before == nil or before.note ~= member.note or before.rankIndex ~= member.rankIndex
+            or before.level ~= member.level
+        then
+            return false
+        end
+        count = count + 1
+    end
+    for _ in pairs(last) do
+        count = count - 1
+    end
+    return count == 0
+end
+
 -- Live roster facts for display, keyed by character key. Unlike a scan,
 -- this tolerates a partial roster.
+--
+-- The roster is read once per roster update and that one copy is shared by
+-- every caller until the next update (OnRosterUpdate): callers must treat
+-- it as read-only. An empty roster (not loaded yet) is read again next time.
 function Controller:LiveMembers(normalizer)
+    local snapshot = self.snapshot
+    if snapshot ~= nil and snapshot.normalizer == normalizer and snapshot.generation == self.rosterGeneration then
+        return snapshot.members
+    end
+    bump("rosterReads")
     local members = {}
     local count = self.client:GetGuildRosterCount() or 0
     local index
@@ -1055,6 +1116,14 @@ function Controller:LiveMembers(normalizer)
             members[key] = member
         end
     end
+    if next(members) ~= nil then
+        self.snapshot = { normalizer = normalizer, generation = self.rosterGeneration, members = members }
+        -- What the roster says about anyone changed (see AuditStamp).
+        if not sameRosterFacts(members, self.lastMembers) then
+            self.rosterVersion = (self.rosterVersion or 0) + 1
+        end
+        self.lastMembers = members
+    end
     return members
 end
 
@@ -1062,6 +1131,7 @@ end
 -- setting): bump the revision and redraw.
 function Controller:Refresh()
     self.revision = (self.revision or 0) + 1
+    self.dataRevision = (self.dataRevision or 0) + 1
     self:Redraw()
     self:NotifyChanged()
 end
@@ -1074,9 +1144,13 @@ end
 
 -- Data changed: the rows are stale even while the window is hidden, so the
 -- next open rebuilds them. Only a shown window redraws now, or the player
--- panel when it's open on its own.
-function Controller:Invalidate()
+-- panel when it's open on its own. `fromRoster` when it's only the live
+-- roster that may have changed (a roster update), not saved data.
+function Controller:Invalidate(fromRoster)
     self.revision = (self.revision or 0) + 1
+    if not fromRoster then
+        self.dataRevision = (self.dataRevision or 0) + 1
+    end
     if self.window ~= nil and self.window:IsShown() then
         self:Redraw()
     elseif self.selected ~= nil then

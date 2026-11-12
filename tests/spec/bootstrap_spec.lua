@@ -3,6 +3,7 @@ local fixtures = require("tests.client_fixtures")
 
 local MANIFEST_FILES = {
     "Core/Identity.lua",
+    "Core/PerfCounters.lua",
     "Adapters/ClientProfile.lua",
     "Adapters/WoW.lua",
     "Adapters/MasterFrame.lua",
@@ -40,6 +41,7 @@ local MANIFEST_FILES = {
     "Core/SuggestionService.lua",
     "Core/SuggestionBundles.lua",
     "Core/SyncLedger.lua",
+    "Core/PlayerAudit.lua",
     "Core/SyncSession.lua",
     "Core/ScanScheduler.lua",
     "Core/PageNavigator.lua",
@@ -52,6 +54,7 @@ local MANIFEST_FILES = {
     "Core/GreetingLibrary.lua",
     "Core/GreetPromptQueue.lua",
     "Core/GreetTally.lua",
+    "Core/GreetWeight.lua",
     "Core/GuildGreet.lua",
     "Core/RecruitLedger.lua",
     "Core/RecruitPolicy.lua",

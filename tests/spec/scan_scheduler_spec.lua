@@ -98,6 +98,127 @@ test.test("a roster update with a known character's new rank records it", functi
     test.assertEqual(2, #setup.finished)
 end)
 
+-- Counts the reconcile plans `setup` builds from now on.
+local function countPlans(setup)
+    local counted = { plans = 0 }
+    local plan = setup.addon.ReconcileEngine.Plan
+    setup.addon.ReconcileEngine.Plan = function(inputs)
+        counted.plans = counted.plans + 1
+        return plan(inputs)
+    end
+    return counted
+end
+
+local function update(setup)
+    setup.scheduler:OnRosterUpdate()
+    fixtures.runTimers(setup.world, 2)
+end
+
+test.test("an incremental check of an unchanged roster isn't planned at all", function()
+    local setup = build()
+    setup.login()
+    local counted = countPlans(setup)
+
+    -- The login scan stored new characters, so the first check plans once
+    -- and finds nothing; from then on, an unchanged roster isn't planned.
+    update(setup)
+    test.assertEqual(1, counted.plans)
+    update(setup)
+    update(setup)
+
+    test.assertEqual(1, counted.plans)
+    test.assertEqual(1, #setup.finished)
+end)
+
+test.test("an incremental check still picks up a note, rank or level change, a newcomer and a departure", function()
+    local members = nil
+    local changes = {
+        function(guild)
+            guild.members[2].note = "Tank >Toolbox"
+        end,
+        function(guild)
+            guild.members[3].rank = 2
+        end,
+        function(guild)
+            guild.members[3].level = 81
+        end,
+        function(guild)
+            table.insert(guild.members, { name = "Newbie-Area52", class = "ROGUE", level = 10, rank = 4,
+                rankName = "Initiate", online = true, zone = "Dornogal" })
+        end,
+        function(guild)
+            table.remove(guild.members, 3)
+        end,
+    }
+    local index
+    for index = 1, #changes do
+        local setup = build()
+        setup.login()
+        update(setup)
+        local counted = countPlans(setup)
+        members = setup.world.guild.members
+
+        changes[index](setup.world.guild)
+        update(setup)
+
+        test.assertEqual(1, counted.plans, "change " .. index .. " is planned")
+    end
+    test.assertTrue(members ~= nil)
+end)
+
+test.test("an incremental check is planned again once the store changed what a scan depends on", function()
+    local setup = build()
+    setup.login()
+    local counted = countPlans(setup)
+    local hammer = setup.normalizer:Key(setup.world.guild.members[2].name)
+
+    -- A guild sync edit marks a note to be read again.
+    setup.partition():ForgetNoteFingerprint(hammer)
+    update(setup)
+
+    test.assertEqual(1, counted.plans)
+    update(setup)
+    test.assertEqual(1, counted.plans, "then quiet again")
+end)
+
+test.test("a note a scan itself forgets is read on the next check, not skipped", function()
+    local setup = build()
+    setup.login()
+    local counted = countPlans(setup)
+    local wrench = setup.normalizer:Key(setup.world.guild.members[3].name)
+    -- Applying a moved note forgets other notes of the former player.
+    local apply = setup.addon.ReconcileEngine.Apply
+    setup.addon.ReconcileEngine.Apply = function(partition, plan, checkpoint)
+        local result = apply(partition, plan, checkpoint)
+        partition:ForgetNoteFingerprint(wrench)
+        return result
+    end
+
+    setup.world.guild.members[2].note = "Tank >Toolbox"
+    update(setup)
+    test.assertEqual(1, counted.plans)
+    setup.addon.ReconcileEngine.Apply = apply
+
+    update(setup)
+    test.assertEqual(2, counted.plans, "the forgotten note is read")
+    update(setup)
+    test.assertEqual(2, counted.plans, "then quiet again")
+end)
+
+test.test("full scans and manual rescans are never skipped", function()
+    local setup = build()
+    setup.login()
+    local counted = countPlans(setup)
+
+    test.assertTrue(setup.scheduler:RequestFull(true))
+    setup.scheduler:OnRosterUpdate()
+    fixtures.runTimers(setup.world, setup.addon.ScanScheduler.REFRESH_WAIT_SECONDS)
+
+    test.assertEqual(1, counted.plans)
+    test.assertEqual(2, #setup.finished)
+    test.assertEqual("full", setup.finished[2].mode)
+end)
+
 test.test("the daily scan runs again once the last full scan is over 24 hours old", function()
     local setup = build()
     setup.login()

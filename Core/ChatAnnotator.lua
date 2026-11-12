@@ -8,6 +8,9 @@ local _, addon = ...
 -- changes; the sender and its name link are left alone. Any failure leaves
 -- the message as it was.
 local ChatAnnotator = {
+    -- How many recent chat lines' results are kept, so a line shown in
+    -- several chat tabs is worked out once.
+    RECENT_LINES = 16,
     -- The chat events that get tags.
     EVENTS = { "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER", "CHAT_MSG_GUILD_ACHIEVEMENT" },
     -- Default tag colors by kind, as "rrggbb": an alias is medium blue, a
@@ -52,9 +55,16 @@ Annotator.__index = Annotator
 -- Optional; without it tags are on.
 -- options.colorFor: function(kind) -> the chosen "rrggbb" color for a kind
 -- of tag, or nil for the default. Optional.
+-- options.revision: function() -> a value that changes whenever what tags
+-- are worked out from (aliases, mains) may have: each speaker's tag is kept
+-- until it does. Optional; without it tags are worked out every time.
 function ChatAnnotator.Create(options)
     return setmetatable({
         context = options.context,
+        revision = options.revision,
+        tags = {},
+        lines = {},
+        nextLine = 1,
         colorFor = options.colorFor or function()
             return nil
         end,
@@ -83,8 +93,36 @@ function Annotator:IsHidden(message, sender)
     return not ok or hidden == true
 end
 
+local function bump(name)
+    if addon.PerfCounters ~= nil then
+        addon.PerfCounters.Bump(name)
+    end
+end
+
+-- The speaker's tag ({ text, kind }), or nil, kept per speaker until the
+-- revision changes.
+function Annotator:CachedTagFor(sender)
+    if self.revision == nil then
+        return self:TagFor(sender)
+    end
+    local revision = self.revision()
+    if revision ~= self.tagsRevision then
+        self.tags = {}
+        self.tagsRevision = revision
+    end
+    local cached = self.tags[sender]
+    if cached ~= nil then
+        bump("chatTagHits")
+        return cached.tag
+    end
+    local tag = self:TagFor(sender)
+    self.tags[sender] = { tag = tag }
+    return tag
+end
+
 -- The speaker's tag ({ text, kind }), or nil.
 function Annotator:TagFor(sender)
+    bump("chatTags")
     local partition, normalizer = self.context()
     if partition == nil or normalizer == nil then
         return nil
@@ -101,14 +139,36 @@ end
 -- in front of its text. An achievement message is a template whose "%s" the
 -- chat frame replaces with the speaker's name link, so the tag goes right
 -- after it; a template without one is left alone. A message or sender the
--- client hides from add-ons is checked first and never touched.
-function Annotator:Annotate(event, message, sender)
-    if not TAGGED_EVENTS[event] or not self:IsEnabled() or self:IsHidden(message, sender) then
+-- client hides from add-ons is checked first and never touched. `lineId`,
+-- the chat line's ID when the client gives one, lets a line shown in
+-- several chat tabs be worked out once.
+function Annotator:Annotate(event, message, sender, lineId)
+    if not TAGGED_EVENTS[event] or not self:IsEnabled() or self:IsHidden(message, sender)
+        or (lineId ~= nil and self:IsHidden(lineId, lineId))
+    then
         return nil
     end
     if type(message) ~= "string" or type(sender) ~= "string" then
         return nil
     end
+    if type(lineId) ~= "number" then
+        return self:annotate(event, message, sender)
+    end
+    local index
+    for index = 1, #self.lines do
+        local line = self.lines[index]
+        if line.id == lineId and line.event == event and line.message == message and line.sender == sender then
+            bump("chatTagHits")
+            return line.result
+        end
+    end
+    local result = self:annotate(event, message, sender)
+    self.lines[self.nextLine] = { id = lineId, event = event, message = message, sender = sender, result = result }
+    self.nextLine = self.nextLine % ChatAnnotator.RECENT_LINES + 1
+    return result
+end
+
+function Annotator:annotate(event, message, sender)
     local nameEnd
     if event == "CHAT_MSG_GUILD_ACHIEVEMENT" then
         nameEnd = select(2, string.find(message, "%s", 1, true))
@@ -116,7 +176,7 @@ function Annotator:Annotate(event, message, sender)
             return nil
         end
     end
-    local ok, tag = pcall(self.TagFor, self, sender)
+    local ok, tag = pcall(self.CachedTagFor, self, sender)
     if not ok or tag == nil then
         return nil
     end

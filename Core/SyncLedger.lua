@@ -120,8 +120,10 @@ end
 -- main left the guild (and got an acting main) or moved by a guild note
 -- reports the officer's stamp with the main it has now. That's the same
 -- moment about the same thing, or for an alias (named by the player's
--- main) an alias stamp of theirs under another main. It can't win over
--- what anyone who held the officer's fact holds.
+-- main) an alias stamp of theirs under another main of the same player.
+-- An alias stamp only counts on the player it was set through (see
+-- FellowshipStore's GetAliasStamp), so one carried to another player by a
+-- stale link isn't passed on.
 function Ledger:IsForged(fact, now)
     local data = self:Data(now)
     if data == nil or not addon.SyncFacts.IsValid(fact) or fact.at < data.since then

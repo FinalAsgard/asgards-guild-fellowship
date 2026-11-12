@@ -212,12 +212,15 @@ test.test("guild recruit: losing invite permission or opting out closes the prom
 
     world.canInvite = false
     fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    -- What follows roster updates runs once a second during a burst.
+    fixtures.runTimers(world, 1)
     test.assertEqual(0, #world.shown)
     test.assertEqual(nil, world.addon.guildRecruit:Post("general:map:2339"))
     test.assertEqual(0, #world.chat)
 
     world.canInvite = true
     fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 1)
     test.assertEqual(1, #world.shown)
     test.assertTrue(world.addon.settings:Set("recruitOptIn", false))
     test.assertEqual(0, #world.shown)
@@ -420,7 +423,7 @@ test.test("guild recruit: the login check waits for the roster, and runs once", 
 
     world.rosterReady = true
     fixtures.fire(world, "GUILD_ROSTER_UPDATE")
-    fixtures.runTimers(world)
+    fixtures.runTimers(world, 1)
     test.assertEqual("Help with guild recruitment?", world.question)
 
     world.answers.close()
@@ -438,6 +441,7 @@ test.test("guild recruit: losing permission mid-session stops prompts but keeps 
 
     world.canInvite = false
     fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 1)
 
     test.assertEqual(0, #world.shown)
     test.assertFalse(world.addon.settings:IsEnabled("recruitOptIn"))

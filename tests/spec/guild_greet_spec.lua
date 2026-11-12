@@ -36,6 +36,7 @@ local function load()
         "Core/GreetingLibrary.lua",
         "Core/GreetPromptQueue.lua",
         "Core/GreetTally.lua",
+        "Core/GreetWeight.lua",
         "Core/GuildGreet.lua"
     )
 end
@@ -113,6 +114,10 @@ local function setup(profile)
         end,
         inInstance = function()
             return world.inInstance == true
+        end,
+        -- Unknown (no greet weight delay) unless a spec sets it.
+        addonOnline = function()
+            return world.addonOnline
         end,
         view = {
             Show = function(_, prompts, handlers, lockedFor)
@@ -334,11 +339,11 @@ test.test("presence patterns match the client's online and offline messages", fu
     local patternFor = addon.Compatibility.PatternFor
 
     test.assertEqual("Bolt Iron", string.match("|Hplayer:Bolt Iron|h[Bolt Iron]|h has come online.",
-        patternFor("|Hplayer:%s|h[%s]|h has come online.")))
+        (patternFor("|Hplayer:%s|h[%s]|h has come online."))))
     test.assertEqual("Bolt-Area52", string.match("Bolt-Area52 has gone offline.",
-        patternFor("%s has gone offline.")))
-    test.assertEqual("Bolt", string.match("Bolt ist jetzt offline.", patternFor("%1$s ist jetzt offline.")))
-    test.assertEqual(nil, string.match("Bolt has gone offline. Really.", patternFor("%s has gone offline.")))
+        (patternFor("%s has gone offline."))))
+    test.assertEqual("Bolt", string.match("Bolt ist jetzt offline.", (patternFor("%1$s ist jetzt offline."))))
+    test.assertEqual(nil, string.match("Bolt has gone offline. Really.", (patternFor("%s has gone offline."))))
     test.assertEqual(nil, patternFor(nil))
 end)
 
@@ -351,6 +356,8 @@ for profileIndex = 1, #fixtures.PROFILES do
         world.environment.ERR_FRIEND_ONLINE_SS = "|Hplayer:%s|h[%s]|h has come online."
         world.environment.ERR_FRIEND_OFFLINE_S = "%s has gone offline."
         world.environment.ERR_GUILD_JOIN_S = "%s has joined the guild."
+        world.environment.ERR_GUILD_LEAVE_S = "%s has left the guild."
+        world.environment.ERR_GUILD_REMOVE_SS = "%s has been kicked out of the guild by %s."
         local heard = {}
 
         test.assertTrue(compat:ObservePresence(function(kind, name)
@@ -360,10 +367,25 @@ for profileIndex = 1, #fixtures.PROFILES do
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt-Area52 has gone offline.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt Iron has joined the guild.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "No player named 'Bolt-Area52' is currently playing.")
+        fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt Iron has left the guild.")
+        fixtures.fire(world, "CHAT_MSG_SYSTEM", "Rust has been kicked out of the guild by Toolbox.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", nil)
 
-        test.assertEqual("online:Bolt Iron,offline:Bolt-Area52,join:Bolt Iron,notFound:Bolt-Area52",
-            table.concat(heard, ","))
+        test.assertEqual("online:Bolt Iron,offline:Bolt-Area52,join:Bolt Iron,notFound:Bolt-Area52," ..
+            "leave:Bolt Iron,removed:Rust", table.concat(heard, ","))
+    end)
+
+    test.test(profile .. ": a translation that names the officer first still reports who was removed", function()
+        local compat, world = client(profile)
+        world.environment.ERR_GUILD_REMOVE_SS = "%2$s hat %1$s aus der Gilde geworfen."
+        local heard = {}
+
+        test.assertTrue(compat:ObservePresence(function(kind, name)
+            table.insert(heard, kind .. ":" .. name)
+        end))
+        fixtures.fire(world, "CHAT_MSG_SYSTEM", "Toolbox hat Rust aus der Gilde geworfen.")
+
+        test.assertEqual("removed:Rust", table.concat(heard, ","))
     end)
 end
 
@@ -591,6 +613,22 @@ for coordinationIndex = 1, #fixtures.PROFILES do
         test.assertEqual(1, world.greet.tally:Count(tongs, world.time))
     end)
 
+    test.test(profile .. ": with no prompt waiting, guild chat isn't looked at; with one, it still counts", function()
+        local world = setup(profile)
+        local asked = 0
+        local context = world.greet.context
+        world.greet.context = function()
+            asked = asked + 1
+            return context()
+        end
+
+        test.assertFalse(greeted(world, "bishop", world.names.tongs))
+        test.assertEqual(0, asked, "no context, name or text work")
+
+        world.greet:OnPresence("online", world.names.tongs)
+        test.assertTrue(greeted(world, "bishop", world.names.tongs))
+    end)
+
     test.test(profile .. ": two greetings in guild chat close the prompt, naming the character or the main", function()
         local world = setup(profile)
         -- Tongs is Anvil's alt.
@@ -698,6 +736,60 @@ test.test("guild greet: a prompt closes when its player goes offline", function(
     test.assertEqual(1, #world.shown)
     test.assertContains(world.shown[1].label, "Bolt")
 end)
+
+test.test("guild greet: a prompt closes when its player leaves the guild or is removed, even before it shows",
+    function()
+        local world = setup("Retail")
+        world.greet:OnPresence("online", world.names.anvil)
+        world.greet:OnPresence("online", world.names.bolt)
+        world.showDelay = 10
+        world.greet:OnPresence("online", world.names.rust)
+
+        world.greet:OnPresence("leave", world.names.anvil)
+        world.greet:OnPresence("removed", world.names.rust)
+        advance(world, 10)
+
+        test.assertEqual(1, #world.shown)
+        test.assertContains(world.shown[1].label, "Bolt")
+        test.assertEqual(0, #world.sent)
+    end)
+
+test.test("guild greet: a prompt for someone a roster scan saw leave closes, and pressing it sends nothing",
+    function()
+        local world = setup("Retail")
+        local partition, normalizer = world.greet.context()
+        world.greet:OnPresence("online", world.names.bolt)
+        world.greet:OnPresence("online", world.names.rust)
+        local bolt = world.shown[1].player
+
+        partition:MarkDeparted(normalizer:Key(world.names.bolt), world.time)
+        test.assertEqual(nil, world.greet:Greet(bolt))
+        test.assertEqual(0, #world.sent)
+        test.assertEqual(1, #world.shown)
+        test.assertContains(world.shown[1].label, "Rust")
+
+        partition:MarkDeparted(normalizer:Key(world.names.rust), world.time)
+        advance(world, 1)
+        world.greet:Refresh()
+        test.assertEqual(0, #world.shown)
+    end)
+
+test.test("guild greet: a login prompt for a purged character closes, but a join prompt before its scan stays",
+    function()
+        local world = setup("Retail")
+        local partition, normalizer = world.greet.context()
+        world.greet:OnPresence("online", world.names.bolt)
+        world.greet:OnPresence("join", "Newcomer")
+        test.assertEqual(2, #world.shown)
+
+        local bolt = normalizer:Key(world.names.bolt)
+        partition:MarkDeparted(bolt, world.time)
+        partition:Purge(bolt, world.time)
+        world.greet:Refresh()
+
+        test.assertEqual(1, #world.shown)
+        test.assertContains(world.shown[1].label, "Newcomer")
+    end)
 
 test.test("guild greet: accented names match whatever their case, but a one-letter name never does", function()
     local world = setup("Retail")
@@ -1021,6 +1113,32 @@ test.test("guild greet: a player greeted enough while their prompt waits never g
     test.assertEqual(0, #world.shown)
 end)
 
+test.test("guild greet: guild chat is watched from the arrival, before the prompt shows, until enough greetings", function()
+    local world = setup("Retail")
+    world.showDelay = 10
+    world.store:SetGreetCap(2)
+    local asked = 0
+    local context = world.greet.context
+    world.greet.context = function()
+        asked = asked + 1
+        return context()
+    end
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(0, #world.shown)
+    -- Welcomes in the moments before the prompt shows still count.
+    test.assertTrue(greeted(world, "bishop", world.names.bolt))
+    advance(world, 10)
+    test.assertEqual(1, #world.shown)
+    test.assertTrue(greeted(world, "rust", world.names.bolt))
+    test.assertEqual(0, #world.shown)
+
+    -- With enough greetings, guild chat isn't looked at any more.
+    asked = 0
+    test.assertFalse(greeted(world, "anvil", world.names.bolt))
+    test.assertEqual(0, asked)
+end)
+
 test.test("guild greet: a failing random pick still delays the prompt", function()
     local world = setup("Retail")
     world.greet.showDelay = nil
@@ -1046,12 +1164,100 @@ test.test("guild greet: without timers, a prompt shows at once instead of never"
     test.assertEqual(1, #world.shown)
 end)
 
-test.test("greet: prompts in instances are on by default, and turned off none show inside one", function()
+test.test("guild greet: each Greet adds weight, and with 3 add-on users online new prompts wait 2.5s a weight", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:Greet(world.shown[1].player)
+    advance(world, 2)
+    world.greet:Greet(world.shown[1].player)
+    -- The first press's 1 faded for the 2 seconds before the second.
+    test.assertTrue(math.abs(world.store:GreetWeight().weight - (2 - 0.2 * 2 / 60)) < 1e-9)
+    world.store:SetGreetWeight({ weight = 2, at = world.time })
+    world.addonOnline = 3
+
+    -- 2 weight: 5 seconds on top of the usual delay (0 here).
+    advance(world, 30)
+    local weight = world.greet:Weight(world.time)
+    test.assertEqual(1.9, math.floor(weight * 10 + 0.5) / 10, "0.2 a minute fades 0.1 in 30 seconds")
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertEqual(0, #world.shown)
+    advance(world, 4)
+    test.assertEqual(0, #world.shown)
+    advance(world, 1)
+    test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild greet: greet weight never delays with fewer than 3 add-on users online, or when unknown", function()
+    local world = setup("Retail")
+    world.store:SetGreetWeight({ weight = 6, at = world.time })
+
+    world.addonOnline = 2
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(1, #world.shown)
+
+    world.addonOnline = nil
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(2, #world.shown)
+end)
+
+test.test("guild greet: weight caps at 6 (15 seconds) and fades 1 every 5 minutes, also while away", function()
+    local world = setup("Retail")
+    world.store:SetGreetWeight({ weight = 6, at = world.time })
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:Greet(world.shown[1].player)
+    test.assertEqual(6, world.store:GreetWeight().weight, "no more than 6")
+    world.addonOnline = 5
+
+    -- Logged out for 10 minutes: 2 faded.
+    advance(world, 600)
+    test.assertEqual(4, world.greet:Weight(world.time))
+    world.greet:OnPresence("online", world.names.rust)
+    advance(world, 9)
+    test.assertEqual(0, #world.shown)
+    advance(world, 1)
+    test.assertEqual(1, #world.shown)
+
+    -- Gone entirely after 30 minutes.
+    advance(world, 1800)
+    test.assertEqual(0, world.greet:Weight(world.time))
+end)
+
+test.test("guild greet: others' greetings during the extra wait count, and the prompt never shows once enough", function()
+    local world = setup("Retail")
+    world.addonOnline = 4
+    world.store:SetGreetCap(2)
+    world.store:SetGreetWeight({ weight = 6, at = world.time })
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertTrue(greeted(world, "bishop", world.names.bolt))
+    test.assertTrue(greeted(world, "rust", world.names.bolt))
+    advance(world, 15)
+
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a press while Greet is locked adds no weight", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:Greet(world.shown[1].player)
+    test.assertEqual(nil, world.greet:Greet(world.shown[1].player))
+
+    test.assertEqual(1, world.store:GreetWeight().weight)
+end)
+
+test.test("greet: prompts in instances are off by default, and turned on show inside one", function()
     local world = setup("Retail")
     world.inInstance = true
 
-    -- On by default: inside an instance, arrivals are prompted as anywhere.
-    test.assertTrue(world.store:GreetInInstances())
+    -- Off by default: inside an instance, nobody is prompted.
+    test.assertFalse(world.store:GreetInInstances())
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(0, #world.shown)
+
+    -- Turned on, arrivals inside are prompted as anywhere.
+    test.assertTrue(world.store:SetGreetInInstances(true))
     world.greet:OnPresence("online", world.names.bolt)
     test.assertEqual(1, #world.shown)
 
@@ -1073,7 +1279,7 @@ test.test("greet: prompts in instances are on by default, and turned off none sh
     -- The setting is kept, and an unusable saved value is left alone.
     test.assertFalse(world.store:GreetInInstances())
     world.database.greet.inInstances = "yes"
-    test.assertTrue(world.store:GreetInInstances())
+    test.assertFalse(world.store:GreetInInstances())
     test.assertFalse(world.store:SetGreetInInstances(false))
     test.assertFalse(world.store:SetGreetInInstances("off"))
 end)
