@@ -3990,7 +3990,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         if kind == "join" or kind == "leave" then
             recordLiveMembership(kind, name)
         end
-        if dropLocationOf ~= nil and (kind == "offline" or kind == "leave" or kind == "notFound") then
+        if dropLocationOf ~= nil and (kind == "offline" or kind == "leave" or kind == "removed"
+            or kind == "notFound")
+        then
             dropLocationOf(name)
         end
         if kind == "notFound" then

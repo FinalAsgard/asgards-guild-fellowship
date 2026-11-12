@@ -339,11 +339,11 @@ test.test("presence patterns match the client's online and offline messages", fu
     local patternFor = addon.Compatibility.PatternFor
 
     test.assertEqual("Bolt Iron", string.match("|Hplayer:Bolt Iron|h[Bolt Iron]|h has come online.",
-        patternFor("|Hplayer:%s|h[%s]|h has come online.")))
+        (patternFor("|Hplayer:%s|h[%s]|h has come online."))))
     test.assertEqual("Bolt-Area52", string.match("Bolt-Area52 has gone offline.",
-        patternFor("%s has gone offline.")))
-    test.assertEqual("Bolt", string.match("Bolt ist jetzt offline.", patternFor("%1$s ist jetzt offline.")))
-    test.assertEqual(nil, string.match("Bolt has gone offline. Really.", patternFor("%s has gone offline.")))
+        (patternFor("%s has gone offline."))))
+    test.assertEqual("Bolt", string.match("Bolt ist jetzt offline.", (patternFor("%1$s ist jetzt offline."))))
+    test.assertEqual(nil, string.match("Bolt has gone offline. Really.", (patternFor("%s has gone offline."))))
     test.assertEqual(nil, patternFor(nil))
 end)
 
@@ -356,6 +356,8 @@ for profileIndex = 1, #fixtures.PROFILES do
         world.environment.ERR_FRIEND_ONLINE_SS = "|Hplayer:%s|h[%s]|h has come online."
         world.environment.ERR_FRIEND_OFFLINE_S = "%s has gone offline."
         world.environment.ERR_GUILD_JOIN_S = "%s has joined the guild."
+        world.environment.ERR_GUILD_LEAVE_S = "%s has left the guild."
+        world.environment.ERR_GUILD_REMOVE_SS = "%s has been kicked out of the guild by %s."
         local heard = {}
 
         test.assertTrue(compat:ObservePresence(function(kind, name)
@@ -365,10 +367,25 @@ for profileIndex = 1, #fixtures.PROFILES do
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt-Area52 has gone offline.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt Iron has joined the guild.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", "No player named 'Bolt-Area52' is currently playing.")
+        fixtures.fire(world, "CHAT_MSG_SYSTEM", "Bolt Iron has left the guild.")
+        fixtures.fire(world, "CHAT_MSG_SYSTEM", "Rust has been kicked out of the guild by Toolbox.")
         fixtures.fire(world, "CHAT_MSG_SYSTEM", nil)
 
-        test.assertEqual("online:Bolt Iron,offline:Bolt-Area52,join:Bolt Iron,notFound:Bolt-Area52",
-            table.concat(heard, ","))
+        test.assertEqual("online:Bolt Iron,offline:Bolt-Area52,join:Bolt Iron,notFound:Bolt-Area52," ..
+            "leave:Bolt Iron,removed:Rust", table.concat(heard, ","))
+    end)
+
+    test.test(profile .. ": a translation that names the officer first still reports who was removed", function()
+        local compat, world = client(profile)
+        world.environment.ERR_GUILD_REMOVE_SS = "%2$s hat %1$s aus der Gilde geworfen."
+        local heard = {}
+
+        test.assertTrue(compat:ObservePresence(function(kind, name)
+            table.insert(heard, kind .. ":" .. name)
+        end))
+        fixtures.fire(world, "CHAT_MSG_SYSTEM", "Toolbox hat Rust aus der Gilde geworfen.")
+
+        test.assertEqual("removed:Rust", table.concat(heard, ","))
     end)
 end
 
@@ -703,6 +720,43 @@ test.test("guild greet: a prompt closes when its player goes offline", function(
     test.assertEqual(1, #world.shown)
     test.assertContains(world.shown[1].label, "Bolt")
 end)
+
+test.test("guild greet: a prompt closes when its player leaves the guild or is removed, even before it shows",
+    function()
+        local world = setup("Retail")
+        world.greet:OnPresence("online", world.names.anvil)
+        world.greet:OnPresence("online", world.names.bolt)
+        world.showDelay = 10
+        world.greet:OnPresence("online", world.names.rust)
+
+        world.greet:OnPresence("leave", world.names.anvil)
+        world.greet:OnPresence("removed", world.names.rust)
+        advance(world, 10)
+
+        test.assertEqual(1, #world.shown)
+        test.assertContains(world.shown[1].label, "Bolt")
+        test.assertEqual(0, #world.sent)
+    end)
+
+test.test("guild greet: a prompt for someone a roster scan saw leave closes, and pressing it sends nothing",
+    function()
+        local world = setup("Retail")
+        local partition, normalizer = world.greet.context()
+        world.greet:OnPresence("online", world.names.bolt)
+        world.greet:OnPresence("online", world.names.rust)
+        local bolt = world.shown[1].player
+
+        partition:MarkDeparted(normalizer:Key(world.names.bolt), world.time)
+        test.assertEqual(nil, world.greet:Greet(bolt))
+        test.assertEqual(0, #world.sent)
+        test.assertEqual(1, #world.shown)
+        test.assertContains(world.shown[1].label, "Rust")
+
+        partition:MarkDeparted(normalizer:Key(world.names.rust), world.time)
+        advance(world, 1)
+        world.greet:Refresh()
+        test.assertEqual(0, #world.shown)
+    end)
 
 test.test("guild greet: accented names match whatever their case, but a one-letter name never does", function()
     local world = setup("Retail")

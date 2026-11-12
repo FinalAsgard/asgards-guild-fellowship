@@ -333,8 +333,8 @@ function Client:AddChatMessageFilter(events, filter)
     return registered
 end
 
--- The system messages that report someone coming online, going offline, or
--- joining the guild, by kind: the client's own format string (so every
+-- The system messages that report someone coming online, going offline,
+-- joining the guild, leaving it, or being removed from it, by kind: the client's own format string (so every
 -- locale works), with the English text as a fallback. Online and offline
 -- fire for friends too; callers check guild membership.
 Compatibility.PRESENCE_FORMATS = {
@@ -342,20 +342,35 @@ Compatibility.PRESENCE_FORMATS = {
     { kind = "offline", global = "ERR_FRIEND_OFFLINE_S", fallback = "%s has gone offline." },
     { kind = "join", global = "ERR_GUILD_JOIN_S", fallback = "%s has joined the guild." },
     { kind = "leave", global = "ERR_GUILD_LEAVE_S", fallback = "%s has left the guild." },
+    -- The first name is who was removed, the second the officer.
+    { kind = "removed", global = "ERR_GUILD_REMOVE_SS", fallback = "%s has been kicked out of the guild by %s." },
     -- A whisper (the add-on's included) went to someone who isn't playing.
     { kind = "notFound", global = "ERR_CHAT_PLAYER_NOT_FOUND_S", fallback = "No player named '%s' is currently playing." },
 }
 
 -- A Lua pattern matching a client format string, capturing each "%s" (or
--- positional "%1$s"). Nil for anything that isn't text.
+-- positional "%1$s"), and which of the format's arguments each capture is
+-- (a translation can reorder positional ones). Nil for anything that isn't
+-- text.
 function Compatibility.PatternFor(format)
     if type(format) ~= "string" or format == "" then
         return nil
     end
+    local order = {}
+    local nextPosition = 1
+    local spec
+    for spec in string.gmatch(format, "%%(%d*)%$?s") do
+        local position = tonumber(spec)
+        if position == nil then
+            position = nextPosition
+            nextPosition = nextPosition + 1
+        end
+        table.insert(order, position)
+    end
     local pattern = string.gsub(format, "[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
     pattern = string.gsub(pattern, "%%%%%d%%%$s", "(.-)")
     pattern = string.gsub(pattern, "%%%%s", "(.-)")
-    return "^" .. pattern .. "$"
+    return "^" .. pattern .. "$", order
 end
 
 -- Each presence message's pattern, by kind: { kind, pattern }.
@@ -365,16 +380,25 @@ local function presencePatterns(environment)
     for index = 1, #Compatibility.PRESENCE_FORMATS do
         local entry = Compatibility.PRESENCE_FORMATS[index]
         local format = environment[entry.global]
-        local pattern = Compatibility.PatternFor(type(format) == "string" and format or entry.fallback)
+        local pattern, order = Compatibility.PatternFor(type(format) == "string" and format or entry.fallback)
         if pattern ~= nil then
-            table.insert(patterns, { kind = entry.kind, pattern = pattern })
+            -- The capture holding the format's first argument: the name.
+            local capture = 1
+            local orderIndex
+            for orderIndex = 1, #order do
+                if order[orderIndex] == 1 then
+                    capture = orderIndex
+                end
+            end
+            table.insert(patterns, { kind = entry.kind, pattern = pattern, capture = capture })
         end
     end
     return patterns
 end
 
 -- Calls onPresence(kind, name) for every system message saying someone came
--- online, went offline, joined the guild, or left it, or that a whisper
+-- online, went offline, joined the guild, left it ("leave"), or was removed
+-- from it ("removed", with the name of who was removed), or that a whisper
 -- found nobody of that name playing ("notFound"), with the name as the
 -- message gives it (from the player link when there is one). Messages the
 -- client hides from add-ons are skipped. Returns false when the client
@@ -392,7 +416,8 @@ function Client:ObservePresence(onPresence)
             end
             local patternIndex
             for patternIndex = 1, #patterns do
-                local name = string.match(message, patterns[patternIndex].pattern)
+                local name = select(patterns[patternIndex].capture,
+                    string.match(message, patterns[patternIndex].pattern))
                 if name ~= nil and name ~= "" then
                     pcall(onPresence, patterns[patternIndex].kind, name)
                     return

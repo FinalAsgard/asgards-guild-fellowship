@@ -244,7 +244,7 @@ When someone joins the guild or a guild member comes online, a small prompt appe
 - **Welcome back**: someone you saw log off comes back 15 minutes or more later (you can change the minutes). Coming back sooner (a relog or a disconnect) gets no prompt.
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
 - Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
-- A prompt shows 5 to 10 seconds (at random) after someone arrives, so your greeting doesn't reach them while their game is still loading. It disappears 90 seconds after it shows, or as soon as that person goes offline; the **X** closes one without greeting.
+- A prompt shows 5 to 10 seconds (at random) after someone arrives, so your greeting doesn't reach them while their game is still loading. It disappears 90 seconds after it shows, or as soon as that person goes offline, leaves the guild or is removed from it (even before it shows); the **X** closes one without greeting.
 - To move the prompts, tick **Unlock greet prompts** in the Guild Greet settings and drag the gold bar that appears. The place is saved for every character. The bar stays while the add-on's window is open, on any tab. Untick it, or close the window or the AddOns options, to hide it; it also locks again after a reload.
 - In combat or a boss encounter, prompts wait. When it's over, any that are still under 90 seconds old appear.
 - On Retail, the game hides some system messages from add-ons during encounters and keystone runs. Logins it hides get no prompt; nothing breaks.

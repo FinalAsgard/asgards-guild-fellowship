@@ -324,8 +324,9 @@ function Greet:OnRosterUpdate(readRoster)
     self.policy:Seed(online)
 end
 
--- A guild member came online ("online"), went offline ("offline"), or
--- someone joined the guild ("join").
+-- A guild member came online ("online"), went offline ("offline"), left
+-- the guild ("leave") or was removed from it ("removed"), or someone joined
+-- the guild ("join").
 -- `rawName` is the name the game's message reported.
 function Greet:OnPresence(kind, rawName)
     local _, normalizer = self.context()
@@ -334,8 +335,10 @@ function Greet:OnPresence(kind, rawName)
     if key == nil or type(now) ~= "number" then
         return
     end
-    if kind == "offline" then
-        self.policy:WentOffline(key, now)
+    if kind == "offline" or kind == "leave" or kind == "removed" then
+        if kind == "offline" then
+            self.policy:WentOffline(key, now)
+        end
         -- Nobody to greet any more: the prompt raised for this character,
         -- not one for another of its player's characters still online.
         -- Matched by character, so a prompt raised before a scan linked
@@ -430,6 +433,30 @@ function Greet:WeightProbeLines(now)
     return addon.GreetWeight.ProbeLines(self:Weight(now), self:AddonOnline())
 end
 
+-- Closes the prompts for characters a roster scan saw leave the guild (in
+-- case the game's message about it was missed). Returns true when any
+-- closed.
+function Greet:dropDeparted(now)
+    local prompts = self.queue:All(now)
+    -- With nothing waiting, the guild's data isn't looked at (or created).
+    if prompts[1] == nil then
+        return false
+    end
+    local partition = self.context()
+    if partition == nil then
+        return false
+    end
+    local removed = false
+    local index
+    for index = 1, #prompts do
+        local character = partition:GetCharacter(prompts[index].key)
+        if character ~= nil and character.departed ~= nil then
+            removed = self.queue:Remove(prompts[index].player) or removed
+        end
+    end
+    return removed
+end
+
 -- Whole seconds until Greet unlocks: 0 when it isn't locked.
 function Greet:LockedFor(now)
     if self.readyAt == nil or type(now) ~= "number" or now >= self.readyAt then
@@ -445,6 +472,7 @@ function Greet:Refresh()
     if type(now) ~= "number" or self.view == nil then
         return
     end
+    self:dropDeparted(now)
     local prompts = self.queue:Visible(now)
     local lockedFor = self:LockedFor(now)
     if lockedFor == 0 then
@@ -468,8 +496,11 @@ end
 -- closes the prompt, and locks Greet for the next cooldown. Returns the text
 -- sent, or nil.
 function Greet:Greet(player)
-    local prompt = self.queue:Get(player)
     local now = self.now()
+    if type(now) == "number" and self:dropDeparted(now) then
+        self:Refresh()
+    end
+    local prompt = self.queue:Get(player)
     if prompt == nil or type(now) ~= "number" or self:LockedFor(now) > 0 then
         return nil
     end
