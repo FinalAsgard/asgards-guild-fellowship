@@ -1545,7 +1545,9 @@ end
 -- add-on name and function name), and when it shows an error ("error",
 -- with the event's arguments: an error number, then the text), and when
 -- the character's money changes ("money"). Returns false when the client
--- can't deliver the events.
+-- can't deliver the events. Errors, money and blocked calls come only while
+-- SetMailListening(true): they fire all session (every "Out of range" in
+-- combat, every coin looted) and only matter while mailing.
 Compatibility.MAIL_EVENTS = {
     PLAYER_MONEY = "money",
     MAIL_SHOW = "open",
@@ -1555,6 +1557,13 @@ Compatibility.MAIL_EVENTS = {
     ADDON_ACTION_BLOCKED = "blocked",
     ADDON_ACTION_FORBIDDEN = "blocked",
     UI_ERROR_MESSAGE = "error",
+}
+-- The mail events heard only while listening (see SetMailListening).
+Compatibility.MAIL_LISTENING_EVENTS = {
+    PLAYER_MONEY = true,
+    ADDON_ACTION_BLOCKED = true,
+    ADDON_ACTION_FORBIDDEN = true,
+    UI_ERROR_MESSAGE = true,
 }
 
 function Client:ObserveMail(onMail)
@@ -1573,7 +1582,7 @@ function Client:ObserveMail(onMail)
     local registered = false
     local eventName
     for eventName in pairs(Compatibility.MAIL_EVENTS) do
-        if self:RegisterEvent(frame, eventName) then
+        if not Compatibility.MAIL_LISTENING_EVENTS[eventName] and self:RegisterEvent(frame, eventName) then
             registered = true
         end
     end
@@ -1596,7 +1605,27 @@ function Client:ObserveMail(onMail)
         registered = true
     end
     self.mailFrame = frame
+    self.mailListening = false
     return registered
+end
+
+-- Starts (true) or stops (false) hearing the mail events only needed while
+-- mailing (Compatibility.MAIL_LISTENING_EVENTS): while the mailbox is open
+-- or a mail waits for the game's answer.
+function Client:SetMailListening(listening)
+    listening = listening == true
+    if self.mailFrame == nil or self.mailListening == listening then
+        return
+    end
+    self.mailListening = listening
+    local eventName
+    for eventName in pairs(Compatibility.MAIL_LISTENING_EVENTS) do
+        if listening then
+            self:RegisterEvent(self.mailFrame, eventName)
+        else
+            callMethod(self.mailFrame, "UnregisterEvent", eventName)
+        end
+    end
 end
 
 function Client:GetAccountDatabase()

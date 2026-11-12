@@ -4043,6 +4043,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             -- The money line, and whether the postage is affordable.
             guildMail:Refresh()
         end
+        -- Errors, money and blocked calls only matter while mailing.
+        client:SetMailListening(guildMail:WantsGameEvents())
     end)
     -- Without a chat filter API, chat is simply left untagged.
     client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)

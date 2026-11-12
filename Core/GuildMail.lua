@@ -1617,6 +1617,14 @@ function Mail:OnMailboxOpened()
     self:refresh()
 end
 
+-- Whether the game's errors, money changes and blocked calls matter now:
+-- while the mailbox is open, a mail waits for the game's answer, or a
+-- failed one for the error saying why.
+function Mail:WantsGameEvents()
+    return self.mailboxOpen == true or self.sender:InFlight() ~= nil or self.sender:IsSending()
+        or self.sender:AwaitsReason()
+end
+
 -- Closing the mailbox stops sending, as Stop does, and closes the window;
 -- the list and progress stay for when it's opened again.
 function Mail:OnMailboxClosed()

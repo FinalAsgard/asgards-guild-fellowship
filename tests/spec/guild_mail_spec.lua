@@ -2185,6 +2185,69 @@ test.test("guild mail: /agf mail tells a non-officer it's for officers", functio
     test.assertContains(world.messages[before + 1], addon.GuildMail.OFFICERS_ONLY)
 end)
 
+-- Whether any of `world`'s frames hears `eventName`.
+local function hears(world, eventName)
+    local index
+    for index = 1, #world.frames do
+        if world.frames[index].registeredEvents[eventName] then
+            return true
+        end
+    end
+    return false
+end
+
+local mailProfileIndex
+for mailProfileIndex = 1, #fixtures.PROFILES do
+    local profile = fixtures.PROFILES[mailProfileIndex]
+
+    test.test(profile .. ": guild mail hears game errors, money and blocked calls only while the mailbox is open",
+        function()
+            local world = fixtures.newEnvironment(profile, {})
+            fixtures.loadAddon(world)
+            fixtures.fire(world, "ADDON_LOADED", world.addonName)
+            world.loggedIn = true
+            fixtures.fire(world, "PLAYER_LOGIN")
+            local gated = { "UI_ERROR_MESSAGE", "PLAYER_MONEY", "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN" }
+            local index
+
+            test.assertTrue(hears(world, "MAIL_SHOW"))
+            for index = 1, #gated do
+                test.assertFalse(hears(world, gated[index]), gated[index] .. " before the mailbox opens")
+            end
+            fixtures.fire(world, "MAIL_SHOW")
+            for index = 1, #gated do
+                test.assertTrue(hears(world, gated[index]), gated[index] .. " while it's open")
+            end
+            fixtures.fire(world, "MAIL_CLOSED")
+            for index = 1, #gated do
+                test.assertFalse(hears(world, gated[index]), gated[index] .. " once it closed")
+            end
+        end)
+end
+
+test.test("guild mail: a mail still waiting for the game's answer keeps game errors heard after the mailbox closes",
+    function()
+        local _, world = newMail()
+        test.assertFalse(world.mail:WantsGameEvents())
+        readyToSend(world)
+        test.assertTrue(world.mail:WantsGameEvents())
+        world.mail:RequestSend()
+        world.mail:Confirm()
+
+        world.mail:OnMailboxClosed()
+        test.assertTrue(world.mail:WantsGameEvents(), "the mail in flight")
+        world.mail:OnFailed(nil)
+        test.assertTrue(world.mail:OnError("Mailbox full"), "the failure's reason still arrives")
+        test.assertFalse(world.mail:WantsGameEvents())
+    end)
+
+test.test("guild mail: an error with nothing waiting on the game is ignored without reading it", function()
+    local _, world = newMail()
+
+    test.assertFalse(world.mail:OnError({ "not even text" }))
+    test.assertFalse(world.mail:OnError("Out of range."))
+end)
+
 -- Saved draft ---------------------------------------------------------------
 
 test.test("guild mail: the draft and filter choices are saved as they change", function()
