@@ -58,8 +58,13 @@ local _, addon = ...
 -- when it was sent, `perMail` the postage per mail, `state` the sender's
 -- ("sending", "paused", "stopped" or "done"), `capped` true while paused at
 -- the game's mail limit; each recipient is { key, name, playerName, rank,
--- subject, body, status, reason, inFlight }, with its filled-in mail and
--- inFlight true while waiting for the game's answer. After a reload the
+-- values | subject and body, status, reason, inFlight }, with inFlight
+-- true while waiting for the game's answer. A recipient's filled-in mail is
+-- kept as the placeholder values it was filled with (`values`, see
+-- GuildMailComposer.Values), rebuilt word for word from the entry's
+-- `subject` and `body`; one that can't be (a welcome, whose text is the
+-- welcome mail's) keeps its filled-in `subject` and `body` instead. Read it
+-- only through mailOf. After a reload the
 -- newest unfinished entry comes back on any of the account's characters,
 -- and a mail that was in flight comes back unconfirmed (GuildMailSender).
 local GuildMail = {
@@ -363,11 +368,45 @@ function Mail:restore()
     end
 end
 
--- A saved recipient as the send needs it, or nil when it's unusable.
-local function savedRecipient(saved)
+-- The subject and body saved recipient `saved` of outbox `entry` is
+-- mailed: its own text when kept in full, else rebuilt from the entry's and
+-- its values. Nil when neither is usable.
+local function mailOf(entry, saved)
+    if type(saved) ~= "table" then
+        return nil
+    end
+    if type(saved.subject) == "string" and type(saved.body) == "string" then
+        return saved.subject, saved.body
+    end
+    if type(saved.values) == "table" and type(entry) == "table" and type(entry.subject) == "string"
+        and type(entry.body) == "string"
+    then
+        return addon.GuildMailComposer.Rebuild(entry.subject, entry.body, saved.values)
+    end
+    return nil
+end
+
+-- Keeps `mail` (from GuildMailComposer.Compose, for outbox `entry`) on
+-- `saved` as its values when it rebuilds word for word from them, else in
+-- full.
+local function keepMail(entry, saved, mail)
+    local values = entry.kind ~= GuildMail.WELCOME_KIND
+        and addon.GuildMailComposer.Values(entry.subject, entry.body, mail) or nil
+    if values ~= nil then
+        saved.values = values
+        saved.subject, saved.body = nil, nil
+    else
+        saved.values = nil
+        saved.subject, saved.body = mail.subject, mail.body
+    end
+end
+
+-- A saved recipient of outbox `entry` as the send needs it, or nil when
+-- it's unusable.
+local function savedRecipient(entry, saved)
+    local subject, body = mailOf(entry, saved)
     if type(saved) ~= "table" or type(saved.name) ~= "string" or saved.name == ""
-        or type(saved.subject) ~= "string" or type(saved.body) ~= "string"
-        or type(saved.rank) ~= "number"
+        or subject == nil or type(saved.rank) ~= "number"
     then
         return nil
     end
@@ -376,7 +415,7 @@ local function savedRecipient(saved)
         name = saved.name,
         playerName = type(saved.playerName) == "string" and saved.playerName or nil,
         rank = saved.rank,
-        mail = { subject = saved.subject, body = saved.body },
+        mail = { subject = subject, body = body },
     }
 end
 
@@ -404,7 +443,7 @@ function Mail:load(entry)
     local index
     for index = 1, #entry.recipients do
         local saved = entry.recipients[index]
-        local recipient = savedRecipient(saved)
+        local recipient = savedRecipient(entry, saved)
         if recipient == nil then
             return false
         end
@@ -424,6 +463,38 @@ function Mail:load(entry)
     return self.sender:Restore(mails, statuses, reasons, entry.capped == true)
 end
 
+-- Once per session: each saved recipient whose mail is kept in full (from
+-- before the outbox kept values) is kept as its values instead, where the
+-- text rebuilds from them word for word. Any other is left exactly as it
+-- is; nothing is removed.
+function Mail:compactOutbox(outbox)
+    local partition, normalizer = self.context()
+    local position, index
+    for position = 1, #outbox do
+        local entry = outbox[position]
+        if type(entry) == "table" and type(entry.recipients) == "table" and type(entry.subject) == "string"
+            and type(entry.body) == "string" and not isWelcome(entry)
+        then
+            for index = 1, #entry.recipients do
+                local saved = entry.recipients[index]
+                if type(saved) == "table" and type(saved.subject) == "string" and type(saved.body) == "string"
+                    and type(saved.name) == "string"
+                then
+                    local ok, names = pcall(addon.GuildGreet.NamesFor, partition, normalizer,
+                        type(saved.key) == "string" and saved.key or saved.name, saved.name)
+                    local values = ok and addon.GuildMailComposer.Values(entry.subject, entry.body, {
+                        subject = saved.subject, body = saved.body, names = names,
+                    }) or nil
+                    if values ~= nil then
+                        saved.values = values
+                        saved.subject, saved.body = nil, nil
+                    end
+                end
+            end
+        end
+    end
+end
+
 -- Puts back the newest unfinished outbox entry, once, unless a send is
 -- already on show.
 function Mail:restoreOutbox()
@@ -436,6 +507,7 @@ function Mail:restoreOutbox()
         return
     end
     self.outboxLoaded = true
+    self:compactOutbox(outbox)
     local position
     for position = #outbox, 1, -1 do
         -- Welcome mails wait in the Guild Mail tab for their own Send.
@@ -496,19 +568,6 @@ end
 -- Saves a new send at the end of the outbox and puts it on show.
 function Mail:record(recipients, perMail)
     local saved = {}
-    local index
-    for index = 1, #recipients do
-        local recipient = recipients[index]
-        saved[index] = {
-            key = recipient.key,
-            name = recipient.name,
-            playerName = recipient.playerName,
-            rank = recipient.rank,
-            subject = recipient.mail.subject,
-            body = recipient.mail.body,
-            status = addon.GuildMailSender.PENDING,
-        }
-    end
     local entry = {
         subject = self.subject,
         body = self.body,
@@ -523,6 +582,18 @@ function Mail:record(recipients, perMail)
         skipDiscord = self.skipDiscord,
         activeOnly = self.activeOnly,
     }
+    local index
+    for index = 1, #recipients do
+        local recipient = recipients[index]
+        saved[index] = {
+            key = recipient.key,
+            name = recipient.name,
+            playerName = recipient.playerName,
+            rank = recipient.rank,
+            status = addon.GuildMailSender.PENDING,
+        }
+        keepMail(entry, saved[index], recipient.mail)
+    end
     local outbox = self:ask(self.outbox)
     if type(outbox) == "table" then
         table.insert(outbox, entry)
@@ -1304,7 +1375,8 @@ function Mail:entryModel(rankNames)
         whenText = entryWhen(self:ask(self.now), entry),
         progressText = entryProgress(self:entryCounts(entry)),
         preview = type(first) == "table" and {
-            to = tostring(first.name), subject = tostring(first.subject), body = tostring(first.body),
+            to = tostring(first.name), subject = tostring((mailOf(entry, first))),
+            body = tostring(select(2, mailOf(entry, first))),
         } or nil,
         recipients = rows,
         canResume = self:canResume(entry),
