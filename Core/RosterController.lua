@@ -284,6 +284,12 @@ function Controller:OnRosterUpdate()
     self:Invalidate(true)
 end
 
+-- Changes whenever saved data the roster shows changes (local edits,
+-- scans, guild sync), not on roster updates alone.
+function Controller:DataRevision()
+    return self.dataRevision or 0
+end
+
 -- A stamp for things worked out from saved data and the roster's notes,
 -- ranks and levels (the guild note audit): it changes when saved data or
 -- what the roster says about anyone changes, not on every roster update.

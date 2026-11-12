@@ -3505,6 +3505,11 @@ if clientProfile.supported then
             local store = rosterController:Store()
             return store and store:ChatTagColor(kind)
         end,
+        -- Tags follow local edits, scans and guild sync.
+        revision = function()
+            local guild, partition = rosterController:QuietContext()
+            return (guild and partition.key or "") .. "#" .. rosterController:DataRevision()
+        end,
     })
     -- Officers see out-of-date guild notes in the game's guild roster. The
     -- audit is cached until the roster's data changes.
@@ -4088,8 +4093,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         client:SetMailListening(guildMail:WantsGameEvents())
     end)
     -- Without a chat filter API, chat is simply left untagged.
-    client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender)
-        return chatAnnotator:Annotate(event, message, sender)
+    client:AddChatMessageFilter(addon.ChatAnnotator.EVENTS, function(event, message, sender, lineId)
+        return chatAnnotator:Annotate(event, message, sender, lineId)
     end)
     -- The game answers a whisper to someone who just logged off with "No
     -- player named ... is currently playing."; when the add-on sent that

@@ -316,7 +316,10 @@ function Client:AddChatMessageFilter(events, filter)
     end
 
     local function handler(_, event, message, sender, ...)
-        local ok, replacement = pcall(filter, event, message, sender)
+        -- The chat line's ID: the same line shown in several chat tabs
+        -- comes with the same one.
+        local lineId = select(9, ...)
+        local ok, replacement = pcall(filter, event, message, sender, lineId)
         if ok and replacement == true then
             return true
         end
