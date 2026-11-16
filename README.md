@@ -33,6 +33,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf probe player <name or alias>` | Shows how your add-on holds a player: its alias, who set it and when, and through which character; each character's link and Discord name with who set them and when; and the player's last 10 logged changes (anyone). |
 | `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** and **Promote to match** flags reach the game's guild roster (officers only). |
 | `/agf probe greet` | Shows your greet weight, how many guildmates with the add-on count as online, and how much longer your greet prompts wait because of it. |
+| `/agf greetstats` | Shows how busy greeting has been, for the last hour and since you logged in: guild chat lines counted as greetings (from anyone, you included), arrivals, and time spent in [anti-spam mode](#anti-spam-mode), plus whether the mode is on now and the guild's anti-spam settings. Kept in memory only, so a `/reload` starts it again (anyone). |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
@@ -58,7 +59,7 @@ The settings are in two places that always agree: the window's tabs, and **Esc â
 - **General**: show or hide the minimap button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off, and choose the colors of the alias tag and the main's-name tag (see [Chat tags](#chat-tags)).
 - **Guild Map**: **Share my location with the guild** and **Show guildmates on the map and minimap**, both on unless you turn them off (see [Guild map](#guild-map)).
-- **Guild Greet**: at the top, turn Guild Greet on or off (everywhere, or just on the character you're playing) and unlock the prompts to move them; under **Which arrivals to prompt for**, turn each category's prompts on or off; under **Timing**, set the welcome-back minutes; under **Close my prompt after**, set how many greetings close your prompt for a login, welcome back or long absence, and how many welcomes close it for someone who just joined. On the window's Greetings tab the greetings editor follows, under its own **Greetings** heading. In the AddOns options it also has an **Edit Greetings** button that opens the window's Greetings tab.
+- **Guild Greet**: at the top, turn Guild Greet on or off (everywhere, or just on the character you're playing) and unlock the prompts to move them; under **Which arrivals to prompt for**, turn each category's prompts on or off; under **Timing**, set the welcome-back minutes; under **Close my prompt after**, set how many greetings close your prompt for a login, welcome back or long absence, and how many welcomes close it for someone who just joined; under **Anti-spam mode**, officers set the guild's [anti-spam](#anti-spam-mode) trigger and cooldown (everyone else sees them greyed out). On the window's Greetings tab the greetings editor follows, under its own **Greetings** heading. In the AddOns options it also has an **Edit Greetings** button that opens the window's Greetings tab.
 - **Recruitment**: how many guild ads you've posted (all your characters together, and in the last 30 days), then turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, choose whether you also post the officers' guild ad (hover the info icon beside it to read the guild ad), and set your own timers (sliders) for how long General and Trade go without a guild ad before you're asked. On a character that can't invite to the guild these are greyed out, with a line saying why. Officers also get the guild ad, the guild's floor under everyone's timers for General and for Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild. Regular members don't see the officer settings.
 
 A change made in the window, the AddOns options or a slash command shows up in the other places at once. Settings are saved for every character on this game install. The development build's options are labeled "(Dev)".
@@ -243,7 +244,7 @@ When someone joins the guild or a guild member comes online, a small prompt appe
 - **Join**: someone joins the guild. They get this instead of a login prompt.
 - **Long absence**: someone's first login this session when none of their characters had logged in for 30 days or more, going by the guild roster's last-online times when you logged in.
 - **Login**: the first time you see someone come online this session.
-- **Welcome back**: someone you saw log off comes back 15 minutes or more later (you can change the minutes). Coming back sooner (a relog or a disconnect) gets no prompt.
+- **Welcome back**: someone you saw log off comes back 15 minutes or more later (you can change the minutes). Coming back sooner (a relog or a disconnect) gets no prompt. Someone who was online within the 5 hours before you logged in (going by the guild roster's last-online times) also gets a welcome back, not a login, the first time you see them come online: the guild greeted them earlier tonight.
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
 - Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
 - A prompt shows 5 to 10 seconds (at random) after someone arrives, so your greeting doesn't reach them while their game is still loading. It disappears 90 seconds after it shows, or as soon as that person goes offline, leaves the guild or is removed from it (even before it shows); the **X** closes one without greeting.
@@ -267,7 +268,7 @@ First and last parts only differ on WoW Forever, where names have two parts, so 
 
 The add-on counts greetings by reading guild chat. While your prompt for someone is up, any guild chat line that names them counts as a greeting from whoever sent it: their character's name, their main's name or their alias, as a whole word in any capitalization (on WoW Forever, either part of a two-part name works too). Greetings from Greet buttons and greetings typed by hand count alike, from members with or without the add-on. Lines that don't name them, like "wb!" or "hi all", never count, so the greetings that close your prompt are personal ones. A custom greeting of yours without a name placeholder doesn't count toward anyone else's prompt either.
 
-Once a player has had enough greetings, your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (15 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever of their characters sent it, and the person's own lines never count. If two people press Greet at the same moment, an extra greeting can slip through. Pressing a greeting button also sends a short add-on message, for guildmates on v0.9.4 or earlier, whose add-on counts greetings only that way; it's heard from them too. It's counted once with the same person's line in guild chat, and goes away in a later release once everyone has updated. Typing a greeting by hand sends nothing extra.
+Once a player has had enough greetings, your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (15 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever of their characters sent it, and the person's own lines never count. If two people press Greet at the same moment, an extra greeting can slip through. Pressing a greeting button also sends a short add-on message, so guildmates' add-ons count it at once (and those on v0.9.4 or earlier, which count greetings only that way, count it at all); it also tells them whether you're in [anti-spam mode](#anti-spam-mode). It's counted once with the same person's line in guild chat. Typing a greeting by hand sends nothing extra.
 
 How many is enough is set under **Close my prompt after** in the Guild Greet settings, each from 1 to 10: **Greetings** (2 by default) for a login, welcome back or long absence, and **Guild join welcomes** (3 by default) for someone who just joined the guild.
 
@@ -276,6 +277,24 @@ After each greeting, Greet is locked for a moment so nobody floods guild chat: 2
 So the same few quick greeters don't take every greeting, each greeting you post adds 1 to your greet weight, up to 6. While 3 or more guildmates with the add-on are online (counting you), your new prompts wait 2.5 seconds longer per weight, up to 15 seconds, on top of the usual 5 to 10. That gives everyone else a chance to greet first: greetings during the wait count as usual, and once the person has had enough, your prompt never shows. The weight fades by 1 every 5 minutes, also while you're offline, and it's shared by all your characters. A guildmate counts once your add-on has heard theirs since you logged in (their own login announcement, their location updates, or any other add-on message), unless they're inside a dungeon, raid or other instance, where greeting is off by default. `/agf probe greet` shows where you stand.
 
 Greeting messages, recruitment ad times, and the officer channel probe travel apart from guild sync's traffic, so a busy sync (a big guild logging in at once) doesn't hold them up.
+
+### Anti-spam mode
+
+On busy nights, when guild members keep arriving one after another, the add-on turns **anti-spam mode** on by itself so guild chat isn't a stream of greetings. It turns on once 8 guild members have come online within 2 minutes (each character counts once every 3 minutes; your own characters and people joining the guild don't count). While it's on:
+
+- Each arriving player gets **one** greeting from the whole guild, whatever your **Close my prompt after** setting. As soon as anyone greets them (with the add-on or typed by hand), everyone's prompt for them closes.
+- Welcome-back prompts aren't shown; logins and long absences still are.
+- After each greeting, every greet prompt but a guild welcome greys out with a countdown for the **guild cooldown** (15 seconds by default), plus your own lock for greetings in a row, plus up to 2 random seconds, so greeters unlock one after another instead of all at once. New prompts arrive already greyed out. Any greeting seen in guild chat starts the countdown again.
+- Long absences are listed first, then the people who have waited longest.
+- An **Anti-spam mode** label shows above the prompts, and you get a line in your own chat (never in guild chat) when it turns on and when it turns off.
+
+**Guild welcomes** for someone who just joined are never affected: they keep their usual cap, never grey out and never start the cooldown.
+
+It turns off once no more than 2 arrivals have been left waiting for a greeting for 10 times the guild cooldown (150 seconds by default). Arrivals stop waiting once greeted, once they log off, or once their prompt would have gone. Every add-on watches the guild for itself, also with Guild Greet turned off, in an instance or with a category hidden, so it's up to date when you start greeting. Right after you log in, prompts other than welcomes wait one guild cooldown, and while your add-on has been online for less than 2 minutes it turns anti-spam mode on as soon as it hears a guildmate's greeting sent in anti-spam mode, so you don't add to a busy stretch you just logged into. Add-ons older than this version don't take part.
+
+Officers set the two numbers under **Anti-spam mode** in the Guild Greet settings: **Arrivals within 2 minutes that turn anti-spam mode on** (3 to 30, 8 by default) and **Seconds between greetings while anti-spam mode is on** (5 to 60, 15 by default). They apply to everyone in the guild: the newest officer change wins, and changes from anyone else are ignored. `/agf greetstats` shows whether the settings are working.
+
+Guild members who'd rather not be greeted can tick **Don't greet me** on [My Profile](#characters-and-roles). Guildmates' add-ons then never prompt anyone to greet them (except with a guild welcome if they rejoin), and they never count as waiting.
 
 ### Editing greetings
 
@@ -638,7 +657,7 @@ These belong to your player, not to one character: whichever of your characters 
 
 Under each character are its [role preferences](#role-preferences). The character you're logged in on has a check box for each role its class can fill. Ticking one changes it, and the guild hears about it through [guild sync](#guild-sync). Your other characters' roles are shown but can't be changed here: log in on that character to change them.
 
-Along the bottom is the **Do Not Disturb** check box, the same setting as in the Group Finder, the settings and `/agf dnd` (see [Do Not Disturb](#do-not-disturb)).
+Along the bottom is the **Do Not Disturb** check box, the same setting as in the Group Finder, the settings and `/agf dnd` (see [Do Not Disturb](#do-not-disturb)). Beside it, **Don't greet me** tells every guildmate's add-on not to prompt them to greet you, on any of your characters (see [Anti-spam mode](#anti-spam-mode)). Only your own characters can set it, the newest change on any of them wins, and it reaches the guild through [guild sync](#guild-sync). A guild welcome if you ever rejoin still prompts.
 
 On a character that isn't in a guild, My Profile just says it needs one. Right after joining, before the add-on has scanned the roster, it asks you to try again after the next scan.
 
