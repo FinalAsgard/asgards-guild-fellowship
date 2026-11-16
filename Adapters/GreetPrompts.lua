@@ -298,8 +298,9 @@ end
 -- Each greeting button is named for its prompt's category and sized to
 -- fit its text. While
 -- `lockedFor` (whole seconds) is above 0, each is disabled and counts down,
--- as "Welcome Back (3)". `state.antiSpam` shows the "Anti-spam mode" label
--- above them.
+-- as "Welcome Back (3)". A prompt's own `lockedFor`, when set, is used for
+-- it instead. `state.antiSpam` shows the "Anti-spam mode" label above
+-- them.
 function Prompts:Show(prompts, handlers, lockedFor, state)
     if type(self.environment.CreateFrame) ~= "function" then
         return false
@@ -312,8 +313,10 @@ function Prompts:Show(prompts, handlers, lockedFor, state)
             local row = self:row(index)
             row.player = prompt.player
             row.name:SetText(prompt.label or "")
-            local locked = type(lockedFor) == "number" and lockedFor > 0
-            row.greet:SetText(GreetPrompts.Label(prompt.category, lockedFor))
+            -- A prompt's own lock, when it has one, else the shared one.
+            local promptLock = type(prompt.lockedFor) == "number" and prompt.lockedFor or lockedFor
+            local locked = type(promptLock) == "number" and promptLock > 0
+            row.greet:SetText(GreetPrompts.Label(prompt.category, promptLock))
             row.greet:SetWidth(fittedWidth(row.greet) or self.buttonWidth)
             if type(row.greet.SetEnabled) == "function" then
                 row.greet:SetEnabled(not locked)

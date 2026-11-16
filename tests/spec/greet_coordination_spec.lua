@@ -53,6 +53,8 @@ local function login(channel, playerName, options)
     fixtures.fire(world, "PLAYER_ENTERING_WORLD")
     fixtures.fire(world, "GUILD_ROSTER_UPDATE")
     fixtures.runTimers(world)
+    -- Past the guild cooldown every add-on waits after its roster loads.
+    fixtures.runTimers(world, 20)
     return world
 end
 

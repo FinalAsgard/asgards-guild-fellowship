@@ -3,6 +3,7 @@ local fixtures = require("tests.client_fixtures")
 
 local START = 1790000000
 local MINUTE = 60
+local ROSTER_LOADED_BEFORE = 10 * MINUTE
 
 local RULES = {
     Retail = { twoPartNames = false, homeRealm = "Area52" },
@@ -45,8 +46,9 @@ end
 -- A scanned guild with Guild Greet over it. The world records what was sent
 -- and what the prompts view was last asked to show; `world.time` is the
 -- clock and `world.timers` the pending timers. `away` optionally replaces
--- members' roster last-online times, by their NAMES id.
-local function setup(profile, away)
+-- members' roster last-online times, by their NAMES id. With `freshRoster`
+-- the roster loads at START, so the startup cooldown is running.
+local function setup(profile, away, freshRoster)
     local addon = load()
     local names = NAMES[profile]
     local rules = RULES[profile]
@@ -106,7 +108,12 @@ local function setup(profile, away)
             table.insert(world.timers, { at = world.time + seconds, callback = callback })
             return true
         end,
-        random = function(low)
+        -- The guild cooldown's random seconds are `world.stagger`, when
+        -- set; every other draw is its lowest.
+        random = function(low, high)
+            if world.stagger ~= nil and low == 0 and high == addon.GuildGreet.STAGGER_MAX_SECONDS then
+                return world.stagger
+            end
             return low
         end,
         send = function(text)
@@ -150,6 +157,9 @@ local function setup(profile, away)
             end,
         },
     })
+    -- The roster loaded a while before the spec starts, so the startup
+    -- cooldown is over (see the startup lock specs).
+    world.time = freshRoster and START or START - ROSTER_LOADED_BEFORE
     world.greet:OnRosterUpdate(function()
         local roster = {}
         local entryIndex
@@ -162,6 +172,7 @@ local function setup(profile, away)
         end
         return roster
     end)
+    world.time = START
     return world
 end
 
@@ -1532,4 +1543,123 @@ test.test("guild greet: the user's own characters never count toward anti-spam m
     world.greet:OnPresence("online", world.names.bishop)
 
     test.assertFalse(world.greet:AntiSpamOn())
+end)
+
+-- Guild cooldown ---------------------------------------------------------------
+
+-- A busy guild in anti-spam mode with prompts for Bolt, Bishop ("Rip") and
+-- Anvil showing, and the guild cooldown's random seconds set to `stagger`.
+local function inAntiSpam(stagger)
+    local world = busyGuild()
+    world.stagger = stagger
+    -- A second apart, so oldest first is well defined.
+    world.greet:OnPresence("online", world.names.bolt)
+    advance(world, 1)
+    world.greet:OnPresence("online", world.names.bishop)
+    advance(world, 1)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertTrue(world.greet:AntiSpamOn())
+    return world
+end
+
+test.test("guild greet: in anti-spam mode Greet unlocks after the guild cooldown, the user's lock and a random wait", function()
+    local world = inAntiSpam(2)
+    test.assertEqual(0, shownFor(world, "Rip").lockedFor)
+
+    world.handlers.greet(shownFor(world, world.names.bolt).player)
+
+    -- 15 seconds of guild cooldown, 2 for one greeting in a row, 2 random.
+    test.assertEqual(1, #world.sent)
+    test.assertEqual(2, world.lockedFor)
+    test.assertEqual(19, shownFor(world, "Rip").lockedFor)
+    test.assertEqual(19, shownFor(world, world.names.anvil).lockedFor)
+    world.handlers.greet(shownFor(world, "Rip").player)
+    test.assertEqual(1, #world.sent)
+
+    advance(world, 5)
+    test.assertEqual(14, shownFor(world, "Rip").lockedFor, "the countdown redraws")
+    -- Someone greets Anvil by hand: Anvil's prompt closes, and the cooldown
+    -- starts again at full length for everyone.
+    world.greet:OnGuildChat("hi Anvil", world.names.rust)
+    test.assertEqual(nil, shownFor(world, world.names.anvil))
+    test.assertEqual(19, shownFor(world, "Rip").lockedFor)
+
+    advance(world, 19)
+    test.assertEqual(0, shownFor(world, "Rip").lockedFor)
+    world.handlers.greet(shownFor(world, "Rip").player)
+    test.assertEqual(2, #world.sent)
+end)
+
+test.test("guild greet: someone else's greeting starts the guild cooldown on this add-on too", function()
+    local world = inAntiSpam(1)
+
+    world.greet:OnGuildChat("welcome Bolt", world.names.rust)
+
+    test.assertEqual(nil, shownFor(world, world.names.bolt))
+    -- No streak of the user's own: 15 + 1 random.
+    test.assertEqual(16, shownFor(world, "Rip").lockedFor)
+    test.assertEqual(0, world.lockedFor)
+end)
+
+test.test("guild greet: new prompts arrive locked, long absences listed first", function()
+    local world = inAntiSpam(0)
+    world.greet:OnGuildChat("hey Bolt", world.names.tongs)
+
+    world.greet:OnPresence("online", world.names.rust)
+
+    test.assertEqual("longAbsence", world.shown[1].category)
+    test.assertEqual(15, world.shown[1].lockedFor)
+    -- Then oldest first.
+    test.assertEqual("Rip", world.shown[2].label)
+    test.assertEqual(firstWord(world.names.anvil), world.shown[3].label)
+end)
+
+test.test("guild greet: join prompts stay unlocked and never start the guild cooldown", function()
+    local world = inAntiSpam(0)
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual(0, shownFor(world, world.names.newt).lockedFor)
+
+    world.greet:OnGuildChat("welcome to the guild Newt", world.names.rust)
+    test.assertEqual(0, shownFor(world, "Rip").lockedFor)
+
+    world.greet:OnGuildChat("hi Rip", world.names.rust)
+    test.assertEqual(15, shownFor(world, world.names.anvil).lockedFor)
+    -- Only the user's own lock holds a join's prompt.
+    test.assertEqual(0, shownFor(world, world.names.newt).lockedFor)
+    world.handlers.greet(shownFor(world, world.names.newt).player)
+    test.assertEqual(1, #world.sent)
+    -- The user's join greeting didn't start the cooldown again: only their
+    -- own 2 seconds for it are added.
+    test.assertEqual(17, shownFor(world, world.names.anvil).lockedFor)
+end)
+
+test.test("guild greet: for one guild cooldown after the roster loads, prompts but a join's wait", function()
+    local world = setup("Retail", nil, true)
+    world.stagger = 0
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("join", world.names.newt)
+
+    test.assertFalse(world.greet:AntiSpamOn())
+    test.assertEqual(15, shownFor(world, world.names.bolt).lockedFor)
+    test.assertEqual(0, shownFor(world, world.names.newt).lockedFor)
+    world.handlers.greet(shownFor(world, world.names.bolt).player)
+    test.assertEqual(0, #world.sent)
+
+    advance(world, 15)
+    test.assertEqual(0, shownFor(world, world.names.bolt).lockedFor)
+end)
+
+test.test("guild greet: outside anti-spam mode greetings don't lock other prompts, and order is by arrival", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:OnPresence("online", world.names.bishop)
+
+    test.assertEqual(firstWord(world.names.bolt), world.shown[1].label)
+    test.assertEqual("longAbsence", world.shown[2].category)
+    world.greet:OnGuildChat("hey Bolt", world.names.anvil)
+    test.assertEqual(0, shownFor(world, "Rip").lockedFor)
+    world.handlers.greet(shownFor(world, "Rip").player)
+    test.assertEqual(2, shownFor(world, world.names.rust).lockedFor)
 end)

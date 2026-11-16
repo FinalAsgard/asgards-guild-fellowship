@@ -15,6 +15,10 @@ local _, addon = ...
 --     `lifetime` seconds old (their prompt is gone by then).
 --   * Exit: it turns off once no more than CALM_WAITING players have been
 --     waiting for EXIT_MULTIPLIER x `cooldownSeconds()`, unbroken.
+--   * Guild cooldown: while it's on, each greeting seen starts the guild
+--     cooldown again at full length. For one cooldown after the session's
+--     roster loads, there's a cooldown anyway, before this add-on can know
+--     whether the guild is busy.
 -- `onChange(on)` hears each turn on (true) or off (false).
 local AntiSpamMonitor = {
     WINDOW_SECONDS = 2 * 60,
@@ -48,6 +52,9 @@ function AntiSpamMonitor.Create(options)
         waitingCount = 0,
         -- While on: since when no more than CALM_WAITING have waited.
         calmSince = nil,
+        -- When the guild cooldown and the startup cooldown end.
+        cooldownUntil = nil,
+        startupUntil = nil,
     }, Monitor)
 end
 
@@ -74,6 +81,9 @@ function Monitor:setOn(on)
     end
     self.on = on
     self.calmSince = nil
+    if not on then
+        self.cooldownUntil = nil
+    end
     pcall(self.onChange, on)
 end
 
@@ -210,4 +220,33 @@ function Monitor:NextCheckAt(now)
         end
     end
     return soonest
+end
+
+-- The session's roster loaded at `now`: a cooldown runs from it.
+function Monitor:Started(now)
+    if type(now) == "number" then
+        self.startupUntil = now + number(self.cooldownSeconds, 15)
+    end
+end
+
+-- A greeting was seen at `now`: while on, the guild cooldown starts again
+-- at full length. Returns true when it did.
+function Monitor:GreetingSeen(now)
+    self:Update(now)
+    if not self.on or type(now) ~= "number" then
+        return false
+    end
+    self.cooldownUntil = now + number(self.cooldownSeconds, 15)
+    return true
+end
+
+-- When the latest guild or startup cooldown ends (or ended), or nil when
+-- there has been none this session or since it last turned off.
+function Monitor:CooldownEndsAt(now)
+    self:Update(now)
+    local ends = self.startupUntil
+    if self.on and self.cooldownUntil ~= nil and (ends == nil or self.cooldownUntil > ends) then
+        ends = self.cooldownUntil
+    end
+    return ends
 end

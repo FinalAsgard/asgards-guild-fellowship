@@ -31,6 +31,12 @@ local _, addon = ...
 -- prompt but a join's closes after one greeting from anyone, whatever the
 -- user's cap, and welcome-backs aren't prompted. Arrivals are watched
 -- whatever the user's own settings, so it's up to date when they greet.
+-- While it's on, each greeting for an arrival (not a join) starts the guild
+-- cooldown again, on every add-on: every prompt but a join's stays locked
+-- until it ends, plus the user's own lock (2 seconds per greeting in a
+-- row), plus a random 0 to 2 seconds, so greeters don't all unlock at
+-- once. The same holds for one cooldown after the session's roster loads.
+-- Prompts are then listed long absences first, then oldest first.
 local GuildGreet = {
     -- The "greeted" message older versions (v0.9.4 and before) close their
     -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
@@ -52,6 +58,9 @@ local GuildGreet = {
     SHOW_DELAY_MAX = 10,
     -- How much longer Greet stays locked after each greeting in a row.
     COOLDOWN_STEP_SECONDS = 2,
+    -- The most random seconds added to the guild cooldown, so greeters
+    -- unlock one after another.
+    STAGGER_MAX_SECONDS = 2,
     -- The local chat lines when anti-spam mode turns on and off.
     ANTI_SPAM_ON_TEXT = "Anti-spam mode is on: the guild is busy, so each arrival gets one greeting "
         .. "and welcome-backs aren't prompted.",
@@ -111,8 +120,10 @@ function GuildGreet.Create(options)
         -- Greetings posted in a row, and when Greet unlocks.
         streak = 0,
         readyAt = nil,
-        -- Bumped by each cooldown, so an older one's countdown stops.
-        cooldownId = 0,
+        -- The random seconds added to the current guild cooldown.
+        stagger = 0,
+        -- True while a once-a-second redraw is waiting.
+        ticking = false,
         -- Hours since each offline member's last login, as the roster said
         -- when the session's roster first loaded.
         absences = {},
@@ -360,6 +371,50 @@ function Greet:OnRosterUpdate(readRoster)
         end
     end
     self.policy:Seed(online)
+    -- Until it knows whether the guild is busy, it waits one guild cooldown.
+    self.antiSpam:Started(self.now())
+    self:drawStagger()
+end
+
+-- Draws the random seconds for a new guild cooldown.
+function Greet:drawStagger()
+    local ok, stagger = pcall(self.random, 0, GuildGreet.STAGGER_MAX_SECONDS)
+    self.stagger = ok and type(stagger) == "number" and stagger >= 0 and stagger or 0
+end
+
+-- A greeting for an arrival was seen at `now`: in anti-spam mode the guild
+-- cooldown starts again.
+function Greet:greetingSeen(now)
+    if self.antiSpam:GreetingSeen(now) then
+        self:drawStagger()
+        return true
+    end
+    return false
+end
+
+-- Whole seconds until the guild cooldown lets a prompt other than a join's
+-- greet: its end, plus the user's lock for their streak, plus the random
+-- seconds. 0 when it doesn't hold.
+function Greet:GuildLockedFor(now)
+    local ends = type(now) == "number" and self.antiSpam:CooldownEndsAt(now) or nil
+    if ends == nil then
+        return 0
+    end
+    local unlockAt = ends + GuildGreet.COOLDOWN_STEP_SECONDS * self.streak + self.stagger
+    if unlockAt <= now then
+        return 0
+    end
+    return math.ceil(unlockAt - now)
+end
+
+-- Whole seconds until Greet unlocks for `prompt`: a join's only waits for
+-- the user's own lock.
+function Greet:PromptLockedFor(prompt, now)
+    local own = self:LockedFor(now)
+    if prompt.category == addon.GreetPolicy.JOIN then
+        return own
+    end
+    return math.max(own, self:GuildLockedFor(now))
 end
 
 -- A guild member came online ("online"), went offline ("offline"), left
@@ -594,6 +649,28 @@ function Greet:Refresh()
             self.streak = 0
         end
     end
+    local anyLocked = lockedFor > 0
+    local index
+    for index = 1, #prompts do
+        prompts[index].lockedFor = self:PromptLockedFor(prompts[index], now)
+        anyLocked = anyLocked or prompts[index].lockedFor > 0
+    end
+    if self.antiSpam:IsOn() then
+        table.sort(prompts, function(a, b)
+            local aLong = a.category == addon.GreetPolicy.LONG_ABSENCE
+            local bLong = b.category == addon.GreetPolicy.LONG_ABSENCE
+            if aLong ~= bLong then
+                return aLong
+            end
+            if a.raisedAt ~= b.raisedAt then
+                return a.raisedAt < b.raisedAt
+            end
+            return tostring(a.player) < tostring(b.player)
+        end)
+    end
+    if anyLocked then
+        self:tick()
+    end
     pcall(self.view.Show, self.view, prompts, {
         greet = function(player)
             self:Greet(player)
@@ -614,7 +691,7 @@ function Greet:Greet(player)
         self:Refresh()
     end
     local prompt = self.queue:Get(player)
-    if prompt == nil or type(now) ~= "number" or self:LockedFor(now) > 0 then
+    if prompt == nil or type(now) ~= "number" or self:PromptLockedFor(prompt, now) > 0 then
         return nil
     end
     self.queue:Remove(player)
@@ -637,22 +714,28 @@ end
 -- redraws every second until it unlocks. Without timers, Greet never locks.
 function Greet:startCooldown(now)
     self.streak = self.streak + 1
-    self.cooldownId = self.cooldownId + 1
-    local id = self.cooldownId
     self.readyAt = now + GuildGreet.COOLDOWN_STEP_SECONDS * self.streak
-    local function tick()
-        if self.cooldownId ~= id then
-            return
-        end
-        self:Refresh()
-        if self.readyAt ~= nil then
-            self.after(1, tick)
-        end
-    end
-    if not self.after(1, tick) then
+    if not self:tick() then
         self.readyAt = nil
         self.streak = 0
     end
+end
+
+-- Redraws in a second, so countdowns count down; Refresh asks again while
+-- anything is locked. Returns false without timers.
+function Greet:tick()
+    if self.ticking then
+        return true
+    end
+    self.ticking = true
+    if not self.after(1, function()
+        self.ticking = false
+        self:Refresh()
+    end) then
+        self.ticking = false
+        return false
+    end
+    return true
 end
 
 -- Posts a random greeting from `prompt`'s category, using the names as they
@@ -670,6 +753,9 @@ function Greet:post(prompt, now)
     if text ~= nil then
         self.tally:Add(prompt.player, self:ownGreeter(), prompt.raisedAt, now)
         self.antiSpam:Greeted(prompt.player, now)
+        if prompt.category ~= addon.GreetPolicy.JOIN then
+            self:greetingSeen(now)
+        end
         if GuildGreet.LEGACY_GREETED then
             pcall(self.announce, {
                 v = GuildGreet.PROTOCOL, t = GuildGreet.TYPE_GREETED, c = prompt.key, a = prompt.raisedAt,
@@ -799,16 +885,19 @@ function Greet:OnGuildChat(message, sender)
     end
     local greeter = self:IsOwn(senderKey) and self:ownGreeter() or self.policy:PlayerOf(senderKey)
     local lowered = addon.NameNormalizer.Fold(message)
-    -- Anti-spam mode watches every arrival, prompted here or not.
+    -- Anti-spam mode watches every arrival, prompted here or not. A
+    -- greeting for one, or for a prompt other than a join's, starts the
+    -- guild cooldown again.
+    local seen = false
     local waiting = self.antiSpam:Waiting(now)
     local waitingIndex
     for waitingIndex = 1, #waiting do
         local entry = waiting[waitingIndex]
         if greeter ~= entry.player and greeter ~= self.policy:PlayerOf(entry.key) and self:NamedIn(lowered, entry) then
             self.antiSpam:Greeted(entry.player, now)
+            seen = true
         end
     end
-    self:scheduleAntiSpamCheck(now)
     local counted, closed = 0, false
     local prompts = self.queue:All(now)
     local index
@@ -818,6 +907,7 @@ function Greet:OnGuildChat(message, sender)
         -- them after the prompt was raised.
         local own = greeter == prompt.player or greeter == self.policy:PlayerOf(prompt.key)
         if not own and self:NamedIn(lowered, prompt) then
+            seen = seen or prompt.category ~= addon.GreetPolicy.JOIN
             local before = self.tally:Count(prompt.player, now)
             if self.tally:Add(prompt.player, greeter, prompt.raisedAt, now) > before then
                 counted = counted + 1
@@ -827,6 +917,10 @@ function Greet:OnGuildChat(message, sender)
             end
         end
     end
+    if seen and self:greetingSeen(now) then
+        closed = true
+    end
+    self:scheduleAntiSpamCheck(now)
     if closed then
         self:Refresh()
     end
