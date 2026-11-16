@@ -152,8 +152,9 @@ function Monitor:Update(now)
 end
 
 -- Guild member `key` (of `player`, named `rawName` by the game) came online
--- at `now`. Returns true when it counted as an arrival.
-function Monitor:Arrived(key, player, rawName, now)
+-- at `now`. With `waits` false (they asked not to be greeted) they count as
+-- an arrival but never wait. Returns true when it counted as an arrival.
+function Monitor:Arrived(key, player, rawName, now, waits)
     if type(key) ~= "string" or player == nil or type(now) ~= "number" then
         return false
     end
@@ -164,11 +165,13 @@ function Monitor:Arrived(key, player, rawName, now)
     end
     self.lastArrival[key] = now
     table.insert(self.arrivals, now)
-    if self.waiting[player] == nil then
-        self.waitingCount = self.waitingCount + 1
+    if waits ~= false then
+        if self.waiting[player] == nil then
+            self.waitingCount = self.waitingCount + 1
+        end
+        self.waiting[player] = { player = player, key = key, rawName = rawName, arrivedAt = now }
+        self:countChanged(now)
     end
-    self.waiting[player] = { player = player, key = key, rawName = rawName, arrivedAt = now }
-    self:countChanged(now)
     if not self.on and #self.arrivals >= number(self.threshold, 8) then
         self:setOn(true)
         self:countChanged(now)

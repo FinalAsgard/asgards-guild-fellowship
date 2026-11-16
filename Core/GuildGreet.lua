@@ -463,6 +463,11 @@ function Greet:OnPresence(kind, rawName)
     if prompt ~= nil and prompt.category == addon.GreetPolicy.WELCOME_BACK and self.antiSpam:IsOn() then
         return
     end
+    -- A player who asked not to be greeted isn't, except as a newcomer, who
+    -- can't have asked yet.
+    if prompt ~= nil and prompt.category ~= addon.GreetPolicy.JOIN and self:OptedOut(key) then
+        return
+    end
     -- A category with no greetings has nothing to say, so it never prompts,
     -- and a player who has had enough greetings already isn't prompted.
     if prompt == nil or #self:Library():Greetings(prompt.category) == 0
@@ -499,8 +504,17 @@ function Greet:watchArrival(kind, key, rawName, now)
     if kind ~= "online" or partition == nil or not partition:IsInGuild(key) or self:IsOwn(key) then
         return
     end
-    self.antiSpam:Arrived(key, self.policy:PlayerOf(key), rawName, now)
+    -- A player who asked not to be greeted never waits for a greeting.
+    self.antiSpam:Arrived(key, self.policy:PlayerOf(key), rawName, now, not self:OptedOut(key))
     self:scheduleAntiSpamCheck(now)
+end
+
+-- True when `key`'s player asked not to be greeted ("Don't greet me" on
+-- their profile, the newest any of their characters set).
+function Greet:OptedOut(key)
+    local partition = self.context()
+    local character = partition and partition:GetCharacter(key)
+    return character ~= nil and (partition:PlayerNoGreet(character.player)) == true
 end
 
 -- Makes sure anti-spam mode is looked at again when it could next turn off

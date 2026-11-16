@@ -175,6 +175,10 @@ local function newPage(model)
         setDnd = function(enabled)
             table.insert(world.dnd, enabled)
         end,
+        setNoGreet = function(enabled)
+            world.noGreet = world.noGreet or {}
+            table.insert(world.noGreet, enabled)
+        end,
     })
     return world
 end
@@ -887,3 +891,37 @@ local index
 for index = 1, #fixtures.PROFILES do
     registerProfileTests(fixtures.PROFILES[index])
 end
+
+test.test("profile view model: carries the player's Don't greet me, from any of its characters", function()
+    local world = setup()
+    test.assertFalse(world.build().noGreet)
+
+    world.partition:SetNoGreet("hammer-area52", true, START, "hammer-area52")
+
+    test.assertTrue(world.build().noGreet)
+    test.assertEqual(nil, world.build({ inGuild = false }).noGreet)
+end)
+
+test.test("profile tab: the Don't greet me check box shows the player's choice and changes it", function()
+    local model = {}
+    local key, value
+    for key, value in pairs(PLAYER) do
+        model[key] = value
+    end
+    model.noGreet = true
+    local world = newPage(model)
+    local page = world.page
+    page.panel.hooks.OnShow()
+
+    test.assertTrue(page.noGreetButton.shown)
+    test.assertTrue(page.noGreetButton:GetChecked())
+    test.assertContains(page.noGreetLabel.text, "Don't greet me")
+    page.noGreetButton:SetChecked(false)
+    page.noGreetButton.scripts.OnClick(page.noGreetButton)
+    test.assertEqual(false, world.noGreet[1])
+
+    -- Without a player to set it for, it's hidden.
+    world.model = { message = "This needs a guild." }
+    page:Refresh()
+    test.assertFalse(page.noGreetButton.shown)
+end)

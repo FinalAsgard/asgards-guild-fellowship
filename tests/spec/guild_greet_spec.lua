@@ -1733,3 +1733,61 @@ test.test("guild greet: unflagged, malformed and own greeted messages leave the 
     test.assertFalse(flaggedGreeted(world, "myAlt", world.names.anvil, { s = true }))
     test.assertFalse(world.greet:AntiSpamOn())
 end)
+
+-- Don't greet me -----------------------------------------------------------------
+
+-- Marks `name`'s character as having set "Don't greet me" to `value`.
+local function setNoGreet(world, name, value, at)
+    local partition, normalizer = world.greet.context()
+    local key = normalizer:Key(name)
+    partition:SetNoGreet(key, value, at or world.time, key)
+end
+
+test.test("guild greet: a player who asked not to be greeted gets no prompt, on any character", function()
+    local world = setup("Retail", { bolt = { years = 0, months = 0, days = 0, hours = 2 } })
+    -- Tongs set it; Anvil is the same player.
+    setNoGreet(world, world.names.tongs, true)
+    setNoGreet(world, world.names.rust, true)
+    setNoGreet(world, world.names.bolt, true)
+
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:OnPresence("online", world.names.bolt)
+
+    test.assertEqual(0, #world.shown)
+
+    -- Turned off again (newer, on another character): greetings come back.
+    setNoGreet(world, world.names.anvil, false, START + 1)
+    world.greet:OnPresence("offline", world.names.anvil)
+    advance(world, 20 * MINUTE)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertEqual("welcomeBack", world.shown[1].category)
+end)
+
+test.test("guild greet: someone who asked not to be greeted still gets a join welcome", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("join", world.names.newt)
+    -- A rejoining member's old choice doesn't stop the welcome either.
+    setNoGreet(world, world.names.rust, true)
+    world.greet:OnPresence("join", world.names.rust)
+
+    test.assertEqual(2, #world.shown)
+    test.assertEqual("join", world.shown[1].category)
+    test.assertEqual("join", world.shown[2].category)
+end)
+
+test.test("guild greet: players who asked not to be greeted count as arrivals but never wait", function()
+    local world = busyGuild()
+    setNoGreet(world, world.names.bolt, true)
+    setNoGreet(world, world.names.bishop, true)
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+
+    -- Three arrivals turn it on; only Anvil waits.
+    test.assertTrue(world.greet:AntiSpamOn())
+    local waiting = world.greet.antiSpam:Waiting(world.time)
+    test.assertEqual(1, #waiting)
+    test.assertEqual(1, #world.shown)
+end)

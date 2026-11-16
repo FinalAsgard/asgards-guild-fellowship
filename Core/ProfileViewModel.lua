@@ -163,6 +163,7 @@ function ProfileViewModel.Build(inputs)
         declared = main.declared == true,
         characters = characters,
         dnd = dnd,
+        noGreet = (partition:PlayerNoGreet(own.player)) == true,
     }
 end
 

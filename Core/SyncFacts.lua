@@ -57,6 +57,10 @@ local SyncFacts = {
     KIND_ALIAS = "alias",
     KIND_DECLARED = "declared",
     KIND_ROLES = "roles",
+    -- { kind = "noGreet", character = key, noGreet = boolean, at, by }:
+    -- the character's player asks guildmates' add-ons not to prompt them
+    -- to greet it (true), or lets them again (false).
+    KIND_NO_GREET = "noGreet",
     KIND_DISCORD = "discord",
     KIND_LOCATION = "location",
     KIND_BIO = "bio",
@@ -69,6 +73,7 @@ local SyncFacts = {
 -- Kinds only the character they describe may write.
 SyncFacts.PROFILE_KINDS = {
     [SyncFacts.KIND_ROLES] = true,
+    [SyncFacts.KIND_NO_GREET] = true,
     [SyncFacts.KIND_DISCORD] = true,
     [SyncFacts.KIND_LOCATION] = true,
     [SyncFacts.KIND_BIO] = true,
@@ -116,6 +121,9 @@ function SyncFacts.IsValid(fact)
     end
     if fact.kind == SyncFacts.KIND_DECLARED then
         return type(fact.declared) == "boolean"
+    end
+    if fact.kind == SyncFacts.KIND_NO_GREET then
+        return type(fact.noGreet) == "boolean"
     end
     if addon.FellowshipStore.PROFILE_FIELDS[fact.kind] ~= nil then
         return addon.FellowshipStore.IsProfileText(fact.kind, fact.text)
@@ -306,6 +314,33 @@ function Facts:StampRoles(key, roles, at)
     return self:RolesFactOf(key)
 end
 
+-- The "Don't greet me" fact for `key` as this client holds it, or nil when
+-- that character never set it.
+function Facts:NoGreetFactOf(key)
+    local noGreet, at, by = self.partition:GetNoGreet(key)
+    if type(noGreet) ~= "boolean" then
+        return nil
+    end
+    return { kind = SyncFacts.KIND_NO_GREET, character = key, noGreet = noGreet, at = at, by = by }
+end
+
+-- Sets `key`'s "Don't greet me" to `noGreet`, written by the character
+-- itself at `at`, stamped newer than any of its player's characters' so the
+-- player's value becomes this one. Returns its fact, or nil for an unknown
+-- character.
+function Facts:StampNoGreet(key, noGreet, at)
+    local character = self.partition:GetCharacter(key)
+    if character == nil then
+        return nil
+    end
+    local _, newestAt = self.partition:PlayerNoGreet(character.player)
+    local _, heldAt = self.partition:GetNoGreet(key)
+    if not self.partition:SetNoGreet(key, noGreet == true, math.max(at, heldAt + 1, newestAt + 1), key) then
+        return nil
+    end
+    return self:NoGreetFactOf(key)
+end
+
 -- The `kind` text fact ("discord", "location" or "bio") for `key` as this
 -- client holds it, or nil when that character never set it.
 function Facts:TextFactOf(key, kind)
@@ -321,6 +356,9 @@ end
 function Facts:ProfileFactOf(key, kind)
     if kind == SyncFacts.KIND_ROLES then
         return self:RolesFactOf(key)
+    end
+    if kind == SyncFacts.KIND_NO_GREET then
+        return self:NoGreetFactOf(key)
     end
     return self:TextFactOf(key, kind)
 end
@@ -349,6 +387,10 @@ end
 function Facts:HeldStamp(fact)
     if fact.kind == SyncFacts.KIND_ROLES then
         return self.partition:GetRolesStamp(fact.character)
+    end
+    if fact.kind == SyncFacts.KIND_NO_GREET then
+        local _, at, by = self.partition:GetNoGreet(fact.character)
+        return at, by
     end
     if addon.FellowshipStore.PROFILE_FIELDS[fact.kind] ~= nil then
         return self.partition:GetProfileStamp(fact.character, fact.kind)
@@ -609,6 +651,10 @@ function Facts:Change(fact)
         self.partition:SetRoles(fact.character, fact.roles, fact.at, fact.by)
         return
     end
+    if fact.kind == SyncFacts.KIND_NO_GREET then
+        self.partition:SetNoGreet(fact.character, fact.noGreet, fact.at, fact.by)
+        return
+    end
     -- The players this changes are logged.
     local keys = { fact.character }
     if fact.kind == SyncFacts.KIND_MAIN and fact.main ~= fact.character then
@@ -768,6 +814,9 @@ function Facts:ProfileFacts(checkpoint)
         local character = self.partition:GetCharacter(key)
         if character.rolesAt ~= nil and character.rolesBy == key and character.roles ~= nil then
             table.insert(facts, self:RolesFactOf(key))
+        end
+        if character.noGreetAt ~= nil and character.noGreetBy == key and type(character.noGreet) == "boolean" then
+            table.insert(facts, self:NoGreetFactOf(key))
         end
         for kindIndex = 1, #SyncFacts.TEXT_KINDS do
             local kind = SyncFacts.TEXT_KINDS[kindIndex]

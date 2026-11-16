@@ -1902,6 +1902,12 @@ if clientProfile.supported then
                     rosterController:Print("Do Not Disturb can't be changed: " .. tostring(why) .. ".")
                 end
             end,
+            -- Every character of the player at once, and the guild is told.
+            setNoGreet = function(enabled)
+                if syncSession:LocalNoGreetEdit(enabled) == nil then
+                    rosterController:Print("Don't greet me can't be changed: the server time isn't known yet.")
+                end
+            end,
             -- The player's own Discord, location and bio: saved and sent to
             -- the guild at once, with no officer involved.
             -- The alias goes through the roster, like Set alias…: official

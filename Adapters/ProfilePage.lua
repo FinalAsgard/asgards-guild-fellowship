@@ -15,7 +15,8 @@ local _, addon = ...
 -- yet, each with Add as alt and Dismiss; nothing is ever linked without that
 -- click. A member's changes still waiting for an officer are listed under
 -- "Waiting for an officer", each with Undo. A Do Not Disturb check box sits
--- along the bottom. Out of a guild,
+-- along the bottom, and beside it, once the player is known, "Don't greet
+-- me". Out of a guild,
 -- or before the roster knows the character, the tab shows a short message
 -- instead.
 --
@@ -81,6 +82,7 @@ end
 --   setRole(role, on)     sets whether the logged-in character is willing to
 --                         play `role`
 --   setDnd(on)            turns Do Not Disturb on or off
+--   setNoGreet(on)        turns the player's "Don't greet me" on or off
 --   setText(kind, text)   saves the player's "alias", "discord", "location"
 --                         or "bio"
 --   makeMain(key)         makes that character the player's main
@@ -106,6 +108,7 @@ function ProfilePage.Create(client, host, options)
         model = options.model,
         setRole = options.setRole or function() end,
         setDnd = options.setDnd or function() end,
+        setNoGreet = options.setNoGreet or function() end,
         setText = options.setText or function() end,
         makeMain = options.makeMain or function() end,
         removeAlt = options.removeAlt or function() end,
@@ -197,6 +200,20 @@ function Page:build()
     label:SetPoint("LEFT", dnd, "RIGHT", 2, 0)
     label:SetText("Do Not Disturb (no group requests, on every character)")
     self.dndButton = dnd
+
+    local noGreet = createFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    noGreet:SetWidth(ProfilePage.CHECK_SIZE)
+    noGreet:SetHeight(ProfilePage.CHECK_SIZE)
+    noGreet:SetPoint("LEFT", label, "RIGHT", 20, 0)
+    noGreet:SetScript("OnClick", function(button)
+        pcall(self.setNoGreet, button:GetChecked() == true)
+        self:Refresh()
+    end)
+    local noGreetLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    noGreetLabel:SetPoint("LEFT", noGreet, "RIGHT", 2, 0)
+    noGreetLabel:SetText("Don't greet me (guildmates' add-ons won't prompt them to greet you)")
+    self.noGreetButton = noGreet
+    self.noGreetLabel = noGreetLabel
 end
 
 function Page:button(parent, text, width, onClick)
@@ -696,6 +713,14 @@ function Page:draw()
         model = { message = addon.ProfileViewModel.NOT_READY }
     end
     self.dndButton:SetChecked(model.dnd == true)
+    if model.message == nil then
+        self.noGreetButton:SetChecked(model.noGreet == true)
+        self.noGreetButton:Show()
+        self.noGreetLabel:Show()
+    else
+        self.noGreetButton:Hide()
+        self.noGreetLabel:Hide()
+    end
     local fields = {}
     if model.message == nil then
         fields[1] = { kind = "alias", label = "Alias", text = model.alias or "", max = model.aliasMax or 48 }

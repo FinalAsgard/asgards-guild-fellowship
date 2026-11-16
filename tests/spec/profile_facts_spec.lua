@@ -1125,3 +1125,99 @@ test.test("player panel: shows the player's Discord in the header, and location 
     test.assertEqual("Healer.", lines[3])
     test.assertEqual("Evenings only.", lines[4])
 end)
+
+-- Don't greet me ------------------------------------------------------------------
+
+local function noGreet(at, by, character, value)
+    return { kind = "noGreet", character = character or by, noGreet = value ~= false, at = at, by = by }
+end
+
+test.test("profile store: Don't greet me is the newest any of the player's characters set", function()
+    local addon = load()
+    local partition = newPartition(addon)
+    onePlayer(partition)
+    local playerId = partition:GetCharacter(MEMBER).player
+
+    test.assertFalse((partition:PlayerNoGreet(playerId)))
+    partition:SetNoGreet(MEMBER, true, NOW, MEMBER)
+    test.assertTrue((partition:PlayerNoGreet(playerId)))
+    partition:SetNoGreet("wrench-area52", false, NOW + 10, "wrench-area52")
+    test.assertFalse((partition:PlayerNoGreet(playerId)))
+
+    -- Ticking it again on Hammer is newer than Wrench's, whatever the clock says.
+    local fact = newFacts(addon, partition):StampNoGreet(MEMBER, true, NOW)
+    test.assertEqual(NOW + 11, fact.at)
+    test.assertTrue((partition:PlayerNoGreet(playerId)))
+end)
+
+test.test("profile facts: Don't greet me is accepted only from the character itself, newest winning", function()
+    local addon = load()
+    local partition = newPartition(addon)
+    local facts = newFacts(addon, partition)
+
+    test.assertEqual("not the character's own", facts:Refusal(noGreet(NOW, OFFICER, MEMBER)))
+    test.assertEqual("not the character's own", facts:Refusal(noGreet(NOW, "wrench-area52", MEMBER)))
+    test.assertEqual("malformed", facts:Refusal({ kind = "noGreet", character = MEMBER, noGreet = "yes",
+        at = NOW, by = MEMBER }))
+
+    test.assertEqual(1, facts:ApplyAll({ noGreet(NOW, MEMBER) }))
+    test.assertTrue((partition:GetNoGreet(MEMBER)))
+    test.assertEqual(0, facts:ApplyAll({ noGreet(NOW - 1, MEMBER, MEMBER, false) }))
+    test.assertEqual(1, facts:ApplyAll({ noGreet(NOW + 1, MEMBER, MEMBER, false) }))
+    test.assertEqual(false, (partition:GetNoGreet(MEMBER)))
+end)
+
+test.test("profile facts: Don't greet me is part of the digest and catch-up, only in its own name", function()
+    local addon = load()
+    local partition = newPartition(addon)
+    local facts = newFacts(addon, partition)
+    local before = addon.SyncDigest.Of(facts:SharedFacts())
+
+    partition:SetNoGreet(MEMBER, true, NOW, MEMBER)
+    partition:SetNoGreet("wrench-area52", true, NOW, MEMBER)
+
+    local shared = facts:SharedFacts()
+    test.assertEqual(1, #shared)
+    test.assertEqual("noGreet", shared[1].kind)
+    test.assertEqual(true, shared[1].noGreet)
+    local after = addon.SyncDigest.Of(shared)
+    test.assertTrue(#addon.SyncDigest.Differing(before, after) >= 1)
+    partition:SetNoGreet(MEMBER, false, NOW, MEMBER)
+    test.assertTrue(#addon.SyncDigest.Differing(after, addon.SyncDigest.Of(facts:SharedFacts())) >= 1)
+end)
+
+test.test("guild sync: Don't greet me is sent at once, applied by others, and reaches latecomers", function()
+    local network = newNetwork()
+    local member = newClient(network, MEMBER, "Hammer-Area52")
+    local other = newClient(network, "wrench-area52", "Wrench-Area52")
+
+    local fact = member.session:LocalNoGreetEdit(true)
+
+    test.assertEqual("noGreet", fact.kind)
+    test.assertEqual("facts", member.sent[1].t)
+    deliver(network)
+    test.assertTrue((other.partition:GetNoGreet(MEMBER)))
+    test.assertEqual(0, #member.session:Suggestions(member.partition):Pending())
+
+    network.queue = {}
+    local latecomer = newClient(network, OFFICER, "Toolbox-Area52")
+    latecomer.session:SendDigest()
+    deliver(network)
+    test.assertTrue((latecomer.partition:GetNoGreet(MEMBER)))
+end)
+
+test.test("guild sync: the owner's client corrects a forged Don't greet me in its name", function()
+    local network = newNetwork()
+    local member = newClient(network, MEMBER, "Hammer-Area52")
+    local bystander = newClient(network, "wrench-area52", "Wrench-Area52")
+    local forger = newClient(network, OFFICER, "Toolbox-Area52")
+    member.session:LocalNoGreetEdit(true)
+    deliver(network)
+
+    forger.session:Send({ t = "facts", facts = { noGreet(NOW + 5, MEMBER, MEMBER, false) } })
+    deliver(network)
+
+    test.assertTrue((member.partition:GetNoGreet(MEMBER)))
+    test.assertTrue((bystander.partition:GetNoGreet(MEMBER)))
+    test.assertEqual(1, #member.forgeries)
+end)

@@ -490,6 +490,24 @@ function Session:LocalRolesEdit(roles)
     return fact
 end
 
+-- After this user ticked or cleared "Don't greet me": stores it as written
+-- by the logged-in character now, and sends the fact to the guild. Returns
+-- the fact sent, or nil when nothing could be.
+function Session:LocalNoGreetEdit(noGreet)
+    local partition = self.context()
+    local key = self.selfKey()
+    local now = self.now()
+    if partition == nil or key == nil or now == nil then
+        return nil
+    end
+    local fact = self:Facts(partition):StampNoGreet(key, noGreet, now)
+    if fact == nil then
+        return nil
+    end
+    self:SendWhenAcceptable({ fact }, now)
+    return fact
+end
+
 -- After this user changed their player's profile text of `kind`
 -- ("discord", "location" or "bio") to `text` ("" clears it): stores it as
 -- written by the logged-in character now, and sends the fact to the guild.
@@ -916,6 +934,9 @@ function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
             if fact.kind == addon.SyncFacts.KIND_ROLES then
                 local roles = self.rolesOf(owner)
                 correction = roles and own:StampRoles(owner, roles, at)
+            elseif fact.kind == addon.SyncFacts.KIND_NO_GREET then
+                -- This character's own choice as it was, or off.
+                correction = own:StampNoGreet(owner, partition:GetNoGreet(owner) == true, at)
             else
                 -- This character's own text as it was, or cleared when it
                 -- never set one.

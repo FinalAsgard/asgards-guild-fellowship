@@ -43,6 +43,8 @@ local function factHash(fact)
         value = table.concat(fact.roles, ",")
     elseif fact.kind == addon.SyncFacts.KIND_DECLARED then
         value = tostring(fact.declared)
+    elseif fact.kind == addon.SyncFacts.KIND_NO_GREET then
+        value = tostring(fact.noGreet)
     elseif addon.SyncFacts.DateValue(fact) ~= nil then
         value = addon.SyncFacts.DateValue(fact)
     elseif fact.text ~= nil then

@@ -1985,6 +1985,48 @@ function Partition:SetRoles(key, roles, at, by)
     return true
 end
 
+-- Whether `key` set "Don't greet me" (nil when it never set it either way),
+-- and when and by whom: never set is the oldest possible, at 0 with no
+-- author. Nil for an unknown character.
+function Partition:GetNoGreet(key)
+    local character = self.data.characters[key]
+    if character == nil then
+        return nil
+    end
+    return character.noGreet, character.noGreetAt or 0, character.noGreetBy
+end
+
+-- Sets `key`'s "Don't greet me", stamped `at` by `by`.
+function Partition:SetNoGreet(key, noGreet, at, by)
+    local character = self.data.characters[key]
+    if character == nil or type(noGreet) ~= "boolean" or not isWholeNumber(at) or not isText(by) then
+        return false
+    end
+    character.noGreet = noGreet
+    character.noGreetAt = at
+    character.noGreetBy = by
+    return true
+end
+
+-- Whether player `playerId` asked not to be greeted: the newest "Don't greet
+-- me" any of its characters set. Also returns that value's stamp (at, by),
+-- or 0 when none ever set it.
+function Partition:PlayerNoGreet(playerId)
+    local keys = self:CharactersOf(playerId)
+    local value, newestAt, newestBy = false, 0, nil
+    local index
+    for index = 1, #keys do
+        local character = self.data.characters[keys[index]]
+        local at, by = character.noGreetAt, character.noGreetBy
+        if type(character.noGreet) == "boolean" and type(at) == "number" and isText(by)
+            and (newestBy == nil or at > newestAt or (at == newestAt and by > newestBy))
+        then
+            value, newestAt, newestBy = character.noGreet, at, by
+        end
+    end
+    return value, newestAt, newestBy
+end
+
 -- Whether `text` can be a value of profile field `field`: text no longer
 -- than the field allows ("" clears it).
 function FellowshipStore.IsProfileText(field, text)
