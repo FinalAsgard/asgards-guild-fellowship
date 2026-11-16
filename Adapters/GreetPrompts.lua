@@ -9,7 +9,9 @@ local _, addon = ...
 -- the quest log). Unlocking it shows a handle above the stack that drags it
 -- anywhere; the new place is saved when the drag ends. Frames are made on
 -- first use and reused. Like the other adapters, a failing frame call hides
--- the prompts rather than raising an error.
+-- the prompts rather than raising an error. While anti-spam mode is on, an
+-- "Anti-spam mode" label sits above the stack (above the handle when it
+-- shows).
 local GreetPrompts = {
     HEIGHT = 40,
     GAP = 8,
@@ -36,6 +38,8 @@ local GreetPrompts = {
     DEFAULT_LABEL = "Greet",
     -- The widest countdown a locked button adds to its label.
     WIDEST_COUNTDOWN = " (88)",
+    ANTI_SPAM_LABEL = "Anti-spam mode",
+    BANNER_HEIGHT = 16,
 }
 addon.GreetPrompts = GreetPrompts
 
@@ -202,7 +206,35 @@ function Prompts:SetUnlocked(unlocked)
         return nil, "the prompts can't be drawn on this client"
     end
     self.unlocked = unlocked == true
+    if self.banner ~= nil then
+        pcall(self.placeBanner, self)
+    end
     return true
+end
+
+-- The "Anti-spam mode" label's frame, made on first use.
+function Prompts:bannerFrame()
+    if self.banner ~= nil then
+        return self.banner
+    end
+    local anchor = self:anchorFrame()
+    local banner = self.environment.CreateFrame("Frame", nil, anchor)
+    banner:SetWidth(self:width())
+    banner:SetHeight(GreetPrompts.BANNER_HEIGHT)
+    local label = banner:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    label:SetPoint("LEFT", banner, "LEFT", GreetPrompts.PADDING, 0)
+    label:SetText(GreetPrompts.ANTI_SPAM_LABEL)
+    self.banner = banner
+    self.bannerLabel = label
+    self:placeBanner()
+    return banner
+end
+
+-- Puts the label just above the stack, or above the handle while it shows.
+function Prompts:placeBanner()
+    local below = self.unlocked and self.handle or self.anchor
+    self.banner:ClearAllPoints()
+    self.banner:SetPoint("BOTTOMLEFT", below, "TOPLEFT", 0, 4)
 end
 
 function Prompts:row(index)
@@ -266,8 +298,9 @@ end
 -- Each greeting button is named for its prompt's category and sized to
 -- fit its text. While
 -- `lockedFor` (whole seconds) is above 0, each is disabled and counts down,
--- as "Welcome Back (3)".
-function Prompts:Show(prompts, handlers, lockedFor)
+-- as "Welcome Back (3)". `state.antiSpam` shows the "Anti-spam mode" label
+-- above them.
+function Prompts:Show(prompts, handlers, lockedFor, state)
     if type(self.environment.CreateFrame) ~= "function" then
         return false
     end
@@ -290,6 +323,11 @@ function Prompts:Show(prompts, handlers, lockedFor)
         for index = #prompts + 1, #self.rows do
             self.rows[index].player = nil
             self.rows[index].frame:Hide()
+        end
+        if #prompts > 0 and type(state) == "table" and state.antiSpam == true then
+            self:bannerFrame():Show()
+        elseif self.banner ~= nil then
+            self.banner:Hide()
         end
     end)
     return ok

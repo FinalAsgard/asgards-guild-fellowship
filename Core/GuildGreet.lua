@@ -26,6 +26,11 @@ local _, addon = ...
 -- adds to the user's greet weight (GreetWeight), and while enough add-on
 -- users are online a new prompt waits longer the more weight there is.
 -- Greetings from others during the wait count as usual.
+--
+-- On busy nights anti-spam mode (AntiSpamMonitor) turns on by itself: every
+-- prompt but a join's closes after one greeting from anyone, whatever the
+-- user's cap, and welcome-backs aren't prompted. Arrivals are watched
+-- whatever the user's own settings, so it's up to date when they greet.
 local GuildGreet = {
     -- The "greeted" message older versions (v0.9.4 and before) close their
     -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
@@ -47,6 +52,10 @@ local GuildGreet = {
     SHOW_DELAY_MAX = 10,
     -- How much longer Greet stays locked after each greeting in a row.
     COOLDOWN_STEP_SECONDS = 2,
+    -- The local chat lines when anti-spam mode turns on and off.
+    ANTI_SPAM_ON_TEXT = "Anti-spam mode is on: the guild is busy, so each arrival gets one greeting "
+        .. "and welcome-backs aren't prompted.",
+    ANTI_SPAM_OFF_TEXT = "Anti-spam mode is off: greetings are back to normal.",
 }
 addon.GuildGreet = GuildGreet
 
@@ -71,8 +80,15 @@ Greet.__index = Greet
 --   inInstance    function() -> true in a dungeon, raid, battleground,
 --                 arena or keystone run, where the user can turn prompts
 --                 off. Optional.
---   view          { Show = function(view, prompts, handlers) }: draws the
---                 prompts; handlers.greet(player) and handlers.close(player)
+--   antiSpamThreshold, antiSpamCooldown   function() -> the guild's
+--                 anti-spam settings (AntiSpamConfig). Optional; the
+--                 defaults otherwise.
+--   notify        function(text) -> prints a line to the user's own chat
+--                 frame, never to guild chat. Optional.
+--   view          { Show = function(view, prompts, handlers, lockedFor,
+--                 state) }: draws the prompts; handlers.greet(player) and
+--                 handlers.close(player); state.antiSpam is true while
+--                 anti-spam mode is on
 function GuildGreet.Create(options)
     local greet = setmetatable({
         context = options.context,
@@ -100,7 +116,25 @@ function GuildGreet.Create(options)
         -- Hours since each offline member's last login, as the roster said
         -- when the session's roster first loaded.
         absences = {},
+        notify = options.notify or function() end,
+        -- When the next anti-spam check is due, and its timer's id.
+        antiSpamCheckAt = nil,
+        antiSpamCheckId = 0,
     }, Greet)
+    local antiSpamDefaults = addon.AntiSpamConfig and addon.AntiSpamConfig.SETTINGS
+    greet.antiSpam = addon.AntiSpamMonitor.Create({
+        threshold = options.antiSpamThreshold or function()
+            return antiSpamDefaults and antiSpamDefaults.threshold.default or 8
+        end,
+        cooldownSeconds = options.antiSpamCooldown or function()
+            return antiSpamDefaults and antiSpamDefaults.cooldownSeconds.default or 15
+        end,
+        -- An arrival is never prompted later than this.
+        lifetime = addon.GreetPromptQueue.LIFETIME_SECONDS + GuildGreet.SHOW_DELAY_MAX,
+        onChange = function(on)
+            greet:onAntiSpamChanged(on)
+        end,
+    })
     greet.tally = addon.GreetTally.Create(function()
         return greet.policy:WelcomeBackSeconds()
     end)
@@ -154,6 +188,10 @@ end
 function Greet:Cap(category)
     if category == addon.GreetPolicy.JOIN then
         return self:Setting("welcomeCap")
+    end
+    -- One greeting per arrival while anti-spam mode is on.
+    if self.antiSpam:IsOn() then
+        return 1
     end
     local store = self.store()
     return store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
@@ -339,6 +377,8 @@ function Greet:OnPresence(kind, rawName)
         if kind == "offline" then
             self.policy:WentOffline(key, now)
         end
+        self.antiSpam:Left(self.policy:PlayerOf(key), now)
+        self:scheduleAntiSpamCheck(now)
         -- Nobody to greet any more: the prompt raised for this character,
         -- not one for another of its player's characters still online.
         -- Matched by character, so a prompt raised before a scan linked
@@ -356,11 +396,16 @@ function Greet:OnPresence(kind, rawName)
         end
         return
     end
+    self:watchArrival(kind, key, rawName, now)
     local prompt
     if kind == "online" then
         prompt = self.policy:CameOnline(key, now)
     elseif kind == "join" then
         prompt = self.policy:Joined(key, now)
+    end
+    -- Short breaks don't add to a busy guild chat.
+    if prompt ~= nil and prompt.category == addon.GreetPolicy.WELCOME_BACK and self.antiSpam:IsOn() then
+        return
     end
     -- A category with no greetings has nothing to say, so it never prompts,
     -- and a player who has had enough greetings already isn't prompted.
@@ -384,6 +429,69 @@ function Greet:OnPresence(kind, rawName)
         self:Refresh()
     end)
     self:Refresh()
+end
+
+-- Tells anti-spam mode about a guild member coming online: every one counts,
+-- whatever the user's own Guild Greet settings, except the user's own
+-- characters and someone joining the guild.
+function Greet:watchArrival(kind, key, rawName, now)
+    if kind == "join" then
+        self.antiSpam:Joined(key, now)
+        return
+    end
+    local partition = self.context()
+    if kind ~= "online" or partition == nil or not partition:IsInGuild(key) or self:IsOwn(key) then
+        return
+    end
+    self.antiSpam:Arrived(key, self.policy:PlayerOf(key), rawName, now)
+    self:scheduleAntiSpamCheck(now)
+end
+
+-- Makes sure anti-spam mode is looked at again when it could next turn off
+-- on its own. Without timers it's looked at on the next event.
+function Greet:scheduleAntiSpamCheck(now)
+    local at = self.antiSpam:NextCheckAt(now)
+    if at == nil or (self.antiSpamCheckAt ~= nil and self.antiSpamCheckAt <= at and self.antiSpamCheckAt > now) then
+        return
+    end
+    self.antiSpamCheckId = self.antiSpamCheckId + 1
+    local id = self.antiSpamCheckId
+    self.antiSpamCheckAt = at
+    self.after(math.max(at - now, 0), function()
+        if self.antiSpamCheckId ~= id then
+            return
+        end
+        self.antiSpamCheckAt = nil
+        local later = self.now()
+        if type(later) == "number" then
+            self.antiSpam:Update(later)
+            self:scheduleAntiSpamCheck(later)
+        end
+    end)
+end
+
+-- Anti-spam mode turned on or off: the user is told in their own chat
+-- frame, and the prompts are redrawn. Turning on closes every prompt but a
+-- join's whose player has had a greeting already.
+function Greet:onAntiSpamChanged(on)
+    pcall(self.notify, on and GuildGreet.ANTI_SPAM_ON_TEXT or GuildGreet.ANTI_SPAM_OFF_TEXT)
+    local now = self.now()
+    if on and type(now) == "number" then
+        local prompts = self.queue:All(now)
+        local index
+        for index = 1, #prompts do
+            local prompt = prompts[index]
+            if prompt.category ~= addon.GreetPolicy.JOIN and self.tally:Count(prompt.player, now) > 0 then
+                self.queue:Remove(prompt.player)
+            end
+        end
+    end
+    self:Refresh()
+end
+
+-- True while anti-spam mode is on.
+function Greet:AntiSpamOn()
+    return self.antiSpam:IsOn()
 end
 
 -- Seconds a new prompt waits before showing.
@@ -493,7 +601,7 @@ function Greet:Refresh()
         close = function(player)
             self:Close(player)
         end,
-    }, lockedFor)
+    }, lockedFor, { antiSpam = self.antiSpam:IsOn() })
 end
 
 -- The user pressed Greet: unless Greet is locked, posts a random greeting
@@ -561,6 +669,7 @@ function Greet:post(prompt, now)
     end
     if text ~= nil then
         self.tally:Add(prompt.player, self:ownGreeter(), prompt.raisedAt, now)
+        self.antiSpam:Greeted(prompt.player, now)
         if GuildGreet.LEGACY_GREETED then
             pcall(self.announce, {
                 v = GuildGreet.PROTOCOL, t = GuildGreet.TYPE_GREETED, c = prompt.key, a = prompt.raisedAt,
@@ -595,6 +704,7 @@ function Greet:OnGreeted(message, sender)
     if partition:GetCharacter(message.c) == nil and prompt == nil then
         return false
     end
+    self.antiSpam:Greeted(player, now)
     local before = self.tally:Count(player, now)
     if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
         return false
@@ -672,8 +782,8 @@ end
 -- counted for.
 function Greet:OnGuildChat(message, sender)
     local now = self.now()
-    -- With no prompt waiting, a chat line can't count for anyone.
-    if type(now) ~= "number" or not self.queue:HasAny(now) then
+    -- With no prompt or arrival waiting, a chat line can't count for anyone.
+    if type(now) ~= "number" or (not self.queue:HasAny(now) and not self.antiSpam:HasWaiting(now)) then
         if addon.PerfCounters ~= nil then
             addon.PerfCounters.Bump("greetChecksSkipped")
         end
@@ -689,6 +799,16 @@ function Greet:OnGuildChat(message, sender)
     end
     local greeter = self:IsOwn(senderKey) and self:ownGreeter() or self.policy:PlayerOf(senderKey)
     local lowered = addon.NameNormalizer.Fold(message)
+    -- Anti-spam mode watches every arrival, prompted here or not.
+    local waiting = self.antiSpam:Waiting(now)
+    local waitingIndex
+    for waitingIndex = 1, #waiting do
+        local entry = waiting[waitingIndex]
+        if greeter ~= entry.player and greeter ~= self.policy:PlayerOf(entry.key) and self:NamedIn(lowered, entry) then
+            self.antiSpam:Greeted(entry.player, now)
+        end
+    end
+    self:scheduleAntiSpamCheck(now)
     local counted, closed = 0, false
     local prompts = self.queue:All(now)
     local index

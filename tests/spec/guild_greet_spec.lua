@@ -37,6 +37,7 @@ local function load()
         "Core/GreetPromptQueue.lua",
         "Core/GreetTally.lua",
         "Core/GreetWeight.lua",
+        "Core/AntiSpamMonitor.lua",
         "Core/GuildGreet.lua"
     )
 end
@@ -128,9 +129,18 @@ local function setup(profile, away)
         addonOnline = function()
             return world.addonOnline
         end,
+        -- The guild's anti-spam threshold, when a spec sets it.
+        antiSpamThreshold = function()
+            return world.antiSpamThreshold
+        end,
+        notify = function(text)
+            world.notices = world.notices or {}
+            table.insert(world.notices, text)
+        end,
         view = {
-            Show = function(_, prompts, handlers, lockedFor)
+            Show = function(_, prompts, handlers, lockedFor, state)
                 world.lockedFor = lockedFor
+                world.antiSpamShown = state and state.antiSpam
                 world.shown = {}
                 local promptIndex
                 for promptIndex = 1, #prompts do
@@ -1388,4 +1398,138 @@ test.test("guild greet: without timers, Greet never locks", function()
 
     test.assertEqual(3, #world.sent)
     test.assertEqual(0, world.lockedFor)
+end)
+
+-- Anti-spam mode ---------------------------------------------------------------
+
+-- A Retail guild where 3 arrivals within 2 minutes turn anti-spam mode on.
+local function busyGuild(away)
+    local world = setup("Retail", away)
+    world.antiSpamThreshold = 3
+    return world
+end
+
+local function shownFor(world, name)
+    local index
+    for index = 1, #world.shown do
+        if world.shown[index].label == firstWord(name) then
+            return world.shown[index]
+        end
+    end
+    return nil
+end
+
+test.test("guild greet: anti-spam mode turns on with arrivals, says so only locally, and labels the prompts", function()
+    local world = busyGuild()
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    test.assertFalse(world.greet:AntiSpamOn())
+    test.assertFalse(world.antiSpamShown)
+    world.greet:OnPresence("online", world.names.anvil)
+
+    test.assertTrue(world.greet:AntiSpamOn())
+    test.assertTrue(world.antiSpamShown)
+    test.assertEqual(1, #world.notices)
+    test.assertEqual(world.addon.GuildGreet.ANTI_SPAM_ON_TEXT, world.notices[1])
+    test.assertEqual(0, #world.sent)
+    test.assertEqual(3, #world.shown)
+end)
+
+test.test("guild greet: in anti-spam mode one greeting from anyone, typed by hand, closes a prompt", function()
+    -- Mode off: the cap of 2 keeps the prompt open after one greeting.
+    local calm = setup("Retail")
+    calm.greet:OnPresence("online", calm.names.bolt)
+    calm.greet:OnGuildChat("hey Bolt", calm.names.anvil)
+    test.assertEqual(1, #calm.shown)
+
+    local world = busyGuild()
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertTrue(world.greet:AntiSpamOn())
+
+    test.assertEqual(1, world.greet:OnGuildChat("hey Bolt", world.names.rust))
+
+    test.assertEqual(nil, shownFor(world, world.names.bolt))
+    test.assertEqual(2, #world.shown)
+end)
+
+test.test("guild greet: when anti-spam mode turns on, prompts for players already greeted close", function()
+    local world = busyGuild()
+    world.greet:OnPresence("join", world.names.newt)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnGuildChat("hi Bolt", world.names.rust)
+    world.greet:OnGuildChat("welcome Newt", world.names.rust)
+    test.assertTrue(shownFor(world, world.names.bolt) ~= nil)
+
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+    -- The join didn't count toward the trigger; three logins did.
+    test.assertTrue(world.greet:AntiSpamOn())
+
+    test.assertEqual(nil, shownFor(world, world.names.bolt))
+    -- Bishop's prompt is labelled with their alias.
+    test.assertTrue(shownFor(world, "Rip") ~= nil)
+    test.assertTrue(shownFor(world, world.names.newt) ~= nil)
+end)
+
+test.test("guild greet: joins never count toward anti-spam mode and keep the welcome cap", function()
+    local world = busyGuild()
+    world.greet:OnPresence("join", world.names.newt)
+    world.greet:OnPresence("online", world.names.newt)
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertFalse(world.greet:AntiSpamOn())
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertTrue(world.greet:AntiSpamOn())
+
+    world.greet:OnGuildChat("welcome Newt", world.names.rust)
+    world.greet:OnGuildChat("welcome to the guild Newt", world.names.bishop)
+
+    -- Two greetings, and the welcome cap is 3.
+    test.assertEqual("join", shownFor(world, world.names.newt).category)
+end)
+
+test.test("guild greet: anti-spam mode skips welcome-backs", function()
+    local world = busyGuild({ bolt = { years = 0, months = 0, days = 0, hours = 2 } })
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertTrue(world.greet:AntiSpamOn())
+
+    -- On earlier tonight: a welcome-back, so no prompt.
+    world.greet:OnPresence("online", world.names.bolt)
+
+    test.assertEqual(nil, shownFor(world, world.names.bolt))
+    test.assertEqual(3, #world.shown)
+end)
+
+test.test("guild greet: anti-spam mode is watched with Guild Greet off, and turns off once calm", function()
+    local world = busyGuild()
+    world.store:SetGreetEnabled(false)
+    world.greet:OnEnabledChanged(false)
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+
+    test.assertTrue(world.greet:AntiSpamOn())
+    test.assertEqual(0, #world.shown)
+
+    -- Nobody greets: the arrivals age out, and 150 calm seconds later the
+    -- mode ends on its own.
+    advance(world, 400)
+    test.assertFalse(world.greet:AntiSpamOn())
+    test.assertEqual(world.addon.GuildGreet.ANTI_SPAM_OFF_TEXT, world.notices[2])
+    test.assertEqual(0, #world.sent)
+end)
+
+test.test("guild greet: the user's own characters never count toward anti-spam mode", function()
+    local world = busyGuild()
+    world.greet:OnPresence("online", world.names.myAlt)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+
+    test.assertFalse(world.greet:AntiSpamOn())
 end)

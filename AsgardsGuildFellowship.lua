@@ -3449,6 +3449,17 @@ if clientProfile.supported then
             return comm:BroadcastLive(message)
         end,
         addonOnline = addonOnline,
+        -- The guild's anti-spam settings, shared by officers.
+        antiSpamThreshold = function()
+            return antiSpamConfig and antiSpamConfig:Threshold()
+        end,
+        antiSpamCooldown = function()
+            return antiSpamConfig and antiSpamConfig:CooldownSeconds()
+        end,
+        -- Anti-spam mode turning on or off is told only to the user.
+        notify = function(text)
+            rosterController:Print(text)
+        end,
         view = greetPrompts,
     })
     -- The Guild Recruit window stays where it's dragged; the place is saved

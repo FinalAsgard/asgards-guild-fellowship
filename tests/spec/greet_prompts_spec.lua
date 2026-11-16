@@ -240,3 +240,31 @@ test.test("greet prompts: each button fits its own label, and every box is as wi
     world.prompts:Show({ prompt(1, "login") }, {})
     test.assertEqual(170, world.prompts.rows[1].greet.width)
 end)
+
+test.test("greet prompts: an \"Anti-spam mode\" label shows above them while the mode is on", function()
+    local world = newPrompts(nil)
+
+    world.prompts:Show({ prompt(1) }, {}, 0, { antiSpam = false })
+    test.assertEqual(nil, world.prompts.banner)
+
+    world.prompts:Show({ prompt(1) }, {}, 0, { antiSpam = true })
+    local banner = world.prompts.banner
+    test.assertTrue(banner.shown)
+    test.assertEqual("Anti-spam mode", world.prompts.bannerLabel.text)
+    test.assertEqual(world.prompts.anchor, banner.point.relativeTo)
+    test.assertEqual("BOTTOMLEFT", banner.point.point)
+
+    -- Above the drag handle while it shows.
+    world.prompts:SetUnlocked(true)
+    test.assertEqual(world.prompts.handle, banner.point.relativeTo)
+    world.prompts:SetUnlocked(false)
+    test.assertEqual(world.prompts.anchor, banner.point.relativeTo)
+
+    -- Gone with the mode, or with the last prompt.
+    world.prompts:Show({ prompt(1) }, {}, 0, { antiSpam = false })
+    test.assertFalse(banner.shown)
+    world.prompts:Show({ prompt(1) }, {}, 0, { antiSpam = true })
+    test.assertTrue(banner.shown)
+    world.prompts:Show({}, {}, 0, { antiSpam = true })
+    test.assertFalse(banner.shown)
+end)
