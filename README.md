@@ -26,6 +26,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf mail` | Opens [Guild Mail](#guild-mail), to mail the guild ranks you pick (officers only). |
 | `/agf sync` | Shows guild sync status: whether it's running or paused, when you last synced, and how many of your suggestions are waiting for an officer. |
+| `/agf resync <name>` | Replaces your roster data (main and alt links, aliases, declared mains, and Discord, location and bio) with an online officer's copy, whatever the edit times. For when your roster went wrong and sync won't correct it. See [Resync](#resync). |
 | `/agf setdate join\|rank <character> <YYYY-MM-DD>` | Sets a character's join date, or the date it reached its current rank, when you know better than the add-on (officers only; see [Dates behind the checks](#dates-behind-the-checks)). |
 | `/agf perf` | Shows the add-on's memory use, its CPU use (when the game's script profiling is on, or how to turn it on), and counts since login of its costly work: roster reads, roster-update refreshes, scans, map redraws, chat tags and greet checks (anyone). |
 | `/agf probe` | Shows when the roster last had a full scan, and how many guild notes the latest scan picked up as changed (anyone). |
@@ -185,6 +186,15 @@ When an officer changes which characters belong together, or what a player goes 
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
 - The Roster tab's footer shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
 - Sync never gets in the way of play. It sends and processes nothing while you're in combat, or on Retail during a boss encounter or a keystone run, and picks up where it left off once that's over. Like scans, it works on data a little at a time, so even a large guild's full sync doesn't cause a hitch, and your roster redraws once per batch rather than once per change.
+
+### Resync
+
+Sync keeps the most recently edited version of everything, so if your copy of a player went wrong with a newer edit time than the officers' copy, sync keeps your wrong copy. `/agf resync <name>` replaces your copy with an officer's instead:
+
+- Name an officer who's online: the name of the character they're playing, or their alias. Their add-on sends you its whole roster copy, which takes a minute or two in a big guild. A line in your chat says when it's been applied, and how many players changed.
+- It replaces main and alt links, aliases, declared mains, and Discord, location and bio, keeping the officer's edit times. Your own characters' Discord, location and bio, role preferences, membership dates, history and settings are left alone. Characters your add-on hasn't seen yet are skipped.
+- Only an officer's copy is accepted, only the one you asked for, and only within 5 minutes. Each player's **Log → Changes** shows what changed "(resync)".
+- The officer's add-on answers each guildmate at most once a minute, and prints a line saying who it sent its roster to.
 
 ### Suggestions
 

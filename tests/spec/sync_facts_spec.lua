@@ -656,3 +656,173 @@ test.test("a player whose main a fact moves away logs the main it keeps, after a
     test.assertEqual(PALT, last.to)
     test.assertEqual(OFFICER, last.by)
 end)
+
+-- Resync ------------------------------------------------------------------------
+
+-- The right roster, as an officer's healthy client holds it.
+local function healthyRoster()
+    local healthy = newSetup({ OFFICER, ZOLL, ZOLL_ALT, TIKIT_ALT, TIKIT })
+    healthy.facts:ApplyAll(rightFacts())
+    return healthy
+end
+
+-- The record an older version's takeover leaves: Zoll's player made
+-- Tikitalt's, holding Zoll, Zollalt and Tikitalt with Zoll's alias, every
+-- stamp newer than the officer's, so newest-wins keeps it.
+local function takenOver()
+    local setup = newSetup({ OFFICER, ZOLL, ZOLL_ALT, TIKIT_ALT, TIKIT })
+    local partition = setup.partition
+    partition:JoinPlayerOf(ZOLL_ALT, ZOLL, "sync")
+    partition:JoinPlayerOf(TIKIT_ALT, ZOLL, "sync")
+    local zollPlayer = partition:GetCharacter(ZOLL).player
+    partition:SetMain(zollPlayer, TIKIT_ALT)
+    partition:SetAlias(zollPlayer, "Zoll", "sync")
+    partition:SetAliasStamp(TIKIT_ALT, NOW + 9000, OFFICER)
+    local key
+    for _, key in ipairs({ ZOLL, ZOLL_ALT, TIKIT_ALT, TIKIT }) do
+        partition:SetMainStamp(key, NOW + 9000, OFFICER)
+    end
+    return setup
+end
+
+test.test("newest-wins keeps a taken-over record whose stamps are newer than the officer's", function()
+    local setup = takenOver()
+
+    setup.facts:ApplyAll(healthyRoster().facts:OfficerFacts())
+
+    test.assertEqual(TIKIT_ALT, mainOf(setup.partition, ZOLL))
+    test.assertEqual("Zoll", aliasOf(setup.partition, TIKIT_ALT))
+end)
+
+test.test("resync makes a taken-over record match the officer's roster, stamps and all", function()
+    local healthy = healthyRoster()
+    local setup = takenOver()
+
+    local changed = setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, {})
+
+    test.assertTrue(changed > 0)
+    test.assertEqual(ZOLL, mainOf(setup.partition, ZOLL))
+    test.assertEqual(ZOLL, mainOf(setup.partition, ZOLL_ALT))
+    test.assertEqual(TIKIT_ALT, mainOf(setup.partition, TIKIT_ALT))
+    test.assertEqual(TIKIT_ALT, mainOf(setup.partition, TIKIT))
+    test.assertEqual("Zoll", aliasOf(setup.partition, ZOLL))
+    test.assertEqual("Tikit", aliasOf(setup.partition, TIKIT))
+    test.assertTrue(setup.partition:GetCharacter(ZOLL).player ~= setup.partition:GetCharacter(TIKIT).player)
+    -- It now passes on exactly the officer's data.
+    local function shared(facts)
+        local lines = {}
+        local _, held
+        for _, held in ipairs(facts:OfficerFacts()) do
+            table.insert(lines, table.concat({ held.kind, held.character, tostring(held.main or held.alias),
+                tostring(held.at), tostring(held.by) }, "|"))
+        end
+        table.sort(lines)
+        return table.concat(lines, "\n")
+    end
+    test.assertEqual(shared(healthy.facts), shared(setup.facts))
+    -- The change log says it came from a resync.
+    local changes = setup.partition:GetPlayer(setup.partition:GetCharacter(ZOLL).player).changes
+    test.assertEqual("resync", changes[#changes].via)
+
+    -- Doing it again changes nothing.
+    test.assertEqual(0, setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, {}))
+end)
+
+test.test("resync copies Discord as the officer holds it, but keeps the user's own", function()
+    local healthy = healthyRoster()
+    healthy.partition:SetProfileText(ZOLL, "discord", "zoll#1", NOW, ZOLL)
+    local setup = takenOver()
+    -- The officer's Discord edit for Zoll landed on Tikitalt here.
+    setup.partition:SetProfileText(TIKIT_ALT, "discord", "zoll#1", NOW + 9000, OFFICER)
+    setup.partition:SetProfileText(TIKIT, "bio", "my own words", NOW + 9000, TIKIT)
+
+    setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, { [TIKIT] = true })
+
+    test.assertEqual(nil, setup.partition:GetProfileText(TIKIT_ALT, "discord"))
+    test.assertEqual("zoll#1", setup.partition:GetProfileText(ZOLL, "discord"))
+    test.assertEqual("zoll#1", (setup.partition:PlayerProfileText(setup.partition:GetCharacter(ZOLL).player, "discord")))
+    test.assertEqual("my own words", setup.partition:GetProfileText(TIKIT, "bio"))
+end)
+
+test.test("resync clears stamps the officer doesn't hold, and skips characters this client doesn't know", function()
+    local healthy = newSetup({ OFFICER, ZOLL, ZOLL_ALT, "stranger-area52" })
+    healthy.partition:JoinPlayerOf(ZOLL_ALT, ZOLL, "note")
+    local setup = newSetup({ OFFICER, ZOLL, ZOLL_ALT })
+    setup.partition:SetAlias(setup.partition:GetCharacter(ZOLL).player, "Wrong", "sync")
+    setup.partition:SetAliasStamp(ZOLL, NOW + 9000, OFFICER)
+
+    setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, {})
+
+    test.assertEqual(ZOLL, mainOf(setup.partition, ZOLL_ALT))
+    test.assertEqual(nil, aliasOf(setup.partition, ZOLL))
+    test.assertEqual(0, (setup.partition:GetAliasStamp(ZOLL)))
+    test.assertEqual(0, (setup.partition:GetMainStamp(ZOLL_ALT)))
+    test.assertEqual(nil, setup.partition:GetCharacter("stranger-area52"))
+end)
+
+test.test("resync refuses a snapshot it can't read, changing nothing", function()
+    local setup = takenOver()
+
+    test.assertEqual(nil, setup.facts:Overwrite(nil, OFFICER, {}))
+    test.assertEqual(nil, setup.facts:Overwrite({ l = "x" }, OFFICER, {}))
+    test.assertEqual(0, setup.facts:Overwrite({ l = { { 5, false } }, a = { "bad" }, d = 7, p = { {} } }, OFFICER, {}))
+    test.assertEqual(TIKIT_ALT, mainOf(setup.partition, ZOLL))
+end)
+
+test.test("an officer re-stamping both players untangles a taken-over record through guild sync", function()
+    local healthy = healthyRoster()
+    -- The officer "Make main"s each real main and re-sets each alias: fresh
+    -- stamps, sent sorted by character, so Tikit's link comes before
+    -- Tikitalt's own.
+    local later = NOW + 20000
+    local tikitKeys = { [TIKIT] = true, [TIKIT_ALT] = true }
+    local zollKeys = { [ZOLL] = true, [ZOLL_ALT] = true }
+    local sent = {}
+    local _, item
+    for _, item in ipairs(healthy.facts:Stamp(tikitKeys, OFFICER, later)) do
+        table.insert(sent, item)
+    end
+    for _, item in ipairs(healthy.facts:Stamp(zollKeys, OFFICER, later)) do
+        table.insert(sent, item)
+    end
+    table.insert(sent, healthy.facts:StampAlias(TIKIT_ALT, OFFICER, later))
+    table.insert(sent, healthy.facts:StampAlias(ZOLL, OFFICER, later))
+    test.assertEqual(TIKIT, sent[1].character)
+    local setup = takenOver()
+
+    setup.facts:ApplyAll(sent)
+
+    test.assertEqual(ZOLL, mainOf(setup.partition, ZOLL_ALT))
+    test.assertEqual(TIKIT_ALT, mainOf(setup.partition, TIKIT))
+    test.assertEqual("Zoll", aliasOf(setup.partition, ZOLL))
+    test.assertEqual("Tikit", aliasOf(setup.partition, TIKIT))
+end)
+
+test.test("resync swapping a player's main and alt keeps the player's record and history", function()
+    local healthy = newSetup({ OFFICER, ZOLL, ZOLL_ALT })
+    healthy.facts:ApplyAll({ fact(ZOLL_ALT, ZOLL_ALT, NOW), fact(ZOLL, ZOLL_ALT, NOW) })
+    local setup = newSetup({ OFFICER, ZOLL, ZOLL_ALT })
+    local partition = setup.partition
+    partition:JoinPlayerOf(ZOLL_ALT, ZOLL, "sync")
+    local id = partition:GetCharacter(ZOLL).player
+    partition:SetAlias(id, "Zoll", "sync")
+    partition:LogChange(id, { at = NOW - 50, kind = "alias", from = "", to = "Zoll", via = "local" })
+
+    test.assertEqual(1, setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, {}))
+
+    test.assertEqual(id, partition:GetCharacter(ZOLL).player)
+    test.assertEqual(id, partition:GetCharacter(ZOLL_ALT).player)
+    test.assertEqual(ZOLL_ALT, partition:GetPlayer(id).main)
+    test.assertEqual("alias", partition:GetPlayer(id).changes[1].kind)
+end)
+
+test.test("resync counts a player whose declared main changed", function()
+    local healthy = newSetup({ OFFICER, ZOLL })
+    healthy.partition:SetDeclared(ZOLL, true, "sync")
+    healthy.partition:SetDeclaredStamp(ZOLL, NOW, OFFICER)
+    local setup = newSetup({ OFFICER, ZOLL })
+
+    test.assertEqual(1, setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, {}))
+    test.assertTrue(setup.partition:IsDeclared(ZOLL))
+    test.assertEqual(0, setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, {}))
+end)
