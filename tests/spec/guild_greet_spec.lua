@@ -1165,7 +1165,10 @@ test.test("guild greet: guild chat is watched from the arrival, before the promp
     test.assertTrue(greeted(world, "rust", world.names.bolt))
     test.assertEqual(0, #world.shown)
 
-    -- With enough greetings, guild chat isn't looked at any more.
+    -- With enough greetings, guild chat is only looked at for the stats,
+    -- and not at all once the latest greeting is a minute old.
+    test.assertFalse(greeted(world, "anvil", world.names.bolt))
+    advance(world, 60)
     asked = 0
     test.assertFalse(greeted(world, "anvil", world.names.bolt))
     test.assertEqual(0, asked)
@@ -1601,11 +1604,14 @@ test.test("guild greet: greeting stats keep counting with Guild Greet off", func
     world.greet:OnPresence("online", world.names.bishop)
     world.greet:OnPresence("online", world.names.anvil)
     world.greet:OnGuildChat("hey Bolt", world.names.rust)
-    advance(world, 60)
+    -- A second greeting, after Bolt stopped waiting, counts too.
+    advance(world, 5)
+    world.greet:OnGuildChat("welcome back Bolt", world.names.anvil)
+    advance(world, 55)
 
     local lines = world.greet:StatsLines(world.time)
-    test.assertEqual("  Last hour: 1 greeting lines, 3 arrivals, 1m 00s in anti-spam mode", lines[1])
-    test.assertEqual("  This session: 1 greeting lines, 3 arrivals, 1m 00s in anti-spam mode", lines[2])
+    test.assertEqual("  Last hour: 2 greeting lines, 3 arrivals, 1m 00s in anti-spam mode", lines[1])
+    test.assertEqual("  This session: 2 greeting lines, 3 arrivals, 1m 00s in anti-spam mode", lines[2])
     test.assertEqual("  Anti-spam mode is on now.", lines[3])
 end)
 
