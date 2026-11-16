@@ -43,8 +43,9 @@ end
 
 -- A scanned guild with Guild Greet over it. The world records what was sent
 -- and what the prompts view was last asked to show; `world.time` is the
--- clock and `world.timers` the pending timers.
-local function setup(profile)
+-- clock and `world.timers` the pending timers. `away` optionally replaces
+-- members' roster last-online times, by their NAMES id.
+local function setup(profile, away)
     local addon = load()
     local names = NAMES[profile]
     local rules = RULES[profile]
@@ -65,9 +66,17 @@ local function setup(profile)
         { names.anvil, "", { years = 0, months = 0, days = 2, hours = 0 } },
         { names.tongs, ">" .. names.anvil, { years = 0, months = 1, days = 15, hours = 0 } },
         { names.bishop, "@Rip", { years = 0, months = 0, days = 1, hours = 0 } },
-        { names.bolt, "", { years = 0, months = 0, days = 0, hours = 5 } },
+        { names.bolt, "", { years = 0, months = 0, days = 0, hours = 6 } },
         { names.rust, "", { years = 0, months = 2, days = 0, hours = 0 } },
     }
+    local id, lastOnline, entryIndex
+    for id, lastOnline in pairs(away or {}) do
+        for entryIndex = 1, #entries do
+            if entries[entryIndex][1] == names[id] then
+                entries[entryIndex][3] = lastOnline
+            end
+        end
+    end
     local members = {}
     local index
     for index = 1, #entries do
@@ -456,6 +465,19 @@ for joinIndex = 1, #fixtures.PROFILES do
         world.greet:OnPresence("online", world.names.tongs)
 
         test.assertEqual("login", world.shown[1].category)
+    end)
+
+    test.test(profile .. ": a player on earlier tonight is greeted as a welcome-back", function()
+        local world = setup(profile, {
+            bolt = { years = 0, months = 0, days = 0, hours = 5 },
+            bishop = { years = 0, months = 0, days = 0, hours = 6 },
+        })
+
+        world.greet:OnPresence("online", world.names.bolt)
+        world.greet:OnPresence("online", world.names.bishop)
+
+        test.assertEqual("welcomeBack", world.shown[1].category)
+        test.assertEqual("login", world.shown[2].category)
     end)
 
     test.test(profile .. ": someone joining gets a join prompt, and their login no separate one", function()

@@ -44,9 +44,9 @@ local GreetingLibrary = {
     CATEGORIES = {
         { id = "join", label = "Join", when = "Someone joins the guild.",
             toggle = "Prompt when someone joins the guild" },
-        { id = "login", label = "Login", when = "Someone's first login you see this session.",
+        { id = "login", label = "Login", when = "Someone's first login you see this session, after more than 5 hours away.",
             toggle = "Prompt for first logins" },
-        { id = "welcomeBack", label = "Welcome back", when = "Someone you saw log off comes back after a break.",
+        { id = "welcomeBack", label = "Welcome back", when = "Someone comes back after a break, or was on within the last 5 hours.",
             toggle = "Prompt for welcome backs" },
         { id = "longAbsence", label = "Long absence", when = "Someone logs in after a long time away.",
             toggle = "Prompt after a long absence" },

@@ -11,7 +11,8 @@ local _, addon = ...
 --     and never get a login prompt
 --   * the first login seen from a player this session is a "longAbsence"
 --     when their latest login on any character was at least `longAbsence`
---     seconds before, and otherwise a "login"
+--     seconds before, a "welcomeBack" when it was at most `SAME_NIGHT_SECONDS`
+--     before (they were on earlier tonight), and otherwise a "login"
 --   * a player seen going offline who comes back at least `welcomeBack`
 --     seconds later is a "welcomeBack"; sooner is a relog and gets nothing
 --   * the user's own characters never get a prompt
@@ -25,6 +26,9 @@ local GreetPolicy = {
     LONG_ABSENCE = "longAbsence",
     WELCOME_BACK_SECONDS = 15 * 60,
     LONG_ABSENCE_SECONDS = 30 * 24 * 60 * 60,
+    -- A first login this session from a player away at most this long, by
+    -- the roster as it first loaded, was on earlier tonight.
+    SAME_NIGHT_SECONDS = 5 * 60 * 60,
 }
 addon.GreetPolicy = GreetPolicy
 
@@ -39,7 +43,8 @@ Policy.__index = Policy
 -- options.isOwn: function(key) -> true for the user's own characters.
 -- options.absenceOf: function(key) -> seconds between the player's latest
 --   login on any character and the start of this session, or nil when
---   unknown. Optional; without it nobody is on a long absence.
+--   unknown. Optional; without it nobody is on a long absence or back the
+--   same night.
 -- options.enabled: function() -> false when Guild Greet is off, or off on
 --   this character. Optional.
 -- options.categoryEnabled: function(category) -> false when that category's
@@ -174,6 +179,8 @@ function Policy:CameOnline(key, now)
             and absence >= seconds(self.longAbsence, GreetPolicy.LONG_ABSENCE_SECONDS)
         then
             category = GreetPolicy.LONG_ABSENCE
+        elseif ok and type(absence) == "number" and absence <= GreetPolicy.SAME_NIGHT_SECONDS then
+            category = GreetPolicy.WELCOME_BACK
         else
             category = GreetPolicy.LOGIN
         end

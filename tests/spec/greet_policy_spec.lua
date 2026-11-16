@@ -300,3 +300,41 @@ test.test("greet policy: a failing setting falls back to the defaults", function
     policy:WentOffline("anvil", START)
     test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 15 * MINUTE)))
 end)
+
+local HOUR = 60 * MINUTE
+
+test.test("greet policy: a first login within 5 whole hours of the last one is a welcome-back", function()
+    local addon = test.newAddon("Core/GreetPolicy.lua")
+    test.assertEqual(5 * HOUR, addon.GreetPolicy.SAME_NIGHT_SECONDS)
+
+    local policy = withAbsences({ anvil = 5 * HOUR, bolt = 0, stranger = 6 * HOUR })
+
+    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START)))
+    test.assertEqual("welcomeBack", category(policy:CameOnline("bolt", START)))
+    test.assertEqual("login", category(policy:CameOnline("stranger", START)))
+    -- Not in the roster snapshot: a plain login, as before.
+    test.assertEqual("login", category(withAbsences({}):CameOnline("stranger", START)))
+end)
+
+test.test("greet policy: the same-night rule leaves players online at start or seen leaving as before", function()
+    local policy = withAbsences({ me = 0, anvil = HOUR, bolt = 10 * HOUR })
+
+    -- Seen leaving this session: a quick return is a relog, whatever the
+    -- snapshot says, and a later one a welcome-back.
+    policy:WentOffline("bolt", START)
+    test.assertEqual(nil, policy:CameOnline("bolt", START + MINUTE))
+    policy:WentOffline("anvil", START)
+    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 20 * MINUTE)))
+
+    -- Online when the roster loaded, never seen leaving: no prompt.
+    local seeded = withSettings({}, { anvil = HOUR })
+    test.assertEqual(nil, seeded:CameOnline("anvil", START))
+end)
+
+test.test("greet policy: a same-night return gives nothing with welcome-backs turned off", function()
+    local settings = { off = { welcomeBack = true } }
+    local policy = withSettings(settings, { bolt = 2 * HOUR, stranger = 6 * HOUR })
+
+    test.assertEqual(nil, policy:CameOnline("bolt", START))
+    test.assertEqual("login", category(policy:CameOnline("stranger", START)))
+end)
