@@ -60,6 +60,7 @@ local promotions = {
 }
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
+local antiSpamConfig
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations, dropLocationOf
@@ -158,6 +159,11 @@ if clientProfile.supported then
             promotions.prune()
             promotions.askOnce()
             promotions.changed()
+            -- Every add-on follows the guild's anti-spam settings, so each
+            -- asks the officers' add-ons for them once ranks are known.
+            if antiSpamConfig ~= nil then
+                antiSpamConfig:AskOnce()
+            end
             -- A scan that saw a promotion or demotion shows or hides the
             -- officers' tabs.
             rosterController:RefreshPages()
@@ -707,6 +713,40 @@ if clientProfile.supported then
         end,
     })
     greetNumber("welcomeCap", "Guild join welcomes")
+    -- Officers set anti-spam mode for the whole guild; everyone else sees
+    -- the guild's values but can't change them.
+    settings:Add("guildGreet", {
+        id = "greetAntiSpamHeading",
+        kind = "heading",
+        label = "Anti-spam mode (officer settings: these apply to everyone in the guild)",
+    })
+    local function antiSpamNumber(id, setting, label)
+        local range = addon.AntiSpamConfig.SETTINGS[setting]
+        settings:Add("guildGreet", {
+            id = id,
+            kind = "number",
+            label = label,
+            min = range.min,
+            max = range.max,
+            enabled = function()
+                if antiSpamConfig == nil or not antiSpamConfig:IsOfficer() then
+                    return false, "only officers can change it"
+                end
+                return true
+            end,
+            get = function()
+                return antiSpamConfig and antiSpamConfig:Get(setting) or range.default
+            end,
+            set = function(value)
+                if antiSpamConfig == nil then
+                    return nil, "saved data is unavailable"
+                end
+                return antiSpamConfig:Set(setting, value)
+            end,
+        })
+    end
+    antiSpamNumber("greetAntiSpamThreshold", "threshold", "Arrivals within 2 minutes that turn anti-spam mode on")
+    antiSpamNumber("greetAntiSpamCooldown", "cooldownSeconds", "Seconds between greetings while anti-spam mode is on")
     -- The greetings are edited below these settings on the master frame's
     -- Greetings tab; the AddOns options get a button to go there.
     local function openGreetings()
@@ -3158,6 +3198,49 @@ if clientProfile.supported then
             end
         end,
     })
+    -- Guild Greet's anti-spam settings: officer settings shared with every
+    -- add-on user over guild sync.
+    antiSpamConfig = addon.AntiSpamConfig.Create({
+        partition = function()
+            local guild, partition = rosterController:QuietContext()
+            return guild and partition or nil
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        senderIsOfficer = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            return key ~= nil and officerAuthority:IsOfficer(key)
+        end,
+        isOwn = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            if key == nil then
+                return nil
+            end
+            return guildGreet:IsOwn(key)
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        announce = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        onChange = function()
+            settingsPanel:Refresh()
+            frameSettings:Refresh()
+        end,
+    })
     -- The guild's welcome mail: officer settings shared over guild sync.
     guildWelcome = addon.GuildWelcome.Create({
         partition = function()
@@ -4055,6 +4138,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildRecruit:OnMessage(message, sender)
         elseif addon.GuildWelcome.TYPES[message.t] ~= nil then
             guildWelcome:OnMessage(message, sender)
+        elseif addon.AntiSpamConfig.TYPES[message.t] ~= nil then
+            antiSpamConfig:OnMessage(message, sender)
         elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
             onGroupFinderMessage(message, sender)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then

@@ -599,7 +599,36 @@ test.test("the Guild Greet settings open with the main switches, then headed gro
     test.assertEqual("greetCloseHeading", ids[12])
     test.assertEqual("greetCap", ids[13])
     test.assertEqual("welcomeCap", ids[14])
-    test.assertEqual(14, #ids)
+    test.assertEqual("greetAntiSpamHeading", ids[15])
+    test.assertEqual("greetAntiSpamThreshold", ids[16])
+    test.assertEqual("greetAntiSpamCooldown", ids[17])
+    test.assertEqual(17, #ids)
     -- "This character" explains how it differs from the main switch.
     test.assertContains(addon.settings:Info("greetCharacter"), "every character on this account")
+end)
+
+test.test("officers change the anti-spam settings; everyone else sees them read-only", function()
+    local world, addon = loggedIn("Retail")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 5)
+
+    test.assertEqual(8, addon.settings:Get("greetAntiSpamThreshold"))
+    test.assertEqual(15, addon.settings:Get("greetAntiSpamCooldown"))
+    test.assertTrue(addon.settings:IsShown("greetAntiSpamThreshold"))
+    test.assertTrue(addon.settings:IsEnabled("greetAntiSpamThreshold"))
+    test.assertTrue(addon.settings:Set("greetAntiSpamThreshold", 12))
+    test.assertEqual(12, addon.settings:Get("greetAntiSpamThreshold"))
+    local changed = addon.settings:Set("greetAntiSpamCooldown", 61)
+    test.assertFalse(changed == true)
+    test.assertEqual(15, addon.settings:Get("greetAntiSpamCooldown"))
+
+    -- Demoted: the values still show, but can't be changed.
+    world.officerRanks = { [0] = true }
+    test.assertTrue(addon.settings:IsShown("greetAntiSpamThreshold"))
+    test.assertEqual(12, addon.settings:Get("greetAntiSpamThreshold"))
+    local enabled, reason = addon.settings:IsEnabled("greetAntiSpamThreshold")
+    test.assertFalse(enabled)
+    test.assertEqual("only officers can change it", reason)
+    test.assertFalse(addon.settings:Set("greetAntiSpamThreshold", 20) == true)
+    test.assertEqual(12, addon.settings:Get("greetAntiSpamThreshold"))
 end)
