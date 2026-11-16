@@ -1001,6 +1001,7 @@ function Greet:OnGuildChat(message, sender)
             local entry = recent[recentIndex]
             if greeter ~= entry.player and greeter ~= self.policy:PlayerOf(entry.key) and self:NamedIn(lowered, entry) then
                 greeting = true
+                self:noteRecent(entry.player, entry.key, entry.rawName, now)
                 break
             end
         end

@@ -1607,11 +1607,13 @@ test.test("guild greet: greeting stats keep counting with Guild Greet off", func
     -- A second greeting, after Bolt stopped waiting, counts too.
     advance(world, 5)
     world.greet:OnGuildChat("welcome back Bolt", world.names.anvil)
-    advance(world, 55)
+    -- The minute runs from the latest greeting, not the first.
+    advance(world, 57)
+    world.greet:OnGuildChat("hi Bolt", world.names.bishop)
 
     local lines = world.greet:StatsLines(world.time)
-    test.assertEqual("  Last hour: 2 greeting lines, 3 arrivals, 1m 00s in anti-spam mode", lines[1])
-    test.assertEqual("  This session: 2 greeting lines, 3 arrivals, 1m 00s in anti-spam mode", lines[2])
+    test.assertEqual("  Last hour: 3 greeting lines, 3 arrivals, 1m 02s in anti-spam mode", lines[1])
+    test.assertEqual("  This session: 3 greeting lines, 3 arrivals, 1m 02s in anti-spam mode", lines[2])
     test.assertEqual("  Anti-spam mode is on now.", lines[3])
 end)
 
