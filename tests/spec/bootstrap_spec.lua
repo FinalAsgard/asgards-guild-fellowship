@@ -43,6 +43,7 @@ local MANIFEST_FILES = {
     "Core/SyncLedger.lua",
     "Core/PlayerAudit.lua",
     "Core/SyncSession.lua",
+    "Core/Resync.lua",
     "Core/ScanScheduler.lua",
     "Core/PageNavigator.lua",
     "Core/RosterController.lua",

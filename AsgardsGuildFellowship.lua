@@ -61,6 +61,7 @@ local promotions = {
 local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local antiSpamConfig
+local resync
 local guildNoteOverlay
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations, dropLocationOf
@@ -3060,6 +3061,63 @@ if clientProfile.supported then
             rosterController:Print(lines[index])
         end
     end)
+    -- Copying an officer's roster data over this client's, when it went
+    -- wrong and newest-wins keeps it so.
+    resync = addon.Resync.Create({
+        context = function()
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            return partition, normalizer
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        isOwn = function(key)
+            return guildGreet:IsOwn(key)
+        end,
+        online = function()
+            local guild, _, normalizer = rosterController:QuietContext()
+            local names = {}
+            if guild == nil then
+                return names
+            end
+            local key, member
+            for key, member in pairs(rosterController:LiveMembers(normalizer)) do
+                if member.online then
+                    names[key] = member.name
+                end
+            end
+            return names
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        whisper = function(message, name, options)
+            return comm:Whisper(message, name, false, options)
+        end,
+        print = function(text)
+            rosterController:Print(text)
+        end,
+        onApplied = function()
+            rosterController:Invalidate()
+            if profilePage ~= nil then
+                profilePage:Refresh()
+            end
+        end,
+    })
+    router:Register("resync", "copy an online officer's roster data over yours: /agf resync <name>",
+        function(arguments)
+            local _, text = resync:Ask(arguments)
+            rosterController:Print(text)
+        end)
     -- Guild Mail: officers mail the ranks they tick (to each player's main,
     -- their most recently online character, or every character), sent from
     -- a mailbox one at a time.
@@ -4178,12 +4236,15 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             syncSession:Receive(message, sender)
         end
     end, function(message, sender)
-        -- Only guild map updates and, to officers who miss the officer
-        -- channel, guild log messages are whispered.
+        -- Only guild map updates, resync requests and answers, and, to
+        -- officers who miss the officer channel, guild log messages are
+        -- whispered.
         if addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
         elseif addon.GuildLogSync.TYPES[message.t] ~= nil then
             guildLogSync:Receive(message, sender)
+        elseif addon.Resync.TYPES[message.t] ~= nil then
+            resync:OnMessage(message, sender)
         end
     end, function(message, sender)
         -- Only guild log messages go to the officer channel.
