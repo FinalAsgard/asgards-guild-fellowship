@@ -50,6 +50,8 @@ function PlayerAudit.ChangeText(entry, name)
         what = what .. " (guild sync)"
     elseif entry.via == "local" then
         what = what .. " (here)"
+    elseif entry.via == "resync" then
+        what = what .. " (resync)"
     end
     return what
 end

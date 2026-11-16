@@ -873,3 +873,213 @@ function Facts:ApplyAll(facts, checkpoint)
     end
     return applied
 end
+
+-- Resync ------------------------------------------------------------------------
+
+-- This client's whole view of the roster's structure, for a guildmate who
+-- asked to copy it (see Resync), as compact positional lists. A missing
+-- stamp is sent as 0 with author "".
+--   l = { { character, main, at, by }, ... }: every character's main link
+--   d = { { character, declared, at, by }, ... }: declared mains, and any
+--       declaration stamp
+--   a = { { main, alias, at, by, setThrough }, ... }: every player's alias
+--       ("" for none), named by its main
+--   p = { { character, kind, text, at, by }, ... }: Discord, location and
+--       bio as each character holds them
+-- `checkpoint`, when given, is called after each character and player.
+function Facts:ResyncSnapshot(checkpoint)
+    checkpoint = checkpoint or function() end
+    local partition = self.partition
+    local snapshot = { l = {}, d = {}, a = {}, p = {} }
+    local keys = {}
+    partition:EachCharacter(function(key)
+        table.insert(keys, key)
+    end)
+    table.sort(keys)
+    local index
+    for index = 1, #keys do
+        local key = keys[index]
+        local character = partition:GetCharacter(key)
+        local player = partition:GetPlayer(character.player)
+        if player ~= nil then
+            table.insert(snapshot.l, { key, player.main, character.mainAt or 0, character.mainBy or "" })
+            if character.declaredAt ~= nil or partition:IsDeclared(key) then
+                table.insert(snapshot.d, {
+                    key, partition:IsDeclared(key), character.declaredAt or 0, character.declaredBy or "",
+                })
+            end
+            local kindIndex
+            for kindIndex = 1, #SyncFacts.TEXT_KINDS do
+                local kind = SyncFacts.TEXT_KINDS[kindIndex]
+                local text = partition:GetProfileText(key, kind)
+                if text ~= nil then
+                    local at, by = partition:GetProfileStamp(key, kind)
+                    table.insert(snapshot.p, { key, kind, text, at or 0, by or "" })
+                end
+            end
+        end
+        checkpoint()
+    end
+    partition:EachPlayer(function(id, player)
+        local anchored = player.aliasAt ~= nil and partition:AliasAnchored(id)
+        table.insert(snapshot.a, {
+            player.main, player.alias or "", anchored and player.aliasAt or 0,
+            anchored and player.aliasBy or "", anchored and player.aliasFor or "",
+        })
+        checkpoint()
+    end)
+    return snapshot
+end
+
+local function isStamp(at, by)
+    return type(at) == "number" and at > 0 and at == math.floor(at) and isText(by)
+end
+
+-- Makes this client's roster structure match `snapshot` (from
+-- ResyncSnapshot) sent by `from` (a character key), whatever the stamps
+-- held here: main links, declared mains, aliases, and Discord, location and
+-- bio, with the sender's stamps. Characters this client doesn't know are
+-- skipped, and ones the sender doesn't know are left as they are. Profile
+-- text of `ownKeys` (a set: the user's own characters) is theirs to write
+-- and is kept. Mains move out to players of their own before any alt joins
+-- them, so no player's record is handed to another. Returns how many
+-- players changed, or nil for an unusable snapshot.
+function Facts:Overwrite(snapshot, from, ownKeys, checkpoint)
+    checkpoint = checkpoint or function() end
+    ownKeys = ownKeys or {}
+    if type(snapshot) ~= "table" or type(snapshot.l) ~= "table" or type(snapshot.a) ~= "table" then
+        return nil
+    end
+    local partition = self.partition
+    local store = addon.FellowshipStore
+    local links = {}
+    local index
+    for index = 1, #snapshot.l do
+        local entry = snapshot.l[index]
+        if type(entry) == "table" and isText(entry[1]) and isText(entry[2])
+            and partition:GetCharacter(entry[1]) ~= nil and partition:GetCharacter(entry[2]) ~= nil
+        then
+            table.insert(links, entry)
+        end
+    end
+    local keys = {}
+    for index = 1, #links do
+        table.insert(keys, links[index][1])
+    end
+    local before = self:Snapshot(keys)
+    local function relink(entry)
+        local key, main, at, by = entry[1], entry[2], entry[3], entry[4]
+        local stamped = isStamp(at, by)
+        local source = stamped and store.SOURCE_SYNC or (key == main and store.SOURCE_ROSTER or store.SOURCE_NOTE)
+        self:Reshape({ kind = SyncFacts.KIND_MAIN, character = key, main = main }, source)
+        if stamped then
+            partition:SetMainStamp(key, at, by)
+        else
+            partition:ClearMainStamp(key)
+        end
+        checkpoint()
+    end
+    -- Mains first, then alts.
+    for index = 1, #links do
+        if links[index][1] == links[index][2] then
+            relink(links[index])
+        end
+    end
+    for index = 1, #links do
+        if links[index][1] ~= links[index][2] then
+            relink(links[index])
+        end
+    end
+    for index = 1, #snapshot.a do
+        local entry = snapshot.a[index]
+        if type(entry) == "table" and isText(entry[1]) and type(entry[2]) == "string"
+            and #entry[2] <= SyncFacts.MAX_ALIAS_LENGTH and partition:GetCharacter(entry[1]) ~= nil
+        then
+            local main, alias, at, by, through = entry[1], entry[2], entry[3], entry[4], entry[5]
+            local stamped = isStamp(at, by)
+            self:Reshape({ kind = SyncFacts.KIND_ALIAS, character = main, alias = alias },
+                stamped and store.SOURCE_SYNC or store.SOURCE_NOTE)
+            local anchor = main
+            local throughCharacter = isText(through) and partition:GetCharacter(through)
+            if throughCharacter and throughCharacter.player == partition:GetCharacter(main).player then
+                anchor = through
+            end
+            if stamped then
+                partition:SetAliasStamp(anchor, at, by)
+            else
+                partition:ClearAliasStamp(main)
+            end
+        end
+        checkpoint()
+    end
+    local declared = {}
+    for index = 1, #(type(snapshot.d) == "table" and snapshot.d or {}) do
+        local entry = snapshot.d[index]
+        if type(entry) == "table" and isText(entry[1]) and type(entry[2]) == "boolean" then
+            declared[entry[1]] = entry
+        end
+    end
+    local texts = {}
+    for index = 1, #(type(snapshot.p) == "table" and snapshot.p or {}) do
+        local entry = snapshot.p[index]
+        if type(entry) == "table" and isText(entry[1]) and store.PROFILE_FIELDS[entry[2]] ~= nil
+            and store.IsProfileText(entry[2], entry[3]) and isStamp(entry[4], entry[5])
+        then
+            texts[entry[1] .. "\n" .. entry[2]] = entry
+        end
+    end
+    for index = 1, #keys do
+        local key = keys[index]
+        local entry = declared[key]
+        partition:SetDeclared(key, entry ~= nil and entry[2] or false,
+            entry ~= nil and isStamp(entry[3], entry[4]) and store.SOURCE_SYNC or store.SOURCE_NOTE)
+        if entry ~= nil and isStamp(entry[3], entry[4]) then
+            partition:SetDeclaredStamp(key, entry[3], entry[4])
+        else
+            partition:ClearDeclaredStamp(key)
+        end
+        if not ownKeys[key] then
+            local kindIndex
+            for kindIndex = 1, #SyncFacts.TEXT_KINDS do
+                local kind = SyncFacts.TEXT_KINDS[kindIndex]
+                local text = texts[key .. "\n" .. kind]
+                if text ~= nil then
+                    partition:SetProfileText(key, kind, text[3], text[4], text[5])
+                else
+                    partition:ClearProfileText(key, kind)
+                end
+            end
+        end
+        checkpoint()
+    end
+    addon.ReconcileEngine.EnsureActingMains(partition, {}, self.now(), checkpoint)
+    local players = self:LogChanges(keys, before, from, "resync")
+    local after = self:Snapshot(keys, players)
+    local changed = 0
+    local id, state
+    for id, state in pairs(after.players) do
+        local was = before.players[id]
+        local same = was ~= nil and was.main == state.main and was.alias == state.alias
+        if same then
+            local kindIndex
+            for kindIndex = 1, #SyncFacts.TEXT_KINDS do
+                local kind = SyncFacts.TEXT_KINDS[kindIndex]
+                if was[kind] ~= state[kind] then
+                    same = false
+                end
+            end
+        end
+        if same then
+            local key
+            for key in pairs(after.characters) do
+                if (after.characters[key] == id) ~= (before.characters[key] == id) then
+                    same = false
+                end
+            end
+        end
+        if not same then
+            changed = changed + 1
+        end
+    end
+    return changed
+end

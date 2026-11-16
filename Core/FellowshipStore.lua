@@ -2018,6 +2018,19 @@ function Partition:SetProfileText(key, field, text, at, by)
     return true
 end
 
+-- Forgets `key`'s profile field `field` and its stamp, as if it never set
+-- it. False for an unknown character or field.
+function Partition:ClearProfileText(key, field)
+    local character = self.data.characters[key]
+    if character == nil or FellowshipStore.PROFILE_FIELDS[field] == nil then
+        return false
+    end
+    character[field] = nil
+    character[field .. "At"] = nil
+    character[field .. "By"] = nil
+    return true
+end
+
 -- The player's value of profile field `field`: the newest any of its
 -- characters set, or nil when none set one or the newest cleared it. Also
 -- returns that value's stamp (at, by), or 0 when none was ever set.
@@ -2129,7 +2142,8 @@ end
 -- `from` to `to`), "joined" (`character` came from the player whose main
 -- was `from`) or "left" (`character` went to the player whose main is
 -- `to`). `by` is who made the edit (a character key) and `via` where it
--- came from: "local" (this user) or "sync" (a guildmate's add-on).
+-- came from: "local" (this user), "sync" (a guildmate's add-on) or
+-- "resync" (copied whole from an officer's add-on, see Resync).
 function Partition:LogChange(playerId, entry)
     local player = self.data.players[playerId]
     if player == nil or type(entry) ~= "table" or not isText(entry.kind) then
