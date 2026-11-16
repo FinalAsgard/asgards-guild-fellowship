@@ -3443,8 +3443,8 @@ if clientProfile.supported then
         inInstance = function()
             return client:IsInInstance()
         end,
-        -- Older versions' "greeted" message (GuildGreet.LEGACY_GREETED),
-        -- heard within seconds, however much sync traffic is waiting.
+        -- The "greeted" message (GuildGreet.TYPE_GREETED), heard within
+        -- seconds, however much sync traffic is waiting.
         announce = function(message)
             return comm:BroadcastLive(message)
         end,

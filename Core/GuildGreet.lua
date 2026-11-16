@@ -38,16 +38,17 @@ local _, addon = ...
 -- once. The same holds for one cooldown after the session's roster loads.
 -- Prompts are then listed long absences first, then oldest first.
 local GuildGreet = {
-    -- The "greeted" message older versions (v0.9.4 and before) close their
-    -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
-    -- character's key, a = when they arrived (server time) }. The greeter
-    -- is whoever the game says sent it. Greetings are counted from guild
-    -- chat now, but it's still sent after a Greet press, and counted when
-    -- heard, so guildmates who haven't updated aren't nudged into greeting
-    -- again. Turn LEGACY_GREETED off (and remove it) once they have.
+    -- The "greeted" message, sent after each Greet press: { v = PROTOCOL,
+    -- t = TYPE_GREETED, c = the greeted character's key, a = when they
+    -- arrived (server time), s = true while the sender is in anti-spam
+    -- mode, q = since when the sender's guild has been calm (see
+    -- AntiSpamMonitor), when it is }. The greeter is whoever the game says
+    -- sent it. Greetings are counted from guild chat too; older versions
+    -- (v0.9.4 and before) only close their prompts by this message, and
+    -- ignore `s` and `q`. An add-on that has just logged in catches up on
+    -- anti-spam mode from `s` and `q`.
     PROTOCOL = 1,
     TYPE_GREETED = "greeted",
-    LEGACY_GREETED = true,
     -- Name parts shorter than this never count as naming someone, so a
     -- one-letter part of a two-part name doesn't match "a".
     MIN_NAME_LETTERS = 2,
@@ -739,7 +740,7 @@ function Greet:tick()
 end
 
 -- Posts a random greeting from `prompt`'s category, using the names as they
--- are now, counts it, and tells older versions (see LEGACY_GREETED).
+-- are now, counts it, and sends the "greeted" message (see TYPE_GREETED).
 -- Returns the text sent, or nil.
 function Greet:post(prompt, now)
     local greeting = self:Library():Pick(prompt.category)
@@ -756,23 +757,26 @@ function Greet:post(prompt, now)
         if prompt.category ~= addon.GreetPolicy.JOIN then
             self:greetingSeen(now)
         end
-        if GuildGreet.LEGACY_GREETED then
-            pcall(self.announce, {
-                v = GuildGreet.PROTOCOL, t = GuildGreet.TYPE_GREETED, c = prompt.key, a = prompt.raisedAt,
-            })
+        local message = { v = GuildGreet.PROTOCOL, t = GuildGreet.TYPE_GREETED, c = prompt.key, a = prompt.raisedAt }
+        if self.antiSpam:IsOn() then
+            message.s = true
+            message.q = self.antiSpam:CalmSince(now)
         end
+        pcall(self.announce, message)
     end
     return text
 end
 
--- Another add-on user's "greeted" message (see LEGACY_GREETED), from
+-- Another add-on user's "greeted" message (see TYPE_GREETED), from
 -- `sender` (a name as the game reports it). Counts their greeting, once per
 -- greeter however it's heard (their line in guild chat too), and closes
 -- the user's prompt once the player has had enough. Messages from the
 -- user's own characters, about players this add-on can't place, or for an
 -- arrival that's long past are ignored. Returns true when it was counted.
+-- One flagged in anti-spam mode turns it on here too, while this add-on has
+-- only just logged in (see AntiSpamMonitor:Heard).
 function Greet:OnGreeted(message, sender)
-    if not GuildGreet.LEGACY_GREETED or type(message) ~= "table" or message.v ~= GuildGreet.PROTOCOL
+    if type(message) ~= "table" or message.v ~= GuildGreet.PROTOCOL
         or message.t ~= GuildGreet.TYPE_GREETED or type(message.c) ~= "string" or type(message.a) ~= "number"
     then
         return false
@@ -782,6 +786,10 @@ function Greet:OnGreeted(message, sender)
     local senderKey = normalizer and normalizer:Key(sender)
     if senderKey == nil or type(now) ~= "number" or self:IsOwn(senderKey) then
         return false
+    end
+    if message.s == true and (message.q == nil or type(message.q) == "number") then
+        self.antiSpam:Heard(message.q, now)
+        self:scheduleAntiSpamCheck(now)
     end
     -- A player is placed by the database, or by a prompt the user has for
     -- them (someone who just joined isn't in the database yet).

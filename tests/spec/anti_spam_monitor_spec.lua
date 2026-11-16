@@ -196,3 +196,43 @@ test.test("anti-spam monitor: a failing setting falls back to the defaults", fun
     test.assertTrue(monitor:IsOn())
     test.assertEqual(150, monitor:ExitSeconds())
 end)
+
+test.test("anti-spam monitor: a flagged greeting turns it on with the sender's calm, only in the first window", function()
+    local monitor, changes = newMonitor()
+    monitor:Started(START)
+
+    test.assertTrue(monitor:Heard(START + 30, START + 40))
+    test.assertTrue(monitor:IsOn())
+    test.assertEqual(true, changes[1])
+    test.assertEqual(START + 30, monitor:CalmSince(START + 40))
+    -- It ends when the sender's calm has lasted 150 seconds.
+    monitor:Update(START + 30 + 149)
+    test.assertTrue(monitor:IsOn())
+    monitor:Update(START + 30 + 150)
+    test.assertFalse(monitor:IsOn())
+
+    -- After a full window online, flags are ignored.
+    test.assertFalse(monitor:Heard(nil, START + 120))
+    test.assertFalse(monitor:IsOn())
+end)
+
+test.test("anti-spam monitor: a flag from a busy sender keeps it from counting calm", function()
+    local monitor = newMonitor()
+    monitor:Started(START)
+
+    monitor:Heard(START + 10, START + 20)
+    monitor:Heard(nil, START + 50)
+
+    test.assertEqual(nil, monitor:CalmSince(START + 50))
+    -- Once the window ends it goes by its own count: nobody is waiting
+    -- here, so it's calm from then.
+    test.assertEqual(START + 120, monitor:NextCheckAt(START + 50))
+    monitor:Update(START + 120)
+    test.assertEqual(START + 120, monitor:CalmSince(START + 120))
+    monitor:Update(START + 270)
+    test.assertFalse(monitor:IsOn())
+    -- Without a roster loaded yet, nothing is taken.
+    local fresh = newMonitor()
+    test.assertFalse(fresh:Heard(nil, START))
+    test.assertEqual(nil, fresh:CalmSince(START))
+end)

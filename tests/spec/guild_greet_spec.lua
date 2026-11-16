@@ -891,7 +891,7 @@ test.test("guild greet: a newcomer linked by a scan after joining still can't gr
     test.assertEqual(0, #world.shown)
 end)
 
--- Older versions' "greeted" message (GuildGreet.LEGACY_GREETED) --------------------
+-- The "greeted" message (GuildGreet.TYPE_GREETED) ------------------------------
 
 -- A "greeted" message from `greeter` about `name`, for an arrival at `at`.
 local function legacyGreeted(world, greeter, name, at)
@@ -947,18 +947,6 @@ test.test("guild greet: own, late, unplaceable and malformed greeted messages do
     test.assertFalse(world.greet:OnGreeted({ v = 1, t = "greeted", c = 42, a = START }, world.names.bolt))
     test.assertFalse(world.greet:OnGreeted({ v = 99, t = "greeted", c = "anvil", a = START }, world.names.bolt))
     test.assertEqual(1, #world.shown)
-end)
-
-test.test("guild greet: with LEGACY_GREETED off, the greeted message is neither sent nor counted", function()
-    local world = setup("Retail")
-    world.addon.GuildGreet.LEGACY_GREETED = false
-    world.store:SetGreetCap(1)
-    world.greet:OnPresence("online", world.names.anvil)
-
-    test.assertFalse(legacyGreeted(world, "bishop", world.names.anvil))
-    test.assertEqual(1, #world.shown)
-    world.handlers.greet(world.shown[1].player)
-    test.assertEqual(nil, world.announced)
 end)
 
 test.test("guild greet: the greeting cap is saved account-wide, from 1 to 10, default 2", function()
@@ -1662,4 +1650,86 @@ test.test("guild greet: outside anti-spam mode greetings don't lock other prompt
     test.assertEqual(0, shownFor(world, "Rip").lockedFor)
     world.handlers.greet(shownFor(world, "Rip").player)
     test.assertEqual(2, shownFor(world, world.names.rust).lockedFor)
+end)
+
+-- Catching up from greeted messages ----------------------------------------------
+
+-- A greeted message from `greeter` about `name`, with extra fields `extra`.
+local function flaggedGreeted(world, greeter, name, extra)
+    local _, normalizer = world.greet.context()
+    local message = {
+        v = world.addon.GuildGreet.PROTOCOL, t = world.addon.GuildGreet.TYPE_GREETED,
+        c = normalizer:Key(name), a = world.time,
+    }
+    local key, value
+    for key, value in pairs(extra or {}) do
+        message[key] = value
+    end
+    return world.greet:OnGreeted(message, world.names[greeter])
+end
+
+test.test("guild greet: the greeted message says when the sender is in anti-spam mode, and how calm it is", function()
+    local calm = setup("Retail")
+    calm.greet:OnPresence("online", calm.names.bolt)
+    calm.handlers.greet(calm.shown[1].player)
+    test.assertEqual(nil, calm.announced[1].s)
+    test.assertEqual(nil, calm.announced[1].q)
+
+    local world = inAntiSpam(0)
+    world.greet:OnGuildChat("hi Rip", world.names.rust)
+    world.greet:OnGuildChat("hi Anvil", world.names.rust)
+    advance(world, 20)
+    world.handlers.greet(shownFor(world, world.names.bolt).player)
+
+    local message = world.announced[1]
+    test.assertEqual("greeted", message.t)
+    test.assertEqual(true, message.s)
+    -- Two of three were greeted at START + 2: one waiting is calm.
+    test.assertEqual(START + 2, message.q)
+end)
+
+test.test("guild greet: just after logging in, a greeting flagged anti-spam on turns it on here", function()
+    local world = setup("Retail", nil, true)
+    world.greet:OnPresence("online", world.names.bolt)
+
+    test.assertTrue(flaggedGreeted(world, "rust", world.names.bolt, { s = true, q = START - 30 }))
+
+    test.assertTrue(world.greet:AntiSpamOn())
+    test.assertEqual(world.addon.GuildGreet.ANTI_SPAM_ON_TEXT, world.notices[1])
+    -- The greeting counted as usual: one is the cap in the mode.
+    test.assertEqual(0, #world.shown)
+    -- The sender's calm carries over: it ends 150 seconds after it.
+    advance(world, 119)
+    test.assertTrue(world.greet:AntiSpamOn())
+    advance(world, 1)
+    test.assertFalse(world.greet:AntiSpamOn())
+end)
+
+test.test("guild greet: after two minutes online, flagged greetings don't change the mode", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.bolt)
+
+    test.assertTrue(flaggedGreeted(world, "rust", world.names.bolt, { s = true }))
+
+    test.assertFalse(world.greet:AntiSpamOn())
+end)
+
+test.test("guild greet: unflagged, malformed and own greeted messages leave the mode alone", function()
+    local world = setup("Retail", nil, true)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.anvil)
+
+    -- An older version's: counted, no mode.
+    test.assertTrue(flaggedGreeted(world, "rust", world.names.bolt))
+    test.assertFalse(world.greet:AntiSpamOn())
+    -- Malformed flags are ignored, the greeting still counts.
+    test.assertTrue(flaggedGreeted(world, "rust", world.names.anvil, { s = "yes" }))
+    test.assertTrue(flaggedGreeted(world, "bishop", world.names.anvil, { s = true, q = "soon" }))
+    test.assertFalse(world.greet:AntiSpamOn())
+    -- Anvil had both greetings (the cap of 2); Bolt has one.
+    test.assertEqual(nil, shownFor(world, world.names.anvil))
+    test.assertTrue(shownFor(world, world.names.bolt) ~= nil)
+    -- The user's own characters' are ignored altogether.
+    test.assertFalse(flaggedGreeted(world, "myAlt", world.names.anvil, { s = true }))
+    test.assertFalse(world.greet:AntiSpamOn())
 end)

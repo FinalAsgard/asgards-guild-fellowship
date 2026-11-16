@@ -15,6 +15,10 @@ local _, addon = ...
 --     `lifetime` seconds old (their prompt is gone by then).
 --   * Exit: it turns off once no more than CALM_WAITING players have been
 --     waiting for EXIT_MULTIPLIER x `cooldownSeconds()`, unbroken.
+--   * Catching up: an add-on that has been online for less than one window
+--     takes the mode from other add-ons' greetings flagged "anti-spam on",
+--     with the sender's calm-since time; after that it goes by its own
+--     observations, so add-ons can't keep switching each other back on.
 --   * Guild cooldown: while it's on, each greeting seen starts the guild
 --     cooldown again at full length. For one cooldown after the session's
 --     roster loads, there's a cooldown anyway, before this add-on can know
@@ -83,6 +87,7 @@ function Monitor:setOn(on)
     self.calmSince = nil
     if not on then
         self.cooldownUntil = nil
+        self.heardRemote = false
     end
     pcall(self.onChange, on)
 end
@@ -133,6 +138,13 @@ function Monitor:Update(now)
     local index
     for index = 1, #expired do
         self:drop(expired[index].player, expired[index].arrivedAt + self.lifetime)
+    end
+    -- Once it stops taking other add-ons' calm, its own count decides.
+    local ownFrom = self.heardRemote and self.startedAt + AntiSpamMonitor.WINDOW_SECONDS or nil
+    if self.on and self.calmSince == nil and ownFrom ~= nil and now >= ownFrom
+        and self.waitingCount <= AntiSpamMonitor.CALM_WAITING
+    then
+        self.calmSince = ownFrom
     end
     if self.on and self.calmSince ~= nil and now - self.calmSince >= self:ExitSeconds() then
         self:setOn(false)
@@ -212,6 +224,9 @@ function Monitor:NextCheckAt(now)
         return self.calmSince + self:ExitSeconds()
     end
     local soonest
+    if self.heardRemote and self.waitingCount <= AntiSpamMonitor.CALM_WAITING then
+        soonest = self.startedAt + AntiSpamMonitor.WINDOW_SECONDS
+    end
     local _, entry
     for _, entry in pairs(self.waiting) do
         local at = entry.arrivedAt + self.lifetime
@@ -225,6 +240,7 @@ end
 -- The session's roster loaded at `now`: a cooldown runs from it.
 function Monitor:Started(now)
     if type(now) == "number" then
+        self.startedAt = now
         self.startupUntil = now + number(self.cooldownSeconds, 15)
     end
 end
@@ -249,4 +265,34 @@ function Monitor:CooldownEndsAt(now)
         ends = self.cooldownUntil
     end
     return ends
+end
+
+-- Since when the waiting count has been calm, while on and calm; nil
+-- otherwise.
+function Monitor:CalmSince(now)
+    self:Update(now)
+    if not self.on then
+        return nil
+    end
+    return self.calmSince
+end
+
+-- Another add-on's greeting flagged "anti-spam on", with its calm-since
+-- time (`calmSince`, nil while it's busy), heard at `now`. Taken while
+-- this add-on has been online for less than one window since its roster
+-- loaded. Returns true when taken.
+function Monitor:Heard(calmSince, now)
+    if type(now) ~= "number" or self.startedAt == nil or now - self.startedAt >= AntiSpamMonitor.WINDOW_SECONDS then
+        return false
+    end
+    self:Update(now)
+    self:setOn(true)
+    self.heardRemote = true
+    if type(calmSince) == "number" and calmSince <= now then
+        self.calmSince = calmSince
+    else
+        self.calmSince = nil
+    end
+    self:Update(now)
+    return true
 end
