@@ -215,3 +215,12 @@ test.test("resync: an unreadable answer changes nothing", function()
     test.assertContains(world.member.printed[1], "couldn't be read")
     test.assertEqual(TIKIT, mainOf(world.member.partition, ZOLL_ALT))
 end)
+
+test.test("resync: an officer is found even when a roster gone wrong holds them with the user", function()
+    local world = newWorld()
+    local member = world.member.partition
+    member:JoinPlayerOf(OFFICER, MEMBER, "sync")
+
+    test.assertTrue(world.member.resync:Ask("Toolbox"))
+    test.assertEqual("Toolbox", world.member.whispers[1].to)
+end)

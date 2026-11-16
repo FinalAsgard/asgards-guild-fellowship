@@ -967,11 +967,30 @@ function Facts:Overwrite(snapshot, from, ownKeys, checkpoint)
         table.insert(keys, links[index][1])
     end
     local before = self:Snapshot(keys)
+    local declaredBefore = {}
+    for index = 1, #keys do
+        declaredBefore[keys[index]] = partition:IsDeclared(keys[index]) == true
+    end
+    -- Each character's main in the snapshot.
+    local mainIn = {}
+    for index = 1, #links do
+        mainIn[links[index][1]] = links[index][2]
+    end
     local function relink(entry)
         local key, main, at, by = entry[1], entry[2], entry[3], entry[4]
         local stamped = isStamp(at, by)
         local source = stamped and store.SOURCE_SYNC or (key == main and store.SOURCE_ROSTER or store.SOURCE_NOTE)
-        self:Reshape({ kind = SyncFacts.KIND_MAIN, character = key, main = main }, source)
+        local character = partition:GetCharacter(key)
+        local current = partition:GetPlayer(character.player)
+        if key == main and current.main ~= key and mainIn[current.main] == key then
+            -- The player's main and this alt swap: the player keeps its
+            -- record (history and all), with this as its main.
+            partition:ForgetNoteFingerprint(key)
+            partition:SetMain(character.player, key)
+            character.source = source
+        else
+            self:Reshape({ kind = SyncFacts.KIND_MAIN, character = key, main = main }, source)
+        end
         if stamped then
             partition:SetMainStamp(key, at, by)
         else
@@ -1060,6 +1079,13 @@ function Facts:Overwrite(snapshot, from, ownKeys, checkpoint)
     for id, state in pairs(after.players) do
         local was = before.players[id]
         local same = was ~= nil and was.main == state.main and was.alias == state.alias
+        -- A declared main that changed counts for its player.
+        local key
+        for key in pairs(after.characters) do
+            if after.characters[key] == id and (partition:IsDeclared(key) == true) ~= declaredBefore[key] then
+                same = false
+            end
+        end
         if same then
             local kindIndex
             for kindIndex = 1, #SyncFacts.TEXT_KINDS do

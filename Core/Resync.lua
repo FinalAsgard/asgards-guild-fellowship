@@ -134,19 +134,25 @@ function Session:Ask(name)
     end
     local online = ask(self.online) or {}
     local keys = partition:CharactersOf(player)
-    local target, anyOnline
+    -- The user's own characters are skipped: a roster gone wrong can hold
+    -- them in the officer's player.
+    local target, anyOnline, ownOnline
     local index
     for index = 1, #keys do
         local key = keys[index]
         if online[key] ~= nil then
-            anyOnline = true
             if ask(self.isOwn, key) == true then
-                return nil, "That's you: name another officer."
-            end
-            if target == nil and ask(self.isOfficer, key) == true then
-                target = { key = key, name = online[key] }
+                ownOnline = true
+            else
+                anyOnline = true
+                if target == nil and ask(self.isOfficer, key) == true then
+                    target = { key = key, name = online[key] }
+                end
             end
         end
+    end
+    if not anyOnline and ownOnline then
+        return nil, "That's you: name another officer."
     end
     if not anyOnline then
         return nil, name .. " isn't online. Resync from an officer who is."

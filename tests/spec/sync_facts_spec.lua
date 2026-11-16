@@ -797,3 +797,32 @@ test.test("an officer re-stamping both players untangles a taken-over record thr
     test.assertEqual("Zoll", aliasOf(setup.partition, ZOLL))
     test.assertEqual("Tikit", aliasOf(setup.partition, TIKIT))
 end)
+
+test.test("resync swapping a player's main and alt keeps the player's record and history", function()
+    local healthy = newSetup({ OFFICER, ZOLL, ZOLL_ALT })
+    healthy.facts:ApplyAll({ fact(ZOLL_ALT, ZOLL_ALT, NOW), fact(ZOLL, ZOLL_ALT, NOW) })
+    local setup = newSetup({ OFFICER, ZOLL, ZOLL_ALT })
+    local partition = setup.partition
+    partition:JoinPlayerOf(ZOLL_ALT, ZOLL, "sync")
+    local id = partition:GetCharacter(ZOLL).player
+    partition:SetAlias(id, "Zoll", "sync")
+    partition:LogChange(id, { at = NOW - 50, kind = "alias", from = "", to = "Zoll", via = "local" })
+
+    test.assertEqual(1, setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, {}))
+
+    test.assertEqual(id, partition:GetCharacter(ZOLL).player)
+    test.assertEqual(id, partition:GetCharacter(ZOLL_ALT).player)
+    test.assertEqual(ZOLL_ALT, partition:GetPlayer(id).main)
+    test.assertEqual("alias", partition:GetPlayer(id).changes[1].kind)
+end)
+
+test.test("resync counts a player whose declared main changed", function()
+    local healthy = newSetup({ OFFICER, ZOLL })
+    healthy.partition:SetDeclared(ZOLL, true, "sync")
+    healthy.partition:SetDeclaredStamp(ZOLL, NOW, OFFICER)
+    local setup = newSetup({ OFFICER, ZOLL })
+
+    test.assertEqual(1, setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, {}))
+    test.assertTrue(setup.partition:IsDeclared(ZOLL))
+    test.assertEqual(0, setup.facts:Overwrite(healthy.facts:ResyncSnapshot(), OFFICER, {}))
+end)
