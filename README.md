@@ -191,10 +191,11 @@ When an officer changes which characters belong together, or what a player goes 
 
 Sync keeps the most recently edited version of everything, so if your copy of a player went wrong with a newer edit time than the officers' copy, sync keeps your wrong copy. `/agf resync <name>` replaces your copy with an officer's instead:
 
-- Name an officer who's online: the name of the character they're playing, or their alias. Their add-on sends you its whole roster copy, which takes a minute or two in a big guild. A line in your chat says when it's been applied, and how many players changed.
+- Name an officer who's online: the name of the character they're playing, or their alias. Their add-on sends you its whole roster copy. The game only sends a little add-on data per second, so a big guild's roster takes a minute or two; your chat shows how far along it is and roughly how long is left, then how many players changed once it's applied.
+- The officer sees a line asking them to stay online until it's done, and another when it's finished. If they log off (or stop sending) partway, you're told after 90 seconds without progress, and nothing changes; run it again later. If their add-on doesn't answer within 30 seconds (it may be an older version), you're told that too.
 - It replaces main and alt links, aliases, declared mains, and Discord, location and bio, keeping the officer's edit times. Your own characters' Discord, location and bio, role preferences, membership dates, history and settings are left alone. Characters your add-on hasn't seen yet are skipped.
-- Only an officer's copy is accepted, only the one you asked for, and only within 5 minutes. Each player's **Log → Changes** shows what changed "(resync)".
-- The officer's add-on answers each guildmate at most once a minute, and prints a line saying who it sent its roster to.
+- Only an officer's copy is accepted, and only the one you asked for. Each player's **Log → Changes** shows what changed "(resync)".
+- The officer's add-on answers each guildmate at most once a minute. You can only resync from one officer at a time.
 
 ### Suggestions
 

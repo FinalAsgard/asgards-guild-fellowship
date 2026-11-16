@@ -878,7 +878,8 @@ end
 
 -- This client's whole view of the roster's structure, for a guildmate who
 -- asked to copy it (see Resync), as compact positional lists. A missing
--- stamp is sent as 0 with author "".
+-- stamp is sent as 0 with author "". Characters who left the guild are
+-- left out.
 --   l = { { character, main, at, by }, ... }: every character's main link
 --   d = { { character, declared, at, by }, ... }: declared mains, and any
 --       declaration stamp
@@ -892,8 +893,10 @@ function Facts:ResyncSnapshot(checkpoint)
     local partition = self.partition
     local snapshot = { l = {}, d = {}, a = {}, p = {} }
     local keys = {}
-    partition:EachCharacter(function(key)
-        table.insert(keys, key)
+    partition:EachCharacter(function(key, character)
+        if character.departed == nil then
+            table.insert(keys, key)
+        end
     end)
     table.sort(keys)
     local index
@@ -921,6 +924,10 @@ function Facts:ResyncSnapshot(checkpoint)
         checkpoint()
     end
     partition:EachPlayer(function(id, player)
+        local main = partition:GetCharacter(player.main)
+        if main == nil or main.departed ~= nil then
+            return
+        end
         local anchored = player.aliasAt ~= nil and partition:AliasAnchored(id)
         table.insert(snapshot.a, {
             player.main, player.alias or "", anchored and player.aliasAt or 0,

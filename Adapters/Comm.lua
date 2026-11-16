@@ -24,6 +24,7 @@ local Comm = {
     OFFICER = "OFFICER",
     PRIORITY = "BULK",
     PRIORITY_NORMAL = "NORMAL",
+    PRIORITY_ALERT = "ALERT",
     -- Indexes in a rank's permission flags: listening and speaking in
     -- officer chat, and "view officer note".
     OFFICER_CHAT_LISTEN_FLAG = 3,
@@ -103,9 +104,10 @@ end
 
 -- Serializes `message` and sends it on `distribution` (to `target` for a
 -- whisper) at `priority`. A live message goes under the live prefix, with
--- a copy under the sync prefix for older add-ons. Returns false when it
--- couldn't be sent.
-function Endpoint:send(message, distribution, target, priority, live)
+-- a copy under the sync prefix for older add-ons. `onProgress(sent,
+-- total)`, when given, hears the bytes sent so far after each piece goes
+-- out. Returns false when it couldn't be sent.
+function Endpoint:send(message, distribution, target, priority, live, onProgress)
     if self.endpoint == nil or type(message) ~= "table" then
         return false
     end
@@ -113,9 +115,15 @@ function Endpoint:send(message, distribution, target, priority, live)
     if not serialized or type(text) ~= "string" then
         return false
     end
+    local progress
+    if type(onProgress) == "function" then
+        progress = function(_, sent, total)
+            pcall(onProgress, sent, total)
+        end
+    end
     local function sendUnder(prefix, sendPriority)
         local ok = pcall(self.endpoint.SendCommMessage, self.endpoint, prefix, text, distribution, target,
-            sendPriority)
+            sendPriority, progress)
         return ok
     end
     if not live or self.livePrefix == nil then
@@ -146,13 +154,17 @@ function Endpoint:SendOfficers(message, live)
 end
 
 -- Whispers `message` to the character named `target` (at BULK priority,
--- or live when `live`). Returns false when it couldn't be sent (whispered
--- add-on messages may not work on every client).
-function Endpoint:Whisper(message, target, live)
+-- or live when `live`). `options.priority` sends it at another priority,
+-- and `options.onProgress(sent, total)` hears how many bytes have gone out.
+-- Returns false when it couldn't be sent (whispered add-on messages may not
+-- work on every client).
+function Endpoint:Whisper(message, target, live, options)
     if type(target) ~= "string" or target == "" then
         return false
     end
-    local sent = self:send(message, Comm.WHISPER, target, Comm.PRIORITY, live == true)
+    options = type(options) == "table" and options or {}
+    local sent = self:send(message, Comm.WHISPER, target, options.priority or Comm.PRIORITY, live == true,
+        options.onProgress)
     if sent then
         self.whispered = self.whispered or {}
         self.whispered[string.lower(target)] = self.client:Timestamp()
