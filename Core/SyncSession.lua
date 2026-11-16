@@ -806,7 +806,11 @@ function Session:FollowUp(reply, partition)
     for index = 1, #mine do
         local fact = mine[index]
         local held = theirs[fact.kind .. "\31" .. fact.character]
-        if held == nil or addon.SyncFacts.IsNewer(fact.at, fact.by, held.at, held.by) then
+        -- The same stamp with another value went wrong on one side: the
+        -- officer who wrote it can tell which (see CatchForgeries).
+        if held == nil or addon.SyncFacts.IsNewer(fact.at, fact.by, held.at, held.by)
+            or (held.at == fact.at and held.by == fact.by and not addon.SyncFacts.SameValue(fact, held))
+        then
             table.insert(missing, fact)
         end
     end
@@ -821,7 +825,10 @@ end
 -- it), returns the ones to apply. Facts in this officer's (`officer`'s) name
 -- that their ledger doesn't know are left out, logged, and corrected: this
 -- officer's own data for each such thing goes to the guild, stamped newer
--- than the forgery, and the officer is warned.
+-- than the forgery, and the officer is warned. One that carries this
+-- officer's very stamp but another value went wrong on the way (see
+-- SyncLedger:Contradicts): it's corrected the same way, without the
+-- warning.
 function Session:CatchForgeries(facts, partition, officer, relayer, sender)
     local now = self.now()
     if type(facts) ~= "table" or now == nil then
@@ -838,14 +845,16 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
         -- never reaches a correction.
         -- Profile facts are the characters' own, except a Discord
         -- username this officer set for someone else.
-        if addon.SyncFacts.IsValid(fact) and fact.by == officer
+        local judged = addon.SyncFacts.IsValid(fact) and fact.by == officer
             and (not addon.SyncFacts.PROFILE_KINDS[fact.kind]
                 or (addon.SyncFacts.OFFICER_TEXT_KINDS[fact.kind] and fact.character ~= officer))
             and not (now > 0 and fact.at > now + addon.SyncFacts.MAX_FUTURE_SECONDS)
-            and ledger:IsForged(fact, now)
-        then
-            forged = forged + 1
-            ledger:LogForgery(fact, relayer, now)
+        local isForged = judged and ledger:IsForged(fact, now)
+        if isForged or (judged and ledger:Contradicts(fact, now)) then
+            if isForged then
+                forged = forged + 1
+                ledger:LogForgery(fact, relayer, now)
+            end
             local at = math.max(now, fact.at + 1)
             if addon.SyncFacts.IsDateKind(fact.kind) then
                 -- This officer's own date, as they hold it.
@@ -874,14 +883,16 @@ function Session:CatchForgeries(facts, partition, officer, relayer, sender)
         end
         self:Checkpoint()
     end
-    if forged == 0 then
+    if #kept == #facts then
         return facts
     end
     if corrections[1] ~= nil then
         ledger:Record(corrections, now)
         self:SendWhenAcceptable(corrections, now)
     end
-    self.onForgery(forged, sender)
+    if forged > 0 then
+        self.onForgery(forged, sender)
+    end
     return kept
 end
 

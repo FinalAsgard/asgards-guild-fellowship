@@ -3042,8 +3042,11 @@ if clientProfile.supported then
         now = function()
             return client:Timestamp()
         end,
-        whisper = function(message, name)
-            return comm:Whisper(message, name)
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        whisper = function(message, name, options)
+            return comm:Whisper(message, name, false, options)
         end,
         print = function(text)
             rosterController:Print(text)

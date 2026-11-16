@@ -134,6 +134,30 @@ function SyncFacts.IsNewer(at, by, heldAt, heldBy)
     return by > (heldBy or "")
 end
 
+-- Whether facts `a` and `b`, about the same thing, say the same about it.
+function SyncFacts.SameValue(a, b)
+    if a.kind ~= b.kind then
+        return false
+    end
+    if a.kind == SyncFacts.KIND_MAIN then
+        return a.main == b.main
+    end
+    if a.kind == SyncFacts.KIND_ALIAS then
+        return a.alias == b.alias
+    end
+    if a.kind == SyncFacts.KIND_DECLARED then
+        return a.declared == b.declared
+    end
+    if a.kind == SyncFacts.KIND_ROLES then
+        return type(a.roles) == "table" and type(b.roles) == "table"
+            and table.concat(a.roles, ",") == table.concat(b.roles, ",")
+    end
+    if isDateKind(a.kind) then
+        return SyncFacts.DateValue(a) == SyncFacts.DateValue(b)
+    end
+    return a.text == b.text
+end
+
 -- The value a date fact carries, as one string, for the officer ledger and
 -- the digest; nil for other facts.
 function SyncFacts.DateValue(fact)
@@ -878,7 +902,8 @@ end
 
 -- This client's whole view of the roster's structure, for a guildmate who
 -- asked to copy it (see Resync), as compact positional lists. A missing
--- stamp is sent as 0 with author "".
+-- stamp is sent as 0 with author "". Characters who left the guild are
+-- left out.
 --   l = { { character, main, at, by }, ... }: every character's main link
 --   d = { { character, declared, at, by }, ... }: declared mains, and any
 --       declaration stamp
@@ -892,8 +917,10 @@ function Facts:ResyncSnapshot(checkpoint)
     local partition = self.partition
     local snapshot = { l = {}, d = {}, a = {}, p = {} }
     local keys = {}
-    partition:EachCharacter(function(key)
-        table.insert(keys, key)
+    partition:EachCharacter(function(key, character)
+        if character.departed == nil then
+            table.insert(keys, key)
+        end
     end)
     table.sort(keys)
     local index
@@ -921,6 +948,10 @@ function Facts:ResyncSnapshot(checkpoint)
         checkpoint()
     end
     partition:EachPlayer(function(id, player)
+        local main = partition:GetCharacter(player.main)
+        if main == nil or main.departed ~= nil then
+            return
+        end
         local anchored = player.aliasAt ~= nil and partition:AliasAnchored(id)
         table.insert(snapshot.a, {
             player.main, player.alias or "", anchored and player.aliasAt or 0,
