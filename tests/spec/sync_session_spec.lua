@@ -610,3 +610,67 @@ test.test("malformed announcements and replies are ignored without errors", func
     test.assertEqual(0, #client.sent)
     test.assertEqual(0, #client.applied)
 end)
+
+test.test("an officer's own edits are logged on the players they change, and so are the guild's copies", function()
+    local network = newNetwork()
+    local officer = newOfficer(network)
+    local member = newClient(network, "Wrench-Area52")
+    give(network, member, officerData())
+    officer.time = NOW + 100
+    local partition = officer.partition
+    local hammer = partition:GetCharacter("hammer-area52").player
+    partition:SetAlias(hammer, "Hammy", "manual")
+    officer.session:LocalAliasEdit("hammer-area52", "")
+    partition:JoinPlayerOf("alt5-area52", "hammer-area52", "manual")
+    officer.session:LocalEdit({ ["alt5-area52"] = true }, { ["alt5-area52"] = OFFICER })
+    officer.session:LocalDiscordEdit("hammer-area52", "hammy")
+    deliver(network)
+
+    local changes = partition:GetChanges(hammer)
+    test.assertEqual(3, #changes)
+    test.assertEqual("alias", changes[1].kind)
+    test.assertEqual("Hammy", changes[1].to)
+    test.assertEqual("local", changes[1].via)
+    test.assertEqual(OFFICER, changes[1].by)
+    test.assertEqual(NOW + 100, changes[1].at)
+    test.assertEqual("link", changes[2].kind)
+    test.assertEqual(OFFICER, changes[2].from)
+    test.assertEqual("hammer-area52", changes[2].to)
+    test.assertEqual("discord", changes[3].kind)
+    test.assertEqual("hammy", changes[3].to)
+    -- The member's client logs what reached it, as through guild sync.
+    local heard = member.partition:GetChanges(member.partition:GetCharacter("hammer-area52").player)
+    local kinds = {}
+    local index
+    for index = 1, #heard do
+        test.assertEqual("sync", heard[index].via)
+        kinds[heard[index].kind] = true
+    end
+    test.assertTrue(kinds.alias and kinds.joined and kinds.discord)
+end)
+
+test.test("a character moved by hand is logged on the player it left as well as the one it joined", function()
+    local network = newNetwork()
+    local officer = newOfficer(network)
+    officer.time = NOW + 100
+    local partition = officer.partition
+    partition:JoinPlayerOf("alt5-area52", OFFICER, "manual")
+    local former = partition:GetCharacter(OFFICER).player
+    local hammer = partition:GetCharacter("hammer-area52").player
+    local earlier = #partition:GetChanges(former)
+
+    partition:JoinPlayerOf("alt5-area52", "hammer-area52", "manual")
+    officer.session:LocalEdit({ ["alt5-area52"] = true, [OFFICER] = true, ["hammer-area52"] = true },
+        { ["alt5-area52"] = OFFICER, [OFFICER] = OFFICER, ["hammer-area52"] = "hammer-area52" })
+
+    local changes = partition:GetChanges(former)
+    test.assertEqual(earlier + 1, #changes)
+    local left = changes[#changes]
+    test.assertEqual("left", left.kind)
+    test.assertEqual("alt5-area52", left.character)
+    test.assertEqual("hammer-area52", left.to)
+    test.assertEqual(OFFICER, left.by)
+    test.assertEqual("local", left.via)
+    local joined = partition:GetChanges(hammer)
+    test.assertEqual("link", joined[#joined].kind)
+end)

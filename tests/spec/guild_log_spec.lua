@@ -687,7 +687,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         world.guild.members[1].rank = 3
         world.guild.members[1].rankName = "Member"
         fixtures.fire(world, "GUILD_ROSTER_UPDATE")
-        fixtures.runTimers(world)
+        fixtures.runTimers(world, 1)
 
         test.assertFalse(hasTab(addon, "guildlog"))
         test.assertEqual("roster", world.frame.page)

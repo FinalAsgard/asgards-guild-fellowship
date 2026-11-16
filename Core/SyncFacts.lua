@@ -501,13 +501,101 @@ function Facts:Reshape(fact, source)
             partition:MoveToNewPlayer(fact.character, source)
         end
     else
-        partition:JoinPlayerOf(fact.character, fact.main, source)
         local main = partition:GetCharacter(fact.main)
+        if main.player ~= character.player and partition:GetPlayer(main.player).main ~= fact.main then
+            -- Its main is someone else's alt here: it leaves for a player of
+            -- its own, as that player's own facts would have it. Making it
+            -- that player's main instead would hand this one that player's
+            -- record, alias and all.
+            partition:ForgetNoteFingerprint(fact.main)
+            partition:MoveToNewPlayer(fact.main, source)
+        end
+        partition:JoinPlayerOf(fact.character, fact.main, source)
+        main = partition:GetCharacter(fact.main)
         if partition:GetPlayer(main.player).main ~= fact.main then
+            -- Both were already one player: its main changes.
             partition:SetMain(main.player, fact.main)
         end
     end
     partition:GetCharacter(fact.character).source = source
+end
+
+-- What the change log compares, for the players of `keys` (or, given
+-- `players`, a set of player ids, for those): which player each key is
+-- in, and each player's main, alias and profile text.
+function Facts:Snapshot(keys, players)
+    local partition = self.partition
+    local shot = { characters = {}, players = {} }
+    local ids = {}
+    local index
+    for index = 1, #keys do
+        local character = partition:GetCharacter(keys[index])
+        if character ~= nil then
+            shot.characters[keys[index]] = character.player
+            ids[character.player] = true
+        end
+    end
+    local id
+    for id in pairs(players or {}) do
+        ids[id] = true
+    end
+    for id in pairs(ids) do
+        local player = partition:GetPlayer(id)
+        if player ~= nil then
+            local state = { main = player.main, alias = player.alias or "" }
+            for index = 1, #SyncFacts.TEXT_KINDS do
+                local kind = SyncFacts.TEXT_KINDS[index]
+                state[kind] = partition:PlayerProfileText(id, kind) or ""
+            end
+            shot.players[id] = state
+        end
+    end
+    return shot
+end
+
+-- Logs to each player concerned what changed for `keys` since `before` (a
+-- Snapshot of them), as an edit by `by` that came `via` "sync" or "local"
+-- (see FellowshipStore's LogChange). Returns the players `keys` belong to
+-- now (a set of ids).
+function Facts:LogChanges(keys, before, by, via)
+    local partition = self.partition
+    local after = self:Snapshot(keys, before.players)
+    local at = self.now()
+    local function log(id, entry)
+        entry.at, entry.by, entry.via = at, by, via
+        partition:LogChange(id, entry)
+    end
+    local index
+    for index = 1, #keys do
+        local key = keys[index]
+        local was, now = before.characters[key], after.characters[key]
+        if was ~= nil and now ~= nil and was ~= now then
+            log(now, { kind = "joined", character = key, from = before.players[was] and before.players[was].main })
+            if after.players[was] ~= nil then
+                log(was, { kind = "left", character = key, to = after.players[now] and after.players[now].main })
+            end
+        end
+    end
+    local ids = {}
+    local id
+    for id in pairs(before.players) do
+        if after.players[id] ~= nil then
+            table.insert(ids, id)
+        end
+    end
+    table.sort(ids)
+    local fields = { "main", "alias", SyncFacts.KIND_DISCORD, SyncFacts.KIND_LOCATION, SyncFacts.KIND_BIO }
+    local field
+    for index = 1, #ids do
+        id = ids[index]
+        for field = 1, #fields do
+            local was, now = before.players[id][fields[field]], after.players[id][fields[field]]
+            if was ~= now then
+                log(id, { kind = fields[field], from = was, to = now })
+            end
+        end
+    end
+    return after.players
 end
 
 -- Makes the roster agree with one accepted fact. Officer data beats guild
@@ -521,6 +609,22 @@ function Facts:Change(fact)
         self.partition:SetRoles(fact.character, fact.roles, fact.at, fact.by)
         return
     end
+    -- The players this changes are logged.
+    local keys = { fact.character }
+    if fact.kind == SyncFacts.KIND_MAIN and fact.main ~= fact.character then
+        table.insert(keys, fact.main)
+    end
+    local before = fact.kind ~= SyncFacts.KIND_DECLARED and self:Snapshot(keys) or nil
+    self:Apply(fact)
+    if before ~= nil then
+        return self:LogChanges(keys, before, fact.by, "sync")
+    end
+    return nil
+end
+
+-- Changes the roster and stamps for one accepted officer or profile text
+-- fact (see Change).
+function Facts:Apply(fact)
     if addon.FellowshipStore.PROFILE_FIELDS[fact.kind] ~= nil then
         self.partition:SetProfileText(fact.character, fact.kind, fact.text, fact.at, fact.by)
         return
@@ -613,7 +717,9 @@ function Facts:OfficerFacts(checkpoint)
         end
     end)
     partition:EachPlayer(function(id, player)
-        if player.aliasAt ~= nil and self.isOfficer(player.aliasBy) and not partition:IsNoSync(id) then
+        if player.aliasAt ~= nil and self.isOfficer(player.aliasBy) and not partition:IsNoSync(id)
+            and partition:AliasAnchored(id)
+        then
             table.insert(aliases, player.main)
         end
     end)
@@ -728,16 +834,42 @@ function Facts:ApplyAll(facts, checkpoint)
     end
     checkpoint = checkpoint or function() end
     local applied = 0
+    -- The players the facts changed, and whose edit last changed each.
+    local touched = {}
     local index
     for index = 1, #facts do
         if self:Refusal(facts[index]) == nil then
-            self:Change(facts[index])
+            local players = self:Change(facts[index])
+            local id
+            for id in pairs(players or {}) do
+                touched[id] = facts[index].by
+            end
             applied = applied + 1
         end
         checkpoint()
     end
     if applied > 0 then
+        -- Restoring acting mains can pick another main for a player a fact
+        -- just changed; the log ends on the main the player keeps.
+        local mains = {}
+        local id, by
+        for id in pairs(touched) do
+            local player = self.partition:GetPlayer(id)
+            mains[id] = player and player.main
+            checkpoint()
+        end
         addon.ReconcileEngine.EnsureActingMains(self.partition, {}, self.now(), checkpoint)
+        for id, by in pairs(touched) do
+            local player = self.partition:GetPlayer(id)
+            if player ~= nil and mains[id] ~= nil and player.main ~= mains[id] then
+                self.partition:LogChange(id, { at = self.now(), kind = "main", from = mains[id], to = player.main,
+                    by = by, via = "sync" })
+            end
+            checkpoint()
+        end
+        -- A guildmate on an older version can still pass on a copy of
+        -- another player's alias stamp; it isn't passed on from here.
+        self.partition:RepairAliasStamps()
     end
     return applied
 end

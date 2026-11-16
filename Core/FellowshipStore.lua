@@ -188,9 +188,17 @@ local function playerProblem(player)
     if player.aliasBy ~= nil and not isText(player.aliasBy) then
         return "player alias author is invalid"
     end
+    -- The character the alias stamp was set through (see GetAliasStamp).
+    if player.aliasFor ~= nil and not isText(player.aliasFor) then
+        return "player alias anchor is invalid"
+    end
     -- "Don't sync": this client keeps its own version of the player.
     if player.noSync ~= nil and player.noSync ~= true then
         return "player don't sync flag is invalid"
+    end
+    -- What changed about this player, and who changed it (see LogChange).
+    if player.changes ~= nil and type(player.changes) ~= "table" then
+        return "player change log is invalid"
     end
     if player.history ~= nil then
         if type(player.history) ~= "table" then
@@ -365,6 +373,7 @@ function Store:Partition(guild)
     end
 
     local partition = setmetatable({ data = data, key = key }, Partition)
+    partition:RepairAliasStamps()
     self.partitions[key] = partition
     return partition
 end
@@ -537,10 +546,10 @@ function Store:SetGreetEnabled(enabled)
 end
 
 -- Whether Guild Greet prompts inside a dungeon, raid, battleground or arena.
--- On unless turned off; unusable saved data counts as on.
+-- Off unless turned on; unusable saved data counts as off.
 function Store:GreetInInstances()
     local state = type(self.database) == "table" and self.database.greet or nil
-    return type(state) ~= "table" or state.inInstances ~= false
+    return type(state) == "table" and state.inInstances == true
 end
 
 -- Turns Guild Greet's prompts inside instances on or off. An unusable
@@ -584,6 +593,30 @@ function Store:SetGreetCap(cap)
         return false
     end
     state.cap = cap
+    return true
+end
+
+-- How much the user has greeted lately (GreetWeight's { weight, at }),
+-- shared by every character on the account, or nil when none or unusable.
+function Store:GreetWeight()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local saved = type(state) == "table" and state.weight or nil
+    if not addon.GreetWeight.IsRecord(saved) then
+        return nil
+    end
+    return saved
+end
+
+-- Saves the greet weight record. An unusable existing value is left alone.
+function Store:SetGreetWeight(record)
+    if not addon.GreetWeight.IsRecord(record) then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.weight ~= nil and not addon.GreetWeight.IsRecord(state.weight)) then
+        return false
+    end
+    state.weight = { weight = record.weight, at = record.at }
     return true
 end
 
@@ -1161,6 +1194,7 @@ function Partition:RecordCharacter(key, facts)
         character = { player = id, source = FellowshipStore.SOURCE_ROSTER }
         self.data.characters[key] = character
         self.members = nil
+        self:ScanInputsChanged()
     end
 
     -- The name exactly as the roster spells it (capitalization, realm
@@ -1198,7 +1232,20 @@ function Partition:ForgetNoteFingerprint(key)
     local character = self.data.characters[key]
     if character ~= nil then
         character.note = nil
+        self:ScanInputsChanged()
     end
+end
+
+-- A roster scan's plan depends on the roster and on which characters are
+-- stored, departed, and have their notes read. ScanEpoch changes whenever
+-- one of those stored things does (in memory only), so a scan can tell
+-- that a roster it already reconciled still is.
+function Partition:ScanInputsChanged()
+    self.scanEpoch = (self.scanEpoch or 0) + 1
+end
+
+function Partition:ScanEpoch()
+    return self.scanEpoch or 0
 end
 
 -- Leaves an out-of-date note alone while the note (its fingerprint) and the
@@ -1780,15 +1827,42 @@ end
 
 -- When the alias of `key`'s player was last set or cleared, and by whom;
 -- like main links, an unstamped alias is at 0 with no author.
+--
+-- A stamp belongs to the player it was set for, which facts name by a
+-- character: `aliasFor`, the character it was set through. Characters move
+-- between players (by notes, by hand, through sync), so a player record can
+-- end up holding someone else's characters, and its alias stamp with them.
+-- The stamp only counts while `aliasFor` is still one of the player's
+-- characters; otherwise the alias is the oldest possible, so it isn't
+-- passed on as an officer's and any officer's alias for this player wins
+-- over it. A stamp from before anchors (no `aliasFor`) counts.
 function Partition:GetAliasStamp(key)
     local character = self.data.characters[key]
     local player = character and self.data.players[character.player]
     if player == nil then
         return nil
     end
+    if not self:AliasAnchored(character.player) then
+        return 0, nil
+    end
     return player.aliasAt or 0, player.aliasBy
 end
 
+-- Whether the alias stamp of player `playerId` still belongs to it (see
+-- GetAliasStamp). False for an unknown player.
+function Partition:AliasAnchored(playerId)
+    local player = self.data.players[playerId]
+    if player == nil then
+        return false
+    end
+    if player.aliasAt == nil or player.aliasFor == nil then
+        return true
+    end
+    local anchor = self.data.characters[player.aliasFor]
+    return anchor ~= nil and anchor.player == playerId
+end
+
+-- Stamps the alias of `key`'s player, set through `key`.
 function Partition:SetAliasStamp(key, at, by)
     local character = self.data.characters[key]
     local player = character and self.data.players[character.player]
@@ -1797,7 +1871,67 @@ function Partition:SetAliasStamp(key, at, by)
     end
     player.aliasAt = at
     player.aliasBy = by
+    player.aliasFor = key
     return true
+end
+
+-- Repairs alias stamps that left their player, and returns how many were
+-- made the oldest possible. Stamps from before anchors are anchored to
+-- their player's main. One officer edit names one player, so two players
+-- holding the same alias under the same stamp means one of them carries a
+-- copy: when this officer's ledger shows which character the edit was
+-- for, that player keeps it; every other copy is made the oldest possible
+-- (the alias itself is kept), so it isn't passed on and the guild's
+-- officer data for those players wins over it again.
+function Partition:RepairAliasStamps()
+    local ledger = type(self.data.ledger) == "table" and type(self.data.ledger.facts) == "table"
+        and self.data.ledger.facts or {}
+    local groups, order = {}, {}
+    local id, player
+    for id, player in pairs(self.data.players) do
+        if player.aliasAt ~= nil then
+            if player.aliasFor == nil then
+                player.aliasFor = player.main
+            end
+            if isText(player.alias) and self:AliasAnchored(id) then
+                local group = player.aliasAt .. "\31" .. tostring(player.aliasBy) .. "\31" .. string.lower(player.alias)
+                if groups[group] == nil then
+                    groups[group] = {}
+                    table.insert(order, group)
+                end
+                table.insert(groups[group], id)
+            end
+        end
+    end
+    local voided = 0
+    local index, member, keyIndex
+    for index = 1, #order do
+        local ids = groups[order[index]]
+        if ids[2] ~= nil then
+            for member = 1, #ids do
+                player = self.data.players[ids[member]]
+                local keys = self:CharactersOf(ids[member])
+                local genuine
+                for keyIndex = 1, #keys do
+                    local held = ledger["alias|" .. keys[keyIndex]]
+                    if type(held) == "table" and held.at == player.aliasAt and type(held.alias) == "string"
+                        and string.lower(held.alias) == string.lower(player.alias)
+                    then
+                        genuine = keys[keyIndex]
+                    end
+                end
+                if genuine ~= nil then
+                    player.aliasFor = genuine
+                else
+                    player.aliasAt = nil
+                    player.aliasBy = nil
+                    player.aliasFor = nil
+                    voided = voided + 1
+                end
+            end
+        end
+    end
+    return voided
 end
 
 -- The roles `key` is willing to play, as a new list, or nil when never set
@@ -1920,6 +2054,7 @@ function Partition:ClearAliasStamp(key)
     if player ~= nil then
         player.aliasAt = nil
         player.aliasBy = nil
+        player.aliasFor = nil
     end
 end
 
@@ -1948,6 +2083,7 @@ function Partition:MarkDeparted(key, timestamp)
         return false
     end
     character.departed = timestamp
+    self:ScanInputsChanged()
     return true
 end
 
@@ -1959,6 +2095,7 @@ function Partition:MarkRejoined(key)
         return false
     end
     character.departed = nil
+    self:ScanInputsChanged()
     return true
 end
 
@@ -1983,6 +2120,30 @@ end
 function Partition:GetHistory(playerId)
     local player = self.data.players[playerId]
     return player and player.history or {}
+end
+
+-- Logs a change to a player, kept for good (never trimmed):
+--   { at, kind, character?, from?, to?, by?, via }
+-- `kind` is "alias", "discord", "location" or "bio" (the player's value
+-- went from `from` to `to`, "" for none), "main" (its main went from
+-- `from` to `to`), "joined" (`character` came from the player whose main
+-- was `from`) or "left" (`character` went to the player whose main is
+-- `to`). `by` is who made the edit (a character key) and `via` where it
+-- came from: "local" (this user) or "sync" (a guildmate's add-on).
+function Partition:LogChange(playerId, entry)
+    local player = self.data.players[playerId]
+    if player == nil or type(entry) ~= "table" or not isText(entry.kind) then
+        return false
+    end
+    player.changes = player.changes or {}
+    table.insert(player.changes, entry)
+    return true
+end
+
+-- The player's change log (see LogChange), oldest first.
+function Partition:GetChanges(playerId)
+    local player = self.data.players[playerId]
+    return player and player.changes or {}
 end
 
 -- Makes `key` its player's main. Returns false when it isn't a member.
@@ -2029,12 +2190,20 @@ function Partition:Purge(key, timestamp)
 
     self.data.characters[key] = nil
     self.members = nil
+    self:ScanInputsChanged()
     if player ~= nil then
         local remaining = self:CharactersOf(playerId)
         if remaining[1] == nil then
             self.data.players[playerId] = nil
-        elseif player.main == key then
-            player.main = remaining[1]
+        else
+            if player.main == key then
+                player.main = remaining[1]
+            end
+            -- The player keeps its alias stamp when the character it was
+            -- set through is gone for good.
+            if player.aliasFor == key then
+                player.aliasFor = player.main
+            end
         end
     end
     self:RemoveConflictsFor(key)

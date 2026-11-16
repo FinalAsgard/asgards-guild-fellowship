@@ -482,3 +482,110 @@ test.test("tag colors are saved account-wide, and an unusable saved value is ign
     test.assertFalse(store:SetChatTagColor("alias", "ffffff"))
     test.assertEqual("corrupt", database.chatTagColors)
 end)
+
+-- Working tags out once --------------------------------------------------------
+
+-- An annotator over `world` that counts its guild context reads, with
+-- `revision` (a table whose `value` changes when aliases may have).
+local function counting(world, revision, options)
+    options = options or {}
+    local probe = { contextReads = 0 }
+    probe.annotator = world.addon.ChatAnnotator.Create({
+        context = function()
+            probe.contextReads = probe.contextReads + 1
+            return world.partition, world.normalizer
+        end,
+        revision = revision and function()
+            return revision.value
+        end or nil,
+        enabled = options.enabled,
+        isSecret = options.isSecret,
+        colorFor = options.colorFor,
+    })
+    return probe
+end
+
+test.test("a chat line shown in three chat tabs is worked out once", function()
+    local world = retail()
+    local probe = counting(world)
+
+    local index
+    for index = 1, 3 do
+        test.assertEqual(alias("TheTool") .. "hi", probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52", 41))
+    end
+
+    test.assertEqual(1, probe.contextReads)
+    -- The next line is its own.
+    probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52", 42)
+    test.assertEqual(2, probe.contextReads)
+end)
+
+test.test("a speaker's tag is kept until aliases or mains may have changed", function()
+    local world = retail()
+    local revision = { value = 1 }
+    local probe = counting(world, revision)
+
+    probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52", 1)
+    probe.annotator:Annotate("CHAT_MSG_GUILD", "again", "Hammer-Area52", 2)
+    test.assertEqual(1, probe.contextReads, "the second line reuses the tag")
+
+    -- A new alias, by hand or through guild sync.
+    world.partition:SetAlias(world.partition:GetCharacter("toolbox-area52").player, "Tools", "manual")
+    revision.value = 2
+    test.assertEqual(alias("Tools") .. "more", probe.annotator:Annotate("CHAT_MSG_GUILD", "more", "Hammer-Area52", 3))
+    test.assertEqual(2, probe.contextReads)
+end)
+
+test.test("turning tags off applies to the next line, even one seen before", function()
+    local world = retail()
+    local on = true
+    local probe = counting(world, { value = 1 }, { enabled = function()
+        return on
+    end })
+    test.assertEqual(alias("TheTool") .. "hi", probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52", 7))
+
+    on = false
+
+    test.assertEqual(nil, probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52", 7))
+    test.assertEqual(nil, probe.annotator:Annotate("CHAT_MSG_GUILD", "next", "Hammer-Area52", 8))
+end)
+
+test.test("a hidden line ID is never used, and the line is left unchanged", function()
+    local world = retail()
+    local probe = counting(world, { value = 1 }, { isSecret = function(value)
+        return value == 99
+    end })
+
+    test.assertEqual(nil, probe.annotator:Annotate("CHAT_MSG_GUILD", "hi", "Hammer-Area52", 99))
+    test.assertEqual(0, probe.contextReads)
+end)
+
+test.test("the chat filter passes the line ID through, so every chat tab after the first reuses the line", function()
+    local fixtures = require("tests.client_fixtures")
+    local world = fixtures.newEnvironment("Retail", {})
+    local filters = {}
+    world.environment.ChatFrame_AddMessageEventFilter = function(event, filter)
+        filters[event] = filters[event] or {}
+        table.insert(filters[event], filter)
+    end
+    local addon = fixtures.loadAddon(world)
+    fixtures.fire(world, "ADDON_LOADED", world.addonName)
+    world.loggedIn = true
+    fixtures.fire(world, "PLAYER_LOGIN")
+    fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world)
+    local before = addon.PerfCounters.Get("chatTagHits")
+    local worked = addon.PerfCounters.Get("chatTags")
+
+    local tab
+    for tab = 1, 3 do
+        local filter = filters.CHAT_MSG_GUILD[1]
+        -- message, sender, language, channel, target, flags, zone, number,
+        -- channel name, unused, then the line's ID.
+        filter({}, "CHAT_MSG_GUILD", "hi", "Hammer-Area52", "", "", "", "", 0, 0, "", 0, 501)
+    end
+
+    test.assertEqual(worked + 1, addon.PerfCounters.Get("chatTags"))
+    test.assertEqual(before + 2, addon.PerfCounters.Get("chatTagHits"))
+end)

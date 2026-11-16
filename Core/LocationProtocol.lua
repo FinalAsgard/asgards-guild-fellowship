@@ -16,8 +16,10 @@ local LocationProtocol = {
     TYPE_LOCATION = "gm-loc",
     -- The same fields, whispered to one guildmate in the same zone.
     TYPE_NEAR = "gm-near",
-    -- { v, t, c }: the sender's character is off the map (sharing turned
-    -- off, or inside an instance). Sent to the guild.
+    -- { v, t, c, i }: the sender's character is off the map (sharing turned
+    -- off, or inside an instance). `i` is true inside an instance (added
+    -- later: older versions never send it, and ignore it). Sent to the
+    -- guild.
     TYPE_HIDE = "gm-hide",
 }
 addon.LocationProtocol = LocationProtocol
@@ -44,7 +46,7 @@ local CHECKS = {
     [LocationProtocol.TYPE_LOCATION] = isPosition,
     [LocationProtocol.TYPE_NEAR] = isPosition,
     [LocationProtocol.TYPE_HIDE] = function(message)
-        return isText(message.c)
+        return isText(message.c) and (message.i == nil or type(message.i) == "boolean")
     end,
 }
 
@@ -83,8 +85,10 @@ function LocationProtocol.Near(character, spot)
     return position(LocationProtocol.TYPE_NEAR, character, spot)
 end
 
-function LocationProtocol.Hide(character)
-    return { v = LocationProtocol.VERSION, t = LocationProtocol.TYPE_HIDE, c = character }
+-- `inInstance` true when the reason is being inside an instance.
+function LocationProtocol.Hide(character, inInstance)
+    return { v = LocationProtocol.VERSION, t = LocationProtocol.TYPE_HIDE, c = character,
+        i = inInstance == true or nil }
 end
 
 -- Whether `message` is a location message this version understands.

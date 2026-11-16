@@ -183,6 +183,9 @@ local function newFrame(world)
     function frame:RegisterEvent(eventName)
         self.registeredEvents[eventName] = true
     end
+    function frame:UnregisterEvent(eventName)
+        self.registeredEvents[eventName] = nil
+    end
     function frame:SetScript(scriptName, handler)
         if scriptName == "OnEvent" then
             self.handler = handler

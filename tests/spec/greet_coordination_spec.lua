@@ -175,3 +175,23 @@ test.test("greeter coordination: without the comm libraries, Greet still works",
     test.assertContains(world.posted[1], "Grandmaster")
     test.assertEqual(0, #waiting(world))
 end)
+
+test.test("Guild Greet learns who's online from the first full roster, even inside a burst of updates", function()
+    local world = fixtures.newEnvironment("Retail", { guild = guild(), playerName = "Hammer-Area52" })
+    local members = world.guild.members
+    world.guild.members = {}
+    fixtures.loadAddon(world)
+    fixtures.fire(world, "ADDON_LOADED", world.addonName)
+    world.loggedIn = true
+    fixtures.fire(world, "PLAYER_LOGIN")
+    fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+    -- An empty roster first: nothing to learn from yet.
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    test.assertFalse(world.addon.guildGreet.policy:IsReady())
+
+    -- The full roster arrives a moment later, while the burst is open.
+    world.guild.members = members
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+
+    test.assertTrue(world.addon.guildGreet.policy:IsReady())
+end)

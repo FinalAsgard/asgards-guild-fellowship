@@ -156,8 +156,18 @@ function Endpoint:Whisper(message, target, live)
     if sent then
         self.whispered = self.whispered or {}
         self.whispered[string.lower(target)] = self.client:Timestamp()
+        self.lastWhisperAt = self.client:Timestamp()
     end
     return sent
+end
+
+-- Whether this add-on whispered anyone in the last WHISPER_ANSWER_SECONDS:
+-- otherwise no "No player named ..." line can answer it, and nothing needs
+-- to be checked.
+function Endpoint:WhisperedAnyRecently()
+    local now = self.client:Timestamp()
+    return type(self.lastWhisperAt) == "number" and type(now) == "number"
+        and now - self.lastWhisperAt <= Comm.WHISPER_ANSWER_SECONDS
 end
 
 -- Whether this add-on whispered the character named `name` (as the game's

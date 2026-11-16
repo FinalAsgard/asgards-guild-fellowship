@@ -27,9 +27,12 @@ local LocationScheduler = {
     -- With this many guildmates near, one gm-near goes to the guild instead
     -- of a whisper to each.
     NEAR_GUILD_MIN = 3,
-    -- How often the caller should ask (Tick), so a zone change made inside
-    -- the minimum gap still goes out soon after it ends.
-    TICK_SECONDS = 5,
+    -- How often the caller should ask (Tick): enough for the 2-minute
+    -- broadcast and for guildmates who went quiet to drop off the map. A
+    -- zone change, or the end of combat, asks again on its own.
+    TICK_SECONDS = 30,
+    -- How often while the fast same-zone updates are on.
+    NEAR_TICK_SECONDS = 5,
 }
 addon.LocationScheduler = LocationScheduler
 
@@ -54,11 +57,15 @@ function Scheduler:Tick(state)
         return nil
     end
     if state.sharing == false or state.inInstance then
-        if self.hidden then
+        -- One gm-hide, and another when the reason changes (sharing off
+        -- and entering an instance, or leaving one with sharing off), so
+        -- guildmates know who's inside.
+        local reason = state.inInstance and "instance" or "off"
+        if self.hidden == reason then
             return nil
         end
-        self.hidden = true
-        return addon.LocationProtocol.Hide(state.character)
+        self.hidden = reason
+        return addon.LocationProtocol.Hide(state.character, state.inInstance == true)
     end
     if self.hidden then
         -- Back on, or out of the instance: the location goes out at once.
