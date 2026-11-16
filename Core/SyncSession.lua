@@ -946,8 +946,11 @@ function Session:CatchProfileForgeries(facts, partition, owner, relayer, sender)
                 local roles = self.rolesOf(owner)
                 correction = roles and own:StampRoles(owner, roles, at)
             elseif fact.kind == addon.SyncFacts.KIND_NO_GREET then
-                -- This character's own choice as it was, or off.
-                correction = own:StampNoGreet(owner, partition:GetNoGreet(owner) == true, at)
+                -- The player's choice as it was (the newest any of its
+                -- characters set), or off.
+                local character = partition:GetCharacter(owner)
+                local noGreet = character ~= nil and (partition:PlayerNoGreet(character.player)) == true
+                correction = own:StampNoGreet(owner, noGreet, at)
             else
                 -- This character's own text as it was, or cleared when it
                 -- never set one.

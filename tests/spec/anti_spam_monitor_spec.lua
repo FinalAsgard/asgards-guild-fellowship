@@ -83,6 +83,16 @@ test.test("anti-spam monitor: a character counts once within a few minutes, and 
     test.assertTrue(monitor:Arrived("c1", "p1", "C1", START + dedupe + 1))
 end)
 
+test.test("anti-spam monitor: another of the player's characters going offline doesn't end their wait", function()
+    local monitor = newMonitor()
+    monitor:Arrived("c1", "p1", "C1", START)
+
+    test.assertFalse(monitor:Left("p1", START + 1, "alt1"))
+    test.assertEqual(1, #monitor:Waiting(START + 1))
+    test.assertTrue(monitor:Left("p1", START + 2, "c1"))
+    test.assertEqual(0, #monitor:Waiting(START + 2))
+end)
+
 test.test("anti-spam monitor: a player stops waiting when greeted, gone offline, or too long ago", function()
     local monitor = newMonitor()
     arrive(monitor, 1, START)

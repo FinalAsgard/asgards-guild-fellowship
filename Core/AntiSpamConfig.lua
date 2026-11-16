@@ -221,8 +221,8 @@ end
 
 -- An "antispam-config": applied setting by setting, newest wins, when the
 -- sender and each change's author are officers. Hearing one that holds
--- everything this add-on knows stops its own answer to an ask. Returns
--- true when anything changed.
+-- everything this add-on knows stops its own answer to an ask, and one
+-- holding every setting its own ask. Returns true when anything changed.
 function Config:OnConfig(message, sender)
     if type(message) ~= "table" or message.v ~= AntiSpamConfig.PROTOCOL or message.t ~= AntiSpamConfig.TYPE_CONFIG
         or type(message.s) ~= "table" or not self:fromOthers(sender) or ask(self.senderIsOfficer, sender) ~= true
@@ -233,12 +233,22 @@ function Config:OnConfig(message, sender)
     if config == nil then
         return false
     end
-    self.heard = true
+    -- One holding only some settings doesn't stop the ask: another officer
+    -- may hold a change to the rest.
+    local complete = true
+    local name
+    for name in pairs(AntiSpamConfig.SETTINGS) do
+        if message.s[name] == nil then
+            complete = false
+        end
+    end
+    if complete then
+        self.heard = true
+    end
     if self.answering and config:CoveredBy(message.s) then
         self.answering = false
     end
     local changed = false
-    local name
     for name in pairs(AntiSpamConfig.SETTINGS) do
         if config:Apply(name, message.s[name]) then
             changed = true

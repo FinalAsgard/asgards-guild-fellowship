@@ -1505,6 +1505,19 @@ test.test("guild greet: anti-spam mode skips welcome-backs", function()
     test.assertEqual(3, #world.shown)
 end)
 
+test.test("guild greet: a welcome-back prompt already showing closes when anti-spam mode turns on", function()
+    local world = busyGuild({ bolt = { years = 0, months = 0, days = 0, hours = 2 } })
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual("welcomeBack", shownFor(world, world.names.bolt).category)
+
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertTrue(world.greet:AntiSpamOn())
+
+    test.assertEqual(nil, shownFor(world, world.names.bolt))
+    test.assertEqual(2, #world.shown)
+end)
+
 test.test("guild greet: anti-spam mode is watched with Guild Greet off, and turns off once calm", function()
     local world = busyGuild()
     world.store:SetGreetEnabled(false)
@@ -1621,6 +1634,16 @@ local function inAntiSpam(stagger)
     test.assertTrue(world.greet:AntiSpamOn())
     return world
 end
+
+test.test("guild greet: a guildmate's add-on greeting restarts the guild cooldown before their line arrives", function()
+    local world = inAntiSpam(0)
+    test.assertEqual(0, shownFor(world, "Rip").lockedFor)
+
+    legacyGreeted(world, "rust", world.names.bolt)
+
+    test.assertEqual(15, shownFor(world, "Rip").lockedFor)
+    test.assertEqual(15, shownFor(world, world.names.anvil).lockedFor)
+end)
 
 test.test("guild greet: in anti-spam mode Greet unlocks after the guild cooldown, the user's lock and a random wait", function()
     local world = inAntiSpam(2)

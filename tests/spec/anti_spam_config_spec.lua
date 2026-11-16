@@ -225,6 +225,7 @@ test.test("anti-spam config: an ask isn't sent once an officer's settings were h
     local _, officer = newConfig("tool box-camelot")
     local _, member = newConfig("bob ward-camelot")
     officer.config:Set("threshold", 10)
+    officer.config:Set("cooldownSeconds", 20)
 
     member.config:AskOnce()
     member.config:OnMessage(officer.sent[#officer.sent], "Tool Box")
@@ -233,6 +234,21 @@ test.test("anti-spam config: an ask isn't sent once an officer's settings were h
     test.assertEqual(0, #member.sent)
     test.assertEqual(10, member.config:Threshold())
 end)
+
+test.test("anti-spam config: hearing only some settings still asks, so another officer's change to the rest arrives",
+    function()
+        local _, officer = newConfig("tool box-camelot")
+        local _, member = newConfig("bob ward-camelot")
+        officer.config:Set("threshold", 10)
+
+        member.config:AskOnce()
+        member.config:OnMessage(officer.sent[#officer.sent], "Tool Box")
+        runTimers(member)
+
+        test.assertEqual(10, member.config:Threshold())
+        test.assertEqual(1, #member.sent)
+        test.assertEqual("ask-antispam-config", member.sent[1].t)
+    end)
 
 test.test("anti-spam config: an officer's answer is dropped when another answer covers it", function()
     local addon, first = newConfig("tool box-camelot")

@@ -1221,3 +1221,22 @@ test.test("guild sync: the owner's client corrects a forged Don't greet me in it
     test.assertTrue((bystander.partition:GetNoGreet(MEMBER)))
     test.assertEqual(1, #member.forgeries)
 end)
+
+test.test("guild sync: correcting a forged Don't greet me keeps the player's newer choice from an alt", function()
+    local network = newNetwork()
+    local member = newClient(network, MEMBER, "Hammer-Area52")
+    local forger = newClient(network, OFFICER, "Toolbox-Area52")
+    -- Hammer said "greet me" long ago; its alt Wrench opted out since.
+    onePlayer(member.partition)
+    member.partition:SetNoGreet(MEMBER, false, NOW - 100, MEMBER)
+    member.partition:SetNoGreet("wrench-area52", true, NOW - 50, "wrench-area52")
+    local playerId = member.partition:GetCharacter(MEMBER).player
+    test.assertTrue((member.partition:PlayerNoGreet(playerId)))
+
+    forger.session:Send({ t = "facts", facts = { noGreet(NOW + 5, MEMBER, MEMBER, false) } })
+    deliver(network)
+
+    test.assertEqual(1, #member.forgeries)
+    test.assertTrue((member.partition:PlayerNoGreet(playerId)), "still opted out")
+    test.assertTrue((forger.partition:GetNoGreet(MEMBER)), "the correction carries the player's choice")
+end)

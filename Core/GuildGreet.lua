@@ -150,8 +150,10 @@ function GuildGreet.Create(options)
         cooldownSeconds = options.antiSpamCooldown or function()
             return antiSpamDefaults and antiSpamDefaults.cooldownSeconds.default or 15
         end,
-        -- An arrival is never prompted later than this.
-        lifetime = addon.GreetPromptQueue.LIFETIME_SECONDS + GuildGreet.SHOW_DELAY_MAX,
+        -- No add-on in the guild still has a prompt for an arrival this
+        -- old: the longest show delay plus the most a greet weight adds.
+        lifetime = addon.GreetPromptQueue.LIFETIME_SECONDS + GuildGreet.SHOW_DELAY_MAX
+            + addon.GreetWeight.CAP * addon.GreetWeight.SECONDS_PER_WEIGHT,
         onChange = function(on)
             greet:onAntiSpamChanged(on)
         end,
@@ -442,7 +444,7 @@ function Greet:OnPresence(kind, rawName)
         if kind == "offline" then
             self.policy:WentOffline(key, now)
         end
-        self.antiSpam:Left(self.policy:PlayerOf(key), now)
+        self.antiSpam:Left(self.policy:PlayerOf(key), now, key)
         self:scheduleAntiSpamCheck(now)
         -- Nobody to greet any more: the prompt raised for this character,
         -- not one for another of its player's characters still online.
@@ -552,8 +554,9 @@ function Greet:scheduleAntiSpamCheck(now)
 end
 
 -- Anti-spam mode turned on or off: the user is told in their own chat
--- frame, and the prompts are redrawn. Turning on closes every prompt but a
--- join's whose player has had a greeting already.
+-- frame, and the prompts are redrawn. Turning on closes every welcome-back
+-- prompt, and every other prompt but a join's whose player has had a
+-- greeting already.
 function Greet:onAntiSpamChanged(on)
     pcall(self.notify, on and GuildGreet.ANTI_SPAM_ON_TEXT or GuildGreet.ANTI_SPAM_OFF_TEXT)
     local now = self.now()
@@ -563,7 +566,9 @@ function Greet:onAntiSpamChanged(on)
         local index
         for index = 1, #prompts do
             local prompt = prompts[index]
-            if prompt.category ~= addon.GreetPolicy.JOIN and self.tally:Count(prompt.player, now) > 0 then
+            if prompt.category == addon.GreetPolicy.WELCOME_BACK
+                or (prompt.category ~= addon.GreetPolicy.JOIN and self.tally:Count(prompt.player, now) > 0)
+            then
                 self.queue:Remove(prompt.player)
             end
         end
@@ -825,8 +830,14 @@ function Greet:OnGreeted(message, sender)
     if partition:GetCharacter(message.c) == nil and prompt == nil then
         return false
     end
-    self.antiSpam:Greeted(player, now)
+    -- A greeting for a waiting arrival, or for a prompt other than a
+    -- join's, starts the guild cooldown again, though the greeter's line
+    -- may only reach guild chat after its prompt has closed.
+    local waited = self.antiSpam:Greeted(player, now)
     self:noteRecent(player, message.c, prompt and prompt.rawName, now)
+    if (waited or (prompt ~= nil and prompt.category ~= addon.GreetPolicy.JOIN)) and self:greetingSeen(now) then
+        self:Refresh()
+    end
     local before = self.tally:Count(player, now)
     if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
         return false

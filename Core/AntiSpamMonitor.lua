@@ -193,9 +193,16 @@ function Monitor:Greeted(player, now)
     return self:drop(player, now)
 end
 
--- `player` went offline (or left the guild) at `now`.
-function Monitor:Left(player, now)
+-- `player`'s character `key` went offline (or left the guild) at `now`.
+-- Their arrival stops waiting only when it was that character's: another
+-- of their characters may have come online first. Without `key`, it stops
+-- anyway.
+function Monitor:Left(player, now, key)
     self:Update(now)
+    local entry = self.waiting[player]
+    if entry ~= nil and key ~= nil and entry.key ~= key then
+        return false
+    end
     return self:drop(player, now)
 end
 
