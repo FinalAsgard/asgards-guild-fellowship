@@ -134,6 +134,30 @@ function SyncFacts.IsNewer(at, by, heldAt, heldBy)
     return by > (heldBy or "")
 end
 
+-- Whether facts `a` and `b`, about the same thing, say the same about it.
+function SyncFacts.SameValue(a, b)
+    if a.kind ~= b.kind then
+        return false
+    end
+    if a.kind == SyncFacts.KIND_MAIN then
+        return a.main == b.main
+    end
+    if a.kind == SyncFacts.KIND_ALIAS then
+        return a.alias == b.alias
+    end
+    if a.kind == SyncFacts.KIND_DECLARED then
+        return a.declared == b.declared
+    end
+    if a.kind == SyncFacts.KIND_ROLES then
+        return type(a.roles) == "table" and type(b.roles) == "table"
+            and table.concat(a.roles, ",") == table.concat(b.roles, ",")
+    end
+    if isDateKind(a.kind) then
+        return SyncFacts.DateValue(a) == SyncFacts.DateValue(b)
+    end
+    return a.text == b.text
+end
+
 -- The value a date fact carries, as one string, for the officer ledger and
 -- the digest; nil for other facts.
 function SyncFacts.DateValue(fact)

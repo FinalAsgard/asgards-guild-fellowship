@@ -141,3 +141,19 @@ test.test("the forgery probe lists each logged forgery with what the ledger held
         " your ledger held nothing.", lines[4])
     test.assertEqual(1, #setup.addon.SyncLedger.ForgeryLines(setup.partition, format, 1) - 2, "only the newest")
 end)
+
+test.test("a fact with the officer's very stamp but another value contradicts the ledger", function()
+    local setup = newSetup()
+    local discord = { kind = "discord", character = "anvil-area52", text = "anvil#1", at = NOW, by = OFFICER }
+    setup.ledger:Record({ link("wrench-area52", "hammer-area52", NOW), alias("hammer-area52", "Hammy", NOW),
+        discord }, NOW)
+
+    test.assertFalse(setup.ledger:Contradicts(link("wrench-area52", "hammer-area52", NOW), NOW))
+    test.assertTrue(setup.ledger:Contradicts(link("wrench-area52", "anvil-area52", NOW), NOW))
+    test.assertTrue(setup.ledger:Contradicts(alias("hammer-area52", "Anvil", NOW), NOW))
+    test.assertTrue(setup.ledger:Contradicts(
+        { kind = "discord", character = "anvil-area52", text = "hammer#2", at = NOW, by = OFFICER }, NOW))
+    -- Another stamp, or something the ledger never held, isn't for it to say.
+    test.assertFalse(setup.ledger:Contradicts(link("wrench-area52", "anvil-area52", NOW - 5), NOW))
+    test.assertFalse(setup.ledger:Contradicts(link("anvil-area52", "hammer-area52", NOW), NOW))
+end)

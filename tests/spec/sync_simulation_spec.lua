@@ -729,6 +729,42 @@ test.test("a member holding a stale link doesn't hand one player's alias to anot
         ~= nil, shown)
 end)
 
+test.test("a link an older version's takeover changed under the officer's stamp is corrected at the next sync", function()
+    local channel = fixtures.newChannel()
+    local officer = login(channel, "Toolbox-Area52")
+    local stale = login(channel, "Hammer-Area52")
+    fixtures.deliver(channel)
+    linkAlt(officer, "wrench-area52", "toolbox-area52")
+    fixtures.deliver(channel)
+    test.assertEqual("toolbox-area52", mainOf(stale, "wrench-area52"))
+    -- On Hammer's install an older version moved Wrench into the
+    -- Grandmaster's player, keeping the officer's stamp on the link: the
+    -- officer's data isn't newer, so newest-wins never fixes it.
+    partitionOf(stale):JoinPlayerOf("wrench-area52", "grandmaster-area52", "sync")
+    local at, by = partitionOf(stale):GetMainStamp("wrench-area52")
+    test.assertEqual(partitionOf(officer):GetMainStamp("wrench-area52"), at)
+    test.assertEqual("toolbox-area52", by)
+
+    -- Hammer's next catch-up: the officer answers, Hammer sends back its
+    -- different copy under the same stamp, and the officer, whose ledger
+    -- says what it wrote, sends its link again, stamped newer.
+    local printed = #officer.messages
+    announce(stale)
+    fixtures.deliver(channel)
+    fixtures.runTimers(officer, 5)
+    fixtures.deliver(channel)
+    fixtures.deliver(channel)
+    fixtures.runTimers(officer, 5)
+    fixtures.deliver(channel)
+
+    test.assertEqual("toolbox-area52", mainOf(stale, "wrench-area52"))
+    test.assertEqual("toolbox-area52", mainOf(officer, "wrench-area52"))
+    test.assertTrue((partitionOf(stale):GetMainStamp("wrench-area52")) > at)
+    -- It isn't reported as a forgery.
+    local shown = table.concat(officer.messages, "\n", printed + 1)
+    test.assertTrue(string.find(string.lower(shown), "forg", 1, true) == nil, shown)
+end)
+
 -- Upgrading from before sync --------------------------------------------------
 
 -- Saved data from before guild sync (schema 1): Hammer linked to Toolbox

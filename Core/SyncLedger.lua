@@ -139,6 +139,31 @@ function Ledger:IsForged(fact, now)
     return fact.at > held.at
 end
 
+-- Whether `fact`, in this officer's name, carries the very stamp this
+-- officer wrote for that thing but another value: a copy that went wrong on
+-- the way (an older version's stale link could take over a record, keeping
+-- its stamp). Main links, aliases and Discord, location and bio only.
+function Ledger:Contradicts(fact, now)
+    local data = self:Data(now)
+    if data == nil or not addon.SyncFacts.IsValid(fact) then
+        return false
+    end
+    local held = data.facts[keyOf(fact)]
+    if type(held) ~= "table" or held.at ~= fact.at then
+        return false
+    end
+    if fact.kind == addon.SyncFacts.KIND_MAIN then
+        return held.main ~= nil and held.main ~= fact.main
+    end
+    if fact.kind == addon.SyncFacts.KIND_ALIAS then
+        return held.alias ~= nil and held.alias ~= fact.alias
+    end
+    if addon.SyncFacts.OFFICER_TEXT_KINDS[fact.kind] then
+        return held.text ~= nil and held.text ~= fact.text
+    end
+    return false
+end
+
 -- Logs a forged fact and the character (key) that relayed it, with the
 -- stamp the ledger held for that thing.
 function Ledger:LogForgery(fact, relayedBy, now)
