@@ -62,6 +62,9 @@ local GuildGreet = {
     -- The most random seconds added to the guild cooldown, so greeters
     -- unlock one after another.
     STAGGER_MAX_SECONDS = 2,
+    -- How long a greeting line for a player greeted through an add-on still
+    -- counts in the greeting stats once their prompt has closed.
+    RECENT_SECONDS = 60,
     -- The local chat lines when anti-spam mode turns on and off.
     ANTI_SPAM_ON_TEXT = "Anti-spam mode is on: the guild is busy, so each arrival gets one greeting "
         .. "and welcome-backs aren't prompted.",
@@ -132,6 +135,12 @@ function GuildGreet.Create(options)
         -- When the next anti-spam check is due, and its timer's id.
         antiSpamCheckAt = nil,
         antiSpamCheckId = 0,
+        -- Greeting lines, arrivals and time in anti-spam mode, for /agf.
+        stats = addon.GreetStats.Create(),
+        -- Players greeted through an add-on in the last RECENT_SECONDS:
+        -- player -> { player, key, rawName, at }. Their greeting line can
+        -- reach guild chat after their prompt closed, and still counts.
+        recent = {},
     }, Greet)
     local antiSpamDefaults = addon.AntiSpamConfig and addon.AntiSpamConfig.SETTINGS
     greet.antiSpam = addon.AntiSpamMonitor.Create({
@@ -505,7 +514,9 @@ function Greet:watchArrival(kind, key, rawName, now)
         return
     end
     -- A player who asked not to be greeted never waits for a greeting.
-    self.antiSpam:Arrived(key, self.policy:PlayerOf(key), rawName, now, not self:OptedOut(key))
+    if self.antiSpam:Arrived(key, self.policy:PlayerOf(key), rawName, now, not self:OptedOut(key)) then
+        self.stats:Arrival(now)
+    end
     self:scheduleAntiSpamCheck(now)
 end
 
@@ -546,6 +557,7 @@ end
 function Greet:onAntiSpamChanged(on)
     pcall(self.notify, on and GuildGreet.ANTI_SPAM_ON_TEXT or GuildGreet.ANTI_SPAM_OFF_TEXT)
     local now = self.now()
+    self.stats:ModeChanged(on, now)
     if on and type(now) == "number" then
         local prompts = self.queue:All(now)
         local index
@@ -768,6 +780,7 @@ function Greet:post(prompt, now)
     if text ~= nil then
         self.tally:Add(prompt.player, self:ownGreeter(), prompt.raisedAt, now)
         self.antiSpam:Greeted(prompt.player, now)
+        self:noteRecent(prompt.player, prompt.key, prompt.rawName, now)
         if prompt.category ~= addon.GreetPolicy.JOIN then
             self:greetingSeen(now)
         end
@@ -813,6 +826,7 @@ function Greet:OnGreeted(message, sender)
         return false
     end
     self.antiSpam:Greeted(player, now)
+    self:noteRecent(player, message.c, prompt and prompt.rawName, now)
     local before = self.tally:Count(player, now)
     if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
         return false
@@ -821,6 +835,28 @@ function Greet:OnGreeted(message, sender)
         self:Refresh()
     end
     return true
+end
+
+-- `player` (character `key`, named `rawName` by the game) was greeted
+-- through an add-on at `now`.
+function Greet:noteRecent(player, key, rawName, now)
+    if player ~= nil and type(key) == "string" then
+        self.recent[player] = { player = player, key = key, rawName = rawName, at = now }
+    end
+end
+
+-- The players greeted through an add-on lately, at `now`.
+function Greet:Recent(now)
+    local list = {}
+    local player, entry
+    for player, entry in pairs(self.recent) do
+        if entry.at + GuildGreet.RECENT_SECONDS <= now then
+            self.recent[player] = nil
+        else
+            table.insert(list, entry)
+        end
+    end
+    return list
 end
 
 -- Who the user counts as when they greet, on any of their characters.
@@ -891,7 +927,9 @@ end
 function Greet:OnGuildChat(message, sender)
     local now = self.now()
     -- With no prompt or arrival waiting, a chat line can't count for anyone.
-    if type(now) ~= "number" or (not self.queue:HasAny(now) and not self.antiSpam:HasWaiting(now)) then
+    if type(now) ~= "number" or (not self.queue:HasAny(now) and not self.antiSpam:HasWaiting(now)
+        and next(self.recent) == nil)
+    then
         if addon.PerfCounters ~= nil then
             addon.PerfCounters.Bump("greetChecksSkipped")
         end
@@ -910,14 +948,14 @@ function Greet:OnGuildChat(message, sender)
     -- Anti-spam mode watches every arrival, prompted here or not. A
     -- greeting for one, or for a prompt other than a join's, starts the
     -- guild cooldown again.
-    local seen = false
+    local seen, greeting = false, false
     local waiting = self.antiSpam:Waiting(now)
     local waitingIndex
     for waitingIndex = 1, #waiting do
         local entry = waiting[waitingIndex]
         if greeter ~= entry.player and greeter ~= self.policy:PlayerOf(entry.key) and self:NamedIn(lowered, entry) then
             self.antiSpam:Greeted(entry.player, now)
-            seen = true
+            seen, greeting = true, true
         end
     end
     local counted, closed = 0, false
@@ -929,6 +967,7 @@ function Greet:OnGuildChat(message, sender)
         -- them after the prompt was raised.
         local own = greeter == prompt.player or greeter == self.policy:PlayerOf(prompt.key)
         if not own and self:NamedIn(lowered, prompt) then
+            greeting = true
             seen = seen or prompt.category ~= addon.GreetPolicy.JOIN
             local before = self.tally:Count(prompt.player, now)
             if self.tally:Add(prompt.player, greeter, prompt.raisedAt, now) > before then
@@ -939,6 +978,22 @@ function Greet:OnGuildChat(message, sender)
             end
         end
     end
+    -- A greeting line for a player just greeted through an add-on, whose
+    -- prompt may be gone by now, still counts in the stats.
+    if not greeting then
+        local recent = self:Recent(now)
+        local recentIndex
+        for recentIndex = 1, #recent do
+            local entry = recent[recentIndex]
+            if greeter ~= entry.player and greeter ~= self.policy:PlayerOf(entry.key) and self:NamedIn(lowered, entry) then
+                greeting = true
+                break
+            end
+        end
+    end
+    if greeting then
+        self.stats:Greeting(now)
+    end
     if seen and self:greetingSeen(now) then
         closed = true
     end
@@ -947,6 +1002,13 @@ function Greet:OnGuildChat(message, sender)
         self:Refresh()
     end
     return counted
+end
+
+-- /agf greetstats: greeting lines, arrivals and time in anti-spam mode for
+-- the last hour and the session, the mode now, and the officer settings.
+function Greet:StatsLines(now)
+    return addon.GreetStats.Lines(self.stats:Report(now),
+        self.antiSpam.threshold() or 8, self.antiSpam.cooldownSeconds() or 15)
 end
 
 -- The user closed a prompt without greeting.

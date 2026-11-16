@@ -3044,6 +3044,15 @@ if clientProfile.supported then
                 client:Print("  " .. lines[index])
             end
         end)
+    router:Register("greetstats", "show greeting lines, arrivals and anti-spam mode for the last hour and session",
+        function()
+            rosterController:Print("Greeting stats:")
+            local lines = guildGreet:StatsLines(client:Timestamp())
+            local index
+            for index = 1, #lines do
+                client:Print(lines[index])
+            end
+        end)
     router:Register("sync", "show guild sync status", function()
         local lines = addon.RosterViewModel.SyncStatusLines(syncSession:Status(), client:Timestamp())
         local index

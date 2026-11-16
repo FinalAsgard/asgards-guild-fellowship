@@ -39,6 +39,7 @@ local function load()
         "Core/GreetTally.lua",
         "Core/GreetWeight.lua",
         "Core/AntiSpamMonitor.lua",
+        "Core/GreetStats.lua",
         "Core/GuildGreet.lua"
     )
 end
@@ -1522,6 +1523,77 @@ test.test("guild greet: anti-spam mode is watched with Guild Greet off, and turn
     test.assertFalse(world.greet:AntiSpamOn())
     test.assertEqual(world.addon.GuildGreet.ANTI_SPAM_OFF_TEXT, world.notices[2])
     test.assertEqual(0, #world.sent)
+end)
+
+test.test("guild greet: greeting stats count greeting lines, arrivals and time in anti-spam mode", function()
+    local world = busyGuild()
+    world.greet:OnPresence("online", world.names.bolt)
+    -- A line naming nobody waiting isn't a greeting.
+    world.greet:OnGuildChat("anyone up for a dungeon?", world.names.rust)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertTrue(world.greet:AntiSpamOn())
+
+    -- The user's own Greet, heard back in guild chat, and a guildmate's
+    -- line by hand.
+    world.handlers.greet(shownFor(world, world.names.bolt).player)
+    world.greet:OnGuildChat(world.sent[1], world.names.me)
+    world.greet:OnGuildChat("hey Anvil", world.names.rust)
+    -- On from the start; note when it turns off.
+    local onFor
+    local second
+    for second = 1, 400 do
+        advance(world, 1)
+        if onFor == nil and not world.greet:AntiSpamOn() then
+            onFor = world.time - START
+        end
+    end
+    test.assertTrue(onFor ~= nil)
+
+    local lines = world.greet:StatsLines(world.time)
+    test.assertEqual("  Last hour: 2 greeting lines, 3 arrivals, " .. world.addon.GreetStats.Duration(onFor)
+        .. " in anti-spam mode", lines[1])
+    test.assertEqual("  Anti-spam mode is off now.", lines[3])
+    test.assertEqual("  Officer settings: on at 3 arrivals in 2 minutes, 15s guild cooldown.", lines[4])
+end)
+
+test.test("guild greet: a guildmate's greeting line counts in the stats though their add-on's message came first", function()
+    local world = busyGuild()
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+
+    -- Their "greeted" message closes Bolt's prompt before their line.
+    legacyGreeted(world, "rust", world.names.bolt)
+    test.assertEqual(nil, shownFor(world, world.names.bolt))
+    world.greet:OnGuildChat("hey Bolt", world.names.rust)
+    -- Bolt's own line naming himself doesn't count.
+    world.greet:OnGuildChat("Bolt here", world.names.bolt)
+
+    test.assertEqual("  Last hour: 1 greeting lines, 3 arrivals, 0s in anti-spam mode",
+        world.greet:StatsLines(world.time)[1])
+    -- A minute later, a line naming Bolt is just chat.
+    advance(world, 60)
+    world.greet:OnGuildChat("Bolt, want to run a dungeon?", world.names.rust)
+    test.assertEqual("  Last hour: 1 greeting lines, 3 arrivals, 1m 00s in anti-spam mode",
+        world.greet:StatsLines(world.time)[1])
+end)
+
+test.test("guild greet: greeting stats keep counting with Guild Greet off", function()
+    local world = busyGuild()
+    world.store:SetGreetEnabled(false)
+    world.greet:OnEnabledChanged(false)
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnGuildChat("hey Bolt", world.names.rust)
+    advance(world, 60)
+
+    local lines = world.greet:StatsLines(world.time)
+    test.assertEqual("  Last hour: 1 greeting lines, 3 arrivals, 1m 00s in anti-spam mode", lines[1])
+    test.assertEqual("  This session: 1 greeting lines, 3 arrivals, 1m 00s in anti-spam mode", lines[2])
+    test.assertEqual("  Anti-spam mode is on now.", lines[3])
 end)
 
 test.test("guild greet: the user's own characters never count toward anti-spam mode", function()

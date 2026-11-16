@@ -27,6 +27,7 @@ local function load()
         "Core/GreetTally.lua",
         "Core/GreetWeight.lua",
         "Core/AntiSpamMonitor.lua",
+        "Core/GreetStats.lua",
         "Core/GuildGreet.lua"
     )
 end
