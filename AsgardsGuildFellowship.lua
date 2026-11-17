@@ -539,7 +539,7 @@ if clientProfile.supported then
     settings:Add("guildGreet", {
         id = "guildGreet",
         kind = "toggle",
-        label = "Offer to greet guild members as they come online",
+        label = "Show greet prompts",
         get = function()
             local store = rosterController:Store()
             return store == nil or store:GreetEnabled()
@@ -555,6 +555,11 @@ if clientProfile.supported then
             return true
         end,
     })
+    settings:Add("guildGreet", {
+        id = "greetPromptOptionsHeading",
+        kind = "heading",
+        label = "Prompts",
+    })
     -- The character that's logged in; the set of characters it's off on is
     -- account-wide.
     settings:Add("guildGreet", {
@@ -562,7 +567,7 @@ if clientProfile.supported then
         kind = "toggle",
         label = "Greet from this character",
         info = function()
-            return "The setting above turns Guild Greet on or off for every character on this account. " ..
+            return "\"Show greet prompts\" turns Guild Greet on or off for every character on this account. " ..
                 "This one only stops the prompts on the character you're playing now, for example an alt " ..
                 "in another guild, and leaves your other characters as they are."
         end,

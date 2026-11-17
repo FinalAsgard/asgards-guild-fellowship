@@ -577,29 +577,52 @@ end
 registerTagColorTest("Forever")
 registerTagColorTest("Retail")
 
-test.test("the Guild Greet settings open with the main switches, then headed groups for prompts, timing and closing", function()
-    local _, addon = loggedIn("Retail")
+-- The ids of the Guild Greet entries drawn on `host`, in order.
+local function greetIds(addon, host)
     local section = addon.settings:SectionsOn("greetings")[1]
     local ids = {}
     local index
     for index = 1, #section.entries do
-        if addon.settings:InHost(section.entries[index].id, "frame") then
+        if addon.settings:InHost(section.entries[index].id, host) then
             table.insert(ids, section.entries[index].id)
         end
     end
+    return ids
+end
+
+test.test("the Guild Greet settings open with Show greet prompts, then headed groups for prompts, arrivals, timing and closing", function()
+    local _, addon = loggedIn("Retail")
+    local ids = greetIds(addon, "frame")
 
     test.assertEqual("guildGreet", ids[1])
-    test.assertEqual("greetCharacter", ids[2])
-    test.assertEqual("greetInInstances", ids[3])
-    test.assertEqual("greetUnlock", ids[4])
-    test.assertEqual("greetPromptsHeading", ids[5])
-    test.assertEqual("greetCategory:join", ids[6])
-    test.assertEqual("greetTimingHeading", ids[10])
-    test.assertEqual("welcomeBackMinutes", ids[11])
-    test.assertEqual("greetCloseHeading", ids[12])
-    test.assertEqual("greetCap", ids[13])
-    test.assertEqual("welcomeCap", ids[14])
-    test.assertEqual(14, #ids)
-    -- "This character" explains how it differs from the main switch.
-    test.assertContains(addon.settings:Info("greetCharacter"), "every character on this account")
+    test.assertEqual("Show greet prompts", addon.settings:Entry("guildGreet").label)
+    test.assertEqual("greetPromptOptionsHeading", ids[2])
+    test.assertEqual("Prompts", addon.settings:Entry("greetPromptOptionsHeading").label)
+    test.assertEqual("greetCharacter", ids[3])
+    test.assertEqual("greetInInstances", ids[4])
+    test.assertEqual("greetUnlock", ids[5])
+    test.assertEqual("greetPromptsHeading", ids[6])
+    test.assertEqual("greetCategory:join", ids[7])
+    test.assertEqual("greetTimingHeading", ids[11])
+    test.assertEqual("welcomeBackMinutes", ids[12])
+    test.assertEqual("greetCloseHeading", ids[13])
+    test.assertEqual("greetCap", ids[14])
+    test.assertEqual("welcomeCap", ids[15])
+    test.assertEqual(15, #ids)
+    -- "This character" explains how it differs from the main switch, by name.
+    local info = addon.settings:Info("greetCharacter")
+    test.assertContains(info, "every character on this account")
+    test.assertContains(info, "\"Show greet prompts\"")
+    test.assertFalse(string.find(info, "setting above", 1, true) ~= nil)
+end)
+
+test.test("on every host, Show greet prompts is the only Guild Greet entry before a heading", function()
+    local _, addon = loggedIn("Retail")
+    for _, host in ipairs({ "frame", "options" }) do
+        local ids = greetIds(addon, host)
+        test.assertEqual("guildGreet", ids[1], host)
+        -- Everything after the first heading is under a heading.
+        test.assertEqual("heading", addon.settings:Entry(ids[2]).kind, host)
+        test.assertTrue(#ids > 2, host)
+    end
 end)
