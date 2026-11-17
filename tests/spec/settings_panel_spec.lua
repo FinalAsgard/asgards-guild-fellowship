@@ -396,6 +396,53 @@ local function widgetFor(panel, id)
     return nil
 end
 
+test.test("settings panel: a mode button's label follows its mode, and closing the panel ends the mode", function()
+    local environment = newEnvironment()
+    local printed = {}
+    environment.InterfaceOptions_AddCategory = function() end
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local state = { moving = false, refuse = nil }
+    local model = addon.SettingsModel.Create()
+    model:AddSection("greet", "Guild Greet")
+    test.assertTrue(model:Add("greet", { id = "move", kind = "action", offOnClose = true,
+        label = "Move greeting pop-ups", activeLabel = "Done moving",
+        active = function() return state.moving end,
+        run = function()
+            if state.refuse then
+                return nil, state.refuse
+            end
+            state.moving = not state.moving
+            return true
+        end }))
+    local panel = addon.SettingsPanel.Create({
+        environment = environment,
+        Print = function(_, message) table.insert(printed, message) end,
+    }, model)
+    panel:Register()
+    local button = widgetFor(panel, "move").frame
+    test.assertEqual("Move greeting pop-ups", button.text)
+
+    button.scripts.OnClick(button)
+    test.assertTrue(state.moving)
+    test.assertEqual("Done moving", button.text)
+
+    button.scripts.OnClick(button)
+    test.assertFalse(state.moving)
+    test.assertEqual("Move greeting pop-ups", button.text)
+
+    -- Closing the options while moving ends it and resets the label.
+    button.scripts.OnClick(button)
+    panel.frame.scripts.OnHide(panel.frame)
+    test.assertFalse(state.moving)
+    test.assertEqual("Move greeting pop-ups", button.text)
+
+    -- A press that's refused says why and leaves the label alone.
+    state.refuse = "the prompts can't be drawn on this client"
+    button.scripts.OnClick(button)
+    test.assertEqual("Move greeting pop-ups", button.text)
+    test.assertContains(printed[1], "Couldn't do \"Move greeting pop-ups\": the prompts can't be drawn on this client.")
+end)
+
 test.test("settings panel: a setting changed in one host reads back in the other", function()
     local environment = newEnvironment()
     environment.InterfaceOptions_AddCategory = function() end

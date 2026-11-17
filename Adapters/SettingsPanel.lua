@@ -205,6 +205,8 @@ function Panel:Refresh()
                 widget.pending = nil
             elseif widget.kind == "text" then
                 widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
+            elseif widget.kind == "action" then
+                widget.frame:SetText(self.model:Label(widget.id))
             elseif widget.kind == "color" then
                 -- A color that can't be read shows the entry's default.
                 local color = self.model:Get(widget.id) or widget.entry.default or widget.entry.swatches[1].color
@@ -497,9 +499,14 @@ function Panel:addAction(frame, entry)
     button:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT, 0)
     button:SetWidth(SettingsPanel.BUTTON_WIDTH)
     button:SetHeight(22)
-    button:SetText(entry.label)
+    button:SetText(self.model:Label(entry.id))
     button:SetScript("OnClick", function()
-        self.model:Run(entry.id)
+        local ok, reason = self.model:Run(entry.id)
+        if not ok and reason ~= nil then
+            pcall(self.client.Print, self.client, addon.Identity.chatPrefix .. " Couldn't do \"" ..
+                tostring(self.model:Label(entry.id)) .. "\": " .. tostring(reason) .. ".")
+        end
+        self:Refresh()
     end)
     return { kind = "action", id = entry.id, frame = button, controls = { button } }
 end

@@ -326,17 +326,50 @@ test.test("/agf options is listed in help and explains when the window can't ope
     test.assertContains(lastMessage(world), "can't open")
 end)
 
-test.test("the Guild Greet section can unlock the prompts, and refuses when they can't be drawn", function()
+test.test("the Guild Greet section's Move greeting pop-ups button refuses when the prompts can't be drawn", function()
     local _, addon = loggedIn("Forever")
-    local entry = addon.settings:Entry("greetUnlock")
+    local entry = addon.settings:Entry("greetMove")
 
-    test.assertEqual("toggle", entry.kind)
-    test.assertFalse(addon.settings:Get("greetUnlock"))
-    -- The fixtures' frames can't build prompts, so the toggle stays off.
-    local ok, reason = addon.settings:Set("greetUnlock", true)
-    test.assertEqual(nil, ok)
+    test.assertEqual("action", entry.kind)
+    test.assertEqual(nil, addon.settings:Entry("greetUnlock"), "the unlock check box is gone")
+    test.assertEqual("Move greeting pop-ups", addon.settings:Label("greetMove"))
+    -- The fixtures' frames can't build prompts, so they stay locked.
+    local ok, reason = addon.settings:Run("greetMove")
+    test.assertFalse(ok)
     test.assertContains(reason, "can't be drawn")
-    test.assertFalse(addon.settings:Get("greetUnlock"))
+    test.assertFalse(addon.settings:IsActive("greetMove"))
+    test.assertEqual("Move greeting pop-ups", addon.settings:Label("greetMove"))
+end)
+
+test.test("an action with a mode reads its active label while on, and closing the panel turns it off", function()
+    local model = newModel()
+    local state = { on = false, runs = 0 }
+    model:AddSection("general", "General")
+    test.assertFalse(model:Add("general", { id = "bad", kind = "action", label = "Bad",
+        run = function() end, active = function() return true end }), "active needs an active label")
+    test.assertTrue(model:Add("general", { id = "mode", kind = "action", label = "Start", activeLabel = "Stop",
+        offOnClose = true,
+        active = function() return state.on end,
+        run = function()
+            state.runs = state.runs + 1
+            state.on = not state.on
+        end }))
+    local heard = {}
+    model:OnChange(function(id)
+        table.insert(heard, id)
+    end)
+
+    test.assertEqual("Start", model:Label("mode"))
+    test.assertTrue(model:Run("mode"))
+    test.assertEqual("Stop", model:Label("mode"))
+    test.assertEqual("mode", heard[1], "listeners hear the action ran")
+
+    model:Closed()
+    test.assertFalse(state.on)
+    test.assertEqual("Start", model:Label("mode"))
+    -- Already off: closing again doesn't run it.
+    model:Closed()
+    test.assertEqual(2, state.runs)
 end)
 
 test.test("number settings take whole numbers within their range", function()
@@ -422,10 +455,13 @@ test.test("closing the panel turns off modes marked to end on close, and nothing
     test.assertEqual(1, #changes)
 end)
 
-test.test("the prompt unlock is a mode that ends when the panel closes", function()
+test.test("moving the greet prompts is a mode that ends when the panel closes, shown on every host", function()
     local _, addon = loggedIn("Retail")
 
-    test.assertTrue(addon.settings:Entry("greetUnlock").offOnClose)
+    test.assertTrue(addon.settings:Entry("greetMove").offOnClose)
+    test.assertEqual("Done moving", addon.settings:Entry("greetMove").activeLabel)
+    test.assertTrue(addon.settings:InHost("greetMove", "frame"))
+    test.assertTrue(addon.settings:InHost("greetMove", "options"))
 end)
 
 test.test("a text setting saves text up to its length and refuses anything else", function()
@@ -600,7 +636,7 @@ test.test("the Guild Greet settings open with Show greet prompts, then headed gr
     test.assertEqual("Prompts", addon.settings:Entry("greetPromptOptionsHeading").label)
     test.assertEqual("greetCharacter", ids[3])
     test.assertEqual("greetInInstances", ids[4])
-    test.assertEqual("greetUnlock", ids[5])
+    test.assertEqual("greetMove", ids[5])
     test.assertEqual("greetPromptsHeading", ids[6])
     test.assertEqual("greetCategory:join", ids[7])
     test.assertEqual("greetTimingHeading", ids[11])

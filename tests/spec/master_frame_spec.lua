@@ -199,17 +199,24 @@ local function registerProfileTests(profile)
         -- Frames that can draw, so the prompts can be unlocked.
         fakeFrames.install(world.environment)
         fixtures.slash(world, "greet")
-        test.assertTrue(addon.settings:Set("greetUnlock", true))
+        test.assertTrue(addon.settings:Run("greetMove"))
+        test.assertEqual("Done moving", addon.settings:Label("greetMove"))
 
         -- Moving between tabs keeps the mode on.
         fixtures.slash(world, "options")
         fixtures.slash(world, "")
-        test.assertTrue(addon.settings:Get("greetUnlock"))
+        test.assertTrue(addon.settings:IsActive("greetMove"))
+
+        -- Pressing Done moving locks them again.
+        test.assertTrue(addon.settings:Run("greetMove"))
+        test.assertFalse(addon.settings:IsActive("greetMove"))
 
         -- The frame closing (Escape, its close button, or /agf) ends it.
+        test.assertTrue(addon.settings:Run("greetMove"))
         frame:Hide()
         frame.options.onHide()
-        test.assertFalse(addon.settings:Get("greetUnlock"))
+        test.assertFalse(addon.settings:IsActive("greetMove"))
+        test.assertEqual("Move greeting pop-ups", addon.settings:Label("greetMove"))
     end)
 
     test.test(profile .. " the guild window's button opens the frame on the Roster tab", function()

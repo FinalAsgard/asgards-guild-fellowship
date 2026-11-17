@@ -616,15 +616,16 @@ if clientProfile.supported then
     -- Not saved, and only while the master frame or the options are open:
     -- closing either, or a reload, locks the prompts again.
     settings:Add("guildGreet", {
-        id = "greetUnlock",
-        kind = "toggle",
+        id = "greetMove",
+        kind = "action",
         offOnClose = true,
-        label = "Unlock greet prompts to drag them somewhere else",
-        get = function()
+        label = "Move greeting pop-ups",
+        activeLabel = "Done moving",
+        active = function()
             return greetPrompts:IsUnlocked()
         end,
-        set = function(unlocked)
-            return greetPrompts:SetUnlocked(unlocked)
+        run = function()
+            return greetPrompts:SetUnlocked(not greetPrompts:IsUnlocked())
         end,
     })
     settings:Add("guildGreet", {
