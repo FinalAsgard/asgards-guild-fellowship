@@ -238,7 +238,7 @@ local function validatePartition(data)
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
         "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn", "withdrawals",
         "welcomeConfig", "welcomeLedger", "guildLog", "membershipDates",
-        "rankRequirements", "promotionChecks",
+        "rankRequirements", "promotionChecks", "slowModeConfig",
     }
     local index
     for index = 1, #containers do
@@ -273,7 +273,7 @@ local function validatePartition(data)
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
         recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true, withdrawals = true,
         welcomeConfig = true, welcomeLedger = true, guildLog = true, membershipDates = true,
-        rankRequirements = true, promotionChecks = true,
+        rankRequirements = true, promotionChecks = true, slowModeConfig = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -1616,6 +1616,15 @@ function Partition:GetWelcomeConfig()
         self.data.welcomeConfig = {}
     end
     return self.data.welcomeConfig
+end
+
+-- Guild Greet's Slow mode officer setting (see SlowModeConfig), kept as an
+-- officer setting like Guild Recruit's, created on first use.
+function Partition:GetSlowModeConfig()
+    if self.data.slowModeConfig == nil then
+        self.data.slowModeConfig = {}
+    end
+    return self.data.slowModeConfig
 end
 
 -- Guild Mail's welcome ledger (see GuildWelcome): { seen = { [key] = when

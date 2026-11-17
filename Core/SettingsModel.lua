@@ -21,7 +21,9 @@ local _, addon = ...
 --   input    get() -> a line of text the user edits, at most `maxLength`
 --            characters; set(text) -> true, or nil and a reason
 --   heading  a title within a section that sets the entries after it apart
---            (e.g. officer-only settings); it holds no value
+--            (e.g. officer-only settings); it holds no value. With
+--            `style = "officer"` it's drawn as a tinted block, so an area of
+--            settings that apply to the whole guild stands out
 --   color    get() -> a color as "rrggbb"; set(color) -> true, or nil and a
 --            reason. `swatches` lists the colors offered to click, each
 --            { label, color }; `sample` is text shown in the chosen color;
@@ -43,6 +45,7 @@ local SettingsModel = {
     KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true, color = true },
     HOSTS = { frame = true, options = true },
     PAGES = { settings = true, greetings = true, recruitment = true },
+    HEADING_STYLES = { officer = true },
 }
 addon.SettingsModel = SettingsModel
 
@@ -127,6 +130,9 @@ local function entryProblem(entry)
     if entry.kind == "heading" then
         if entry.shown ~= nil and type(entry.shown) ~= "function" then
             return "entry's shown check isn't a function"
+        end
+        if entry.style ~= nil and not SettingsModel.HEADING_STYLES[entry.style] then
+            return "heading style is unknown"
         end
         return nil
     end

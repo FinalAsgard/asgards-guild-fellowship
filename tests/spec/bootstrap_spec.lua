@@ -60,6 +60,7 @@ local MANIFEST_FILES = {
     "Core/RecruitLedger.lua",
     "Core/RecruitPolicy.lua",
     "Core/RecruitConfig.lua",
+    "Core/SlowModeConfig.lua",
     "Core/RecruitStats.lua",
     "Core/GuildRecruit.lua",
     "Core/DungeonCatalog.lua",

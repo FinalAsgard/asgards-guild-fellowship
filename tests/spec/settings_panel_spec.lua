@@ -396,6 +396,25 @@ local function widgetFor(panel, id)
     return nil
 end
 
+test.test("settings panel: an officer-style heading is drawn as a tinted block, unlike a plain heading", function()
+    local environment = newEnvironment()
+    environment.InterfaceOptions_AddCategory = function() end
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local model = addon.SettingsModel.Create()
+    model:AddSection("greet", "Guild Greet")
+    model:Add("greet", { id = "timing", kind = "heading", label = "Timing" })
+    model:Add("greet", { id = "officers", kind = "heading", label = "Officer settings (officer only)",
+        style = "officer" })
+    local panel = addon.SettingsPanel.Create({ environment = environment }, model)
+    panel:Register()
+
+    test.assertEqual(nil, widgetFor(panel, "timing").block)
+    local officer = widgetFor(panel, "officers")
+    test.assertTrue(officer.block ~= nil)
+    test.assertEqual("officer", officer.style)
+    test.assertEqual("Officer settings (officer only)", officer.label.text)
+end)
+
 test.test("settings panel: a mode button's label follows its mode, and closing the panel ends the mode", function()
     local environment = newEnvironment()
     local printed = {}

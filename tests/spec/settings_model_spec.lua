@@ -644,7 +644,10 @@ test.test("the Guild Greet settings open with Show greet prompts, then headed gr
     test.assertEqual("greetCloseHeading", ids[13])
     test.assertEqual("greetCap", ids[14])
     test.assertEqual("welcomeCap", ids[15])
-    test.assertEqual(15, #ids)
+    test.assertEqual("greetOfficerHeading", ids[16])
+    test.assertEqual("greetSlowMode", ids[17])
+    test.assertEqual("greetSlowModeReadOnly", ids[18])
+    test.assertEqual(18, #ids)
     -- "This character" explains how it differs from the main switch, by name.
     local info = addon.settings:Info("greetCharacter")
     test.assertContains(info, "every character on this account")
@@ -661,4 +664,63 @@ test.test("on every host, Show greet prompts is the only Guild Greet entry befor
         test.assertEqual("heading", addon.settings:Entry(ids[2]).kind, host)
         test.assertTrue(#ids > 2, host)
     end
+end)
+
+test.test("the Officer settings area closes the Guild Greet section, under an officer-only heading in the officer style",
+    function()
+        local _, addon = loggedIn("Retail")
+        for _, host in ipairs({ "frame", "options" }) do
+            local ids = greetIds(addon, host)
+            local index
+            for index = 1, #ids do
+                if ids[index] == "greetOfficerHeading" then
+                    test.assertEqual("greetSlowMode", ids[index + 1], host)
+                    test.assertEqual("greetSlowModeReadOnly", ids[index + 2], host)
+                    test.assertEqual(index + 2, #ids, host)
+                end
+            end
+        end
+        local heading = addon.settings:Entry("greetOfficerHeading")
+        test.assertEqual("officer", heading.style)
+        test.assertContains(heading.label, "officer only")
+        local slider = addon.settings:Entry("greetSlowMode")
+        test.assertTrue(slider.slider)
+        test.assertEqual(0, slider.min)
+        test.assertEqual(15, slider.max)
+        test.assertEqual("Off", slider.format(0))
+        test.assertEqual("5 min", slider.format(5))
+    end)
+
+test.test("officers change Slow mode; everyone else sees the guild's value read-only, with why", function()
+    local world, addon = loggedIn("Retail")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 5)
+
+    test.assertEqual(0, addon.settings:Get("greetSlowMode"))
+    test.assertTrue(addon.settings:IsEnabled("greetSlowMode"))
+    test.assertFalse(addon.settings:IsShown("greetSlowModeReadOnly"))
+    test.assertTrue(addon.settings:Set("greetSlowMode", 5))
+    test.assertEqual(5, addon.settings:Get("greetSlowMode"))
+    test.assertFalse(addon.settings:Set("greetSlowMode", 16) == true)
+    test.assertEqual(5, addon.settings:Get("greetSlowMode"))
+
+    -- Demoted: the value still shows, but can't be changed, and a line says why.
+    world.officerRanks = { [0] = true }
+    test.assertTrue(addon.settings:IsShown("greetSlowMode"))
+    test.assertEqual(5, addon.settings:Get("greetSlowMode"))
+    local enabled, reason = addon.settings:IsEnabled("greetSlowMode")
+    test.assertFalse(enabled)
+    test.assertEqual("only officers can change it", reason)
+    test.assertTrue(addon.settings:IsShown("greetSlowModeReadOnly"))
+    test.assertEqual("Only officers can change it.", addon.settings:Get("greetSlowModeReadOnly"))
+    test.assertFalse(addon.settings:Set("greetSlowMode", 10) == true)
+    test.assertEqual(5, addon.settings:Get("greetSlowMode"))
+end)
+
+test.test("a heading's style must be one the panel knows", function()
+    local model = newModel()
+    model:AddSection("general", "General")
+
+    test.assertTrue(model:Add("general", { id = "officer", kind = "heading", label = "Officers", style = "officer" }))
+    test.assertFalse(model:Add("general", { id = "loud", kind = "heading", label = "Loud", style = "shouting" }))
 end)
