@@ -3320,6 +3320,8 @@ if clientProfile.supported then
         onChange = function()
             settingsPanel:Refresh()
             frameSettings:Refresh()
+            -- The prompts' Slow mode notice follows the new value.
+            guildGreet:Refresh()
         end,
     })
     -- The guild's welcome mail: officer settings shared over guild sync.
@@ -3458,6 +3460,9 @@ if clientProfile.supported then
             if store ~= nil then
                 store:SetGreetAnchor(anchor)
             end
+        end,
+        slowModeMinutes = function()
+            return slowModeConfig and slowModeConfig:Minutes() or 0
         end,
     })
     -- Guild Greet reads the same guild context as the roster.

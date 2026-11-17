@@ -87,6 +87,10 @@ local function newPrompts(saved, letterWidth)
         saveAnchor = function(anchor)
             world.saved = anchor
         end,
+        -- Slow mode is off unless a spec sets `world.slowMinutes`.
+        slowModeMinutes = function()
+            return world.slowMinutes or 0
+        end,
     })
     return world, addon
 end
@@ -239,4 +243,67 @@ test.test("greet prompts: each button fits its own label, and every box is as wi
     world = newPrompts(nil)
     world.prompts:Show({ prompt(1, "login") }, {})
     test.assertEqual(170, world.prompts.rows[1].greet.width)
+end)
+
+test.test("greet prompts: the Slow mode notice shows above the stack while Slow mode is on and prompts show", function()
+    local world = newPrompts(nil)
+    world.slowMinutes = 5
+
+    world.prompts:Show({ prompt(1, "login") }, {})
+
+    local notice = world.prompts.notice
+    test.assertTrue(notice.shown)
+    test.assertEqual("Greeting Slow mode is on: you can greet once every 5 minutes.", world.prompts.noticeText.text)
+    test.assertEqual("BOTTOMLEFT", notice.point.point)
+    test.assertEqual(world.prompts.anchor, notice.point.relativeTo)
+    test.assertEqual("TOPLEFT", notice.point.relativePoint)
+
+    -- A changed setting shows at the next redraw.
+    world.slowMinutes = 12
+    world.prompts:Show({ prompt(1, "login") }, {})
+    test.assertEqual("Greeting Slow mode is on: you can greet once every 12 minutes.", world.prompts.noticeText.text)
+end)
+
+test.test("greet prompts: the Slow mode notice is hidden at 0 and with no prompts showing", function()
+    local world = newPrompts(nil)
+    world.slowMinutes = 5
+    world.prompts:Show({ prompt(1, "login") }, {})
+
+    world.prompts:Show({}, {})
+    test.assertFalse(world.prompts.notice.shown)
+
+    world.slowMinutes = 0
+    world.prompts:Show({ prompt(1, "login") }, {})
+    test.assertFalse(world.prompts.notice.shown)
+end)
+
+test.test("greet prompts: unlocked, the Slow mode notice sits above the drag handle; locked, above the stack", function()
+    local world = newPrompts(nil)
+    world.slowMinutes = 5
+    world.prompts:Show({ prompt(1, "login") }, {})
+
+    world.prompts:SetUnlocked(true)
+    test.assertTrue(world.prompts.notice.shown)
+    test.assertEqual(world.prompts.handle, world.prompts.notice.point.relativeTo)
+
+    world.prompts:SetUnlocked(false)
+    test.assertEqual(world.prompts.anchor, world.prompts.notice.point.relativeTo)
+end)
+
+test.test("greet prompts: a failing frame call hides the Slow mode notice without an error", function()
+    local world = newPrompts(nil)
+    world.slowMinutes = 5
+    world.prompts:Show({ prompt(1, "login") }, {})
+    world.prompts.noticeText.SetText = function()
+        error("broken")
+    end
+
+    world.prompts:Show({ prompt(1, "login") }, {})
+    test.assertFalse(world.prompts.notice.shown)
+
+    -- A setting that can't be read hides it too.
+    world.prompts.noticeText.SetText = function() end
+    world.slowMinutes = "five"
+    world.prompts:Show({ prompt(1, "login") }, {})
+    test.assertFalse(world.prompts.notice.shown)
 end)
