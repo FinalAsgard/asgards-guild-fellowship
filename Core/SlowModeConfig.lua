@@ -120,11 +120,15 @@ end
 -- The minutes between each greeter's greetings, 0 when Slow mode is off.
 -- The default when nothing usable is saved or outside a guild.
 function Config:Minutes()
-    local config = self:Config()
-    if config == nil then
+    local partition = ask(self.partition)
+    local saved = partition and partition:PeekSlowModeConfig()
+    if saved == nil then
         return SlowModeConfig.SETTINGS.slowModeMinutes.default
     end
-    return config:Get("slowModeMinutes")
+    return addon.RecruitConfig.Create(saved, {
+        settings = SlowModeConfig.SETTINGS,
+        isOfficer = self.isOfficer,
+    }):Get("slowModeMinutes")
 end
 
 function Config:IsOfficer()
@@ -196,9 +200,10 @@ function Config:fromOthers(sender)
 end
 
 -- A "slowmode-config": applied when the sender and the change's author are
--- officers and it's newer, with sync's tie-break. Hearing one stops this
--- add-on's own ask, and its answer to someone else's ask when it holds
--- everything this add-on knows. Returns true when the value changed.
+-- officers and it's newer, with sync's tie-break; an officer's add-on that
+-- holds a newer change sends it back. Hearing one stops this add-on's own
+-- ask, and its answer to someone else's ask when it holds everything this
+-- add-on knows. Returns true when the value changed.
 function Config:OnConfig(message, sender)
     if type(message) ~= "table" or message.v ~= SlowModeConfig.PROTOCOL or message.t ~= SlowModeConfig.TYPE_CONFIG
         or type(message.s) ~= "table" or message.s.slowModeMinutes == nil
@@ -211,10 +216,17 @@ function Config:OnConfig(message, sender)
         return false
     end
     self.heard = true
-    if self.answering and config:CoveredBy(message.s) then
+    local covered = config:CoveredBy(message.s)
+    if self.answering and covered then
         self.answering = false
     end
     if not config:Apply("slowModeMinutes", message.s.slowModeMinutes) then
+        -- An officer holding a newer change than the one heard sends it, so
+        -- an older value doesn't stick on the sender's add-on (or on the
+        -- members its answer reached). Equal changes aren't resent.
+        if not covered and self:IsOfficer() then
+            self:send()
+        end
         return false
     end
     pcall(self.onChange)

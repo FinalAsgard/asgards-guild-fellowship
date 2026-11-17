@@ -80,6 +80,8 @@ test.test("slow mode config: off (0) until an officer changes it, from 0 to 15 m
     local addon, world = newConfig("bob ward-camelot")
 
     test.assertEqual(0, world.config:Minutes())
+    -- Reading it saves nothing (it's read on every prompt redraw).
+    test.assertEqual(nil, world.partition:PeekSlowModeConfig())
     -- Outside a guild too.
     world.partition = nil
     test.assertEqual(0, world.config:Minutes())
@@ -184,6 +186,35 @@ test.test("slow mode config: two officers' changes at the same moment settle on 
     second.config:OnMessage(first.sent[#first.sent], "Tool Box")
 
     test.assertEqual(first.config:Minutes(), second.config:Minutes())
+end)
+
+test.test("slow mode config: an officer holding a newer change sends it back on hearing an older one", function()
+    local addon, newer = newConfig("tool box-camelot", { time = 2000 })
+    local _, older = newConfig("ann bell-camelot", { addon = addon, time = 1000 })
+    older.config:SetMinutes(3)
+    newer.config:SetMinutes(9)
+    local sent = #newer.sent
+
+    test.assertFalse(newer.config:OnMessage(older.sent[#older.sent], "Ann Bell"))
+    test.assertEqual(sent + 1, #newer.sent)
+    test.assertEqual(9, newer.sent[#newer.sent].s.slowModeMinutes.value)
+
+    -- The older side takes it and sends nothing back, so there's no loop.
+    local olderSent = #older.sent
+    test.assertTrue(older.config:OnMessage(newer.sent[#newer.sent], "Tool Box"))
+    test.assertEqual(9, older.config:Minutes())
+    test.assertEqual(olderSent, #older.sent)
+
+    -- The same change heard again isn't resent.
+    test.assertFalse(newer.config:OnMessage(older.sent[#older.sent], "Ann Bell"))
+    test.assertFalse(older.config:OnMessage(newer.sent[#newer.sent], "Tool Box"))
+    test.assertEqual(olderSent, #older.sent)
+
+    -- A member's add-on never answers with its own copy.
+    local _, member = newConfig("bob ward-camelot", { addon = addon })
+    member.config:OnMessage(newer.sent[#newer.sent], "Tool Box")
+    member.config:OnMessage(change(1, 500, "ann bell-camelot"), "Ann Bell")
+    test.assertEqual(0, #member.sent)
 end)
 
 test.test("slow mode config: an add-on asks once, a while after the rank scan, and an officer answers", function()

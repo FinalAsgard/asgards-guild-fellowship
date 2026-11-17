@@ -1565,6 +1565,33 @@ test.test("guild greet: lowering Slow mode shortens a running cooldown, and 0 en
     test.assertEqual("Rip", shownLabels(world))
 end)
 
+test.test("guild greet: a prompt raised before Slow mode was turned back up closes and can't be greeted", function()
+    local world = setup("Retail")
+    world.slowMinutes = 5
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:Greet(world.shown[1].player)
+    -- Turned off, an arrival is prompted; turned back on, the cooldown from
+    -- the earlier press is running again.
+    world.slowMinutes = 0
+    advance(world, 2)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:OnPresence("join", world.names.newt)
+    local bishop = world.shown[1].player
+    world.slowMinutes = 5
+
+    test.assertEqual(nil, world.greet:Greet(bishop))
+    test.assertEqual(1, #world.sent)
+    test.assertEqual(START, world.store:GreetSlowPressedAt(), "the cooldown isn't restarted")
+    test.assertEqual("Newt", shownLabels(world), "the join prompt stays")
+
+    -- Redrawing closes them too, without a press.
+    world.slowMinutes = 0
+    world.greet:OnPresence("online", world.names.rust)
+    world.slowMinutes = 5
+    world.greet:Refresh()
+    test.assertEqual("Newt", shownLabels(world))
+end)
+
 test.test("guild greet: the Slow mode press time is saved account-wide, and an unusable one is left alone", function()
     local world = setup("Retail")
 

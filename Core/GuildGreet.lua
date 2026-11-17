@@ -414,10 +414,13 @@ end
 -- end is worked out from the current setting, so lowering it shortens a
 -- running cooldown and 0 ends it.
 function Greet:SlowFor(now)
-    local minutes = self:SlowMinutes()
     local store = self.store()
     local pressedAt = store and store:GreetSlowPressedAt()
-    if minutes == 0 or pressedAt == nil or type(now) ~= "number" then
+    if pressedAt == nil or type(now) ~= "number" then
+        return 0
+    end
+    local minutes = self:SlowMinutes()
+    if minutes == 0 then
         return 0
     end
     return math.max(0, pressedAt + minutes * 60 - now)
@@ -515,6 +518,7 @@ function Greet:Refresh()
         return
     end
     self:dropDeparted(now)
+    self:dropSlowed(now)
     local prompts = self.queue:Visible(now)
     local lockedFor = self:LockedFor(now)
     if lockedFor == 0 then
@@ -539,7 +543,7 @@ end
 -- sent, or nil.
 function Greet:Greet(player)
     local now = self.now()
-    if type(now) == "number" and self:dropDeparted(now) then
+    if type(now) == "number" and (self:dropDeparted(now) or self:dropSlowed(now)) then
         self:Refresh()
     end
     local prompt = self.queue:Get(player)
@@ -565,20 +569,31 @@ function Greet:Greet(player)
     return text
 end
 
--- Starts Slow mode's cooldown from `now`, and closes every other non-join
--- prompt, shown or still waiting to show.
+-- Starts Slow mode's cooldown from `now`; the next Refresh closes every
+-- other non-join prompt.
 function Greet:startSlowMode(now)
     local store = self.store()
     if store ~= nil then
         store:SetGreetSlowPressedAt(now)
     end
+end
+
+-- During Slow mode's cooldown, closes every non-join prompt, shown or still
+-- waiting to show (including one raised before the setting was turned up).
+-- Returns true when any closed.
+function Greet:dropSlowed(now)
+    if self:SlowFor(now) == 0 then
+        return false
+    end
+    local removed = false
     local prompts = self.queue:All(now)
     local index
     for index = 1, #prompts do
         if prompts[index].category ~= addon.GreetPolicy.JOIN then
-            self.queue:Remove(prompts[index].player)
+            removed = self.queue:Remove(prompts[index].player) or removed
         end
     end
+    return removed
 end
 
 -- Locks Greet for 2 seconds more than the last cooldown in a row, and

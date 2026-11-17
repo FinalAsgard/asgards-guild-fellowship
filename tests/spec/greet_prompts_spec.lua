@@ -290,6 +290,33 @@ test.test("greet prompts: unlocked, the Slow mode notice sits above the drag han
     test.assertEqual(world.prompts.anchor, world.prompts.notice.point.relativeTo)
 end)
 
+test.test("greet prompts: a Slow mode notice that fails to build is tried again at the next draw", function()
+    local world = newPrompts(nil)
+    world.prompts:Show({ prompt(1, "login") }, {})
+    local createFrame = world.screen.CreateFrame
+    local draft, createFontString
+    world.screen.CreateFrame = function(...)
+        draft = createFrame(...)
+        createFontString = draft.CreateFontString
+        draft.CreateFontString = function()
+            error("broken")
+        end
+        return draft
+    end
+    world.slowMinutes = 5
+
+    test.assertTrue(world.prompts:Show({ prompt(1, "login") }, {}))
+    test.assertEqual(nil, world.prompts.notice)
+    test.assertTrue(world.prompts.rows[1].frame.shown, "the prompts still show")
+
+    -- Once the client can draw it, the next draw shows it, on the same frame.
+    world.screen.CreateFrame = createFrame
+    draft.CreateFontString = createFontString
+    world.prompts:Show({ prompt(1, "login") }, {})
+    test.assertEqual(draft, world.prompts.notice)
+    test.assertTrue(draft.shown)
+end)
+
 test.test("greet prompts: a failing frame call hides the Slow mode notice without an error", function()
     local world = newPrompts(nil)
     world.slowMinutes = 5

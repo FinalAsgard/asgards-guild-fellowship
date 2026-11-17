@@ -1653,6 +1653,12 @@ function Partition:GetSlowModeConfig()
     return self.data.slowModeConfig
 end
 
+-- The Slow mode officer setting if one was ever saved, else nil, without
+-- creating it (it's read on every prompt redraw).
+function Partition:PeekSlowModeConfig()
+    return self.data.slowModeConfig
+end
+
 -- Guild Mail's welcome ledger (see GuildWelcome): { seen = { [key] = when
 -- first seen }, welcomed = { [key] = { main, at, by } }, gone = { [key] =
 -- true for a noted newcomer who left } }, created on first use, with any

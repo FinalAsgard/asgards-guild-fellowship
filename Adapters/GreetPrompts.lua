@@ -172,34 +172,52 @@ function Prompts:anchorFrame()
     end)
     handle:Hide()
     self.handle = handle
-
-    local notice = createFrame("Frame", nil, anchor)
-    notice:SetWidth(self:width())
-    notice:SetHeight(GreetPrompts.NOTICE_HEIGHT)
-    notice:SetFrameStrata("HIGH")
-    local noticeBackground = notice:CreateTexture(nil, "BACKGROUND")
-    noticeBackground:SetAllPoints(notice)
-    noticeBackground:SetColorTexture(0, 0, 0, 0.7)
-    self.noticeText = notice:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    self.noticeText:SetPoint("CENTER", notice, "CENTER", 0, 0)
-    notice:Hide()
-    self.notice = notice
     return anchor
+end
+
+-- The Slow mode notice, made on first use. It counts as made only once it's
+-- complete, so a frame call that fails while making it is retried at the
+-- next draw (on the same frame, so no frames pile up).
+function Prompts:noticeFrame()
+    if self.notice ~= nil then
+        return self.notice
+    end
+    self.noticeDraft = self.noticeDraft or self.environment.CreateFrame("Frame", nil, self.anchor)
+    local notice = self.noticeDraft
+    local ok = pcall(function()
+        notice:SetWidth(self:width())
+        notice:SetHeight(GreetPrompts.NOTICE_HEIGHT)
+        notice:SetFrameStrata("HIGH")
+        local background = notice:CreateTexture(nil, "BACKGROUND")
+        background:SetAllPoints(notice)
+        background:SetColorTexture(0, 0, 0, 0.7)
+        self.noticeText = notice:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        self.noticeText:SetPoint("CENTER", notice, "CENTER", 0, 0)
+    end)
+    notice:Hide()
+    if not ok then
+        error("the Slow mode notice can't be drawn")
+    end
+    self.notice, self.noticeDraft = notice, nil
+    return notice
 end
 
 -- Shows the Slow mode notice while Slow mode is on and prompts are showing,
 -- just above the stack, or above the handle while it's unlocked; hides it
 -- otherwise, and when a frame call fails.
 function Prompts:drawNotice()
-    if self.notice == nil then
+    if self.anchor == nil then
         return
     end
     local ok = pcall(function()
         local minutes = self.slowModeMinutes()
         if type(minutes) ~= "number" or minutes <= 0 or self.shownCount == 0 then
-            self.notice:Hide()
+            if self.notice ~= nil then
+                self.notice:Hide()
+            end
             return
         end
+        self:noticeFrame()
         self.noticeText:SetText(GreetPrompts.NoticeText(minutes))
         self.notice:ClearAllPoints()
         if self.unlocked then
@@ -209,7 +227,7 @@ function Prompts:drawNotice()
         end
         self.notice:Show()
     end)
-    if not ok then
+    if not ok and self.notice ~= nil then
         pcall(self.notice.Hide, self.notice)
     end
 end
