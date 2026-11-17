@@ -383,7 +383,7 @@ test.test("the Guild Greet section has category, threshold and this-character se
     test.assertTrue(addon.settings:Set("greetCategory:join", false))
     test.assertFalse(world.database.greet.categories.join)
 
-    test.assertEqual(15, addon.settings:Get("welcomeBackMinutes"))
+    test.assertEqual(60, addon.settings:Get("welcomeBackMinutes"))
     test.assertTrue(addon.settings:Set("welcomeBackMinutes", 20))
     test.assertEqual(20, world.database.greet.welcomeBackMinutes)
     test.assertEqual(3, addon.settings:Get("welcomeCap"))

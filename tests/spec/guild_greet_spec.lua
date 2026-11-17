@@ -236,18 +236,18 @@ for index = 1, #fixtures.PROFILES do
         test.assertEqual(names.character, names.name)
     end)
 
-    test.test(profile .. ": a welcome back follows a logoff of 15 minutes, and relogs are quiet", function()
+    test.test(profile .. ": a welcome back follows a logoff of 60 minutes, and relogs are quiet", function()
         local world = setup(profile)
         world.greet:OnPresence("online", world.names.anvil)
         world.handlers.close(world.shown[1].player)
 
         world.greet:OnPresence("offline", world.names.anvil)
-        advance(world, 5 * MINUTE)
+        advance(world, 60 * MINUTE - 1)
         world.greet:OnPresence("online", world.names.tongs)
         test.assertEqual(0, #world.shown)
 
         world.greet:OnPresence("offline", world.names.tongs)
-        advance(world, 15 * MINUTE)
+        advance(world, 60 * MINUTE)
         world.greet:OnPresence("online", world.names.anvil)
         test.assertEqual("welcomeBack", world.shown[1].category)
         world.handlers.greet(world.shown[1].player)
@@ -667,7 +667,7 @@ test.test("guild greet: a player greeted enough is prompted again once the welco
     test.assertEqual(0, #world.shown)
 
     world.greet:OnPresence("offline", world.names.bolt)
-    advance(world, 15 * MINUTE)
+    advance(world, 60 * MINUTE)
     world.greet:OnPresence("online", world.names.bolt)
     test.assertEqual(1, #world.shown)
     test.assertEqual("welcomeBack", world.shown[1].category)
@@ -899,7 +899,7 @@ test.test("guild greet: own, late, unplaceable and malformed greeted messages do
 
     test.assertFalse(legacyGreeted(world, "me", world.names.anvil))
     test.assertFalse(legacyGreeted(world, "myAlt", world.names.anvil))
-    test.assertFalse(legacyGreeted(world, "bolt", world.names.anvil, START - 15 * MINUTE))
+    test.assertFalse(legacyGreeted(world, "bolt", world.names.anvil, START - 60 * MINUTE))
     test.assertFalse(legacyGreeted(world, "bolt", world.names.friend))
     test.assertFalse(world.greet:OnGreeted({ v = 1, t = "greeted", c = 42, a = START }, world.names.bolt))
     test.assertFalse(world.greet:OnGreeted({ v = 99, t = "greeted", c = "anvil", a = START }, world.names.bolt))
@@ -945,7 +945,7 @@ test.test("guild greet settings: categories, thresholds and characters default o
     local store = addon.FellowshipStore.Create(database)
 
     test.assertTrue(store:GreetCategoryEnabled("login"))
-    test.assertEqual(15, store:GreetNumber("welcomeBackMinutes"))
+    test.assertEqual(60, store:GreetNumber("welcomeBackMinutes"))
     test.assertEqual(3, store:GreetNumber("welcomeCap"))
     test.assertEqual(nil, store:GreetNumber("longAbsenceDays"), "a long absence is a fixed 30 days")
     test.assertTrue(store:GreetOnCharacter("toolbox"))
@@ -985,7 +985,7 @@ test.test("guild greet settings: ranges are enforced and unusable saved values a
         welcomeBackMinutes = "soon", welcomeCap = -4,
         categories = "corrupt", offCharacters = "corrupt",
     }
-    test.assertEqual(15, store:GreetNumber("welcomeBackMinutes"))
+    test.assertEqual(60, store:GreetNumber("welcomeBackMinutes"))
     test.assertEqual(3, store:GreetNumber("welcomeCap"))
     test.assertTrue(store:GreetCategoryEnabled("login"))
     test.assertTrue(store:GreetOnCharacter("toolbox"))
@@ -1009,6 +1009,19 @@ test.test("guild greet: turning a category off stops its prompts only, and close
     test.assertEqual("longAbsence", world.shown[1].category)
     world.greet:OnPresence("online", world.names.bishop)
     test.assertEqual(1, #world.shown)
+end)
+
+test.test("guild greet: a welcome-back time saved before the new default is kept and used", function()
+    local world = setup("Retail")
+    world.store:GetGreetState().welcomeBackMinutes = 15
+    world.greet:OnPresence("online", world.names.anvil)
+    world.handlers.close(world.shown[1].player)
+
+    test.assertEqual(15, world.store:GreetNumber("welcomeBackMinutes"))
+    world.greet:OnPresence("offline", world.names.anvil)
+    advance(world, 15 * MINUTE)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertEqual("welcomeBack", world.shown[1].category)
 end)
 
 test.test("guild greet: the saved threshold changes the welcome-back boundary; a long absence stays 30 days", function()

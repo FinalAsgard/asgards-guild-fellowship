@@ -23,7 +23,7 @@ local GreetPolicy = {
     LOGIN = "login",
     WELCOME_BACK = "welcomeBack",
     LONG_ABSENCE = "longAbsence",
-    WELCOME_BACK_SECONDS = 15 * 60,
+    WELCOME_BACK_SECONDS = 60 * 60,
     LONG_ABSENCE_SECONDS = 30 * 24 * 60 * 60,
 }
 addon.GreetPolicy = GreetPolicy

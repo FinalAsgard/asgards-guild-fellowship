@@ -652,7 +652,7 @@ end
 -- Guild Greet's whole-number settings: the saved field, default and range.
 FellowshipStore.GREET_NUMBERS = {
     -- Minutes someone must be gone before coming back is a welcome back.
-    welcomeBackMinutes = { default = 15, min = 1, max = 120 },
+    welcomeBackMinutes = { default = 60, min = 1, max = 120 },
     -- How many welcomes a player who just joined the guild must have had
     -- before the user's prompt for them closes (the greeting cap covers
     -- every other prompt).
