@@ -91,8 +91,10 @@ function SlowModeConfig.Create(options)
             return false
         end),
         onChange = option("onChange", function() end),
-        asked = false,
-        heard = false,
+        -- By guild (partition key): asked this session, and heard an
+        -- officer's setting this session.
+        asked = {},
+        heard = {},
         answering = false,
     }, Config)
 end
@@ -103,6 +105,12 @@ local function ask(callback, ...)
         return value
     end
     return nil
+end
+
+-- The current guild's key, or nil outside a guild.
+function Config:guild()
+    local partition = ask(self.partition)
+    return partition and partition.key
 end
 
 -- The current guild's setting, or nil outside a guild.
@@ -171,17 +179,18 @@ function Config:send()
     end
 end
 
--- Asks the officers' add-ons for the newest setting, once a session, a
--- while after it's first called. Every add-on asks, since every greeter
--- follows it, unless an officer's setting arrives first: an answer to
--- anyone's ask holds it for all.
+-- Asks the officers' add-ons for the newest setting, once a session for
+-- each guild, a while after it's first called there. Every add-on asks,
+-- since every greeter follows it, unless an officer's setting arrives
+-- first: an answer to anyone's ask holds it for all.
 function Config:AskOnce()
-    if self.asked or self:Config() == nil then
+    local guild = self:guild()
+    if guild == nil or self.asked[guild] then
         return false
     end
-    self.asked = true
+    self.asked[guild] = true
     local function send()
-        if not self.heard and self:Config() ~= nil then
+        if not self.heard[guild] and self:guild() == guild then
             pcall(self.announce, { v = SlowModeConfig.PROTOCOL, t = SlowModeConfig.TYPE_ASK_CONFIG })
         end
     end
@@ -215,7 +224,7 @@ function Config:OnConfig(message, sender)
     if config == nil then
         return false
     end
-    self.heard = true
+    self.heard[self:guild()] = true
     local covered = config:CoveredBy(message.s)
     if self.answering and covered then
         self.answering = false

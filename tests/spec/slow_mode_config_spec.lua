@@ -245,6 +245,25 @@ test.test("slow mode config: an add-on asks once, a while after the rank scan, a
     test.assertEqual(4, member.config:Minutes())
 end)
 
+test.test("slow mode config: after a guild change without a reload, the new guild is asked too", function()
+    local addon, member = newConfig("bob ward-camelot")
+    local _, officer = newConfig("tool box-camelot", { addon = addon })
+    officer.config:SetMinutes(4)
+    member.config:AskOnce()
+    member.config:OnMessage(officer.sent[#officer.sent], "Tool Box")
+    runTimers(member)
+    test.assertEqual(0, #member.sent, "heard in the first guild, so no ask there")
+
+    local store = addon.FellowshipStore.Create(member.database)
+    member.partition = store:Partition({ name = "Squires", realm = "Camelot" })
+
+    test.assertTrue(member.config:AskOnce())
+    test.assertFalse(member.config:AskOnce())
+    runTimers(member)
+    test.assertEqual(1, #member.sent)
+    test.assertEqual("ask-slowmode-config", member.sent[1].t)
+end)
+
 test.test("slow mode config: the ask isn't sent once an officer's setting was heard", function()
     local _, officer = newConfig("tool box-camelot")
     local _, member = newConfig("bob ward-camelot")
