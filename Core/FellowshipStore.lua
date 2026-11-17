@@ -620,6 +620,32 @@ function Store:SetGreetWeight(record)
     return true
 end
 
+-- When the user last pressed Greet on a prompt that starts Slow mode's
+-- cooldown (server time), shared by every character on the account, or nil
+-- when never or unusable.
+function Store:GreetSlowPressedAt()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local saved = type(state) == "table" and state.slowPressedAt or nil
+    if type(saved) ~= "number" then
+        return nil
+    end
+    return saved
+end
+
+-- Saves when Greet was pressed for Slow mode. An unusable existing value is
+-- left alone.
+function Store:SetGreetSlowPressedAt(at)
+    if type(at) ~= "number" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.slowPressedAt ~= nil and type(state.slowPressedAt) ~= "number") then
+        return false
+    end
+    state.slowPressedAt = at
+    return true
+end
+
 -- Whether Guild Greet prompts for `category` (a GreetPolicy category). On
 -- unless turned off; an unusable saved value counts as on.
 function Store:GreetCategoryEnabled(category)

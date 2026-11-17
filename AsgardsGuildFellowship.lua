@@ -3530,6 +3530,9 @@ if clientProfile.supported then
             return comm:BroadcastLive(message)
         end,
         addonOnline = addonOnline,
+        slowModeMinutes = function()
+            return slowModeConfig and slowModeConfig:Minutes() or 0
+        end,
         view = greetPrompts,
     })
     -- The Guild Recruit window stays where it's dragged; the place is saved

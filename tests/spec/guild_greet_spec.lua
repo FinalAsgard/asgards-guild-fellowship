@@ -79,7 +79,7 @@ local function setup(profile)
         partition = partition, members = members, normalizer = normalizer,
         rules = rules, mode = "initial", now = START,
     }))
-    world.greet = addon.GuildGreet.Create({
+    world.options = {
         context = function()
             return partition, normalizer
         end,
@@ -119,6 +119,10 @@ local function setup(profile)
         addonOnline = function()
             return world.addonOnline
         end,
+        -- Slow mode is off unless a spec sets `world.slowMinutes`.
+        slowModeMinutes = function()
+            return world.slowMinutes or 0
+        end,
         view = {
             Show = function(_, prompts, handlers, lockedFor)
                 world.lockedFor = lockedFor
@@ -130,8 +134,9 @@ local function setup(profile)
                 world.handlers = handlers
             end,
         },
-    })
-    world.greet:OnRosterUpdate(function()
+    }
+    world.greet = addon.GuildGreet.Create(world.options)
+    world.readRoster = function()
         local roster = {}
         local entryIndex
         for entryIndex = 1, #entries do
@@ -142,8 +147,27 @@ local function setup(profile)
             })
         end
         return roster
-    end)
+    end
+    world.greet:OnRosterUpdate(world.readRoster)
     return world
+end
+
+-- A new Guild Greet over the same saved data and guild (a reload), logged in
+-- as `name` (the user's character by default).
+local function reload(world, name)
+    local options = {}
+    local key, value
+    for key, value in pairs(world.options) do
+        options[key] = value
+    end
+    if name ~= nil then
+        options.selfKey = function()
+            local _, normalizer = world.options.context()
+            return normalizer:Key(name)
+        end
+    end
+    world.greet = world.addon.GuildGreet.Create(options)
+    world.greet:OnRosterUpdate(world.readRoster)
 end
 
 local function advance(world, seconds)
@@ -1379,4 +1403,175 @@ test.test("guild greet: without timers, Greet never locks", function()
 
     test.assertEqual(3, #world.sent)
     test.assertEqual(0, world.lockedFor)
+end)
+
+-- Slow mode ----------------------------------------------------------------
+
+-- The labels of the prompts showing.
+local function shownLabels(world)
+    local labels = {}
+    local index
+    for index = 1, #world.shown do
+        table.insert(labels, world.shown[index].label)
+    end
+    return table.concat(labels, ",")
+end
+
+test.test("guild greet: Slow mode off (0), Greet closes only its own prompt and starts no cooldown", function()
+    local world = setup("Retail")
+    world.slowMinutes = 0
+    threeArrive(world)
+
+    world.greet:Greet(world.shown[1].player)
+
+    test.assertEqual(2, #world.shown)
+    test.assertEqual(nil, world.store:GreetSlowPressedAt())
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(3, #world.shown)
+end)
+
+test.test("guild greet: in Slow mode, greeting one of three prompts posts it and closes the other two", function()
+    local world = setup("Retail")
+    world.slowMinutes = 5
+    threeArrive(world)
+
+    test.assertEqual("Hey Rip!", world.greet:Greet(world.shown[2].player))
+
+    test.assertEqual(1, #world.sent)
+    test.assertEqual(0, #world.shown)
+    test.assertEqual(START, world.store:GreetSlowPressedAt())
+end)
+
+test.test("guild greet: in Slow mode, no new prompts until the cooldown ends, and arrivals then are skipped", function()
+    local world = setup("Retail")
+    world.slowMinutes = 5
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    world.greet:Greet(world.shown[1].player)
+
+    world.greet:OnPresence("online", world.names.anvil)
+    advance(world, 5 * MINUTE - 1)
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(0, #world.shown)
+
+    -- Over: new arrivals prompt again, but those skipped aren't brought back.
+    advance(world, 1)
+    test.assertEqual(0, #world.shown)
+    world.greet:OnPresence("online", world.names.tongs)
+    test.assertEqual(0, #world.shown, "Tongs is Anvil's alt, and Anvil is still online")
+    world.greet:OnPresence("offline", world.names.rust)
+    world.greet:OnPresence("offline", world.names.anvil)
+    world.greet:OnPresence("offline", world.names.tongs)
+    advance(world, 60 * MINUTE)
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual("Rust", shownLabels(world))
+end)
+
+test.test("guild greet: in Slow mode, a prompt still waiting to show when Greet is pressed never shows", function()
+    local world = setup("Retail")
+    world.slowMinutes = 5
+    world.showDelay = 7
+    world.greet:OnPresence("online", world.names.bolt)
+    advance(world, 7)
+    world.greet:OnPresence("online", world.names.bishop)
+    test.assertEqual(1, #world.shown)
+
+    world.greet:Greet(world.shown[1].player)
+    advance(world, 30)
+
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: in Slow mode, join prompts show, stay open, and greeting one starts no cooldown", function()
+    local world = setup("Retail")
+    world.slowMinutes = 5
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual(2, #world.shown)
+
+    -- Greeting Bolt leaves Newt's join prompt open.
+    world.greet:Greet(world.shown[1].player)
+    test.assertEqual("Newt", shownLabels(world))
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual("Newt", shownLabels(world), "no login prompt during the cooldown")
+
+    -- Greeting the join prompt doesn't start (or restart) the cooldown.
+    advance(world, 2)
+    world.greet:Greet(world.shown[1].player)
+    test.assertEqual(2, #world.sent)
+    test.assertEqual(START, world.store:GreetSlowPressedAt())
+
+    -- And outside one, a join greeting leaves the next arrival prompted.
+    world = setup("Retail")
+    world.slowMinutes = 5
+    world.greet:OnPresence("join", world.names.newt)
+    world.greet:Greet(world.shown[1].player)
+    test.assertEqual(nil, world.store:GreetSlowPressedAt())
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual("Bolt", shownLabels(world))
+end)
+
+test.test("guild greet: in Slow mode, typed and others' greetings don't start the cooldown", function()
+    local world = setup("Retail")
+    world.slowMinutes = 5
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+
+    test.assertTrue(greeted(world, "me", world.names.bolt))
+    test.assertTrue(greeted(world, "anvil", world.names.bishop))
+    world.greet:OnGreeted({ v = 1, t = "greeted", c = "bishop-area52", a = START }, world.names.rust)
+
+    test.assertEqual(nil, world.store:GreetSlowPressedAt())
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertContains(shownLabels(world), "Rust")
+end)
+
+test.test("guild greet: the Slow mode cooldown carries across a reload and to another character", function()
+    local world = setup("Retail")
+    world.slowMinutes = 5
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:Greet(world.shown[1].player)
+
+    reload(world)
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(0, #world.shown)
+
+    reload(world, world.names.myAlt)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertEqual(0, #world.shown)
+
+    advance(world, 5 * MINUTE)
+    world.greet:OnPresence("online", world.names.bishop)
+    test.assertEqual("Rip", shownLabels(world))
+end)
+
+test.test("guild greet: lowering Slow mode shortens a running cooldown, and 0 ends it", function()
+    local world = setup("Retail")
+    world.slowMinutes = 10
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:Greet(world.shown[1].player)
+
+    advance(world, 4 * MINUTE)
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(0, #world.shown)
+    world.slowMinutes = 5
+    advance(world, MINUTE)
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertEqual("Anvil", shownLabels(world))
+
+    world.greet:Greet(world.shown[1].player)
+    world.slowMinutes = 0
+    world.greet:OnPresence("online", world.names.bishop)
+    test.assertEqual("Rip", shownLabels(world))
+end)
+
+test.test("guild greet: the Slow mode press time is saved account-wide, and an unusable one is left alone", function()
+    local world = setup("Retail")
+
+    test.assertTrue(world.store:SetGreetSlowPressedAt(START))
+    test.assertEqual(START, world.database.greet.slowPressedAt)
+    test.assertFalse(world.store:SetGreetSlowPressedAt("now"))
+    world.database.greet.slowPressedAt = "soon"
+    test.assertEqual(nil, world.store:GreetSlowPressedAt())
+    test.assertFalse(world.store:SetGreetSlowPressedAt(START))
 end)
