@@ -190,7 +190,13 @@ function Config:AskOnce()
     end
     self.asked[guild] = true
     local function send()
-        if not self.heard[guild] and self:guild() == guild then
+        -- Left the guild before the ask went out: it's asked again on the
+        -- next return there.
+        if self:guild() ~= guild then
+            self.asked[guild] = nil
+            return
+        end
+        if not self.heard[guild] then
             pcall(self.announce, { v = SlowModeConfig.PROTOCOL, t = SlowModeConfig.TYPE_ASK_CONFIG })
         end
     end

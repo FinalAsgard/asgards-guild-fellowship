@@ -264,6 +264,24 @@ test.test("slow mode config: after a guild change without a reload, the new guil
     test.assertEqual("ask-slowmode-config", member.sent[1].t)
 end)
 
+test.test("slow mode config: leaving a guild before its ask goes out asks it again on return", function()
+    local addon, member = newConfig("bob ward-camelot")
+    local knights = member.partition
+    member.config:AskOnce()
+
+    local store = addon.FellowshipStore.Create(member.database)
+    member.partition = store:Partition({ name = "Squires", realm = "Camelot" })
+    runTimers(member)
+    test.assertEqual(0, #member.sent, "not sent to the guild the user left")
+
+    member.partition = knights
+    test.assertTrue(member.config:AskOnce())
+    runTimers(member)
+    test.assertEqual(1, #member.sent)
+    test.assertEqual("ask-slowmode-config", member.sent[1].t)
+    test.assertFalse(member.config:AskOnce())
+end)
+
 test.test("slow mode config: the ask isn't sent once an officer's setting was heard", function()
     local _, officer = newConfig("tool box-camelot")
     local _, member = newConfig("bob ward-camelot")
