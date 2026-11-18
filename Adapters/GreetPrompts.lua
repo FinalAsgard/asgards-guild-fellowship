@@ -7,9 +7,11 @@ local _, addon = ...
 -- a shorter button leaves the name more room.
 -- The anchor defaults to the left side of the screen (the right side holds
 -- the quest log). Unlocking it shows a handle above the stack that drags it
--- anywhere; the new place is saved when the drag ends. Frames are made on
--- first use and reused. Like the other adapters, a failing frame call hides
--- the prompts rather than raising an error.
+-- anywhere; the new place is saved when the drag ends. While Slow mode is on
+-- and prompts are showing, a notice sits just above the stack (above the
+-- handle while it's unlocked). Frames are made on first use and reused. Like
+-- the other adapters, a failing frame call hides the prompts rather than
+-- raising an error.
 local GreetPrompts = {
     HEIGHT = 40,
     GAP = 8,
@@ -23,6 +25,7 @@ local GreetPrompts = {
     BUTTON_HEIGHT = 24,
     CLOSE_SIZE = 24,
     HANDLE_HEIGHT = 22,
+    NOTICE_HEIGHT = 22,
     -- The top prompt's default place, relative to the screen's left edge.
     DEFAULT_ANCHOR = { point = "LEFT", x = 40, y = 120 },
     -- The greeting button's label for each kind of prompt (GreetPolicy's
@@ -49,17 +52,26 @@ function GreetPrompts.Label(category, lockedFor)
     return label
 end
 
+-- The Slow mode notice's text for `minutes`.
+function GreetPrompts.NoticeText(minutes)
+    return "Greeting Slow mode is on: you can greet once every " .. minutes .. " minutes."
+end
+
 local Prompts = {}
 Prompts.__index = Prompts
 
 -- `options.loadAnchor()` returns the saved position ({ point, x, y }) or
--- nil; `options.saveAnchor(anchor)` saves a new one.
+-- nil; `options.saveAnchor(anchor)` saves a new one;
+-- `options.slowModeMinutes()` returns the guild's Slow mode minutes (0 is
+-- off; off without it).
 function GreetPrompts.Create(client, options)
     options = options or {}
     return setmetatable({
         environment = client.environment,
         loadAnchor = options.loadAnchor or function() return nil end,
         saveAnchor = options.saveAnchor or function() end,
+        slowModeMinutes = options.slowModeMinutes or function() return 0 end,
+        shownCount = 0,
         rows = {},
         unlocked = false,
     }, Prompts)
@@ -163,6 +175,63 @@ function Prompts:anchorFrame()
     return anchor
 end
 
+-- The Slow mode notice, made on first use. It counts as made only once it's
+-- complete, so a frame call that fails while making it is retried at the
+-- next draw (on the same frame, so no frames pile up).
+function Prompts:noticeFrame()
+    if self.notice ~= nil then
+        return self.notice
+    end
+    self.noticeDraft = self.noticeDraft or self.environment.CreateFrame("Frame", nil, self.anchor)
+    local notice = self.noticeDraft
+    local ok = pcall(function()
+        notice:SetWidth(self:width())
+        notice:SetHeight(GreetPrompts.NOTICE_HEIGHT)
+        notice:SetFrameStrata("HIGH")
+        local background = notice:CreateTexture(nil, "BACKGROUND")
+        background:SetAllPoints(notice)
+        background:SetColorTexture(0, 0, 0, 0.7)
+        self.noticeText = notice:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        self.noticeText:SetPoint("CENTER", notice, "CENTER", 0, 0)
+    end)
+    notice:Hide()
+    if not ok then
+        error("the Slow mode notice can't be drawn")
+    end
+    self.notice, self.noticeDraft = notice, nil
+    return notice
+end
+
+-- Shows the Slow mode notice while Slow mode is on and prompts are showing,
+-- just above the stack, or above the handle while it's unlocked; hides it
+-- otherwise, and when a frame call fails.
+function Prompts:drawNotice()
+    if self.anchor == nil then
+        return
+    end
+    local ok = pcall(function()
+        local minutes = self.slowModeMinutes()
+        if type(minutes) ~= "number" or minutes <= 0 or self.shownCount == 0 then
+            if self.notice ~= nil then
+                self.notice:Hide()
+            end
+            return
+        end
+        self:noticeFrame()
+        self.noticeText:SetText(GreetPrompts.NoticeText(minutes))
+        self.notice:ClearAllPoints()
+        if self.unlocked then
+            self.notice:SetPoint("BOTTOMLEFT", self.handle, "TOPLEFT", 0, 4)
+        else
+            self.notice:SetPoint("BOTTOMLEFT", self.anchor, "TOPLEFT", 0, 4)
+        end
+        self.notice:Show()
+    end)
+    if not ok and self.notice ~= nil then
+        pcall(self.notice.Hide, self.notice)
+    end
+end
+
 -- Saves where the anchor was dropped, as its top-left corner's offset from
 -- the screen's top-left, and re-pins it there.
 function Prompts:saveCurrent()
@@ -202,6 +271,7 @@ function Prompts:SetUnlocked(unlocked)
         return nil, "the prompts can't be drawn on this client"
     end
     self.unlocked = unlocked == true
+    self:drawNotice()
     return true
 end
 
@@ -292,5 +362,7 @@ function Prompts:Show(prompts, handlers, lockedFor)
             self.rows[index].frame:Hide()
         end
     end)
+    self.shownCount = ok and #prompts or 0
+    self:drawNotice()
     return ok
 end

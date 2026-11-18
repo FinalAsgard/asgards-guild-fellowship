@@ -58,7 +58,7 @@ local promotions = {
         return nil
     end,
 }
-local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority
+local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority, slowModeConfig
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local resync
 local guildNoteOverlay
@@ -159,6 +159,11 @@ if clientProfile.supported then
             promotions.prune()
             promotions.askOnce()
             promotions.changed()
+            -- Every add-on follows the guild's Slow mode setting, so each
+            -- asks the officers' add-ons for it once ranks are known.
+            if slowModeConfig ~= nil then
+                slowModeConfig:AskOnce()
+            end
             -- A scan that saw a promotion or demotion shows or hides the
             -- officers' tabs.
             rosterController:RefreshPages()
@@ -539,7 +544,7 @@ if clientProfile.supported then
     settings:Add("guildGreet", {
         id = "guildGreet",
         kind = "toggle",
-        label = "Offer to greet guild members as they come online",
+        label = "Show greet prompts",
         get = function()
             local store = rosterController:Store()
             return store == nil or store:GreetEnabled()
@@ -555,6 +560,11 @@ if clientProfile.supported then
             return true
         end,
     })
+    settings:Add("guildGreet", {
+        id = "greetPromptOptionsHeading",
+        kind = "heading",
+        label = "Prompts",
+    })
     -- The character that's logged in; the set of characters it's off on is
     -- account-wide.
     settings:Add("guildGreet", {
@@ -562,7 +572,7 @@ if clientProfile.supported then
         kind = "toggle",
         label = "Greet from this character",
         info = function()
-            return "The setting above turns Guild Greet on or off for every character on this account. " ..
+            return "\"Show greet prompts\" turns Guild Greet on or off for every character on this account. " ..
                 "This one only stops the prompts on the character you're playing now, for example an alt " ..
                 "in another guild, and leaves your other characters as they are."
         end,
@@ -611,15 +621,16 @@ if clientProfile.supported then
     -- Not saved, and only while the master frame or the options are open:
     -- closing either, or a reload, locks the prompts again.
     settings:Add("guildGreet", {
-        id = "greetUnlock",
-        kind = "toggle",
+        id = "greetMove",
+        kind = "action",
         offOnClose = true,
-        label = "Unlock greet prompts to drag them somewhere else",
-        get = function()
+        label = "Move greeting pop-ups",
+        activeLabel = "Done moving",
+        active = function()
             return greetPrompts:IsUnlocked()
         end,
-        set = function(unlocked)
-            return greetPrompts:SetUnlocked(unlocked)
+        run = function()
+            return greetPrompts:SetUnlocked(not greetPrompts:IsUnlocked())
         end,
     })
     settings:Add("guildGreet", {
@@ -719,6 +730,58 @@ if clientProfile.supported then
         host = "options",
         label = "Edit Greetings",
         run = openGreetings,
+    })
+    -- Officers set Slow mode for the whole guild; everyone else sees the
+    -- guild's value but can't change it.
+    local function slowModeOfficer()
+        return slowModeConfig ~= nil and slowModeConfig:IsOfficer()
+    end
+    settings:Add("guildGreet", {
+        id = "greetOfficerHeading",
+        kind = "heading",
+        style = "officer",
+        label = "Officer settings (officer only): these apply to everyone in the guild",
+    })
+    local slowMode = addon.SlowModeConfig.SETTINGS.slowModeMinutes
+    settings:Add("guildGreet", {
+        id = "greetSlowMode",
+        kind = "number",
+        slider = true,
+        label = "Slow mode: minutes between each greeter's greetings (0 = off)",
+        min = slowMode.min,
+        max = slowMode.max,
+        format = function(minutes)
+            if minutes == 0 then
+                return "Off"
+            end
+            return minutes .. " min"
+        end,
+        enabled = function()
+            if not slowModeOfficer() then
+                return false, "only officers can change it"
+            end
+            return true
+        end,
+        get = function()
+            return slowModeConfig and slowModeConfig:Minutes() or slowMode.default
+        end,
+        set = function(minutes)
+            if slowModeConfig == nil then
+                return nil, "saved data is unavailable"
+            end
+            return slowModeConfig:SetMinutes(minutes)
+        end,
+    })
+    -- Says why the slider is greyed out, only when it is.
+    settings:Add("guildGreet", {
+        id = "greetSlowModeReadOnly",
+        kind = "text",
+        shown = function()
+            return not slowModeOfficer()
+        end,
+        get = function()
+            return "Only officers can change it."
+        end,
     })
     -- Guild Recruit's settings only change for a character that can invite
     -- to the guild.
@@ -3216,6 +3279,51 @@ if clientProfile.supported then
             end
         end,
     })
+    -- Guild Greet's Slow mode: an officer setting shared with every add-on
+    -- user over guild sync.
+    slowModeConfig = addon.SlowModeConfig.Create({
+        partition = function()
+            local guild, partition = rosterController:QuietContext()
+            return guild and partition or nil
+        end,
+        selfKey = function()
+            return rosterController:SelfKey()
+        end,
+        isOfficer = function(key)
+            return officerAuthority:IsOfficer(key)
+        end,
+        senderIsOfficer = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            return key ~= nil and officerAuthority:IsOfficer(key)
+        end,
+        isOwn = function(sender)
+            local guild, _, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(sender)
+            if key == nil then
+                return nil
+            end
+            return guildGreet:IsOwn(key)
+        end,
+        now = function()
+            return client:Timestamp()
+        end,
+        announce = function(message)
+            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        end,
+        random = function(low, high)
+            return client:Random(low, high)
+        end,
+        after = function(seconds, callback)
+            return client:After(seconds, callback)
+        end,
+        onChange = function()
+            settingsPanel:Refresh()
+            frameSettings:Refresh()
+            -- The prompts' Slow mode notice follows the new value.
+            guildGreet:Refresh()
+        end,
+    })
     -- The guild's welcome mail: officer settings shared over guild sync.
     guildWelcome = addon.GuildWelcome.Create({
         partition = function()
@@ -3353,6 +3461,9 @@ if clientProfile.supported then
                 store:SetGreetAnchor(anchor)
             end
         end,
+        slowModeMinutes = function()
+            return slowModeConfig and slowModeConfig:Minutes() or 0
+        end,
     })
     -- Guild Greet reads the same guild context as the roster.
     -- How many guildmates with the add-on are online, counting the user: the
@@ -3424,6 +3535,9 @@ if clientProfile.supported then
             return comm:BroadcastLive(message)
         end,
         addonOnline = addonOnline,
+        slowModeMinutes = function()
+            return slowModeConfig and slowModeConfig:Minutes() or 0
+        end,
         view = greetPrompts,
     })
     -- The Guild Recruit window stays where it's dragged; the place is saved
@@ -4113,6 +4227,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildRecruit:OnMessage(message, sender)
         elseif addon.GuildWelcome.TYPES[message.t] ~= nil then
             guildWelcome:OnMessage(message, sender)
+        elseif addon.SlowModeConfig.TYPES[message.t] ~= nil then
+            slowModeConfig:OnMessage(message, sender)
         elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
             onGroupFinderMessage(message, sender)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then

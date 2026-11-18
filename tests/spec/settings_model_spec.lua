@@ -326,17 +326,50 @@ test.test("/agf options is listed in help and explains when the window can't ope
     test.assertContains(lastMessage(world), "can't open")
 end)
 
-test.test("the Guild Greet section can unlock the prompts, and refuses when they can't be drawn", function()
+test.test("the Guild Greet section's Move greeting pop-ups button refuses when the prompts can't be drawn", function()
     local _, addon = loggedIn("Forever")
-    local entry = addon.settings:Entry("greetUnlock")
+    local entry = addon.settings:Entry("greetMove")
 
-    test.assertEqual("toggle", entry.kind)
-    test.assertFalse(addon.settings:Get("greetUnlock"))
-    -- The fixtures' frames can't build prompts, so the toggle stays off.
-    local ok, reason = addon.settings:Set("greetUnlock", true)
-    test.assertEqual(nil, ok)
+    test.assertEqual("action", entry.kind)
+    test.assertEqual(nil, addon.settings:Entry("greetUnlock"), "the unlock check box is gone")
+    test.assertEqual("Move greeting pop-ups", addon.settings:Label("greetMove"))
+    -- The fixtures' frames can't build prompts, so they stay locked.
+    local ok, reason = addon.settings:Run("greetMove")
+    test.assertFalse(ok)
     test.assertContains(reason, "can't be drawn")
-    test.assertFalse(addon.settings:Get("greetUnlock"))
+    test.assertFalse(addon.settings:IsActive("greetMove"))
+    test.assertEqual("Move greeting pop-ups", addon.settings:Label("greetMove"))
+end)
+
+test.test("an action with a mode reads its active label while on, and closing the panel turns it off", function()
+    local model = newModel()
+    local state = { on = false, runs = 0 }
+    model:AddSection("general", "General")
+    test.assertFalse(model:Add("general", { id = "bad", kind = "action", label = "Bad",
+        run = function() end, active = function() return true end }), "active needs an active label")
+    test.assertTrue(model:Add("general", { id = "mode", kind = "action", label = "Start", activeLabel = "Stop",
+        offOnClose = true,
+        active = function() return state.on end,
+        run = function()
+            state.runs = state.runs + 1
+            state.on = not state.on
+        end }))
+    local heard = {}
+    model:OnChange(function(id)
+        table.insert(heard, id)
+    end)
+
+    test.assertEqual("Start", model:Label("mode"))
+    test.assertTrue(model:Run("mode"))
+    test.assertEqual("Stop", model:Label("mode"))
+    test.assertEqual("mode", heard[1], "listeners hear the action ran")
+
+    model:Closed()
+    test.assertFalse(state.on)
+    test.assertEqual("Start", model:Label("mode"))
+    -- Already off: closing again doesn't run it.
+    model:Closed()
+    test.assertEqual(2, state.runs)
 end)
 
 test.test("number settings take whole numbers within their range", function()
@@ -383,7 +416,7 @@ test.test("the Guild Greet section has category, threshold and this-character se
     test.assertTrue(addon.settings:Set("greetCategory:join", false))
     test.assertFalse(world.database.greet.categories.join)
 
-    test.assertEqual(15, addon.settings:Get("welcomeBackMinutes"))
+    test.assertEqual(60, addon.settings:Get("welcomeBackMinutes"))
     test.assertTrue(addon.settings:Set("welcomeBackMinutes", 20))
     test.assertEqual(20, world.database.greet.welcomeBackMinutes)
     test.assertEqual(3, addon.settings:Get("welcomeCap"))
@@ -422,10 +455,13 @@ test.test("closing the panel turns off modes marked to end on close, and nothing
     test.assertEqual(1, #changes)
 end)
 
-test.test("the prompt unlock is a mode that ends when the panel closes", function()
+test.test("moving the greet prompts is a mode that ends when the panel closes, shown on every host", function()
     local _, addon = loggedIn("Retail")
 
-    test.assertTrue(addon.settings:Entry("greetUnlock").offOnClose)
+    test.assertTrue(addon.settings:Entry("greetMove").offOnClose)
+    test.assertEqual("Done moving", addon.settings:Entry("greetMove").activeLabel)
+    test.assertTrue(addon.settings:InHost("greetMove", "frame"))
+    test.assertTrue(addon.settings:InHost("greetMove", "options"))
 end)
 
 test.test("a text setting saves text up to its length and refuses anything else", function()
@@ -577,29 +613,114 @@ end
 registerTagColorTest("Forever")
 registerTagColorTest("Retail")
 
-test.test("the Guild Greet settings open with the main switches, then headed groups for prompts, timing and closing", function()
-    local _, addon = loggedIn("Retail")
+-- The ids of the Guild Greet entries drawn on `host`, in order.
+local function greetIds(addon, host)
     local section = addon.settings:SectionsOn("greetings")[1]
     local ids = {}
     local index
     for index = 1, #section.entries do
-        if addon.settings:InHost(section.entries[index].id, "frame") then
+        if addon.settings:InHost(section.entries[index].id, host) then
             table.insert(ids, section.entries[index].id)
         end
     end
+    return ids
+end
+
+test.test("the Guild Greet settings open with Show greet prompts, then headed groups for prompts, arrivals, timing and closing", function()
+    local _, addon = loggedIn("Retail")
+    local ids = greetIds(addon, "frame")
 
     test.assertEqual("guildGreet", ids[1])
-    test.assertEqual("greetCharacter", ids[2])
-    test.assertEqual("greetInInstances", ids[3])
-    test.assertEqual("greetUnlock", ids[4])
-    test.assertEqual("greetPromptsHeading", ids[5])
-    test.assertEqual("greetCategory:join", ids[6])
-    test.assertEqual("greetTimingHeading", ids[10])
-    test.assertEqual("welcomeBackMinutes", ids[11])
-    test.assertEqual("greetCloseHeading", ids[12])
-    test.assertEqual("greetCap", ids[13])
-    test.assertEqual("welcomeCap", ids[14])
-    test.assertEqual(14, #ids)
-    -- "This character" explains how it differs from the main switch.
-    test.assertContains(addon.settings:Info("greetCharacter"), "every character on this account")
+    test.assertEqual("Show greet prompts", addon.settings:Entry("guildGreet").label)
+    test.assertEqual("greetPromptOptionsHeading", ids[2])
+    test.assertEqual("Prompts", addon.settings:Entry("greetPromptOptionsHeading").label)
+    test.assertEqual("greetCharacter", ids[3])
+    test.assertEqual("greetInInstances", ids[4])
+    test.assertEqual("greetMove", ids[5])
+    test.assertEqual("greetPromptsHeading", ids[6])
+    test.assertEqual("greetCategory:join", ids[7])
+    test.assertEqual("greetTimingHeading", ids[11])
+    test.assertEqual("welcomeBackMinutes", ids[12])
+    test.assertEqual("greetCloseHeading", ids[13])
+    test.assertEqual("greetCap", ids[14])
+    test.assertEqual("welcomeCap", ids[15])
+    test.assertEqual("greetOfficerHeading", ids[16])
+    test.assertEqual("greetSlowMode", ids[17])
+    test.assertEqual("greetSlowModeReadOnly", ids[18])
+    test.assertEqual(18, #ids)
+    -- "This character" explains how it differs from the main switch, by name.
+    local info = addon.settings:Info("greetCharacter")
+    test.assertContains(info, "every character on this account")
+    test.assertContains(info, "\"Show greet prompts\"")
+    test.assertFalse(string.find(info, "setting above", 1, true) ~= nil)
+end)
+
+test.test("on every host, Show greet prompts is the only Guild Greet entry before a heading", function()
+    local _, addon = loggedIn("Retail")
+    for _, host in ipairs({ "frame", "options" }) do
+        local ids = greetIds(addon, host)
+        test.assertEqual("guildGreet", ids[1], host)
+        -- Everything after the first heading is under a heading.
+        test.assertEqual("heading", addon.settings:Entry(ids[2]).kind, host)
+        test.assertTrue(#ids > 2, host)
+    end
+end)
+
+test.test("the Officer settings area closes the Guild Greet section, under an officer-only heading in the officer style",
+    function()
+        local _, addon = loggedIn("Retail")
+        for _, host in ipairs({ "frame", "options" }) do
+            local ids = greetIds(addon, host)
+            local index
+            for index = 1, #ids do
+                if ids[index] == "greetOfficerHeading" then
+                    test.assertEqual("greetSlowMode", ids[index + 1], host)
+                    test.assertEqual("greetSlowModeReadOnly", ids[index + 2], host)
+                    test.assertEqual(index + 2, #ids, host)
+                end
+            end
+        end
+        local heading = addon.settings:Entry("greetOfficerHeading")
+        test.assertEqual("officer", heading.style)
+        test.assertContains(heading.label, "officer only")
+        local slider = addon.settings:Entry("greetSlowMode")
+        test.assertTrue(slider.slider)
+        test.assertEqual(0, slider.min)
+        test.assertEqual(15, slider.max)
+        test.assertEqual("Off", slider.format(0))
+        test.assertEqual("5 min", slider.format(5))
+    end)
+
+test.test("officers change Slow mode; everyone else sees the guild's value read-only, with why", function()
+    local world, addon = loggedIn("Retail")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 5)
+
+    test.assertEqual(0, addon.settings:Get("greetSlowMode"))
+    test.assertTrue(addon.settings:IsEnabled("greetSlowMode"))
+    test.assertFalse(addon.settings:IsShown("greetSlowModeReadOnly"))
+    test.assertTrue(addon.settings:Set("greetSlowMode", 5))
+    test.assertEqual(5, addon.settings:Get("greetSlowMode"))
+    test.assertFalse(addon.settings:Set("greetSlowMode", 16) == true)
+    test.assertEqual(5, addon.settings:Get("greetSlowMode"))
+
+    -- Demoted: the value still shows, but can't be changed, and a line says why.
+    world.officerRanks = { [0] = true }
+    test.assertTrue(addon.settings:IsShown("greetSlowMode"))
+    test.assertEqual(5, addon.settings:Get("greetSlowMode"))
+    local enabled, reason = addon.settings:IsEnabled("greetSlowMode")
+    test.assertFalse(enabled)
+    test.assertEqual("only officers can change it", reason)
+    test.assertTrue(addon.settings:IsShown("greetSlowModeReadOnly"))
+    test.assertEqual("Only officers can change it.", addon.settings:Get("greetSlowModeReadOnly"))
+    test.assertFalse(addon.settings:Set("greetSlowMode", 10) == true)
+    test.assertEqual(5, addon.settings:Get("greetSlowMode"))
+end)
+
+test.test("a heading's style must be one the panel knows", function()
+    local model = newModel()
+    model:AddSection("general", "General")
+
+    test.assertTrue(model:Add("general", { id = "officer", kind = "heading", label = "Officers", style = "officer" }))
+    test.assertFalse(model:Add("general", { id = "loud", kind = "heading", label = "Loud", style = "shouting" }))
 end)

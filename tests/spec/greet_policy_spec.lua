@@ -67,19 +67,19 @@ test.test("greet policy: players online when the roster loads are never prompted
     test.assertEqual(nil, policy:CameOnline("tongs", START))
 end)
 
-test.test("greet policy: back 15 minutes after logging off is a welcome back; sooner is a relog", function()
+test.test("greet policy: back 60 minutes after logging off is a welcome back; sooner is a relog", function()
     local policy = newPolicy(guild())
     policy:Seed({ "me", "anvil", "bolt" })
 
     policy:WentOffline("anvil", START)
-    test.assertEqual(nil, policy:CameOnline("anvil", START + 15 * MINUTE - 1))
+    test.assertEqual(nil, policy:CameOnline("anvil", START + 59 * MINUTE))
 
     policy:WentOffline("bolt", START)
-    test.assertEqual("welcomeBack", category(policy:CameOnline("bolt", START + 15 * MINUTE)))
+    test.assertEqual("welcomeBack", category(policy:CameOnline("bolt", START + 60 * MINUTE)))
 
     -- The relog is over; a later return is measured from the next logoff.
-    policy:WentOffline("anvil", START + 20 * MINUTE)
-    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 40 * MINUTE)))
+    policy:WentOffline("anvil", START + 70 * MINUTE)
+    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 130 * MINUTE)))
 end)
 
 test.test("greet policy: switching to an alt counts as the same player", function()
@@ -90,7 +90,7 @@ test.test("greet policy: switching to an alt counts as the same player", functio
     test.assertEqual(nil, policy:CameOnline("tongs", START + 2 * MINUTE))
 
     policy:WentOffline("tongs", START + 10 * MINUTE)
-    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 30 * MINUTE)))
+    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 70 * MINUTE)))
 end)
 
 test.test("greet policy: a first login seen on an alt prompts once for the player", function()
@@ -183,7 +183,7 @@ test.test("greet policy: a long absence only applies to the first login of the s
     policy:CameOnline("anvil", START)
 
     policy:WentOffline("anvil", START + MINUTE)
-    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 20 * MINUTE)))
+    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 61 * MINUTE)))
 end)
 
 test.test("greet policy: someone joining the guild gets a join prompt and no login prompt", function()
@@ -296,7 +296,7 @@ test.test("greet policy: a failing setting falls back to the defaults", function
     })
     policy:Seed({ "anvil" })
 
-    test.assertEqual(15 * MINUTE, policy:WelcomeBackSeconds())
+    test.assertEqual(60 * MINUTE, policy:WelcomeBackSeconds())
     policy:WentOffline("anvil", START)
-    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 15 * MINUTE)))
+    test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 60 * MINUTE)))
 end)

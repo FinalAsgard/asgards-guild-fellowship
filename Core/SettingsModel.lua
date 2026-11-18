@@ -7,7 +7,11 @@ local _, addon = ...
 --
 -- Entry kinds:
 --   toggle   get() -> boolean; set(boolean) -> true, or nil and a reason
---   action   run() performs it (a button, e.g. "Open window")
+--   action   run() performs it (a button, e.g. "Open window"); run() may
+--            return nil and a reason when it couldn't. An action that
+--            switches a mode on and off has `active() -> boolean`, and while
+--            it answers true the button reads `activeLabel`
+--            (e.g. "Move greeting pop-ups" / "Done moving")
 --   text     get() -> a line of text shown as is (e.g. the version)
 --   number   get() -> a whole number from `min` to `max`; set(number) ->
 --            true, or nil and a reason. With `step`, the value goes in
@@ -17,14 +21,17 @@ local _, addon = ...
 --   input    get() -> a line of text the user edits, at most `maxLength`
 --            characters; set(text) -> true, or nil and a reason
 --   heading  a title within a section that sets the entries after it apart
---            (e.g. officer-only settings); it holds no value
+--            (e.g. officer-only settings); it holds no value. With
+--            `style = "officer"` it's drawn as a tinted block, so an area of
+--            settings that apply to the whole guild stands out
 --   color    get() -> a color as "rrggbb"; set(color) -> true, or nil and a
 --            reason. `swatches` lists the colors offered to click, each
 --            { label, color }; `sample` is text shown in the chosen color;
 --            `default` is the color shown when the setting can't be read
 -- `get`, `set` and `run` are called protected, so a failing feature never
--- breaks the panel or a slash command. A toggle marked `offOnClose` is a
--- mode that only lasts while the panel is open (see Model:Closed). An entry
+-- breaks the panel or a slash command. A toggle, or an action with
+-- `active`, marked `offOnClose` is a mode that only lasts while the panel is
+-- open (see Model:Closed). An entry
 -- with `enabled() -> false, reason` can't be changed or run until it
 -- answers true again. An entry with `shown() -> false` is left off the panel
 -- (e.g. officer-only settings for other members). An entry with `info() ->
@@ -38,6 +45,7 @@ local SettingsModel = {
     KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true, color = true },
     HOSTS = { frame = true, options = true },
     PAGES = { settings = true, greetings = true, recruitment = true },
+    HEADING_STYLES = { officer = true },
 }
 addon.SettingsModel = SettingsModel
 
@@ -111,11 +119,20 @@ local function entryProblem(entry)
         return "entry's host is unknown"
     end
     if entry.kind == "action" then
-        return type(entry.run) ~= "function" and "action has no run function" or nil
+        if type(entry.run) ~= "function" then
+            return "action has no run function"
+        end
+        if entry.active ~= nil and (type(entry.active) ~= "function" or not isText(entry.activeLabel)) then
+            return "action's active check needs a function and an active label"
+        end
+        return nil
     end
     if entry.kind == "heading" then
         if entry.shown ~= nil and type(entry.shown) ~= "function" then
             return "entry's shown check isn't a function"
+        end
+        if entry.style ~= nil and not SettingsModel.HEADING_STYLES[entry.style] then
+            return "heading style is unknown"
         end
         return nil
     end
@@ -169,6 +186,30 @@ end
 
 function Model:Entry(id)
     return self.entries[id]
+end
+
+-- True while an action with `active` has its mode on (a failing check
+-- counts as off).
+function Model:IsActive(id)
+    local entry = self.entries[id]
+    if entry == nil or entry.kind ~= "action" or entry.active == nil then
+        return false
+    end
+    local ok, active = pcall(entry.active)
+    return ok and active == true
+end
+
+-- The text the entry is drawn with: an active action's `activeLabel`, and
+-- otherwise its `label`.
+function Model:Label(id)
+    local entry = self.entries[id]
+    if entry == nil then
+        return nil
+    end
+    if self:IsActive(id) then
+        return entry.activeLabel
+    end
+    return entry.label
 end
 
 -- The entry's current value, or nil when it has none or reading it failed.
@@ -303,22 +344,37 @@ function Model:Toggle(id)
     return enabled
 end
 
--- The settings panel closed: turns off every toggle marked `offOnClose`
--- that's on, so such a mode is never left on behind a closed panel.
+-- The settings panel closed: turns off every toggle, and runs every active
+-- action, marked `offOnClose`, so such a mode is never left on behind a
+-- closed panel.
 function Model:Closed()
     local id, entry
     for id, entry in pairs(self.entries) do
-        if entry.kind == "toggle" and entry.offOnClose and self:Get(id) == true then
-            self:Set(id, false)
+        if entry.offOnClose then
+            if entry.kind == "toggle" and self:Get(id) == true then
+                self:Set(id, false)
+            elseif entry.kind == "action" and self:IsActive(id) then
+                self:Run(id)
+            end
         end
     end
 end
 
--- Performs an action entry. False when it isn't one or it failed.
+-- Performs an action entry. Returns true, or false and, when the action gave
+-- one, a reason a player can read. Listeners hear of every action that ran,
+-- so a drawn button's label follows its mode.
 function Model:Run(id)
     local entry = self.entries[id]
     if entry == nil or entry.kind ~= "action" or not self:IsEnabled(id) then
         return false
     end
-    return (pcall(entry.run))
+    local ok, result, reason = pcall(entry.run)
+    if not ok then
+        return false
+    end
+    if result == nil and reason ~= nil then
+        return false, reason
+    end
+    self:notify(id)
+    return true
 end

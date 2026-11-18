@@ -26,6 +26,13 @@ local _, addon = ...
 -- adds to the user's greet weight (GreetWeight), and while enough add-on
 -- users are online a new prompt waits longer the more weight there is.
 -- Greetings from others during the wait count as usual.
+--
+-- Slow mode (the officers' setting, in minutes; 0 is off) limits each
+-- greeter: a press of Greet on a prompt other than a join saves the press
+-- time account-wide and closes every other non-join prompt, and until the
+-- press time plus the current setting's minutes no new non-join prompt is
+-- raised (arrivals then are skipped, never queued). Join prompts are exempt.
+-- Only Greet presses start it: typed greetings and other users' don't.
 local GuildGreet = {
     -- The "greeted" message older versions (v0.9.4 and before) close their
     -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
@@ -71,7 +78,9 @@ Greet.__index = Greet
 --   inInstance    function() -> true in a dungeon, raid, battleground,
 --                 arena or keystone run, where the user can turn prompts
 --                 off. Optional.
---   view          { Show = function(view, prompts, handlers) }: draws the
+--   slowModeMinutes function() -> the guild's Slow mode minutes (0 is
+--                 off). Optional; off without it.
+--   view         { Show = function(view, prompts, handlers) }: draws the
 --                 prompts; handlers.greet(player) and handlers.close(player)
 function GuildGreet.Create(options)
     local greet = setmetatable({
@@ -91,6 +100,7 @@ function GuildGreet.Create(options)
         inInstance = options.inInstance or function()
             return false
         end,
+        slowModeMinutes = options.slowModeMinutes,
         queue =addon.GreetPromptQueue.Create(),
         -- Greetings posted in a row, and when Greet unlocks.
         streak = 0,
@@ -364,7 +374,9 @@ function Greet:OnPresence(kind, rawName)
     end
     -- A category with no greetings has nothing to say, so it never prompts,
     -- and a player who has had enough greetings already isn't prompted.
+    -- During Slow mode's cooldown only joins are.
     if prompt == nil or #self:Library():Greetings(prompt.category) == 0
+        or (prompt.category ~= addon.GreetPolicy.JOIN and self:SlowFor(now) > 0)
         or self.tally:Reached(prompt.player, self:Cap(prompt.category), now)
     then
         return
@@ -384,6 +396,34 @@ function Greet:OnPresence(kind, rawName)
         self:Refresh()
     end)
     self:Refresh()
+end
+
+-- The guild's Slow mode minutes: 0 when off or unknown.
+function Greet:SlowMinutes()
+    if self.slowModeMinutes == nil then
+        return 0
+    end
+    local ok, minutes = pcall(self.slowModeMinutes)
+    if not ok or type(minutes) ~= "number" or minutes <= 0 then
+        return 0
+    end
+    return minutes
+end
+
+-- Seconds left of the user's Slow mode cooldown at `now`: 0 when none. The
+-- end is worked out from the current setting, so lowering it shortens a
+-- running cooldown and 0 ends it.
+function Greet:SlowFor(now)
+    local store = self.store()
+    local pressedAt = store and store:GreetSlowPressedAt()
+    if pressedAt == nil or type(now) ~= "number" then
+        return 0
+    end
+    local minutes = self:SlowMinutes()
+    if minutes == 0 then
+        return 0
+    end
+    return math.max(0, pressedAt + minutes * 60 - now)
 end
 
 -- Seconds a new prompt waits before showing.
@@ -478,6 +518,7 @@ function Greet:Refresh()
         return
     end
     self:dropDeparted(now)
+    self:dropSlowed(now)
     local prompts = self.queue:Visible(now)
     local lockedFor = self:LockedFor(now)
     if lockedFor == 0 then
@@ -502,7 +543,7 @@ end
 -- sent, or nil.
 function Greet:Greet(player)
     local now = self.now()
-    if type(now) == "number" and self:dropDeparted(now) then
+    if type(now) == "number" and (self:dropDeparted(now) or self:dropSlowed(now)) then
         self:Refresh()
     end
     local prompt = self.queue:Get(player)
@@ -520,9 +561,39 @@ function Greet:Greet(player)
         if store ~= nil then
             store:SetGreetWeight(addon.GreetWeight.Added(store:GreetWeight(), now))
         end
+        if prompt.category ~= addon.GreetPolicy.JOIN and self:SlowMinutes() > 0 then
+            self:startSlowMode(now)
+        end
     end
     self:Refresh()
     return text
+end
+
+-- Starts Slow mode's cooldown from `now`; the next Refresh closes every
+-- other non-join prompt.
+function Greet:startSlowMode(now)
+    local store = self.store()
+    if store ~= nil then
+        store:SetGreetSlowPressedAt(now)
+    end
+end
+
+-- During Slow mode's cooldown, closes every non-join prompt, shown or still
+-- waiting to show (including one raised before the setting was turned up).
+-- Returns true when any closed.
+function Greet:dropSlowed(now)
+    if self:SlowFor(now) == 0 then
+        return false
+    end
+    local removed = false
+    local prompts = self.queue:All(now)
+    local index
+    for index = 1, #prompts do
+        if prompts[index].category ~= addon.GreetPolicy.JOIN then
+            removed = self.queue:Remove(prompts[index].player) or removed
+        end
+    end
+    return removed
 end
 
 -- Locks Greet for 2 seconds more than the last cooldown in a row, and

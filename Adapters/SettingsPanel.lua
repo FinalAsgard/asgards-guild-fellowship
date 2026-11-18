@@ -104,7 +104,7 @@ end
 local function setShown(widget, shown)
     local parts = {}
     local index
-    for index, part in ipairs({ "row", "label", "value", "info" }) do
+    for index, part in ipairs({ "row", "label", "value", "info", "block" }) do
         if widget[part] ~= nil then
             table.insert(parts, widget[part])
         end
@@ -205,6 +205,8 @@ function Panel:Refresh()
                 widget.pending = nil
             elseif widget.kind == "text" then
                 widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
+            elseif widget.kind == "action" then
+                widget.frame:SetText(self.model:Label(widget.id))
             elseif widget.kind == "color" then
                 -- A color that can't be read shows the entry's default.
                 local color = self.model:Get(widget.id) or widget.entry.default or widget.entry.swatches[1].color
@@ -497,9 +499,14 @@ function Panel:addAction(frame, entry)
     button:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT, 0)
     button:SetWidth(SettingsPanel.BUTTON_WIDTH)
     button:SetHeight(22)
-    button:SetText(entry.label)
+    button:SetText(self.model:Label(entry.id))
     button:SetScript("OnClick", function()
-        self.model:Run(entry.id)
+        local ok, reason = self.model:Run(entry.id)
+        if not ok and reason ~= nil then
+            pcall(self.client.Print, self.client, addon.Identity.chatPrefix .. " Couldn't do \"" ..
+                tostring(self.model:Label(entry.id)) .. "\": " .. tostring(reason) .. ".")
+        end
+        self:Refresh()
     end)
     return { kind = "action", id = entry.id, frame = button, controls = { button } }
 end
@@ -642,17 +649,35 @@ function Panel:addText(frame, entry)
 end
 
 -- A title within a section, over a thin gold line, setting the entries
--- after it apart (e.g. officer-only settings).
+-- after it apart (e.g. officer-only settings). The officer style is a
+-- reddish tinted block with an orange line and title instead, so settings
+-- that apply to the whole guild stand out from the player's own.
 function Panel:addHeading(frame, entry)
+    local officer = entry.style == "officer"
+    local block
+    if officer then
+        block = frame:CreateTexture(nil, "BACKGROUND")
+        block:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT - 4, 0)
+        block:SetWidth(SettingsPanel.INPUT_WIDTH + 8)
+        block:SetHeight(addon.SettingsLayout.ROW)
+        block:SetColorTexture(0.55, 0.12, 0.08, 0.35)
+    end
     local line = frame:CreateTexture(nil, "ARTWORK")
     line:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT, -2)
     line:SetWidth(SettingsPanel.INPUT_WIDTH)
-    line:SetHeight(1)
-    line:SetColorTexture(0.83, 0.69, 0.22, 0.6)
+    line:SetHeight(officer and 2 or 1)
+    if officer then
+        line:SetColorTexture(1, 0.5, 0.25, 0.9)
+    else
+        line:SetColorTexture(0.83, 0.69, 0.22, 0.6)
+    end
     local label = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     label:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT, -8)
     label:SetText(entry.label)
-    return { kind = "heading", id = entry.id, label = label, value = line }
+    if officer then
+        label:SetTextColor(1, 0.5, 0.25)
+    end
+    return { kind = "heading", id = entry.id, label = label, value = line, block = block, style = entry.style }
 end
 
 -- Draws one entry on a row of its own inside `content`; the row is placed

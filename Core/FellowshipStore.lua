@@ -238,7 +238,7 @@ local function validatePartition(data)
         "characters", "players", "quarantine", "conflicts", "suggestions", "ledger", "forgeries", "unapplied",
         "recruitLedger", "recruitConfig", "recruitStats", "groupHistory", "ownCharacters", "dismissedOwn", "withdrawals",
         "welcomeConfig", "welcomeLedger", "guildLog", "membershipDates",
-        "rankRequirements", "promotionChecks",
+        "rankRequirements", "promotionChecks", "slowModeConfig",
     }
     local index
     for index = 1, #containers do
@@ -273,7 +273,7 @@ local function validatePartition(data)
         unapplied = true, ledger = true, forgeries = true, recruitLedger = true, recruitConfig = true,
         recruitStats = true, groupHistory = true, ownCharacters = true, dismissedOwn = true, withdrawals = true,
         welcomeConfig = true, welcomeLedger = true, guildLog = true, membershipDates = true,
-        rankRequirements = true, promotionChecks = true,
+        rankRequirements = true, promotionChecks = true, slowModeConfig = true,
     }
     for index = 1, #containers do
         if not optional[containers[index]] and data[containers[index]] == nil then
@@ -620,6 +620,32 @@ function Store:SetGreetWeight(record)
     return true
 end
 
+-- When the user last pressed Greet on a prompt that starts Slow mode's
+-- cooldown (server time), shared by every character on the account, or nil
+-- when never or unusable.
+function Store:GreetSlowPressedAt()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    local saved = type(state) == "table" and state.slowPressedAt or nil
+    if type(saved) ~= "number" then
+        return nil
+    end
+    return saved
+end
+
+-- Saves when Greet was pressed for Slow mode. An unusable existing value is
+-- left alone.
+function Store:SetGreetSlowPressedAt(at)
+    if type(at) ~= "number" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.slowPressedAt ~= nil and type(state.slowPressedAt) ~= "number") then
+        return false
+    end
+    state.slowPressedAt = at
+    return true
+end
+
 -- Whether Guild Greet prompts for `category` (a GreetPolicy category). On
 -- unless turned off; an unusable saved value counts as on.
 function Store:GreetCategoryEnabled(category)
@@ -652,7 +678,7 @@ end
 -- Guild Greet's whole-number settings: the saved field, default and range.
 FellowshipStore.GREET_NUMBERS = {
     -- Minutes someone must be gone before coming back is a welcome back.
-    welcomeBackMinutes = { default = 15, min = 1, max = 120 },
+    welcomeBackMinutes = { default = 60, min = 1, max = 120 },
     -- How many welcomes a player who just joined the guild must have had
     -- before the user's prompt for them closes (the greeting cap covers
     -- every other prompt).
@@ -1616,6 +1642,21 @@ function Partition:GetWelcomeConfig()
         self.data.welcomeConfig = {}
     end
     return self.data.welcomeConfig
+end
+
+-- Guild Greet's Slow mode officer setting (see SlowModeConfig), kept as an
+-- officer setting like Guild Recruit's, created on first use.
+function Partition:GetSlowModeConfig()
+    if self.data.slowModeConfig == nil then
+        self.data.slowModeConfig = {}
+    end
+    return self.data.slowModeConfig
+end
+
+-- The Slow mode officer setting if one was ever saved, else nil, without
+-- creating it (it's read on every prompt redraw).
+function Partition:PeekSlowModeConfig()
+    return self.data.slowModeConfig
 end
 
 -- Guild Mail's welcome ledger (see GuildWelcome): { seen = { [key] = when
