@@ -40,7 +40,8 @@ test.test("facts the officer wrote are known, and anything newer about the same 
     test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW), NOW), "the same fact")
     test.assertFalse(setup.ledger:IsForged(alias("hammer-area52", "Hammy", NOW), NOW))
     test.assertTrue(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW + 5), NOW), "newer")
-    test.assertTrue(setup.ledger:IsForged(link("anvil-area52", "hammer-area52", NOW), NOW), "never written")
+    -- Nothing they wrote about Anvil: it overrides no edit of theirs.
+    test.assertFalse(setup.ledger:IsForged(link("anvil-area52", "hammer-area52", NOW + 5), NOW), "never written")
     test.assertTrue(setup.ledger:IsForged(alias("hammer-area52", "Hammy", NOW + 5), NOW), "a newer alias")
     -- Older than the officer's own newer edit: it can't change anything.
     test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "anvil-area52", NOW - 5), NOW))
@@ -49,6 +50,7 @@ end)
 test.test("the officer's own stamp with a value a roster worked out since isn't forged", function()
     local setup = newSetup()
     setup.ledger:Record({ link("wrench-area52", "hammer-area52", NOW), alias("hammer-area52", "Hammy", NOW) }, NOW)
+    setup.partition:SetAliasStamp("hammer-area52", NOW, OFFICER)
 
     -- Hammer left the guild and Wrench became the player's acting main.
     test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "wrench-area52", NOW), NOW + 60), "the link")
@@ -56,20 +58,21 @@ test.test("the officer's own stamp with a value a roster worked out since isn't 
         "the alias, now named by the acting main")
     test.assertTrue(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW + 1), NOW + 60),
         "an alias stamp they never wrote")
-    test.assertTrue(setup.ledger:IsForged(alias("anvil-area52", "Hammy", NOW), NOW + 60),
-        "their alias stamp reused for another player")
+    -- Anvil's player was never aliased by them: nothing of theirs to override.
+    test.assertFalse(setup.ledger:IsForged(alias("anvil-area52", "Hammy", NOW), NOW + 60),
+        "their alias stamp on another player")
 end)
 
-test.test("an alias stamp the officer replaced since no longer vouches for drift", function()
+test.test("a newer alias over the officer's own, named by another main, is forged", function()
     local setup = newSetup()
     setup.ledger:Record({ alias("hammer-area52", "Hammy", NOW) }, NOW)
-    test.assertFalse(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW), NOW))
+    setup.partition:SetAliasStamp("hammer-area52", NOW, OFFICER)
 
-    -- The officer renames the player while the same check is under way.
-    local other = setup.addon.SyncLedger.Create(setup.partition)
-    other:Record({ alias("hammer-area52", "Hammers", NOW + 10) }, NOW + 10)
-
-    test.assertTrue(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW), NOW + 10))
+    test.assertFalse(setup.ledger:IsForged(alias("wrench-area52", "Hammy", NOW), NOW), "the same stamp")
+    test.assertTrue(setup.ledger:IsForged(alias("wrench-area52", "Evil", NOW + 10), NOW + 10), "newer")
+    -- Another officer's alias on the player isn't this officer's to judge by.
+    setup.partition:SetAliasStamp("hammer-area52", NOW + 20, "anvil-area52")
+    test.assertFalse(setup.ledger:IsForged(alias("wrench-area52", "Evil", NOW + 10), NOW + 20))
 end)
 
 test.test("a newer edit by the officer replaces the older one, and an older record never does", function()
@@ -87,7 +90,7 @@ test.test("facts dated before the ledger started are trusted, and nothing is jud
 
     test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW), nil), "no clock")
     test.assertEqual(nil, setup.partition:GetLedger())
-    test.assertTrue(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW), NOW), "starts the ledger")
+    test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW), NOW), "nothing written yet")
     test.assertEqual(NOW, setup.partition:GetLedger().since)
     test.assertFalse(setup.ledger:IsForged(link("wrench-area52", "hammer-area52", NOW - 86400), NOW + 60),
         "made before this install kept a ledger")
@@ -115,7 +118,7 @@ test.test("a saved ledger or forgery log of the wrong shape quarantines nothing 
     partition:SetLedger({ since = "yesterday" })
     local ledger = addon.SyncLedger.Create(partition)
 
-    test.assertTrue(ledger:IsForged(link("wrench-area52", "hammer-area52", NOW), NOW))
+    test.assertFalse(ledger:IsForged(link("wrench-area52", "hammer-area52", NOW), NOW))
     test.assertEqual(NOW, partition:GetLedger().since, "started over")
     test.assertEqual(0, #ledger:Forgeries())
 end)

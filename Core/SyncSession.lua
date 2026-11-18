@@ -24,10 +24,11 @@ local _, addon = ...
 -- Everyone applies every facts message they hear, so bystanders catch up too.
 --
 -- Forgeries: each officer keeps a ledger (SyncLedger) of the facts they
--- wrote. When a facts message carries one in this officer's name that the
--- ledger doesn't know, it isn't applied: this officer's add-on sends a
--- correction (their own data for that thing, stamped newer), logs who
--- relayed it, and warns them.
+-- wrote. When a facts message carries one in this officer's name newer than
+-- an edit the ledger holds for that thing, it isn't applied: this officer's
+-- add-on sends a correction (their own data for that thing, stamped newer),
+-- logs who relayed it, and warns them. One about something they never
+-- edited overrides nothing of theirs and is applied as usual.
 --
 -- Suggestions (SuggestionService): a member's own edit stays on their side
 -- and is kept as a suggestion. It's sent ("suggest") right away when an
@@ -823,9 +824,9 @@ end
 
 -- Of `facts` received from `relayer` (key, and `sender` as the game reports
 -- it), returns the ones to apply. Facts in this officer's (`officer`'s) name
--- that their ledger doesn't know are left out, logged, and corrected: this
--- officer's own data for each such thing goes to the guild, stamped newer
--- than the forgery, and the officer is warned. One that carries this
+-- that their ledger finds forged (SyncLedger:IsForged) are left out,
+-- logged, and corrected: this officer's own data for each such thing goes
+-- to the guild, stamped newer than the forgery, and the officer is warned. One that carries this
 -- officer's very stamp but another value went wrong on the way (see
 -- SyncLedger:Contradicts): it's corrected the same way, without the
 -- warning.
