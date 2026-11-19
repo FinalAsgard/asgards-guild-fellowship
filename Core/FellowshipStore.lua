@@ -1656,17 +1656,22 @@ function Partition:AddGroupHistory(entry)
 end
 
 -- Cheap marks of the group history's state, without reading it all: how
--- many entries are stored, the last one, and how many characters it holds.
--- Entries are only ever added, and only the last gains characters, so any
--- change to the history changes one of these.
+-- many entries are stored, the last readable one, and how many characters
+-- it holds. Entries are only ever added, and only the last readable one
+-- (the one GetGroupHistory ends with) gains characters, so any change to
+-- the history changes one of these. Only an unreadable tail is stepped
+-- over to find it.
 function Partition:GroupHistoryMark()
     local stored = self.data.groupHistory
     if type(stored) ~= "table" then
         return 0, nil, 0
     end
-    local last = stored[#stored]
-    local characters = type(last) == "table" and type(last.characters) == "table" and #last.characters or 0
-    return #stored, last, characters
+    local index = #stored
+    while index > 0 and not isHistoryEntry(stored[index]) do
+        index = index - 1
+    end
+    local last = stored[index]
+    return #stored, last, last and #last.characters or 0
 end
 
 -- Guild Recruit's ad counts heard from other add-on users, by character

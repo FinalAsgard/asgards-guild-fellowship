@@ -576,6 +576,22 @@ function Greet:NeverGrouped(key)
     return self:OnlyGrouped() and self:groupedTier(key) == nil
 end
 
+-- Closes the prompts whose player has had their current cap of greetings,
+-- which can fall after they were counted (highlighting turned off, or a
+-- friend's tier dropping). Returns true when any closed.
+function Greet:dropCapped(now)
+    local removed = false
+    local prompts = self.queue:All(now)
+    local index
+    for index = 1, #prompts do
+        local prompt = prompts[index]
+        if self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now) then
+            removed = self.queue:Remove(prompt.player) or removed
+        end
+    end
+    return removed
+end
+
 -- Closes the prompts, shown or waiting to show, for players the user never
 -- grouped with while they only greet those they have. Returns true when any
 -- closed.
@@ -606,6 +622,7 @@ function Greet:Refresh()
     self:dropDeparted(now)
     self:dropUngrouped(now)
     self:dropSlowed(now)
+    self:dropCapped(now)
     local prompts = self.queue:Visible(now)
     -- A held prompt's Greet stays locked until Slow mode's cooldown ends.
     local slowFor = math.ceil(self:SlowFor(now))
@@ -685,7 +702,8 @@ end
 -- During Slow mode's cooldown, closes every non-join prompt, shown or still
 -- waiting to show (including one raised before the setting was turned up),
 -- except held friends'. A held prompt is kept until the cooldown ends and
--- for a prompt's usual lifetime after. Returns true when any closed.
+-- for a prompt's usual lifetime after, worked out again at each draw, so a
+-- shortened cooldown shortens it too. Returns true when any closed.
 function Greet:dropSlowed(now)
     local slowFor = self:SlowFor(now)
     if slowFor == 0 then
@@ -698,7 +716,7 @@ function Greet:dropSlowed(now)
         local prompt = prompts[index]
         if prompt.category ~= addon.GreetPolicy.JOIN then
             if self:HasPerks(prompt.key) then
-                self:keepUntil(prompt, now + slowFor + self.queue.lifetime, now)
+                self:holdUntil(prompt, now + slowFor + self.queue.lifetime, now)
             else
                 removed = self.queue:Remove(prompt.player) or removed
             end
@@ -707,9 +725,11 @@ function Greet:dropSlowed(now)
     return removed
 end
 
--- Keeps `prompt` from expiring before `expiresAt`, with a redraw then.
-function Greet:keepUntil(prompt, expiresAt, now)
-    if prompt.expiresAt >= expiresAt then
+-- Keeps held `prompt` until `heldUntil`, or its usual expiry if that's
+-- later, with a redraw then.
+function Greet:holdUntil(prompt, heldUntil, now)
+    local expiresAt = math.max(prompt.showAt + self.queue.lifetime, heldUntil)
+    if prompt.expiresAt == expiresAt then
         return
     end
     prompt.expiresAt = expiresAt

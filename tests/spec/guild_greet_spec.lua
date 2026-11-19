@@ -1988,3 +1988,44 @@ test.test("guild greet: it doesn't change caps, marks or Slow mode for the playe
     test.assertEqual("Anvil", shownLabels(world))
     test.assertEqual(5 * MINUTE, world.shown[1].heldFor)
 end)
+
+-- Review follow-ups ---------------------------------------------------------------
+
+test.test("guild greet: turning highlighting off closes a friend's prompt that's had the normal cap", function()
+    local world = withFriends({ bolt = "frequent", anvil = "frequent" })
+    world.store:SetGreetCap(2)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.anvil)
+    greeted(world, "bishop", world.names.bolt)
+    greeted(world, "rust", world.names.bolt)
+    greeted(world, "bishop", world.names.anvil)
+    test.assertEqual("Bolt,Anvil", shownLabels(world))
+
+    world.store:SetGreetHighlightFriends(false)
+    world.greet:Refresh()
+
+    -- Bolt has had 2, the normal cap; Anvil only 1.
+    test.assertEqual("Anvil", shownLabels(world))
+end)
+
+test.test("guild greet: shortening Slow mode shortens how long a held prompt stays", function()
+    local world = withFriends({ anvil = "frequent" })
+    world.slowMinutes = 5
+    threeArrive(world)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("Anvil", shownLabels(world))
+
+    advance(world, 30)
+    world.slowMinutes = 1
+    world.greet:Refresh()
+    test.assertEqual(30, world.shown[1].heldFor)
+
+    -- The cooldown ends at 1 minute; the prompt stays its usual 90 seconds
+    -- after, not 90 seconds after the old 5.
+    advance(world, 30 + world.greet.queue.lifetime - 1)
+    world.greet:Refresh()
+    test.assertEqual("Anvil", shownLabels(world))
+    advance(world, 1)
+    world.greet:Refresh()
+    test.assertEqual("", shownLabels(world))
+end)

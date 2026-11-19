@@ -151,3 +151,17 @@ test.test("group friends: tiers are kept until the history or the version change
     test.assertEqual(GroupFriends.TOP, world.friends:TierOf("tongs"))
     test.assertTrue(world.lookups > lookups + 3)
 end)
+
+test.test("group friends: characters joining a resumed party behind an unreadable entry update the tiers", function()
+    local world, GroupFriends = newFriends()
+    party(world, { "frank" })
+    -- A damaged last entry, which reading the history skips.
+    table.insert(world.partition.data.groupHistory, { at = "soon", characters = { "zed" } })
+    test.assertEqual(nil, world.friends:TierOf("gus"))
+
+    -- After a reload, the party carries on in the last readable entry.
+    world.addon.GroupHistory.Create(world.partition):OnParty({ "frank", "gus" }, NOW + 120)
+
+    test.assertEqual(1, #world.partition:GetGroupHistory())
+    test.assertEqual(GroupFriends.TOP, world.friends:TierOf("gus"))
+end)
