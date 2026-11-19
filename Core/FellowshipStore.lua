@@ -1528,9 +1528,6 @@ function Partition:GetForgeries()
     return self.data.forgeries
 end
 
--- The most group history entries kept; the oldest go first.
-FellowshipStore.GROUP_HISTORY_MAX = 1000
-
 local function isHistoryEntry(entry)
     if type(entry) ~= "table" or not isWholeNumber(entry.at) or type(entry.characters) ~= "table"
         or (entry.dungeon ~= nil and not isText(entry.dungeon))
@@ -1602,7 +1599,7 @@ function Partition:GetGroupHistory()
     return entries
 end
 
--- Adds a group history entry, dropping the oldest past GROUP_HISTORY_MAX.
+-- Adds a group history entry. History is never pruned or capped.
 function Partition:AddGroupHistory(entry)
     if not isHistoryEntry(entry) then
         return false
@@ -1611,10 +1608,21 @@ function Partition:AddGroupHistory(entry)
         self.data.groupHistory = {}
     end
     table.insert(self.data.groupHistory, entry)
-    while #self.data.groupHistory > FellowshipStore.GROUP_HISTORY_MAX do
-        table.remove(self.data.groupHistory, 1)
-    end
     return true
+end
+
+-- Cheap marks of the group history's state, without reading it all: how
+-- many entries are stored, the last one, and how many characters it holds.
+-- Entries are only ever added, and only the last gains characters, so any
+-- change to the history changes one of these.
+function Partition:GroupHistoryMark()
+    local stored = self.data.groupHistory
+    if type(stored) ~= "table" then
+        return 0, nil, 0
+    end
+    local last = stored[#stored]
+    local characters = type(last) == "table" and type(last.characters) == "table" and #last.characters or 0
+    return #stored, last, characters
 end
 
 -- Guild Recruit's ad counts heard from other add-on users, by character
