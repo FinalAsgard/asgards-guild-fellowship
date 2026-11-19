@@ -1751,3 +1751,106 @@ test.test("guild greet: with highlighting off, a friend's prompt uses the normal
     test.assertTrue(greeted(world, "bishop", world.names.newt, "welcome Newt!"))
     test.assertEqual(0, #world.shown)
 end)
+
+-- Group friends held through Slow mode ------------------------------------------
+
+-- The prompt showing for `name` (a world.names key), or nil.
+local function shownFor(world, name)
+    local index
+    for index = 1, #world.shown do
+        if world.shown[index].rawName == world.names[name] then
+            return world.shown[index]
+        end
+    end
+    return nil
+end
+
+test.test("guild greet: in Slow mode, a Frequent or Top 5 friend's prompt stays, locked, when another is greeted", function()
+    local world = withFriends({ anvil = "frequent", bishop = "grouped" })
+    world.slowMinutes = 5
+    threeArrive(world)
+
+    test.assertEqual("Hey Bolt!", world.greet:Greet(shownFor(world, "bolt").player))
+
+    -- Bishop is only Grouped, so their prompt closes as before.
+    test.assertEqual("Anvil", shownLabels(world))
+    test.assertEqual(5 * MINUTE, world.shown[1].heldFor)
+    test.assertEqual(nil, world.greet:Greet(world.shown[1].player))
+    test.assertEqual(1, #world.sent)
+    test.assertEqual("Anvil", shownLabels(world))
+end)
+
+test.test("guild greet: in Slow mode, a Frequent or Top 5 friend arriving during the cooldown is prompted, locked", function()
+    local world = withFriends({ rust = "top5", bishop = "grouped" })
+    world.slowMinutes = 5
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:Greet(world.shown[1].player)
+    advance(world, MINUTE)
+
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:OnPresence("online", world.names.bishop)
+
+    test.assertEqual("Rust", shownLabels(world))
+    test.assertEqual(4 * MINUTE, world.shown[1].heldFor)
+    test.assertEqual(nil, world.greet:Greet(world.shown[1].player))
+end)
+
+test.test("guild greet: once the cooldown ends, Greet on a held friend posts and starts a new cooldown", function()
+    local world = withFriends({ anvil = "frequent", bishop = "top5" })
+    world.slowMinutes = 5
+    threeArrive(world)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("Rip,Anvil", shownLabels(world))
+
+    -- Held well past a prompt's usual lifetime, the countdown running down.
+    advance(world, 3 * MINUTE)
+    test.assertEqual("Rip,Anvil", shownLabels(world))
+    test.assertEqual(2 * MINUTE, world.shown[1].heldFor)
+    advance(world, 2 * MINUTE)
+    world.greet:Refresh()
+    test.assertEqual("Rip,Anvil", shownLabels(world))
+    test.assertEqual(nil, world.shown[1].heldFor)
+
+    test.assertTrue(world.greet:Greet(world.shown[1].player) ~= nil)
+    test.assertEqual(2, #world.sent)
+    test.assertEqual(START + 5 * MINUTE, world.store:GreetSlowPressedAt())
+    -- The other held friend is held again by the new cooldown.
+    test.assertEqual("Anvil", shownLabels(world))
+    test.assertEqual(5 * MINUTE, world.shown[1].heldFor)
+end)
+
+test.test("guild greet: a held prompt closes on log off, leaving the guild, or the doubled cap", function()
+    local world = withFriends({ anvil = "frequent", bishop = "top5", rust = "top5" })
+    world.slowMinutes = 5
+    threeArrive(world)
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("Rip,Anvil,Rust", shownLabels(world))
+
+    world.greet:OnPresence("offline", world.names.anvil)
+    test.assertEqual("Rip,Rust", shownLabels(world))
+    world.greet:OnPresence("leave", world.names.rust)
+    test.assertEqual("Rip", shownLabels(world))
+    greeted(world, "anvil", world.names.bishop)
+    test.assertEqual("Rip", shownLabels(world))
+    greeted(world, "rust", world.names.bishop)
+    test.assertEqual("", shownLabels(world))
+end)
+
+test.test("guild greet: with highlighting off or Slow mode at 0, friends aren't held", function()
+    local world = withFriends({ anvil = "top5", rust = "top5" })
+    world.store:SetGreetHighlightFriends(false)
+    world.slowMinutes = 5
+    threeArrive(world)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("", shownLabels(world))
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual("", shownLabels(world))
+
+    world = withFriends({ anvil = "top5" })
+    world.slowMinutes = 0
+    threeArrive(world)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("Rip,Anvil", shownLabels(world))
+    test.assertEqual(nil, world.shown[2].heldFor)
+end)

@@ -229,8 +229,8 @@ test.test("greet prompts: each button fits its own label, and every box is as wi
     local rows = world.prompts.rows
     test.assertEqual(#"Greet" * 6 + 24, rows[1].greet.width)
     test.assertEqual(#"Welcome to the Guild" * 6 + 24, rows[2].greet.width)
-    -- The boxes match, with room for "Welcome to the Guild (88)".
-    local room = #"Welcome to the Guild (88)" * 6 + 24
+    -- The boxes match, with room for "Welcome to the Guild (88:88)".
+    local room = #"Welcome to the Guild (88:88)" * 6 + 24
     test.assertEqual(14 + 16 + 118 + 10 + room + 6 + 24 + 6, rows[1].frame.width)
     test.assertEqual(rows[1].frame.width, rows[2].frame.width)
     test.assertEqual(rows[1].frame.width, world.prompts.anchor.width)
@@ -355,4 +355,24 @@ test.test("greet prompts: group friends' names are marked by tier, everyone else
     -- The Greet button keeps its normal look.
     test.assertEqual("Greet", world.prompts.rows[2].greet.text)
     test.assertEqual(world.prompts.rows[1].greet.text, world.prompts.rows[2].greet.text)
+end)
+
+test.test("greet prompts: a prompt held through Slow mode is locked with the time left, in minutes from a minute up", function()
+    local world, addon = newPrompts(nil)
+    local held, free = prompt(1, "login"), prompt(2, "join")
+    held.heldFor = 272
+
+    world.prompts:Show({ held, free }, {})
+
+    test.assertEqual("Greet (4:32)", world.prompts.rows[1].greet.text)
+    test.assertFalse(world.prompts.rows[1].greet.enabled)
+    test.assertEqual("Welcome to the Guild", world.prompts.rows[2].greet.text)
+    test.assertTrue(world.prompts.rows[2].greet.enabled)
+
+    -- Under a minute it's whole seconds; the longer of the two locks shows.
+    held.heldFor = 45
+    world.prompts:Show({ held }, {}, 3)
+    test.assertEqual("Greet (45)", world.prompts.rows[1].greet.text)
+    test.assertEqual("1:05", addon.GreetPrompts.Countdown(65))
+    test.assertEqual("15:00", addon.GreetPrompts.Countdown(900))
 end)

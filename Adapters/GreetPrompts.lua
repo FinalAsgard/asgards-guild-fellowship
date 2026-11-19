@@ -51,17 +51,27 @@ local GreetPrompts = {
         longAbsence = "Long Time No See!",
     },
     DEFAULT_LABEL = "Greet",
-    -- The widest countdown a locked button adds to its label.
-    WIDEST_COUNTDOWN = " (88)",
+    -- The widest countdown a locked button adds to its label: a held
+    -- prompt's runs to Slow mode's 15 minutes.
+    WIDEST_COUNTDOWN = " (88:88)",
 }
 addon.GreetPrompts = GreetPrompts
+
+-- A countdown of `seconds`: whole seconds, or minutes and seconds ("4:05")
+-- from a minute up.
+function GreetPrompts.Countdown(seconds)
+    if seconds < 60 then
+        return tostring(seconds)
+    end
+    return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
+end
 
 -- The greeting button's label for a prompt in `category`, with the
 -- countdown while Greet is locked for `lockedFor` seconds.
 function GreetPrompts.Label(category, lockedFor)
     local label = GreetPrompts.LABELS[category] or GreetPrompts.DEFAULT_LABEL
     if type(lockedFor) == "number" and lockedFor > 0 then
-        return label .. " (" .. lockedFor .. ")"
+        return label .. " (" .. GreetPrompts.Countdown(lockedFor) .. ")"
     end
     return label
 end
@@ -365,7 +375,8 @@ end
 -- Each greeting button is named for its prompt's category and sized to
 -- fit its text. While
 -- `lockedFor` (whole seconds) is above 0, each is disabled and counts down,
--- as "Welcome Back (3)".
+-- as "Welcome Back (3)". A prompt held through Slow mode's cooldown
+-- (`prompt.heldFor` seconds) is locked the same way, as "Greet (4:32)".
 function Prompts:Show(prompts, handlers, lockedFor)
     if type(self.environment.CreateFrame) ~= "function" then
         return false
@@ -378,8 +389,12 @@ function Prompts:Show(prompts, handlers, lockedFor)
             local row = self:row(index)
             row.player = prompt.player
             row.name:SetText(GreetPrompts.NameText(prompt.label, prompt.friendTier))
-            local locked = type(lockedFor) == "number" and lockedFor > 0
-            row.greet:SetText(GreetPrompts.Label(prompt.category, lockedFor))
+            local waitFor = type(lockedFor) == "number" and lockedFor or 0
+            if type(prompt.heldFor) == "number" and prompt.heldFor > waitFor then
+                waitFor = prompt.heldFor
+            end
+            local locked = waitFor > 0
+            row.greet:SetText(GreetPrompts.Label(prompt.category, waitFor))
             row.greet:SetWidth(fittedWidth(row.greet) or self.buttonWidth)
             if type(row.greet.SetEnabled) == "function" then
                 row.greet:SetEnabled(not locked)
