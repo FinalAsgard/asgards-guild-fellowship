@@ -514,10 +514,17 @@ function Greet:LockedFor(now)
     return math.ceil(self.readyAt - now)
 end
 
+-- Whether group friends are highlighted, and get Guild Greet's perks: the
+-- user's setting, on without saved data.
+function Greet:HighlightsFriends()
+    local store = self.store()
+    return store == nil or store:GreetHighlightFriends()
+end
+
 -- The group friend tier (GroupFriends) of the player character `key`
--- belongs to, or nil.
+-- belongs to, or nil, as is everyone while highlighting is off.
 function Greet:FriendTier(key)
-    if self.friendTier == nil then
+    if self.friendTier == nil or not self:HighlightsFriends() then
         return nil
     end
     local ok, tier = pcall(self.friendTier, key)

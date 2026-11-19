@@ -1638,3 +1638,38 @@ test.test("guild greet: without a group friend lookup, or when it fails, nobody 
     test.assertEqual(1, #world.shown)
     test.assertEqual(nil, world.shown[1].friendTier)
 end)
+
+test.test("guild greet: highlighting group friends is on by default, saved, and an unusable value is left alone", function()
+    local world = setup("Retail")
+
+    test.assertTrue(world.store:GreetHighlightFriends())
+    test.assertTrue(world.greet:HighlightsFriends())
+    test.assertTrue(world.store:SetGreetHighlightFriends(false))
+    test.assertFalse(world.database.greet.highlightFriends)
+    test.assertFalse(world.addon.FellowshipStore.Create(world.database):GreetHighlightFriends())
+    test.assertFalse(world.greet:HighlightsFriends())
+    test.assertTrue(world.store:SetGreetHighlightFriends(true))
+    test.assertTrue(world.store:GreetHighlightFriends())
+
+    test.assertFalse(world.store:SetGreetHighlightFriends("off"))
+    world.database.greet.highlightFriends = "no"
+    test.assertTrue(world.store:GreetHighlightFriends())
+    test.assertFalse(world.store:SetGreetHighlightFriends(false))
+    test.assertEqual("no", world.database.greet.highlightFriends)
+end)
+
+test.test("guild greet: with highlighting off, prompts carry no group friend tier until it's back on", function()
+    local world = setup("Retail")
+    world.options.friendTier = function()
+        return "top5"
+    end
+    reload(world)
+    world.store:SetGreetHighlightFriends(false)
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(nil, world.shown[1].friendTier)
+
+    world.store:SetGreetHighlightFriends(true)
+    world.greet:Refresh()
+    test.assertEqual("top5", world.shown[1].friendTier)
+end)

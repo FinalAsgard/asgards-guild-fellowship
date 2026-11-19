@@ -618,6 +618,30 @@ if clientProfile.supported then
             return true
         end,
     })
+    settings:Add("guildGreet", {
+        id = "greetHighlightFriends",
+        kind = "toggle",
+        label = "Highlight group friends",
+        info = function()
+            return "On by default. Players you've grouped with show in blue on their prompts. The ones you've " ..
+                "grouped with 4 or more times get a star too, and your 5 most grouped-with players a star and " ..
+                "a purple name. It only uses your own party history, which is never shared."
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:GreetHighlightFriends()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetHighlightFriends(enabled) then
+                return nil, "the saved setting is unreadable, so it stays on"
+            end
+            return true
+        end,
+    })
     -- Not saved, and only while the master frame or the options are open:
     -- closing either, or a reload, locks the prompts again.
     settings:Add("guildGreet", {
@@ -3699,6 +3723,8 @@ if clientProfile.supported then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
         elseif id == "greetInInstances" then
             guildGreet:OnZoneChanged()
+        elseif id == "greetHighlightFriends" then
+            guildGreet:Refresh()
         elseif entry ~= nil and entry.category ~= nil then
             guildGreet:OnCategoryChanged(entry.category, value)
         end

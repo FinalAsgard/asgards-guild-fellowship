@@ -566,6 +566,28 @@ function Store:SetGreetInInstances(enabled)
     return true
 end
 
+-- Whether greet prompts mark the user's group friends (GroupFriends) and
+-- give them Guild Greet's perks. On unless turned off; unusable saved data
+-- counts as on.
+function Store:GreetHighlightFriends()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    return type(state) ~= "table" or state.highlightFriends ~= false
+end
+
+-- Turns group friend highlighting on or off. An unusable existing value is
+-- left alone.
+function Store:SetGreetHighlightFriends(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.highlightFriends ~= nil and type(state.highlightFriends) ~= "boolean") then
+        return false
+    end
+    state.highlightFriends = enabled
+    return true
+end
+
 local function isGreetCap(value)
     return type(value) == "number" and value == math.floor(value)
         and value >= FellowshipStore.GREET_CAP_MIN and value <= FellowshipStore.GREET_CAP_MAX
