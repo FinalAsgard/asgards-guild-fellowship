@@ -364,13 +364,13 @@ test.test("an officer catches an edit relayed in their name that they never made
 
     forger.session:Send({ t = "facts", facts = {
         { kind = "main", character = "alt2-area52", main = "anvil-area52", at = NOW + 30, by = OFFICER },
-        { kind = "alias", character = OFFICER, alias = "Fake", at = NOW + 30, by = OFFICER },
+        { kind = "main", character = "alt4-area52", main = "anvil-area52", at = NOW + 30, by = OFFICER },
         link("alt3-area52"),
     } })
     deliver(network)
     -- Until the correction arrives, a member can't tell it's forged.
     test.assertEqual(OFFICER, mainOf(officer, "alt2-area52"), "the officer never applies it")
-    test.assertEqual(nil, officer.partition:GetPlayer(officer.partition:GetCharacter(OFFICER).player).alias)
+    test.assertEqual(OFFICER, mainOf(officer, "alt4-area52"))
 
     test.assertEqual(1, #officer.forgeries)
     test.assertEqual(2, officer.forgeries[1].count)
@@ -385,11 +385,36 @@ test.test("an officer catches an edit relayed in their name that they never made
     test.assertTrue(correction.facts[1].at > NOW + 30, "stamped newer than the forgery")
 
     test.assertEqual(OFFICER, mainOf(member, "alt2-area52"))
-    test.assertEqual(nil, member.partition:GetPlayer(member.partition:GetCharacter(OFFICER).player).alias)
+    test.assertEqual(OFFICER, mainOf(member, "alt4-area52"))
     -- The officer's own correction isn't mistaken for a forgery later.
     forger.session:Send({ t = "facts", facts = correction.facts })
     deliver(network)
     test.assertEqual(1, #officer.forgeries)
+end)
+
+test.test("a relay in an officer's name about something they never edited isn't a forgery, however often it comes", function()
+    local network = newNetwork()
+    local officer = newOfficer(network)
+    local member = newClient(network, "Wrench-Area52")
+    local other = newClient(network, "Hammer-Area52")
+    -- The officer's alias edit, as a roster that drifted names the player,
+    -- and a guild log date this officer's client never kept.
+    local facts = {
+        { kind = "alias", character = OFFICER, alias = "Talespin", at = NOW + 30, by = OFFICER },
+        { kind = "lastPromotion", character = "alt2-area52", time = NOW - 3600, source = "log", rank = 8,
+            tolerance = 7200, promoter = OFFICER, at = NOW + 30, by = OFFICER },
+    }
+    local sentBefore = #officer.sent
+
+    member.session:Send({ t = "facts", facts = copy(facts) })
+    deliver(network)
+    other.session:Send({ t = "facts", facts = copy(facts) })
+    deliver(network)
+
+    test.assertEqual(0, #officer.forgeries, "no warning")
+    test.assertEqual(0, #network.addon.SyncLedger.Create(officer.partition):Forgeries(), "nothing logged")
+    test.assertEqual(sentBefore, #officer.sent, "nothing to correct")
+    test.assertEqual("Talespin", officer.partition:GetPlayer(officer.partition:GetCharacter(OFFICER).player).alias)
 end)
 
 test.test("an edit in an officer's name dated far ahead is refused, and its date never reaches a correction", function()

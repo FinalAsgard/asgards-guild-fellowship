@@ -1,8 +1,8 @@
 local _, addon = ...
 
 -- An officer's record of the facts (SyncFacts) they wrote, used to catch
--- forged edits: a relayed fact naming this officer as its author that the
--- ledger doesn't know was never made by them.
+-- forged edits: a relayed fact naming this officer as its author that
+-- overrides an edit the ledger holds with a newer one they never made.
 --
 -- Stored in the partition:
 --   ledger    { since = time, facts = { ["main|key"] = { at, main },
@@ -111,9 +111,18 @@ function Ledger:StampedAlias(data, character, at)
 end
 
 -- Whether `fact`, naming this officer as its author, is one they never
--- wrote: newer than anything they wrote about that thing. Facts older than
+-- wrote: newer than an edit they made about that thing. Facts older than
 -- the ledger itself, or older than this officer's own newer edit, can't
 -- change anything they hold and aren't judged.
+--
+-- A fact about something the ledger holds no edit for isn't forged: it
+-- overrides nothing this officer wrote, and with nothing of their own to
+-- send back it could never be corrected, so it would be caught again from
+-- every guildmate who relays it. Rosters drift apart honestly (a player
+-- named by another main, a guild log date this client never kept), and
+-- those facts are applied like any other officer's. For an alias, the
+-- officer's own stamp on that player, whichever main named it then, counts
+-- as an edit they made.
 --
 -- A fact carrying a stamp this officer did write isn't forged, even when
 -- its value differs: facts are rebuilt from each roster, so a player whose
@@ -132,11 +141,18 @@ function Ledger:IsForged(fact, now)
     if fact.kind == addon.SyncFacts.KIND_ALIAS and self:StampedAlias(data, fact.character, fact.at) then
         return false
     end
+    local heldAt
     local held = data.facts[keyOf(fact)]
-    if type(held) ~= "table" or not isTime(held.at) then
-        return true
+    if type(held) == "table" and isTime(held.at) then
+        heldAt = held.at
     end
-    return fact.at > held.at
+    if fact.kind == addon.SyncFacts.KIND_ALIAS then
+        local at, by = self.partition:GetAliasStamp(fact.character)
+        if by == fact.by and isTime(at) and (heldAt == nil or at > heldAt) then
+            heldAt = at
+        end
+    end
+    return heldAt ~= nil and fact.at > heldAt
 end
 
 -- Whether `fact`, in this officer's name, carries the very stamp this
