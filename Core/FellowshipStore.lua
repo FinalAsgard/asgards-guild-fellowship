@@ -588,6 +588,28 @@ function Store:SetGreetHighlightFriends(enabled)
     return true
 end
 
+-- Whether Guild Greet only prompts for players the user has grouped with
+-- (any GroupFriends tier). Off unless turned on; unusable saved data counts
+-- as off.
+function Store:GreetOnlyGrouped()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    return type(state) == "table" and state.onlyGrouped == true
+end
+
+-- Turns "only greet players I've grouped with" on or off. An unusable
+-- existing value is left alone.
+function Store:SetGreetOnlyGrouped(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.onlyGrouped ~= nil and type(state.onlyGrouped) ~= "boolean") then
+        return false
+    end
+    state.onlyGrouped = enabled
+    return true
+end
+
 local function isGreetCap(value)
     return type(value) == "number" and value == math.floor(value)
         and value >= FellowshipStore.GREET_CAP_MIN and value <= FellowshipStore.GREET_CAP_MAX

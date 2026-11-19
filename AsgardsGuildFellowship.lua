@@ -642,6 +642,30 @@ if clientProfile.supported then
             return true
         end,
     })
+    settings:Add("guildGreet", {
+        id = "greetOnlyGrouped",
+        kind = "toggle",
+        label = "Only greet players I've grouped with",
+        info = function()
+            return "Off by default. When on, you only get greet prompts, welcomes to the guild included, for " ..
+                "players you've grouped with at least once. Turning it on closes waiting prompts for everyone " ..
+                "else. It works whether or not \"Highlight group friends\" is on."
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store ~= nil and store:GreetOnlyGrouped()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetOnlyGrouped(enabled) then
+                return nil, "the saved setting is unreadable, so it stays off"
+            end
+            return true
+        end,
+    })
     -- Not saved, and only while the master frame or the options are open:
     -- closing either, or a reload, locks the prompts again.
     settings:Add("guildGreet", {
@@ -3723,7 +3747,7 @@ if clientProfile.supported then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
         elseif id == "greetInInstances" then
             guildGreet:OnZoneChanged()
-        elseif id == "greetHighlightFriends" then
+        elseif id == "greetHighlightFriends" or id == "greetOnlyGrouped" then
             guildGreet:Refresh()
         elseif entry ~= nil and entry.category ~= nil then
             guildGreet:OnCategoryChanged(entry.category, value)

@@ -37,6 +37,11 @@ local _, addon = ...
 -- 5) are held instead: their prompts stay, and their arrivals are prompted,
 -- with Greet locked until the cooldown ends. They still close when the
 -- player logs off, leaves, or has had their (doubled) cap.
+--
+-- With "only greet players I've grouped with" on, highlighting or not, a
+-- player the user never grouped with gets no prompt of any kind: checked
+-- when a prompt is raised and again at each draw, so turning it on closes
+-- their waiting prompts.
 local GuildGreet = {
     -- The "greeted" message older versions (v0.9.4 and before) close their
     -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
@@ -398,7 +403,7 @@ function Greet:OnPresence(kind, rawName)
     -- A category with no greetings has nothing to say, so it never prompts,
     -- and a player who has had enough greetings already isn't prompted.
     -- During Slow mode's cooldown only joins and held friends are.
-    if prompt == nil or #self:Library():Greetings(prompt.category) == 0
+    if prompt == nil or #self:Library():Greetings(prompt.category) == 0 or self:NeverGrouped(key)
         or (prompt.category ~= addon.GreetPolicy.JOIN and self:SlowFor(now) > 0 and not self:HasPerks(key))
         or self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now)
     then
@@ -543,11 +548,50 @@ end
 -- The group friend tier (GroupFriends) of the player character `key`
 -- belongs to, or nil, as is everyone while highlighting is off.
 function Greet:FriendTier(key)
-    if self.friendTier == nil or not self:HighlightsFriends() then
+    if not self:HighlightsFriends() then
+        return nil
+    end
+    return self:groupedTier(key)
+end
+
+-- The group friend tier of `key`'s player, highlighting or not.
+function Greet:groupedTier(key)
+    if self.friendTier == nil then
         return nil
     end
     local ok, tier = pcall(self.friendTier, key)
     return ok and tier or nil
+end
+
+-- Whether the user only greets players they've grouped with: off without
+-- saved data.
+function Greet:OnlyGrouped()
+    local store = self.store()
+    return store ~= nil and store:GreetOnlyGrouped()
+end
+
+-- True when the user only greets players they've grouped with and never
+-- grouped with the player character `key` belongs to.
+function Greet:NeverGrouped(key)
+    return self:OnlyGrouped() and self:groupedTier(key) == nil
+end
+
+-- Closes the prompts, shown or waiting to show, for players the user never
+-- grouped with while they only greet those they have. Returns true when any
+-- closed.
+function Greet:dropUngrouped(now)
+    if not self:OnlyGrouped() then
+        return false
+    end
+    local removed = false
+    local prompts = self.queue:All(now)
+    local index
+    for index = 1, #prompts do
+        if self:NeverGrouped(prompts[index].key) then
+            removed = self.queue:Remove(prompts[index].player) or removed
+        end
+    end
+    return removed
 end
 
 -- Draws the waiting prompts, with Greet locked while a cooldown runs. Each
@@ -560,6 +604,7 @@ function Greet:Refresh()
         return
     end
     self:dropDeparted(now)
+    self:dropUngrouped(now)
     self:dropSlowed(now)
     local prompts = self.queue:Visible(now)
     -- A held prompt's Greet stays locked until Slow mode's cooldown ends.
@@ -600,7 +645,7 @@ end
 -- sent, or nil.
 function Greet:Greet(player)
     local now = self.now()
-    if type(now) == "number" and (self:dropDeparted(now) or self:dropSlowed(now)) then
+    if type(now) == "number" and (self:dropDeparted(now) or self:dropUngrouped(now) or self:dropSlowed(now)) then
         self:Refresh()
     end
     local prompt = self.queue:Get(player)
