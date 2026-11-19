@@ -37,6 +37,7 @@ local function load()
         "Core/GreetPromptQueue.lua",
         "Core/GreetTally.lua",
         "Core/GreetWeight.lua",
+        "Core/GroupFriends.lua",
         "Core/GuildGreet.lua"
     )
 end
@@ -1672,4 +1673,81 @@ test.test("guild greet: with highlighting off, prompts carry no group friend tie
     world.store:SetGreetHighlightFriends(true)
     world.greet:Refresh()
     test.assertEqual("top5", world.shown[1].friendTier)
+end)
+
+-- Group friend caps -------------------------------------------------------------
+
+-- A Retail Guild Greet whose group friend tiers are `world.tiers`, by name
+-- (world.names' keys), with a greet cap of 1.
+local function withFriends(tiers)
+    local world = setup("Retail")
+    local _, normalizer = world.options.context()
+    world.tiers = {}
+    local name, tier
+    for name, tier in pairs(tiers) do
+        world.tiers[normalizer:Key(world.names[name])] = tier
+    end
+    world.options.friendTier = function(key)
+        return world.tiers[key]
+    end
+    reload(world)
+    world.store:SetGreetCap(1)
+    return world
+end
+
+test.test("guild greet: a Frequent or Top 5 friend's prompt stays open up to twice the greet cap", function()
+    local _, tier
+    for _, tier in ipairs({ "frequent", "top5" }) do
+        local world = withFriends({ bolt = tier })
+        world.greet:OnPresence("online", world.names.bolt)
+
+        test.assertTrue(greeted(world, "bishop", world.names.bolt))
+        test.assertEqual(1, #world.shown, tier)
+        test.assertTrue(greeted(world, "anvil", world.names.bolt))
+        test.assertEqual(0, #world.shown, tier)
+    end
+end)
+
+test.test("guild greet: a Grouped-only or never-grouped player's prompt closes at the normal cap", function()
+    local world = withFriends({ bolt = "grouped" })
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+
+    test.assertTrue(greeted(world, "bishop", world.names.bolt))
+    test.assertTrue(greeted(world, "bishop", world.names.rust))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a friend's join prompt stays open up to twice the welcome cap", function()
+    local world = withFriends({ newt = "top5" })
+    world.store:SetGreetNumber("welcomeCap", 1)
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual(1, #world.shown)
+
+    test.assertTrue(greeted(world, "bishop", world.names.newt, "welcome Newt!"))
+    test.assertEqual(1, #world.shown)
+    test.assertTrue(greeted(world, "bolt", world.names.newt, "welcome Newt!"))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: Greet on a friend's prompt still posts while they're under the doubled cap", function()
+    local world = withFriends({ bolt = "frequent" })
+    world.greet:OnPresence("online", world.names.bolt)
+    greeted(world, "bishop", world.names.bolt)
+
+    test.assertEqual(1, #world.shown)
+    test.assertTrue(world.greet:Greet(world.shown[1].player) ~= nil)
+    test.assertEqual(1, #world.sent)
+end)
+
+test.test("guild greet: with highlighting off, a friend's prompt uses the normal cap", function()
+    local world = withFriends({ bolt = "top5", newt = "top5" })
+    world.store:SetGreetHighlightFriends(false)
+    world.store:SetGreetNumber("welcomeCap", 1)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("join", world.names.newt)
+
+    test.assertTrue(greeted(world, "bishop", world.names.bolt))
+    test.assertTrue(greeted(world, "bishop", world.names.newt, "welcome Newt!"))
+    test.assertEqual(0, #world.shown)
 end)

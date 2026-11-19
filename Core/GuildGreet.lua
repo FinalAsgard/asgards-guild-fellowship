@@ -164,13 +164,22 @@ end
 
 -- How many greetings a player must already have before the user's prompt
 -- for them closes: the welcome cap for someone who just joined (a "join"
--- prompt), the greeting cap otherwise.
-function Greet:Cap(category)
+-- prompt), the greeting cap otherwise. Twice that for a group friend with
+-- the perks (Frequent or Top 5) while highlighting is on; `key` is the
+-- prompt's character.
+function Greet:Cap(category, key)
+    local cap
     if category == addon.GreetPolicy.JOIN then
-        return self:Setting("welcomeCap")
+        cap = self:Setting("welcomeCap")
+    else
+        local store = self.store()
+        cap = store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
     end
-    local store = self.store()
-    return store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
+    local tier = key and self:FriendTier(key)
+    if tier ~= nil and addon.GroupFriends.HasPerks(tier) then
+        cap = cap * 2
+    end
+    return cap
 end
 
 -- A Guild Greet number setting (FellowshipStore.GREET_NUMBERS), or its
@@ -381,7 +390,7 @@ function Greet:OnPresence(kind, rawName)
     -- During Slow mode's cooldown only joins are.
     if prompt == nil or #self:Library():Greetings(prompt.category) == 0
         or (prompt.category ~= addon.GreetPolicy.JOIN and self:SlowFor(now) > 0)
-        or self.tally:Reached(prompt.player, self:Cap(prompt.category), now)
+        or self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now)
     then
         return
     end
@@ -579,7 +588,7 @@ function Greet:Greet(player)
     end
     self.queue:Remove(player)
     local text
-    if not self.tally:Reached(prompt.player, self:Cap(prompt.category), now) then
+    if not self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now) then
         text = self:post(prompt, now)
     end
     if text ~= nil then
@@ -697,7 +706,7 @@ function Greet:OnGreeted(message, sender)
     if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
         return false
     end
-    if prompt ~= nil and self.tally:Reached(player, self:Cap(prompt.category), now) and self.queue:Remove(player) then
+    if prompt ~= nil and self.tally:Reached(player, self:Cap(prompt.category, prompt.key), now) and self.queue:Remove(player) then
         self:Refresh()
     end
     return true
@@ -799,7 +808,7 @@ function Greet:OnGuildChat(message, sender)
             local before = self.tally:Count(prompt.player, now)
             if self.tally:Add(prompt.player, greeter, prompt.raisedAt, now) > before then
                 counted = counted + 1
-                if self.tally:Reached(prompt.player, self:Cap(prompt.category), now) then
+                if self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now) then
                     closed = self.queue:Remove(prompt.player) or closed
                 end
             end
