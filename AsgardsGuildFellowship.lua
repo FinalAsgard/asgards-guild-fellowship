@@ -3500,6 +3500,30 @@ if clientProfile.supported then
         end
         return count
     end
+    -- The user's group friends in the current guild, from their own party
+    -- history. Worked out again when the history changes or saved data does
+    -- (a scan linking an alt to its main changes who counts as whom).
+    local groupFriends
+    local function friendTier(key)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        if groupFriends == nil or groupFriends.partition.key ~= partition.key then
+            groupFriends = addon.GroupFriends.Create({
+                partition = partition,
+                playerOf = function(characterKey)
+                    local character = groupFriends.partition:GetCharacter(characterKey)
+                    return character and character.player or nil
+                end,
+                version = function()
+                    return rosterController.dataRevision
+                end,
+            })
+        end
+        groupFriends.partition = partition
+        return groupFriends:TierOf(key)
+    end
     guildGreet = addon.GuildGreet.Create({
         context = function()
             local guild, partition, normalizer = rosterController:QuietContext()
@@ -3538,6 +3562,7 @@ if clientProfile.supported then
         slowModeMinutes = function()
             return slowModeConfig and slowModeConfig:Minutes() or 0
         end,
+        friendTier = friendTier,
         view = greetPrompts,
     })
     -- The Guild Recruit window stays where it's dragged; the place is saved

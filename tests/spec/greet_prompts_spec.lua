@@ -231,7 +231,7 @@ test.test("greet prompts: each button fits its own label, and every box is as wi
     test.assertEqual(#"Welcome to the Guild" * 6 + 24, rows[2].greet.width)
     -- The boxes match, with room for "Welcome to the Guild (88)".
     local room = #"Welcome to the Guild (88)" * 6 + 24
-    test.assertEqual(14 + 118 + 10 + room + 6 + 24 + 6, rows[1].frame.width)
+    test.assertEqual(14 + 16 + 118 + 10 + room + 6 + 24 + 6, rows[1].frame.width)
     test.assertEqual(rows[1].frame.width, rows[2].frame.width)
     test.assertEqual(rows[1].frame.width, world.prompts.anchor.width)
 
@@ -333,4 +333,26 @@ test.test("greet prompts: a failing frame call hides the Slow mode notice withou
     world.slowMinutes = "five"
     world.prompts:Show({ prompt(1, "login") }, {})
     test.assertFalse(world.prompts.notice.shown)
+end)
+
+test.test("greet prompts: group friends' names are marked by tier, everyone else's left as they are", function()
+    local world, addon = newPrompts(nil)
+    local GreetPrompts = addon.GreetPrompts
+    local star = GreetPrompts.STAR
+
+    test.assertEqual("Bolt", GreetPrompts.NameText("Bolt", nil))
+    test.assertEqual("|cff4da6ffBolt|r", GreetPrompts.NameText("Bolt", "grouped"))
+    test.assertEqual(star .. "|cff4da6ffBolt|r", GreetPrompts.NameText("Bolt", "frequent"))
+    test.assertEqual(star .. "|cffa335eeBolt|r", GreetPrompts.NameText("Bolt", "top5"))
+    test.assertContains(star, "UI-RaidTargetingIcon_1")
+
+    local plain, top = prompt(1, "login"), prompt(2, "login")
+    top.friendTier = "top5"
+    world.prompts:Show({ plain, top }, {})
+
+    test.assertEqual("Player 1", world.prompts.rows[1].name.text)
+    test.assertEqual(star .. "|cffa335eePlayer 2|r", world.prompts.rows[2].name.text)
+    -- The Greet button keeps its normal look.
+    test.assertEqual("Greet", world.prompts.rows[2].greet.text)
+    test.assertEqual(world.prompts.rows[1].greet.text, world.prompts.rows[2].greet.text)
 end)

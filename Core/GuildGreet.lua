@@ -80,6 +80,9 @@ Greet.__index = Greet
 --                 off. Optional.
 --   slowModeMinutes function() -> the guild's Slow mode minutes (0 is
 --                 off). Optional; off without it.
+--   friendTier    function(key) -> the group friend tier (GroupFriends) of
+--                 the player character `key` belongs to, or nil. Optional;
+--                 nobody is a group friend without it.
 --   view         { Show = function(view, prompts, handlers) }: draws the
 --                 prompts; handlers.greet(player) and handlers.close(player)
 function GuildGreet.Create(options)
@@ -101,6 +104,7 @@ function GuildGreet.Create(options)
             return false
         end,
         slowModeMinutes = options.slowModeMinutes,
+        friendTier = options.friendTier,
         queue =addon.GreetPromptQueue.Create(),
         -- Greetings posted in a row, and when Greet unlocks.
         streak = 0,
@@ -510,8 +514,20 @@ function Greet:LockedFor(now)
     return math.ceil(self.readyAt - now)
 end
 
--- Draws the waiting prompts, with Greet locked while a cooldown runs. A
--- cooldown that ended with no prompt showing resets the streak.
+-- The group friend tier (GroupFriends) of the player character `key`
+-- belongs to, or nil.
+function Greet:FriendTier(key)
+    if self.friendTier == nil then
+        return nil
+    end
+    local ok, tier = pcall(self.friendTier, key)
+    return ok and tier or nil
+end
+
+-- Draws the waiting prompts, with Greet locked while a cooldown runs. Each
+-- prompt's group friend tier is looked up as it's drawn, so a change shows
+-- at the next draw. A cooldown that ended with no prompt showing resets the
+-- streak.
 function Greet:Refresh()
     local now = self.now()
     if type(now) ~= "number" or self.view == nil then
@@ -520,6 +536,10 @@ function Greet:Refresh()
     self:dropDeparted(now)
     self:dropSlowed(now)
     local prompts = self.queue:Visible(now)
+    local index
+    for index = 1, #prompts do
+        prompts[index].friendTier = self:FriendTier(prompts[index].key)
+    end
     local lockedFor = self:LockedFor(now)
     if lockedFor == 0 then
         self.readyAt = nil

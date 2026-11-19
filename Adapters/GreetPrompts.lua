@@ -4,7 +4,10 @@ local _, addon = ...
 -- top, each with just the player's name, a button named for the kind of
 -- greeting ("Welcome Back") and sized to its text, and a close button. The
 -- boxes are all as wide as the longest label needs, so the stack lines up;
--- a shorter button leaves the name more room.
+-- a shorter button leaves the name more room. A group friend's name is
+-- marked by their tier (GroupFriends): blue when grouped with, the raid
+-- target star before it too when Frequent, and the star with the name in
+-- purple for the Top 5.
 -- The anchor defaults to the left side of the screen (the right side holds
 -- the quest log). Unlocking it shows a handle above the stack that drags it
 -- anywhere; the new place is saved when the drag ends. While Slow mode is on
@@ -16,8 +19,19 @@ local GreetPrompts = {
     HEIGHT = 40,
     GAP = 8,
     PADDING = 14,
-    -- Room for the player's name, between the padding and the button.
+    -- Room for the player's name, between the padding and the button, and
+    -- for the star before a group friend's name.
     NAME_WIDTH = 118,
+    STAR_WIDTH = 16,
+    -- The game's raid target star, drawn inline at the text's height.
+    STAR = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t ",
+    -- How each group friend tier (GroupFriends) marks the name: a color
+    -- (hex RGB) and whether the star goes first.
+    FRIEND_MARKS = {
+        grouped = { color = "4da6ff" },
+        frequent = { color = "4da6ff", star = true },
+        top5 = { color = "a335ee", star = true },
+    },
     -- The greeting button's width when the client can't measure its labels.
     BUTTON_WIDTH = 170,
     -- Room around a button's label.
@@ -50,6 +64,21 @@ function GreetPrompts.Label(category, lockedFor)
         return label .. " (" .. lockedFor .. ")"
     end
     return label
+end
+
+-- The name as a prompt shows it: `label`, marked for group friend `tier`
+-- (nil for none, shown just as it is).
+function GreetPrompts.NameText(label, tier)
+    label = label or ""
+    local mark = tier and GreetPrompts.FRIEND_MARKS[tier]
+    if mark == nil then
+        return label
+    end
+    local text = "|cff" .. mark.color .. label .. "|r"
+    if mark.star then
+        text = GreetPrompts.STAR .. text
+    end
+    return text
 end
 
 -- The Slow mode notice's text for `minutes`.
@@ -127,10 +156,10 @@ function Prompts:measureButton(parent)
     return math.ceil(width) + GreetPrompts.BUTTON_TEXT_PADDING
 end
 
--- A prompt's width: padding, the name, room for the widest greeting button,
--- and Close.
+-- A prompt's width: padding, the name with room for a star, room for the
+-- widest greeting button, and Close.
 function Prompts:width()
-    return GreetPrompts.PADDING + GreetPrompts.NAME_WIDTH + 10 + self.buttonWidth + 6
+    return GreetPrompts.PADDING + GreetPrompts.STAR_WIDTH + GreetPrompts.NAME_WIDTH + 10 + self.buttonWidth + 6
         + GreetPrompts.CLOSE_SIZE + 6
 end
 
@@ -348,7 +377,7 @@ function Prompts:Show(prompts, handlers, lockedFor)
             local prompt = prompts[index]
             local row = self:row(index)
             row.player = prompt.player
-            row.name:SetText(prompt.label or "")
+            row.name:SetText(GreetPrompts.NameText(prompt.label, prompt.friendTier))
             local locked = type(lockedFor) == "number" and lockedFor > 0
             row.greet:SetText(GreetPrompts.Label(prompt.category, lockedFor))
             row.greet:SetWidth(fittedWidth(row.greet) or self.buttonWidth)

@@ -1602,3 +1602,39 @@ test.test("guild greet: the Slow mode press time is saved account-wide, and an u
     test.assertEqual(nil, world.store:GreetSlowPressedAt())
     test.assertFalse(world.store:SetGreetSlowPressedAt(START))
 end)
+
+test.test("guild greet: each prompt carries its player's group friend tier, looked up as it's drawn", function()
+    local world = setup("Retail")
+    world.tiers = {}
+    world.options.friendTier = function(key)
+        return world.tiers[key]
+    end
+    reload(world)
+    local _, normalizer = world.options.context()
+    world.tiers[normalizer:Key(world.names.bolt)] = "frequent"
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+
+    test.assertEqual("frequent", world.shown[1].friendTier)
+    test.assertEqual(nil, world.shown[2].friendTier)
+
+    -- A tier that changes shows at the next draw.
+    world.tiers[normalizer:Key(world.names.bishop)] = "grouped"
+    world.greet:Refresh()
+    test.assertEqual("grouped", world.shown[2].friendTier)
+end)
+
+test.test("guild greet: without a group friend lookup, or when it fails, nobody has a tier", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(nil, world.shown[1].friendTier)
+
+    world.options.friendTier = function()
+        error("no history")
+    end
+    reload(world)
+    world.greet:OnPresence("online", world.names.bishop)
+    test.assertEqual(1, #world.shown)
+    test.assertEqual(nil, world.shown[1].friendTier)
+end)
