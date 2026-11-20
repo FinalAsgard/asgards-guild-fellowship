@@ -749,7 +749,7 @@ The production add-on lives in `AsgardsGuildFellowship` (managed by CurseForge) 
 
 The development build also has testing commands the production build leaves out:
 
-- `/agfdev greettest` shows a greet prompt right away for a guildmate of each group friend tier (Grouped, Frequent and Top 5), picked from your party history, so you can see how they look without waiting for one to log in. **Greet** on a test prompt posts nothing to guild chat and just closes it. `/agfdev greettest hold` shows the Frequent and Top 5 prompts held as in Slow mode, counting down 30 seconds.
+- `/agfdev greettest` shows a greet prompt right away in each look: never grouped with, Grouped, Frequent and Top 5, so you can see them without waiting for a friend to log in. Each tier shows a guildmate really in it when your party history has one, and otherwise another guildmate drawn in that tier's look (chat marks them "stand-in"). **Greet** on a test prompt posts nothing to guild chat and just closes it. `/agfdev greettest hold` shows the Frequent and Top 5 prompts held as in Slow mode, counting down 30 seconds.
 - To test with your production party history, quit WoW, copy `AsgardsGuildFellowship.lua` in `WTF/Account/<ACCOUNT>/SavedVariables/` to `AsgardsGuildFellowshipDev.lua`, and change its first line to `AsgardsGuildFellowshipDevDB = {`.
 
 ## Running the tests

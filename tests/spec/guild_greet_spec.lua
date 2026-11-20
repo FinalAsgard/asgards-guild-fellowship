@@ -2036,7 +2036,7 @@ test.test("guild greet: a test prompt shows at once with its friend mark, and Gr
     local world = withFriends({ bolt = "grouped" })
     local _, normalizer = world.options.context()
 
-    test.assertEqual(1, world.greet:Preview({ normalizer:Key(world.names.bolt) }))
+    test.assertEqual(1, world.greet:Preview({ { key = normalizer:Key(world.names.bolt), tier = "grouped" } }))
 
     test.assertEqual(1, #world.shown)
     test.assertEqual("grouped", world.shown[1].friendTier)
@@ -2050,7 +2050,10 @@ test.test("guild greet: a held test prompt counts down for a Frequent or Top 5 f
     local world = withFriends({ anvil = "frequent", bolt = "grouped" })
     local _, normalizer = world.options.context()
 
-    world.greet:Preview({ normalizer:Key(world.names.anvil), normalizer:Key(world.names.bolt) }, 30)
+    world.greet:Preview({
+        { key = normalizer:Key(world.names.anvil), tier = "frequent" },
+        { key = normalizer:Key(world.names.bolt), tier = "grouped" },
+    }, 30)
 
     test.assertEqual(30, shownFor(world, "anvil").heldFor)
     test.assertEqual(nil, shownFor(world, "bolt").heldFor)
@@ -2073,9 +2076,26 @@ test.test("guild greet: Slow mode and the greet cap leave test prompts alone", f
     advance(world, 10)
     world.greet:Greet(shownFor(world, "anvil").player)
 
-    world.greet:Preview({ normalizer:Key(world.names.bolt) })
+    world.greet:Preview({ { key = normalizer:Key(world.names.bolt), tier = "grouped" } })
     greeted(world, "bishop", world.names.bolt)
 
     test.assertTrue(shownFor(world, "bolt") ~= nil)
     test.assertEqual(nil, shownFor(world, "bolt").heldFor)
+end)
+
+test.test("guild greet: a test prompt is drawn in the tier it's given, not the player's own, while highlighting is on", function()
+    local world = withFriends({})
+    local _, normalizer = world.options.context()
+
+    world.greet:Preview({
+        { key = normalizer:Key(world.names.bolt), tier = "top5" },
+        { key = normalizer:Key(world.names.rust), tier = nil },
+    }, 30)
+
+    test.assertEqual("top5", shownFor(world, "bolt").friendTier)
+    test.assertEqual(30, shownFor(world, "bolt").heldFor)
+    test.assertEqual(nil, shownFor(world, "rust").friendTier)
+    world.store:SetGreetHighlightFriends(false)
+    world.greet:Refresh()
+    test.assertEqual(nil, shownFor(world, "bolt").friendTier)
 end)

@@ -3618,18 +3618,21 @@ if clientProfile.supported then
         friendTier = friendTier,
         view = greetPrompts,
     })
-    -- Dev build only: test prompts for a real guildmate of each group
-    -- friend tier, from the user's party history, since waiting for one to
-    -- log in can take days. Greet on them posts nothing.
+    -- Dev build only: a test prompt in each group friend tier's look (and
+    -- one never grouped with), since waiting for a friend to log in can take
+    -- days. Each tier shows a guildmate really in it when the party history
+    -- has one, else another guildmate drawn in that tier's look. Greet on
+    -- them posts nothing.
     if addon.Identity.isDev then
         local PREVIEW_HOLD_SECONDS = 30
         local TIERS = {
+            { tier = nil, name = "Not grouped" },
             { tier = addon.GroupFriends.GROUPED, name = "Grouped" },
             { tier = addon.GroupFriends.FREQUENT, name = "Frequent" },
             { tier = addon.GroupFriends.TOP, name = "Top 5" },
         }
         router:Register("greettest",
-            "show a test greet prompt for a guildmate of each group friend tier; Greet on them posts nothing" ..
+            "show a test greet prompt in each group friend tier's look; Greet on them posts nothing" ..
             " (greettest hold: Frequent and Top 5 shown as held in Slow mode for " .. PREVIEW_HOLD_SECONDS ..
             " seconds)",
             function(arguments)
@@ -3639,35 +3642,66 @@ if clientProfile.supported then
                     rosterController:Print("Greet test needs a guild.")
                     return
                 end
-                local samples = friends:Samples(function(key)
+                local function usable(key)
                     local character = partition:GetCharacter(key)
                     return character ~= nil and character.departed == nil and partition:IsInGuild(key)
                         and not guildGreet:IsOwn(key)
-                end)
-                local keys, shown, missing = {}, {}, {}
+                end
+                local samples = friends:Samples(usable)
+                -- One prompt per player, so each tier needs its own.
+                local usedPlayers = {}
+                local function claim(key)
+                    usedPlayers[guildGreet.policy:PlayerOf(key)] = true
+                    return key
+                end
                 local index
                 for index = 1, #TIERS do
-                    local key = samples[TIERS[index].tier]
+                    if TIERS[index].tier ~= nil and samples[TIERS[index].tier] ~= nil then
+                        claim(samples[TIERS[index].tier])
+                    end
+                end
+                -- Stand-ins: guildmates never grouped with first, so a
+                -- stand-in's real tier doesn't confuse, then anyone.
+                local others, grouped = {}, {}
+                partition:EachCharacter(function(key)
+                    if usable(key) then
+                        table.insert(friends:TierOf(key) == nil and others or grouped, key)
+                    end
+                end)
+                table.sort(others)
+                table.sort(grouped)
+                for index = 1, #grouped do
+                    table.insert(others, grouped[index])
+                end
+                local function standIn()
+                    local otherIndex
+                    for otherIndex = 1, #others do
+                        if not usedPlayers[guildGreet.policy:PlayerOf(others[otherIndex])] then
+                            return claim(others[otherIndex])
+                        end
+                    end
+                    return nil
+                end
+                local entries, shown = {}, {}
+                for index = 1, #TIERS do
+                    local key = TIERS[index].tier and samples[TIERS[index].tier] or nil
+                    local real = key ~= nil
+                    key = key or standIn()
                     if key ~= nil then
-                        table.insert(keys, key)
+                        table.insert(entries, { key = key, tier = TIERS[index].tier })
                         local rawName = partition:GetCharacter(key).name or key
-                        table.insert(shown, TIERS[index].name .. " (" .. guildGreet:Names(key, rawName).name .. ")")
-                    else
-                        table.insert(missing, TIERS[index].name)
+                        table.insert(shown, TIERS[index].name .. " (" .. guildGreet:Names(key, rawName).name ..
+                            ((real or TIERS[index].tier == nil) and "" or ", stand-in") .. ")")
                     end
                 end
                 local hold = string.lower(string.match(arguments or "", "^%s*(%S*)") or "") == "hold"
                     and PREVIEW_HOLD_SECONDS or nil
-                if guildGreet:Preview(keys, hold) == 0 then
-                    rosterController:Print("Greet test: nobody in your group history to show.")
+                if guildGreet:Preview(entries, hold) == 0 then
+                    rosterController:Print("Greet test: no guildmates to show.")
                     return
                 end
                 rosterController:Print("Greet test prompts: " .. table.concat(shown, ", ") ..
                     ". Greet on them posts nothing.")
-                if missing[1] ~= nil then
-                    rosterController:Print("Nobody in your group history is " .. table.concat(missing, " or ") ..
-                        " yet.")
-                end
                 if not guildGreet:HighlightsFriends() then
                     rosterController:Print("Highlight group friends is off, so they show without marks.")
                 end

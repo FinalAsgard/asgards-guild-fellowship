@@ -631,6 +631,9 @@ function Greet:Refresh()
     for index = 1, #prompts do
         local prompt = prompts[index]
         prompt.friendTier = self:FriendTier(prompt.key)
+        if prompt.preview and self:HighlightsFriends() then
+            prompt.friendTier = prompt.previewTier
+        end
         prompt.heldFor = nil
         if slowFor > 0 and prompt.category ~= addon.GreetPolicy.JOIN and not prompt.preview then
             prompt.heldFor = slowFor
@@ -705,12 +708,14 @@ function Greet:Greet(player)
 end
 
 -- Test prompts (the Dev build's /agfdev greettest): a login prompt for each
--- character in `keys`, shown at once and marked `preview`, so the user can
--- see how group friends look without waiting for one to log in. Greet on
--- one posts nothing and just closes it. With `holdSeconds`, a Frequent or
--- Top 5 friend's shows as held in Slow mode, counting down that long,
--- whatever the guild's Slow mode. Returns how many were raised.
-function Greet:Preview(keys, holdSeconds)
+-- of `entries` ({ key, tier }), shown at once, marked `preview`, and drawn
+-- as group friend tier `tier` (GroupFriends) whatever the player's real
+-- one, so the user can see how each tier looks without waiting for one to
+-- log in. Greet on one posts nothing and just closes it. With
+-- `holdSeconds`, a Frequent or Top 5 one shows as held in Slow mode,
+-- counting down that long, whatever the guild's Slow mode. Returns how many
+-- were raised.
+function Greet:Preview(entries, holdSeconds)
     local partition = self.context()
     local now = self.now()
     if partition == nil or type(now) ~= "number" then
@@ -718,8 +723,8 @@ function Greet:Preview(keys, holdSeconds)
     end
     local raised = 0
     local index
-    for index = 1, #keys do
-        local key = keys[index]
+    for index = 1, #entries do
+        local key = entries[index].key
         local character = partition:GetCharacter(key)
         if character ~= nil then
             local prompt = {
@@ -728,10 +733,11 @@ function Greet:Preview(keys, holdSeconds)
                 key = key,
                 rawName = character.name or key,
                 preview = true,
+                previewTier = entries[index].tier,
             }
             prompt.label = self:Names(key, prompt.rawName).name
             self.queue:Add(prompt, now, 0)
-            if type(holdSeconds) == "number" and holdSeconds > 0 and self:HasPerks(key) then
+            if type(holdSeconds) == "number" and holdSeconds > 0 and addon.GroupFriends.HasPerks(prompt.previewTier) then
                 prompt.previewHeldUntil = now + holdSeconds
                 self:holdUntil(prompt, prompt.previewHeldUntil + self.queue.lifetime, now)
             else

@@ -470,15 +470,36 @@ test.test("composed: the Dev build's greettest shows a group friend's prompt, an
     fixtures.slash(world, "greettest")
 
     local greet = world.addon.guildGreet
+    -- Zap is really Top 5; Hammer, never grouped with, shows the plain look.
+    -- Spark is Zap's alt, so nobody is left to stand in for the other tiers.
     local prompts = greet.queue:All(world.time)
-    test.assertEqual(1, #prompts)
-    test.assertEqual("zap arcane-camelot", prompts[1].key)
-    test.assertTrue(prompts[1].preview)
-    test.assertContains(table.concat(world.messages, "\n"), "Top 5 (Zap Arcane)")
+    test.assertEqual(2, #prompts)
+    test.assertEqual("hammer smith-camelot", prompts[1].key)
+    test.assertEqual(nil, prompts[1].previewTier)
+    test.assertEqual("zap arcane-camelot", prompts[2].key)
+    test.assertEqual("top5", prompts[2].previewTier)
+    test.assertTrue(prompts[2].preview)
+    local said = table.concat(world.messages, "\n")
+    test.assertContains(said, "Not grouped (Hammer Smith)")
+    test.assertContains(said, "Top 5 (Zap Arcane)")
     world.chat = {}
     greet:Greet(prompts[1].player)
+    greet:Greet(prompts[2].player)
     test.assertEqual(0, #world.chat)
     test.assertEqual(0, #greet.queue:All(world.time))
+end)
+
+test.test("composed: greettest stands another guildmate in for a tier nobody in the history is in", function()
+    local channel = fixtures.newChannel()
+    local world = loginForever(channel, "Tool Box", "AsgardsGuildFellowshipDev")
+
+    fixtures.slash(world, "greettest")
+
+    local prompts = world.addon.guildGreet.queue:All(world.time)
+    test.assertEqual(2, #prompts)
+    test.assertEqual(nil, prompts[1].previewTier)
+    test.assertEqual("grouped", prompts[2].previewTier)
+    test.assertContains(table.concat(world.messages, "\n"), ", stand-in)")
 end)
 
 test.test("composed: the release build has no greettest command", function()
