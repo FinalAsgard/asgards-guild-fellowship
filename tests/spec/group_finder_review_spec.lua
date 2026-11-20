@@ -375,8 +375,9 @@ local function foreverGuild()
     }
 end
 
-local function loginForever(channel, playerName)
-    local world = fixtures.newEnvironment("Forever", { guild = foreverGuild(), playerName = playerName })
+local function loginForever(channel, playerName, addonName)
+    local world = fixtures.newEnvironment("Forever",
+        { guild = foreverGuild(), playerName = playerName, addonName = addonName })
     fixtures.joinChannel(channel, world)
     world.grouped = false
     world.environment.IsInGroup = function() return world.grouped end
@@ -454,6 +455,39 @@ test.test("composed: guildmates anywhere in the raid go into the group history, 
     local entries = partition:GetGroupHistory()
     test.assertEqual(1, #entries)
     test.assertEqual("zap arcane-camelot", table.concat(entries[1].characters, ","))
+end)
+
+test.test("composed: the Dev build's greettest shows a group friend's prompt, and its Greet posts nothing", function()
+    local channel = fixtures.newChannel()
+    local world = loginForever(channel, "Tool Box", "AsgardsGuildFellowshipDev")
+    joinParty(world, {
+        player = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        party1 = { name = "Zap", guid = "Player-1-Zap Arcane", class = "MAGE" },
+    })
+    fixtures.slash(world, "help")
+    test.assertContains(table.concat(world.messages, "\n"), "/agfdev greettest")
+
+    fixtures.slash(world, "greettest")
+
+    local greet = world.addon.guildGreet
+    local prompts = greet.queue:All(world.time)
+    test.assertEqual(1, #prompts)
+    test.assertEqual("zap arcane-camelot", prompts[1].key)
+    test.assertTrue(prompts[1].preview)
+    test.assertContains(table.concat(world.messages, "\n"), "Top 5 (Zap Arcane)")
+    world.chat = {}
+    greet:Greet(prompts[1].player)
+    test.assertEqual(0, #world.chat)
+    test.assertEqual(0, #greet.queue:All(world.time))
+end)
+
+test.test("composed: the release build has no greettest command", function()
+    local channel = fixtures.newChannel()
+    local world = loginForever(channel, "Tool Box")
+
+    fixtures.slash(world, "help")
+
+    test.assertFalse(string.find(table.concat(world.messages, "\n"), "greettest", 1, true) ~= nil)
 end)
 
 test.test("composed: on Forever, a party member with no GUID is found by an unshared first name", function()

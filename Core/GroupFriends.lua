@@ -133,3 +133,24 @@ function Friends:TierOf(key)
     end
     return self.tiers[self:player(key)]
 end
+
+-- For each tier, the character most recently grouped with whose player is
+-- in it, among those `accept(key)` allows: { [tier] = key }. A tier nobody
+-- is in is left out. For the Dev build's test prompts.
+function Friends:Samples(accept)
+    local samples = {}
+    local entries = self.partition:GetGroupHistory()
+    local index
+    for index = #entries, 1, -1 do
+        local characters = entries[index].characters
+        local characterIndex
+        for characterIndex = 1, #characters do
+            local key = characters[characterIndex]
+            local tier = self:TierOf(key)
+            if tier ~= nil and samples[tier] == nil and accept(key) then
+                samples[tier] = key
+            end
+        end
+    end
+    return samples
+end

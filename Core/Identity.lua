@@ -18,6 +18,7 @@ local VARIANTS = {
         shortName = "Guild Fellowship (Dev)",
         slashAlias = "/asgardsfellowshipdev",
         slashCommand = "/agfdev",
+        isDev = true,
     },
 }
 
@@ -42,4 +43,6 @@ addon.Identity = {
     slashAlias = variant.slashAlias,
     slashCommand = variant.slashCommand,
     slashKey = string.upper(string.sub(variant.slashCommand, 2)),
+    -- The development build, which alone has the testing commands.
+    isDev = variant.isDev == true,
 }

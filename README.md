@@ -747,6 +747,11 @@ Use `/reload` in game for Lua changes, and restart WoW after manifest changes.
 
 The production add-on lives in `AsgardsGuildFellowship` (managed by CurseForge) and the development add-on in `AsgardsGuildFellowshipDev`. They never overwrite each other. Each build has its own commands (`/agf` and `/agfdev`) and its own SavedVariables (`AsgardsGuildFellowshipDB` and `AsgardsGuildFellowshipDevDB`), so their data never mixes. Enable only one of them at a time.
 
+The development build also has testing commands the production build leaves out:
+
+- `/agfdev greettest` shows a greet prompt right away for a guildmate of each group friend tier (Grouped, Frequent and Top 5), picked from your party history, so you can see how they look without waiting for one to log in. **Greet** on a test prompt posts nothing to guild chat and just closes it. `/agfdev greettest hold` shows the Frequent and Top 5 prompts held as in Slow mode, counting down 30 seconds.
+- To test with your production party history, quit WoW, copy `AsgardsGuildFellowship.lua` in `WTF/Account/<ACCOUNT>/SavedVariables/` to `AsgardsGuildFellowshipDev.lua`, and change its first line to `AsgardsGuildFellowshipDevDB = {`.
+
 ## Running the tests
 
 The tests need only Lua 5.1:

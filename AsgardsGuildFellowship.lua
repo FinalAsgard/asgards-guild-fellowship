@@ -3553,7 +3553,7 @@ if clientProfile.supported then
     -- history. Worked out again when the history changes or saved data does
     -- (a scan linking an alt to its main changes who counts as whom).
     local groupFriends
-    local function friendTier(key)
+    local function currentFriends()
         local guild, partition = rosterController:QuietContext()
         if guild == nil then
             return nil
@@ -3571,7 +3571,11 @@ if clientProfile.supported then
             })
         end
         groupFriends.partition = partition
-        return groupFriends:TierOf(key)
+        return groupFriends
+    end
+    local function friendTier(key)
+        local friends = currentFriends()
+        return friends and friends:TierOf(key) or nil
     end
     guildGreet = addon.GuildGreet.Create({
         context = function()
@@ -3614,6 +3618,61 @@ if clientProfile.supported then
         friendTier = friendTier,
         view = greetPrompts,
     })
+    -- Dev build only: test prompts for a real guildmate of each group
+    -- friend tier, from the user's party history, since waiting for one to
+    -- log in can take days. Greet on them posts nothing.
+    if addon.Identity.isDev then
+        local PREVIEW_HOLD_SECONDS = 30
+        local TIERS = {
+            { tier = addon.GroupFriends.GROUPED, name = "Grouped" },
+            { tier = addon.GroupFriends.FREQUENT, name = "Frequent" },
+            { tier = addon.GroupFriends.TOP, name = "Top 5" },
+        }
+        router:Register("greettest",
+            "show a test greet prompt for a guildmate of each group friend tier; Greet on them posts nothing" ..
+            " (greettest hold: Frequent and Top 5 shown as held in Slow mode for " .. PREVIEW_HOLD_SECONDS ..
+            " seconds)",
+            function(arguments)
+                local friends = currentFriends()
+                local _, partition = rosterController:QuietContext()
+                if friends == nil or partition == nil then
+                    rosterController:Print("Greet test needs a guild.")
+                    return
+                end
+                local samples = friends:Samples(function(key)
+                    local character = partition:GetCharacter(key)
+                    return character ~= nil and character.departed == nil and partition:IsInGuild(key)
+                        and not guildGreet:IsOwn(key)
+                end)
+                local keys, shown, missing = {}, {}, {}
+                local index
+                for index = 1, #TIERS do
+                    local key = samples[TIERS[index].tier]
+                    if key ~= nil then
+                        table.insert(keys, key)
+                        local rawName = partition:GetCharacter(key).name or key
+                        table.insert(shown, TIERS[index].name .. " (" .. guildGreet:Names(key, rawName).name .. ")")
+                    else
+                        table.insert(missing, TIERS[index].name)
+                    end
+                end
+                local hold = string.lower(string.match(arguments or "", "^%s*(%S*)") or "") == "hold"
+                    and PREVIEW_HOLD_SECONDS or nil
+                if guildGreet:Preview(keys, hold) == 0 then
+                    rosterController:Print("Greet test: nobody in your group history to show.")
+                    return
+                end
+                rosterController:Print("Greet test prompts: " .. table.concat(shown, ", ") ..
+                    ". Greet on them posts nothing.")
+                if missing[1] ~= nil then
+                    rosterController:Print("Nobody in your group history is " .. table.concat(missing, " or ") ..
+                        " yet.")
+                end
+                if not guildGreet:HighlightsFriends() then
+                    rosterController:Print("Highlight group friends is off, so they show without marks.")
+                end
+            end)
+    end
     -- The Guild Recruit window stays where it's dragged; the place is saved
     -- account-wide.
     recruitPrompts = addon.RecruitPrompts.Create(client, {

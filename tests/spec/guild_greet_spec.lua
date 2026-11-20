@@ -2029,3 +2029,53 @@ test.test("guild greet: shortening Slow mode shortens how long a held prompt sta
     world.greet:Refresh()
     test.assertEqual("", shownLabels(world))
 end)
+
+-- Test prompts (the Dev build's greettest) ---------------------------------------
+
+test.test("guild greet: a test prompt shows at once with its friend mark, and Greet on it posts nothing", function()
+    local world = withFriends({ bolt = "grouped" })
+    local _, normalizer = world.options.context()
+
+    test.assertEqual(1, world.greet:Preview({ normalizer:Key(world.names.bolt) }))
+
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("grouped", world.shown[1].friendTier)
+    test.assertEqual(nil, world.greet:Greet(world.shown[1].player))
+    test.assertEqual(0, #world.sent)
+    test.assertEqual(0, #world.shown)
+    test.assertEqual(0, world.greet:LockedFor(world.time))
+end)
+
+test.test("guild greet: a held test prompt counts down for a Frequent or Top 5 friend only, then can be closed", function()
+    local world = withFriends({ anvil = "frequent", bolt = "grouped" })
+    local _, normalizer = world.options.context()
+
+    world.greet:Preview({ normalizer:Key(world.names.anvil), normalizer:Key(world.names.bolt) }, 30)
+
+    test.assertEqual(30, shownFor(world, "anvil").heldFor)
+    test.assertEqual(nil, shownFor(world, "bolt").heldFor)
+    test.assertEqual(nil, world.greet:Greet(shownFor(world, "anvil").player))
+    test.assertTrue(shownFor(world, "anvil") ~= nil)
+    advance(world, 10)
+    test.assertEqual(20, shownFor(world, "anvil").heldFor)
+    advance(world, 20)
+    test.assertEqual(nil, shownFor(world, "anvil").heldFor)
+    world.greet:Greet(shownFor(world, "anvil").player)
+    test.assertEqual(nil, shownFor(world, "anvil"))
+    test.assertEqual(0, #world.sent)
+end)
+
+test.test("guild greet: Slow mode and the greet cap leave test prompts alone", function()
+    local world = withFriends({ bolt = "grouped" })
+    local _, normalizer = world.options.context()
+    world.slowMinutes = 5
+    world.greet:OnPresence("online", world.names.anvil)
+    advance(world, 10)
+    world.greet:Greet(shownFor(world, "anvil").player)
+
+    world.greet:Preview({ normalizer:Key(world.names.bolt) })
+    greeted(world, "bishop", world.names.bolt)
+
+    test.assertTrue(shownFor(world, "bolt") ~= nil)
+    test.assertEqual(nil, shownFor(world, "bolt").heldFor)
+end)

@@ -165,3 +165,33 @@ test.test("group friends: characters joining a resumed party behind an unreadabl
     test.assertEqual(1, #world.partition:GetGroupHistory())
     test.assertEqual(GroupFriends.TOP, world.friends:TierOf("gus"))
 end)
+
+test.test("group friends: samples are the most recently grouped character of each tier, among those accepted", function()
+    local world, GroupFriends = newFriends({ ace2 = "ace" })
+    fillTop(world)
+    party(world, { "frank" }, 4)
+    party(world, { "gus" }, 1)
+    party(world, { "hal" }, 1, NOW + 9999)
+    party(world, { "ace2" }, 1, NOW + 99999)
+
+    local samples = world.friends:Samples(function(key)
+        return key ~= "hal"
+    end)
+
+    test.assertEqual("ace2", samples[GroupFriends.TOP])
+    test.assertEqual("frank", samples[GroupFriends.FREQUENT])
+    test.assertEqual("gus", samples[GroupFriends.GROUPED])
+end)
+
+test.test("group friends: a tier nobody is in has no sample", function()
+    local world, GroupFriends = newFriends()
+    party(world, { "bolt" })
+
+    local samples = world.friends:Samples(function()
+        return true
+    end)
+
+    test.assertEqual("bolt", samples[GroupFriends.TOP])
+    test.assertEqual(nil, samples[GroupFriends.FREQUENT])
+    test.assertEqual(nil, samples[GroupFriends.GROUPED])
+end)

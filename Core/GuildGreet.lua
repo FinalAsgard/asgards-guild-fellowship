@@ -585,7 +585,7 @@ function Greet:dropCapped(now)
     local index
     for index = 1, #prompts do
         local prompt = prompts[index]
-        if self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now) then
+        if not prompt.preview and self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now) then
             removed = self.queue:Remove(prompt.player) or removed
         end
     end
@@ -629,10 +629,16 @@ function Greet:Refresh()
     local holding = false
     local index
     for index = 1, #prompts do
-        prompts[index].friendTier = self:FriendTier(prompts[index].key)
-        prompts[index].heldFor = nil
-        if slowFor > 0 and prompts[index].category ~= addon.GreetPolicy.JOIN then
-            prompts[index].heldFor = slowFor
+        local prompt = prompts[index]
+        prompt.friendTier = self:FriendTier(prompt.key)
+        prompt.heldFor = nil
+        if slowFor > 0 and prompt.category ~= addon.GreetPolicy.JOIN and not prompt.preview then
+            prompt.heldFor = slowFor
+            holding = true
+        end
+        local previewFor = prompt.previewHeldUntil and math.ceil(prompt.previewHeldUntil - now) or 0
+        if previewFor > 0 then
+            prompt.heldFor = previewFor
             holding = true
         end
     end
@@ -666,6 +672,14 @@ function Greet:Greet(player)
         self:Refresh()
     end
     local prompt = self.queue:Get(player)
+    -- A test prompt posts nothing, counts nothing and starts no cooldown.
+    if prompt ~= nil and prompt.preview then
+        if type(now) == "number" and (prompt.previewHeldUntil or 0) <= now then
+            self.queue:Remove(player)
+            self:Refresh()
+        end
+        return nil
+    end
     if prompt == nil or type(now) ~= "number" or self:LockedFor(now) > 0
         or (prompt.category ~= addon.GreetPolicy.JOIN and self:SlowFor(now) > 0)
     then
@@ -688,6 +702,48 @@ function Greet:Greet(player)
     end
     self:Refresh()
     return text
+end
+
+-- Test prompts (the Dev build's /agfdev greettest): a login prompt for each
+-- character in `keys`, shown at once and marked `preview`, so the user can
+-- see how group friends look without waiting for one to log in. Greet on
+-- one posts nothing and just closes it. With `holdSeconds`, a Frequent or
+-- Top 5 friend's shows as held in Slow mode, counting down that long,
+-- whatever the guild's Slow mode. Returns how many were raised.
+function Greet:Preview(keys, holdSeconds)
+    local partition = self.context()
+    local now = self.now()
+    if partition == nil or type(now) ~= "number" then
+        return 0
+    end
+    local raised = 0
+    local index
+    for index = 1, #keys do
+        local key = keys[index]
+        local character = partition:GetCharacter(key)
+        if character ~= nil then
+            local prompt = {
+                category = addon.GreetPolicy.LOGIN,
+                player = self.policy:PlayerOf(key),
+                key = key,
+                rawName = character.name or key,
+                preview = true,
+            }
+            prompt.label = self:Names(key, prompt.rawName).name
+            self.queue:Add(prompt, now, 0)
+            if type(holdSeconds) == "number" and holdSeconds > 0 and self:HasPerks(key) then
+                prompt.previewHeldUntil = now + holdSeconds
+                self:holdUntil(prompt, prompt.previewHeldUntil + self.queue.lifetime, now)
+            else
+                self.after(prompt.expiresAt - now, function()
+                    self:Refresh()
+                end)
+            end
+            raised = raised + 1
+        end
+    end
+    self:Refresh()
+    return raised
 end
 
 -- Starts Slow mode's cooldown from `now`; the next Refresh closes every
@@ -714,7 +770,7 @@ function Greet:dropSlowed(now)
     local index
     for index = 1, #prompts do
         local prompt = prompts[index]
-        if prompt.category ~= addon.GreetPolicy.JOIN then
+        if prompt.category ~= addon.GreetPolicy.JOIN and not prompt.preview then
             if self:HasPerks(prompt.key) then
                 self:holdUntil(prompt, now + slowFor + self.queue.lifetime, now)
             else
@@ -827,7 +883,9 @@ function Greet:OnGreeted(message, sender)
     if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
         return false
     end
-    if prompt ~= nil and self.tally:Reached(player, self:Cap(prompt.category, prompt.key), now) and self.queue:Remove(player) then
+    if prompt ~= nil and not prompt.preview and self.tally:Reached(player, self:Cap(prompt.category, prompt.key), now)
+        and self.queue:Remove(player)
+    then
         self:Refresh()
     end
     return true
@@ -925,7 +983,7 @@ function Greet:OnGuildChat(message, sender)
         -- The player's own lines don't count, even when a scan linked
         -- them after the prompt was raised.
         local own = greeter == prompt.player or greeter == self.policy:PlayerOf(prompt.key)
-        if not own and self:NamedIn(lowered, prompt) then
+        if not own and not prompt.preview and self:NamedIn(lowered, prompt) then
             local before = self.tally:Count(prompt.player, now)
             if self.tally:Add(prompt.player, greeter, prompt.raisedAt, now) > before then
                 counted = counted + 1
