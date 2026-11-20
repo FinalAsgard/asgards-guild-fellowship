@@ -438,6 +438,24 @@ test.test("composed: on Forever, a guildmate without the add-on who joins the pa
     test.assertTrue(keys["hammer smith-camelot"])
 end)
 
+test.test("composed: guildmates anywhere in the raid go into the group history, not just the player's subgroup", function()
+    local channel = fixtures.newChannel()
+    local world = loginForever(channel, "Tool Box")
+    world.environment.IsInRaid = function() return true end
+
+    -- Zap is in another subgroup: a raid unit, but no party unit.
+    joinParty(world, {
+        player = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        raid1 = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        raid7 = { name = "Zap", guid = "Player-1-Zap Arcane", class = "MAGE" },
+    })
+
+    local _, partition = world.addon.rosterController:QuietContext()
+    local entries = partition:GetGroupHistory()
+    test.assertEqual(1, #entries)
+    test.assertEqual("zap arcane-camelot", table.concat(entries[1].characters, ","))
+end)
+
 test.test("composed: on Forever, a party member with no GUID is found by an unshared first name", function()
     local channel = fixtures.newChannel()
     local organizer = loginForever(channel, "Tool Box")

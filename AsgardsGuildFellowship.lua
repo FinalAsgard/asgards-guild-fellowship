@@ -1670,7 +1670,7 @@ if clientProfile.supported then
             groupFinder:Refresh()
         end
     end)
-    -- Group history: the guildmates in the party now (this player's own
+    -- Group history: the guildmates in the party or raid now (this player's own
     -- characters left out), and the dungeon when known: the Group Finder's
     -- pick, else the instance the player is in.
     local groupHistory
@@ -1688,7 +1688,8 @@ if clientProfile.supported then
         local own = selfKey and partition:GetCharacter(selfKey)
         local keys = {}
         if client:IsInGroup() then
-            local members = client:GetPartyMembers()
+            -- The whole raid, every subgroup, not just the player's own.
+            local members = client:GetGroupMembers()
             local index
             for index = 1, #members do
                 local key = not members[index].isPlayer

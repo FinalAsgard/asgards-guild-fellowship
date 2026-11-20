@@ -1188,9 +1188,10 @@ function Client:ObserveParty(onChange)
         return false
     end
     -- Retail and newer clients send GROUP_ROSTER_UPDATE; older ones the
-    -- party events. Each client registers whichever it knows.
+    -- party and raid events. Each client registers whichever it knows.
     local registered = self:RegisterEvent(frame, "GROUP_ROSTER_UPDATE")
     registered = self:RegisterEvent(frame, "PARTY_MEMBERS_CHANGED") or registered
+    registered = self:RegisterEvent(frame, "RAID_ROSTER_UPDATE") or registered
     self:RegisterEvent(frame, "PLAYER_ROLES_ASSIGNED")
     self.partyFrame = frame
     return registered
