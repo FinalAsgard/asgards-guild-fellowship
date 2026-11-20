@@ -26,6 +26,7 @@ local MANIFEST_FILES = {
     "Core/NameNormalizer.lua",
     "Core/NoteParser.lua",
     "Core/FellowshipStore.lua",
+    "Core/RealmMigration.lua",
     "Core/ReconcileEngine.lua",
     "Core/NoteAudit.lua",
     "Core/PlayerService.lua",

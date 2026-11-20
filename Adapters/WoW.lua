@@ -162,7 +162,9 @@ function Client:GetGuildIdentity()
         return nil
     end
 
-    if type(realm) ~= "string" or realm == "" then
+    if self:RealmIsRegion() then
+        realm = self:GetRegionName()
+    elseif type(realm) ~= "string" or realm == "" then
         local realmOk, currentRealm = callFunction(self.environment.GetRealmName)
         realm = realmOk and currentRealm or nil
     end
@@ -171,6 +173,23 @@ function Client:GetGuildIdentity()
     end
 
     return { name = name, realm = realm }
+end
+
+-- Whether the region stands in for the realm: on WoW Forever, which hides
+-- realm names since its 1.60.1 hotfix (GetRealmName returns ""), and whose
+-- character and guild names are unique across a region.
+function Client:RealmIsRegion()
+    return self:GetClientProfile().id == "forever"
+end
+
+-- The region the client is playing in ("US", "EU", ...), or nil when the
+-- client can't say.
+function Client:GetRegionName()
+    local ok, region = callFunction(self.environment.GetCurrentRegionName)
+    if not ok or type(region) ~= "string" or region == "" then
+        return nil
+    end
+    return region
 end
 
 -- The logged-in character's 0-based guild rank index, read live (the
@@ -191,7 +210,10 @@ function Client:GetPlayerFullName()
     if not ok or type(name) ~= "string" or name == "" then
         return nil
     end
-    if type(realm) ~= "string" or realm == "" then
+    -- WoW Forever's second value can be the surname, not the realm.
+    if self:RealmIsRegion() then
+        realm = self:GetRegionName()
+    elseif type(realm) ~= "string" or realm == "" then
         local realmOk, ownRealm = callFunction(self.environment.GetNormalizedRealmName)
         if not realmOk or type(ownRealm) ~= "string" or ownRealm == "" then
             realmOk, ownRealm = callFunction(self.environment.GetRealmName)

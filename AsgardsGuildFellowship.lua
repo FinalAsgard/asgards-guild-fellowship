@@ -77,7 +77,13 @@ local recordParty = function() end
 -- with the roster below).
 local recordOwnCharacter = function() end
 if clientProfile.supported then
-    persistence = addon.Persistence.Create(client)
+    -- Where the region stands in for the realm (WoW Forever), data saved
+    -- under the realm the game used to name moves to the region.
+    persistence = addon.Persistence.Create(client, {
+        homeRealm = function()
+            return client:RealmIsRegion() and client:GetRegionName() or nil
+        end,
+    })
     comm = addon.Comm.Create(client, addon.Identity.commPrefix, addon.Identity.liveCommPrefix)
     -- The master frame's tabs, in order. The first is where the general
     -- entry points open it.
@@ -2853,7 +2859,7 @@ if clientProfile.supported then
         " guild event log; probe officer: the officer channel; probe ready: the Ready flags on the game's" ..
         " guild roster; officers; probe player <name or alias>: a player's alias, links and Discord, with who" ..
         " set each and when, and its logged changes; probe greet: your greet weight and how long it holds your" ..
-        " prompts back)",
+        " prompts back; probe realm: the realm or region your guild's data is kept under)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
@@ -2866,7 +2872,7 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer, probe ready, probe player <name> or probe greet.")
+                        " probe officer, probe ready, probe player <name>, probe greet or probe realm.")
                 end
                 return
             end
@@ -2927,6 +2933,26 @@ if clientProfile.supported then
             end
             if what == "ready" then
                 probeReady()
+                return
+            end
+            if what == "realm" then
+                rosterController:Print("Realm probe:")
+                local guild = client:GetGuildIdentity()
+                if client:RealmIsRegion() then
+                    client:Print("  This client hides realm names, so the region stands in for the realm: " ..
+                        tostring(client:GetRegionName() or "none reported") .. ".")
+                end
+                client:Print("  Guild: " .. (guild and (guild.name .. ", realm " .. guild.realm) or "unknown") .. ".")
+                local current, partition = rosterController:QuietContext()
+                client:Print("  Saved data: " .. (current and partition.key or tostring(partition)) .. ".")
+                local moved, kept = persistence:HomeRealmMoves()
+                if moved > 0 then
+                    client:Print("  Moved to the region this session: " .. moved .. " guild(s).")
+                end
+                if kept[1] ~= nil then
+                    client:Print("  Left under the old realm, because the region's key was taken: " ..
+                        table.concat(kept, ", ") .. ".")
+                end
                 return
             end
             if what == "greet" then
@@ -4383,6 +4409,8 @@ else
 end
 
 local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterController and function()
+    -- In case the region wasn't known yet when saved data loaded.
+    persistence:MoveToHomeRealm()
     rosterController:OnSavedDataReady()
     -- Without the comm libraries, sync simply stays off, and Guild Greet and
     -- Guild Recruit work uncoordinated.

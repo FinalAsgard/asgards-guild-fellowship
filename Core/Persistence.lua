@@ -23,6 +23,10 @@ local _, addon = ...
 -- guild, the characters this install has logged in on and the ones the
 -- player dismissed as suggestions (local only). Optional again, so v3 data
 -- is already valid v4 data.
+--
+-- Where the client hides realm names, the home realm is handed in
+-- (options.homeRealm), and data saved under older realms moves to it
+-- (RealmMigration) once it's known: at load, or at MoveToHomeRealm later.
 local Persistence = {
     SCHEMA_VERSION = 4,
 }
@@ -56,8 +60,34 @@ local function problemWith(database)
     return nil
 end
 
-function Persistence.Create(client)
-    return setmetatable({ client = client }, Store)
+-- options.homeRealm  function() -> the realm saved data belongs to, or nil
+--                    when the client names realms itself or can't say yet.
+--                    Optional.
+function Persistence.Create(client, options)
+    options = options or {}
+    return setmetatable({ client = client, homeRealm = options.homeRealm, moved = 0, kept = {} }, Store)
+end
+
+-- Moves data saved under older realms to the home realm, when there's one
+-- and the store is ready. Returns how many guilds moved this time.
+function Store:MoveToHomeRealm()
+    if self.database == nil or self.homeRealm == nil then
+        return 0
+    end
+    local ok, realm = pcall(self.homeRealm)
+    if not ok or realm == nil then
+        return 0
+    end
+    local moved, kept = addon.RealmMigration.Run(self.database, realm)
+    self.moved = self.moved + moved
+    self.kept = kept
+    return moved
+end
+
+-- What MoveToHomeRealm did this session: guilds moved, and the partition
+-- keys left in place because their new key was taken.
+function Store:HomeRealmMoves()
+    return self.moved, self.kept
 end
 
 -- Matches the lifecycle's state contract: true when the store is ready, or
@@ -92,6 +122,7 @@ function Store:Initialize()
     end
 
     self.database = database
+    self:MoveToHomeRealm()
     return true
 end
 

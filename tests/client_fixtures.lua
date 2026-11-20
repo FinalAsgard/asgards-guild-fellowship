@@ -258,8 +258,24 @@ local function installGuild(world, environment, profile)
         local member = world.playerMember and world.playerMember()
         return world.guild.name, member and member.rankName or "Member", member and member.rank or 3, nil
     end
-    environment.GetRealmName = function()
-        return world.guild and world.guild.realm or "Camelot"
+    -- WoW Forever hides realm names (GetRealmName returns "") and the add-on
+    -- uses the region there instead; the fixtures name Forever's region
+    -- after the guild's realm, so its keys read as they always have
+    -- ("tool box-camelot"). `world.region` sets another.
+    if profile == "Forever" then
+        environment.GetRealmName = function()
+            return ""
+        end
+        environment.GetCurrentRegionName = function()
+            return world.region or (world.guild and world.guild.realm) or "Camelot"
+        end
+    else
+        environment.GetRealmName = function()
+            return world.guild and world.guild.realm or "Camelot"
+        end
+        environment.GetCurrentRegionName = function()
+            return "US"
+        end
     end
     environment.GetNumGuildMembers = function()
         if world.guild == nil or not world.rosterReady then
