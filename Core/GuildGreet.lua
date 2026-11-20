@@ -33,6 +33,15 @@ local _, addon = ...
 -- press time plus the current setting's minutes no new non-join prompt is
 -- raised (arrivals then are skipped, never queued). Join prompts are exempt.
 -- Only Greet presses start it: typed greetings and other users' don't.
+-- While highlighting is on, group friends with the perks (Frequent and Top
+-- 5) are held instead: their prompts stay, and their arrivals are prompted,
+-- with Greet locked until the cooldown ends. They still close when the
+-- player logs off, leaves, or has had their (doubled) cap.
+--
+-- With "only greet players I've grouped with" on, highlighting or not, a
+-- player the user never grouped with gets no prompt of any kind: checked
+-- when a prompt is raised and again at each draw, so turning it on closes
+-- their waiting prompts.
 local GuildGreet = {
     -- The "greeted" message older versions (v0.9.4 and before) close their
     -- prompts by: { v = PROTOCOL, t = TYPE_GREETED, c = the greeted
@@ -80,6 +89,9 @@ Greet.__index = Greet
 --                 off. Optional.
 --   slowModeMinutes function() -> the guild's Slow mode minutes (0 is
 --                 off). Optional; off without it.
+--   friendTier    function(key) -> the group friend tier (GroupFriends) of
+--                 the player character `key` belongs to, or nil. Optional;
+--                 nobody is a group friend without it.
 --   view         { Show = function(view, prompts, handlers) }: draws the
 --                 prompts; handlers.greet(player) and handlers.close(player)
 function GuildGreet.Create(options)
@@ -101,6 +113,7 @@ function GuildGreet.Create(options)
             return false
         end,
         slowModeMinutes = options.slowModeMinutes,
+        friendTier = options.friendTier,
         queue =addon.GreetPromptQueue.Create(),
         -- Greetings posted in a row, and when Greet unlocks.
         streak = 0,
@@ -160,13 +173,28 @@ end
 
 -- How many greetings a player must already have before the user's prompt
 -- for them closes: the welcome cap for someone who just joined (a "join"
--- prompt), the greeting cap otherwise.
-function Greet:Cap(category)
+-- prompt), the greeting cap otherwise. Twice that for a group friend with
+-- the perks (Frequent or Top 5) while highlighting is on; `key` is the
+-- prompt's character.
+function Greet:Cap(category, key)
+    local cap
     if category == addon.GreetPolicy.JOIN then
-        return self:Setting("welcomeCap")
+        cap = self:Setting("welcomeCap")
+    else
+        local store = self.store()
+        cap = store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
     end
-    local store = self.store()
-    return store and store:GreetCap() or addon.FellowshipStore.GREET_CAP_DEFAULT
+    if self:HasPerks(key) then
+        cap = cap * 2
+    end
+    return cap
+end
+
+-- Whether the player character `key` belongs to is a group friend with
+-- Guild Greet's perks (Frequent or Top 5), while highlighting is on.
+function Greet:HasPerks(key)
+    local tier = key and self:FriendTier(key)
+    return tier ~= nil and addon.GroupFriends.HasPerks(tier)
 end
 
 -- A Guild Greet number setting (FellowshipStore.GREET_NUMBERS), or its
@@ -374,10 +402,10 @@ function Greet:OnPresence(kind, rawName)
     end
     -- A category with no greetings has nothing to say, so it never prompts,
     -- and a player who has had enough greetings already isn't prompted.
-    -- During Slow mode's cooldown only joins are.
-    if prompt == nil or #self:Library():Greetings(prompt.category) == 0
-        or (prompt.category ~= addon.GreetPolicy.JOIN and self:SlowFor(now) > 0)
-        or self.tally:Reached(prompt.player, self:Cap(prompt.category), now)
+    -- During Slow mode's cooldown only joins and held friends are.
+    if prompt == nil or #self:Library():Greetings(prompt.category) == 0 or self:NeverGrouped(key)
+        or (prompt.category ~= addon.GreetPolicy.JOIN and self:SlowFor(now) > 0 and not self:HasPerks(key))
+        or self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now)
     then
         return
     end
@@ -510,16 +538,116 @@ function Greet:LockedFor(now)
     return math.ceil(self.readyAt - now)
 end
 
--- Draws the waiting prompts, with Greet locked while a cooldown runs. A
--- cooldown that ended with no prompt showing resets the streak.
+-- Whether group friends are highlighted, and get Guild Greet's perks: the
+-- user's setting, on without saved data.
+function Greet:HighlightsFriends()
+    local store = self.store()
+    return store == nil or store:GreetHighlightFriends()
+end
+
+-- The group friend tier (GroupFriends) of the player character `key`
+-- belongs to, or nil, as is everyone while highlighting is off.
+function Greet:FriendTier(key)
+    if not self:HighlightsFriends() then
+        return nil
+    end
+    return self:groupedTier(key)
+end
+
+-- The group friend tier of `key`'s player, highlighting or not.
+function Greet:groupedTier(key)
+    if self.friendTier == nil then
+        return nil
+    end
+    local ok, tier = pcall(self.friendTier, key)
+    return ok and tier or nil
+end
+
+-- Whether the user only greets players they've grouped with: off without
+-- saved data.
+function Greet:OnlyGrouped()
+    local store = self.store()
+    return store ~= nil and store:GreetOnlyGrouped()
+end
+
+-- True when the user only greets players they've grouped with and never
+-- grouped with the player character `key` belongs to.
+function Greet:NeverGrouped(key)
+    return self:OnlyGrouped() and self:groupedTier(key) == nil
+end
+
+-- Closes the prompts whose player has had their current cap of greetings,
+-- which can fall after they were counted (highlighting turned off, or a
+-- friend's tier dropping). Returns true when any closed.
+function Greet:dropCapped(now)
+    local removed = false
+    local prompts = self.queue:All(now)
+    local index
+    for index = 1, #prompts do
+        local prompt = prompts[index]
+        if not prompt.preview and self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now) then
+            removed = self.queue:Remove(prompt.player) or removed
+        end
+    end
+    return removed
+end
+
+-- Closes the prompts, shown or waiting to show, for players the user never
+-- grouped with while they only greet those they have. Returns true when any
+-- closed.
+function Greet:dropUngrouped(now)
+    if not self:OnlyGrouped() then
+        return false
+    end
+    local removed = false
+    local prompts = self.queue:All(now)
+    local index
+    for index = 1, #prompts do
+        if self:NeverGrouped(prompts[index].key) then
+            removed = self.queue:Remove(prompts[index].player) or removed
+        end
+    end
+    return removed
+end
+
+-- Draws the waiting prompts, with Greet locked while a cooldown runs. Each
+-- prompt's group friend tier is looked up as it's drawn, so a change shows
+-- at the next draw. A cooldown that ended with no prompt showing resets the
+-- streak.
 function Greet:Refresh()
     local now = self.now()
     if type(now) ~= "number" or self.view == nil then
         return
     end
     self:dropDeparted(now)
+    self:dropUngrouped(now)
     self:dropSlowed(now)
+    self:dropCapped(now)
     local prompts = self.queue:Visible(now)
+    -- A held prompt's Greet stays locked until Slow mode's cooldown ends.
+    local slowFor = math.ceil(self:SlowFor(now))
+    local holding = false
+    local index
+    for index = 1, #prompts do
+        local prompt = prompts[index]
+        prompt.friendTier = self:FriendTier(prompt.key)
+        if prompt.preview and self:HighlightsFriends() then
+            prompt.friendTier = prompt.previewTier
+        end
+        prompt.heldFor = nil
+        if slowFor > 0 and prompt.category ~= addon.GreetPolicy.JOIN and not prompt.preview then
+            prompt.heldFor = slowFor
+            holding = true
+        end
+        local previewFor = prompt.previewHeldUntil and math.ceil(prompt.previewHeldUntil - now) or 0
+        if previewFor > 0 then
+            prompt.heldFor = previewFor
+            holding = true
+        end
+    end
+    if holding then
+        self:tickHold()
+    end
     local lockedFor = self:LockedFor(now)
     if lockedFor == 0 then
         self.readyAt = nil
@@ -543,16 +671,26 @@ end
 -- sent, or nil.
 function Greet:Greet(player)
     local now = self.now()
-    if type(now) == "number" and (self:dropDeparted(now) or self:dropSlowed(now)) then
+    if type(now) == "number" and (self:dropDeparted(now) or self:dropUngrouped(now) or self:dropSlowed(now)) then
         self:Refresh()
     end
     local prompt = self.queue:Get(player)
-    if prompt == nil or type(now) ~= "number" or self:LockedFor(now) > 0 then
+    -- A test prompt posts nothing, counts nothing and starts no cooldown.
+    if prompt ~= nil and prompt.preview then
+        if type(now) == "number" and (prompt.previewHeldUntil or 0) <= now then
+            self.queue:Remove(player)
+            self:Refresh()
+        end
+        return nil
+    end
+    if prompt == nil or type(now) ~= "number" or self:LockedFor(now) > 0
+        or (prompt.category ~= addon.GreetPolicy.JOIN and self:SlowFor(now) > 0)
+    then
         return nil
     end
     self.queue:Remove(player)
     local text
-    if not self.tally:Reached(prompt.player, self:Cap(prompt.category), now) then
+    if not self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now) then
         text = self:post(prompt, now)
     end
     if text ~= nil then
@@ -569,6 +707,51 @@ function Greet:Greet(player)
     return text
 end
 
+-- Test prompts (the Dev build's /agfdev greettest): a login prompt for each
+-- of `entries` ({ key, tier }), shown at once, marked `preview`, and drawn
+-- as group friend tier `tier` (GroupFriends) whatever the player's real
+-- one, so the user can see how each tier looks without waiting for one to
+-- log in. Greet on one posts nothing and just closes it. With
+-- `holdSeconds`, a Frequent or Top 5 one shows as held in Slow mode,
+-- counting down that long, whatever the guild's Slow mode. Returns how many
+-- were raised.
+function Greet:Preview(entries, holdSeconds)
+    local partition = self.context()
+    local now = self.now()
+    if partition == nil or type(now) ~= "number" then
+        return 0
+    end
+    local raised = 0
+    local index
+    for index = 1, #entries do
+        local key = entries[index].key
+        local character = partition:GetCharacter(key)
+        if character ~= nil then
+            local prompt = {
+                category = addon.GreetPolicy.LOGIN,
+                player = self.policy:PlayerOf(key),
+                key = key,
+                rawName = character.name or key,
+                preview = true,
+                previewTier = entries[index].tier,
+            }
+            prompt.label = self:Names(key, prompt.rawName).name
+            self.queue:Add(prompt, now, 0)
+            if type(holdSeconds) == "number" and holdSeconds > 0 and addon.GroupFriends.HasPerks(prompt.previewTier) then
+                prompt.previewHeldUntil = now + holdSeconds
+                self:holdUntil(prompt, prompt.previewHeldUntil + self.queue.lifetime, now)
+            else
+                self.after(prompt.expiresAt - now, function()
+                    self:Refresh()
+                end)
+            end
+            raised = raised + 1
+        end
+    end
+    self:Refresh()
+    return raised
+end
+
 -- Starts Slow mode's cooldown from `now`; the next Refresh closes every
 -- other non-join prompt.
 function Greet:startSlowMode(now)
@@ -579,21 +762,57 @@ function Greet:startSlowMode(now)
 end
 
 -- During Slow mode's cooldown, closes every non-join prompt, shown or still
--- waiting to show (including one raised before the setting was turned up).
--- Returns true when any closed.
+-- waiting to show (including one raised before the setting was turned up),
+-- except held friends'. A held prompt is kept until the cooldown ends and
+-- for a prompt's usual lifetime after, worked out again at each draw, so a
+-- shortened cooldown shortens it too. Returns true when any closed.
 function Greet:dropSlowed(now)
-    if self:SlowFor(now) == 0 then
+    local slowFor = self:SlowFor(now)
+    if slowFor == 0 then
         return false
     end
     local removed = false
     local prompts = self.queue:All(now)
     local index
     for index = 1, #prompts do
-        if prompts[index].category ~= addon.GreetPolicy.JOIN then
-            removed = self.queue:Remove(prompts[index].player) or removed
+        local prompt = prompts[index]
+        if prompt.category ~= addon.GreetPolicy.JOIN and not prompt.preview then
+            if self:HasPerks(prompt.key) then
+                self:holdUntil(prompt, now + slowFor + self.queue.lifetime, now)
+            else
+                removed = self.queue:Remove(prompt.player) or removed
+            end
         end
     end
     return removed
+end
+
+-- Keeps held `prompt` until `heldUntil`, or its usual expiry if that's
+-- later, with a redraw then.
+function Greet:holdUntil(prompt, heldUntil, now)
+    local expiresAt = math.max(prompt.showAt + self.queue.lifetime, heldUntil)
+    if prompt.expiresAt == expiresAt then
+        return
+    end
+    prompt.expiresAt = expiresAt
+    self.after(expiresAt - now, function()
+        self:Refresh()
+    end)
+end
+
+-- Redraws in a second, so a held prompt's countdown runs; one redraw at a
+-- time.
+function Greet:tickHold()
+    if self.holdTicking then
+        return
+    end
+    self.holdTicking = true
+    if not self.after(1, function()
+        self.holdTicking = false
+        self:Refresh()
+    end) then
+        self.holdTicking = false
+    end
 end
 
 -- Locks Greet for 2 seconds more than the last cooldown in a row, and
@@ -670,7 +889,9 @@ function Greet:OnGreeted(message, sender)
     if self.tally:Add(player, self.policy:PlayerOf(senderKey), message.a, now) == before then
         return false
     end
-    if prompt ~= nil and self.tally:Reached(player, self:Cap(prompt.category), now) and self.queue:Remove(player) then
+    if prompt ~= nil and not prompt.preview and self.tally:Reached(player, self:Cap(prompt.category, prompt.key), now)
+        and self.queue:Remove(player)
+    then
         self:Refresh()
     end
     return true
@@ -768,11 +989,11 @@ function Greet:OnGuildChat(message, sender)
         -- The player's own lines don't count, even when a scan linked
         -- them after the prompt was raised.
         local own = greeter == prompt.player or greeter == self.policy:PlayerOf(prompt.key)
-        if not own and self:NamedIn(lowered, prompt) then
+        if not own and not prompt.preview and self:NamedIn(lowered, prompt) then
             local before = self.tally:Count(prompt.player, now)
             if self.tally:Add(prompt.player, greeter, prompt.raisedAt, now) > before then
                 counted = counted + 1
-                if self.tally:Reached(prompt.player, self:Cap(prompt.category), now) then
+                if self.tally:Reached(prompt.player, self:Cap(prompt.category, prompt.key), now) then
                     closed = self.queue:Remove(prompt.player) or closed
                 end
             end

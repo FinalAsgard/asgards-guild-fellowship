@@ -618,6 +618,54 @@ if clientProfile.supported then
             return true
         end,
     })
+    settings:Add("guildGreet", {
+        id = "greetHighlightFriends",
+        kind = "toggle",
+        label = "Highlight group friends",
+        info = function()
+            return "On by default. Players you've grouped with show in blue on their prompts. The ones you've " ..
+                "grouped with 4 or more times get a star too, and your 5 most grouped-with players a star and " ..
+                "a purple name. It only uses your own party history, which is never shared."
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:GreetHighlightFriends()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetHighlightFriends(enabled) then
+                return nil, "the saved setting is unreadable, so it stays on"
+            end
+            return true
+        end,
+    })
+    settings:Add("guildGreet", {
+        id = "greetOnlyGrouped",
+        kind = "toggle",
+        label = "Only greet players I've grouped with",
+        info = function()
+            return "Off by default. When on, you only get greet prompts, welcomes to the guild included, for " ..
+                "players you've grouped with at least once. Turning it on closes waiting prompts for everyone " ..
+                "else. It works whether or not \"Highlight group friends\" is on."
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store ~= nil and store:GreetOnlyGrouped()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetGreetOnlyGrouped(enabled) then
+                return nil, "the saved setting is unreadable, so it stays off"
+            end
+            return true
+        end,
+    })
     -- Not saved, and only while the master frame or the options are open:
     -- closing either, or a reload, locks the prompts again.
     settings:Add("guildGreet", {
@@ -1622,7 +1670,7 @@ if clientProfile.supported then
             groupFinder:Refresh()
         end
     end)
-    -- Group history: the guildmates in the party now (this player's own
+    -- Group history: the guildmates in the party or raid now (this player's own
     -- characters left out), and the dungeon when known: the Group Finder's
     -- pick, else the instance the player is in.
     local groupHistory
@@ -1640,7 +1688,8 @@ if clientProfile.supported then
         local own = selfKey and partition:GetCharacter(selfKey)
         local keys = {}
         if client:IsInGroup() then
-            local members = client:GetPartyMembers()
+            -- The whole raid, every subgroup, not just the player's own.
+            local members = client:GetGroupMembers()
             local index
             for index = 1, #members do
                 local key = not members[index].isPlayer
@@ -3500,6 +3549,34 @@ if clientProfile.supported then
         end
         return count
     end
+    -- The user's group friends in the current guild, from their own party
+    -- history. Worked out again when the history changes or saved data does
+    -- (a scan linking an alt to its main changes who counts as whom).
+    local groupFriends
+    local function currentFriends()
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        if groupFriends == nil or groupFriends.partition.key ~= partition.key then
+            groupFriends = addon.GroupFriends.Create({
+                partition = partition,
+                playerOf = function(characterKey)
+                    local character = groupFriends.partition:GetCharacter(characterKey)
+                    return character and character.player or nil
+                end,
+                version = function()
+                    return rosterController.dataRevision
+                end,
+            })
+        end
+        groupFriends.partition = partition
+        return groupFriends
+    end
+    local function friendTier(key)
+        local friends = currentFriends()
+        return friends and friends:TierOf(key) or nil
+    end
     guildGreet = addon.GuildGreet.Create({
         context = function()
             local guild, partition, normalizer = rosterController:QuietContext()
@@ -3538,8 +3615,98 @@ if clientProfile.supported then
         slowModeMinutes = function()
             return slowModeConfig and slowModeConfig:Minutes() or 0
         end,
+        friendTier = friendTier,
         view = greetPrompts,
     })
+    -- Dev build only: a test prompt in each group friend tier's look (and
+    -- one never grouped with), since waiting for a friend to log in can take
+    -- days. Each tier shows a guildmate really in it when the party history
+    -- has one, else another guildmate drawn in that tier's look. Greet on
+    -- them posts nothing.
+    if addon.Identity.isDev then
+        local PREVIEW_HOLD_SECONDS = 30
+        local TIERS = {
+            { tier = nil, name = "Not grouped" },
+            { tier = addon.GroupFriends.GROUPED, name = "Grouped" },
+            { tier = addon.GroupFriends.FREQUENT, name = "Frequent" },
+            { tier = addon.GroupFriends.TOP, name = "Top 5" },
+        }
+        router:Register("greettest",
+            "show a test greet prompt in each group friend tier's look; Greet on them posts nothing" ..
+            " (greettest hold: Frequent and Top 5 shown as held in Slow mode for " .. PREVIEW_HOLD_SECONDS ..
+            " seconds)",
+            function(arguments)
+                local friends = currentFriends()
+                local _, partition = rosterController:QuietContext()
+                if friends == nil or partition == nil then
+                    rosterController:Print("Greet test needs a guild.")
+                    return
+                end
+                local function usable(key)
+                    local character = partition:GetCharacter(key)
+                    return character ~= nil and character.departed == nil and partition:IsInGuild(key)
+                        and not guildGreet:IsOwn(key)
+                end
+                local samples = friends:Samples(usable)
+                -- One prompt per player, so each tier needs its own.
+                local usedPlayers = {}
+                local function claim(key)
+                    usedPlayers[guildGreet.policy:PlayerOf(key)] = true
+                    return key
+                end
+                local index
+                for index = 1, #TIERS do
+                    if TIERS[index].tier ~= nil and samples[TIERS[index].tier] ~= nil then
+                        claim(samples[TIERS[index].tier])
+                    end
+                end
+                -- Stand-ins: guildmates never grouped with first, so a
+                -- stand-in's real tier doesn't confuse, then anyone.
+                local others, grouped = {}, {}
+                partition:EachCharacter(function(key)
+                    if usable(key) then
+                        table.insert(friends:TierOf(key) == nil and others or grouped, key)
+                    end
+                end)
+                table.sort(others)
+                table.sort(grouped)
+                for index = 1, #grouped do
+                    table.insert(others, grouped[index])
+                end
+                local function standIn()
+                    local otherIndex
+                    for otherIndex = 1, #others do
+                        if not usedPlayers[guildGreet.policy:PlayerOf(others[otherIndex])] then
+                            return claim(others[otherIndex])
+                        end
+                    end
+                    return nil
+                end
+                local entries, shown = {}, {}
+                for index = 1, #TIERS do
+                    local key = TIERS[index].tier and samples[TIERS[index].tier] or nil
+                    local real = key ~= nil
+                    key = key or standIn()
+                    if key ~= nil then
+                        table.insert(entries, { key = key, tier = TIERS[index].tier })
+                        local rawName = partition:GetCharacter(key).name or key
+                        table.insert(shown, TIERS[index].name .. " (" .. guildGreet:Names(key, rawName).name ..
+                            ((real or TIERS[index].tier == nil) and "" or ", stand-in") .. ")")
+                    end
+                end
+                local hold = string.lower(string.match(arguments or "", "^%s*(%S*)") or "") == "hold"
+                    and PREVIEW_HOLD_SECONDS or nil
+                if guildGreet:Preview(entries, hold) == 0 then
+                    rosterController:Print("Greet test: no guildmates to show.")
+                    return
+                end
+                rosterController:Print("Greet test prompts: " .. table.concat(shown, ", ") ..
+                    ". Greet on them posts nothing.")
+                if not guildGreet:HighlightsFriends() then
+                    rosterController:Print("Highlight group friends is off, so they show without marks.")
+                end
+            end)
+    end
     -- The Guild Recruit window stays where it's dragged; the place is saved
     -- account-wide.
     recruitPrompts = addon.RecruitPrompts.Create(client, {
@@ -3674,6 +3841,8 @@ if clientProfile.supported then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
         elseif id == "greetInInstances" then
             guildGreet:OnZoneChanged()
+        elseif id == "greetHighlightFriends" or id == "greetOnlyGrouped" then
+            guildGreet:Refresh()
         elseif entry ~= nil and entry.category ~= nil then
             guildGreet:OnCategoryChanged(entry.category, value)
         end

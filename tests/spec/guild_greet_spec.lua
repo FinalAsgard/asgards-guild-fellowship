@@ -37,6 +37,7 @@ local function load()
         "Core/GreetPromptQueue.lua",
         "Core/GreetTally.lua",
         "Core/GreetWeight.lua",
+        "Core/GroupFriends.lua",
         "Core/GuildGreet.lua"
     )
 end
@@ -1601,4 +1602,500 @@ test.test("guild greet: the Slow mode press time is saved account-wide, and an u
     world.database.greet.slowPressedAt = "soon"
     test.assertEqual(nil, world.store:GreetSlowPressedAt())
     test.assertFalse(world.store:SetGreetSlowPressedAt(START))
+end)
+
+test.test("guild greet: each prompt carries its player's group friend tier, looked up as it's drawn", function()
+    local world = setup("Retail")
+    world.tiers = {}
+    world.options.friendTier = function(key)
+        return world.tiers[key]
+    end
+    reload(world)
+    local _, normalizer = world.options.context()
+    world.tiers[normalizer:Key(world.names.bolt)] = "frequent"
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+
+    test.assertEqual("frequent", world.shown[1].friendTier)
+    test.assertEqual(nil, world.shown[2].friendTier)
+
+    -- A tier that changes shows at the next draw.
+    world.tiers[normalizer:Key(world.names.bishop)] = "grouped"
+    world.greet:Refresh()
+    test.assertEqual("grouped", world.shown[2].friendTier)
+end)
+
+test.test("guild greet: without a group friend lookup, or when it fails, nobody has a tier", function()
+    local world = setup("Retail")
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(nil, world.shown[1].friendTier)
+
+    world.options.friendTier = function()
+        error("no history")
+    end
+    reload(world)
+    world.greet:OnPresence("online", world.names.bishop)
+    test.assertEqual(1, #world.shown)
+    test.assertEqual(nil, world.shown[1].friendTier)
+end)
+
+test.test("guild greet: highlighting group friends is on by default, saved, and an unusable value is left alone", function()
+    local world = setup("Retail")
+
+    test.assertTrue(world.store:GreetHighlightFriends())
+    test.assertTrue(world.greet:HighlightsFriends())
+    test.assertTrue(world.store:SetGreetHighlightFriends(false))
+    test.assertFalse(world.database.greet.highlightFriends)
+    test.assertFalse(world.addon.FellowshipStore.Create(world.database):GreetHighlightFriends())
+    test.assertFalse(world.greet:HighlightsFriends())
+    test.assertTrue(world.store:SetGreetHighlightFriends(true))
+    test.assertTrue(world.store:GreetHighlightFriends())
+
+    test.assertFalse(world.store:SetGreetHighlightFriends("off"))
+    world.database.greet.highlightFriends = "no"
+    test.assertTrue(world.store:GreetHighlightFriends())
+    test.assertFalse(world.store:SetGreetHighlightFriends(false))
+    test.assertEqual("no", world.database.greet.highlightFriends)
+end)
+
+test.test("guild greet: with highlighting off, prompts carry no group friend tier until it's back on", function()
+    local world = setup("Retail")
+    world.options.friendTier = function()
+        return "top5"
+    end
+    reload(world)
+    world.store:SetGreetHighlightFriends(false)
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual(nil, world.shown[1].friendTier)
+
+    world.store:SetGreetHighlightFriends(true)
+    world.greet:Refresh()
+    test.assertEqual("top5", world.shown[1].friendTier)
+end)
+
+-- Group friend caps -------------------------------------------------------------
+
+-- A Retail Guild Greet whose group friend tiers are `world.tiers`, by name
+-- (world.names' keys), with a greet cap of 1.
+local function withFriends(tiers)
+    local world = setup("Retail")
+    local _, normalizer = world.options.context()
+    world.tiers = {}
+    local name, tier
+    for name, tier in pairs(tiers) do
+        world.tiers[normalizer:Key(world.names[name])] = tier
+    end
+    world.options.friendTier = function(key)
+        return world.tiers[key]
+    end
+    reload(world)
+    world.store:SetGreetCap(1)
+    return world
+end
+
+test.test("guild greet: a Frequent or Top 5 friend's prompt stays open up to twice the greet cap", function()
+    local _, tier
+    for _, tier in ipairs({ "frequent", "top5" }) do
+        local world = withFriends({ bolt = tier })
+        world.greet:OnPresence("online", world.names.bolt)
+
+        test.assertTrue(greeted(world, "bishop", world.names.bolt))
+        test.assertEqual(1, #world.shown, tier)
+        test.assertTrue(greeted(world, "anvil", world.names.bolt))
+        test.assertEqual(0, #world.shown, tier)
+    end
+end)
+
+test.test("guild greet: a Grouped-only or never-grouped player's prompt closes at the normal cap", function()
+    local world = withFriends({ bolt = "grouped" })
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+
+    test.assertTrue(greeted(world, "bishop", world.names.bolt))
+    test.assertTrue(greeted(world, "bishop", world.names.rust))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: a friend's join prompt stays open up to twice the welcome cap", function()
+    local world = withFriends({ newt = "top5" })
+    world.store:SetGreetNumber("welcomeCap", 1)
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual(1, #world.shown)
+
+    test.assertTrue(greeted(world, "bishop", world.names.newt, "welcome Newt!"))
+    test.assertEqual(1, #world.shown)
+    test.assertTrue(greeted(world, "bolt", world.names.newt, "welcome Newt!"))
+    test.assertEqual(0, #world.shown)
+end)
+
+test.test("guild greet: Greet on a friend's prompt still posts while they're under the doubled cap", function()
+    local world = withFriends({ bolt = "frequent" })
+    world.greet:OnPresence("online", world.names.bolt)
+    greeted(world, "bishop", world.names.bolt)
+
+    test.assertEqual(1, #world.shown)
+    test.assertTrue(world.greet:Greet(world.shown[1].player) ~= nil)
+    test.assertEqual(1, #world.sent)
+end)
+
+test.test("guild greet: with highlighting off, a friend's prompt uses the normal cap", function()
+    local world = withFriends({ bolt = "top5", newt = "top5" })
+    world.store:SetGreetHighlightFriends(false)
+    world.store:SetGreetNumber("welcomeCap", 1)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("join", world.names.newt)
+
+    test.assertTrue(greeted(world, "bishop", world.names.bolt))
+    test.assertTrue(greeted(world, "bishop", world.names.newt, "welcome Newt!"))
+    test.assertEqual(0, #world.shown)
+end)
+
+-- Group friends held through Slow mode ------------------------------------------
+
+-- The prompt showing for `name` (a world.names key), or nil.
+local function shownFor(world, name)
+    local index
+    for index = 1, #world.shown do
+        if world.shown[index].rawName == world.names[name] then
+            return world.shown[index]
+        end
+    end
+    return nil
+end
+
+test.test("guild greet: in Slow mode, a Frequent or Top 5 friend's prompt stays, locked, when another is greeted", function()
+    local world = withFriends({ anvil = "frequent", bishop = "grouped" })
+    world.slowMinutes = 5
+    threeArrive(world)
+
+    test.assertEqual("Hey Bolt!", world.greet:Greet(shownFor(world, "bolt").player))
+
+    -- Bishop is only Grouped, so their prompt closes as before.
+    test.assertEqual("Anvil", shownLabels(world))
+    test.assertEqual(5 * MINUTE, world.shown[1].heldFor)
+    test.assertEqual(nil, world.greet:Greet(world.shown[1].player))
+    test.assertEqual(1, #world.sent)
+    test.assertEqual("Anvil", shownLabels(world))
+end)
+
+test.test("guild greet: in Slow mode, a Frequent or Top 5 friend arriving during the cooldown is prompted, locked", function()
+    local world = withFriends({ rust = "top5", bishop = "grouped" })
+    world.slowMinutes = 5
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:Greet(world.shown[1].player)
+    advance(world, MINUTE)
+
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:OnPresence("online", world.names.bishop)
+
+    test.assertEqual("Rust", shownLabels(world))
+    test.assertEqual(4 * MINUTE, world.shown[1].heldFor)
+    test.assertEqual(nil, world.greet:Greet(world.shown[1].player))
+end)
+
+test.test("guild greet: once the cooldown ends, Greet on a held friend posts and starts a new cooldown", function()
+    local world = withFriends({ anvil = "frequent", bishop = "top5" })
+    world.slowMinutes = 5
+    threeArrive(world)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("Rip,Anvil", shownLabels(world))
+
+    -- Held well past a prompt's usual lifetime, the countdown running down.
+    advance(world, 3 * MINUTE)
+    test.assertEqual("Rip,Anvil", shownLabels(world))
+    test.assertEqual(2 * MINUTE, world.shown[1].heldFor)
+    advance(world, 2 * MINUTE)
+    world.greet:Refresh()
+    test.assertEqual("Rip,Anvil", shownLabels(world))
+    test.assertEqual(nil, world.shown[1].heldFor)
+
+    test.assertTrue(world.greet:Greet(world.shown[1].player) ~= nil)
+    test.assertEqual(2, #world.sent)
+    test.assertEqual(START + 5 * MINUTE, world.store:GreetSlowPressedAt())
+    -- The other held friend is held again by the new cooldown.
+    test.assertEqual("Anvil", shownLabels(world))
+    test.assertEqual(5 * MINUTE, world.shown[1].heldFor)
+end)
+
+test.test("guild greet: a held prompt closes on log off, leaving the guild, or the doubled cap", function()
+    local world = withFriends({ anvil = "frequent", bishop = "top5", rust = "top5" })
+    world.slowMinutes = 5
+    threeArrive(world)
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("Rip,Anvil,Rust", shownLabels(world))
+
+    world.greet:OnPresence("offline", world.names.anvil)
+    test.assertEqual("Rip,Rust", shownLabels(world))
+    world.greet:OnPresence("leave", world.names.rust)
+    test.assertEqual("Rip", shownLabels(world))
+    greeted(world, "anvil", world.names.bishop)
+    test.assertEqual("Rip", shownLabels(world))
+    greeted(world, "rust", world.names.bishop)
+    test.assertEqual("", shownLabels(world))
+end)
+
+test.test("guild greet: with highlighting off or Slow mode at 0, friends aren't held", function()
+    local world = withFriends({ anvil = "top5", rust = "top5" })
+    world.store:SetGreetHighlightFriends(false)
+    world.slowMinutes = 5
+    threeArrive(world)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("", shownLabels(world))
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual("", shownLabels(world))
+
+    world = withFriends({ anvil = "top5" })
+    world.slowMinutes = 0
+    threeArrive(world)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("Rip,Anvil", shownLabels(world))
+    test.assertEqual(nil, world.shown[2].heldFor)
+end)
+
+-- Only greet players I've grouped with ------------------------------------------
+
+test.test("guild greet: only greeting grouped-with players is off by default, saved, and an unusable value is left alone", function()
+    local world = setup("Retail")
+
+    test.assertFalse(world.store:GreetOnlyGrouped())
+    test.assertFalse(world.greet:OnlyGrouped())
+    test.assertTrue(world.store:SetGreetOnlyGrouped(true))
+    test.assertTrue(world.database.greet.onlyGrouped)
+    test.assertTrue(world.addon.FellowshipStore.Create(world.database):GreetOnlyGrouped())
+    test.assertTrue(world.greet:OnlyGrouped())
+    test.assertTrue(world.store:SetGreetOnlyGrouped(false))
+    test.assertFalse(world.store:GreetOnlyGrouped())
+
+    test.assertFalse(world.store:SetGreetOnlyGrouped("on"))
+    world.database.greet.onlyGrouped = "yes"
+    test.assertFalse(world.store:GreetOnlyGrouped())
+    test.assertFalse(world.store:SetGreetOnlyGrouped(true))
+    test.assertEqual("yes", world.database.greet.onlyGrouped)
+end)
+
+test.test("guild greet: off, never-grouped players are prompted as before", function()
+    local world = withFriends({ bolt = "grouped" })
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:OnPresence("join", world.names.newt)
+
+    test.assertEqual(3, #world.shown)
+end)
+
+test.test("guild greet: on, only grouped-with players are prompted, for logins, long absences and joins alike", function()
+    local world = withFriends({ bolt = "grouped", anvil = "frequent", bishop = "top5" })
+    world.store:SetGreetOnlyGrouped(true)
+
+    world.greet:OnPresence("online", world.names.rust)
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual("", shownLabels(world))
+
+    threeArrive(world)
+    test.assertEqual("Bolt,Rip,Anvil", shownLabels(world))
+end)
+
+test.test("guild greet: on, a never-grouped player gets no welcome back, a grouped one does", function()
+    local world = withFriends({ anvil = "grouped" })
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.handlers.close(world.shown[1].player)
+    world.handlers.close(world.shown[1].player)
+    world.greet:OnPresence("offline", world.names.anvil)
+    world.greet:OnPresence("offline", world.names.bolt)
+    advance(world, 60 * MINUTE)
+    world.store:SetGreetOnlyGrouped(true)
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.anvil)
+
+    test.assertEqual("Anvil", shownLabels(world))
+    test.assertEqual("welcomeBack", world.shown[1].category)
+end)
+
+test.test("guild greet: turning it on closes waiting prompts for never-grouped players, shown or not yet", function()
+    local world = withFriends({ anvil = "grouped" })
+    world.options.showDelay = function() return 5 end
+    reload(world)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnPresence("join", world.names.newt)
+    advance(world, 5)
+    test.assertEqual(3, #world.shown)
+
+    world.store:SetGreetOnlyGrouped(true)
+    world.greet:Refresh()
+    test.assertEqual("Anvil", shownLabels(world))
+
+    -- One raised before the change and still waiting to show never shows.
+    world.store:SetGreetOnlyGrouped(false)
+    world.greet:OnPresence("online", world.names.rust)
+    world.store:SetGreetOnlyGrouped(true)
+    advance(world, 5)
+    world.greet:Refresh()
+    test.assertEqual("Anvil", shownLabels(world))
+end)
+
+test.test("guild greet: a player grouped with for the first time is prompted from then on", function()
+    local world = withFriends({})
+    world.store:SetGreetOnlyGrouped(true)
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual("", shownLabels(world))
+    world.greet:OnPresence("offline", world.names.bolt)
+
+    local _, normalizer = world.options.context()
+    world.tiers[normalizer:Key(world.names.bolt)] = "grouped"
+    advance(world, 60 * MINUTE)
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual("Bolt", shownLabels(world))
+end)
+
+test.test("guild greet: it works with highlighting off, and nobody is prompted without a group friend lookup", function()
+    local world = withFriends({ bolt = "top5" })
+    world.store:SetGreetHighlightFriends(false)
+    world.store:SetGreetOnlyGrouped(true)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.rust)
+
+    test.assertEqual("Bolt", shownLabels(world))
+    -- Highlighting off still removes the mark and the perks.
+    test.assertEqual(nil, world.shown[1].friendTier)
+
+    world = setup("Retail")
+    world.store:SetGreetOnlyGrouped(true)
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual("", shownLabels(world))
+end)
+
+test.test("guild greet: it doesn't change caps, marks or Slow mode for the players prompted", function()
+    local world = withFriends({ bolt = "grouped", anvil = "top5", bishop = "grouped" })
+    world.store:SetGreetOnlyGrouped(true)
+    world.slowMinutes = 5
+    threeArrive(world)
+    test.assertEqual("grouped", shownFor(world, "bolt").friendTier)
+    test.assertEqual("top5", shownFor(world, "anvil").friendTier)
+
+    -- The Top 5 friend keeps the doubled cap; a Grouped one closes at 1.
+    test.assertTrue(greeted(world, "rust", world.names.bishop))
+    test.assertTrue(greeted(world, "rust", world.names.anvil))
+    test.assertEqual("Bolt,Anvil", shownLabels(world))
+
+    -- Slow mode closes the Grouped prompt and holds the Top 5 one.
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("Anvil", shownLabels(world))
+    test.assertEqual(5 * MINUTE, world.shown[1].heldFor)
+end)
+
+-- Review follow-ups ---------------------------------------------------------------
+
+test.test("guild greet: turning highlighting off closes a friend's prompt that's had the normal cap", function()
+    local world = withFriends({ bolt = "frequent", anvil = "frequent" })
+    world.store:SetGreetCap(2)
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.anvil)
+    greeted(world, "bishop", world.names.bolt)
+    greeted(world, "rust", world.names.bolt)
+    greeted(world, "bishop", world.names.anvil)
+    test.assertEqual("Bolt,Anvil", shownLabels(world))
+
+    world.store:SetGreetHighlightFriends(false)
+    world.greet:Refresh()
+
+    -- Bolt has had 2, the normal cap; Anvil only 1.
+    test.assertEqual("Anvil", shownLabels(world))
+end)
+
+test.test("guild greet: shortening Slow mode shortens how long a held prompt stays", function()
+    local world = withFriends({ anvil = "frequent" })
+    world.slowMinutes = 5
+    threeArrive(world)
+    world.greet:Greet(shownFor(world, "bolt").player)
+    test.assertEqual("Anvil", shownLabels(world))
+
+    advance(world, 30)
+    world.slowMinutes = 1
+    world.greet:Refresh()
+    test.assertEqual(30, world.shown[1].heldFor)
+
+    -- The cooldown ends at 1 minute; the prompt stays its usual 90 seconds
+    -- after, not 90 seconds after the old 5.
+    advance(world, 30 + world.greet.queue.lifetime - 1)
+    world.greet:Refresh()
+    test.assertEqual("Anvil", shownLabels(world))
+    advance(world, 1)
+    world.greet:Refresh()
+    test.assertEqual("", shownLabels(world))
+end)
+
+-- Test prompts (the Dev build's greettest) ---------------------------------------
+
+test.test("guild greet: a test prompt shows at once with its friend mark, and Greet on it posts nothing", function()
+    local world = withFriends({ bolt = "grouped" })
+    local _, normalizer = world.options.context()
+
+    test.assertEqual(1, world.greet:Preview({ { key = normalizer:Key(world.names.bolt), tier = "grouped" } }))
+
+    test.assertEqual(1, #world.shown)
+    test.assertEqual("grouped", world.shown[1].friendTier)
+    test.assertEqual(nil, world.greet:Greet(world.shown[1].player))
+    test.assertEqual(0, #world.sent)
+    test.assertEqual(0, #world.shown)
+    test.assertEqual(0, world.greet:LockedFor(world.time))
+end)
+
+test.test("guild greet: a held test prompt counts down for a Frequent or Top 5 friend only, then can be closed", function()
+    local world = withFriends({ anvil = "frequent", bolt = "grouped" })
+    local _, normalizer = world.options.context()
+
+    world.greet:Preview({
+        { key = normalizer:Key(world.names.anvil), tier = "frequent" },
+        { key = normalizer:Key(world.names.bolt), tier = "grouped" },
+    }, 30)
+
+    test.assertEqual(30, shownFor(world, "anvil").heldFor)
+    test.assertEqual(nil, shownFor(world, "bolt").heldFor)
+    test.assertEqual(nil, world.greet:Greet(shownFor(world, "anvil").player))
+    test.assertTrue(shownFor(world, "anvil") ~= nil)
+    advance(world, 10)
+    test.assertEqual(20, shownFor(world, "anvil").heldFor)
+    advance(world, 20)
+    test.assertEqual(nil, shownFor(world, "anvil").heldFor)
+    world.greet:Greet(shownFor(world, "anvil").player)
+    test.assertEqual(nil, shownFor(world, "anvil"))
+    test.assertEqual(0, #world.sent)
+end)
+
+test.test("guild greet: Slow mode and the greet cap leave test prompts alone", function()
+    local world = withFriends({ bolt = "grouped" })
+    local _, normalizer = world.options.context()
+    world.slowMinutes = 5
+    world.greet:OnPresence("online", world.names.anvil)
+    advance(world, 10)
+    world.greet:Greet(shownFor(world, "anvil").player)
+
+    world.greet:Preview({ { key = normalizer:Key(world.names.bolt), tier = "grouped" } })
+    greeted(world, "bishop", world.names.bolt)
+
+    test.assertTrue(shownFor(world, "bolt") ~= nil)
+    test.assertEqual(nil, shownFor(world, "bolt").heldFor)
+end)
+
+test.test("guild greet: a test prompt is drawn in the tier it's given, not the player's own, while highlighting is on", function()
+    local world = withFriends({})
+    local _, normalizer = world.options.context()
+
+    world.greet:Preview({
+        { key = normalizer:Key(world.names.bolt), tier = "top5" },
+        { key = normalizer:Key(world.names.rust), tier = nil },
+    }, 30)
+
+    test.assertEqual("top5", shownFor(world, "bolt").friendTier)
+    test.assertEqual(30, shownFor(world, "bolt").heldFor)
+    test.assertEqual(nil, shownFor(world, "rust").friendTier)
+    world.store:SetGreetHighlightFriends(false)
+    world.greet:Refresh()
+    test.assertEqual(nil, shownFor(world, "bolt").friendTier)
 end)

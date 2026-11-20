@@ -82,7 +82,7 @@ end)
 
 -- Storage ---------------------------------------------------------------------------
 
-test.test("group history: kept in the guild partition, unreadable entries skipped, oldest dropped past the cap", function()
+test.test("group history: kept in the guild partition, unreadable entries skipped, never capped", function()
     local addon, partition, _, database = newHistory()
     local stored = database.guilds["Knights of Camelot-Camelot"]
 
@@ -93,10 +93,11 @@ test.test("group history: kept in the guild partition, unreadable entries skippe
     test.assertEqual(2, #stored.groupHistory)
 
     local index
-    for index = 1, addon.FellowshipStore.GROUP_HISTORY_MAX + 5 do
+    -- History is never pruned or capped.
+    for index = 1, 1500 do
         partition:AddGroupHistory({ at = NOW + index, characters = { "zap" } })
     end
-    test.assertEqual(addon.FellowshipStore.GROUP_HISTORY_MAX, #stored.groupHistory)
+    test.assertEqual(1502, #stored.groupHistory)
 end)
 
 test.test("group history: never part of what guild sync passes on", function()

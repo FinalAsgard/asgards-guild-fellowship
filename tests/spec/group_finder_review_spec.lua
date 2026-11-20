@@ -375,8 +375,9 @@ local function foreverGuild()
     }
 end
 
-local function loginForever(channel, playerName)
-    local world = fixtures.newEnvironment("Forever", { guild = foreverGuild(), playerName = playerName })
+local function loginForever(channel, playerName, addonName)
+    local world = fixtures.newEnvironment("Forever",
+        { guild = foreverGuild(), playerName = playerName, addonName = addonName })
     fixtures.joinChannel(channel, world)
     world.grouped = false
     world.environment.IsInGroup = function() return world.grouped end
@@ -436,6 +437,78 @@ test.test("composed: on Forever, a guildmate without the add-on who joins the pa
     test.assertEqual(nil, keys["zap arcane-camelot"])
     test.assertEqual(nil, keys["spark arcane-camelot"])
     test.assertTrue(keys["hammer smith-camelot"])
+end)
+
+test.test("composed: guildmates anywhere in the raid go into the group history, not just the player's subgroup", function()
+    local channel = fixtures.newChannel()
+    local world = loginForever(channel, "Tool Box")
+    world.environment.IsInRaid = function() return true end
+
+    -- Zap is in another subgroup: a raid unit, but no party unit.
+    joinParty(world, {
+        player = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        raid1 = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        raid7 = { name = "Zap", guid = "Player-1-Zap Arcane", class = "MAGE" },
+    })
+
+    local _, partition = world.addon.rosterController:QuietContext()
+    local entries = partition:GetGroupHistory()
+    test.assertEqual(1, #entries)
+    test.assertEqual("zap arcane-camelot", table.concat(entries[1].characters, ","))
+end)
+
+test.test("composed: the Dev build's greettest shows a group friend's prompt, and its Greet posts nothing", function()
+    local channel = fixtures.newChannel()
+    local world = loginForever(channel, "Tool Box", "AsgardsGuildFellowshipDev")
+    joinParty(world, {
+        player = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
+        party1 = { name = "Zap", guid = "Player-1-Zap Arcane", class = "MAGE" },
+    })
+    fixtures.slash(world, "help")
+    test.assertContains(table.concat(world.messages, "\n"), "/agfdev greettest")
+
+    fixtures.slash(world, "greettest")
+
+    local greet = world.addon.guildGreet
+    -- Zap is really Top 5; Hammer, never grouped with, shows the plain look.
+    -- Spark is Zap's alt, so nobody is left to stand in for the other tiers.
+    local prompts = greet.queue:All(world.time)
+    test.assertEqual(2, #prompts)
+    test.assertEqual("hammer smith-camelot", prompts[1].key)
+    test.assertEqual(nil, prompts[1].previewTier)
+    test.assertEqual("zap arcane-camelot", prompts[2].key)
+    test.assertEqual("top5", prompts[2].previewTier)
+    test.assertTrue(prompts[2].preview)
+    local said = table.concat(world.messages, "\n")
+    test.assertContains(said, "Not grouped (Hammer Smith)")
+    test.assertContains(said, "Top 5 (Zap Arcane)")
+    world.chat = {}
+    greet:Greet(prompts[1].player)
+    greet:Greet(prompts[2].player)
+    test.assertEqual(0, #world.chat)
+    test.assertEqual(0, #greet.queue:All(world.time))
+end)
+
+test.test("composed: greettest stands another guildmate in for a tier nobody in the history is in", function()
+    local channel = fixtures.newChannel()
+    local world = loginForever(channel, "Tool Box", "AsgardsGuildFellowshipDev")
+
+    fixtures.slash(world, "greettest")
+
+    local prompts = world.addon.guildGreet.queue:All(world.time)
+    test.assertEqual(2, #prompts)
+    test.assertEqual(nil, prompts[1].previewTier)
+    test.assertEqual("grouped", prompts[2].previewTier)
+    test.assertContains(table.concat(world.messages, "\n"), ", stand-in)")
+end)
+
+test.test("composed: the release build has no greettest command", function()
+    local channel = fixtures.newChannel()
+    local world = loginForever(channel, "Tool Box")
+
+    fixtures.slash(world, "help")
+
+    test.assertFalse(string.find(table.concat(world.messages, "\n"), "greettest", 1, true) ~= nil)
 end)
 
 test.test("composed: on Forever, a party member with no GUID is found by an unshared first name", function()

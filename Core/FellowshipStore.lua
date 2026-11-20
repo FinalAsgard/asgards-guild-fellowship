@@ -566,6 +566,50 @@ function Store:SetGreetInInstances(enabled)
     return true
 end
 
+-- Whether greet prompts mark the user's group friends (GroupFriends) and
+-- give them Guild Greet's perks. On unless turned off; unusable saved data
+-- counts as on.
+function Store:GreetHighlightFriends()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    return type(state) ~= "table" or state.highlightFriends ~= false
+end
+
+-- Turns group friend highlighting on or off. An unusable existing value is
+-- left alone.
+function Store:SetGreetHighlightFriends(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.highlightFriends ~= nil and type(state.highlightFriends) ~= "boolean") then
+        return false
+    end
+    state.highlightFriends = enabled
+    return true
+end
+
+-- Whether Guild Greet only prompts for players the user has grouped with
+-- (any GroupFriends tier). Off unless turned on; unusable saved data counts
+-- as off.
+function Store:GreetOnlyGrouped()
+    local state = type(self.database) == "table" and self.database.greet or nil
+    return type(state) == "table" and state.onlyGrouped == true
+end
+
+-- Turns "only greet players I've grouped with" on or off. An unusable
+-- existing value is left alone.
+function Store:SetGreetOnlyGrouped(enabled)
+    if type(enabled) ~= "boolean" then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.onlyGrouped ~= nil and type(state.onlyGrouped) ~= "boolean") then
+        return false
+    end
+    state.onlyGrouped = enabled
+    return true
+end
+
 local function isGreetCap(value)
     return type(value) == "number" and value == math.floor(value)
         and value >= FellowshipStore.GREET_CAP_MIN and value <= FellowshipStore.GREET_CAP_MAX
@@ -1528,9 +1572,6 @@ function Partition:GetForgeries()
     return self.data.forgeries
 end
 
--- The most group history entries kept; the oldest go first.
-FellowshipStore.GROUP_HISTORY_MAX = 1000
-
 local function isHistoryEntry(entry)
     if type(entry) ~= "table" or not isWholeNumber(entry.at) or type(entry.characters) ~= "table"
         or (entry.dungeon ~= nil and not isText(entry.dungeon))
@@ -1602,7 +1643,7 @@ function Partition:GetGroupHistory()
     return entries
 end
 
--- Adds a group history entry, dropping the oldest past GROUP_HISTORY_MAX.
+-- Adds a group history entry. History is never pruned or capped.
 function Partition:AddGroupHistory(entry)
     if not isHistoryEntry(entry) then
         return false
@@ -1611,10 +1652,26 @@ function Partition:AddGroupHistory(entry)
         self.data.groupHistory = {}
     end
     table.insert(self.data.groupHistory, entry)
-    while #self.data.groupHistory > FellowshipStore.GROUP_HISTORY_MAX do
-        table.remove(self.data.groupHistory, 1)
-    end
     return true
+end
+
+-- Cheap marks of the group history's state, without reading it all: how
+-- many entries are stored, the last readable one, and how many characters
+-- it holds. Entries are only ever added, and only the last readable one
+-- (the one GetGroupHistory ends with) gains characters, so any change to
+-- the history changes one of these. Only an unreadable tail is stepped
+-- over to find it.
+function Partition:GroupHistoryMark()
+    local stored = self.data.groupHistory
+    if type(stored) ~= "table" then
+        return 0, nil, 0
+    end
+    local index = #stored
+    while index > 0 and not isHistoryEntry(stored[index]) do
+        index = index - 1
+    end
+    local last = stored[index]
+    return #stored, last, last and #last.characters or 0
 end
 
 -- Guild Recruit's ad counts heard from other add-on users, by character
