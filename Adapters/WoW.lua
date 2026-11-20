@@ -183,17 +183,11 @@ function Client:GetGuildName()
     return name
 end
 
--- The realm the player is on, from the client's other sources, for when
--- GetGuildIdentity has none (WoW Forever's GetRealmName can return an
--- empty string): the normalized realm, else the one UnitFullName gives.
--- Nil when neither says.
+-- The realm the player is on, from the client's normalized realm name, for
+-- when GetGuildIdentity has none; nil when it can't say. UnitFullName isn't
+-- asked: on WoW Forever its second value can be the surname.
 function Client:GetPlayerRealm()
     local ok, realm = callFunction(self.environment.GetNormalizedRealmName)
-    if ok and type(realm) == "string" and realm ~= "" then
-        return realm
-    end
-    local _
-    ok, _, realm = callFunction(self.environment.UnitFullName, "player")
     if ok and type(realm) == "string" and realm ~= "" then
         return realm
     end

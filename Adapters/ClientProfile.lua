@@ -12,11 +12,14 @@ addon.ClientProfile = ClientProfile
 
 -- `twoPartNames`: Forever character names are "First Last"; Retail names are
 -- a single word. NameNormalizer receives this instead of detecting it.
-local function supported(id, label, twoPartNames)
+-- `onlyRealm`: the client's one realm, for when the game won't name it
+-- (WoW Forever's GetRealmName returns "" since its 1.60.1 hotfix); nil
+-- where there are many.
+local function supported(id, label, twoPartNames, onlyRealm)
     return {
         id = id,
         label = label,
-        nameRules = { twoPartNames = twoPartNames },
+        nameRules = { twoPartNames = twoPartNames, onlyRealm = onlyRealm },
         supported = true,
     }
 end
@@ -62,7 +65,7 @@ function ClientProfile.Detect(environment, addonName)
     end
 
     if declared == "Forever" then
-        return supported("forever", "WoW Forever", true)
+        return supported("forever", "WoW Forever", true, "Camelot")
     end
 
     if declared == "Retail" then

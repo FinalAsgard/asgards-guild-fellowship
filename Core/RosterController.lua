@@ -165,9 +165,10 @@ function Controller:QuietContext()
     if guild == nil and store ~= nil then
         -- The client knows the guild but not its realm: the realm the
         -- guild's saved data was kept under, so it's found again, else the
-        -- client's other sources for the player's realm.
+        -- client's only realm (WoW Forever's), else its normalized realm.
         local name = self.client:GetGuildName()
-        local realm = name and (store:SavedGuildRealm(name) or self.client:GetPlayerRealm())
+        local realm = name and (store:SavedGuildRealm(name) or self.nameRules.onlyRealm
+            or self.client:GetPlayerRealm())
         guild = realm and { name = name, realm = realm } or nil
     end
     if guild == nil then
