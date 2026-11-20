@@ -157,11 +157,11 @@ end
 -- The player's current guild as { name, realm }, or nil when guildless or
 -- unknown. GetGuildInfo reports no realm for a guild on the player's realm.
 function Client:GetGuildIdentity()
-    local ok, name, _, _, realm = callFunction(self.environment.GetGuildInfo, "player")
-    if not ok or type(name) ~= "string" or name == "" then
+    local name = self:GetGuildName()
+    if name == nil then
         return nil
     end
-
+    local _, _, _, _, realm = callFunction(self.environment.GetGuildInfo, "player")
     if type(realm) ~= "string" or realm == "" then
         local realmOk, currentRealm = callFunction(self.environment.GetRealmName)
         realm = realmOk and currentRealm or nil
@@ -171,6 +171,33 @@ function Client:GetGuildIdentity()
     end
 
     return { name = name, realm = realm }
+end
+
+-- The player's guild's name, or nil outside a guild or while the client
+-- can't say.
+function Client:GetGuildName()
+    local ok, name = callFunction(self.environment.GetGuildInfo, "player")
+    if not ok or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    return name
+end
+
+-- The realm the player is on, from the client's other sources, for when
+-- GetGuildIdentity has none (WoW Forever's GetRealmName can return an
+-- empty string): the normalized realm, else the one UnitFullName gives.
+-- Nil when neither says.
+function Client:GetPlayerRealm()
+    local ok, realm = callFunction(self.environment.GetNormalizedRealmName)
+    if ok and type(realm) == "string" and realm ~= "" then
+        return realm
+    end
+    local _
+    ok, _, realm = callFunction(self.environment.UnitFullName, "player")
+    if ok and type(realm) == "string" and realm ~= "" then
+        return realm
+    end
+    return nil
 end
 
 -- The logged-in character's 0-based guild rank index, read live (the
@@ -185,8 +212,9 @@ end
 
 -- The logged-in character as "Name-Realm", or nil while the client can't
 -- say. UnitFullName may leave out the realm (early at login, or on older
--- clients), so the player's own realm fills it in.
-function Client:GetPlayerFullName()
+-- clients), so the player's own realm fills it in, or `fallbackRealm` when
+-- the client gives none at all.
+function Client:GetPlayerFullName(fallbackRealm)
     local ok, name, realm = callFunction(self.environment.UnitFullName, "player")
     if not ok or type(name) ~= "string" or name == "" then
         return nil
@@ -197,6 +225,9 @@ function Client:GetPlayerFullName()
             realmOk, ownRealm = callFunction(self.environment.GetRealmName)
         end
         realm = realmOk and ownRealm or nil
+    end
+    if type(realm) ~= "string" or realm == "" then
+        realm = fallbackRealm
     end
     if type(realm) ~= "string" or realm == "" then
         return nil

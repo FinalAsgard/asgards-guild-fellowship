@@ -161,13 +161,21 @@ end
 -- message explaining why not.
 function Controller:QuietContext()
     local guild = self.client:GetGuildIdentity()
+    local store = self:Store()
+    if guild == nil and store ~= nil then
+        -- The client knows the guild but not its realm: the realm the
+        -- guild's saved data was kept under, so it's found again, else the
+        -- client's other sources for the player's realm.
+        local name = self.client:GetGuildName()
+        local realm = name and (store:SavedGuildRealm(name) or self.client:GetPlayerRealm())
+        guild = realm and { name = name, realm = realm } or nil
+    end
     if guild == nil then
         if self.client:IsInGuild() then
             return nil, "Guild information isn't available yet. Try again in a moment."
         end
         return nil, "You're not in a guild, so there is no roster to show."
     end
-    local store = self:Store()
     if store == nil then
         return nil, "Saved data is unavailable, so the roster can't be shown."
     end
@@ -187,7 +195,7 @@ end
 -- A key found in the roster is remembered for this guild and character.
 function Controller:SelfKey()
     local guild, partition, normalizer = self:QuietContext()
-    local fullName = self.client:GetPlayerFullName()
+    local fullName = self.client:GetPlayerFullName(guild and guild.realm)
     if guild == nil or fullName == nil then
         return nil
     end

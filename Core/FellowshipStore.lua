@@ -348,6 +348,26 @@ function FellowshipStore.PartitionKey(guild)
     return guild.name .. "-" .. string.gsub(guild.realm, "%s+", "")
 end
 
+-- The realm (spaces removed, as in PartitionKey) of the one guild named
+-- `name` with saved data, or nil when there's none or more than one.
+function Store:SavedGuildRealm(name)
+    if not isText(name) or type(self.database) ~= "table" or type(self.database.guilds) ~= "table" then
+        return nil
+    end
+    local prefix = name .. "-"
+    local found
+    local key
+    for key in pairs(self.database.guilds) do
+        if type(key) == "string" and string.sub(key, 1, #prefix) == prefix and #key > #prefix then
+            if found ~= nil then
+                return nil
+            end
+            found = string.sub(key, #prefix + 1)
+        end
+    end
+    return found
+end
+
 -- The guild's partition, created on first use. Returns nil and a reason
 -- when the database or that partition can't be used; corrupt data is then
 -- left exactly as it was.

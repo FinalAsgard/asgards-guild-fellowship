@@ -565,3 +565,66 @@ test.test("hovering the counts line shows its tooltip, and leaving hides it", fu
     counts:Set(nil)
     test.assertFalse(counts.frame.shown)
 end)
+
+-- Some WoW Forever builds give no realm anywhere: GetGuildInfo leaves it out
+-- (the guild is on the player's realm) and GetRealmName returns "".
+local function withoutRealm(world)
+    world.environment.GetRealmName = function()
+        return ""
+    end
+    world.environment.GetNormalizedRealmName = nil
+    local fullName = world.environment.UnitFullName
+    world.environment.UnitFullName = function(unit)
+        return (fullName(unit))
+    end
+end
+
+test.test("Forever with no realm from the client finds the guild's saved data again by its name", function()
+    local setup = build("Forever")
+    setup.login()
+    local scanned = setup.partition()
+    test.assertTrue(scanned ~= nil)
+
+    withoutRealm(setup.world)
+    local guild, partition = setup.controller:QuietContext()
+
+    test.assertEqual("Camelot", guild.realm)
+    test.assertEqual("Knights of Camelot-Camelot", partition.key)
+    test.assertTrue(partition.data == scanned)
+    test.assertEqual(EXPECTED_FIRST.Forever.key, setup.controller:SelfKey())
+    test.assertEqual(1, countKeys(setup.database.guilds))
+end)
+
+test.test("Forever with no realm from the client and no saved data says guild information isn't available", function()
+    local setup = build("Forever")
+    withoutRealm(setup.world)
+    setup.controller:OnSavedDataReady()
+
+    local guild, reason = setup.controller:QuietContext()
+
+    test.assertEqual(nil, guild)
+    test.assertEqual("Guild information isn't available yet. Try again in a moment.", reason)
+end)
+
+test.test("a guild name saved on two realms isn't guessed between", function()
+    local setup = build("Forever", { database = { schemaVersion = 1, guilds = {
+        ["Knights of Camelot-Camelot"] = {}, ["Knights of Camelot-Avalon"] = {},
+    } } })
+    withoutRealm(setup.world)
+    setup.controller:OnSavedDataReady()
+
+    test.assertEqual(nil, (setup.controller:QuietContext()))
+end)
+
+test.test("Retail with no realm from the client falls back to the realm UnitFullName gives", function()
+    local setup = build("Retail")
+    setup.world.environment.GetRealmName = function()
+        return ""
+    end
+    setup.world.environment.GetNormalizedRealmName = nil
+    setup.controller:OnSavedDataReady()
+
+    local guild = setup.controller:QuietContext()
+
+    test.assertEqual("Area52", guild.realm)
+end)
