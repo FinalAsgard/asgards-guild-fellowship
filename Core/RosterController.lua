@@ -71,6 +71,8 @@ Controller.__index = Controller
 --                 promotion rows (officers, or a member's own player), or nil
 --   readyKeys     optional function() -> the set of characters ready for
 --                 promotion, for the roster's marker (officers), or nil
+--   timeMetKeys   optional function() -> the set of characters whose time is
+--                 up, for the roster's timer marker (officers), or nil
 --   recruitRecord optional function(keys) -> a player's ad record (see
 --                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
@@ -91,6 +93,7 @@ function RosterController.Create(options)
         promotionsView = options.promotionsView,
         promotion = options.promotion,
         readyKeys = options.readyKeys,
+        timeMetKeys = options.timeMetKeys,
         recruitRecord = options.recruitRecord,
         recentAds = options.recentAds,
         offZones = options.offZones,
@@ -1515,15 +1518,21 @@ function Controller:RefreshGuildLog()
     end
 end
 
--- Marks the roster's rows of characters ready for promotion (see
--- RosterViewModel.MarkReady; only officers get any), redrawing the roster
--- when that changed and `redraw` is set.
+-- Marks the roster's rows of characters ready for promotion, and whose time
+-- is up (see RosterViewModel.MarkReady; only officers get any), redrawing
+-- the roster when that changed and `redraw` is set.
 function Controller:MarkReady(redraw)
     if self.rosterRows == nil or self.readyKeys == nil then
         return
     end
     local ok, ready = pcall(self.readyKeys)
-    if addon.RosterViewModel.MarkReady(self.rosterRows, ok and ready or nil) and redraw and self.window ~= nil then
+    local timeOk, timeMet = false, nil
+    if self.timeMetKeys ~= nil then
+        timeOk, timeMet = pcall(self.timeMetKeys)
+    end
+    if addon.RosterViewModel.MarkReady(self.rosterRows, ok and ready or nil, timeOk and timeMet or nil)
+        and redraw and self.window ~= nil
+    then
         self.window:SetRows(self.rosterRows)
     end
 end

@@ -696,6 +696,26 @@ test.test("the roster marks ready characters' rows, and clears marks that no lon
     test.assertEqual(nil, rows[2].ready)
 end)
 
+test.test("the rank cell shows Ready over the timer, the timer, or no marker", function()
+    local Roster = test.newAddon("Core/RosterViewModel.lua").RosterViewModel
+    local rows = { { kind = "character", key = "both" }, { kind = "character", key = "due" },
+        { kind = "character", key = "neither" } }
+    test.assertTrue(Roster.MarkReady(rows, { both = true }, { both = true, due = true }))
+    test.assertEqual("ready", Roster.RankMarker(rows[1]))
+    test.assertEqual("timer", Roster.RankMarker(rows[2]))
+    test.assertEqual(nil, Roster.RankMarker(rows[3]))
+    test.assertFalse(Roster.MarkReady(rows, { both = true }, { both = true, due = true }), "nothing changed")
+    test.assertTrue(Roster.MarkReady(rows, { both = true }, nil), "a member gets no timer keys")
+    test.assertEqual(nil, Roster.RankMarker(rows[2]))
+end)
+
+test.test("the timer icon falls back to text only when the client says its texture is missing", function()
+    local Roster = test.newAddon("Core/RosterViewModel.lua").RosterViewModel
+    test.assertContains(Roster.TimerIcon(true), Roster.TIMER_TEXTURE)
+    test.assertContains(Roster.TimerIcon(nil), Roster.TIMER_TEXTURE, "a client that can't say tries the texture")
+    test.assertEqual(Roster.TIMER_FALLBACK, Roster.TimerIcon(false))
+end)
+
 -- In the composed add-on -----------------------------------------------------------
 
 local NAMES = {
@@ -918,6 +938,38 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertContains(printed, "Guild roster rows followed: no")
         hammer.messages = {}
         fixtures.slash(hammer, "probe ready")
+        test.assertContains(table.concat(hammer.messages, "\n"), "Only officers")
+    end)
+
+    test.test(profile .. " /agf probe timer counts whose time is up, and the count follows ticks", function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local hammer = login(profile, channel, names[2])
+        settle(channel, 5)
+        local promotions = tool.addon.promotions
+        test.assertTrue(promotions.add("Read the rules", false))
+        test.assertTrue(promotions.automated("char-guild-days", true, "7"))
+        local boltKey = keyOf(tool, names[3])
+        local _, partition = tool.addon.rosterController:QuietContext()
+        partition:GetMembershipDates().characters[boltKey].joined =
+            { time = tool.time - 10 * DAY, source = "log", at = tool.time, by = tool.addon.rosterController:SelfKey() }
+        test.assertTrue(promotions.timeMetKeys()[boltKey])
+        tool.messages = {}
+        fixtures.slash(tool, "probe timer")
+        local printed = table.concat(tool.messages, "\n")
+        test.assertContains(printed, "Timer marker probe:")
+        test.assertContains(printed, "Texture: " .. tool.addon.RosterViewModel.TIMER_TEXTURE)
+        test.assertContains(printed, "Loaded:")
+        test.assertContains(printed, "Time is up: 1")
+
+        -- Ticking the manual item makes Bolt Ready, which replaces the timer.
+        test.assertTrue(promotions.tick(boltKey, promotions.view().items[1].id, true))
+        test.assertTrue(promotions.readyKeys()[boltKey])
+        test.assertEqual(nil, promotions.timeMetKeys()[boltKey])
+
+        test.assertEqual(nil, hammer.addon.promotions.timeMetKeys(), "members get no timer keys")
+        hammer.messages = {}
+        fixtures.slash(hammer, "probe timer")
         test.assertContains(table.concat(hammer.messages, "\n"), "Only officers")
     end)
 

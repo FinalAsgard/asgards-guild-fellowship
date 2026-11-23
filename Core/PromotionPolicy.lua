@@ -192,21 +192,41 @@ local function judgeItem(inputs, key, item, character)
     return met, detail, record, automated, overridden
 end
 
+-- The time kinds: when a rank has any, a character whose every one is met
+-- is due a promotion check (see TimeMetSet).
+PromotionPolicy.TIME_KINDS = {
+    ["char-guild-days"] = true,
+    ["player-guild-days"] = true,
+    ["rank-days"] = true,
+}
+
 -- Just enough of `key`'s status to tell whether it's ready (see
--- ReadySet): { key, rank, met, total, ready }, or nil as for Evaluate.
+-- ReadySet) and whether its time is up (see TimeMetSet): { key, rank,
+-- met, total, ready, timeMet }, or nil as for Evaluate. `timeMet` is true
+-- when its rank has a time item and every one is met.
 function PromotionPolicy.Summarize(inputs, key, itemsOf)
     local character, items = checklistOf(inputs, key, itemsOf)
     if character == nil then
         return nil
     end
     local met = 0
+    local timeItems, timeMet = 0, 0
     local index
     for index = 1, #items do
-        if judgeItem(inputs, key, items[index], character) then
+        local item = items[index]
+        local itemMet = judgeItem(inputs, key, item, character)
+        if itemMet then
             met = met + 1
         end
+        if PromotionPolicy.TIME_KINDS[item.kind] then
+            timeItems = timeItems + 1
+            if itemMet then
+                timeMet = timeMet + 1
+            end
+        end
     end
-    return { key = key, rank = character.rank, met = met, total = #items, ready = met == #items }
+    return { key = key, rank = character.rank, met = met, total = #items, ready = met == #items,
+        timeMet = timeItems > 0 and timeMet == timeItems }
 end
 
 function PromotionPolicy.Evaluate(inputs, key, itemsOf)
@@ -339,4 +359,17 @@ function PromotionPolicy.ReadySet(inputs)
         end
     end)
     return ready
+end
+
+-- The characters whose time is up but who aren't fully ready, as a set of
+-- keys: their rank has a time item and every one is met (see Summarize).
+function PromotionPolicy.TimeMetSet(inputs)
+    local due = {}
+    eachCandidate(inputs, function(key, character, itemsOf)
+        local summary = PromotionPolicy.Summarize(inputs, key, itemsOf)
+        if summary ~= nil and summary.timeMet and not summary.ready then
+            due[key] = true
+        end
+    end)
+    return due
 end

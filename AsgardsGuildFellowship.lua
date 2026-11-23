@@ -54,6 +54,9 @@ local promotions = {
     readyKeys = function()
         return nil
     end,
+    timeMetKeys = function()
+        return nil
+    end,
     panelRows = function()
         return nil
     end,
@@ -210,6 +213,9 @@ if clientProfile.supported then
         readyKeys = function()
             return promotions.readyKeys()
         end,
+        timeMetKeys = function()
+            return promotions.timeMetKeys()
+        end,
         grouped = function(keys)
             local guild, partition = rosterController:QuietContext()
             if guild == nil then
@@ -245,6 +251,7 @@ if clientProfile.supported then
         createWindow = function()
             return addon.RosterWindow.Create(client, {
                 navigator = pages,
+                timerIcon = addon.RosterViewModel.TimerIcon(client:TextureLoads(addon.RosterViewModel.TIMER_TEXTURE)),
                 drawPages = {
                     group = function(content)
                         if drawGroupFinder ~= nil then
@@ -2449,6 +2456,15 @@ if clientProfile.supported then
         end
         return addon.PromotionPolicy.ReadySet(inputs)
     end
+    -- The characters whose time is up but who aren't ready, as a set, for
+    -- the roster's timer marker: officers only.
+    promotions.timeMetKeys = function()
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        return addon.PromotionPolicy.TimeMetSet(inputs)
+    end
     -- The characters to promote to match their player, as key -> target
     -- rank, for the roster's marker: officers only.
     promotions.matchKeys = function()
@@ -2853,11 +2869,36 @@ if clientProfile.supported then
             client:Print("  " .. lines[index])
         end
     end
+    -- Whether the timer marker's art loads, and how many characters it
+    -- marks. Changes nothing.
+    local function probeTimer()
+        if not selfIsOfficer() then
+            rosterController:Print("Only officers can probe the timer marker.")
+            return
+        end
+        local loads = client:TextureLoads(addon.RosterViewModel.TIMER_TEXTURE)
+        local count = 0
+        local key
+        for key in pairs(promotions.timeMetKeys() or {}) do
+            count = count + 1
+        end
+        rosterController:Print("Timer marker probe:")
+        client:Print("  Texture: " .. addon.RosterViewModel.TIMER_TEXTURE)
+        if loads == true then
+            client:Print("  Loaded: yes")
+        elseif loads == false then
+            client:Print("  Loaded: no, so the roster shows " .. addon.RosterViewModel.TIMER_FALLBACK .. " instead")
+        else
+            client:Print("  Loaded: unknown (this client can't say)")
+        end
+        client:Print("  Time is up: " .. count)
+    end
     router:Register("probe",
         "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..
         " notes changed; probe forgeries: the guild sync edits caught as forged in your name; probe log: the" ..
         " guild event log; probe officer: the officer channel; probe ready: the Ready flags on the game's" ..
-        " guild roster; officers; probe player <name or alias>: a player's alias, links and Discord, with who" ..
+        " guild roster; officers; probe timer: the roster's timer marker, officers; probe player <name or" ..
+        " alias>: a player's alias, links and Discord, with who" ..
         " set each and when, and its logged changes; probe greet: your greet weight and how long it holds your" ..
         " prompts back; probe realm: the realm or region your guild's data is kept under)",
         function(arguments)
@@ -2872,7 +2913,7 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer, probe ready, probe player <name>, probe greet or probe realm.")
+                        " probe officer, probe ready, probe timer, probe player <name>, probe greet or probe realm.")
                 end
                 return
             end
@@ -2935,6 +2976,10 @@ if clientProfile.supported then
                 probeReady()
                 return
             end
+            if what == "timer" then
+                probeTimer()
+                return
+            end
             if what == "realm" then
                 rosterController:Print("Realm probe:")
                 local guild = client:GetGuildIdentity()
@@ -2968,7 +3013,8 @@ if clientProfile.supported then
                 rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe forgeries, " ..
                     addon.Identity.slashCommand .. " probe log, " ..
                     addon.Identity.slashCommand .. " probe officer, " .. addon.Identity.slashCommand ..
-                    " probe ready, " .. addon.Identity.slashCommand .. " probe player <name> or " ..
+                    " probe ready, " .. addon.Identity.slashCommand .. " probe timer, " ..
+                    addon.Identity.slashCommand .. " probe player <name> or " ..
                     addon.Identity.slashCommand .. " probe greet.")
                 return
             end

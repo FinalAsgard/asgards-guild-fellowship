@@ -164,7 +164,8 @@ end
 -- A single-character player is just its character row, marked
 -- `standalone = true` and carrying the player's `label`, `coloredLabel` and
 -- `discord`.
--- Players sort online first, then by label. MarkReady adds `ready`.
+-- Players sort online first, then by label. MarkReady adds `ready` and
+-- `timeMet`.
 local function trimmedLower(text)
     if type(text) ~= "string" then
         return ""
@@ -442,20 +443,48 @@ function Cache:Build(inputs, stamp)
 end
 
 -- Marks each character row whose key is in `ready` (a set, or nil for
--- none) with `ready = true`, for the officers' ready marker, and clears the
--- rest. True when any row changed.
-function RosterViewModel.MarkReady(rows, ready)
+-- none) with `ready = true`, for the officers' ready marker, and each in
+-- `timeMet` (likewise) with `timeMet = true`, for their timer marker; clears
+-- the rest. True when any row changed.
+function RosterViewModel.MarkReady(rows, ready, timeMet)
     local changed = false
     local index
     for index = 1, #(rows or {}) do
         local row = rows[index]
         if row.kind == "character" then
             local mark = ready ~= nil and ready[row.key] == true or nil
-            if row.ready ~= mark then
-                row.ready = mark
+            local timer = timeMet ~= nil and timeMet[row.key] == true or nil
+            if row.ready ~= mark or row.timeMet ~= timer then
+                row.ready, row.timeMet = mark, timer
                 changed = true
             end
         end
     end
     return changed
+end
+
+-- The marker a row's rank cell shows: "ready" (Ready wins), "timer", or
+-- nil.
+function RosterViewModel.RankMarker(row)
+    if row.ready then
+        return "ready"
+    end
+    if row.timeMet then
+        return "timer"
+    end
+    return nil
+end
+
+-- The timer marker's art: a pocket watch, in the game's icons on every
+-- client. TimerIcon gives the text it draws: the texture, or a plain "[T]"
+-- when the client says the texture is missing (`loads` false; nil means it
+-- can't tell, so the texture is tried).
+RosterViewModel.TIMER_TEXTURE = "Interface\\Icons\\INV_Misc_PocketWatch_01"
+RosterViewModel.TIMER_FALLBACK = "|cffffd100[T]|r"
+
+function RosterViewModel.TimerIcon(loads)
+    if loads == false then
+        return RosterViewModel.TIMER_FALLBACK
+    end
+    return "|T" .. RosterViewModel.TIMER_TEXTURE .. ":14|t"
 end

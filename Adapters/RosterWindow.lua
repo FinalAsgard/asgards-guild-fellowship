@@ -39,6 +39,10 @@ local HEADER_BACKGROUND = { 0.35, 0.27, 0.05, 0.35 }
 local STRIPE_BACKGROUND = { 1, 1, 1, 0.04 }
 local NO_BACKGROUND = { 0, 0, 0, 0 }
 
+-- The officers' timer marker, as text (options.timerIcon, see
+-- RosterViewModel.TimerIcon).
+local timerIcon = ""
+
 local function frameworkFrom(client)
     local framework = client:GetGlobal("DetailsFramework")
     if type(framework) ~= "table" or framework.FrameWorkVersion == nil
@@ -136,10 +140,14 @@ local function cellText(row, field)
     if row.departed and field == "location" then
         return "|cff7f7f7f" .. tostring(row.location) .. "|r"
     end
-    -- Officers see who is ready for promotion (see RosterViewModel.MarkReady).
-    if field == "rank" and row.ready then
-        -- First, so a long rank name never hides it.
+    -- Officers see who is ready for promotion, and whose time is up (see
+    -- RosterViewModel.MarkReady), first, so a long rank name never hides it.
+    local marker = field == "rank" and addon.RosterViewModel.RankMarker(row) or nil
+    if marker == "ready" then
         return "|cff40ff40Ready|r " .. tostring(row.rank or "")
+    end
+    if marker == "timer" then
+        return timerIcon .. " " .. tostring(row.rank or "")
     end
     local value = row[field]
     return value ~= nil and tostring(value) or ""
@@ -2265,12 +2273,14 @@ end
 -- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them;
 -- options.onSearch(text), onToggleOnlineOnly(), onExpandAll(), and
 -- onCollapseAll() drive the controls row; options.onSelectCharacter(key)
--- opens a player's edit panel and onClosePanel() runs when it closes.
+-- opens a player's edit panel and onClosePanel() runs when it closes;
+-- options.timerIcon is the text of the officers' timer marker.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then
         return nil, "the Details! Framework is not available"
     end
+    timerIcon = options.timerIcon or addon.RosterViewModel.TimerIcon(nil)
 
     local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts, guildLog, promotions =
         pcall(build, framework, options)
