@@ -738,6 +738,11 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
                 options.onPanelPromotionToggle(key, expanded)
             end
         end,
+        snooze = function(key)
+            if options.onPromotionsSnooze ~= nil then
+                options.onPromotionsSnooze(key)
+            end
+        end,
         redraw = function()
             edit.scroll:Refresh()
         end,

@@ -247,6 +247,7 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
         met = 0,
         total = #items,
     }
+    local timeItems, timeMet = 0, 0
     local index
     for index = 1, #items do
         local item = items[index]
@@ -256,8 +257,15 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
         if met then
             result.met = result.met + 1
         end
+        if PromotionPolicy.TIME_KINDS[item.kind] then
+            timeItems = timeItems + 1
+            if met then
+                timeMet = timeMet + 1
+            end
+        end
     end
     result.ready = result.met == result.total
+    result.timeMet = timeItems > 0 and timeMet == timeItems
     local highest = PromotionPolicy.HighestRank(partition, character.player)
     if highest ~= nil and highest < rank then
         result.highestRank = highest
@@ -362,12 +370,16 @@ function PromotionPolicy.ReadySet(inputs)
 end
 
 -- The characters whose time is up but who aren't fully ready, as a set of
--- keys: their rank has a time item and every one is met (see Summarize).
+-- keys: their rank has a time item and every one is met (see Summarize),
+-- and no officer has snoozed them (see PromotionChecks:IsSnoozed) until
+-- after `now`. ReadySet ignores snoozes.
 function PromotionPolicy.TimeMetSet(inputs)
     local due = {}
     eachCandidate(inputs, function(key, character, itemsOf)
         local summary = PromotionPolicy.Summarize(inputs, key, itemsOf)
-        if summary ~= nil and summary.timeMet and not summary.ready then
+        if summary ~= nil and summary.timeMet and not summary.ready
+            and not inputs.checks:IsSnoozed(key, inputs.now)
+        then
             due[key] = true
         end
     end)

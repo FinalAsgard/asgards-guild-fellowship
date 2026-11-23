@@ -313,3 +313,26 @@ test.test("time met ignores other kinds, and a rank with no time item never show
     test.assertTrue(due.timed, "level, Discord, add-on and manual items don't count")
     test.assertEqual(nil, due.untimed, "no time item at the rank")
 end)
+
+test.test("time met leaves out snoozed characters until the snooze ends, and Ready ignores snoozes", function()
+    local inputs, addon = newGuild({ snoozed = 4, done = 4, other = 4 })
+    timeItem(inputs, 4, "char-guild-days", 7)
+    local rules = manualItem(inputs, 4)
+    local key
+    for _, key in ipairs({ "snoozed", "done", "other" }) do
+        inputs.dates:Offer(key, "joined", { time = NOW - 30 * DAY, source = "log" })
+        inputs.checks:Snooze(key, 4, NOW + 7 * DAY, OFFICER, NOW)
+    end
+    inputs.checks:Set("done", rules, true, nil, OFFICER, NOW)
+
+    local due = addon.PromotionPolicy.TimeMetSet(inputs)
+    test.assertEqual(nil, due.snoozed, "snoozed: no timer")
+    test.assertTrue(addon.PromotionPolicy.ReadySet(inputs).done, "a snoozed character who meets everything is Ready")
+    test.assertEqual(nil, addon.PromotionPolicy.ReadySet(inputs).snoozed)
+
+    inputs.now = NOW + 7 * DAY
+    due = addon.PromotionPolicy.TimeMetSet(inputs)
+    test.assertTrue(due.snoozed, "the timer comes back when the snooze ends")
+    test.assertTrue(due.other)
+    test.assertEqual(nil, due.done, "Ready still replaces the timer")
+end)

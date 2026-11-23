@@ -5,7 +5,8 @@ local _, addon = ...
 -- has a check box (an officer ticks a custom item with it, otherwise it
 -- shows whether the item is met); a needs-a-note item's note, or a failed
 -- check's override reason, is typed on the line under it; and an automated
--- item has Override or Undo override. Used by the player panel's Promotion
+-- item has Override or Undo override; and a character whose timer marker
+-- an officer sees has Not ready. Used by the player panel's Promotion
 -- tab and the game guild roster's promotion panel, so both work the same.
 local PromotionLines = {}
 addon.PromotionLines = PromotionLines
@@ -16,6 +17,7 @@ addon.PromotionLines = PromotionLines
 --   tick(key, item, ticked, note) -> true when saved
 --   toggle(key, expanded) opens or closes a character's checklist
 --                 (`expanded` is whether it's open now)
+--   snooze(key)   Not ready: snoozes a character's timer marker
 --   redraw()      draws the lines again (to ask for a missing note)
 -- Notes typed are kept, by character and item, while the list redraws
 -- until they're saved (a line shows its item's saved note otherwise);
@@ -33,6 +35,11 @@ function PromotionLines.State(options)
     end
     function state.toggle(key, expanded)
         pcall(options.toggle, key, expanded)
+    end
+    function state.snooze(key)
+        if options.snooze ~= nil then
+            pcall(options.snooze, key)
+        end
     end
     function state.redraw()
         pcall(options.redraw)
@@ -161,13 +168,17 @@ function PromotionLines.Attach(line, state)
     end)
     line.note:Hide()
     -- An automated item's button: Override (with the reason typed on the
-    -- line below, if any) and Undo override.
+    -- line below, if any) and Undo override. A character's line: Not ready.
     line.act = state.createFrame("Button", nil, line, "UIPanelButtonTemplate")
     line.act:SetSize(96, 18)
     line.act:SetPoint("RIGHT", line, "RIGHT", -2, 0)
     line.act:SetScript("OnClick", function()
         local row = line.row
         if row == nil or row.kind ~= "promotion" then
+            return
+        end
+        if row.snooze == "can" then
+            state.snooze(row.key)
             return
         end
         if row.ticked then

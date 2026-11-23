@@ -10,6 +10,8 @@ local PromotionsViewModel = {
     -- The color of a "Promote to match" line (the roster's match arrow
     -- shares it).
     MATCH_COLOR = "|cff4da6ff",
+    -- The button that snoozes a character's timer marker.
+    NOT_READY = "Not ready",
 }
 addon.PromotionsViewModel = PromotionsViewModel
 
@@ -196,7 +198,8 @@ end
 --   { key, name, rankName, evaluated (PromotionPolicy.Evaluate, or nil
 --     when its rank has no requirements), lastPromotion (a MembershipDates
 --     record, or nil), matchRankName (the rank to promote it to so it
---     matches its player's other characters, or nil) }
+--     matches its player's other characters, or nil), snooze (its
+--     running snooze, PromotionChecks:SnoozeOf, or nil) }
 -- Add-ons can't promote: an officer promotes in the game's guild window.
 -- options: officer (true for an officer's view: check boxes, Override,
 -- who ticked, notes and reasons; false for a member's own view,
@@ -206,10 +209,16 @@ end
 -- the first character with a checklist, not just a promotion date, unless
 -- `expanded` closes it).
 -- Rows: { kind = "stat", text } lines, then for each character
---   { kind = "promotion", text, key, toggle?, expanded? }, `toggle` when
---   it has a checklist (or a promotion date) to open, then for an officer
---   a "Promote to match: <rank>" line { kind = "promotion", key, text,
---   match = true } when the character has a match target, and when open
+--   { kind = "promotion", text, key, toggle?, expanded?, snooze, action? },
+--   `toggle` when it has a checklist (or a promotion date) to open.
+--   `snooze` is "can" when an officer sees its timer marker (its time is
+--   up, it isn't Ready, and it isn't snoozed): `action` is then the Not
+--   ready button. It's "snoozed" when that marker is snoozed, and "none"
+--   otherwise and for members. Then for an officer a "Promote to match:
+--   <rank>" line { kind = "promotion", key, text, match = true } when the
+--   character has a match target, a "Snoozed until <date> by <officer>"
+--   line { kind = "promotion", key, text, snoozed = true } when snoozed,
+--   and when open
 --   { kind = "promotion", text, key, item, action?, ticked, needsNote,
 --     tooltip?, check, checked, canCheck?, note? }
 -- where `action` names an automated item's button, Override or Undo
@@ -243,12 +252,24 @@ function PromotionsViewModel.PanelRows(characters, options)
                 (evaluated.ready and "  |cff40ff40Ready for promotion|r" or "")
         end
         local last = options.officer and character.lastPromotion or nil
-        local header = { kind = "promotion", key = character.key, text = text }
+        local header = { kind = "promotion", key = character.key, text = text, snooze = "none" }
         table.insert(rows, header)
+        local timeUp = options.officer and evaluated ~= nil and evaluated.timeMet and not evaluated.ready
+        if timeUp and character.snooze ~= nil then
+            header.snooze = "snoozed"
+        elseif timeUp then
+            header.snooze = "can"
+            header.action = PromotionsViewModel.NOT_READY
+        end
         if options.officer and character.matchRankName ~= nil then
             table.insert(rows, { kind = "promotion", key = character.key, match = true,
                 text = "    " .. PromotionsViewModel.MATCH_COLOR .. "Promote to match: " .. character.matchRankName
                     .. "|r" })
+        end
+        if header.snooze == "snoozed" then
+            table.insert(rows, { kind = "promotion", key = character.key, snoozed = true,
+                text = "    |cff9d9d9dSnoozed until " .. formatDate(character.snooze.untilTime) .. " by "
+                    .. tostring(nameOf(character.snooze.by)) .. "|r" })
         end
         if evaluated ~= nil or last ~= nil then
             header.toggle = true

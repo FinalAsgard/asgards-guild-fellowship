@@ -338,6 +338,9 @@ if clientProfile.supported then
                 onPanelPromotionToggle = function(key, expanded)
                     return promotions.togglePanel(key, expanded)
                 end,
+                onPromotionsSnooze = function(key)
+                    return promotions.snooze(key)
+                end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
                 end,
@@ -2382,6 +2385,9 @@ if clientProfile.supported then
                 end
                 return since.time - math.max(since.tolerance or 0, addon.MembershipDates.SAME_JOIN_SECONDS)
             end,
+            now = function()
+                return client:Timestamp()
+            end,
         })
     end
     local ticksSync = addon.RankRequirements.CreateSync({
@@ -2551,6 +2557,7 @@ if clientProfile.supported then
             local character = partition:GetCharacter(key)
             if character ~= nil and partition:IsInGuild(key) and type(character.rank) == "number" then
                 local match = officer and addon.PromotionPolicy.MatchTarget(inputs, key) or nil
+                local snoozed = officer and inputs.checks:IsSnoozed(key, inputs.now)
                 table.insert(characters, {
                     key = key,
                     name = nameOf(key),
@@ -2558,6 +2565,7 @@ if clientProfile.supported then
                     evaluated = addon.PromotionPolicy.Evaluate(inputs, key),
                     lastPromotion = dates and dates:LastPromotion(key) or nil,
                     matchRankName = match and (inputs.rankNames[match + 1] or ("Rank " .. match)) or nil,
+                    snooze = snoozed and inputs.checks:SnoozeOf(key) or nil,
                 })
             end
         end
@@ -2588,6 +2596,31 @@ if clientProfile.supported then
             return false, "that requirement no longer exists"
         end
         local records, reason = checks:Set(key, item, ticked, note, author, now)
+        if records == nil then
+            return false, reason
+        end
+        ticksSync:Share(records)
+        promotions.changed()
+        return true
+    end
+    -- Not ready: snoozes `key`'s timer marker for its rank's snooze length,
+    -- from now. Returns true, or false and why.
+    promotions.snooze = function(key)
+        local inputs = promotionInputs()
+        local author = rosterController:SelfKey()
+        if inputs == nil or author == nil or inputs.now == nil then
+            return false, "saved data is unavailable"
+        end
+        if not selfIsOfficer() then
+            return false, "only officers can snooze a promotion check"
+        end
+        local character = inputs.partition:GetCharacter(key)
+        if character == nil or type(character.rank) ~= "number" then
+            return false, "that character isn't in the guild"
+        end
+        local days = inputs.requirements:SnoozeDays(character.rank)
+        local records, reason = inputs.checks:Snooze(key, character.rank,
+            inputs.now + days * addon.PromotionPolicy.DAY, author, inputs.now)
         if records == nil then
             return false, reason
         end
