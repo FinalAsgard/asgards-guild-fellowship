@@ -176,8 +176,8 @@ local function snoozeRecord(character, rank, untilTime, at, by)
     return { t = "snooze", character = character, rank = rank, untilTime = untilTime, at = at, by = by }
 end
 
--- A PromotionChecks whose characters (key -> rank) and clock the test sets.
-local function snoozeChecks(ranks, clock)
+-- A PromotionChecks whose characters (key -> rank) the test sets.
+local function snoozeChecks(ranks)
     local addon = load()
     local starts = {}
     local checks = addon.PromotionChecks.Create({}, {
@@ -188,16 +188,12 @@ local function snoozeChecks(ranks, clock)
         stintStart = function(key)
             return starts[key]
         end,
-        now = function()
-            return clock.now
-        end,
     })
     return checks, starts
 end
 
 test.test("an officer's Not ready snoozes a character, the newest snooze wins, and members are refused", function()
-    local clock = { now = NOW }
-    local checks = snoozeChecks({ bolt = 4 }, clock)
+    local checks = snoozeChecks({ bolt = 4 })
 
     local records, reason = checks:Snooze("bolt", 4, NOW + 7 * DAY, MEMBER, NOW)
     test.assertEqual(nil, records)
@@ -222,8 +218,7 @@ test.test("an officer's Not ready snoozes a character, the newest snooze wins, a
 end)
 
 test.test("a snooze lasts until its end time, not at it", function()
-    local clock = { now = NOW }
-    local checks = snoozeChecks({ bolt = 4 }, clock)
+    local checks = snoozeChecks({ bolt = 4 })
     checks:Snooze("bolt", 4, NOW + DAY, OFFICER, NOW)
 
     test.assertTrue(checks:IsSnoozed("bolt", NOW + DAY - 1))
@@ -232,11 +227,9 @@ test.test("a snooze lasts until its end time, not at it", function()
     test.assertFalse(checks:IsSnoozed("bolt", nil), "no time, no snooze")
 end)
 
-test.test("a rank change or new stint makes a snooze stale, and stale or ended snoozes are pruned and not sent",
-    function()
-    local clock = { now = NOW }
+test.test("a rank change or new stint makes a snooze stale: ignored, pruned, and never sent", function()
     local ranks = { bolt = 4, nail = 4, rivet = 4 }
-    local checks, starts = snoozeChecks(ranks, clock)
+    local checks, starts = snoozeChecks(ranks)
     checks:Snooze("bolt", 4, NOW + 7 * DAY, OFFICER, NOW)
     checks:Snooze("nail", 4, NOW + 7 * DAY, OFFICER, NOW)
     checks:Snooze("rivet", 4, NOW + DAY, OFFICER, NOW)
@@ -250,21 +243,34 @@ test.test("a rank change or new stint makes a snooze stale, and stale or ended s
     test.assertFalse(checks:Apply(snoozeRecord("bolt", 4, NOW + 7 * DAY, NOW + 10, OTHER_OFFICER)),
         "a snooze for the old rank arriving late")
     test.assertEqual(1, #checks:Snapshot(), "only Rivet's is sent")
-
-    -- Rivet's snooze ends.
-    clock.now = NOW + DAY
-    test.assertEqual(0, #checks:Snapshot(), "an ended snooze isn't sent")
-    test.assertFalse(checks:Apply(snoozeRecord("rivet", 4, NOW + DAY, NOW + 20, OTHER_OFFICER)),
-        "nor taken from another add-on")
-    test.assertEqual(3, checks:Prune())
+    test.assertEqual(2, checks:Prune())
     ranks.bolt = 4
     test.assertEqual(nil, checks:SnoozeOf("bolt"), "demoted back: the old snooze doesn't come back")
 end)
 
+test.test("an ended snooze stops snoozing but is kept and sent, so an older one can't come back", function()
+    local checks = snoozeChecks({ bolt = 4 })
+    checks:Snooze("bolt", 4, NOW + 7 * DAY, OTHER_OFFICER, NOW)
+    -- A newer, shorter snooze replaces it, and ends.
+    test.assertTrue(checks:Apply(snoozeRecord("bolt", 4, NOW + DAY, NOW + 5, OFFICER)))
+    test.assertFalse(checks:IsSnoozed("bolt", NOW + 2 * DAY))
+    test.assertEqual(0, checks:Prune(), "an ended snooze isn't stale")
+    test.assertEqual(1, #checks:Snapshot(), "and is still sent")
+
+    -- An add-on that missed the newer one sends the older, still running.
+    test.assertFalse(checks:Apply(snoozeRecord("bolt", 4, NOW + 7 * DAY, NOW, OTHER_OFFICER), true))
+    test.assertFalse(checks:IsSnoozed("bolt", NOW + 2 * DAY), "the clock stays back")
+
+    -- And one that missed it learns the newer stamp.
+    local other = snoozeChecks({ bolt = 4 })
+    other:Apply(snoozeRecord("bolt", 4, NOW + 7 * DAY, NOW, OTHER_OFFICER), true)
+    test.assertTrue(other:Apply(checks:Snapshot()[1], true))
+    test.assertFalse(other:IsSnoozed("bolt", NOW + 2 * DAY))
+end)
+
 test.test("snoozes travel with ticks in the snapshot and the cover check", function()
-    local clock = { now = NOW }
-    local checks = snoozeChecks({ bolt = 4 }, clock)
-    local other = snoozeChecks({ bolt = 4 }, clock)
+    local checks = snoozeChecks({ bolt = 4 })
+    local other = snoozeChecks({ bolt = 4 })
     checks:Set("bolt", { id = "rules", rank = 4, kind = "check" }, true, nil, OFFICER, NOW)
     other:Set("bolt", { id = "rules", rank = 4, kind = "check" }, true, nil, OFFICER, NOW)
     checks:Snooze("bolt", 4, NOW + 7 * DAY, OFFICER, NOW)
@@ -281,8 +287,7 @@ test.test("snoozes travel with ticks in the snapshot and the cover check", funct
 end)
 
 test.test("an add-on that doesn't know snoozes refuses just those records", function()
-    local clock = { now = NOW }
-    local checks = snoozeChecks({ bolt = 4 }, clock)
+    local checks = snoozeChecks({ bolt = 4 })
     test.assertFalse(checks:Apply({ t = "nap", character = "bolt", rank = 4, at = NOW, by = OFFICER }, true))
     test.assertFalse(checks:Apply(snoozeRecord("bolt", 4, "soon", NOW, OFFICER), true), "a bad end time")
     test.assertTrue(checks:Apply({ t = "tick", character = "bolt", rank = 4, item = "rules", ticked = true,

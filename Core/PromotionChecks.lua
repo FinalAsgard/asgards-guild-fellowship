@@ -25,8 +25,9 @@ local _, addon = ...
 -- PromotionPolicy.TimeMetSet) until `untilTime`, server time:
 --   { t = "snooze", character, rank, untilTime, at, by }
 -- One per character, newest wins, and stale like a tick. A snooze whose
--- end has passed no longer does anything: it's pruned and never sent
--- either. There's no unsnooze; Ready ignores snoozes.
+-- end has passed stops snoozing (IsSnoozed) but is kept and sent like any
+-- other, so an older snooze can't come back in its place. There's no
+-- unsnooze; Ready ignores snoozes.
 --
 -- Pure: the caller passes the saved table and the facts.
 local PromotionChecks = {
@@ -113,8 +114,6 @@ end
 --                     rank can be and still be current (when its stint at
 --                     that rank began, less any doubt), or nil when that
 --                     isn't known for sure
---   now()          -> the server time now, or nil: a snooze that ended by
---                     then is dropped
 function PromotionChecks.Create(saved, options)
     if type(saved.records) ~= "table" then
         saved.records = {}
@@ -131,9 +130,6 @@ function PromotionChecks.Create(saved, options)
         stintStart = options.stintStart or function()
             return nil
         end,
-        now = options.now or function()
-            return nil
-        end,
     }, Checks)
 end
 
@@ -148,16 +144,9 @@ function Checks:current(record)
     return not okStart or type(start) ~= "number" or record.at >= start
 end
 
--- Whether `record` is current and, for a snooze, hasn't ended.
+-- Whether `record` has a record's shape and is current.
 function Checks:live(record)
-    if not PromotionChecks.IsRecord(record) or not self:current(record) then
-        return false
-    end
-    if record.t ~= "snooze" then
-        return true
-    end
-    local ok, now = pcall(self.now)
-    return not ok or type(now) ~= "number" or now < record.untilTime
+    return PromotionChecks.IsRecord(record) and self:current(record)
 end
 
 -- Applies a record received from another add-on (or made here): when it
@@ -302,8 +291,8 @@ function Checks:Snooze(character, rank, untilTime, author, at)
 end
 
 -- Drops every stale record (made at another rank than the character's
--- current one, or for a character no longer in the guild) and every
--- snooze that has ended. Returns how many were dropped.
+-- current one, or for a character no longer in the guild). Returns how
+-- many were dropped.
 function Checks:Prune()
     local dropped = 0
     local key, record

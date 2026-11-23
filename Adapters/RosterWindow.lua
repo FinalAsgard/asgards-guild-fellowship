@@ -1709,9 +1709,24 @@ local function buildPromotions(framework, page, frameName, options)
     editor.snoozeDays:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
     end)
+    -- Only what this officer typed is saved: a value synced in while the
+    -- box had focus is kept when they leave it untouched.
+    editor.snoozeDays:SetScript("OnEditFocusGained", function(self)
+        self.typed = false
+    end)
+    editor.snoozeDays:SetScript("OnTextChanged", function(self, userInput)
+        if userInput then
+            self.typed = true
+        end
+    end)
     editor.snoozeDays:SetScript("OnEditFocusLost", function(self)
-        if editor.snoozeShown ~= nil and tonumber(self:GetText()) ~= editor.snoozeShown
-            and not call("onPromotionsSnoozeDays", self:GetText())
+        local typed = self.typed
+        self.typed = false
+        if editor.snoozeShown == nil then
+            return
+        end
+        if not typed or (tonumber(self:GetText()) ~= editor.snoozeShown
+            and not call("onPromotionsSnoozeDays", self:GetText()))
         then
             self:SetText(tostring(editor.snoozeShown))
         end

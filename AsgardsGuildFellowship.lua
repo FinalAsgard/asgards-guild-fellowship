@@ -2385,9 +2385,6 @@ if clientProfile.supported then
                 end
                 return since.time - math.max(since.tolerance or 0, addon.MembershipDates.SAME_JOIN_SECONDS)
             end,
-            now = function()
-                return client:Timestamp()
-            end,
         })
     end
     local ticksSync = addon.RankRequirements.CreateSync({
