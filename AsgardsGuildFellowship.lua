@@ -323,6 +323,9 @@ if clientProfile.supported then
                 onPromotionsMatchAlts = function(on)
                     return promotions.matchAlts(on)
                 end,
+                onPromotionsSnoozeDays = function(days)
+                    return promotions.snoozeDays(days)
+                end,
                 onPromotionsMove = function(id, step)
                     return promotions.move(id, step)
                 end,
@@ -2702,6 +2705,17 @@ if clientProfile.supported then
                 return nil, "the guild's ranks aren't known yet"
             end
             return requirements:SetMatchesAlts(rank, on == true, author, now)
+        end)
+    end
+    -- Sets how many days Not ready snoozes for at the rank shown (`days`
+    -- as typed).
+    promotions.snoozeDays = function(days)
+        return editRequirements(function(requirements, author, now)
+            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, rankNames())
+            if rank == nil then
+                return nil, "the guild's ranks aren't known yet"
+            end
+            return requirements:SetSnoozeDays(rank, tonumber(days), author, now)
         end)
     end
     promotions.move = function(id, step)

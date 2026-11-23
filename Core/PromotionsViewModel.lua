@@ -84,6 +84,8 @@ end
 --   empty     what to say instead of custom items, or nil
 --   matchAlts whether the rank's "Alts should match this rank" box is
 --             ticked (nil for the guild master's rank, which has none)
+--   snoozeDays how many days Not ready snoozes for at the rank (nil for
+--             the guild master's rank, likewise)
 function PromotionsViewModel.Editor(inputs)
     local requirements, names = inputs.requirements, inputs.rankNames or {}
     local rank = PromotionsViewModel.PickRank(inputs.rank, requirements, names)
@@ -100,6 +102,7 @@ function PromotionsViewModel.Editor(inputs)
     }
     if rank >= 1 then
         model.matchAlts = requirements:MatchesAlts(rank)
+        model.snoozeDays = requirements:SnoozeDays(rank)
     end
     if requirements:Mismatch(rank, name) then
         model.mismatch = "Set up when rank " .. rank .. " was called \"" .. requirements:RankName(rank) ..

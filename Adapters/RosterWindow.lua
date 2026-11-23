@@ -1620,7 +1620,8 @@ end
 -- promotion requirements editor. (Add-ons can't promote, and each
 -- character's checklist is worked on the player panel's Promotion tab.) <
 -- and > pick a rank, a check box beside it sets whether alts are matched
--- to it, a warning shows when the rank was set up under
+-- to it, a number box under that sets how many days Not ready snoozes
+-- for there, a warning shows when the rank was set up under
 -- another name, the automatic checks are listed with a check box each (and
 -- a number box for one that takes days or a level), and below them a box
 -- adds a custom requirement (with whether it needs a note) or edits one,
@@ -1681,6 +1682,33 @@ local function buildPromotions(framework, page, frameName, options)
         local checked = self:GetChecked() == true
         if not call("onPromotionsMatchAlts", checked) then
             self:SetChecked(not checked)
+        end
+    end)
+    -- How many days Not ready snoozes for at this rank, under the match
+    -- box: saved on Enter, or on leaving the box.
+    editor.snoozeDays = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+    editor.snoozeDays:SetSize(32, 20)
+    editor.snoozeDays:SetPoint("TOPLEFT", holder, "TOPLEFT", 596, -46)
+    editor.snoozeDays:SetAutoFocus(false)
+    editor.snoozeDays:SetMaxLetters(3)
+    editor.snoozeDays:SetNumeric(true)
+    local snoozeLabel = editor.snoozeDays:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    snoozeLabel:SetPoint("RIGHT", editor.snoozeDays, "LEFT", -8, 0)
+    snoozeLabel:SetText("Not ready snoozes for")
+    local snoozeUnit = editor.snoozeDays:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    snoozeUnit:SetPoint("LEFT", editor.snoozeDays, "RIGHT", 4, 0)
+    snoozeUnit:SetText("days")
+    editor.snoozeDays:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+    end)
+    editor.snoozeDays:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
+    editor.snoozeDays:SetScript("OnEditFocusLost", function(self)
+        if editor.snoozeShown ~= nil and tonumber(self:GetText()) ~= editor.snoozeShown
+            and not call("onPromotionsSnoozeDays", self:GetText())
+        then
+            self:SetText(tostring(editor.snoozeShown))
         end
     end)
     editor.mismatch = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2443,6 +2471,15 @@ function Window:SetPromotions(model)
         else
             editor.matchCheck:SetChecked(model.matchAlts)
             editor.matchCheck:Show()
+        end
+        editor.snoozeShown = model.snoozeDays
+        if model.snoozeDays == nil then
+            editor.snoozeDays:Hide()
+        else
+            if not editor.snoozeDays:HasFocus() then
+                editor.snoozeDays:SetText(tostring(model.snoozeDays))
+            end
+            editor.snoozeDays:Show()
         end
         if editor.confirm.id ~= nil and editor.confirm:IsShown() then
             local found = false

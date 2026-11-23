@@ -3,7 +3,7 @@ local _, addon = ...
 -- Each guild rank's promotion requirements: what a character at that rank
 -- must do to move up to the next rank. Every rank starts with none.
 --
--- Two kinds of record, each stamped with when (server time) and by whom (a
+-- Four kinds of record, each stamped with when (server time) and by whom (a
 -- character key) it last changed:
 --   item  { t = "item", id, rank, label, kind, n?, position, deleted?, at,
 --         by }
@@ -21,6 +21,9 @@ local _, addon = ...
 --         match their player's highest character at `rank` (1 or more: no
 --         alt is matched to the guild master's rank). A rank with no
 --         record is on.
+--   snooze { t = "snooze", rank, days, at, by }: how many days Not ready
+--         snoozes a character at `rank` (1 or more), SNOOZE_MIN to
+--         SNOOZE_MAX. A rank with no record snoozes for SNOOZE_DEFAULT.
 -- An add-on that doesn't know a record's type refuses that record alone,
 -- so a newer type doesn't stop an older add-on taking the rest.
 -- The newest record wins per item (and per rank name and setting), with sync's
@@ -54,6 +57,10 @@ local RankRequirements = {
     -- The most items a rank can have.
     MAX_ITEMS = 15,
     MAX_RANK = 9,
+    -- How many days Not ready snoozes for (see SnoozeDays).
+    SNOOZE_DEFAULT = 7,
+    SNOOZE_MIN = 1,
+    SNOOZE_MAX = 90,
     -- An officer's add-on answers an ask after OFFICER_ANSWER_MIN to
     -- OFFICER_ANSWER_MAX seconds.
     OFFICER_ANSWER_MIN = 1,
@@ -140,6 +147,9 @@ function RankRequirements.IsRecord(record)
     if record.t == "match" then
         return record.rank >= 1 and type(record.on) == "boolean"
     end
+    if record.t == "snooze" then
+        return record.rank >= 1 and isWhole(record.days, RankRequirements.SNOOZE_MIN, RankRequirements.SNOOZE_MAX)
+    end
     if not (record.t == "item" and isText(record.id) and #record.id <= 80 and isLabel(record.label)
         and RankRequirements.KINDS[record.kind] ~= nil and isWhole(record.position, 0, 10000)
         and (record.deleted == nil or record.deleted == true))
@@ -206,6 +216,9 @@ function RankRequirements.Create(saved, options)
     if type(saved.matches) ~= "table" then
         saved.matches = {}
     end
+    if type(saved.snoozes) ~= "table" then
+        saved.snoozes = {}
+    end
     options = options or {}
     return setmetatable({
         saved = saved,
@@ -220,9 +233,9 @@ local function rankKey(rank)
 end
 
 -- Where each type of record is kept in the saved table.
-local STORES = { rank = "ranks", match = "matches", item = "items" }
+local STORES = { rank = "ranks", match = "matches", snooze = "snoozes", item = "items" }
 -- The order a snapshot lists the types in.
-local TYPE_ORDER = { rank = 1, match = 2, item = 3 }
+local TYPE_ORDER = { rank = 1, match = 2, snooze = 3, item = 4 }
 
 -- A record's key within its type's store.
 local function storeKey(record)
@@ -323,6 +336,16 @@ function Requirements:MatchesAlts(rank)
     end
     local record = self.saved.matches[rankKey(rank)]
     return not (RankRequirements.IsRecord(record) and record.on == false)
+end
+
+-- How many days Not ready snoozes a character at `rank` for: the rank's
+-- setting, or SNOOZE_DEFAULT.
+function Requirements:SnoozeDays(rank)
+    local record = self.saved.snoozes[rankKey(rank)]
+    if RankRequirements.IsRecord(record) then
+        return record.days
+    end
+    return RankRequirements.SNOOZE_DEFAULT
 end
 
 -- True when `rank` has requirements and was set up under another name than
@@ -547,6 +570,23 @@ function Requirements:SetMatchesAlts(rank, on, author, at)
         return {}
     end
     return self:commit({ self:stamped({ t = "match", rank = rank, on = on }, author, at) }, author)
+end
+
+-- An officer sets how many days Not ready snoozes a character at `rank`
+-- for (see SnoozeDays): whole days, SNOOZE_MIN to SNOOZE_MAX. Returns the
+-- records to share, or nil and why not.
+function Requirements:SetSnoozeDays(rank, days, author, at)
+    if not isWhole(rank, 1, RankRequirements.MAX_RANK) then
+        return nil, "that rank can't be snoozed"
+    end
+    if not isWhole(days, RankRequirements.SNOOZE_MIN, RankRequirements.SNOOZE_MAX) then
+        return nil, "a snooze needs to be " .. RankRequirements.SNOOZE_MIN .. " to " .. RankRequirements.SNOOZE_MAX
+            .. " whole days"
+    end
+    if self:SnoozeDays(rank) == days then
+        return {}
+    end
+    return self:commit({ self:stamped({ t = "snooze", rank = rank, days = days }, author, at) }, author)
 end
 
 -- An officer moves item `id` one place up (`step` -1) or down (1) in its
