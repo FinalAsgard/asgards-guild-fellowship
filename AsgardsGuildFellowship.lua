@@ -65,6 +65,8 @@ local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority, 
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local resync
 local guildNoteOverlay
+-- The add-on's new window (see AgfWindow), set up with the settings below.
+local agfWindow
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations, dropLocationOf
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
@@ -1202,6 +1204,54 @@ if clientProfile.supported then
             rosterController:Print("Chat tags on.")
         else
             rosterController:Print("Chat tags off.")
+        end
+    end)
+    -- The add-on's new window, which features move into one at a time; for
+    -- now it has the Guild LFG Board. Its fonts are shared through
+    -- LibSharedMedia. It's made on first open, and its place is saved per
+    -- character.
+    addon.Theme.Register(client:GetLibrary("LibSharedMedia-3.0"))
+    agfWindow = addon.AgfWindow.Create(client, {
+        frameName = addon.Identity.addonName .. "Window",
+        modules = {
+            { id = "lfg", label = "LFG", title = "Guild LFG Board" },
+        },
+        settings = settings,
+        settingsTabs = {
+            {
+                id = "chat",
+                label = "Chat",
+                rows = {
+                    { id = "chatTags", label = "Chat tags",
+                        info = "Tag guild chat speakers with their alias or main." },
+                },
+            },
+        },
+        character = function()
+            local fullName = client:GetPlayerFullName()
+            return {
+                name = fullName and string.match(fullName, "^[^%-]+") or nil,
+                level = client:GetPlayerLevel(),
+                className = client:GetPlayerClassName(),
+                classColor = client:GetClassColor(client:GetPlayerClass()),
+            }
+        end,
+        version = version,
+        loadPosition = function()
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            return store and selfKey and store:WindowPosition(selfKey) or nil
+        end,
+        savePosition = function(position)
+            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
+            if store ~= nil and selfKey ~= nil then
+                store:SetWindowPosition(selfKey, position)
+            end
+        end,
+    })
+    router:Register("lfg", "open the Guild LFG Board", function()
+        local opened, failure = agfWindow:Open("lfg")
+        if not opened then
+            rosterController:Print("The Guild LFG Board can't open on this client: " .. tostring(failure))
         end
     end)
     -- The Group Finder's own window, made on first use. Its dungeons come
@@ -4681,6 +4731,7 @@ addon.mapPins = mapPins
 addon.chatAnnotator = chatAnnotator
 addon.comm = comm
 addon.settings = settings
+addon.agfWindow = agfWindow
 addon.settingsPanel = settingsPanel
 addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet

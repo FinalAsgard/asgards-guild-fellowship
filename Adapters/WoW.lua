@@ -820,6 +820,15 @@ function Client:GetPlayerClass()
     return classToken
 end
 
+-- The logged-in character's class as the game names it ("Warrior"), or nil.
+function Client:GetPlayerClassName()
+    local ok, className = callFunction(self.environment.UnitClass, "player")
+    if not ok or type(className) ~= "string" or className == "" then
+        return nil
+    end
+    return className
+end
+
 -- True in a dungeon, raid, scenario, battleground or arena, or a keystone
 -- run on clients that have them. False when the client can't say.
 function Client:IsInInstance()

@@ -22,6 +22,9 @@ Core/PerfCounters.lua
 Adapters/ClientProfile.lua
 Adapters/WoW.lua
 Adapters/MasterFrame.lua
+Adapters/Theme.lua
+Adapters/Widgets.lua
+Adapters/AgfWindow.lua
 Adapters/PromotionLines.lua
 Adapters/RosterWindow.lua
 Adapters/EntryPoints.lua

@@ -86,6 +86,7 @@ require("tests.spec.perf_counters_spec")
 require("tests.spec.sync_performance_spec")
 require("tests.spec.roster_controller_spec")
 require("tests.spec.master_frame_spec")
+require("tests.spec.agf_window_spec")
 require("tests.spec.lifecycle_spec")
 require("tests.spec.bootstrap_spec")
 

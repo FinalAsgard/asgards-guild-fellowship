@@ -438,6 +438,51 @@ function Store:SetPlayerPanelPosition(position)
     return true
 end
 
+-- A usable saved screen position: { point, relativePoint, x, y }.
+local function isPosition(position)
+    return type(position) == "table" and type(position.point) == "string"
+        and type(position.relativePoint) == "string" and type(position.x) == "number"
+        and type(position.y) == "number"
+end
+
+-- Where the add-on's new window was last left on the character `key`'s
+-- screen ({ point, relativePoint, x, y }), or nil when it was never moved
+-- there or an unusable value is stored. Each character keeps its own.
+function Store:WindowPosition(key)
+    local layouts = type(self.database) == "table" and self.database.characterLayout or nil
+    local layout = type(layouts) == "table" and layouts[key] or nil
+    local position = type(layout) == "table" and layout.window or nil
+    if not isPosition(position) then
+        return nil
+    end
+    return { point = position.point, relativePoint = position.relativePoint, x = position.x, y = position.y }
+end
+
+-- Saves where the new window was left on the character `key`. An
+-- unusable existing value is left alone.
+function Store:SetWindowPosition(key, position)
+    if type(self.database) ~= "table" or not isText(key) or not isPosition(position) then
+        return false
+    end
+    if self.database.characterLayout == nil then
+        self.database.characterLayout = {}
+    end
+    local layouts = self.database.characterLayout
+    if type(layouts) ~= "table" then
+        return false
+    end
+    if layouts[key] == nil then
+        layouts[key] = {}
+    end
+    if type(layouts[key]) ~= "table" then
+        return false
+    end
+    layouts[key].window = {
+        point = position.point, relativePoint = position.relativePoint, x = position.x, y = position.y,
+    }
+    return true
+end
+
 -- The minimap button's saved state (LibDBIcon's angle and hidden flag),
 -- created on first use. Nil when an unusable value is stored there; it is
 -- then left alone.
