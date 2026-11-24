@@ -281,7 +281,7 @@ function Trigger:slotPath(facts, before, full, listed, now, act)
     if not before.inGroup or before.isRaid or size >= before.size then
         return
     end
-    if self:SlotOpen() then
+    if self:SlotOpen() or (self.slot ~= nil and self.slot.state == "waiting") then
         self.slot.state = "kept"
         return
     end
@@ -339,8 +339,14 @@ function Trigger:SlotDue(now)
 end
 
 -- "Fill the empty slot?" answered (by the player or a guildmate in the
--- party): `yes` posts it, no keeps it off. True when it was open.
+-- party): `yes` posts it, no keeps it off. True when it was open. A slot
+-- waiting for the lister's hidden button takes a guildmate's No, but never
+-- a Yes: nothing's posted while it's hidden.
 function Trigger:SlotAnswered(yes)
+    if self.slot ~= nil and self.slot.state == "waiting" and not yes then
+        self.slot.state = "kept"
+        return true
+    end
     if not self:SlotOpen() then
         return false
     end

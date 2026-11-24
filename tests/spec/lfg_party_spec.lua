@@ -1243,6 +1243,30 @@ test.test("lfg trigger: a slot waits while the button's hidden, and is asked abo
         trigger:SlotAnswered(false)
         test.assertFalse(trigger:Resume(10))
         test.assertFalse(trigger:SlotOpen())
+
+        -- While it waits, a guildmate's No keeps it off, and their Yes
+        -- posts nothing.
+        trigger = newTrigger()
+        hidden = fullParty()
+        hidden.hidden = true
+        trigger:Observe(hidden, 0)
+        hidden.size = 4
+        trigger:Observe(hidden, 0)
+        test.assertFalse(trigger:SlotAnswered(true))
+        test.assertTrue(trigger:SlotAnswered(false))
+        test.assertFalse(trigger:Resume(10))
+
+        -- Another leaving while it waits keeps it off too.
+        trigger = newTrigger()
+        hidden = fullParty()
+        hidden.hidden = true
+        trigger:Observe(hidden, 0)
+        hidden.size = 4
+        trigger:Observe(hidden, 0)
+        hidden.size = 3
+        trigger:Observe(hidden, 5)
+        test.assertFalse(trigger:Resume(10))
+        test.assertFalse(trigger:SlotOpen())
     end)
 
 test.test("lfg trigger: two claims at once settle on the lower key for everyone in the party", function()
@@ -1476,6 +1500,21 @@ test.test("Forever a slot that opened while the button was hidden is offered whe
     fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
     fixtures.deliver(channel)
     test.assertEqual(4, addon.lfgBoard:Listings(hammer.time)[1].size)
+end)
+
+test.test("Forever a role the leader edits is the one whoever leaves leaves open", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = fullStrat(channel)
+    test.assertTrue(toolAddon.agfWindow:Open("lfg"))
+    local page = toolAddon.lfgPage
+    page:StartEditing()
+    click(roleRow(page, "Hammer").buttons[2])
+    page.draft.dungeon = toolAddon.DungeonCatalog.For("forever", nil):Get("strat")
+    test.assertTrue(page:Save())
+
+    partyUp(tool, { "Tool Box", "Spark Arcane", "Bolt Smith", "Flint Smith" }, "Tool Box")
+    toolAddon.lfgButton:OpenDrawer()
+    test.assertEqual("Stratholme \194\183 needs Healer", toolAddon.lfgButton.drawer.slotDetails.text)
 end)
 
 test.test("Forever hiding the button while a slot is open keeps it off the board", function()

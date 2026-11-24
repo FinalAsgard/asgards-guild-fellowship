@@ -1835,6 +1835,20 @@ if clientProfile.supported then
         for key, role in pairs(type(roles) == "table" and roles or {}) do
             lfgListing:SetRole(key, role)
         end
+        -- The party as last seen keeps its members, with the roles as
+        -- they're listed now, for whoever leaves next.
+        local listed = {}
+        local members = lfgMembers()
+        local index
+        for index = 1, #members do
+            listed[members[index].key] = members[index].role
+        end
+        for index = 1, #(lfgJoin.before or {}) do
+            local member = lfgJoin.before[index]
+            if listed[member.key] ~= nil then
+                member.role = listed[member.key]
+            end
+        end
         lfgTrigger:Answered()
         announceListing()
         if not lfgHeartbeat then
@@ -1985,6 +1999,12 @@ if clientProfile.supported then
             end
         end
         if lfgListing:IsActive() and lfgLister() then
+            -- Grown past five (a raid that filled up): only a raid listing
+            -- can say so.
+            local purpose = lfgListing:Purpose()
+            if purpose.kind ~= "raid" and size > addon.LfgListing.PARTY_SIZE then
+                lfgListing:Update({ kind = "raid" }, lfgListing:Note())
+            end
             announceListing()
             if not lfgHeartbeat then
                 lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
