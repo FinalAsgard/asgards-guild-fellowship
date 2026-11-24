@@ -2937,7 +2937,7 @@ if clientProfile.supported then
         else
             client:Print("  Loaded: unknown (this client can't say)")
         end
-        client:Print("  Time is up: " .. count)
+        client:Print("  Time requirement met: " .. count)
     end
     router:Register("probe",
         "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..

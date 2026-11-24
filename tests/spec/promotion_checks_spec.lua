@@ -1171,7 +1171,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertContains(printed, "Timer marker probe:")
         test.assertContains(printed, "Texture: " .. tool.addon.RosterViewModel.TIMER_TEXTURE)
         test.assertContains(printed, "Loaded:")
-        test.assertContains(printed, "Time is up: 1")
+        test.assertContains(printed, "Time requirement met: 1")
 
         -- Ticking the manual item makes Bolt Ready, which replaces the timer.
         test.assertTrue(promotions.tick(boltKey, promotions.view().items[1].id, true))

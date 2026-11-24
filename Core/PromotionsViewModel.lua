@@ -339,7 +339,7 @@ function PromotionsViewModel.PanelRows(characters, options)
         if header.snooze == "can" then
             -- Below the checklist, so the button doesn't crowd the header.
             table.insert(rows, { kind = "promotion", key = character.key, snooze = "can",
-                action = PromotionsViewModel.NOT_READY, text = "    |cff9d9d9dTime is up|r" })
+                action = PromotionsViewModel.NOT_READY, text = "    |cff9d9d9dTime requirement met|r" })
         end
     end
     if characters[1] == nil then
