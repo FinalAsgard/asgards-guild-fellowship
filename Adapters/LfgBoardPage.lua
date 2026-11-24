@@ -3,8 +3,10 @@ local _, addon = ...
 -- The Guild LFG Board page in the AGF window. At the top is the card for
 -- the player's own party: "You're not in a party" with Start a group when
 -- they aren't listed, their listing in view mode (Edit, Not looking) when
--- they are, and an inline editor (What's it for?, the kind's fields, the
--- note, Save and Cancel) while editing. Below it are the tabs:
+-- they are, and an inline editor (What's it for?, the kind's fields, Roles
+-- in your party, the note, Save and Cancel) while editing. In someone
+-- else's party it shows that party's listing, read-only; only the leader
+-- lists a party. Below it are the tabs:
 --   Relevant Parties  large gold-bordered cards for groups the current
 --                     character could join, two per row, then small cards
 --                     under "Your alts could join", then a Nearby line
@@ -40,6 +42,10 @@ local LfgBoardPage = {
     -- included.
     DUNGEON_ROWS = 7,
     DUNGEON_ROW_HEIGHT = 20,
+    -- Roles in your party: one row per member.
+    ROLE_ROWS = 5,
+    ROLE_ROW_HEIGHT = 24,
+    ROLE_BUTTON_WIDTH = 56,
     FIELD_WIDTH = 320,
     KINDS = {
         { id = "dungeon", label = "Dungeon" },
@@ -73,6 +79,12 @@ Page.__index = Page
 --   friendTier    function(name) -> the guildmate's GroupFriends tier, or nil
 --   dungeonIcon   function(name) -> the game's icon for the dungeon, or nil
 --   onWhisper     function(name): whispers a leader
+--   party         function() -> { inParty, isLeader, listing? (the party's
+--                 listing on the board, when someone else leads it) }
+--   partyRoles    function() -> the members for Roles in your party, each
+--                 { key, name, role, assigned (by the game), canPlay =
+--                 { tank, healer, dps } }
+--   onSetRole     function(key, role): the leader chose a member's role
 --   onSave        function(purpose, note) -> true, or false and why not
 --   onNotLooking  function()
 function LfgBoardPage.Create(content, ui, options)
@@ -287,6 +299,43 @@ function Page:buildEditor(card)
     self.errorText = ui:Text(editor, "", "regular", "small", "orange")
     self.errorText:SetPoint("TOPLEFT", self.note, "BOTTOMLEFT", 0, -Theme.SPACING.s)
 
+    -- Roles in your party (dungeons): Tank, Healer or DPS for each member,
+    -- the roles their class can't play greyed out. A role the game assigned
+    -- can't be changed here.
+    editor.rolesLabel = ui:SectionLabel(editor, "Roles in your party")
+    editor.rolesLabel:SetPoint("TOPLEFT", self.note, "BOTTOMLEFT", 0, -28)
+    self.roleRows = {}
+    local row
+    for row = 1, LfgBoardPage.ROLE_ROWS do
+        local line = ui:frame("Frame", editor)
+        line:SetSize(LfgBoardPage.FIELD_WIDTH, LfgBoardPage.ROLE_ROW_HEIGHT)
+        line:SetPoint("TOPLEFT", editor.rolesLabel, "BOTTOMLEFT", 0,
+            -Theme.SPACING.xs - (row - 1) * LfgBoardPage.ROLE_ROW_HEIGHT)
+        line.name = ui:Text(line, "", "regular", "body", "text")
+        line.name:SetPoint("LEFT", line, "LEFT", 0, 0)
+        line.buttons = {}
+        local roles = { "tank", "healer", "dps" }
+        local position
+        for position = 1, #roles do
+            local choice = ui:frame("Button", line)
+            choice:SetSize(LfgBoardPage.ROLE_BUTTON_WIDTH, LfgBoardPage.ROLE_ROW_HEIGHT - 4)
+            choice:SetPoint("RIGHT", line, "RIGHT",
+                -(#roles - position) * (LfgBoardPage.ROLE_BUTTON_WIDTH + Theme.SPACING.xs), 0)
+            ui:Round(choice, Theme.RADIUS.small, "raised", "border")
+            choice.role = roles[position]
+            choice.label = ui:Text(choice, Widgets.ROLE_LABELS[roles[position]], "semibold", "small", "text")
+            choice.label:SetPoint("CENTER", choice, "CENTER", 0, 0)
+            choice:SetScript("OnClick", function(self)
+                if self.enabled and line.key then
+                    owner.options.onSetRole(line.key, self.role)
+                    owner:refreshRoles()
+                end
+            end)
+            line.buttons[position] = choice
+        end
+        self.roleRows[row] = line
+    end
+
     self.cancelButton = ui:Button(editor, "Cancel", "secondary", function()
         owner.editing = false
         owner:Refresh()
@@ -348,27 +397,50 @@ function Page:Save()
     return true
 end
 
--- Which way the card shows: "solo", "view" or "edit".
+-- The player's party as the options say, or a solo player's.
+function Page:party()
+    local party = self.options.party and self.options.party() or nil
+    return party or { inParty = false, isLeader = true, members = {} }
+end
+
+-- Which way the card shows: "solo" (nothing listed), "view" (the player's
+-- listing, editable), "member" (the party's listing, read-only, in someone
+-- else's party) or "edit".
 function Page:Mode()
     if self.editing then
         return "edit"
     end
-    return self.options.listing:IsActive() and "view" or "solo"
+    if self.options.listing:IsActive() then
+        return "view"
+    end
+    local party = self:party()
+    if party.inParty and not party.isLeader and party.listing ~= nil then
+        return "member"
+    end
+    return "solo"
 end
 
 function Page:refreshCard()
     local mode = self:Mode()
     local heights = { solo = LfgBoardPage.SOLO_HEIGHT, view = LfgBoardPage.VIEW_HEIGHT,
-        edit = LfgBoardPage.EDIT_HEIGHT }
+        member = LfgBoardPage.VIEW_HEIGHT, edit = LfgBoardPage.EDIT_HEIGHT }
     self.card:SetHeight(heights[mode])
     setShown(self.solo, mode == "solo")
-    setShown(self.view, mode == "view")
+    setShown(self.view, mode == "view" or mode == "member")
     setShown(self.editor, mode == "edit")
     self.tabs:ClearAllPoints()
     self.tabs:SetPoint("TOPLEFT", self.card, "BOTTOMLEFT", 0, -Theme.SPACING.l)
     self.tabs:SetPoint("RIGHT", self.content, "RIGHT", 0, 0)
-    if mode == "view" then
+    if mode == "solo" then
+        -- In a party it isn't listed; only its leader can list it.
+        local party = self:party()
+        self.solo.text:SetText(party.inParty and "Your party isn't listed" or "You're not in a party")
+        self.startButton:SetLabel(party.inParty and "List your party" or "Start a group")
+        setShown(self.startButton, not party.inParty or party.isLeader)
+    elseif mode == "view" then
         self:refreshView()
+    elseif mode == "member" then
+        self:refreshMemberView()
     elseif mode == "edit" then
         self:refreshEditor()
     end
@@ -379,14 +451,62 @@ function Page:refreshView()
     local purpose = listing:Purpose()
     local members = self.options.members()
     local fields = listing:Announcement(members)
+    view.label:SetText(Theme.Label("Your listing"))
     view.purpose:SetText(addon.LfgListing.Label(fields.k, fields.p))
     view.details:SetText(join({ addon.LfgListing.KindLabel(fields.k), range(fields.lo, fields.hi),
-        fields.s .. "/" .. fields.x }))
+        fields.k == "raid" and (fields.s .. " players") or (fields.s .. "/" .. fields.x) }))
     view.note:SetText(listing:Note() or "")
     if purpose.kind == "dungeon" then
         showRoles(view.tiles, members)
     else
         hideAll(view.tiles)
+    end
+    self.editButton:Show()
+    self.notLookingButton:Show()
+end
+
+-- In someone else's party: its listing as the guild sees it, read-only.
+function Page:refreshMemberView()
+    local listing, view = self:party().listing, self.view
+    view.label:SetText(Theme.Label("Your party's listing"))
+    view.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
+    view.details:SetText(join({ addon.LfgListing.KindLabel(listing.kind), range(listing.minLevel, listing.maxLevel),
+        listing.kind == "raid" and (listing.size .. " players") or (listing.size .. "/" .. listing.maxSize),
+        "led by " .. listing.leader }))
+    view.note:SetText(listing.note or "")
+    if listing.kind == "dungeon" then
+        showRoles(view.tiles, listing.members)
+    else
+        hideAll(view.tiles)
+    end
+    self.editButton:Hide()
+    self.notLookingButton:Hide()
+end
+
+-- Roles in your party: each member's role, and the ones they could play.
+function Page:refreshRoles()
+    local members = self.draft.kind == "dungeon" and (self.options.partyRoles and self.options.partyRoles()) or {}
+    setShown(self.editor.rolesLabel, #members > 0)
+    local index
+    for index = 1, #self.roleRows do
+        local line, member = self.roleRows[index], members[index]
+        if member == nil then
+            line.key = false
+            line:Hide()
+        else
+            line.key = member.key
+            line.name:SetText(member.name)
+            local position
+            for position = 1, #line.buttons do
+                local choice = line.buttons[position]
+                local playable = member.canPlay[choice.role] == true
+                choice.enabled = playable and not member.assigned
+                choice.selected = member.role == choice.role
+                choice:SetFill(choice.selected and "green" or "raised")
+                choice.label:SetTextColor(Theme.Color(playable and "text" or "disabled"))
+            end
+            line:Show()
+        end
     end
 end
 
@@ -405,6 +525,7 @@ function Page:refreshEditor()
     setShown(editor.questing, draft.kind == "questing")
     setShown(editor.raid, draft.kind == "raid")
     setShown(self.otherText, draft.kind == "other")
+    self:refreshRoles()
 end
 
 -- The dungeon list: what the search finds, those that fit the player's

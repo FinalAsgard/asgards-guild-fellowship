@@ -131,9 +131,10 @@ local function purposeText(purpose)
     return nil
 end
 
--- Lists the player as a group of one for `purpose`, with `note`, at `now`.
--- True, or false and why it can't be listed.
-function Listing:Start(purpose, note, now)
+-- Lists the player for `purpose`, with `note`, at `now`: as a group of one,
+-- or for their party when `party` is true (it then never runs out the solo
+-- way). True, or false and why it can't be listed.
+function Listing:Start(purpose, note, now, party)
     local cleaned, reason = LfgListing.CleanPurpose(purpose)
     if cleaned == nil then
         return false, reason
@@ -142,8 +143,48 @@ function Listing:Start(purpose, note, now)
     self.purpose = cleaned
     self.note = cleanNote(note)
     self.startedAt = now
-    self.joined = false
+    self.joined = party == true
     return true
+end
+
+-- The leader set member `key`'s role (for a client that assigns none).
+function Listing:SetRole(key, role)
+    self.roles = self.roles or {}
+    self.roles[key] = role
+end
+
+-- The roles the leader set, by member key.
+function Listing:ChosenRoles()
+    return self.roles or {}
+end
+
+-- `members` (each { key, classToken, assignedRole?, ... }) with each one's
+-- dungeon role: the game's, else the one `chosen` (by key) when the class
+-- can play it, else the first `rolesFor(classToken)` gives.
+function LfgListing.FillRoles(members, chosen, rolesFor)
+    local filled = {}
+    local index
+    for index = 1, #members do
+        local member = members[index]
+        local copy = {}
+        local name, value
+        for name, value in pairs(member) do
+            copy[name] = value
+        end
+        local playable = rolesFor(member.classToken) or {}
+        local role = member.assignedRole
+        if role == nil and chosen ~= nil and chosen[member.key] ~= nil then
+            local position
+            for position = 1, #playable do
+                if playable[position] == chosen[member.key] then
+                    role = chosen[member.key]
+                end
+            end
+        end
+        copy.role = role or member.role or playable[1]
+        filled[index] = copy
+    end
+    return filled
 end
 
 -- Changes a live listing's purpose and note. True, or false and why not.

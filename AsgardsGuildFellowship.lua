@@ -75,6 +75,11 @@ local lfgListing, lfgBoard, lfgPage, drawLfgBoard, onLfgMessage, probeLfg
 -- the button and the board when anything they show may have changed.
 local lfgDrawer = addon.LfgDrawerModel.Create()
 local lfgRefresh = function() end
+-- When the party changes, what happens to the listing (LfgTrigger), and
+-- how long a leader who handed the lead on keeps it before ending it.
+local lfgTrigger = addon.LfgTrigger.Create()
+local lfgOnParty = function() end
+local LFG_HAND_OFF_SECONDS = 5
 -- A guildmate's group-friend tier by character key (set up with the group
 -- friends below).
 local lfgFriendTier = function() return nil end
@@ -1341,6 +1346,24 @@ if clientProfile.supported then
                 lfgPage:StartEditing()
             end
         end,
+        -- The leader's question: what it's for goes through the board's
+        -- card; Not looking (or no answer) and the snooze ask nothing more.
+        onListParty = function()
+            lfgTrigger:Answered()
+            openBoard()
+            if lfgPage ~= nil and not lfgListing:IsActive() then
+                lfgPage:StartEditing()
+            end
+            lfgRefresh()
+        end,
+        onNotLooking = function()
+            lfgTrigger:NotLooking()
+            lfgRefresh()
+        end,
+        onSnooze = function()
+            lfgTrigger:Snooze(client:Timestamp() or 0)
+            lfgRefresh()
+        end,
         dungeonIcon = function(name)
             local dungeon = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
             return dungeon and dungeon.icon or nil
@@ -1558,16 +1581,54 @@ if clientProfile.supported then
     end
     -- The party as the listing announces it: for now, the player alone,
     -- in the first role they're willing to play.
+    -- The party as the listing announces it, the leader first: the player
+    -- alone, or their party (the whole raid in a raid). Each member's role
+    -- is the game's, else the one the leader chose, else the first their
+    -- class can play (the player's own: the first they're willing to).
     local function lfgMembers()
-        local fullName = client:GetPlayerFullName()
         local classToken = client:GetPlayerClass()
-        local roles = rolesOf(rosterController:SelfKey()) or roleCatalog:RolesFor(classToken) or {}
-        return { {
-            name = fullName and string.match(fullName, "^[^%-]+") or fullName or "?",
-            classToken = classToken,
-            level = client:GetPlayerLevel(),
-            role = roles[1],
-        } }
+        local preferred = (rolesOf(rosterController:SelfKey()) or {})[1]
+        local members = {}
+        if client:IsInGroup() then
+            local group = client:IsInRaid() and client:GetGroupMembers() or client:GetPartyMembers()
+            local leaderIndex
+            local index
+            for index = 1, #(group or {}) do
+                local member = group[index]
+                table.insert(members, {
+                    key = member.key,
+                    name = string.match(member.name, "^[^%-]+") or member.name,
+                    fullName = member.name,
+                    guid = member.guid,
+                    classToken = member.classToken,
+                    level = member.level,
+                    assignedRole = member.assignedRole,
+                    role = member.isPlayer and preferred or nil,
+                    isPlayer = member.isPlayer,
+                    isLeader = member.isLeader,
+                })
+                if member.isLeader then
+                    leaderIndex = #members
+                end
+            end
+            if leaderIndex ~= nil and leaderIndex > 1 then
+                table.insert(members, 1, table.remove(members, leaderIndex))
+            end
+        end
+        if members[1] == nil then
+            local fullName = client:GetPlayerFullName()
+            members[1] = {
+                key = "player",
+                name = fullName and string.match(fullName, "^[^%-]+") or fullName or "?",
+                classToken = classToken,
+                level = client:GetPlayerLevel(),
+                role = preferred,
+                isPlayer = true,
+            }
+        end
+        return addon.LfgListing.FillRoles(members, lfgListing:ChosenRoles(), function(token)
+            return roleCatalog:RolesFor(token)
+        end)
     end
     local function announceListing()
         local fields = lfgListing:Announcement(lfgMembers())
@@ -1744,6 +1805,7 @@ if clientProfile.supported then
             combat = comm:IsBusy(),
             instance = client:IsInInstance(),
             dnd = settings:Get("dnd") == true,
+            ask = lfgTrigger:Asking(),
         })
         if lfgButton ~= nil then
             lfgButton:Update(view)
@@ -1766,20 +1828,97 @@ if clientProfile.supported then
             purpose.minLevel = levels and levels.minLevel or nil
             purpose.maxLevel = levels and levels.maxLevel or nil
         end
+        -- Only the party's leader lists it.
+        local inGroup = client:IsInGroup()
+        if inGroup and not client:IsGroupLeader() then
+            return false, "only your party's leader can list it"
+        end
         local saved, reason
         if lfgListing:IsActive() then
             saved, reason = lfgListing:Update(purpose, note)
         else
-            saved, reason = lfgListing:Start(purpose, note, client:Timestamp() or 0)
+            saved, reason = lfgListing:Start(purpose, note, client:Timestamp() or 0, inGroup)
         end
         if not saved then
             return false, reason
         end
+        lfgTrigger:Answered()
         announceListing()
         if not lfgHeartbeat then
             lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
         end
+        lfgRefresh()
         return true
+    end
+    -- A board listing's purpose, as the listing keeps it, for taking over
+    -- the party's listing from the leader before.
+    local function purposeOf(listing)
+        if listing.kind == "dungeon" then
+            return { kind = "dungeon", dungeon = {
+                name = listing.purpose, minLevel = listing.minLevel, maxLevel = listing.maxLevel,
+            } }
+        elseif listing.kind == "questing" then
+            return { kind = "questing", zone = listing.purpose, minLevel = listing.minLevel,
+                maxLevel = listing.maxLevel }
+        elseif listing.kind == "other" then
+            return { kind = "other", text = listing.purpose }
+        end
+        return { kind = "raid" }
+    end
+    -- The party changed: LfgTrigger says what that means for the listing
+    -- (ask, take over, hand off, end, become a raid's), and a live listing
+    -- is announced with the party as it is now.
+    lfgOnParty = function()
+        local now = client:Timestamp() or 0
+        local inGroup = client:IsInGroup()
+        local leaderKey
+        if inGroup then
+            local members = lfgMembers()
+            if members[1] ~= nil and members[1].isLeader then
+                leaderKey = rosterController:RosterKeyFor(members[1].fullName or members[1].name, members[1].guid)
+            end
+        end
+        local actions = lfgTrigger:Observe({
+            inGroup = inGroup,
+            isLeader = inGroup and client:IsGroupLeader(),
+            isRaid = inGroup and client:IsInRaid(),
+            leaderKey = leaderKey,
+            listed = lfgListing:IsActive(),
+            listingOf = function(key)
+                return lfgBoard:Get(key, now)
+            end,
+        }, now)
+        local index
+        for index = 1, #actions do
+            local action = actions[index]
+            if action.action == addon.LfgTrigger.ASK then
+                if lfgButton ~= nil and lfgButton:IsShowing() then
+                    lfgRefresh()
+                    lfgButton:OpenDrawer()
+                end
+            elseif action.action == addon.LfgTrigger.TAKE_OVER then
+                lfgListing:Start(purposeOf(action.listing), action.listing.note, now, true)
+            elseif action.action == addon.LfgTrigger.RAID then
+                lfgListing:Update({ kind = "raid" }, lfgListing:Note())
+            elseif action.action == addon.LfgTrigger.END then
+                endListing()
+            elseif action.action == addon.LfgTrigger.HAND_OFF then
+                -- The new leader takes it over from the board, so it ends a
+                -- little later.
+                client:After(LFG_HAND_OFF_SECONDS, function()
+                    if lfgListing:IsActive() and not (client:IsInGroup() and client:IsGroupLeader()) then
+                        endListing()
+                    end
+                end)
+            end
+        end
+        if lfgListing:IsActive() and (not inGroup or client:IsGroupLeader()) then
+            announceListing()
+            if not lfgHeartbeat then
+                lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
+            end
+        end
+        lfgRefresh()
     end
     drawLfgBoard = function(content, ui)
         lfgPage = addon.LfgBoardPage.Create(content, ui, {
@@ -1814,8 +1953,51 @@ if clientProfile.supported then
             onWhisper = function(name)
                 client:OpenWhisper(name)
             end,
+            party = function()
+                if not client:IsInGroup() then
+                    return { inParty = false, isLeader = true }
+                end
+                local isLeader = client:IsGroupLeader()
+                local listing
+                if not isLeader then
+                    local leader = lfgMembers()[1]
+                    local key = leader and leader.isLeader
+                        and rosterController:RosterKeyFor(leader.fullName or leader.name, leader.guid)
+                    listing = key and lfgBoard:Get(key, client:Timestamp()) or nil
+                end
+                return { inParty = true, isLeader = isLeader, listing = listing }
+            end,
+            partyRoles = function()
+                local members = lfgMembers()
+                local rows = {}
+                local index
+                for index = 1, #members do
+                    local member = members[index]
+                    rows[index] = {
+                        key = member.key,
+                        name = member.name,
+                        role = member.role,
+                        assigned = member.assignedRole ~= nil,
+                        canPlay = {
+                            tank = roleCatalog:Can(member.classToken, "tank"),
+                            healer = roleCatalog:Can(member.classToken, "healer"),
+                            dps = roleCatalog:Can(member.classToken, "dps"),
+                        },
+                    }
+                end
+                return rows
+            end,
+            onSetRole = function(key, role)
+                lfgListing:SetRole(key, role)
+                if lfgListing:IsActive() then
+                    announceListing()
+                end
+            end,
             onSave = saveListing,
-            onNotLooking = endListing,
+            onNotLooking = function()
+                lfgTrigger:NotLooking()
+                endListing()
+            end,
         })
         -- Drawn on the window's first open; specs reach it here.
         addon.lfgPage = lfgPage
@@ -5124,8 +5306,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     client:ObserveParty(function()
         syncParty()
         recordParty()
-        -- The drawer shows the party; no glow while in one.
-        lfgRefresh()
+        -- The listing follows the party, and the drawer shows it; no glow
+        -- while in one.
+        lfgOnParty()
         if groupFinder ~= nil then
             groupFinder:Refresh()
         end
@@ -5213,6 +5396,7 @@ addon.groupSession = groupSession
 addon.groupBoard = groupBoard
 addon.lfgListing = lfgListing
 addon.lfgBoard = lfgBoard
+addon.lfgTrigger = lfgTrigger
 addon.groupAvailability = groupAvailability
 addon.joinRequests = joinRequests
 addon.joinPrompts = joinPrompts

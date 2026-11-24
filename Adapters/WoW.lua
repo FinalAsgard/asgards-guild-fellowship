@@ -1108,7 +1108,8 @@ Compatibility.ASSIGNED_ROLES = { TANK = "tank", HEALER = "healer", DAMAGER = "dp
 Compatibility.PARTY_UNITS = { "player", "party1", "party2", "party3", "party4" }
 
 -- One group unit as a member { key, name, classToken, level, guid,
--- assignedRole, inGuild, isPlayer }, or nil when there's no one there.
+-- assignedRole, inGuild, isPlayer, isLeader }, or nil when there's no one
+-- there.
 local function readUnit(environment, unit, isPlayer)
     local existsOk, exists = callFunction(environment.UnitExists, unit)
     if not isPlayer and not (existsOk and exists) then
@@ -1136,7 +1137,9 @@ local function readUnit(environment, unit, isPlayer)
     local level = value(environment.UnitLevel)
     local role = value(environment.UnitGroupRolesAssigned)
     local inGuild = value(environment.UnitIsInMyGuild)
+    local leader = value(environment.UnitIsGroupLeader)
     return {
+        isLeader = leader ~= nil and leader ~= false,
         key = type(guid) == "string" and guid ~= "" and guid or name,
         name = name,
         guid = type(guid) == "string" and guid ~= "" and guid or nil,
@@ -1163,6 +1166,18 @@ function Client:GetPartyMembers()
         end
     end
     return members
+end
+
+-- Whether the player leads their party or raid. False when the client
+-- can't say.
+function Client:IsGroupLeader()
+    local environment = self.environment
+    local ok, leader = callFunction(environment.UnitIsGroupLeader, "player")
+    if ok then
+        return leader ~= nil and leader ~= false
+    end
+    ok, leader = callFunction(environment.IsPartyLeader)
+    return ok and leader ~= nil and leader ~= false
 end
 
 Compatibility.RAID_SIZE = 40

@@ -27,8 +27,9 @@ local LfgButton = {
     DRAWER_GAP = 6,
     -- How far the drawer slides in from.
     SLIDE = 24,
-    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 132 },
+    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 132, ask = 178 },
     NONE_TEXT = "No groups for you right now",
+    ASK_TEXT = "You're leading a party. List it on the Guild LFG Board?",
 }
 addon.LfgButton = LfgButton
 
@@ -45,6 +46,10 @@ Button.__index = Button
 --   onHide          function(): the menu's Hide LFG button
 --   onDrawerOpened  function(): the drawer opened, so what's new is seen
 --   onStartGroup    function(): the drawer's Start a group
+--   onListParty     function(): the leader chose to list their party
+--   onNotLooking    function(): the leader said Not looking, or closed the
+--                   drawer on the question
+--   onSnooze        function(): "don't ask for 30 minutes"
 --   dungeonIcon     function(name) -> the game's icon for a dungeon, or nil
 --   loadPosition    function() -> saved { point, relativePoint, x, y } or nil
 --   savePosition    function(position)
@@ -155,6 +160,31 @@ function Button:buildDrawer()
     self.startButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad)
     self.startButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
 
+    -- Asking the leader: list the party (on the board's card), Not looking,
+    -- or don't ask for a while.
+    drawer.question = ui:Text(drawer, LfgButton.ASK_TEXT, "regular", "body", "text")
+    drawer.question:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
+    drawer.question:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad)
+    drawer.question:SetJustifyH("LEFT")
+    self.listButton = ui:Button(drawer, "Choose what it's for", "primary", function()
+        owner:CloseDrawer(true)
+        owner.options.onListParty()
+    end)
+    self.listButton:SetPoint("TOPLEFT", drawer.question, "BOTTOMLEFT", 0, -Theme.SPACING.s)
+    self.listButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+    self.notLookingButton = ui:Button(drawer, "Not looking", "secondary", function()
+        owner:CloseDrawer(true)
+        owner.options.onNotLooking()
+    end)
+    self.notLookingButton:SetPoint("TOPLEFT", self.listButton, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    self.notLookingButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+    self.snoozeButton = ui:Button(drawer, "Don't ask for 30 minutes", "secondary", function()
+        owner:CloseDrawer(true)
+        owner.options.onSnooze()
+    end)
+    self.snoozeButton:SetPoint("TOPLEFT", self.notLookingButton, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    self.snoozeButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+
     -- Your party: its purpose, size and needs, note, and filled slots.
     drawer.party = ui:Text(drawer, "", "semibold", "title", "text")
     drawer.party:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
@@ -246,14 +276,20 @@ function Button:refreshDrawer()
     local kind = top.kind
     drawer.kind = kind
     drawer:SetHeight(LfgButton.DRAWER_HEIGHTS[kind] or LfgButton.DRAWER_HEIGHTS.none)
-    drawer.heading:SetText(Theme.Label(kind == addon.LfgDrawerModel.PARTY and "Your party" or "New for you"))
+    local asking = kind == addon.LfgDrawerModel.ASK
+    local headings = { [addon.LfgDrawerModel.PARTY] = "Your party", [addon.LfgDrawerModel.ASK] = "List your party?" }
+    drawer.heading:SetText(Theme.Label(headings[kind] or "New for you"))
+    setShown(drawer.question, asking)
+    setShown(self.listButton, asking)
+    setShown(self.notLookingButton, asking)
+    setShown(self.snoozeButton, asking)
     local newest, party = kind == addon.LfgDrawerModel.NEWEST, kind == addon.LfgDrawerModel.PARTY
     setShown(drawer.icon, newest)
     setShown(drawer.purpose, newest)
     setShown(drawer.details, newest)
     setShown(self.askButton, newest)
     setShown(drawer.empty, kind == addon.LfgDrawerModel.NONE)
-    setShown(self.startButton, not party)
+    setShown(self.startButton, not party and not asking)
     setShown(drawer.party, party)
     setShown(drawer.partyDetails, party)
     setShown(drawer.note, party)
@@ -308,10 +344,16 @@ function Button:OpenDrawer()
     end
 end
 
-function Button:CloseDrawer()
+-- Closes the drawer. Closing it on the leader's question without an answer
+-- (`answered` false) is Not looking.
+function Button:CloseDrawer(answered)
+    local wasAsking = self:DrawerOpen() and self.drawer ~= nil and self.drawer.kind == addon.LfgDrawerModel.ASK
     self.drawerOpen = false
     if self.drawer ~= nil then
         self.drawer:Hide()
+    end
+    if wasAsking and not answered and self.options.onNotLooking ~= nil then
+        self.options.onNotLooking()
     end
 end
 

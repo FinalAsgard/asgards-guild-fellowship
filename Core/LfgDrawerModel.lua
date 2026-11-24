@@ -12,12 +12,15 @@ local _, addon = ...
 -- instance glow once that's over, if they're still there. The orange glow
 -- (a slot opened in the player's party) wins over gold.
 --
--- The drawer's top section is the player's party when they're in one,
+-- The drawer's top section asks the leader what their party is for while
+-- they're being asked; else it's the player's party when they're in one,
 -- otherwise the newest relevant group, or none.
 local LfgDrawerModel = {
     NONE = "none",
     NEWEST = "newest",
     PARTY = "party",
+    -- The leader is asked what their party is for.
+    ASK = "ask",
 }
 addon.LfgDrawerModel = LfgDrawerModel
 
@@ -41,6 +44,7 @@ end
 --   instance  in an instance
 --   dnd       Do Not Disturb is on
 --   slotOpen  a slot opened in the player's party
+--   ask       the leader is being asked what their party is for
 -- Returns { count, glow = nil | "gold" | "orange", fresh = the relevant
 -- listings new since the last Update that may pulse, top = { kind,
 -- listing? , party? } }.
@@ -79,7 +83,9 @@ function Model:Update(facts)
         glow = "gold"
     end
     local top
-    if facts.party ~= nil then
+    if facts.ask then
+        top = { kind = LfgDrawerModel.ASK, party = facts.party }
+    elseif facts.party ~= nil then
         top = { kind = LfgDrawerModel.PARTY, party = facts.party }
     elseif relevant[1] ~= nil then
         top = { kind = LfgDrawerModel.NEWEST, listing = relevant[1] }
