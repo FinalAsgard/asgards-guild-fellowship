@@ -1504,8 +1504,6 @@ if clientProfile.supported then
             flushLfg()
         end
     end
-    -- The party as the listing announces it: for now, the player alone,
-    -- in the first role they're willing to play.
     -- The party as the listing announces it, the leader first: the player
     -- alone, or their party (the whole raid in a raid). Each member's role
     -- is the game's, else the one the leader chose, else the first their
