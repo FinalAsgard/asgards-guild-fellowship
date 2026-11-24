@@ -39,10 +39,11 @@ Window.__index = Window
 -- options:
 --   frameName     the window's global name, so Escape closes it
 --   modules       a list of { id, label, title, draw(content, ui),
---                 settingsRows }: label names the sidebar button and the
---                 gear popup, title heads the page; draw is optional, and
---                 settingsRows ({ id, label, info } toggles in `settings`)
---                 are the gear popup's switches
+--                 settingsRows, onShow }: label names the sidebar button
+--                 and the gear popup, title heads the page; draw is
+--                 optional, settingsRows ({ id, label, info } toggles in
+--                 `settings`) are the gear popup's switches, and onShow()
+--                 (optional) runs each time the page is shown
 --   settings      the SettingsModel the Settings page's switches use
 --   settingsTabs  a list of { id, label, rows = { { id, label, info } } },
 --                 each row a toggle in `settings`
@@ -520,6 +521,10 @@ function Window:ShowPage(id)
         self.gear:Show()
         if self.popupOpen then
             self:showPopupFor(id)
+        end
+        local module = self:module(id)
+        if module.onShow ~= nil then
+            module.onShow()
         end
     end
 end

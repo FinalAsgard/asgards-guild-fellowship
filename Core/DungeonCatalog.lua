@@ -144,3 +144,26 @@ function Catalog:Split(level)
     end
     return fitting, others
 end
+
+-- The Guild LFG Board's dungeon search. With no `text`, the dungeons
+-- `level` fits; with text, every dungeon whose name holds it (ignoring
+-- case), those `level` fits first. Returns the fitting and the others, each
+-- lowest range first.
+function Catalog:Search(text, level)
+    local wanted = string.lower(string.gsub(text or "", "^%s*(.-)%s*$", "%1"))
+    local fitting, others = self:Split(level)
+    if wanted == "" then
+        return fitting, {}
+    end
+    local function matching(list)
+        local found = {}
+        local index
+        for index = 1, #list do
+            if string.find(string.lower(list[index].name), wanted, 1, true) ~= nil then
+                table.insert(found, list[index])
+            end
+        end
+        return found
+    end
+    return matching(fitting), matching(others)
+end

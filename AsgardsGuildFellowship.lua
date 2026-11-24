@@ -68,6 +68,9 @@ local guildNoteOverlay
 -- The add-on's new window (see AgfWindow) and the LFG button (see
 -- LfgButton), set up with the settings below.
 local agfWindow, lfgButton
+-- The Guild LFG Board: the player's own listing, the listings heard from
+-- guildmates, and the page drawing them (set up after the Group Finder).
+local lfgListing, lfgBoard, lfgPage, drawLfgBoard, onLfgMessage
 -- The key the new UI saves this character's layout under: its GUID, the
 -- same in every guild (or with none), else its full name.
 local function layoutKey()
@@ -1242,7 +1245,15 @@ if clientProfile.supported then
         frameName = addon.Identity.addonName .. "Window",
         modules = {
             { id = "lfg", label = "LFG", title = "Guild LFG Board",
-                settingsRows = { { id = "lfgButton", label = "Show LFG button" } } },
+                settingsRows = { { id = "lfgButton", label = "Show LFG button" } },
+                draw = function(content, ui)
+                    drawLfgBoard(content, ui)
+                end,
+                onShow = function()
+                    if lfgPage ~= nil then
+                        lfgPage:Refresh()
+                    end
+                end },
         },
         settings = settings,
         settingsTabs = {
@@ -1462,6 +1473,136 @@ if clientProfile.supported then
     local function keyOfSender(sender)
         local guild, _, normalizer = rosterController:QuietContext()
         return guild and normalizer:Key(sender) or nil
+    end
+    -- The Guild LFG Board. The player's listing is announced when it
+    -- starts or changes and every HEARTBEAT_SECONDS while it lasts; its end
+    -- once. Nothing goes out in combat, a boss encounter or a keystone run:
+    -- the latest announcement waits until they're over.
+    lfgListing = addon.LfgListing.Create()
+    lfgBoard = addon.LfgBoard.Create()
+    local lfgWaiting, lfgFlushing, lfgHeartbeat
+    local function refreshLfg()
+        if lfgPage ~= nil then
+            lfgPage:Refresh()
+        end
+    end
+    local function flushLfg()
+        lfgFlushing = false
+        if lfgWaiting == nil then
+            return
+        end
+        if comm:IsBusy() then
+            lfgFlushing = client:After(2, flushLfg)
+            if not lfgFlushing then
+                lfgWaiting = nil
+            end
+            return
+        end
+        local message = lfgWaiting
+        lfgWaiting = nil
+        comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+    end
+    local function sendLfg(message)
+        lfgWaiting = message
+        if not lfgFlushing then
+            flushLfg()
+        end
+    end
+    -- The party as the listing announces it: for now, the player alone,
+    -- in the first role they're willing to play.
+    local function lfgMembers()
+        local fullName = client:GetPlayerFullName()
+        local classToken = client:GetPlayerClass()
+        local roles = rolesOf(rosterController:SelfKey()) or roleCatalog:RolesFor(classToken) or {}
+        return { {
+            name = fullName and string.match(fullName, "^[^%-]+") or fullName or "?",
+            classToken = classToken,
+            level = client:GetPlayerLevel(),
+            role = roles[1],
+        } }
+    end
+    local function announceListing()
+        local fields = lfgListing:Announcement(lfgMembers())
+        if fields ~= nil then
+            sendLfg(addon.LfgProtocol.Listing(fields))
+        end
+    end
+    local function endListing()
+        if lfgListing:IsActive() then
+            lfgListing:End()
+            sendLfg(addon.LfgProtocol.End())
+        end
+        refreshLfg()
+    end
+    local function lfgTick()
+        lfgHeartbeat = false
+        if not lfgListing:IsActive() then
+            return
+        end
+        if lfgListing:Expired(client:Timestamp() or 0, #lfgMembers()) then
+            endListing()
+            rosterController:Print("Your Guild LFG Board listing ended: nobody joined in 30 minutes.")
+            return
+        end
+        announceListing()
+        lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
+    end
+    -- Start a group (or Edit) saved: the listing starts or changes, and the
+    -- guild hears it now.
+    local function saveListing(purpose, note)
+        local saved, reason
+        if lfgListing:IsActive() then
+            saved, reason = lfgListing:Update(purpose, note)
+        else
+            saved, reason = lfgListing:Start(purpose, note, client:Timestamp() or 0)
+        end
+        if not saved then
+            return false, reason
+        end
+        announceListing()
+        if not lfgHeartbeat then
+            lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
+        end
+        return true
+    end
+    drawLfgBoard = function(content, ui)
+        lfgPage = addon.LfgBoardPage.Create(content, ui, {
+            listing = lfgListing,
+            members = lfgMembers,
+            level = function()
+                return client:GetPlayerLevel()
+            end,
+            zone = function()
+                local zone = client:GetZone()
+                return zone and zone.name or nil
+            end,
+            catalog = function()
+                return addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList())
+            end,
+            listings = function()
+                return lfgBoard:Listings(client:Timestamp())
+            end,
+            onSave = saveListing,
+            onNotLooking = endListing,
+        })
+        -- Drawn on the window's first open; specs reach it here.
+        addon.lfgPage = lfgPage
+    end
+    -- Guildmates' listings and their ends; the player's own echo is
+    -- ignored.
+    onLfgMessage = function(message, sender)
+        local senderKey = keyOfSender(sender)
+        if not addon.LfgProtocol.IsValid(message) or senderKey == nil
+            or senderKey == rosterController:SelfKey()
+        then
+            return
+        end
+        if message.t == addon.LfgProtocol.TYPE_LISTING then
+            lfgBoard:OnListing(message, senderKey, sender, client:Timestamp() or 0)
+        else
+            lfgBoard:OnEnd(senderKey)
+        end
+        refreshLfg()
     end
     joinRequests = addon.JoinRequests.Create({
         partition = function()
@@ -4642,6 +4783,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildWelcome:OnMessage(message, sender)
         elseif addon.SlowModeConfig.TYPES[message.t] ~= nil then
             slowModeConfig:OnMessage(message, sender)
+        elseif addon.LfgProtocol.TYPES[message.t] ~= nil then
+            onLfgMessage(message, sender)
         elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
             onGroupFinderMessage(message, sender)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
@@ -4815,6 +4958,8 @@ addon.guildWelcome = guildWelcome
 addon.promotions = promotions
 addon.groupSession = groupSession
 addon.groupBoard = groupBoard
+addon.lfgListing = lfgListing
+addon.lfgBoard = lfgBoard
 addon.groupAvailability = groupAvailability
 addon.joinRequests = joinRequests
 addon.joinPrompts = joinPrompts

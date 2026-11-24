@@ -26,6 +26,7 @@ Adapters/Theme.lua
 Adapters/Widgets.lua
 Adapters/AgfWindow.lua
 Adapters/LfgButton.lua
+Adapters/LfgBoardPage.lua
 Adapters/PromotionLines.lua
 Adapters/RosterWindow.lua
 Adapters/EntryPoints.lua
@@ -84,6 +85,9 @@ Core/SlowModeConfig.lua
 Core/RecruitStats.lua
 Core/GuildRecruit.lua
 Core/DungeonCatalog.lua
+Core/LfgProtocol.lua
+Core/LfgListing.lua
+Core/LfgBoard.lua
 Core/RoleCatalog.lua
 Core/GroupSession.lua
 Core/GroupFinderProtocol.lua
