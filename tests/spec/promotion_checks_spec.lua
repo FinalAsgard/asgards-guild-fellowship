@@ -874,18 +874,36 @@ test.test("a character's line offers Not ready while its timer shows, then says 
         })
     end
 
+    -- The button is on its own line, the last of the character's.
+    local function notReady(rows, key)
+        local last, index
+        for index = 1, #rows do
+            if rows[index].key == key then
+                last = rows[index]
+            end
+        end
+        return last ~= nil and last.action == "Not ready" and last.snooze == "can" and last or nil
+    end
+
     local rows = panel(true)
     test.assertEqual("can", rowWith(rows, "due: Initiate").snooze)
-    test.assertEqual("Not ready", rowWith(rows, "due: Initiate").action)
+    test.assertEqual(nil, rowWith(rows, "due: Initiate").action, "the header doesn't crowd its rank names")
+    test.assertTrue(notReady(rows, "due") ~= nil, "Not ready under the closed header")
     test.assertEqual("snoozed", rowWith(rows, "snoozed: Initiate").snooze)
-    test.assertEqual(nil, rowWith(rows, "snoozed: Initiate").action, "no button while snoozed")
+    test.assertEqual(nil, notReady(rows, "snoozed"), "no button while snoozed")
+
+    -- Open, it's under the checklist.
+    local open = addon.PromotionsViewModel.PanelRows({ { key = "due", name = "due", rankName = RANKS[5],
+        evaluated = addon.PromotionPolicy.Evaluate(inputs, "due") } }, { officer = true, expanded = { due = true } })
+    test.assertTrue(notReady(open, "due") ~= nil)
+    test.assertTrue(open[#open - 1].item ~= nil or open[#open - 1].noteInput, "after the requirements")
     test.assertTrue(rowWith(rows, "Snoozed until 2026-10-27 by Toolbox").snoozed)
     test.assertEqual("none", rowWith(rows, "ready: Initiate").snooze, "Ready, so no timer")
     test.assertEqual("none", rowWith(rows, "early: Initiate").snooze, "time not up")
 
     rows = panel(false)
     test.assertEqual("none", rowWith(rows, "due: Initiate").snooze, "members get none")
-    test.assertEqual(nil, rowWith(rows, "due: Initiate").action)
+    test.assertEqual(nil, notReady(rows, "due"))
     test.assertEqual("none", rowWith(rows, "snoozed: Initiate").snooze)
     test.assertEqual(nil, rowWith(rows, "Snoozed until"))
 end)
@@ -1159,16 +1177,18 @@ for profileIndex = 1, #fixtures.PROFILES do
         local _, partition = tool.addon.rosterController:QuietContext()
         partition:GetMembershipDates().characters[boltKey].joined =
             { time = tool.time - 10 * DAY, source = "log", at = tool.time, by = tool.addon.rosterController:SelfKey() }
-        local _, header = panelOf(tool, names[3])
-        test.assertEqual("Not ready", header.action)
+        local rows, header = panelOf(tool, names[3])
+        test.assertEqual("can", header.snooze)
+        local button = rows[#rows]
+        test.assertEqual("Not ready", button.action, "under the checklist")
+        test.assertEqual(header.key, button.key)
 
         local clicked = tool.time
         test.assertTrue(promotions.snooze(boltKey))
         test.assertEqual(nil, promotions.timeMetKeys()[boltKey], "the timer is snoozed")
-        local rows
         rows, header = panelOf(tool, names[3])
         test.assertEqual("snoozed", header.snooze)
-        test.assertEqual(nil, header.action)
+        test.assertEqual(nil, rows[#rows].action)
         local index, snoozedLine
         for index = 1, #rows do
             if rows[index].snoozed then

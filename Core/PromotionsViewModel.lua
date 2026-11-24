@@ -209,12 +209,11 @@ end
 -- the first character with a checklist, not just a promotion date, unless
 -- `expanded` closes it).
 -- Rows: { kind = "stat", text } lines, then for each character
---   { kind = "promotion", text, key, toggle?, expanded?, snooze, action? },
+--   { kind = "promotion", text, key, toggle?, expanded?, snooze },
 --   `toggle` when it has a checklist (or a promotion date) to open.
 --   `snooze` is "can" when an officer sees its timer marker (its time is
---   up, it isn't Ready, and it isn't snoozed): `action` is then the Not
---   ready button. It's "snoozed" when that marker is snoozed, and "none"
---   otherwise and for members. Then for an officer a "Promote to match:
+--   up, it isn't Ready, and it isn't snoozed), "snoozed" when that marker
+--   is snoozed, and "none" otherwise and for members. Then for an officer a "Promote to match:
 --   <rank>" line { kind = "promotion", key, text, match = true } when the
 --   character has a match target, a "Snoozed until <date> by <officer>"
 --   line { kind = "promotion", key, text, snoozed = true } when snoozed,
@@ -230,6 +229,9 @@ end
 -- override's optional reason:
 --   { kind = "promotion", key, item, noteInput = true, ticked, note?,
 --     reason? }
+-- and last, when `snooze` is "can", the Not ready button's line
+--   { kind = "promotion", key, text, snooze = "can", action }
+-- under the checklist (or the header, when it's closed).
 function PromotionsViewModel.PanelRows(characters, options)
     options = options or {}
     local nameOf = options.nameOf or tostring
@@ -259,7 +261,6 @@ function PromotionsViewModel.PanelRows(characters, options)
             header.snooze = "snoozed"
         elseif timeUp then
             header.snooze = "can"
-            header.action = PromotionsViewModel.NOT_READY
         end
         if options.officer and character.matchRankName ~= nil then
             table.insert(rows, { kind = "promotion", key = character.key, match = true,
@@ -330,6 +331,11 @@ function PromotionsViewModel.PanelRows(characters, options)
                 table.insert(rows, { kind = "promotion", key = character.key, item = item.item, noteInput = true,
                     reason = true, ticked = false })
             end
+        end
+        if header.snooze == "can" then
+            -- Below the checklist, so the button doesn't crowd the header.
+            table.insert(rows, { kind = "promotion", key = character.key, snooze = "can",
+                action = PromotionsViewModel.NOT_READY, text = "    |cff9d9d9dTime is up|r" })
         end
     end
     if characters[1] == nil then

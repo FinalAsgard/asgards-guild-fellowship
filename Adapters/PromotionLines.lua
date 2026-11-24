@@ -6,7 +6,7 @@ local _, addon = ...
 -- shows whether the item is met); a needs-a-note item's note, or a failed
 -- check's override reason, is typed on the line under it; and an automated
 -- item has Override or Undo override; and a character whose timer marker
--- an officer sees has Not ready. Used by the player panel's Promotion
+-- an officer sees has Not ready under its checklist. Used by the player panel's Promotion
 -- tab and the game guild roster's promotion panel, so both work the same.
 local PromotionLines = {}
 addon.PromotionLines = PromotionLines
@@ -168,7 +168,8 @@ function PromotionLines.Attach(line, state)
     end)
     line.note:Hide()
     -- An automated item's button: Override (with the reason typed on the
-    -- line below, if any) and Undo override. A character's line: Not ready.
+    -- line below, if any) and Undo override. The line under a character's
+    -- checklist: Not ready.
     line.act = state.createFrame("Button", nil, line, "UIPanelButtonTemplate")
     line.act:SetSize(96, 18)
     line.act:SetPoint("RIGHT", line, "RIGHT", -2, 0)
