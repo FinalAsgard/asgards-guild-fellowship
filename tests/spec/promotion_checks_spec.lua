@@ -331,18 +331,39 @@ test.test("each character at a rank with requirements gets its next rank, progre
     test.assertEqual(nil, addon.PromotionPolicy.Evaluate(inputs, "rivet"))
 end)
 
-test.test("a character shows its player's highest rank when another character holds a higher one", function()
-    local inputs, addon = newGuild({ main = 1, alt = 4, solo = 4 })
-    addItem(inputs, 4, "Read the rules")
+test.test("a player has one rank-up profile, on its highest-ranked character", function()
+    local inputs, addon = newGuild({ main = 4, alt = 3, twin = 4, solo = 4 })
+    local rules = addItem(inputs, 4, "Read the rules")
+    addItem(inputs, 3, "Attend an event")
     inputs.partition:JoinPlayerOf("alt", "main", "manual")
+    inputs.partition:JoinPlayerOf("twin", "main", "manual")
+    local policy = addon.PromotionPolicy
 
-    local alt = addon.PromotionPolicy.Evaluate(inputs, "alt")
-    test.assertEqual(1, alt.highestRank)
-    test.assertEqual("Officer", alt.highestRankName)
-    test.assertEqual(nil, addon.PromotionPolicy.Evaluate(inputs, "solo").highestRank)
-    -- A character who left doesn't count.
-    inputs.partition:MarkDeparted("main", NOW)
-    test.assertEqual(nil, addon.PromotionPolicy.Evaluate(inputs, "alt").highestRank)
+    test.assertEqual("alt", policy.ProfileOf(inputs.partition, "main"), "the alt outranks the main")
+    test.assertEqual("alt", policy.ProfileOf(inputs.partition, "twin"))
+    test.assertEqual("solo", policy.ProfileOf(inputs.partition, "solo"), "no player: its own")
+    test.assertTrue(policy.Evaluate(inputs, "alt") ~= nil)
+    test.assertEqual(nil, policy.Evaluate(inputs, "main"), "the others have no checklist of their own")
+    test.assertEqual(nil, policy.Evaluate(inputs, "twin"))
+
+    -- Ticking a follower's item doesn't make it Ready.
+    inputs.checks:Set("main", rules, true, nil, OFFICER, NOW)
+    test.assertEqual(nil, policy.ReadySet(inputs).main)
+
+    -- On a tie, the main holds it; a character who left doesn't count.
+    inputs.partition:MarkDeparted("alt", NOW)
+    test.assertEqual("main", policy.ProfileOf(inputs.partition, "twin"))
+    test.assertTrue(policy.ReadySet(inputs).main, "the main's ticks now count")
+    test.assertEqual(nil, policy.Evaluate(inputs, "twin"))
+end)
+
+test.test("the panel says whose checklist a player's other characters follow", function()
+    local _, addon = newGuild({ main = 4 })
+    local rows = addon.PromotionsViewModel.PanelRows({
+        { key = "main", name = "Main", rankName = "Initiate", evaluated = nil, follows = "Alt" },
+    }, { officer = true })
+    test.assertContains(rows[1].text, "checklist on Alt")
+    test.assertFalse(string.find(rows[1].text, "no requirements", 1, true) ~= nil)
 end)
 
 test.test("an item's tooltip says who ticked it, when, and its note", function()
@@ -399,7 +420,7 @@ end)
 
 test.test("player days in guild count from the earliest join among the player's characters still in the guild",
     function()
-    local inputs, addon = newGuild({ main = 2, alt = 4, gone = 4 })
+    local inputs, addon = newGuild({ main = 5, alt = 4, gone = 4 })
     local item = addItem(inputs, 4, "", "player-guild-days", 30)
     inputs.partition:JoinPlayerOf("alt", "main", "manual")
     inputs.partition:JoinPlayerOf("gone", "main", "manual")
@@ -503,7 +524,7 @@ test.test("an officer overrides a failed automated item with an optional reason,
 end)
 
 test.test("the add-on check passes when any of the player's characters was ever heard", function()
-    local inputs, addon = newGuild({ main = 2, alt = 4, solo = 4, quiet = 4 })
+    local inputs, addon = newGuild({ main = 5, alt = 4, solo = 4, quiet = 4 })
     local records = inputs.requirements:Add(4, "", "addon", RANKS[5], OFFICER, NOW)
     local item = records[1]
     test.assertEqual(nil, item.n, "a yes or no check, with no number")

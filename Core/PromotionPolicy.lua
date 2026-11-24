@@ -1,8 +1,9 @@
 local _, addon = ...
 
--- The promotion rules engine: for each character, the next rank, each
--- requirement's status, progress, whether it's ready, its player's highest
--- rank, and the rank to promote it to so it matches its player's other
+-- The promotion rules engine: for each player, one rank-up profile (on its
+-- highest-ranked character, see ProfileOf) with the next rank, each
+-- requirement's status, progress, and whether it's ready; and for each
+-- character, the rank to promote it to so it matches its player's other
 -- characters. Pure: the caller passes everything in.
 --
 -- inputs:
@@ -149,22 +150,35 @@ function PromotionPolicy.HighestCharacter(partition, playerId)
     return bestKey, best
 end
 
+-- The character that holds `key`'s player's rank-up profile: the player's
+-- highest-ranked character in the guild (see HighestCharacter), or `key`
+-- itself when it has no player. A player has one checklist, its ticks and
+-- snooze kept on that character; the others follow it ("Promote to
+-- match").
+function PromotionPolicy.ProfileOf(partition, key)
+    local character = partition:GetCharacter(key)
+    if character == nil or character.player == nil then
+        return key
+    end
+    return (PromotionPolicy.HighestCharacter(partition, character.player)) or key
+end
+
 -- One character's promotion status, or nil when it isn't in the guild,
--- its rank is the top one (nothing above it), or its rank has no
--- requirements:
---   { key, rank, rankName, nextRank, nextRankName, items, met, total, ready,
---     highestRank, highestRankName }
+-- doesn't hold its player's profile (see ProfileOf), its rank is the top
+-- one (nothing above it), or its rank has no requirements:
+--   { key, rank, rankName, nextRank, nextRankName, items, met, total, ready }
 -- where each item is { id, label, kind, automated, met, detail,
 -- overridden, record }: `record` is the officer's tick (or override) when
 -- there is one, `detail` an automated item's status in words, and
 -- `overridden` true when an officer's override is what meets a failed
--- automated item. `highestRank` is the player's highest rank when it's
--- higher than this character's, else nil.
+-- automated item.
 -- `key`'s record and its rank's items, or nil when it has no checklist.
 local function checklistOf(inputs, key, itemsOf)
     local partition = inputs.partition
     local character = partition:GetCharacter(key)
-    if character == nil or not partition:IsInGuild(key) or type(character.rank) ~= "number" or character.rank < 1 then
+    if character == nil or not partition:IsInGuild(key) or type(character.rank) ~= "number" or character.rank < 1
+        or PromotionPolicy.ProfileOf(partition, key) ~= key
+    then
         return nil
     end
     local items = itemsOf and itemsOf(character.rank) or inputs.requirements:Items(character.rank)
@@ -230,7 +244,6 @@ function PromotionPolicy.Summarize(inputs, key, itemsOf)
 end
 
 function PromotionPolicy.Evaluate(inputs, key, itemsOf)
-    local partition = inputs.partition
     local character, items = checklistOf(inputs, key, itemsOf)
     if character == nil then
         return nil
@@ -266,11 +279,6 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
     end
     result.ready = result.met == result.total
     result.timeMet = timeItems > 0 and timeMet == timeItems
-    local highest = PromotionPolicy.HighestRank(partition, character.player)
-    if highest ~= nil and highest < rank then
-        result.highestRank = highest
-        result.highestRankName = names[highest + 1] or ("Rank " .. highest)
-    end
     return result
 end
 

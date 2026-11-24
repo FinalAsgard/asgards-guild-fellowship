@@ -62,7 +62,7 @@ local function discordCheck(inputs, rank)
 end
 
 test.test("the Discord check passes with a name on any of the player's characters", function()
-    local inputs, addon = newGuild({ main = 2, alt = 4, solo = 4 })
+    local inputs, addon = newGuild({ main = 5, alt = 4, solo = 4 })
     local item = discordCheck(inputs, 4)
     inputs.partition:JoinPlayerOf("alt", "main", "manual")
     inputs.partition:SetProfileText("main", "discord", "bolt#1234", NOW - 60, "main")
@@ -91,7 +91,7 @@ test.test("the Discord check fails again when the name is cleared or blank", fun
     test.assertFalse(cleared.met, "the newest change clears it for the whole player")
     test.assertEqual("not set", cleared.detail)
     inputs.partition:SetProfileText("alt", "discord", "   ", NOW + 1, "alt")
-    test.assertFalse(statusOf(inputs, addon, "alt", item.id).met, "spaces aren't a name")
+    test.assertFalse(statusOf(inputs, addon, "main", item.id).met, "spaces aren't a name")
 end)
 
 test.test("an officer's override passes a failed Discord check, and it counts toward ready", function()
@@ -278,7 +278,7 @@ test.test("time met needs every time item at the rank met, and leaves out the fu
 end)
 
 test.test("time met counts before-tracking dates, player days and an officer's override", function()
-    local inputs, addon = newGuild({ main = 2, alt = 4, veteran = 4, waived = 4, fresh = 4 })
+    local inputs, addon = newGuild({ main = 5, alt = 4, veteran = 4, waived = 4, fresh = 4 })
     timeItem(inputs, 4, "player-guild-days", 30)
     manualItem(inputs, 4)
     inputs.partition:JoinPlayerOf("alt", "main", "manual")

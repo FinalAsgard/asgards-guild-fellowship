@@ -2555,7 +2555,9 @@ if clientProfile.supported then
             if character ~= nil and partition:IsInGuild(key) and type(character.rank) == "number" then
                 local match = officer and addon.PromotionPolicy.MatchTarget(inputs, key) or nil
                 local snoozed = officer and inputs.checks:IsSnoozed(key, inputs.now)
+                local profile = addon.PromotionPolicy.ProfileOf(partition, key)
                 table.insert(characters, {
+                    follows = profile ~= key and nameOf(profile) or nil,
                     key = key,
                     name = nameOf(key),
                     rankName = inputs.rankNames[character.rank + 1] or ("Rank " .. character.rank),

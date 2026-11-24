@@ -199,7 +199,9 @@ end
 --     when its rank has no requirements), lastPromotion (a MembershipDates
 --     record, or nil), matchRankName (the rank to promote it to so it
 --     matches its player's other characters, or nil), snooze (its
---     running snooze, PromotionChecks:SnoozeOf, or nil) }
+--     running snooze, PromotionChecks:SnoozeOf, or nil), follows (the
+--     name of the character holding the player's checklist, see
+--     PromotionPolicy.ProfileOf, when it isn't this one, or nil) }
 -- Add-ons can't promote: an officer promotes in the game's guild window.
 -- options: officer (true for an officer's view: check boxes, Override,
 -- who ticked, notes and reasons; false for a member's own view,
@@ -247,7 +249,9 @@ function PromotionsViewModel.PanelRows(characters, options)
         local character = characters[index]
         local evaluated = character.evaluated
         local text = tostring(character.name) .. ": " .. tostring(character.rankName)
-        if evaluated == nil then
+        if character.follows ~= nil then
+            text = text .. "  |cff9d9d9dchecklist on " .. tostring(character.follows) .. "|r"
+        elseif evaluated == nil then
             text = text .. "  |cff9d9d9dno requirements|r"
         else
             text = text .. " -> " .. evaluated.nextRankName .. ", " .. evaluated.met .. " of " .. evaluated.total ..
