@@ -1286,3 +1286,42 @@ test.test("Forever a posted open slot reaches a guildmate who fits it with the c
     test.assertEqual(1, zapAddon.lfgButton.view.count)
     test.assertEqual("gold", zapAddon.lfgButton.view.glow)
 end)
+
+-- Ask in guild --------------------------------------------------------------------------
+
+test.test("lfg listing: the Ask in guild line names a dungeon's open roles, else the players needed", function()
+    local LfgListing = newListing().LfgListing
+    test.assertEqual("LF healer and 2 DPS for Stratholme (58\226\128\14760), whisper me!", LfgListing.GuildLine({
+        k = "dungeon", p = "Stratholme", lo = 58, hi = 60, s = 2, x = 5, r = { "healer", "dps" },
+        mb = { { n = "Tool", r = "tank" }, { n = "Zap", r = "dps" } },
+    }))
+    test.assertEqual("LF tank, healer and DPS for Stratholme (58\226\128\14760), whisper me!", LfgListing.GuildLine({
+        k = "dungeon", p = "Stratholme", lo = 58, hi = 60, s = 3, x = 5, r = { "tank", "healer", "dps" },
+        mb = { { n = "A", r = "dps" }, { n = "B", r = "dps" } },
+    }))
+    test.assertEqual("LF 3 more for Questing in Ironforge (1\226\128\14760), whisper me!", LfgListing.GuildLine({
+        k = "questing", p = "Ironforge", lo = 1, hi = 60, s = 2, x = 5, mb = {},
+    }))
+    test.assertEqual("LF 1 more for Ony first, whisper me!", LfgListing.GuildLine({
+        k = "other", p = "Ony first", s = 4, x = 5, mb = {},
+    }))
+    test.assertEqual("LF 39 more for Raid, whisper me!", LfgListing.GuildLine({ k = "raid", s = 1, x = 40, mb = {} }))
+    -- Nobody needed: no line.
+    test.assertEqual(nil, LfgListing.GuildLine({ k = "dungeon", p = "Stratholme", s = 5, x = 5, r = {}, mb = {} }))
+    test.assertEqual(nil, LfgListing.GuildLine({ k = "other", p = "x", s = 5, x = 5, mb = {} }))
+end)
+
+test.test("Forever Ask in guild types the line into guild chat and never sends it", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = listedStrat(channel)
+    local opened, sent
+    tool.environment.ChatFrameUtil = nil
+    tool.environment.ChatFrame_OpenChat = function(line) opened = line end
+    tool.environment.SendChatMessage = function(text) sent = text end
+    local button = toolAddon.lfgPage.askGuildButton
+    test.assertTrue(button.shown)
+    click(button)
+    test.assertContains(opened, "/g LF healer and 3 DPS for Stratholme (")
+    test.assertContains(opened, "), whisper me!")
+    test.assertEqual(nil, sent)
+end)

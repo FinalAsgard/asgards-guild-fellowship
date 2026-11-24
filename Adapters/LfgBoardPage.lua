@@ -2,7 +2,8 @@ local _, addon = ...
 
 -- The Guild LFG Board page in the AGF window. At the top is the card for
 -- the player's own party: "You're not in a party" with Start a group when
--- they aren't listed, their listing in view mode (Edit, Not looking) when
+-- they aren't listed, their listing in view mode (Edit, Ask in guild, Not
+-- looking) when
 -- they are, and an inline editor (What's it for?, the kind's fields, Roles
 -- in your party, the note, Save and Cancel) while editing. In someone
 -- else's party it shows that party's listing, read-only; only the leader
@@ -92,6 +93,7 @@ Page.__index = Page
 --                 { tank, healer, dps } }
 --   onSetRole     function(key, role): the leader chose a member's role
 --   onSave        function(purpose, note) -> true, or false and why not
+--   onAskInGuild  function(line): types `line` into guild chat, unsent
 --   onNotLooking  function()
 function LfgBoardPage.Create(content, ui, options)
     local page = setmetatable({ content = content, ui = ui, options = options, tab = "relevant" }, Page)
@@ -181,6 +183,16 @@ function Page:buildView(card)
     end)
     self.editButton:SetWidth(70)
     self.editButton:SetPoint("RIGHT", self.notLookingButton, "LEFT", -Theme.SPACING.s, 0)
+    -- Types a line into guild chat for guildmates without the add-on; the
+    -- player sends it, or doesn't.
+    self.askGuildButton = ui:Button(view, "Ask in guild", "secondary", function()
+        local line = addon.LfgListing.GuildLine(owner.options.listing:Announcement(owner.options.members()))
+        if line ~= nil and owner.options.onAskInGuild ~= nil then
+            owner.options.onAskInGuild(line)
+        end
+    end)
+    self.askGuildButton:SetWidth(100)
+    self.askGuildButton:SetPoint("RIGHT", self.editButton, "LEFT", -Theme.SPACING.s, 0)
     view.tiles = self:roleTiles(view, 22)
     view.tiles[1]:SetPoint("TOPRIGHT", view, "TOPRIGHT", -pad - 4 * 26, -pad)
     self.view = view
@@ -469,6 +481,8 @@ function Page:refreshView()
     end
     self.editButton:Show()
     self.notLookingButton:Show()
+    self.askGuildButton:Show()
+    self.askGuildButton:SetActive(addon.LfgListing.GuildLine(fields) ~= nil)
 end
 
 -- In someone else's party: its listing as the guild sees it, read-only.
@@ -487,6 +501,7 @@ function Page:refreshMemberView()
     end
     self.editButton:Hide()
     self.notLookingButton:Hide()
+    self.askGuildButton:Hide()
 end
 
 -- Roles in your party: each member's role, and the ones they could play.

@@ -375,3 +375,54 @@ function Listing:Announcement(members, accepts)
     end
     return fields
 end
+
+-- The line Ask in guild types into guild chat for guildmates without the
+-- add-on, from an Announcement's `fields`: the open roles for a dungeon
+-- ("LF healer and 2 DPS for Stratholme (58–60), whisper me!"), else how
+-- many more players. Nil when nobody's needed.
+function LfgListing.GuildLine(fields)
+    if type(fields) ~= "table" then
+        return nil
+    end
+    local label = LfgListing.Label(fields.k, fields.p)
+    if fields.lo ~= nil and fields.hi ~= nil then
+        label = label .. " (" .. fields.lo .. "\226\128\147" .. fields.hi .. ")"
+    end
+    local wanted = {}
+    if fields.k == "dungeon" then
+        local taken = {}
+        local index
+        for index = 1, #(fields.mb or {}) do
+            local role = fields.mb[index].r
+            if role ~= nil then
+                taken[role] = (taken[role] or 0) + 1
+            end
+        end
+        local open = {}
+        for index = 1, #(fields.r or {}) do
+            open[fields.r[index]] = true
+        end
+        for index = 1, #LfgListing.DUNGEON_ROLES do
+            local slot = LfgListing.DUNGEON_ROLES[index]
+            if open[slot.role] then
+                local count = math.max(slot.count - (taken[slot.role] or 0), 1)
+                local name = slot.role == "dps" and "DPS" or slot.role
+                table.insert(wanted, count > 1 and (count .. " " .. name) or name)
+            end
+        end
+    else
+        local more = (fields.x or 0) - (fields.s or 0)
+        if more > 0 then
+            wanted[1] = more .. " more"
+        end
+    end
+    if wanted[1] == nil then
+        return nil
+    end
+    local roles = wanted[1]
+    local index
+    for index = 2, #wanted do
+        roles = roles .. (index == #wanted and " and " or ", ") .. wanted[index]
+    end
+    return "LF " .. roles .. " for " .. label .. ", whisper me!"
+end

@@ -2323,6 +2323,9 @@ if clientProfile.supported then
                 end
             end,
             onSave = saveListing,
+            onAskInGuild = function(line)
+                client:OpenGuildChat(line)
+            end,
             onNotLooking = function()
                 lfgTrigger:NotLooking()
                 endListing()
