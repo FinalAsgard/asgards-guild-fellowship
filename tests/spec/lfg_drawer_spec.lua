@@ -192,7 +192,9 @@ test.test("lfg button: the drawer's newest group, none, and the party", function
     test.assertEqual("Tool \194\183 1/5 \194\183 needs Healer, DPS", drawer.details.text)
     test.assertEqual(addon.Theme.TEXTURES.dungeon, drawer.iconTexture)
     test.assertTrue(button.askButton.shown)
-    test.assertFalse(button.askButton.active)
+    -- This leader takes no asks: Whisper instead.
+    test.assertEqual("Whisper Tool", button.askButton.label.text)
+    test.assertTrue(button.askButton.active)
     test.assertTrue(button.startButton.shown)
     test.assertFalse(drawer.empty.shown)
 

@@ -842,3 +842,88 @@ test.test("Forever when a listed guild leader logs off, a guildmate in the party
     test.assertEqual("Hammer Smith", listings[1].leader)
     test.assertTrue(listings[1].contact)
 end)
+
+-- Ask to join --------------------------------------------------------------------------
+
+-- Tool lists Stratholme alone; Hammer opens the board.
+local function listedStrat(channel)
+    local tool, toolAddon = login(channel, "Tool Box")
+    local hammer, addon = login(channel, "Hammer Smith")
+    test.assertTrue(toolAddon.agfWindow:Open("lfg"))
+    toolAddon.lfgPage:StartEditing()
+    toolAddon.lfgPage.draft.dungeon = toolAddon.DungeonCatalog.For("forever", nil):Get("strat")
+    test.assertTrue(toolAddon.lfgPage:Save())
+    fixtures.deliver(channel)
+    test.assertTrue(addon.agfWindow:Open("lfg"))
+    return tool, toolAddon, hammer, addon
+end
+
+test.test("Forever Ask to join reaches the leader as a request under the drawer; Invite invites", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = listedStrat(channel)
+    local invited
+    tool.environment.C_PartyInfo = { InviteUnit = function(name) invited = name end }
+    test.assertFalse(toolAddon.lfgButton:DrawerOpen())
+
+    local card = addon.lfgPage.largeCards[1]
+    test.assertTrue(card.ask.shown)
+    test.assertEqual("Ask to join", card.ask.label.text)
+    click(card.ask)
+    -- The paladin could heal or DPS: a menu picks.
+    test.assertTrue(addon.lfgPage.roleMenu:IsOpen())
+    click(addon.lfgPage.roleMenu.rows[1])
+    test.assertEqual("pending", addon.lfgBoard:Request(card.listing.id, hammer.time).state)
+    addon.lfgPage:Refresh()
+    test.assertEqual("Asked \194\183 pending", card.ask.label.text)
+    fixtures.deliver(channel)
+
+    -- The leader's drawer opens with the request under it.
+    local button = toolAddon.lfgButton
+    test.assertTrue(button:DrawerOpen())
+    local toast = button.toasts[1]
+    test.assertTrue(toast.shown)
+    test.assertContains(toast.name.text, "Hammer")
+    test.assertEqual("Healer, 60", toast.details.text)
+    -- Nothing was invited by itself.
+    test.assertEqual(nil, invited)
+
+    click(toast.invite)
+    test.assertEqual("Hammer Smith", string.match(invited, "^[^%-]+"))
+    test.assertFalse(toast.shown)
+    fixtures.deliver(channel)
+    test.assertEqual("accepted", addon.lfgBoard:Request(card.listing.id, hammer.time).state)
+    addon.lfgPage:Refresh()
+    test.assertEqual("Invited", card.ask.label.text)
+end)
+
+test.test("Forever Decline tells the asker no", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = listedStrat(channel)
+    local card = addon.lfgPage.largeCards[1]
+    click(card.ask)
+    click(addon.lfgPage.roleMenu.rows[2])
+    fixtures.deliver(channel)
+    test.assertEqual("DPS, 60", toolAddon.lfgButton.toasts[1].details.text)
+
+    click(toolAddon.lfgButton.toasts[1].decline)
+    fixtures.deliver(channel)
+    test.assertEqual("declined", addon.lfgBoard:Request(card.listing.id, hammer.time).state)
+end)
+
+test.test("Forever a leader with the LFG button hidden is whispered instead, and takes no asks", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = listedStrat(channel)
+    toolAddon.lfgButton.options.onHide()
+    fixtures.deliver(channel)
+
+    addon.lfgPage:Refresh()
+    local card = addon.lfgPage.largeCards[1]
+    test.assertFalse(card.ask.shown)
+    test.assertTrue(card.whisper.shown)
+    test.assertEqual("Whisper Tool Box", card.whisper.label.text)
+
+    -- An ask sent anyway goes nowhere.
+    addon.lfgPage.options.onAsk(card.listing, "healer")
+    fixtures.deliver(channel)
+    test.assertFalse(toolAddon.lfgButton:DrawerOpen())
+end)

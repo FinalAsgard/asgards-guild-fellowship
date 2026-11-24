@@ -25,6 +25,13 @@ local LfgProtocol = {
     -- their party, whose leader isn't in the guild. The party's other
     -- guildmates stop being asked about it.
     TYPE_CONTACT = "lfg-contact",
+    -- { v, t, r = the role asked for (dungeon only)?, l = level, c = class
+    -- token? }: whispered to a listing's leader, asking to join it as the
+    -- sender's current character.
+    TYPE_ASK = "lfg-ask",
+    -- { v, t, a = one of ANSWERS }: whispered back to whoever asked.
+    TYPE_ANSWER = "lfg-answer",
+    ANSWERS = { invited = true, declined = true, expired = true, roleFilled = true },
     HEARTBEAT_SECONDS = 60,
     -- The most characters a note or a free-text purpose holds.
     TEXT_LETTERS = 60,
@@ -132,6 +139,13 @@ local CHECKS = {
     [LfgProtocol.TYPE_CONTACT] = function(message)
         return isShortText(message.ld)
     end,
+    [LfgProtocol.TYPE_ASK] = function(message)
+        return (message.r == nil or ROLES[message.r] == true) and isLevel(message.l)
+            and (message.c == nil or isShortText(message.c))
+    end,
+    [LfgProtocol.TYPE_ANSWER] = function(message)
+        return LfgProtocol.ANSWERS[message.a] == true
+    end,
 }
 
 -- Every Guild LFG Board message type, for routing.
@@ -161,6 +175,17 @@ end
 -- A contact claim for the party led by `leaderName`.
 function LfgProtocol.Contact(leaderName)
     return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_CONTACT, ld = leaderName }
+end
+
+-- Asking to join as `role` (a dungeon's; nil otherwise), at `level`, as a
+-- `classToken`.
+function LfgProtocol.Ask(role, level, classToken)
+    return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_ASK, r = role, l = level, c = classToken }
+end
+
+-- The answer `answer` (invited, declined, expired or roleFilled) to an ask.
+function LfgProtocol.Answer(answer)
+    return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_ANSWER, a = answer }
 end
 
 -- Whether `message` is a Guild LFG Board message this version understands.

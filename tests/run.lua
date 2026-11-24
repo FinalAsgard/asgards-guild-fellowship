@@ -91,6 +91,7 @@ require("tests.spec.lfg_button_spec")
 require("tests.spec.lfg_board_spec")
 require("tests.spec.lfg_drawer_spec")
 require("tests.spec.lfg_party_spec")
+require("tests.spec.lfg_join_spec")
 require("tests.spec.lifecycle_spec")
 require("tests.spec.bootstrap_spec")
 

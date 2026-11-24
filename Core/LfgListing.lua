@@ -301,7 +301,9 @@ end
 -- given the party's `members` (each { name, classToken?, level?, role?,
 -- isPlayer? }, the leader first); nil when it isn't listed. When the
 -- leader isn't the player (isPlayer false), the player is its contact.
-function Listing:Announcement(members)
+-- Ask to join is accepted unless `accepts` is false (the LFG button is
+-- hidden) or the player is the contact (they can't invite).
+function Listing:Announcement(members, accepts)
     if not self.active then
         return nil
     end
@@ -319,9 +321,9 @@ function Listing:Announcement(members)
         x = purpose.kind == "raid" and LfgListing.RAID_SIZE or LfgListing.PARTY_SIZE,
         no = self.note,
         mb = listed,
-        aj = true,
         ct = members[1] ~= nil and members[1].isPlayer == false or nil,
     }
+    fields.aj = accepts ~= false and not fields.ct
     if purpose.kind == "dungeon" then
         fields.lo = purpose.dungeon.minLevel
         fields.hi = purpose.dungeon.maxLevel

@@ -79,6 +79,12 @@ Page.__index = Page
 --   friendTier    function(name) -> the guildmate's GroupFriends tier, or nil
 --   dungeonIcon   function(name) -> the game's icon for the dungeon, or nil
 --   onWhisper     function(name): whispers a leader
+--   requestOf     function(id) -> the player's request to join leader
+--                 `id`'s listing (LfgBoard:Request), or nil
+--   askRoles      function(listing) -> the open roles the current
+--                 character can ask to join a dungeon listing as
+--   onAsk         function(listing, role?): Ask to join, as the current
+--                 character
 --   party         function() -> { inParty, isLeader, listing? (the party's
 --                 listing on the board, when someone else leads it) }
 --   partyRoles    function() -> the members for Roles in your party, each
@@ -739,11 +745,17 @@ function Page:largeCard(index)
     card.count:SetPoint("TOP", card.raidTile, "BOTTOM", 0, -4)
     card.note = ui:Text(card, "", "italic", "small", "muted")
     card.note:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad + Widgets.BUTTON_HEIGHT + Theme.SPACING.s)
+    -- Ask to join, then Whisper <leader>; a leader who takes no asks (not
+    -- in the guild, or their LFG button hidden) has Whisper alone.
+    card.ask = ui:Button(card, "Ask to join", "primary", function(button)
+        owner:ask(button, card.listing)
+    end)
+    card.ask:SetWidth(150)
+    card.ask:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad)
     card.whisper = ui:Button(card, "Whisper", "secondary", function(button)
         owner.options.onWhisper(button.target)
     end)
     card.whisper:SetWidth(150)
-    card.whisper:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad)
     self.largeCards[index] = card
     return card
 end
@@ -791,6 +803,17 @@ function Page:showLarge(card, listing)
     card.note:SetText(listing.note or "")
     card.whisper.target = listing.sender
     card.whisper:SetLabel("Whisper " .. listing.leader)
+    card.whisper:ClearAllPoints()
+    if listing.acceptsAsk then
+        local label, active = addon.LfgBoard.AskButton(self.options.requestOf and self.options.requestOf(listing.id))
+        card.ask:SetLabel(label)
+        card.ask:SetActive(active)
+        card.ask:Show()
+        card.whisper:SetPoint("LEFT", card.ask, "RIGHT", Theme.SPACING.s, 0)
+    else
+        card.ask:Hide()
+        card.whisper:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", Theme.SPACING.m, Theme.SPACING.m)
+    end
     card:Show()
 end
 
@@ -927,4 +950,32 @@ end
 function Page:Refresh()
     self:refreshCard()
     self:refreshTab()
+end
+
+-- Ask to join `listing` as the current character: a dungeon's ask picks
+-- one open role the character can play, from a menu when there's a
+-- choice; other kinds carry no role.
+function Page:ask(anchor, listing)
+    if type(listing) ~= "table" or not listing.acceptsAsk then
+        return
+    end
+    if listing.kind ~= "dungeon" then
+        self.options.onAsk(listing, nil)
+        return
+    end
+    local roles = self.options.askRoles(listing)
+    if #roles == 1 then
+        self.options.onAsk(listing, roles[1])
+    elseif #roles > 1 then
+        self.roleMenu = self.roleMenu or self.ui:ContextMenu(self.content)
+        local items = {}
+        local index
+        for index = 1, #roles do
+            local role = roles[index]
+            items[index] = { label = "Ask as " .. (Widgets.ROLE_LABELS[role] or role), onClick = function()
+                self.options.onAsk(listing, role)
+            end }
+        end
+        self.roleMenu:Open(anchor, items)
+    end
 end

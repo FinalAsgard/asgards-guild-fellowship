@@ -85,6 +85,17 @@ local lfgOnZone = function() end
 local lfgClaim = function() end
 -- A guildmate logged off: their listing is handed on or dropped.
 local lfgOnOffline = function() end
+-- Ask to join: the roles the current character can ask a dungeon listing
+-- for, asking, and the leader's Invite and Decline; and announcing the
+-- player's listing again (when whether it takes asks changed).
+-- (One table: the main chunk is near Lua's 200-local limit.)
+local lfgJoin = {
+    askRoles = function() return {} end,
+    ask = function() end,
+    invite = function() end,
+    decline = function() end,
+    announce = function() end,
+}
 local LFG_HAND_OFF_SECONDS = 5
 -- A guildmate's group-friend tier by character key (set up with the group
 -- friends below).
@@ -1380,6 +1391,24 @@ if clientProfile.supported then
             local dungeon = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
             return dungeon and dungeon.icon or nil
         end,
+        askRoles = function(listing)
+            return lfgJoin.askRoles(listing)
+        end,
+        onAsk = function(listing, role)
+            lfgJoin.ask(listing, role)
+        end,
+        onWhisper = function(name)
+            client:OpenWhisper(name)
+        end,
+        onInvite = function(request)
+            lfgJoin.invite(request)
+        end,
+        onDecline = function(request)
+            lfgJoin.decline(request)
+        end,
+        classColor = function(classToken)
+            return client:GetClassColor(classToken)
+        end,
         onHide = function()
             local hidden, reason = settings:Set("lfgButton", false)
             if hidden then
@@ -1405,6 +1434,8 @@ if clientProfile.supported then
     settings:OnChange(function(id)
         if id == "lfgButton" then
             lfgButton:Refresh()
+            -- A hidden button takes no asks: guildmates see Whisper.
+            lfgJoin.announce()
         end
         -- Do Not Disturb stops the glow; a shown button needs its count.
         if id == "lfgButton" or id == "dnd" then
@@ -1565,6 +1596,8 @@ if clientProfile.supported then
     -- the latest announcement waits until they're over.
     lfgListing = addon.LfgListing.Create()
     lfgBoard = addon.LfgBoard.Create()
+    -- Ask to join requests to the player's listing.
+    lfgJoin.requests = addon.LfgRequests.Create()
     local lfgWaiting, lfgFlushing, lfgHeartbeat
     local function refreshLfg()
         lfgRefresh()
@@ -1645,7 +1678,7 @@ if clientProfile.supported then
         end)
     end
     local function announceListing()
-        local fields = lfgListing:Announcement(lfgMembers())
+        local fields = lfgListing:Announcement(lfgMembers(), settings:Get("lfgButton") == true)
         if fields ~= nil then
             sendLfg(addon.LfgProtocol.Listing(fields))
         end
@@ -1657,6 +1690,7 @@ if clientProfile.supported then
             lfgListing:End()
             sendLfg(addon.LfgProtocol.End(left))
         end
+        lfgJoin.requests:Clear()
         refreshLfg()
     end
     -- Whether the player speaks for their listing: solo, leading the
@@ -1841,6 +1875,10 @@ if clientProfile.supported then
             dnd = settings:Get("dnd") == true,
             ask = lfgTrigger:Asking(),
             gate = lfgTrigger:Gating(),
+            requests = lfgJoin.requests:List(),
+            requestOf = function(id)
+                return lfgBoard:Request(id, client:Timestamp())
+            end,
         })
         if lfgButton ~= nil then
             lfgButton:Update(view)
@@ -2046,6 +2084,57 @@ if clientProfile.supported then
             lfgRefresh()
         end
     end
+    lfgJoin.announce = function()
+        if lfgListing:IsActive() and lfgLister() then
+            announceListing()
+        end
+    end
+    -- Of a dungeon listing's open roles, those the current character plays.
+    lfgJoin.askRoles = function(listing)
+        local current = lfgCharacters()
+        local playable = {}
+        local index
+        for index = 1, #(current.roles or {}) do
+            playable[current.roles[index]] = true
+        end
+        local roles = {}
+        for index = 1, #(listing.openRoles or {}) do
+            if playable[listing.openRoles[index]] then
+                table.insert(roles, listing.openRoles[index])
+            end
+        end
+        return roles
+    end
+    -- Asks to join `listing` as the current character, whispered to its
+    -- leader.
+    lfgJoin.ask = function(listing, role)
+        local message = addon.LfgProtocol.Ask(role, client:GetPlayerLevel(), client:GetPlayerClass())
+        if comm:Whisper(message, listing.sender, true) then
+            lfgBoard:Ask(listing.id, role, client:Timestamp() or 0)
+        else
+            rosterController:Print("Couldn't ask to join " .. listing.leader .. "'s group. Try whispering them.")
+        end
+        lfgRefresh()
+    end
+    -- The leader's answers: Invite sends the game's party invite (the
+    -- add-on never invites by itself) and tells the asker; Decline tells
+    -- them no.
+    lfgJoin.answer = function(request, answer)
+        if type(request) ~= "table" or lfgJoin.requests:Remove(request.key) == nil then
+            return
+        end
+        comm:Whisper(addon.LfgProtocol.Answer(answer), request.sender, true)
+        lfgRefresh()
+    end
+    lfgJoin.invite = function(request)
+        if type(request) == "table" and lfgJoin.requests:Get(request.key) ~= nil then
+            client:InviteToParty(request.sender)
+        end
+        lfgJoin.answer(request, "invited")
+    end
+    lfgJoin.decline = function(request)
+        lfgJoin.answer(request, "declined")
+    end
     drawLfgBoard = function(content, ui)
         lfgPage = addon.LfgBoardPage.Create(content, ui, {
             listing = lfgListing,
@@ -2078,6 +2167,15 @@ if clientProfile.supported then
             end,
             onWhisper = function(name)
                 client:OpenWhisper(name)
+            end,
+            requestOf = function(id)
+                return lfgBoard:Request(id, client:Timestamp())
+            end,
+            askRoles = function(listing)
+                return lfgJoin.askRoles(listing)
+            end,
+            onAsk = function(listing, role)
+                lfgJoin.ask(listing, role)
             end,
             party = function()
                 if not client:IsInGroup() then
@@ -2156,6 +2254,24 @@ if clientProfile.supported then
             if inParty and lfgTrigger:Claimed(senderKey, rosterController:SelfKey()) then
                 endListing()
             end
+        elseif message.t == addon.LfgProtocol.TYPE_ASK then
+            -- Only a listing that takes asks hears them: led by the player,
+            -- with the LFG button shown. A new one opens the drawer.
+            if not lfgListing:IsActive() or not (not client:IsInGroup() or client:IsGroupLeader())
+                or settings:Get("lfgButton") ~= true
+            then
+                return
+            end
+            local added = lfgJoin.requests:Add({ key = senderKey, sender = sender,
+                name = string.match(sender, "^[^%-]+") or sender, classToken = message.c, level = message.l,
+                role = message.r })
+            lfgRefresh()
+            if added and lfgButton ~= nil and lfgButton:IsShowing() and not lfgButton:DrawerOpen() then
+                lfgButton:OpenDrawer()
+            end
+            return
+        elseif message.t == addon.LfgProtocol.TYPE_ANSWER then
+            lfgBoard:OnAnswer(senderKey, message.a)
         else
             lfgBoard:OnEnd(senderKey, message.lf == true)
         end
@@ -5355,7 +5471,10 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildWelcome:OnMessage(message, sender)
         elseif addon.SlowModeConfig.TYPES[message.t] ~= nil then
             slowModeConfig:OnMessage(message, sender)
-        elseif addon.LfgProtocol.TYPES[message.t] ~= nil then
+        elseif addon.LfgProtocol.TYPES[message.t] ~= nil and message.t ~= addon.LfgProtocol.TYPE_ASK
+            and message.t ~= addon.LfgProtocol.TYPE_ANSWER
+        then
+            -- Asks and answers are only ever whispered.
             onLfgMessage(message, sender)
         elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
             onGroupFinderMessage(message, sender)
@@ -5369,11 +5488,13 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             syncSession:Receive(message, sender)
         end
     end, function(message, sender)
-        -- Only guild map updates, resync requests and answers, and, to
-        -- officers who miss the officer channel, guild log messages are
-        -- whispered.
+        -- Only guild map updates, resync requests and answers, Guild LFG
+        -- Board asks and answers, and, to officers who miss the officer
+        -- channel, guild log messages are whispered.
         if addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
+        elseif message.t == addon.LfgProtocol.TYPE_ASK or message.t == addon.LfgProtocol.TYPE_ANSWER then
+            onLfgMessage(message, sender)
         elseif addon.GuildLogSync.TYPES[message.t] ~= nil then
             guildLogSync:Receive(message, sender)
         elseif addon.Resync.TYPES[message.t] ~= nil then

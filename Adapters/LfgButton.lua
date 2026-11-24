@@ -31,6 +31,8 @@ local LfgButton = {
     NONE_TEXT = "No groups for you right now",
     ASK_TEXT = "You're leading a party. List it on the Guild LFG Board?",
     GATE_TEXT = "Your party has players from outside the guild. List it on the Guild LFG Board?",
+    -- An Ask to join request under the drawer.
+    TOAST_HEIGHT = 74,
 }
 addon.LfgButton = LfgButton
 
@@ -53,6 +55,13 @@ Button.__index = Button
 --                   listing a party with outsiders), or closed the drawer
 --                   on the question
 --   onSnooze        function(): "don't ask for 30 minutes"
+--   askRoles        function(listing) -> the open roles the current
+--                   character can ask to join a dungeon listing as
+--   onAsk           function(listing, role?): Ask to join
+--   onWhisper       function(name): whispers a leader
+--   onInvite        function(request): the leader invited an asker
+--   onDecline       function(request): the leader declined one
+--   classColor      function(classToken) -> "ffrrggbb", or nil
 --   dungeonIcon     function(name) -> the game's icon for a dungeon, or nil
 --   loadPosition    function() -> saved { point, relativePoint, x, y } or nil
 --   savePosition    function(position)
@@ -149,9 +158,10 @@ function Button:buildDrawer()
     drawer.details = ui:Text(drawer, "", "regular", "small", "muted")
     drawer.details:SetPoint("TOPLEFT", drawer.purpose, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
     drawer.details:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad - 48)
-    -- Joining comes with Ask to join; until then the button is shown off.
-    self.askButton = ui:Button(drawer, "Ask to join", "primary")
-    self.askButton:SetActive(false)
+    -- Ask to join, or Whisper when the leader takes no asks.
+    self.askButton = ui:Button(drawer, "Ask to join", "primary", function(button)
+        owner:askOrWhisper(button, button.listing)
+    end)
     self.askButton:SetPoint("TOPLEFT", drawer.icon, "BOTTOMLEFT", 0, -Theme.SPACING.s)
     self.askButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
     drawer.empty = ui:Text(drawer, LfgButton.NONE_TEXT, "regular", "body", "muted")
@@ -224,6 +234,105 @@ function Button:buildDrawer()
     end
     drawer:Hide()
     self.drawer = drawer
+    self.toasts = {}
+end
+
+-- One Ask to join request under the drawer, made on first use: who, their
+-- role and level, and Invite and Decline.
+function Button:toast(index)
+    local toast = self.toasts[index]
+    if toast ~= nil then
+        return toast
+    end
+    local ui, owner, pad = self.ui, self, Theme.SPACING.m
+    toast = ui:Panel(self.environment.UIParent, { fill = "background", border = "gold" })
+    toast:SetFrameStrata("MEDIUM")
+    toast:SetSize(LfgButton.DRAWER_WIDTH, LfgButton.TOAST_HEIGHT)
+    toast:EnableMouse(true)
+    if index == 1 then
+        toast:SetPoint("TOPRIGHT", self.drawer, "BOTTOMRIGHT", 0, -LfgButton.DRAWER_GAP)
+    else
+        toast:SetPoint("TOPRIGHT", self.toasts[index - 1], "BOTTOMRIGHT", 0, -LfgButton.DRAWER_GAP)
+    end
+    toast.name = ui:Text(toast, "", "semibold", "body", "text")
+    toast.name:SetPoint("TOPLEFT", toast, "TOPLEFT", pad, -pad)
+    toast.details = ui:Text(toast, "", "regular", "small", "muted")
+    toast.details:SetPoint("TOPLEFT", toast.name, "BOTTOMLEFT", 0, -2)
+    local half = (LfgButton.DRAWER_WIDTH - 2 * pad - Theme.SPACING.s) / 2
+    toast.invite = ui:Button(toast, "Invite", "primary", function()
+        owner.options.onInvite(toast.request)
+    end)
+    toast.invite:SetWidth(half)
+    toast.invite:SetPoint("BOTTOMLEFT", toast, "BOTTOMLEFT", pad, pad)
+    toast.decline = ui:Button(toast, "Decline", "secondary", function()
+        owner.options.onDecline(toast.request)
+    end)
+    toast.decline:SetWidth(half)
+    toast.decline:SetPoint("BOTTOMRIGHT", toast, "BOTTOMRIGHT", -pad, pad)
+    toast:Hide()
+    self.toasts[index] = toast
+    return toast
+end
+
+-- "Healer, 24" for a request with a role; "Level 24, wants to join"
+-- without one.
+local function requestDetails(request)
+    if request.role ~= nil then
+        return (addon.Widgets.ROLE_LABELS[request.role] or request.role) .. ", " .. tostring(request.level)
+    end
+    return "Level " .. tostring(request.level) .. ", wants to join"
+end
+
+-- The requests stacked under the open drawer.
+function Button:refreshToasts()
+    local requests = self.view and self.view.requests or {}
+    local open = self:DrawerOpen()
+    local index
+    for index = 1, math.max(#requests, #self.toasts) do
+        local request = requests[index]
+        if request ~= nil and open then
+            local toast = self:toast(index)
+            toast.request = request
+            local color = self.options.classColor and self.options.classColor(request.classToken) or nil
+            toast.name:SetText(type(color) == "string" and ("|c" .. color .. request.name .. "|r") or request.name)
+            toast.details:SetText(requestDetails(request))
+            toast:Show()
+        elseif self.toasts[index] ~= nil then
+            self.toasts[index].request = false
+            self.toasts[index]:Hide()
+        end
+    end
+end
+
+-- Ask to join `listing`: a dungeon's asks pick one open role the current
+-- character can play (from a menu when there's a choice). A leader who
+-- takes no asks is whispered instead.
+function Button:askOrWhisper(anchor, listing)
+    if type(listing) ~= "table" then
+        return
+    end
+    if not listing.acceptsAsk then
+        self.options.onWhisper(listing.sender)
+        return
+    end
+    if listing.kind ~= "dungeon" then
+        self.options.onAsk(listing, nil)
+        return
+    end
+    local roles = self.options.askRoles(listing)
+    if #roles == 1 then
+        self.options.onAsk(listing, roles[1])
+    elseif #roles > 1 then
+        local items = {}
+        local index
+        for index = 1, #roles do
+            local role = roles[index]
+            items[index] = { label = "Ask as " .. (addon.Widgets.ROLE_LABELS[role] or role), onClick = function()
+                self.options.onAsk(listing, role)
+            end }
+        end
+        self.menu:Open(anchor, items)
+    end
 end
 
 local function setShown(frame, shown)
@@ -315,6 +424,15 @@ function Button:refreshDrawer()
         drawer.iconTexture = icon
         drawer.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
         drawer.details:SetText(join({ listing.leader, sizeText(listing), needs(listing) }))
+        self.askButton.listing = listing
+        if listing.acceptsAsk then
+            local label, active = addon.LfgBoard.AskButton(top.request)
+            self.askButton:SetLabel(label)
+            self.askButton:SetActive(active)
+        else
+            self.askButton:SetLabel("Whisper " .. listing.leader)
+            self.askButton:SetActive(true)
+        end
     elseif party then
         local info = top.party
         drawer.party:SetText(info.label or "Not listed")
@@ -326,6 +444,7 @@ function Button:refreshDrawer()
             drawer.slots[index]:SetFill(filled and "green" or "raised")
         end
     end
+    self:refreshToasts()
 end
 
 -- Opens the drawer, or closes it when open.
@@ -361,6 +480,7 @@ function Button:CloseDrawer(answered)
     self.drawerOpen = false
     if self.drawer ~= nil then
         self.drawer:Hide()
+        self:refreshToasts()
     end
     if wasAsking and not answered and self.options.onNotLooking ~= nil then
         self.options.onNotLooking()

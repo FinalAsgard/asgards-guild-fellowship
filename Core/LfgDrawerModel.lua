@@ -51,9 +51,12 @@ end
 --   ask       the leader is being asked what their party is for
 --   gate      the player is being asked whether to list a party with
 --             players outside the guild
+--   requests  the Ask to join requests to the player's listing (LfgRequests)
+--   requestOf function(id) -> the player's own request to join leader
+--             `id`'s listing (LfgBoard:Request), or nil
 -- Returns { count, glow = nil | "gold" | "orange", fresh = the relevant
 -- listings new since the last Update that may pulse, top = { kind,
--- listing? , party? } }.
+-- listing?, request?, party? }, requests = the requests to the player }.
 function Model:Update(facts)
     local relevant = facts.groups and facts.groups.relevant or {}
     local hidden = facts.party ~= nil or facts.combat == true or facts.instance == true or facts.dnd == true
@@ -96,11 +99,12 @@ function Model:Update(facts)
     elseif facts.party ~= nil then
         top = { kind = LfgDrawerModel.PARTY, party = facts.party }
     elseif relevant[1] ~= nil then
-        top = { kind = LfgDrawerModel.NEWEST, listing = relevant[1] }
+        top = { kind = LfgDrawerModel.NEWEST, listing = relevant[1],
+            request = facts.requestOf and facts.requestOf(relevant[1].id) or nil }
     else
         top = { kind = LfgDrawerModel.NONE }
     end
-    return { count = #relevant, glow = glow, fresh = fresh, top = top }
+    return { count = #relevant, glow = glow, fresh = fresh, top = top, requests = facts.requests or {} }
 end
 
 -- The drawer was opened: everything on the board has been seen.

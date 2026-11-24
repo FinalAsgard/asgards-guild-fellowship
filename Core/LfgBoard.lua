@@ -3,13 +3,21 @@ local _, addon = ...
 -- The listings guildmates' add-ons announce (LfgProtocol.TYPE_LISTING): one
 -- per leader, until it ends or nothing is heard of it for STALE_SECONDS (a
 -- leader re-announces it every HEARTBEAT_SECONDS). It sorts them for the
--- logged-in character into Relevant, alts and Other (see Groups). Pure:
--- messages, characters and times are handed in.
+-- logged-in character into Relevant, alts and Other (see Groups), and keeps
+-- this player's Ask to join requests and how they stand. Pure: messages,
+-- characters and times are handed in.
 local LfgBoard = {
     STALE_SECONDS = 5 * 60,
     -- How often the board is looked at again with nothing new heard, so
     -- quiet listings drop.
     REFRESH_SECONDS = 30,
+    -- An Ask to join nobody answers is expired after this long.
+    REQUEST_SECONDS = 2 * 60,
+    -- An outgoing Ask to join's states.
+    PENDING = "pending",
+    ACCEPTED = "accepted",
+    DECLINED = "declined",
+    EXPIRED = "expired",
 }
 addon.LfgBoard = LfgBoard
 
@@ -17,7 +25,7 @@ local Board = {}
 Board.__index = Board
 
 function LfgBoard.Create()
-    return setmetatable({ listings = {}, ended = {} }, Board)
+    return setmetatable({ listings = {}, ended = {}, requests = {} }, Board)
 end
 
 local function bareName(name)
@@ -144,4 +152,58 @@ end
 -- How many listings `current` could join at `now`.
 function Board:RelevantCount(now, current)
     return #self:Groups(now, current, nil).relevant
+end
+
+-- Outgoing Ask to join requests ----------------------------------------------------
+
+-- The player asked to join leader `id`'s listing as `role` (or none) at
+-- `now`. Asking again starts a new request.
+function Board:Ask(id, role, now)
+    self.requests[id] = { id = id, role = role, state = LfgBoard.PENDING, askedAt = now }
+end
+
+local ANSWERED = {
+    invited = LfgBoard.ACCEPTED,
+    declined = LfgBoard.DECLINED,
+    roleFilled = LfgBoard.DECLINED,
+    expired = LfgBoard.EXPIRED,
+}
+
+-- Leader `id` answered (an LfgProtocol answer). Only a pending request
+-- changes; true when it did.
+function Board:OnAnswer(id, answer)
+    local request = id ~= nil and self.requests[id] or nil
+    if request == nil or request.state ~= LfgBoard.PENDING or ANSWERED[answer] == nil then
+        return false
+    end
+    request.state = ANSWERED[answer]
+    request.roleFilled = answer == "roleFilled" or nil
+    return true
+end
+
+-- The player's request to join leader `id`'s listing, or nil. One nobody
+-- answered in REQUEST_SECONDS has expired by `now`.
+function Board:Request(id, now)
+    local request = id ~= nil and self.requests[id] or nil
+    if request ~= nil and request.state == LfgBoard.PENDING and type(now) == "number"
+        and type(request.askedAt) == "number" and now - request.askedAt >= LfgBoard.REQUEST_SECONDS
+    then
+        request.state = LfgBoard.EXPIRED
+    end
+    return request
+end
+
+-- What an Ask to join button reads for `request` (or none), and whether
+-- it can be clicked: asking again is allowed once a request expired.
+function LfgBoard.AskButton(request)
+    if request == nil then
+        return "Ask to join", true
+    elseif request.state == LfgBoard.PENDING then
+        return "Asked \194\183 pending", false
+    elseif request.state == LfgBoard.ACCEPTED then
+        return "Invited", false
+    elseif request.state == LfgBoard.DECLINED then
+        return request.roleFilled and "Declined \194\183 role filled" or "Declined", false
+    end
+    return "Expired \194\183 ask again", true
 end
