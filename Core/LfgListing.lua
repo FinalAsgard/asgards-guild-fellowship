@@ -134,7 +134,8 @@ end
 -- Lists the player for `purpose`, with `note`, at `now`: as a group of one,
 -- or for their party when `party` is true (it then never runs out the solo
 -- way). True, or false and why it can't be listed.
-function Listing:Start(purpose, note, now, party)
+-- `guessed` marks a purpose the add-on guessed rather than the leader set.
+function Listing:Start(purpose, note, now, party, guessed)
     local cleaned, reason = LfgListing.CleanPurpose(purpose)
     if cleaned == nil then
         return false, reason
@@ -144,6 +145,45 @@ function Listing:Start(purpose, note, now, party)
     self.note = cleanNote(note)
     self.startedAt = now
     self.joined = party == true
+    self.guessed = guessed == true
+    return true
+end
+
+-- Whether the purpose is the add-on's guess, not the leader's choice.
+function Listing:Guessed()
+    return self.active and self.guessed == true
+end
+
+-- A best guess at a party's purpose: the dungeon it's in (`dungeon`, {
+-- name, minLevel, maxLevel }, or nil), otherwise questing in `zone` (its
+-- name) within `levels` ({ minLevel, maxLevel } or nil). Nil when neither
+-- is known.
+function LfgListing.Guess(dungeon, zone, levels)
+    if dungeon ~= nil then
+        return { kind = "dungeon", dungeon = dungeon }
+    end
+    if type(zone) ~= "string" or zone == "" then
+        return nil
+    end
+    return { kind = "questing", zone = zone, minLevel = levels and levels.minLevel or nil,
+        maxLevel = levels and levels.maxLevel or nil }
+end
+
+-- The party entered dungeon `dungeon`: a guessed purpose becomes it; one the
+-- leader set is left alone. True when the purpose changed.
+function Listing:EnteredDungeon(dungeon)
+    if not self:Guessed() or dungeon == nil then
+        return false
+    end
+    local current = self.purpose
+    if current.kind == "dungeon" and current.dungeon.name == dungeon.name then
+        return false
+    end
+    local cleaned = LfgListing.CleanPurpose({ kind = "dungeon", dungeon = dungeon })
+    if cleaned == nil then
+        return false
+    end
+    self.purpose = cleaned
     return true
 end
 
@@ -198,6 +238,8 @@ function Listing:Update(purpose, note)
     end
     self.purpose = cleaned
     self.note = cleanNote(note)
+    -- Set by hand now.
+    self.guessed = false
     return true
 end
 

@@ -406,3 +406,149 @@ test.test("Forever made leader of a listed party, I take its listing over quietl
     test.assertEqual("Hammer Smith", listings[1].leader)
     test.assertEqual("Stratholme", listings[1].purpose)
 end)
+
+-- Quiet listings and the hidden button ------------------------------------------------
+
+test.test("lfg trigger: filling up with another guildmate lists it quietly; with none, nothing", function()
+    local trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2, guildmates = 1 }), 0)
+    test.assertTrue(trigger:Asking())
+
+    test.assertEqual("listQuietly", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
+        guildmates = 1 }), 0)))
+    test.assertFalse(trigger:Asking())
+    -- Still full: nothing more.
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
+        guildmates = 1, listed = true }), 0)))
+
+    -- The only guildmate: nothing happens.
+    trigger = newTrigger()
+    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 4, guildmates = 0 }), 0)
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
+        guildmates = 0 }), 0)))
+
+    -- Formed full at once: listed, not asked.
+    trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("listQuietly", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
+        guildmates = 2 }), 0)))
+    test.assertFalse(trigger:Asking())
+end)
+
+test.test("lfg trigger: Not looking keeps a full party off the board; a member never lists it", function()
+    local trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 3, guildmates = 2 }), 0)
+    trigger:NotLooking()
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
+        guildmates = 2 }), 0)))
+
+    trigger = newTrigger()
+    trigger:Observe(party({ size = 4, guildmates = 2 }), 0)
+    test.assertEqual("", names(trigger:Observe(party({ size = 5, guildmates = 2 }), 0)))
+end)
+
+test.test("lfg trigger: with the button hidden, nothing is asked: listed quietly, with a reminder", function()
+    local trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("listQuietly,remind", names(trigger:Observe(party({ isLeader = true, leaderKey = "me",
+        size = 2, guildmates = 1, hidden = true }), 0)))
+    test.assertFalse(trigger:Asking())
+
+    trigger = newTrigger()
+    trigger:Observe(party({ size = 3, hidden = true }), 0)
+    test.assertEqual("listQuietly,remind", names(trigger:Observe(party({ isLeader = true, leaderKey = "me",
+        size = 3, hidden = true, listingOf = function() return nil end }), 0)))
+end)
+
+test.test("lfg listing: the guess is the dungeon, else questing here; a guess follows into a dungeon", function()
+    local addon = newListing()
+    local LfgListing = addon.LfgListing
+    local strat = { name = "Stratholme", minLevel = 58, maxLevel = 60 }
+
+    test.assertEqual("dungeon", LfgListing.Guess(strat, "Eastern Plaguelands", nil).kind)
+    local questing = LfgListing.Guess(nil, "Duskwood", { minLevel = 18, maxLevel = 30 })
+    test.assertEqual("Duskwood", questing.zone)
+    test.assertEqual(18, questing.minLevel)
+    test.assertEqual(nil, LfgListing.Guess(nil, nil, nil))
+
+    local listing = LfgListing.Create()
+    listing:Start(questing, nil, 0, true, true)
+    test.assertTrue(listing:Guessed())
+    test.assertTrue(listing:EnteredDungeon(strat))
+    test.assertEqual("Stratholme", listing:Purpose().dungeon.name)
+    test.assertFalse(listing:EnteredDungeon(strat))
+
+    -- Set by hand: left alone.
+    listing:Update(questing, nil)
+    test.assertFalse(listing:Guessed())
+    test.assertFalse(listing:EnteredDungeon(strat))
+    test.assertEqual("questing", listing:Purpose().kind)
+end)
+
+CHARACTERS["Spark Arcane"] = { class = "MAGE" }
+CHARACTERS["Bolt Smith"] = { class = "PRIEST" }
+
+local FIVE = { "Tool Box", "Hammer Smith", "Zap Arcane", "Spark Arcane", "Bolt Smith" }
+
+test.test("Forever a full party with guildmates is listed quietly, guessed, and follows it into a dungeon", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local hammer = login(channel, "Hammer Smith")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    test.assertTrue(addon.lfgTrigger:Asking())
+
+    partyUp(tool, FIVE, "Tool Box")
+    fixtures.deliver(channel)
+
+    test.assertFalse(addon.lfgTrigger:Asking())
+    test.assertTrue(addon.lfgListing:Guessed())
+    local heard = hammer.addon.lfgBoard:Listings(hammer.time)[1]
+    test.assertEqual("questing", heard.kind)
+    test.assertEqual("Ironforge", heard.purpose)
+    test.assertEqual(5, heard.size)
+
+    tool.environment.GetInstanceInfo = function()
+        return "Stratholme", "party"
+    end
+    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
+    fixtures.deliver(channel)
+    heard = hammer.addon.lfgBoard:Listings(hammer.time)[1]
+    test.assertEqual("dungeon", heard.kind)
+    test.assertEqual("Stratholme", heard.purpose)
+end)
+
+test.test("Forever a purpose set by hand stays when the party enters a dungeon", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    click(addon.lfgButton.listButton)
+    addon.lfgPage.draft.kind = "raid"
+    test.assertTrue(addon.lfgPage:Save())
+
+    tool.environment.GetInstanceInfo = function()
+        return "Stratholme", "party"
+    end
+    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
+
+    test.assertEqual("raid", addon.lfgListing:Purpose().kind)
+end)
+
+test.test("Forever with the button hidden, a new party is listed quietly with a reminder", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local hammer = login(channel, "Hammer Smith")
+    addon.settings:Set("lfgButton", false)
+    test.assertFalse(addon.lfgButton:IsShowing())
+
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+
+    test.assertFalse(addon.lfgButton:DrawerOpen())
+    test.assertFalse(addon.lfgTrigger:Asking())
+    test.assertTrue(addon.lfgListing:Guessed())
+    test.assertContains(tool.messages[#tool.messages],
+        "Your party is listed on the Guild LFG Board as Questing in Ironforge. Type /agf lfg to take part.")
+    test.assertEqual(1, #hammer.addon.lfgBoard:Listings(hammer.time))
+end)

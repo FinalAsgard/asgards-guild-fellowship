@@ -15,6 +15,13 @@ local _, addon = ...
 --       takes it over)
 --   the party becomes a raid with the player leading and listed -> RAID
 --   the party is gone (disbanded, or the player left) while listed -> END
+--   the party fills up, with the player leading, unlisted, and at least
+--       one other guildmate in it -> LIST_QUIETLY with a guessed purpose
+--       (no other guildmate: nothing)
+--
+-- With the LFG button hidden ("not participating"), nothing is ever asked:
+-- where the player would be asked, the party is listed quietly instead,
+-- with a REMIND chat line of how to take part.
 --
 -- Asking is snoozed for the rest of a party once the player says Not
 -- looking (or ignores the question), and for every new party for
@@ -28,6 +35,10 @@ local LfgTrigger = {
     HAND_OFF = "handOff",
     RAID = "raid",
     END = "end",
+    LIST_QUIETLY = "listQuietly",
+    REMIND = "remind",
+    -- A party this big, not a raid, is full.
+    PARTY_SIZE = 5,
 }
 addon.LfgTrigger = LfgTrigger
 
@@ -52,6 +63,9 @@ end
 --   listed     the player's listing is live
 --   listingOf  function(leaderKey) -> that leader's listing on the board,
 --              or nil
+--   size       how many are in the party
+--   guildmates how many of the others are in the guild
+--   hidden     the LFG button is hidden
 -- Returns a list of { action, listing? } to carry out, in order.
 function Trigger:Observe(facts, now)
     local before = self.state
@@ -59,13 +73,31 @@ function Trigger:Observe(facts, now)
     local function act(action, listing)
         table.insert(actions, { action = action, listing = listing })
     end
+    local full = facts.inGroup == true and not facts.isRaid
+        and type(facts.size) == "number" and facts.size >= LfgTrigger.PARTY_SIZE
     self.state = {
         inGroup = facts.inGroup == true,
         isLeader = facts.isLeader == true,
         isRaid = facts.isRaid == true,
         leaderKey = facts.leaderKey,
+        full = full,
     }
     local listed = facts.listed == true
+    -- Where the player would be asked: asked, or with the button hidden,
+    -- listed quietly and reminded.
+    local function ask()
+        if self:snoozed(now) then
+            return
+        end
+        if facts.hidden then
+            listed = true
+            act(LfgTrigger.LIST_QUIETLY)
+            act(LfgTrigger.REMIND)
+        else
+            self.asking = true
+            act(LfgTrigger.ASK)
+        end
+    end
     if not facts.inGroup then
         if before.inGroup and listed then
             act(LfgTrigger.END)
@@ -80,34 +112,45 @@ function Trigger:Observe(facts, now)
         if facts.isLeader then
             if listed then
                 act(LfgTrigger.JOINED)
-            elseif not self:snoozed(now) then
-                self.asking = true
-                act(LfgTrigger.ASK)
+            else
+                ask()
             end
         elseif listed then
             act(LfgTrigger.END)
+            listed = false
         end
-        return actions
-    end
-    if facts.isLeader and not before.isLeader then
+    elseif facts.isLeader and not before.isLeader then
         local old = before.leaderKey ~= nil and facts.listingOf ~= nil and facts.listingOf(before.leaderKey) or nil
         if old ~= nil then
+            listed = true
             act(LfgTrigger.TAKE_OVER, old)
-        elseif not listed and not self:snoozed(now) then
-            self.asking = true
-            act(LfgTrigger.ASK)
+        elseif not listed then
+            ask()
         end
-        return actions
-    end
-    if not facts.isLeader and before.isLeader then
+    elseif not facts.isLeader and before.isLeader then
         self.asking = false
         if listed then
             act(LfgTrigger.HAND_OFF)
         end
         return actions
-    end
-    if facts.isLeader and facts.isRaid and not before.isRaid and listed then
+    elseif facts.isLeader and facts.isRaid and not before.isRaid and listed then
         act(LfgTrigger.RAID)
+    end
+    -- Filled up with another guildmate in it: listed quietly, unless the
+    -- player said Not looking for this party.
+    local filled = full and not (before.inGroup and before.full)
+    if filled and facts.isLeader and not listed and (facts.guildmates or 0) >= 1
+        and self.partySnoozed ~= self.party
+    then
+        -- No question for a party that's being listed anyway.
+        local index
+        for index = #actions, 1, -1 do
+            if actions[index].action == LfgTrigger.ASK then
+                table.remove(actions, index)
+            end
+        end
+        self.asking = false
+        act(LfgTrigger.LIST_QUIETLY)
     end
     return actions
 end

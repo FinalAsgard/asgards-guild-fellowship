@@ -79,6 +79,7 @@ local lfgRefresh = function() end
 -- how long a leader who handed the lead on keeps it before ending it.
 local lfgTrigger = addon.LfgTrigger.Create()
 local lfgOnParty = function() end
+local lfgOnZone = function() end
 local LFG_HAND_OFF_SECONDS = 5
 -- A guildmate's group-friend tier by character key (set up with the group
 -- friends below).
@@ -1606,6 +1607,7 @@ if clientProfile.supported then
                     role = member.isPlayer and preferred or nil,
                     isPlayer = member.isPlayer,
                     isLeader = member.isLeader,
+                    inGuild = member.inGuild,
                 })
                 if member.isLeader then
                     leaderIndex = #members
@@ -1865,6 +1867,27 @@ if clientProfile.supported then
         end
         return { kind = "raid" }
     end
+    -- The dungeon the player is in, from the dungeon list, or nil.
+    local function lfgCurrentDungeon()
+        local name = client:GetDungeonInstanceName()
+        local dungeon = name and addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
+        if dungeon == nil then
+            return nil
+        end
+        return { id = dungeon.id, name = dungeon.name, minLevel = dungeon.minLevel, maxLevel = dungeon.maxLevel }
+    end
+    -- A best guess at the party's purpose: its dungeon, else questing here.
+    local function lfgGuess()
+        local zone = client:GetZone()
+        return addon.LfgListing.Guess(lfgCurrentDungeon(), zone and zone.name, lfgZoneLevels())
+    end
+    -- Entering a dungeon makes a guessed purpose that dungeon.
+    lfgOnZone = function()
+        if lfgListing:IsActive() and lfgListing:EnteredDungeon(lfgCurrentDungeon()) then
+            announceListing()
+        end
+        lfgRefresh()
+    end
     -- The party changed: LfgTrigger says what that means for the listing
     -- (ask, take over, hand off, end, become a raid's), and a live listing
     -- is announced with the party as it is now.
@@ -1872,10 +1895,18 @@ if clientProfile.supported then
         local now = client:Timestamp() or 0
         local inGroup = client:IsInGroup()
         local leaderKey
+        local size, guildmates = 0, 0
         if inGroup then
             local members = lfgMembers()
             if members[1] ~= nil and members[1].isLeader then
                 leaderKey = rosterController:RosterKeyFor(members[1].fullName or members[1].name, members[1].guid)
+            end
+            size = #members
+            local index
+            for index = 1, #members do
+                if not members[index].isPlayer and members[index].inGuild then
+                    guildmates = guildmates + 1
+                end
             end
         end
         local actions = lfgTrigger:Observe({
@@ -1887,6 +1918,9 @@ if clientProfile.supported then
             listingOf = function(key)
                 return lfgBoard:Get(key, now)
             end,
+            size = size,
+            guildmates = guildmates,
+            hidden = settings:Get("lfgButton") ~= true,
         }, now)
         local index
         for index = 1, #actions do
@@ -1895,6 +1929,18 @@ if clientProfile.supported then
                 if lfgButton ~= nil and lfgButton:IsShowing() then
                     lfgRefresh()
                     lfgButton:OpenDrawer()
+                end
+            elseif action.action == addon.LfgTrigger.LIST_QUIETLY then
+                local purpose = lfgGuess()
+                if purpose ~= nil then
+                    lfgListing:Start(purpose, nil, now, true, true)
+                end
+            elseif action.action == addon.LfgTrigger.REMIND then
+                if lfgListing:IsActive() then
+                    local fields = lfgListing:Announcement(lfgMembers())
+                    rosterController:Print("Your party is listed on the Guild LFG Board as " ..
+                        addon.LfgListing.Label(fields.k, fields.p) .. ". Type " .. addon.Identity.slashCommand ..
+                        " lfg to take part.")
                 end
             elseif action.action == addon.LfgTrigger.TAKE_OVER then
                 lfgListing:Start(purposeOf(action.listing), action.listing.note, now, true)
@@ -5297,8 +5343,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     client:ObserveZone(function()
         guildRecruit:Refresh()
         guildGreet:OnZoneChanged()
-        -- Relevance and Nearby follow the zone; no glow in instances.
-        lfgRefresh()
+        -- A guessed purpose follows the party into a dungeon; relevance and
+        -- Nearby follow the zone; no glow in instances.
+        lfgOnZone()
     end)
     guildRecruit:Refresh()
     -- The Group Finder's slots follow the party, and every party with

@@ -1168,6 +1168,16 @@ function Client:GetPartyMembers()
     return members
 end
 
+-- The dungeon the player is in, by name as the client gives it, or nil
+-- outside a dungeon (a party instance).
+function Client:GetDungeonInstanceName()
+    local ok, name, instanceType = callFunction(self.environment.GetInstanceInfo)
+    if not ok or instanceType ~= "party" or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    return name
+end
+
 -- Whether the player leads their party or raid. False when the client
 -- can't say.
 function Client:IsGroupLeader()
