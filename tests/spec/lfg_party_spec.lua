@@ -1325,3 +1325,106 @@ test.test("Forever Ask in guild types the line into guild chat and never sends i
     test.assertContains(opened, "), whisper me!")
     test.assertEqual(nil, sent)
 end)
+
+-- History -------------------------------------------------------------------------------
+
+test.test("lfg history view: newest first, 20 at a time, guildmates with their friend tier", function()
+    local addon = test.newAddon("Core/GroupFriends.lua", "Core/LfgHistoryView.lua")
+    local view = addon.LfgHistoryView.Create()
+    local entries = {}
+    local index
+    for index = 1, 45 do
+        entries[index] = { at = index * 100, characters = { "hammer", "gone", "zap" },
+            dungeon = index == 45 and "Stratholme" or nil }
+    end
+    local names = { hammer = "Hammer", zap = "Zap" }
+    local function member(key)
+        return names[key] and { name = names[key], whisper = names[key] .. "-Camelot", classToken = "MAGE" } or nil
+    end
+    local tiers = { hammer = addon.GroupFriends.TOP, zap = addon.GroupFriends.GROUPED }
+    local function tierOf(key)
+        return tiers[key]
+    end
+
+    local page = view:Page(entries, member, tierOf)
+    test.assertEqual(20, #page.parties)
+    test.assertTrue(page.more)
+    test.assertEqual(45, page.total)
+    test.assertEqual(4500, page.parties[1].at)
+    test.assertEqual("Stratholme", page.parties[1].place)
+    test.assertEqual(2600, page.parties[20].at)
+    -- A guildmate no longer known is left out.
+    test.assertEqual(2, #page.parties[1].members)
+    local hammer, zap = page.parties[1].members[1], page.parties[1].members[2]
+    test.assertEqual("Hammer-Camelot", hammer.whisper)
+    test.assertEqual(addon.GroupFriends.TOP, hammer.tier)
+    test.assertTrue(hammer.friend)
+    test.assertFalse(zap.friend)
+
+    view:More()
+    test.assertEqual(40, #view:Page(entries, member, tierOf).parties)
+    view:More()
+    page = view:Page(entries, member, tierOf)
+    test.assertEqual(45, #page.parties)
+    test.assertFalse(page.more)
+    test.assertEqual(100, page.parties[45].at)
+    view:Reset()
+    test.assertEqual(20, #view:Page(entries, member, tierOf).parties)
+
+    -- Frequent is a friend too; nothing at all is an empty page.
+    tiers.zap = addon.GroupFriends.FREQUENT
+    test.assertTrue(view:Page(entries, member, tierOf).parties[1].members[2].friend)
+    page = view:Page({}, member, tierOf)
+    test.assertEqual(0, #page.parties)
+    test.assertFalse(page.more)
+end)
+
+test.test("Forever the History tab lists my parties with hearts and Whisper, 20 at a time with Show more", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local _, partition = addon.rosterController:QuietContext()
+    local hammerKey
+    partition:EachCharacter(function(key, character)
+        if string.match(character.name or "", "^Hammer") then
+            hammerKey = key
+        end
+    end)
+    test.assertTrue(hammerKey ~= nil)
+    local whispered
+    tool.environment.ChatFrame_SendTell = function(name) whispered = name end
+    tool.environment.ChatFrameUtil = nil
+
+    test.assertTrue(addon.agfWindow:Open("lfg"))
+    local page = addon.lfgPage
+    page:ShowTab("history")
+    test.assertTrue(page.emptyText.shown)
+    test.assertEqual("No parties in your history yet.", page.emptyText.text)
+
+    local index
+    for index = 1, 25 do
+        test.assertTrue(partition:AddGroupHistory({ at = 1700000000 + index * 3600, characters = { hammerKey },
+            dungeon = index == 25 and "Stratholme" or nil }))
+    end
+    page:ShowTab("history")
+    test.assertFalse(page.emptyText.shown)
+    local shown = 0
+    for index = 1, #page.historyRows do
+        if page.historyRows[index].shown then
+            shown = shown + 1
+        end
+    end
+    test.assertEqual(20, shown)
+    local row = page.historyRows[1]
+    test.assertContains(row.title.text, "Stratholme")
+    local member = row.members[1]
+    test.assertContains(member.name.text, "Hammer")
+    -- 25 parties together: a Frequent group friend.
+    test.assertTrue(member.heart.shown)
+    click(member.whisper)
+    test.assertContains(whispered, "Hammer")
+
+    test.assertTrue(page.moreButton.shown)
+    click(page.moreButton)
+    test.assertTrue(page.historyRows[25].shown)
+    test.assertFalse(page.moreButton.shown)
+end)

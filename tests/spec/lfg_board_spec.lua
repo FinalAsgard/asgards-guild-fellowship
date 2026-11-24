@@ -718,7 +718,7 @@ end)
 local function pageWith(groups, overrides)
     local addon = test.newAddon("Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/LfgBoardPage.lua",
         "Core/DungeonCatalog.lua", "Core/LfgProtocol.lua", "Core/LfgListing.lua", "Core/LfgRelevance.lua",
-        "Core/GroupFriends.lua")
+        "Core/GroupFriends.lua", "Core/LfgHistoryView.lua")
     local environment = fakeFrames.install({})
     local whispered = {}
     local options = {

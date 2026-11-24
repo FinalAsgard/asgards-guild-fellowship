@@ -12,7 +12,8 @@ local _, addon = ...
 --                     character could join, two per row, then small cards
 --                     under "Your alts could join", then a Nearby line
 --   Other Parties     small greyed cards for the rest
---   History           (later)
+--   History           the player's own recent parties (LfgHistoryView),
+--                     newest first, 20 at a time with Show more
 -- An empty tab shows one line.
 --
 -- It draws what it's handed and calls back for every change; it keeps no
@@ -31,6 +32,9 @@ local LfgBoardPage = {
     LARGE_CARD_HEIGHT = 196,
     -- The members a large card lists; more are counted.
     CARD_MEMBERS = 5,
+    -- The guildmates a History party lists; more are counted.
+    HISTORY_MEMBERS = 8,
+    HISTORY_MEMBER_HEIGHT = 22,
     MEMBER_HEIGHT = 14,
     -- The role tiles' width on a large card.
     TILE_BLOCK_WIDTH = 76,
@@ -78,6 +82,11 @@ Page.__index = Page
 --                 player's zone, or nil
 --   classColor    function(classToken) -> "ffrrggbb" or nil
 --   friendTier    function(name) -> the guildmate's GroupFriends tier, or nil
+--   history       function() -> the player's GroupHistory entries
+--   historyMember function(key) -> a guildmate's { name, whisper,
+--                 classToken? }, or nil
+--   keyTier       function(key) -> a guildmate's GroupFriends tier, or nil
+--   formatDate    function(at) -> the date it shows for a party
 --   dungeonIcon   function(name) -> the game's icon for the dungeon, or nil
 --   onWhisper     function(name): whispers a leader
 --   requestOf     function(id) -> the player's request to join leader
@@ -619,6 +628,15 @@ function Page:buildList()
     self.nearbyText:SetWidth(LfgBoardPage.LIST_WIDTH)
     self.nearbyText:SetJustifyH("LEFT")
     self.largeCards, self.smallCards = {}, {}
+    self.historyRows = {}
+    self.historyView = addon.LfgHistoryView.Create()
+    local owner = self
+    self.moreButton = ui:Button(list, "Show more", "secondary", function()
+        owner.historyView:More()
+        owner:refreshTab()
+    end)
+    self.moreButton:SetWidth(120)
+    self.moreButton:Hide()
 end
 
 -- Places `frame` at height `top` of the list: across the whole width, or in
@@ -902,6 +920,8 @@ function Page:refreshTab()
     self.tabs:Select(self.tab)
     hideAll(self.largeCards)
     hideAll(self.smallCards)
+    hideAll(self.historyRows)
+    self.moreButton:Hide()
     self.altsLabel:Hide()
     self.nearbyText:Hide()
     self.emptyText:Hide()
@@ -949,13 +969,107 @@ function Page:refreshTab()
         end
         top = self:smallRows(entries, top, true, used)
     else
-        empty(LfgBoardPage.EMPTY.history)
+        top = self:historyList(top, empty)
     end
     self.list:SetHeight(math.max(top, 1))
 end
 
+-- One History party, made on first use: its date and dungeon or zone,
+-- then its guildmates (group friends with a heart), each with Whisper.
+function Page:historyRow(index)
+    local row = self.historyRows[index]
+    if row ~= nil then
+        return row
+    end
+    local ui, pad, owner = self.ui, Theme.SPACING.m, self
+    row = ui:Panel(self.list)
+    row.title = ui:Text(row, "", "semibold", "body", "text")
+    row.title:SetPoint("TOPLEFT", row, "TOPLEFT", pad, -Theme.SPACING.s)
+    row.members = {}
+    local line
+    for line = 1, LfgBoardPage.HISTORY_MEMBERS do
+        local member = ui:frame("Frame", row)
+        member:SetSize(260, LfgBoardPage.HISTORY_MEMBER_HEIGHT)
+        member:SetPoint("TOPLEFT", row, "TOPLEFT", pad,
+            -28 - (line - 1) * LfgBoardPage.HISTORY_MEMBER_HEIGHT)
+        member.name = ui:Text(member, "", "regular", "body", "text")
+        member.name:SetPoint("LEFT", member, "LEFT", 0, 0)
+        member.heart = member:CreateTexture(nil, "ARTWORK")
+        member.heart:SetTexture(Theme.TEXTURES.heart)
+        member.heart:SetVertexColor(Theme.Color("dps"))
+        member.heart:SetSize(10, 10)
+        member.heart:SetPoint("LEFT", member.name, "RIGHT", 4, 0)
+        member.whisper = ui:Button(member, "Whisper", "secondary", function(button)
+            if button.target then
+                owner.options.onWhisper(button.target)
+            end
+        end)
+        member.whisper:SetWidth(80)
+        member.whisper:SetPoint("RIGHT", member, "RIGHT", 0, 0)
+        row.members[line] = member
+    end
+    row.more = ui:Text(row, "", "regular", "small", "label")
+    self.historyRows[index] = row
+    return row
+end
+
+-- Lays out the History tab's parties from height `top` (or its one empty
+-- line), with Show more when older ones are left. Returns the height
+-- under them.
+function Page:historyList(top, empty)
+    local options = self.options
+    local page = self.historyView:Page(options.history and options.history() or {}, options.historyMember,
+        options.keyTier)
+    if page.parties[1] == nil then
+        empty(LfgBoardPage.EMPTY.history)
+        return top + 24
+    end
+    local index
+    for index = 1, #page.parties do
+        local party = page.parties[index]
+        local row = self:historyRow(index)
+        row.party = party
+        local date = options.formatDate and options.formatDate(party.at) or nil
+        row.title:SetText(join({ date, party.place }))
+        local line
+        for line = 1, #row.members do
+            local member, entry = row.members[line], party.members[line]
+            if entry == nil then
+                member:Hide()
+            else
+                member.name:SetText(colored(entry.name, options.classColor(entry.classToken)))
+                member.friend = entry.friend == true
+                setShown(member.heart, member.friend)
+                member.whisper.target = entry.whisper or false
+                member:Show()
+            end
+        end
+        local shown = math.min(#party.members, #row.members)
+        local more = #party.members - shown
+        row.more:ClearAllPoints()
+        row.more:SetPoint("TOPLEFT", row, "TOPLEFT", Theme.SPACING.m,
+            -28 - shown * LfgBoardPage.HISTORY_MEMBER_HEIGHT)
+        row.more:SetText(more > 0 and ("and " .. more .. " more") or "")
+        local height = 28 + shown * LfgBoardPage.HISTORY_MEMBER_HEIGHT + (more > 0 and 16 or 0) + Theme.SPACING.s
+        row:SetHeight(height)
+        self:place(row, top)
+        row:SetPoint("RIGHT", self.list, "RIGHT", 0, 0)
+        row:Show()
+        top = top + height + Theme.SPACING.s
+    end
+    if page.more then
+        self:place(self.moreButton, top)
+        self.moreButton:Show()
+        top = top + Widgets.BUTTON_HEIGHT + Theme.SPACING.s
+    end
+    return top
+end
+
 -- Shows tab `id` ("relevant", "other" or "history") from the top.
 function Page:ShowTab(id)
+    if id == "history" and self.tab ~= "history" then
+        self.historyView:Reset()
+    end
     self.tab = id
     self.area:SetVerticalScroll(0)
     self:refreshTab()

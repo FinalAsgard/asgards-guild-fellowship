@@ -76,6 +76,7 @@ local MANIFEST_FILES = {
     "Core/LfgRelevance.lua",
     "Core/LfgBoard.lua",
     "Core/LfgRequests.lua",
+    "Core/LfgHistoryView.lua",
     "Core/LfgDrawerModel.lua",
     "Core/LfgTrigger.lua",
     "Core/RoleCatalog.lua",

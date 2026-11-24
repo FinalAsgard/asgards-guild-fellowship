@@ -2267,6 +2267,26 @@ if clientProfile.supported then
                 local key = keyOfSender(name)
                 return key and lfgFriendTier(key) or nil
             end,
+            -- History: the player's own parties, as GroupHistory keeps them.
+            history = function()
+                local guild, partition = rosterController:QuietContext()
+                return guild and partition:GetGroupHistory() or {}
+            end,
+            historyMember = function(key)
+                local guild, partition = rosterController:QuietContext()
+                local character = guild and partition:GetCharacter(key)
+                if not character then
+                    return nil
+                end
+                local name = character.name or key
+                return { name = string.match(name, "^[^%-]+") or name, whisper = name, classToken = character.class }
+            end,
+            keyTier = function(key)
+                return lfgFriendTier(key)
+            end,
+            formatDate = function(at)
+                return client:FormatDate(at)
+            end,
             dungeonIcon = function(name)
                 local dungeon = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
                 return dungeon and dungeon.icon or nil
