@@ -76,6 +76,13 @@ local Theme = {
         gear = MEDIA .. "Textures\\Gear",
         close = MEDIA .. "Textures\\Close",
         glow = MEDIA .. "Textures\\Glow",
+        -- The party's leader, and group friends (Frequent and Top 5).
+        crown = MEDIA .. "Textures\\Crown",
+        heart = MEDIA .. "Textures\\Heart",
+        -- A role tile where any role will do.
+        person = MEDIA .. "Textures\\Person",
+        -- For a dungeon the game gives no icon for.
+        dungeon = MEDIA .. "Textures\\Dungeon",
         -- A plain white square for flat, tinted fills; on every client.
         white = "Interface\\Buttons\\WHITE8X8",
     },

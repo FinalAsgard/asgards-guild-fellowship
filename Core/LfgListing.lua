@@ -7,7 +7,8 @@ local _, addon = ...
 --
 -- A purpose is one of:
 --   { kind = "dungeon", dungeon = { id, name, minLevel, maxLevel } }
---   { kind = "questing", zone = the zone's name }
+--   { kind = "questing", zone = the zone's name, minLevel?, maxLevel? (its
+--     ZoneLevels range) }
 --   { kind = "raid" }
 --   { kind = "other", text = what it's for }
 local Protocol = addon.LfgProtocol
@@ -82,7 +83,14 @@ function LfgListing.CleanPurpose(purpose)
         if type(purpose.zone) ~= "string" or purpose.zone == "" then
             return nil, "your zone isn't known yet"
         end
-        return { kind = "questing", zone = purpose.zone }
+        local cleaned = { kind = "questing", zone = purpose.zone }
+        if type(purpose.minLevel) == "number" and type(purpose.maxLevel) == "number"
+            and purpose.minLevel <= purpose.maxLevel
+        then
+            cleaned.minLevel = purpose.minLevel
+            cleaned.maxLevel = purpose.maxLevel
+        end
+        return cleaned
     elseif purpose.kind == "raid" then
         return { kind = "raid" }
     elseif purpose.kind == "other" then
@@ -233,6 +241,9 @@ function Listing:Announcement(members)
         fields.lo = purpose.dungeon.minLevel
         fields.hi = purpose.dungeon.maxLevel
         fields.r = openRoles(members)
+    elseif purpose.kind == "questing" then
+        fields.lo = purpose.minLevel
+        fields.hi = purpose.maxLevel
     end
     return fields
 end

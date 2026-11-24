@@ -663,6 +663,21 @@ function Client:zoneMapId()
     return mapId
 end
 
+-- The player's zone's level range as the game reports it ({ minLevel,
+-- maxLevel }), or nil on a client without zone level data.
+function Client:GetZoneLevels()
+    local maps = self.environment.C_Map
+    local mapId = self:zoneMapId()
+    if type(maps) ~= "table" or mapId == nil then
+        return nil
+    end
+    local ok, minLevel, maxLevel = callFunction(maps.GetMapLevels, mapId)
+    if not ok or type(minLevel) ~= "number" or type(maxLevel) ~= "number" or minLevel < 1 or minLevel > maxLevel then
+        return nil
+    end
+    return { minLevel = minLevel, maxLevel = maxLevel }
+end
+
 -- The name of the map `mapID`, as the client shows it, or nil.
 function Client:GetMapName(mapID)
     local maps = self.environment.C_Map
@@ -1286,12 +1301,16 @@ function Client:GetDungeonList()
     local index
     for index = 1, #order do
         local id = order[index]
-        local infoOk, name, typeId, subtypeId, minLevel, maxLevel = callFunction(environment.GetLFGDungeonInfo, id)
+        local infoOk, name, typeId, subtypeId, minLevel, maxLevel, _, _, _, _, _, texture =
+            callFunction(environment.GetLFGDungeonInfo, id)
         if infoOk and type(name) == "string" and name ~= ""
             and typeId ~= Compatibility.LFG_TYPE_RANDOM and subtypeId == Compatibility.LFG_SUBTYPE_DUNGEON
             and type(minLevel) == "number" and type(maxLevel) == "number"
         then
-            table.insert(dungeons, { id = id, name = name, minLevel = minLevel, maxLevel = maxLevel })
+            -- The Dungeon Finder's icon for it, where the client names one.
+            local icon = type(texture) == "string" and texture ~= "" and ("Interface\\LFGFrame\\LFGIcon-" .. texture)
+                or nil
+            table.insert(dungeons, { id = id, name = name, minLevel = minLevel, maxLevel = maxLevel, icon = icon })
         end
     end
     if #dungeons == 0 then

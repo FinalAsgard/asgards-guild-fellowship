@@ -2,8 +2,9 @@ local _, addon = ...
 
 -- The listings guildmates' add-ons announce (LfgProtocol.TYPE_LISTING): one
 -- per leader, until it ends or nothing is heard of it for STALE_SECONDS (a
--- leader re-announces it every HEARTBEAT_SECONDS). Pure: messages and times
--- are handed in.
+-- leader re-announces it every HEARTBEAT_SECONDS). It sorts them for the
+-- logged-in character into Relevant, alts and Other (see Groups). Pure:
+-- messages, characters and times are handed in.
 local LfgBoard = {
     STALE_SECONDS = 5 * 60,
 }
@@ -89,4 +90,42 @@ function Board:Listings(now)
         return a.id < b.id
     end)
     return list
+end
+
+-- The listings at `now` sorted for the logged-in character (`current`, {
+-- level, roles }) and its `alts` (a list of { name, level, roles }), each
+-- by LfgRelevance and newest first:
+--   relevant  those `current` could join
+--   alts      of the rest, those an alt could join, each { listing, alt }
+--             with the first alt that fits
+--   other     the rest: full, or nothing of the player's fits
+function Board:Groups(now, current, alts)
+    local groups = { relevant = {}, alts = {}, other = {} }
+    local listings = self:Listings(now)
+    local index
+    for index = 1, #listings do
+        local listing = listings[index]
+        if addon.LfgRelevance.Fits(listing, current) then
+            table.insert(groups.relevant, listing)
+        else
+            local fitting
+            local altIndex
+            for altIndex = 1, #(alts or {}) do
+                if fitting == nil and addon.LfgRelevance.Fits(listing, alts[altIndex]) then
+                    fitting = alts[altIndex]
+                end
+            end
+            if fitting ~= nil then
+                table.insert(groups.alts, { listing = listing, alt = fitting })
+            else
+                table.insert(groups.other, listing)
+            end
+        end
+    end
+    return groups
+end
+
+-- How many listings `current` could join at `now`.
+function Board:RelevantCount(now, current)
+    return #self:Groups(now, current, nil).relevant
 end

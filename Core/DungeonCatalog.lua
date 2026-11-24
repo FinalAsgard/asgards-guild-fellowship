@@ -1,7 +1,8 @@
 local _, addon = ...
 
 -- The dungeons the Group Finder can form a group for, each
--- { id, name, minLevel, maxLevel }. Where the client has a Dungeon Finder
+-- { id, name, minLevel, maxLevel, icon? (the game's texture, where it has
+-- one) }. Where the client has a Dungeon Finder
 -- (Retail's, or WoW Forever's Classic-era one), the WoW adapter supplies its
 -- dungeons and their live ranges; otherwise, or when it supplies none, the
 -- client's static table below is used. It answers which dungeons fit a
@@ -101,6 +102,9 @@ function DungeonCatalog.Create(entries)
         local entry = entries[index]
         if isDungeon(entry) and byId[entry.id] == nil then
             local copy = dungeon(entry.id, entry.name, entry.minLevel, entry.maxLevel)
+            if type(entry.icon) == "string" and entry.icon ~= "" then
+                copy.icon = entry.icon
+            end
             table.insert(dungeons, copy)
             byId[copy.id] = copy
         end
@@ -121,6 +125,17 @@ end
 
 function Catalog:Get(id)
     return self.byId[id]
+end
+
+-- The dungeon named `name`, or nil.
+function Catalog:Named(name)
+    local index
+    for index = 1, #self.dungeons do
+        if self.dungeons[index].name == name then
+            return self.dungeons[index]
+        end
+    end
+    return nil
 end
 
 -- Whether `level` is within the range of the dungeon with `id`.

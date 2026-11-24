@@ -4,10 +4,13 @@ local _, addon = ...
 -- the player's own party: "You're not in a party" with Start a group when
 -- they aren't listed, their listing in view mode (Edit, Not looking) when
 -- they are, and an inline editor (What's it for?, the kind's fields, the
--- note, Save and Cancel) while editing. Below it are the Relevant Parties,
--- Other Parties and History tabs. For now every listing heard from
--- guildmates shows as a small greyed card on Other Parties; an empty tab
--- shows one line.
+-- note, Save and Cancel) while editing. Below it are the tabs:
+--   Relevant Parties  large gold-bordered cards for groups the current
+--                     character could join, two per row, then small cards
+--                     under "Your alts could join", then a Nearby line
+--   Other Parties     small greyed cards for the rest
+--   History           (later)
+-- An empty tab shows one line.
 --
 -- It draws what it's handed and calls back for every change; it keeps no
 -- listing of its own.
@@ -22,9 +25,17 @@ local LfgBoardPage = {
     VIEW_HEIGHT = 104,
     EDIT_HEIGHT = 312,
     SMALL_CARD_HEIGHT = 52,
-    -- The most small cards a tab shows, two per row; more are counted.
-    SMALL_CARDS = 8,
-    EDIT_SMALL_CARDS = 4,
+    LARGE_CARD_HEIGHT = 196,
+    -- The members a large card lists; more are counted.
+    CARD_MEMBERS = 5,
+    MEMBER_HEIGHT = 14,
+    -- The role tiles' width on a large card.
+    TILE_BLOCK_WIDTH = 76,
+    -- Other Parties' cards are faded to this.
+    GREYED_ALPHA = 0.5,
+    -- The tab list's width until the window lays it out.
+    LIST_WIDTH = 688,
+    SCROLL_STEP = 40,
     -- The most rows the dungeon list shows, its "Other levels" line
     -- included.
     DUNGEON_ROWS = 7,
@@ -54,7 +65,14 @@ Page.__index = Page
 --   level         function() -> the player's level
 --   zone          function() -> the player's zone name, or nil
 --   catalog       function() -> the DungeonCatalog to search
---   listings      function() -> the board's listings (LfgBoard:Listings)
+--   groups        function() -> the board's listings sorted for the player
+--                 (LfgBoard:Groups: relevant, alts, other)
+--   nearby        function() -> { zone, names } of guildmates in the
+--                 player's zone, or nil
+--   classColor    function(classToken) -> "ffrrggbb" or nil
+--   friendTier    function(name) -> the guildmate's GroupFriends tier, or nil
+--   dungeonIcon   function(name) -> the game's icon for the dungeon, or nil
+--   onWhisper     function(name): whispers a leader
 --   onSave        function(purpose, note) -> true, or false and why not
 --   onNotLooking  function()
 function LfgBoardPage.Create(content, ui, options)
@@ -100,16 +118,9 @@ function Page:build()
         { id = "other", label = "Other Parties" },
         { id = "history", label = "History" },
     }, function(id)
-        owner.tab = id
-        owner:refreshTab()
+        owner:ShowTab(id)
     end)
-    self.area = ui:frame("Frame", content)
-    self.area:SetPoint("TOPLEFT", self.tabs, "BOTTOMLEFT", 0, -Theme.SPACING.m)
-    self.area:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
-    self.emptyText = ui:Text(self.area, "", "regular", "body", "muted")
-    self.emptyText:SetPoint("TOPLEFT", self.area, "TOPLEFT", 0, 0)
-    self.moreText = ui:Text(self.area, "", "regular", "small", "label")
-    self.smallCards = {}
+    self:buildList()
 end
 
 function Page:buildSolo(card)
@@ -438,96 +449,354 @@ end
 
 -- The tabs ----------------------------------------------------------------------
 
--- A small card for a guildmate's listing, made on first use: the purpose,
--- then the type, levels, leader and size in small text, with role tiles on
--- the right for a dungeon.
+-- The tabs' contents scroll: what's shown is laid out top to bottom on one
+-- list frame inside a scroll frame, scrolled with the mouse wheel.
+function Page:buildList()
+    local ui, content = self.ui, self.content
+    local area = ui:frame("ScrollFrame", content)
+    area:SetPoint("TOPLEFT", self.tabs, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+    area:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
+    local list = ui:frame("Frame", area)
+    list:SetSize(LfgBoardPage.LIST_WIDTH, 1)
+    area:SetScrollChild(list)
+    area:EnableMouseWheel(true)
+    area:SetScript("OnMouseWheel", function(self, delta)
+        local most = self:GetVerticalScrollRange() or 0
+        local scroll = (self:GetVerticalScroll() or 0) - delta * LfgBoardPage.SCROLL_STEP
+        self:SetVerticalScroll(math.max(0, math.min(most, scroll)))
+    end)
+    area:SetScript("OnSizeChanged", function(_, width)
+        if type(width) == "number" and width > 0 then
+            list:SetWidth(width)
+        end
+    end)
+    self.area, self.list = area, list
+    self.emptyText = ui:Text(list, "", "regular", "body", "muted")
+    self.altsLabel = ui:SectionLabel(list, "Your alts could join")
+    self.nearbyText = ui:Text(list, "", "regular", "small", "muted")
+    self.nearbyText:SetWidth(LfgBoardPage.LIST_WIDTH)
+    self.nearbyText:SetJustifyH("LEFT")
+    self.largeCards, self.smallCards = {}, {}
+end
+
+-- Places `frame` at height `top` of the list: across the whole width, or in
+-- the left or right `column` of two.
+function Page:place(frame, top, column)
+    local list = self.list
+    frame:ClearAllPoints()
+    if column == "right" then
+        frame:SetPoint("TOPLEFT", list, "TOP", Theme.SPACING.xs, -top)
+        frame:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+    elseif column == "left" then
+        frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top)
+        frame:SetPoint("RIGHT", list, "CENTER", -Theme.SPACING.xs, 0)
+    else
+        frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top)
+    end
+end
+
+-- Role tiles laid out as on a large card: two on top (Tank and Healer),
+-- three smaller below filling the same width. `role` is nil for a party's
+-- real roles, or "any" for person tiles.
+function Page:tileBlock(parent, role)
+    local width, height, gap = LfgBoardPage.TILE_BLOCK_WIDTH, 20, 4
+    local top = (width - gap) / 2
+    local bottom = (width - 2 * gap) / 3
+    local roles = { role or "tank", role or "healer", role or "dps", role or "dps", role or "dps" }
+    local tiles = {}
+    local index
+    for index = 1, 5 do
+        tiles[index] = self.ui:RoleTile(parent, roles[index], index <= 2 and top or bottom, height)
+        if role ~= nil then
+            tiles[index].label:SetText("")
+        end
+    end
+    tiles[2]:SetPoint("LEFT", tiles[1], "RIGHT", gap, 0)
+    tiles[3]:SetPoint("TOPLEFT", tiles[1], "BOTTOMLEFT", 0, -gap)
+    tiles[4]:SetPoint("LEFT", tiles[3], "RIGHT", gap, 0)
+    tiles[5]:SetPoint("LEFT", tiles[4], "RIGHT", gap, 0)
+    return tiles
+end
+
+-- Shows `tiles` (5 person tiles) with the first `size` filled.
+local function showSize(tiles, size)
+    local index
+    for index = 1, #tiles do
+        tiles[index]:SetFilled(index <= (size or 0))
+        tiles[index]:Show()
+    end
+end
+
+-- Shows the tiles that fit `listing`'s kind from `card`'s role and person
+-- tiles, and the player count for a raid.
+local function showTiles(card, listing)
+    hideAll(card.roleTiles)
+    hideAll(card.anyTiles)
+    card.raidTile:Hide()
+    card.count:SetText("")
+    if listing.kind == "dungeon" then
+        showRoles(card.roleTiles, listing.members)
+    elseif listing.kind == "raid" then
+        card.raidTile:SetFilled(not addon.LfgRelevance.HasRoom(listing))
+        card.raidTile:Show()
+        card.count:SetText(listing.size .. " players")
+    else
+        showSize(card.anyTiles, listing.size)
+    end
+end
+
+local function sizeText(listing)
+    if listing.kind == "raid" then
+        return listing.size .. " players"
+    end
+    return listing.size .. "/" .. listing.maxSize
+end
+
+-- `name` in its class color, where `color` ("ffrrggbb") is known.
+local function colored(name, color)
+    if type(color) ~= "string" then
+        return name
+    end
+    return "|c" .. color .. name .. "|r"
+end
+
+-- A large card, made on first use: the purpose with its icon, then its
+-- type, levels and size; the members on the left (the leader crowned,
+-- group friends with a heart) and the role tiles on the right; the note;
+-- and Whisper <leader>.
+function Page:largeCard(index)
+    local card = self.largeCards[index]
+    if card ~= nil then
+        return card
+    end
+    local ui, pad = self.ui, Theme.SPACING.m
+    card = ui:Panel(self.list, { border = "gold" })
+    card:SetHeight(LfgBoardPage.LARGE_CARD_HEIGHT)
+    card.icon = card:CreateTexture(nil, "ARTWORK")
+    card.icon:SetSize(32, 32)
+    card.icon:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -pad)
+    card.purpose = ui:Text(card, "", "semibold", "title", "text")
+    card.details = ui:Text(card, "", "regular", "small", "muted")
+    card.details:SetPoint("TOPLEFT", card.purpose, "BOTTOMLEFT", 0, -2)
+    local owner = self
+    card.members = {}
+    local row
+    for row = 1, LfgBoardPage.CARD_MEMBERS do
+        local line = ui:frame("Button", card)
+        line:SetSize(150, LfgBoardPage.MEMBER_HEIGHT)
+        line:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -54 - (row - 1) * LfgBoardPage.MEMBER_HEIGHT)
+        line.crown = line:CreateTexture(nil, "ARTWORK")
+        line.crown:SetTexture(Theme.TEXTURES.crown)
+        line.crown:SetVertexColor(Theme.Color("gold"))
+        line.crown:SetSize(10, 10)
+        line.crown:SetPoint("LEFT", line, "LEFT", 0, 0)
+        line.name = ui:Text(line, "", "regular", "body", "text")
+        line.name:SetPoint("LEFT", line, "LEFT", 14, 0)
+        line.heart = line:CreateTexture(nil, "ARTWORK")
+        line.heart:SetTexture(Theme.TEXTURES.heart)
+        line.heart:SetVertexColor(Theme.Color("dps"))
+        line.heart:SetSize(10, 10)
+        line.heart:SetPoint("LEFT", line.name, "RIGHT", 4, 0)
+        -- The leader's name whispers them.
+        line:SetScript("OnClick", function(self)
+            if self.whisper then
+                owner.options.onWhisper(self.whisper)
+            end
+        end)
+        card.members[row] = line
+    end
+    card.more = ui:Text(card, "", "regular", "small", "label")
+    card.more:SetPoint("TOPLEFT", card, "TOPLEFT", pad,
+        -54 - LfgBoardPage.CARD_MEMBERS * LfgBoardPage.MEMBER_HEIGHT)
+    card.roleTiles = self:tileBlock(card, nil)
+    card.roleTiles[1]:SetPoint("TOPLEFT", card, "TOPRIGHT", -pad - LfgBoardPage.TILE_BLOCK_WIDTH, -54)
+    card.anyTiles = self:tileBlock(card, "any")
+    card.anyTiles[1]:SetPoint("TOPLEFT", card.roleTiles[1], "TOPLEFT", 0, 0)
+    card.raidTile = ui:RoleTile(card, "any", LfgBoardPage.TILE_BLOCK_WIDTH, 20)
+    card.raidTile:SetPoint("TOPLEFT", card.roleTiles[1], "TOPLEFT", 0, 0)
+    card.count = ui:Text(card, "", "regular", "small", "muted")
+    card.count:SetPoint("TOP", card.raidTile, "BOTTOM", 0, -4)
+    card.note = ui:Text(card, "", "italic", "small", "muted")
+    card.note:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad + Widgets.BUTTON_HEIGHT + Theme.SPACING.s)
+    card.whisper = ui:Button(card, "Whisper", "secondary", function(button)
+        owner.options.onWhisper(button.target)
+    end)
+    card.whisper:SetWidth(150)
+    card.whisper:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad)
+    self.largeCards[index] = card
+    return card
+end
+
+function Page:showLarge(card, listing)
+    local options, pad = self.options, Theme.SPACING.m
+    local icon = listing.kind == "dungeon" and (options.dungeonIcon(listing.purpose) or Theme.TEXTURES.dungeon)
+        or nil
+    card.purpose:ClearAllPoints()
+    card.iconTexture = icon or false
+    if icon ~= nil then
+        card.icon:SetTexture(icon)
+        card.icon:Show()
+        card.purpose:SetPoint("TOPLEFT", card.icon, "TOPRIGHT", Theme.SPACING.s, 0)
+    else
+        card.icon:Hide()
+        card.purpose:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -pad)
+    end
+    card.listing = listing
+    card.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
+    card.details:SetText(join({ addon.LfgListing.KindLabel(listing.kind), range(listing.minLevel, listing.maxLevel),
+        sizeText(listing) }))
+    local row
+    for row = 1, #card.members do
+        local line, member = card.members[row], listing.members[row]
+        if member == nil then
+            line:Hide()
+        else
+            local leader = row == 1
+            line.name:SetText(colored(member.name, options.classColor(member.classToken)))
+            line.whisper = leader and listing.sender or false
+            setShown(line.crown, leader)
+            local tier = options.friendTier(member.name)
+            line.friend = tier == addon.GroupFriends.FREQUENT or tier == addon.GroupFriends.TOP
+            setShown(line.heart, line.friend)
+            line:Show()
+        end
+    end
+    local more = #listing.members - #card.members
+    card.more:SetText(more > 0 and ("and " .. more .. " more") or "")
+    showTiles(card, listing)
+    card.note:SetText(listing.note or "")
+    card.whisper.target = listing.sender
+    card.whisper:SetLabel("Whisper " .. listing.leader)
+    card:Show()
+end
+
+-- A small card, made on first use: the purpose, then the type, levels,
+-- leader and size (or which alt fits) in small text, with one row of small
+-- tiles on the right.
 function Page:smallCard(index)
     local card = self.smallCards[index]
     if card ~= nil then
         return card
     end
     local ui = self.ui
-    card = ui:Panel(self.area)
+    card = ui:Panel(self.list)
     card:SetHeight(LfgBoardPage.SMALL_CARD_HEIGHT)
-    local row = math.floor((index - 1) / 2)
-    local top = -row * (LfgBoardPage.SMALL_CARD_HEIGHT + Theme.SPACING.s)
-    if index % 2 == 1 then
-        card:SetPoint("TOPLEFT", self.area, "TOPLEFT", 0, top)
-        card:SetPoint("RIGHT", self.area, "CENTER", -Theme.SPACING.xs, 0)
-    else
-        card:SetPoint("TOPLEFT", self.area, "TOP", Theme.SPACING.xs, top)
-        card:SetPoint("RIGHT", self.area, "RIGHT", 0, 0)
-    end
-    card.purpose = ui:Text(card, "", "semibold", "body", "muted")
+    card.purpose = ui:Text(card, "", "semibold", "body", "text")
     card.purpose:SetPoint("TOPLEFT", card, "TOPLEFT", Theme.SPACING.m, -Theme.SPACING.s)
     card.details = ui:Text(card, "", "regular", "small", "label")
     card.details:SetPoint("TOPLEFT", card.purpose, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
-    card.tiles = self:roleTiles(card, 12)
-    card.tiles[1]:SetPoint("RIGHT", card, "RIGHT", -Theme.SPACING.m - 4 * 16, 0)
+    card.roleTiles = self:roleTiles(card, 12)
+    card.roleTiles[1]:SetPoint("RIGHT", card, "RIGHT", -Theme.SPACING.m - 4 * 16, 0)
+    card.anyTiles = {}
+    local index_
+    for index_ = 1, 5 do
+        card.anyTiles[index_] = ui:RoleTile(card, "any", 12, 12)
+        card.anyTiles[index_]:SetPoint("LEFT", card.roleTiles[index_], "LEFT", 0, 0)
+    end
+    card.raidTile = ui:RoleTile(card, "any", 12, 12)
+    card.raidTile:SetPoint("RIGHT", card, "RIGHT", -Theme.SPACING.m, 0)
+    card.count = ui:Text(card, "", "regular", "small", "label")
+    card.count:SetPoint("RIGHT", card.raidTile, "LEFT", -Theme.SPACING.xs, 0)
     self.smallCards[index] = card
     return card
 end
 
-local function details(listing)
-    local where = range(listing.minLevel, listing.maxLevel)
-    local size = listing.kind == "raid" and (listing.size .. " players") or (listing.size .. "/" .. listing.maxSize)
-    return join({ addon.LfgListing.KindLabel(listing.kind), where, listing.leader, size })
+-- Shows a small card for `listing`; `alt` names the alt that fits, and
+-- `greyed` fades it out (Other Parties).
+function Page:showSmall(card, listing, alt, greyed)
+    card.listing = listing
+    card.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
+    local fits = alt and (alt.level and (alt.name .. " (" .. alt.level .. ")") or alt.name) or nil
+    card.details:SetText(join({ addon.LfgListing.KindLabel(listing.kind), range(listing.minLevel, listing.maxLevel),
+        listing.leader, fits or sizeText(listing) }))
+    showTiles(card, listing)
+    card.greyed = greyed == true
+    card.purpose:SetTextColor(Theme.Color(card.greyed and "muted" or "text"))
+    card:SetAlpha(card.greyed and LfgBoardPage.GREYED_ALPHA or 1)
+    card:Show()
 end
 
--- What tab `id` lists: for now every listing is on Other Parties.
-function Page:tabListings(id, listings)
-    if id == "other" then
-        return listings
+-- Lays out small cards for `entries` (each { listing, alt? }) two per row
+-- from height `top`. Returns the height under them.
+function Page:smallRows(entries, top, greyed, used)
+    local index
+    for index = 1, #entries do
+        used.small = used.small + 1
+        local card = self:smallCard(used.small)
+        local row = math.floor((index - 1) / 2)
+        self:place(card, top + row * (LfgBoardPage.SMALL_CARD_HEIGHT + Theme.SPACING.s),
+            index % 2 == 1 and "left" or "right")
+        self:showSmall(card, entries[index].listing, entries[index].alt, greyed)
     end
-    return {}
+    local rows = math.ceil(#entries / 2)
+    return top + rows * (LfgBoardPage.SMALL_CARD_HEIGHT + Theme.SPACING.s)
 end
 
 function Page:refreshTab()
-    local listings = self.options.listings() or {}
-    self.tabs:SetLabel("relevant", "Relevant Parties" .. DOT .. #self:tabListings("relevant", listings))
-    self.tabs:SetLabel("other", "Other Parties" .. DOT .. #self:tabListings("other", listings))
+    local groups = self.options.groups() or { relevant = {}, alts = {}, other = {} }
+    self.groups = groups
+    self.tabs:SetLabel("relevant", "Relevant Parties" .. DOT .. #groups.relevant)
+    self.tabs:SetLabel("other", "Other Parties" .. DOT .. #groups.other)
     self.tabs:Select(self.tab)
-    local shown = self.tab == "history" and {} or self:tabListings(self.tab, listings)
-    self.shownListings = shown
-    if #shown == 0 then
-        self.emptyText:SetText(LfgBoardPage.EMPTY[self.tab])
+    hideAll(self.largeCards)
+    hideAll(self.smallCards)
+    self.altsLabel:Hide()
+    self.nearbyText:Hide()
+    self.emptyText:Hide()
+    local used = { small = 0 }
+    local top = 0
+    local function empty(text)
+        self.emptyText:SetText(text)
+        self:place(self.emptyText, top)
         self.emptyText:Show()
-    else
-        self.emptyText:Hide()
+        top = top + 24
     end
-    -- The editor is tall: fewer cards fit under it.
-    local limit = self:Mode() == "edit" and LfgBoardPage.EDIT_SMALL_CARDS or LfgBoardPage.SMALL_CARDS
-    local index
-    for index = 1, math.max(#self.smallCards, math.min(#shown, limit)) do
-        local listing = index <= limit and shown[index] or nil
-        if listing == nil then
-            if self.smallCards[index] ~= nil then
-                self.smallCards[index]:Hide()
-            end
-        else
-            local card = self:smallCard(index)
-            card.listing = listing
-            card.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
-            card.details:SetText(details(listing))
-            if listing.kind == "dungeon" then
-                showRoles(card.tiles, listing.members)
-            else
-                hideAll(card.tiles)
-            end
-            card:Show()
+    if self.tab == "relevant" then
+        local index
+        for index = 1, #groups.relevant do
+            local card = self:largeCard(index)
+            local row = math.floor((index - 1) / 2)
+            self:place(card, top + row * (LfgBoardPage.LARGE_CARD_HEIGHT + Theme.SPACING.s),
+                index % 2 == 1 and "left" or "right")
+            self:showLarge(card, groups.relevant[index])
         end
-    end
-    local more = #shown - limit
-    if more > 0 then
-        local rows = math.ceil(limit / 2)
-        self.moreText:ClearAllPoints()
-        self.moreText:SetPoint("TOPLEFT", self.area, "TOPLEFT", 0,
-            -rows * (LfgBoardPage.SMALL_CARD_HEIGHT + Theme.SPACING.s))
-        self.moreText:SetText("and " .. more .. " more")
-        self.moreText:Show()
+        top = top + math.ceil(#groups.relevant / 2) * (LfgBoardPage.LARGE_CARD_HEIGHT + Theme.SPACING.s)
+        if #groups.relevant == 0 and #groups.alts == 0 then
+            empty(LfgBoardPage.EMPTY.relevant)
+        end
+        if #groups.alts > 0 then
+            self:place(self.altsLabel, top + Theme.SPACING.xs)
+            self.altsLabel:Show()
+            top = self:smallRows(groups.alts, top + 24, false, used)
+        end
+        local nearby = self.options.nearby()
+        if nearby ~= nil and #nearby.names > 0 then
+            self.nearbyText:SetText("Nearby in " .. nearby.zone .. ": " .. table.concat(nearby.names, ", "))
+            self:place(self.nearbyText, top + Theme.SPACING.xs)
+            self.nearbyText:Show()
+            top = top + 28
+        end
+    elseif self.tab == "other" then
+        if #groups.other == 0 then
+            empty(LfgBoardPage.EMPTY.other)
+        end
+        local entries = {}
+        local index
+        for index = 1, #groups.other do
+            entries[index] = { listing = groups.other[index] }
+        end
+        top = self:smallRows(entries, top, true, used)
     else
-        self.moreText:Hide()
+        empty(LfgBoardPage.EMPTY.history)
     end
+    self.list:SetHeight(math.max(top, 1))
+end
+
+-- Shows tab `id` ("relevant", "other" or "history") from the top.
+function Page:ShowTab(id)
+    self.tab = id
+    self.area:SetVerticalScroll(0)
+    self:refreshTab()
 end
 
 -- Redraws the card and the tabs from what the options say now.

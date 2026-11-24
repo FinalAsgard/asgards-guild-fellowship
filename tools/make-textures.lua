@@ -157,3 +157,47 @@ write("Glow.tga", 64, 64, function(x, y)
     local fade = clamp(1 - math.sqrt(dx * dx + dy * dy))
     return 1, 1, 1, fade * fade
 end)
+
+-- A white heart, for group friends: the classic heart curve, point down.
+write("Heart.tga", 32, 32, function(x, y)
+    local hx, hy = (x - 16) / 12, (16 - y) / 12 + 0.25
+    local shape = (hx * hx + hy * hy - 1) ^ 3 - hx * hx * hy * hy * hy
+    return 1, 1, 1, inside(shape <= 0)
+end)
+
+-- A white crown, for the party's leader: a band with three points above it.
+write("Crown.tga", 32, 32, function(x, y)
+    if x >= 5 and x <= 27 and y >= 20 and y <= 26 then
+        return 1, 1, 1, 1
+    end
+    local points = { 6, 16, 26 }
+    local index
+    for index = 1, #points do
+        -- Each point narrows from its base on the band to a tip at y = 7.
+        local half = (y - 7) / 13 * 5.5
+        if y >= 7 and y < 21 and math.abs(x - points[index]) <= half then
+            return 1, 1, 1, 1
+        end
+    end
+    return 0, 0, 0, 0
+end)
+
+-- A white person, for role tiles where any role will do: a round head over
+-- rounded shoulders.
+write("Person.tga", 32, 32, function(x, y)
+    local hx, hy = x - 16, y - 10
+    if hx * hx + hy * hy <= 5.5 * 5.5 then
+        return 1, 1, 1, 1
+    end
+    local sx, sy = (x - 16) / 11, (y - 29) / 11
+    return 1, 1, 1, inside(y <= 28 and sx * sx + sy * sy <= 1)
+end)
+
+-- A white dungeon gate, for dungeons the game gives no icon for: an arched
+-- doorway in a square of stone.
+write("Dungeon.tga", 64, 64, function(x, y)
+    local inWall = x >= 6 and x <= 58 and y >= 8 and y <= 58
+    local ax, ay = (x - 32) / 14, (y - 30) / 14
+    local inDoor = x >= 18 and x <= 46 and y >= 30 and y <= 58 or (y < 30 and ax * ax + ay * ay <= 1)
+    return 1, 1, 1, inside(inWall and not inDoor)
+end)

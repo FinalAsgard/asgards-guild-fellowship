@@ -567,6 +567,14 @@ function UI:RoleTile(parent, role, width, height)
     tile.role = role
     tile.label = self:Text(tile, Widgets.ROLE_LABELS[role] or "", "semibold", "small", "text")
     tile.label:SetPoint("CENTER", tile, "CENTER", 0, 0)
+    -- Any role: a person instead of a role's name.
+    if role == "any" then
+        local inset = math.floor(math.min(width, height or width) * 0.2)
+        tile.icon = tile:CreateTexture(nil, "ARTWORK")
+        tile.icon:SetTexture(Theme.TEXTURES.person)
+        tile.icon:SetPoint("TOPLEFT", tile, "TOPLEFT", inset, -inset)
+        tile.icon:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -inset, inset)
+    end
     function tile.SetFilled(_, filled)
         tile.filled = filled == true
         if tile.filled then
@@ -575,6 +583,9 @@ function UI:RoleTile(parent, role, width, height)
         else
             tile:SetFill(role == "any" and "green" or role)
             tile.label:SetTextColor(Theme.Color("text"))
+        end
+        if role == "any" then
+            tile.icon:SetVertexColor(Theme.Color(tile.filled and "muted" or "text"))
         end
     end
     return tile

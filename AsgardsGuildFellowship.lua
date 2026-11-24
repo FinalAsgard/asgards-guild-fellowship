@@ -70,7 +70,10 @@ local guildNoteOverlay
 local agfWindow, lfgButton
 -- The Guild LFG Board: the player's own listing, the listings heard from
 -- guildmates, and the page drawing them (set up after the Group Finder).
-local lfgListing, lfgBoard, lfgPage, drawLfgBoard, onLfgMessage
+local lfgListing, lfgBoard, lfgPage, drawLfgBoard, onLfgMessage, probeLfg
+-- A guildmate's group-friend tier by character key (set up with the group
+-- friends below).
+local lfgFriendTier = function() return nil end
 -- The key the new UI saves this character's layout under: its GUID, the
 -- same in every guild (or with none), else its full name.
 local function layoutKey()
@@ -1547,9 +1550,127 @@ if clientProfile.supported then
         announceListing()
         lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
     end
+    -- The player's zone's level range (ZoneLevels): the game's, else the
+    -- party's levels ± ZoneLevels.MARGIN.
+    local function lfgZoneLevels()
+        local levels = {}
+        local members = lfgMembers()
+        local index
+        for index = 1, #members do
+            levels[index] = members[index].level
+        end
+        return addon.ZoneLevels.For(client:GetZoneLevels(), levels)
+    end
+    -- Who the board is sorted for: the logged-in character ({ level, roles
+    -- }), and its player's other characters in the guild as alts ({ name,
+    -- level, roles }), highest level first.
+    local function lfgCharacters()
+        local selfKey = rosterController:SelfKey()
+        local current = {
+            level = client:GetPlayerLevel(),
+            roles = rolesOf(selfKey) or roleCatalog:RolesFor(client:GetPlayerClass()),
+        }
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local own = guild and selfKey and partition:GetCharacter(selfKey)
+        if own == nil then
+            return current, {}
+        end
+        local live = rosterController:LiveMembers(normalizer)
+        local alts = {}
+        local keys = partition:CharactersOf(own.player)
+        local index
+        for index = 1, #keys do
+            local key = keys[index]
+            local character = partition:GetCharacter(key)
+            if key ~= selfKey and character ~= nil and partition:IsInGuild(key) then
+                table.insert(alts, {
+                    name = normalizer:Display((live[key] and live[key].name) or character.name or key) or key,
+                    level = (live[key] and live[key].level) or character.level,
+                    roles = roleCatalog:PreferencesOf(partition, key) or {},
+                })
+            end
+        end
+        table.sort(alts, function(a, b)
+            if (a.level or 0) ~= (b.level or 0) then
+                return (a.level or 0) > (b.level or 0)
+            end
+            return a.name < b.name
+        end)
+        return current, alts
+    end
+    -- Guildmates online in the player's zone, for the Nearby line.
+    local function lfgNearby()
+        local zone = client:GetZone()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if zone == nil or guild == nil then
+            return nil
+        end
+        local entries = addon.GroupCandidates.Create({
+            partition = partition,
+            members = rosterController:LiveMembers(normalizer),
+            roles = roleCatalog,
+            display = function(name)
+                return normalizer:Display(name)
+            end,
+        }):Nearby(zone.name, rosterController:SelfKey())
+        local names = {}
+        local index
+        for index = 1, #entries do
+            names[index] = entries[index].label
+        end
+        return { zone = zone.name, names = names }
+    end
+    -- /agf probe lfg: where questing's zone levels come from, and what's on
+    -- the board for this character.
+    probeLfg = function()
+        rosterController:Print("Guild LFG Board probe:")
+        local zone = client:GetZone()
+        local levels = lfgZoneLevels()
+        local zoneLine = "  Zone levels" .. (zone and (" in " .. zone.name) or "") .. ": "
+        if levels == nil then
+            client:Print(zoneLine .. "unknown.")
+        elseif levels.source == addon.ZoneLevels.GAME then
+            client:Print(zoneLine .. levels.minLevel .. "-" .. levels.maxLevel .. ", from the game.")
+        else
+            client:Print(zoneLine .. levels.minLevel .. "-" .. levels.maxLevel .. ", the fallback (your party's" ..
+                " levels, " .. addon.ZoneLevels.MARGIN .. " either way); the game gives none here.")
+        end
+        local own = lfgListing:Announcement(lfgMembers())
+        client:Print("  Your listing: " .. (own and addon.LfgListing.Label(own.k, own.p) or "none") .. ".")
+        local current, alts = lfgCharacters()
+        local groups = lfgBoard:Groups(client:Timestamp(), current, alts)
+        client:Print("  On the board: " .. #groups.relevant .. " relevant, " .. #groups.alts .. " for your alts, " ..
+            #groups.other .. " other.")
+        local function describe(where, listing, alt)
+            local parts = { where, addon.LfgListing.Label(listing.kind, listing.purpose), "by " .. listing.leader,
+                listing.size .. "/" .. listing.maxSize }
+            if listing.minLevel ~= nil then
+                table.insert(parts, "levels " .. listing.minLevel .. "-" .. listing.maxLevel)
+            end
+            if alt ~= nil then
+                table.insert(parts, "fits " .. alt.name)
+            end
+            client:Print("    " .. table.concat(parts, ", "))
+        end
+        local index
+        for index = 1, #groups.relevant do
+            describe("Relevant", groups.relevant[index])
+        end
+        for index = 1, #groups.alts do
+            describe("Alts", groups.alts[index].listing, groups.alts[index].alt)
+        end
+        for index = 1, #groups.other do
+            describe("Other", groups.other[index])
+        end
+    end
     -- Start a group (or Edit) saved: the listing starts or changes, and the
-    -- guild hears it now.
+    -- guild hears it now. Questing is in the zone's level range.
     local function saveListing(purpose, note)
+        if type(purpose) == "table" and purpose.kind == "questing" then
+            local levels = lfgZoneLevels()
+            purpose.minLevel = levels and levels.minLevel or nil
+            purpose.maxLevel = levels and levels.maxLevel or nil
+        end
         local saved, reason
         if lfgListing:IsActive() then
             saved, reason = lfgListing:Update(purpose, note)
@@ -1579,8 +1700,24 @@ if clientProfile.supported then
             catalog = function()
                 return addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList())
             end,
-            listings = function()
-                return lfgBoard:Listings(client:Timestamp())
+            groups = function()
+                local current, alts = lfgCharacters()
+                return lfgBoard:Groups(client:Timestamp(), current, alts)
+            end,
+            nearby = lfgNearby,
+            classColor = function(classToken)
+                return client:GetClassColor(classToken)
+            end,
+            friendTier = function(name)
+                local key = keyOfSender(name)
+                return key and lfgFriendTier(key) or nil
+            end,
+            dungeonIcon = function(name)
+                local dungeon = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
+                return dungeon and dungeon.icon or nil
+            end,
+            onWhisper = function(name)
+                client:OpenWhisper(name)
             end,
             onSave = saveListing,
             onNotLooking = endListing,
@@ -3208,7 +3345,8 @@ if clientProfile.supported then
         " guild roster; officers; probe timer: the roster's timer marker, officers; probe player <name or" ..
         " alias>: a player's alias, links and Discord, with who" ..
         " set each and when, and its logged changes; probe greet: your greet weight and how long it holds your" ..
-        " prompts back; probe realm: the realm or region your guild's data is kept under)",
+        " prompts back; probe realm: the realm or region your guild's data is kept under; probe lfg: the Guild" ..
+        " LFG Board's zone levels and listings)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
@@ -3221,7 +3359,8 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer, probe ready, probe timer, probe player <name>, probe greet or probe realm.")
+                        " probe officer, probe ready, probe timer, probe player <name>, probe greet, probe realm or" ..
+                        " probe lfg.")
                 end
                 return
             end
@@ -3308,6 +3447,10 @@ if clientProfile.supported then
                 end
                 return
             end
+            if what == "lfg" then
+                probeLfg()
+                return
+            end
             if what == "greet" then
                 rosterController:Print("Greet weight probe:")
                 local lines = guildGreet:WeightProbeLines(client:Timestamp())
@@ -3322,8 +3465,9 @@ if clientProfile.supported then
                     addon.Identity.slashCommand .. " probe log, " ..
                     addon.Identity.slashCommand .. " probe officer, " .. addon.Identity.slashCommand ..
                     " probe ready, " .. addon.Identity.slashCommand .. " probe timer, " ..
-                    addon.Identity.slashCommand .. " probe player <name> or " ..
-                    addon.Identity.slashCommand .. " probe greet.")
+                    addon.Identity.slashCommand .. " probe player <name>, " ..
+                    addon.Identity.slashCommand .. " probe greet or " ..
+                    addon.Identity.slashCommand .. " probe lfg.")
                 return
             end
             if guildLogOf() == nil then
@@ -3957,6 +4101,7 @@ if clientProfile.supported then
         local friends = currentFriends()
         return friends and friends:TierOf(key) or nil
     end
+    lfgFriendTier = friendTier
     guildGreet = addon.GuildGreet.Create({
         context = function()
             local guild, partition, normalizer = rosterController:QuietContext()

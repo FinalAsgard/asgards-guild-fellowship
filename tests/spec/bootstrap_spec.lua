@@ -72,6 +72,8 @@ local MANIFEST_FILES = {
     "Core/DungeonCatalog.lua",
     "Core/LfgProtocol.lua",
     "Core/LfgListing.lua",
+    "Core/ZoneLevels.lua",
+    "Core/LfgRelevance.lua",
     "Core/LfgBoard.lua",
     "Core/RoleCatalog.lua",
     "Core/GroupSession.lua",
