@@ -568,6 +568,24 @@ function Store:SetChatTagsEnabled(enabled)
     return true
 end
 
+-- Whether a chat line announces each new Guild LFG Board group the
+-- character could join; off unless turned on. Account-wide.
+function Store:LfgChatLine()
+    return type(self.database) == "table" and self.database.lfgChatLine == true
+end
+
+-- Turns that chat line on or off. An unusable existing value is left alone.
+function Store:SetLfgChatLine(enabled)
+    if type(self.database) ~= "table" or type(enabled) ~= "boolean" then
+        return false
+    end
+    if self.database.lfgChatLine ~= nil and type(self.database.lfgChatLine) ~= "boolean" then
+        return false
+    end
+    self.database.lfgChatLine = enabled
+    return true
+end
+
 -- The kinds of chat tag whose color can be chosen (see ChatAnnotator).
 local CHAT_TAG_KINDS = { alias = true, main = true }
 

@@ -75,6 +75,7 @@ local MANIFEST_FILES = {
     "Core/ZoneLevels.lua",
     "Core/LfgRelevance.lua",
     "Core/LfgBoard.lua",
+    "Core/LfgDrawerModel.lua",
     "Core/RoleCatalog.lua",
     "Core/GroupSession.lua",
     "Core/GroupFinderProtocol.lua",

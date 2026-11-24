@@ -71,6 +71,10 @@ local agfWindow, lfgButton
 -- The Guild LFG Board: the player's own listing, the listings heard from
 -- guildmates, and the page drawing them (set up after the Group Finder).
 local lfgListing, lfgBoard, lfgPage, drawLfgBoard, onLfgMessage, probeLfg
+-- What the LFG button and drawer show (LfgDrawerModel), and the redraw of
+-- the button and the board when anything they show may have changed.
+local lfgDrawer = addon.LfgDrawerModel.Create()
+local lfgRefresh = function() end
 -- A guildmate's group-friend tier by character key (set up with the group
 -- friends below).
 local lfgFriendTier = function() return nil end
@@ -536,6 +540,27 @@ if clientProfile.supported then
             end
             if not store:SetLfgButtonShown(key, shown) then
                 return nil, "the saved layout is unreadable"
+            end
+            return true
+        end,
+    })
+    -- A chat line for each new Guild LFG Board group the character could
+    -- join, account-wide, off unless turned on.
+    settings:Add("general", {
+        id = "lfgChatLine",
+        kind = "toggle",
+        label = "Chat line for new LFG groups for you",
+        get = function()
+            local store = rosterController:Store()
+            return store ~= nil and store:LfgChatLine()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetLfgChatLine(enabled) then
+                return nil, "the saved setting is unreadable"
             end
             return true
         end,
@@ -1248,7 +1273,11 @@ if clientProfile.supported then
         frameName = addon.Identity.addonName .. "Window",
         modules = {
             { id = "lfg", label = "LFG", title = "Guild LFG Board",
-                settingsRows = { { id = "lfgButton", label = "Show LFG button" } },
+                settingsRows = {
+                    { id = "lfgButton", label = "Show LFG button" },
+                    { id = "lfgChatLine", label = "Chat line for new groups",
+                        info = "A line in chat for each new group you could join." },
+                },
                 draw = function(content, ui)
                     drawLfgBoard(content, ui)
                 end,
@@ -1302,6 +1331,20 @@ if clientProfile.supported then
             return settings:Get("lfgButton") == true
         end,
         onOpenBoard = openBoard,
+        onDrawerOpened = function()
+            lfgDrawer:Seen()
+            lfgRefresh()
+        end,
+        onStartGroup = function()
+            openBoard()
+            if lfgPage ~= nil and not lfgListing:IsActive() then
+                lfgPage:StartEditing()
+            end
+        end,
+        dungeonIcon = function(name)
+            local dungeon = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
+            return dungeon and dungeon.icon or nil
+        end,
         onHide = function()
             local hidden, reason = settings:Set("lfgButton", false)
             if hidden then
@@ -1327,6 +1370,10 @@ if clientProfile.supported then
     settings:OnChange(function(id)
         if id == "lfgButton" then
             lfgButton:Refresh()
+        end
+        -- Do Not Disturb stops the glow; a shown button needs its count.
+        if id == "lfgButton" or id == "dnd" then
+            lfgRefresh()
         end
     end)
     -- Brings the button back if it was hidden, and opens the board.
@@ -1485,9 +1532,7 @@ if clientProfile.supported then
     lfgBoard = addon.LfgBoard.Create()
     local lfgWaiting, lfgFlushing, lfgHeartbeat
     local function refreshLfg()
-        if lfgPage ~= nil then
-            lfgPage:Refresh()
-        end
+        lfgRefresh()
     end
     local function flushLfg()
         lfgFlushing = false
@@ -1661,6 +1706,56 @@ if clientProfile.supported then
         end
         for index = 1, #groups.other do
             describe("Other", groups.other[index])
+        end
+    end
+    -- The player's party for the drawer, or nil when they're not in one:
+    -- its listing when they lead one, else just its size.
+    local function lfgParty()
+        if not client:IsInGroup() then
+            return nil
+        end
+        local raid = client:IsInRaid() == true
+        local size = #(client:GetPartyMembers() or {})
+        local party = { kind = raid and "raid" or "other", size = math.max(size, 1),
+            maxSize = raid and addon.LfgListing.RAID_SIZE or addon.LfgListing.PARTY_SIZE }
+        local fields = lfgListing:IsActive() and lfgListing:Announcement(lfgMembers()) or nil
+        if fields ~= nil then
+            party.kind, party.label, party.note = fields.k, addon.LfgListing.Label(fields.k, fields.p), fields.no
+            party.openRoles = fields.r
+        end
+        return party
+    end
+    -- Redraws the button (count, glow, drawer) and the board. New groups for
+    -- the player get a chat line when they asked for one.
+    lfgRefresh = function()
+        if lfgPage ~= nil then
+            lfgPage:Refresh()
+        end
+        -- With nothing heard, there's nothing to sort (and the guild's saved
+        -- data isn't touched).
+        local groups = { relevant = {}, alts = {}, other = {} }
+        if lfgBoard:Listings(client:Timestamp())[1] ~= nil then
+            local current, alts = lfgCharacters()
+            groups = lfgBoard:Groups(client:Timestamp(), current, alts)
+        end
+        local view = lfgDrawer:Update({
+            groups = groups,
+            party = lfgParty(),
+            combat = comm:IsBusy(),
+            instance = client:IsInInstance(),
+            dnd = settings:Get("dnd") == true,
+        })
+        if lfgButton ~= nil then
+            lfgButton:Update(view)
+        end
+        if settings:Get("lfgChatLine") == true then
+            local index
+            for index = 1, #view.fresh do
+                local listing = view.fresh[index]
+                rosterController:Print("New group for you on the Guild LFG Board: " ..
+                    addon.LfgListing.Label(listing.kind, listing.purpose) .. " (" .. listing.leader .. "). Type " ..
+                    addon.Identity.slashCommand .. " lfg to see it.")
+            end
         end
     end
     -- Start a group (or Edit) saved: the listing starts or changes, and the
@@ -4914,6 +5009,13 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     if lfgButton ~= nil then
         lfgButton:Refresh()
     end
+    -- The board drops listings gone quiet, and the button follows, even
+    -- with nothing else happening.
+    local function tickLfg()
+        lfgRefresh()
+        client:After(addon.LfgBoard.REFRESH_SECONDS, tickLfg)
+    end
+    tickLfg()
     -- Without the comm libraries, sync simply stays off, and Guild Greet and
     -- Guild Recruit work uncoordinated.
     comm:OnHeard(function(sender)
@@ -4997,6 +5099,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     local busy = client:ObserveCombat(function(inCombat)
         guildGreet:OnCombatChanged(inCombat)
         guildRecruit:OnCombatChanged(inCombat)
+        -- The LFG button's glow waits out combat.
+        lfgRefresh()
         -- A location held back by combat goes out once it ends.
         if not inCombat and shareLocationNow ~= nil then
             client:After(1, shareLocationNow)
@@ -5011,6 +5115,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     client:ObserveZone(function()
         guildRecruit:Refresh()
         guildGreet:OnZoneChanged()
+        -- Relevance and Nearby follow the zone; no glow in instances.
+        lfgRefresh()
     end)
     guildRecruit:Refresh()
     -- The Group Finder's slots follow the party, and every party with
@@ -5018,6 +5124,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     client:ObserveParty(function()
         syncParty()
         recordParty()
+        -- The drawer shows the party; no glow while in one.
+        lfgRefresh()
         if groupFinder ~= nil then
             groupFinder:Refresh()
         end

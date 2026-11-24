@@ -7,6 +7,9 @@ local _, addon = ...
 -- messages, characters and times are handed in.
 local LfgBoard = {
     STALE_SECONDS = 5 * 60,
+    -- How often the board is looked at again with nothing new heard, so
+    -- quiet listings drop.
+    REFRESH_SECONDS = 30,
 }
 addon.LfgBoard = LfgBoard
 
