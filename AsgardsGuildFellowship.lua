@@ -95,6 +95,7 @@ local lfgJoin = {
     invite = function() end,
     decline = function() end,
     announce = function() end,
+    sweep = function() return {} end,
 }
 local LFG_HAND_OFF_SECONDS = 5
 -- A guildmate's group-friend tier by character key (set up with the group
@@ -1875,7 +1876,7 @@ if clientProfile.supported then
             dnd = settings:Get("dnd") == true,
             ask = lfgTrigger:Asking(),
             gate = lfgTrigger:Gating(),
-            requests = lfgJoin.requests:List(),
+            requests = lfgJoin.sweep(),
             requestOf = function(id)
                 return lfgBoard:Request(id, client:Timestamp())
             end,
@@ -2135,6 +2136,27 @@ if clientProfile.supported then
     lfgJoin.decline = function(request)
         lfgJoin.answer(request, "declined")
     end
+    -- Tidies the requests and returns those left: ones unanswered for two
+    -- minutes are expired, and once a role (or the whole party) fills, the
+    -- ones it no longer has room for are declined with "role filled".
+    lfgJoin.sweep = function()
+        local requests = lfgJoin.requests
+        if requests:List()[1] == nil then
+            return {}
+        end
+        local function tell(dropped, answer)
+            local index
+            for index = 1, #dropped do
+                comm:Whisper(addon.LfgProtocol.Answer(answer), dropped[index].sender, true)
+            end
+        end
+        tell(requests:Expire(client:Timestamp()), "expired")
+        local fields = lfgListing:Announcement(lfgMembers())
+        if fields ~= nil then
+            tell(requests:Filled(fields.k == "dungeon" and fields.r or nil, fields.s >= fields.x), "roleFilled")
+        end
+        return requests:List()
+    end
     drawLfgBoard = function(content, ui)
         lfgPage = addon.LfgBoardPage.Create(content, ui, {
             listing = lfgListing,
@@ -2262,9 +2284,16 @@ if clientProfile.supported then
             then
                 return
             end
+            -- Do Not Disturb declines them without a word to the player.
+            if settings:Get("dnd") == true then
+                comm:Whisper(addon.LfgProtocol.Answer("declined"), sender, true)
+                return
+            end
             local added = lfgJoin.requests:Add({ key = senderKey, sender = sender,
                 name = string.match(sender, "^[^%-]+") or sender, classToken = message.c, level = message.l,
-                role = message.r })
+                role = message.r }, client:Timestamp() or 0)
+            -- Looked at again when it would expire.
+            client:After(addon.LfgRequests.EXPIRE_SECONDS, lfgRefresh)
             lfgRefresh()
             if added and lfgButton ~= nil and lfgButton:IsShowing() and not lfgButton:DrawerOpen() then
                 lfgButton:OpenDrawer()

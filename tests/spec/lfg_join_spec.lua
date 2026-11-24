@@ -242,3 +242,37 @@ test.test("lfg drawer model: passes the requests on, and the newest group's own 
     test.assertEqual(requests, view.requests)
     test.assertEqual(0, #model:Update({}).requests)
 end)
+
+test.test("lfg requests: unanswered ones expire after two minutes", function()
+    local addon = test.newAddon("Core/LfgRequests.lua")
+    local LfgRequests = addon.LfgRequests
+    local requests = LfgRequests.Create()
+    requests:Add({ key = "hammer" }, 100)
+    requests:Add({ key = "zap" }, 150)
+    test.assertEqual(0, #requests:Expire(100 + LfgRequests.EXPIRE_SECONDS - 1))
+    local expired = requests:Expire(100 + LfgRequests.EXPIRE_SECONDS)
+    test.assertEqual(1, #expired)
+    test.assertEqual("hammer", expired[1].key)
+    test.assertEqual("zap", requests:List()[1].key)
+    test.assertEqual(0, #requests:Expire(nil))
+end)
+
+test.test("lfg requests: a filled role declines its requests, and a full party all of them", function()
+    local addon = test.newAddon("Core/LfgRequests.lua")
+    local requests = addon.LfgRequests.Create()
+    requests:Add({ key = "hammer", role = "healer" }, 0)
+    requests:Add({ key = "tool", role = "tank" }, 0)
+    requests:Add({ key = "zap", role = "dps" }, 0)
+
+    -- The healer slot is taken: only Hammer's ask goes.
+    local filled = requests:Filled({ "tank", "dps" }, false)
+    test.assertEqual(1, #filled)
+    test.assertEqual("hammer", filled[1].key)
+    test.assertEqual(2, #requests:List())
+
+    -- Not a dungeon: no roles to fill, nothing goes until it's full.
+    requests:Add({ key = "bolt" }, 0)
+    test.assertEqual(0, #requests:Filled(nil, false))
+    test.assertEqual(3, #requests:Filled(nil, true))
+    test.assertEqual(0, #requests:List())
+end)

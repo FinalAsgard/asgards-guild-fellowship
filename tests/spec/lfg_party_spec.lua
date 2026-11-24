@@ -927,3 +927,48 @@ test.test("Forever a leader with the LFG button hidden is whispered instead, and
     fixtures.deliver(channel)
     test.assertFalse(toolAddon.lfgButton:DrawerOpen())
 end)
+
+test.test("Forever an unanswered request expires after two minutes, and the asker hears so", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = listedStrat(channel)
+    local card = addon.lfgPage.largeCards[1]
+    click(card.ask)
+    click(addon.lfgPage.roleMenu.rows[1])
+    fixtures.deliver(channel)
+    local toast = toolAddon.lfgButton.toasts[1]
+    test.assertTrue(toast.shown)
+
+    fixtures.runTimers(tool, toolAddon.LfgRequests.EXPIRE_SECONDS)
+    test.assertFalse(toast.shown)
+    fixtures.deliver(channel)
+    test.assertEqual("expired", addon.lfgBoard:Request(card.listing.id, hammer.time).state)
+end)
+
+test.test("Forever an ask for a role that's taken is declined with role filled", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = listedStrat(channel)
+    -- The warrior leads as the tank; the tank slot isn't open.
+    local listing = addon.lfgPage.largeCards[1].listing
+    test.assertEqual("healer,dps", table.concat(listing.openRoles, ","))
+    addon.lfgPage.options.onAsk(listing, "tank")
+    fixtures.deliver(channel)
+    test.assertEqual(nil, toolAddon.lfgButton.toasts[1])
+    fixtures.deliver(channel)
+    local request = addon.lfgBoard:Request(listing.id, hammer.time)
+    test.assertEqual("declined", request.state)
+    test.assertTrue(request.roleFilled)
+end)
+
+test.test("Forever in Do Not Disturb, Ask to join requests are declined without a prompt", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = listedStrat(channel)
+    test.assertTrue(toolAddon.settings:Set("dnd", true))
+    local card = addon.lfgPage.largeCards[1]
+    click(card.ask)
+    click(addon.lfgPage.roleMenu.rows[1])
+    fixtures.deliver(channel)
+    test.assertFalse(toolAddon.lfgButton:DrawerOpen())
+    test.assertEqual(nil, toolAddon.lfgButton.toasts[1])
+    fixtures.deliver(channel)
+    test.assertEqual("declined", addon.lfgBoard:Request(card.listing.id, hammer.time).state)
+end)
