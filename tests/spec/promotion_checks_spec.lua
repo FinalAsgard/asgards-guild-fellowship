@@ -169,6 +169,131 @@ test.test("a snapshot covers what's held only with every current tick, as new or
     test.assertFalse(inputs.checks:CoveredBy("junk"))
 end)
 
+-- Snoozes -----------------------------------------------------------------------
+
+-- A snooze record for `character`.
+local function snoozeRecord(character, rank, untilTime, at, by)
+    return { t = "snooze", character = character, rank = rank, untilTime = untilTime, at = at, by = by }
+end
+
+-- A PromotionChecks whose characters (key -> rank) the test sets.
+local function snoozeChecks(ranks)
+    local addon = load()
+    local starts = {}
+    local checks = addon.PromotionChecks.Create({}, {
+        isOfficer = isOfficer,
+        rankOf = function(key)
+            return ranks[key]
+        end,
+        stintStart = function(key)
+            return starts[key]
+        end,
+    })
+    return checks, starts
+end
+
+test.test("an officer's Not ready snoozes a character, the newest snooze wins, and members are refused", function()
+    local checks = snoozeChecks({ bolt = 4 })
+
+    local records, reason = checks:Snooze("bolt", 4, NOW + 7 * DAY, MEMBER, NOW)
+    test.assertEqual(nil, records)
+    test.assertEqual("only officers can snooze a promotion check", reason)
+    test.assertFalse(checks:Apply(snoozeRecord("bolt", 4, NOW + DAY, NOW, MEMBER)), "a member's record")
+    test.assertEqual(nil, (checks:Snooze("bolt", 3, NOW + DAY, OFFICER, NOW)), "not its current rank")
+    test.assertEqual(nil, (checks:Snooze("bolt", 4, NOW, OFFICER, NOW)), "it has to end later")
+
+    records = checks:Snooze("bolt", 4, NOW + 7 * DAY, OFFICER, NOW)
+    test.assertEqual("snooze", records[1].t)
+    local snooze = checks:SnoozeOf("bolt")
+    test.assertEqual(NOW + 7 * DAY, snooze.untilTime)
+    test.assertEqual(OFFICER, snooze.by)
+    test.assertTrue(checks:IsSnoozed("bolt", NOW))
+
+    test.assertFalse(checks:Apply(snoozeRecord("bolt", 4, NOW + 90 * DAY, NOW - 5, OTHER_OFFICER)), "older")
+    test.assertTrue(checks:Apply(snoozeRecord("bolt", 4, NOW + 3 * DAY, NOW + 5, OTHER_OFFICER)), "newer")
+    test.assertEqual(NOW + 3 * DAY, checks:SnoozeOf("bolt").untilTime)
+    test.assertEqual(OTHER_OFFICER, checks:SnoozeOf("bolt").by)
+    test.assertEqual(nil, checks:SnoozeOf("nail"))
+    test.assertFalse(checks:IsSnoozed("nail", NOW))
+end)
+
+test.test("a snooze lasts until its end time, not at it", function()
+    local checks = snoozeChecks({ bolt = 4 })
+    checks:Snooze("bolt", 4, NOW + DAY, OFFICER, NOW)
+
+    test.assertTrue(checks:IsSnoozed("bolt", NOW + DAY - 1))
+    test.assertFalse(checks:IsSnoozed("bolt", NOW + DAY))
+    test.assertFalse(checks:IsSnoozed("bolt", NOW + DAY + 1))
+    test.assertFalse(checks:IsSnoozed("bolt", nil), "no time, no snooze")
+end)
+
+test.test("a rank change or new stint makes a snooze stale: ignored, pruned, and never sent", function()
+    local ranks = { bolt = 4, nail = 4, rivet = 4 }
+    local checks, starts = snoozeChecks(ranks)
+    checks:Snooze("bolt", 4, NOW + 7 * DAY, OFFICER, NOW)
+    checks:Snooze("nail", 4, NOW + 7 * DAY, OFFICER, NOW)
+    checks:Snooze("rivet", 4, NOW + DAY, OFFICER, NOW)
+    test.assertEqual(3, #checks:Snapshot())
+
+    -- Bolt is promoted; Nail was demoted back to its rank, unseen here.
+    ranks.bolt = 3
+    starts.nail = NOW + 60
+    test.assertEqual(nil, checks:SnoozeOf("bolt"))
+    test.assertFalse(checks:IsSnoozed("nail", NOW + 120))
+    test.assertFalse(checks:Apply(snoozeRecord("bolt", 4, NOW + 7 * DAY, NOW + 10, OTHER_OFFICER)),
+        "a snooze for the old rank arriving late")
+    test.assertEqual(1, #checks:Snapshot(), "only Rivet's is sent")
+    test.assertEqual(2, checks:Prune())
+    ranks.bolt = 4
+    test.assertEqual(nil, checks:SnoozeOf("bolt"), "demoted back: the old snooze doesn't come back")
+end)
+
+test.test("an ended snooze stops snoozing but is kept and sent, so an older one can't come back", function()
+    local checks = snoozeChecks({ bolt = 4 })
+    checks:Snooze("bolt", 4, NOW + 7 * DAY, OTHER_OFFICER, NOW)
+    -- A newer, shorter snooze replaces it, and ends.
+    test.assertTrue(checks:Apply(snoozeRecord("bolt", 4, NOW + DAY, NOW + 5, OFFICER)))
+    test.assertFalse(checks:IsSnoozed("bolt", NOW + 2 * DAY))
+    test.assertEqual(0, checks:Prune(), "an ended snooze isn't stale")
+    test.assertEqual(1, #checks:Snapshot(), "and is still sent")
+
+    -- An add-on that missed the newer one sends the older, still running.
+    test.assertFalse(checks:Apply(snoozeRecord("bolt", 4, NOW + 7 * DAY, NOW, OTHER_OFFICER), true))
+    test.assertFalse(checks:IsSnoozed("bolt", NOW + 2 * DAY), "the clock stays back")
+
+    -- And one that missed it learns the newer stamp.
+    local other = snoozeChecks({ bolt = 4 })
+    other:Apply(snoozeRecord("bolt", 4, NOW + 7 * DAY, NOW, OTHER_OFFICER), true)
+    test.assertTrue(other:Apply(checks:Snapshot()[1], true))
+    test.assertFalse(other:IsSnoozed("bolt", NOW + 2 * DAY))
+end)
+
+test.test("snoozes travel with ticks in the snapshot and the cover check", function()
+    local checks = snoozeChecks({ bolt = 4 })
+    local other = snoozeChecks({ bolt = 4 })
+    checks:Set("bolt", { id = "rules", rank = 4, kind = "check" }, true, nil, OFFICER, NOW)
+    other:Set("bolt", { id = "rules", rank = 4, kind = "check" }, true, nil, OFFICER, NOW)
+    checks:Snooze("bolt", 4, NOW + 7 * DAY, OFFICER, NOW)
+
+    local snapshot = checks:Snapshot()
+    test.assertEqual(2, #snapshot)
+    test.assertFalse(checks:CoveredBy(other:Snapshot()), "the other add-on hasn't the snooze")
+    local index
+    for index = 1, #snapshot do
+        other:Apply(snapshot[index], true)
+    end
+    test.assertTrue(other:IsSnoozed("bolt", NOW))
+    test.assertTrue(checks:CoveredBy(other:Snapshot()))
+end)
+
+test.test("an add-on that doesn't know snoozes refuses just those records", function()
+    local checks = snoozeChecks({ bolt = 4 })
+    test.assertFalse(checks:Apply({ t = "nap", character = "bolt", rank = 4, at = NOW, by = OFFICER }, true))
+    test.assertFalse(checks:Apply(snoozeRecord("bolt", 4, "soon", NOW, OFFICER), true), "a bad end time")
+    test.assertTrue(checks:Apply({ t = "tick", character = "bolt", rank = 4, item = "rules", ticked = true,
+        at = NOW, by = OFFICER }, true), "the next record still applies")
+end)
+
 -- The rules engine ----------------------------------------------------------------
 
 local function itemOf(row, id)
@@ -206,18 +331,39 @@ test.test("each character at a rank with requirements gets its next rank, progre
     test.assertEqual(nil, addon.PromotionPolicy.Evaluate(inputs, "rivet"))
 end)
 
-test.test("a character shows its player's highest rank when another character holds a higher one", function()
-    local inputs, addon = newGuild({ main = 1, alt = 4, solo = 4 })
-    addItem(inputs, 4, "Read the rules")
+test.test("a player has one rank-up profile, on its highest-ranked character", function()
+    local inputs, addon = newGuild({ main = 4, alt = 3, twin = 4, solo = 4 })
+    local rules = addItem(inputs, 4, "Read the rules")
+    addItem(inputs, 3, "Attend an event")
     inputs.partition:JoinPlayerOf("alt", "main", "manual")
+    inputs.partition:JoinPlayerOf("twin", "main", "manual")
+    local policy = addon.PromotionPolicy
 
-    local alt = addon.PromotionPolicy.Evaluate(inputs, "alt")
-    test.assertEqual(1, alt.highestRank)
-    test.assertEqual("Officer", alt.highestRankName)
-    test.assertEqual(nil, addon.PromotionPolicy.Evaluate(inputs, "solo").highestRank)
-    -- A character who left doesn't count.
-    inputs.partition:MarkDeparted("main", NOW)
-    test.assertEqual(nil, addon.PromotionPolicy.Evaluate(inputs, "alt").highestRank)
+    test.assertEqual("alt", policy.ProfileOf(inputs.partition, "main"), "the alt outranks the main")
+    test.assertEqual("alt", policy.ProfileOf(inputs.partition, "twin"))
+    test.assertEqual("solo", policy.ProfileOf(inputs.partition, "solo"), "no player: its own")
+    test.assertTrue(policy.Evaluate(inputs, "alt") ~= nil)
+    test.assertEqual(nil, policy.Evaluate(inputs, "main"), "the others have no checklist of their own")
+    test.assertEqual(nil, policy.Evaluate(inputs, "twin"))
+
+    -- Ticking a follower's item doesn't make it Ready.
+    inputs.checks:Set("main", rules, true, nil, OFFICER, NOW)
+    test.assertEqual(nil, policy.ReadySet(inputs).main)
+
+    -- On a tie, the main holds it; a character who left doesn't count.
+    inputs.partition:MarkDeparted("alt", NOW)
+    test.assertEqual("main", policy.ProfileOf(inputs.partition, "twin"))
+    test.assertTrue(policy.ReadySet(inputs).main, "the main's ticks now count")
+    test.assertEqual(nil, policy.Evaluate(inputs, "twin"))
+end)
+
+test.test("the panel says whose checklist a player's other characters follow", function()
+    local _, addon = newGuild({ main = 4 })
+    local rows = addon.PromotionsViewModel.PanelRows({
+        { key = "main", name = "Main", rankName = "Initiate", evaluated = nil, follows = "Alt" },
+    }, { officer = true })
+    test.assertContains(rows[1].text, "checklist on Alt")
+    test.assertFalse(string.find(rows[1].text, "no requirements", 1, true) ~= nil)
 end)
 
 test.test("an item's tooltip says who ticked it, when, and its note", function()
@@ -274,7 +420,7 @@ end)
 
 test.test("player days in guild count from the earliest join among the player's characters still in the guild",
     function()
-    local inputs, addon = newGuild({ main = 2, alt = 4, gone = 4 })
+    local inputs, addon = newGuild({ main = 5, alt = 4, gone = 4 })
     local item = addItem(inputs, 4, "", "player-guild-days", 30)
     inputs.partition:JoinPlayerOf("alt", "main", "manual")
     inputs.partition:JoinPlayerOf("gone", "main", "manual")
@@ -378,7 +524,7 @@ test.test("an officer overrides a failed automated item with an optional reason,
 end)
 
 test.test("the add-on check passes when any of the player's characters was ever heard", function()
-    local inputs, addon = newGuild({ main = 2, alt = 4, solo = 4, quiet = 4 })
+    local inputs, addon = newGuild({ main = 5, alt = 4, solo = 4, quiet = 4 })
     local records = inputs.requirements:Add(4, "", "addon", RANKS[5], OFFICER, NOW)
     local item = records[1]
     test.assertEqual(nil, item.n, "a yes or no check, with no number")
@@ -696,7 +842,92 @@ test.test("the roster marks ready characters' rows, and clears marks that no lon
     test.assertEqual(nil, rows[2].ready)
 end)
 
+test.test("the rank cell shows Ready over the timer, the timer, or no marker", function()
+    local Roster = test.newAddon("Core/RosterViewModel.lua").RosterViewModel
+    local rows = { { kind = "character", key = "both" }, { kind = "character", key = "due" },
+        { kind = "character", key = "neither" } }
+    test.assertTrue(Roster.MarkReady(rows, { both = true }, { both = true, due = true }))
+    test.assertEqual("ready", Roster.RankMarker(rows[1]))
+    test.assertEqual("timer", Roster.RankMarker(rows[2]))
+    test.assertEqual(nil, Roster.RankMarker(rows[3]))
+    test.assertFalse(Roster.MarkReady(rows, { both = true }, { both = true, due = true }), "nothing changed")
+    test.assertTrue(Roster.MarkReady(rows, { both = true }, nil), "a member gets no timer keys")
+    test.assertEqual(nil, Roster.RankMarker(rows[2]))
+end)
+
+test.test("the timer icon falls back to text only when the client says its texture is missing", function()
+    local Roster = test.newAddon("Core/RosterViewModel.lua").RosterViewModel
+    test.assertContains(Roster.TimerIcon(true), Roster.TIMER_TEXTURE)
+    test.assertContains(Roster.TimerIcon(nil), Roster.TIMER_TEXTURE, "a client that can't say tries the texture")
+    test.assertEqual(Roster.TIMER_FALLBACK, Roster.TimerIcon(false))
+end)
+
 -- In the composed add-on -----------------------------------------------------------
+
+test.test("a character's line offers Not ready while its timer shows, then says who snoozed it until when",
+    function()
+    local inputs, addon = newGuild({ due = 4, snoozed = 4, ready = 4, early = 4 })
+    inputs.requirements:SetAutomated(4, "char-guild-days", true, 7, RANKS[5], OFFICER, NOW)
+    local rules = addItem(inputs, 4, "Read the rules")
+    local key
+    for _, key in ipairs({ "due", "snoozed", "ready" }) do
+        inputs.dates:Offer(key, "joined", { time = NOW - 30 * DAY, source = "log" })
+    end
+    inputs.dates:Offer("early", "joined", { time = NOW - DAY, source = "log" })
+    inputs.checks:Set("ready", rules, true, nil, OFFICER, NOW)
+    local snoozes = { snoozed = { untilTime = NOW + 7 * DAY, by = OFFICER, at = NOW } }
+    local function panel(officer)
+        local characters = {}
+        local index
+        local keys = { "due", "snoozed", "ready", "early" }
+        for index = 1, #keys do
+            table.insert(characters, { key = keys[index], name = keys[index], rankName = RANKS[5],
+                evaluated = addon.PromotionPolicy.Evaluate(inputs, keys[index]), snooze = snoozes[keys[index]] })
+        end
+        return addon.PromotionsViewModel.PanelRows(characters, {
+            officer = officer,
+            nameOf = function(name)
+                return name == OFFICER and "Toolbox" or name
+            end,
+            formatDate = function(time)
+                return time == NOW + 7 * DAY and "2026-10-27" or "?"
+            end,
+        })
+    end
+
+    -- The button is on its own line, the last of the character's.
+    local function notReady(rows, key)
+        local last, index
+        for index = 1, #rows do
+            if rows[index].key == key then
+                last = rows[index]
+            end
+        end
+        return last ~= nil and last.action == "Not ready" and last.snooze == "can" and last or nil
+    end
+
+    local rows = panel(true)
+    test.assertEqual("can", rowWith(rows, "due: Initiate").snooze)
+    test.assertEqual(nil, rowWith(rows, "due: Initiate").action, "the header doesn't crowd its rank names")
+    test.assertTrue(notReady(rows, "due") ~= nil, "Not ready under the closed header")
+    test.assertEqual("snoozed", rowWith(rows, "snoozed: Initiate").snooze)
+    test.assertEqual(nil, notReady(rows, "snoozed"), "no button while snoozed")
+
+    -- Open, it's under the checklist.
+    local open = addon.PromotionsViewModel.PanelRows({ { key = "due", name = "due", rankName = RANKS[5],
+        evaluated = addon.PromotionPolicy.Evaluate(inputs, "due") } }, { officer = true, expanded = { due = true } })
+    test.assertTrue(notReady(open, "due") ~= nil)
+    test.assertTrue(open[#open - 1].item ~= nil or open[#open - 1].noteInput, "after the requirements")
+    test.assertTrue(rowWith(rows, "Snoozed until 2026-10-27 by Toolbox").snoozed)
+    test.assertEqual("none", rowWith(rows, "ready: Initiate").snooze, "Ready, so no timer")
+    test.assertEqual("none", rowWith(rows, "early: Initiate").snooze, "time not up")
+
+    rows = panel(false)
+    test.assertEqual("none", rowWith(rows, "due: Initiate").snooze, "members get none")
+    test.assertEqual(nil, notReady(rows, "due"))
+    test.assertEqual("none", rowWith(rows, "snoozed: Initiate").snooze)
+    test.assertEqual(nil, rowWith(rows, "Snoozed until"))
+end)
 
 local NAMES = {
     Forever = { "Tool Box", "Hammer Smith", "Bolt Nut" },
@@ -919,6 +1150,101 @@ for profileIndex = 1, #fixtures.PROFILES do
         hammer.messages = {}
         fixtures.slash(hammer, "probe ready")
         test.assertContains(table.concat(hammer.messages, "\n"), "Only officers")
+    end)
+
+    test.test(profile .. " /agf probe timer counts whose time is up, and the count follows ticks", function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local hammer = login(profile, channel, names[2])
+        settle(channel, 5)
+        local promotions = tool.addon.promotions
+        test.assertTrue(promotions.add("Read the rules", false))
+        test.assertTrue(promotions.automated("char-guild-days", true, "7"))
+        local boltKey = keyOf(tool, names[3])
+        local _, partition = tool.addon.rosterController:QuietContext()
+        partition:GetMembershipDates().characters[boltKey].joined =
+            { time = tool.time - 10 * DAY, source = "log", at = tool.time, by = tool.addon.rosterController:SelfKey() }
+        test.assertTrue(promotions.timeMetKeys()[boltKey])
+        tool.messages = {}
+        fixtures.slash(tool, "probe timer")
+        local printed = table.concat(tool.messages, "\n")
+        test.assertContains(printed, "Timer marker probe:")
+        test.assertContains(printed, "Texture: " .. tool.addon.RosterViewModel.TIMER_TEXTURE)
+        test.assertContains(printed, "Loaded:")
+        test.assertContains(printed, "Time requirement met: 1")
+
+        -- Ticking the manual item makes Bolt Ready, which replaces the timer.
+        test.assertTrue(promotions.tick(boltKey, promotions.view().items[1].id, true))
+        test.assertTrue(promotions.readyKeys()[boltKey])
+        test.assertEqual(nil, promotions.timeMetKeys()[boltKey])
+
+        test.assertEqual(nil, hammer.addon.promotions.timeMetKeys(), "members get no timer keys")
+        hammer.messages = {}
+        fixtures.slash(hammer, "probe timer")
+        test.assertContains(table.concat(hammer.messages, "\n"), "Only officers")
+    end)
+
+    test.test(profile .. " Not ready snoozes the timer for the rank's length, shared, and Ready still shows",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local hammer = login(profile, channel, names[2])
+        settle(channel, 5)
+        local promotions = tool.addon.promotions
+        test.assertTrue(promotions.add("Read the rules", false))
+        test.assertTrue(promotions.automated("char-guild-days", true, "7"))
+        test.assertTrue(promotions.snoozeDays("3"))
+        local boltKey = keyOf(tool, names[3])
+        local _, partition = tool.addon.rosterController:QuietContext()
+        partition:GetMembershipDates().characters[boltKey].joined =
+            { time = tool.time - 10 * DAY, source = "log", at = tool.time, by = tool.addon.rosterController:SelfKey() }
+        local rows, header = panelOf(tool, names[3])
+        test.assertEqual("can", header.snooze)
+        local button = rows[#rows]
+        test.assertEqual("Not ready", button.action, "under the checklist")
+        test.assertEqual(header.key, button.key)
+
+        local clicked = tool.time
+        test.assertTrue(promotions.snooze(boltKey))
+        test.assertEqual(nil, promotions.timeMetKeys()[boltKey], "the timer is snoozed")
+        rows, header = panelOf(tool, names[3])
+        test.assertEqual("snoozed", header.snooze)
+        test.assertEqual(nil, rows[#rows].action)
+        local index, snoozedLine
+        for index = 1, #rows do
+            if rows[index].snoozed then
+                snoozedLine = rows[index]
+            end
+        end
+        test.assertContains(snoozedLine.text, "Snoozed until ")
+        test.assertContains(snoozedLine.text, " by ")
+
+        -- A later change to the length doesn't move the snooze.
+        test.assertTrue(promotions.snoozeDays("30"))
+        settle(channel, 5)
+        local _, memberPartition = hammer.addon.rosterController:QuietContext()
+        local found
+        local _, record
+        for _, record in pairs(memberPartition:GetPromotionChecks().records) do
+            if record.t == "snooze" then
+                found = record
+            end
+        end
+        test.assertEqual(boltKey, found.character, "the snooze reaches a member's add-on")
+        test.assertEqual(clicked + 3 * DAY, found.untilTime)
+        local refused = hammer.addon.promotions.snooze(boltKey)
+        test.assertFalse(refused, "members can't snooze")
+
+        -- Ticking the missing item makes Bolt Ready, snooze or not.
+        test.assertTrue(promotions.tick(boltKey, promotions.view().items[1].id, true))
+        test.assertTrue(promotions.readyKeys()[boltKey])
+        promotions.tick(boltKey, promotions.view().items[1].id, false)
+
+        -- When the snooze ends, the timer comes back.
+        tool.time = clicked + 3 * DAY
+        test.assertTrue(promotions.timeMetKeys()[boltKey])
+        _, header = panelOf(tool, names[3])
+        test.assertEqual("can", header.snooze)
     end)
 
     test.test(profile .. " the add-on check passes for a member whose add-on was heard, and the officer shares it",

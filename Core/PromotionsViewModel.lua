@@ -10,6 +10,8 @@ local PromotionsViewModel = {
     -- The color of a "Promote to match" line (the roster's match arrow
     -- shares it).
     MATCH_COLOR = "|cff4da6ff",
+    -- The button that snoozes a character's timer marker.
+    NOT_READY = "Not ready",
 }
 addon.PromotionsViewModel = PromotionsViewModel
 
@@ -84,6 +86,8 @@ end
 --   empty     what to say instead of custom items, or nil
 --   matchAlts whether the rank's "Alts should match this rank" box is
 --             ticked (nil for the guild master's rank, which has none)
+--   snoozeDays how many days Not ready snoozes for at the rank (nil for
+--             the guild master's rank, likewise)
 function PromotionsViewModel.Editor(inputs)
     local requirements, names = inputs.requirements, inputs.rankNames or {}
     local rank = PromotionsViewModel.PickRank(inputs.rank, requirements, names)
@@ -100,6 +104,7 @@ function PromotionsViewModel.Editor(inputs)
     }
     if rank >= 1 then
         model.matchAlts = requirements:MatchesAlts(rank)
+        model.snoozeDays = requirements:SnoozeDays(rank)
     end
     if requirements:Mismatch(rank, name) then
         model.mismatch = "Set up when rank " .. rank .. " was called \"" .. requirements:RankName(rank) ..
@@ -193,7 +198,10 @@ end
 --   { key, name, rankName, evaluated (PromotionPolicy.Evaluate, or nil
 --     when its rank has no requirements), lastPromotion (a MembershipDates
 --     record, or nil), matchRankName (the rank to promote it to so it
---     matches its player's other characters, or nil) }
+--     matches its player's other characters, or nil), snooze (its
+--     running snooze, PromotionChecks:SnoozeOf, or nil), follows (the
+--     name of the character holding the player's checklist, see
+--     PromotionPolicy.ProfileOf, when it isn't this one, or nil) }
 -- Add-ons can't promote: an officer promotes in the game's guild window.
 -- options: officer (true for an officer's view: check boxes, Override,
 -- who ticked, notes and reasons; false for a member's own view,
@@ -203,10 +211,15 @@ end
 -- the first character with a checklist, not just a promotion date, unless
 -- `expanded` closes it).
 -- Rows: { kind = "stat", text } lines, then for each character
---   { kind = "promotion", text, key, toggle?, expanded? }, `toggle` when
---   it has a checklist (or a promotion date) to open, then for an officer
---   a "Promote to match: <rank>" line { kind = "promotion", key, text,
---   match = true } when the character has a match target, and when open
+--   { kind = "promotion", text, key, toggle?, expanded?, snooze },
+--   `toggle` when it has a checklist (or a promotion date) to open.
+--   `snooze` is "can" when an officer sees its timer marker (its time is
+--   up, it isn't Ready, and it isn't snoozed), "snoozed" when that marker
+--   is snoozed, and "none" otherwise and for members. Then for an officer a "Promote to match:
+--   <rank>" line { kind = "promotion", key, text, match = true } when the
+--   character has a match target, a "Snoozed until <date> by <officer>"
+--   line { kind = "promotion", key, text, snoozed = true } when snoozed,
+--   and when open
 --   { kind = "promotion", text, key, item, action?, ticked, needsNote,
 --     tooltip?, check, checked, canCheck?, note? }
 -- where `action` names an automated item's button, Override or Undo
@@ -218,6 +231,9 @@ end
 -- override's optional reason:
 --   { kind = "promotion", key, item, noteInput = true, ticked, note?,
 --     reason? }
+-- and last, when `snooze` is "can", the Not ready button's line
+--   { kind = "promotion", key, text, snooze = "can", action }
+-- under the checklist (or the header, when it's closed).
 function PromotionsViewModel.PanelRows(characters, options)
     options = options or {}
     local nameOf = options.nameOf or tostring
@@ -233,19 +249,32 @@ function PromotionsViewModel.PanelRows(characters, options)
         local character = characters[index]
         local evaluated = character.evaluated
         local text = tostring(character.name) .. ": " .. tostring(character.rankName)
-        if evaluated == nil then
+        if character.follows ~= nil then
+            text = text .. "  |cff9d9d9dchecklist on " .. tostring(character.follows) .. "|r"
+        elseif evaluated == nil then
             text = text .. "  |cff9d9d9dno requirements|r"
         else
             text = text .. " -> " .. evaluated.nextRankName .. ", " .. evaluated.met .. " of " .. evaluated.total ..
                 (evaluated.ready and "  |cff40ff40Ready for promotion|r" or "")
         end
         local last = options.officer and character.lastPromotion or nil
-        local header = { kind = "promotion", key = character.key, text = text }
+        local header = { kind = "promotion", key = character.key, text = text, snooze = "none" }
         table.insert(rows, header)
+        local timeUp = options.officer and evaluated ~= nil and evaluated.timeMet and not evaluated.ready
+        if timeUp and character.snooze ~= nil then
+            header.snooze = "snoozed"
+        elseif timeUp then
+            header.snooze = "can"
+        end
         if options.officer and character.matchRankName ~= nil then
             table.insert(rows, { kind = "promotion", key = character.key, match = true,
                 text = "    " .. PromotionsViewModel.MATCH_COLOR .. "Promote to match: " .. character.matchRankName
                     .. "|r" })
+        end
+        if header.snooze == "snoozed" then
+            table.insert(rows, { kind = "promotion", key = character.key, snoozed = true,
+                text = "    |cff9d9d9dSnoozed until " .. formatDate(character.snooze.untilTime) .. " by "
+                    .. tostring(nameOf(character.snooze.by)) .. "|r" })
         end
         if evaluated ~= nil or last ~= nil then
             header.toggle = true
@@ -306,6 +335,11 @@ function PromotionsViewModel.PanelRows(characters, options)
                 table.insert(rows, { kind = "promotion", key = character.key, item = item.item, noteInput = true,
                     reason = true, ticked = false })
             end
+        end
+        if header.snooze == "can" then
+            -- Below the checklist, so the button doesn't crowd the header.
+            table.insert(rows, { kind = "promotion", key = character.key, snooze = "can",
+                action = PromotionsViewModel.NOT_READY, text = "    |cff9d9d9dTime requirement met|r" })
         end
     end
     if characters[1] == nil then

@@ -62,7 +62,7 @@ local function discordCheck(inputs, rank)
 end
 
 test.test("the Discord check passes with a name on any of the player's characters", function()
-    local inputs, addon = newGuild({ main = 2, alt = 4, solo = 4 })
+    local inputs, addon = newGuild({ main = 5, alt = 4, solo = 4 })
     local item = discordCheck(inputs, 4)
     inputs.partition:JoinPlayerOf("alt", "main", "manual")
     inputs.partition:SetProfileText("main", "discord", "bolt#1234", NOW - 60, "main")
@@ -91,7 +91,7 @@ test.test("the Discord check fails again when the name is cleared or blank", fun
     test.assertFalse(cleared.met, "the newest change clears it for the whole player")
     test.assertEqual("not set", cleared.detail)
     inputs.partition:SetProfileText("alt", "discord", "   ", NOW + 1, "alt")
-    test.assertFalse(statusOf(inputs, addon, "alt", item.id).met, "spaces aren't a name")
+    test.assertFalse(statusOf(inputs, addon, "main", item.id).met, "spaces aren't a name")
 end)
 
 test.test("an officer's override passes a failed Discord check, and it counts toward ready", function()
@@ -239,4 +239,100 @@ test.test("no flag when every rank in range has matching off", function()
     test.assertEqual(nil, set.alt2)
     test.assertEqual(1, set.low)
     test.assertEqual(nil, next(set, next(set)), "low is the only one")
+end)
+
+-- Time met ----------------------------------------------------------------------
+
+local DAY = 24 * 60 * 60
+
+local function timeItem(inputs, rank, kind, n)
+    return inputs.requirements:SetAutomated(rank, kind, true, n, RANKS[rank + 1], OFFICER, NOW)[1]
+end
+
+local function manualItem(inputs, rank)
+    return inputs.requirements:Add(rank, "Read the rules", "check", RANKS[rank + 1], OFFICER, NOW)[1]
+end
+
+test.test("time met needs every time item at the rank met, and leaves out the fully ready", function()
+    local inputs, addon = newGuild({ due = 4, early = 4, halfway = 4, ready = 4 })
+    timeItem(inputs, 4, "char-guild-days", 7)
+    timeItem(inputs, 4, "rank-days", 14)
+    local rules = manualItem(inputs, 4)
+    local key
+    for _, key in ipairs({ "due", "halfway", "ready" }) do
+        inputs.dates:Offer(key, "joined", { time = NOW - 30 * DAY, source = "log" })
+    end
+    inputs.dates:Offer("early", "joined", { time = NOW - 2 * DAY, source = "log" })
+    inputs.dates:Offer("due", "rankSince", { time = NOW - 20 * DAY, rank = 4, source = "log" })
+    inputs.dates:Offer("early", "rankSince", { time = NOW - 20 * DAY, rank = 4, source = "log" })
+    inputs.dates:Offer("halfway", "rankSince", { time = NOW - 3 * DAY, rank = 4, source = "log" })
+    inputs.dates:Offer("ready", "rankSince", { time = NOW - 20 * DAY, rank = 4, source = "log" })
+    inputs.checks:Set("ready", rules, true, nil, OFFICER, NOW)
+
+    local due = addon.PromotionPolicy.TimeMetSet(inputs)
+    test.assertTrue(due.due, "both time items met, the manual one not yet")
+    test.assertEqual(nil, due.early, "days at rank met, days in guild not")
+    test.assertEqual(nil, due.halfway, "days in guild met, days at rank not")
+    test.assertEqual(nil, due.ready, "Ready replaces the timer")
+    test.assertTrue(addon.PromotionPolicy.ReadySet(inputs).ready)
+end)
+
+test.test("time met counts before-tracking dates, player days and an officer's override", function()
+    local inputs, addon = newGuild({ main = 5, alt = 4, veteran = 4, waived = 4, fresh = 4 })
+    timeItem(inputs, 4, "player-guild-days", 30)
+    manualItem(inputs, 4)
+    inputs.partition:JoinPlayerOf("alt", "main", "manual")
+    inputs.dates:Offer("main", "joined", { time = NOW - 40 * DAY, source = "log" })
+    inputs.dates:Offer("alt", "joined", { time = NOW - DAY, source = "log" })
+    inputs.dates:Offer("veteran", "joined", { time = NOW, source = "before-tracking" })
+    inputs.dates:Offer("waived", "joined", { time = NOW - DAY, source = "log" })
+    inputs.dates:Offer("fresh", "joined", { time = NOW - DAY, source = "log" })
+    local item = inputs.requirements:ItemOfKind(4, "player-guild-days")
+    inputs.checks:Set("waived", item, true, "Played with us for years", OFFICER, NOW)
+
+    local due = addon.PromotionPolicy.TimeMetSet(inputs)
+    test.assertTrue(due.alt, "the player's earliest join counts")
+    test.assertTrue(due.veteran, "before tracking passes")
+    test.assertTrue(due.waived, "the override counts, as it does for Ready")
+    test.assertEqual(nil, due.fresh)
+end)
+
+test.test("time met ignores other kinds, and a rank with no time item never shows it", function()
+    local inputs, addon = newGuild({ timed = 4, untimed = 3 })
+    timeItem(inputs, 4, "char-guild-days", 7)
+    timeItem(inputs, 4, "level", 60)
+    timeItem(inputs, 4, "discord")
+    timeItem(inputs, 4, "addon")
+    manualItem(inputs, 4)
+    timeItem(inputs, 3, "level", 60)
+    manualItem(inputs, 3)
+    inputs.dates:Offer("timed", "joined", { time = NOW - 10 * DAY, source = "log" })
+    inputs.dates:Offer("untimed", "joined", { time = NOW - 10 * DAY, source = "log" })
+
+    local due = addon.PromotionPolicy.TimeMetSet(inputs)
+    test.assertTrue(due.timed, "level, Discord, add-on and manual items don't count")
+    test.assertEqual(nil, due.untimed, "no time item at the rank")
+end)
+
+test.test("time met leaves out snoozed characters until the snooze ends, and Ready ignores snoozes", function()
+    local inputs, addon = newGuild({ snoozed = 4, done = 4, other = 4 })
+    timeItem(inputs, 4, "char-guild-days", 7)
+    local rules = manualItem(inputs, 4)
+    local key
+    for _, key in ipairs({ "snoozed", "done", "other" }) do
+        inputs.dates:Offer(key, "joined", { time = NOW - 30 * DAY, source = "log" })
+        inputs.checks:Snooze(key, 4, NOW + 7 * DAY, OFFICER, NOW)
+    end
+    inputs.checks:Set("done", rules, true, nil, OFFICER, NOW)
+
+    local due = addon.PromotionPolicy.TimeMetSet(inputs)
+    test.assertEqual(nil, due.snoozed, "snoozed: no timer")
+    test.assertTrue(addon.PromotionPolicy.ReadySet(inputs).done, "a snoozed character who meets everything is Ready")
+    test.assertEqual(nil, addon.PromotionPolicy.ReadySet(inputs).snoozed)
+
+    inputs.now = NOW + 7 * DAY
+    due = addon.PromotionPolicy.TimeMetSet(inputs)
+    test.assertTrue(due.snoozed, "the timer comes back when the snooze ends")
+    test.assertTrue(due.other)
+    test.assertEqual(nil, due.done, "Ready still replaces the timer")
 end)

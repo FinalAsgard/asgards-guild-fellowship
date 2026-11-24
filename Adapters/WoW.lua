@@ -1405,6 +1405,16 @@ function Client:FormatDateTime(timestamp)
     return tostring(timestamp)
 end
 
+-- Whether the texture at `path` is in the game's files: true or false, or
+-- nil when the client can't say (no GetFileIDFromPath).
+function Client:TextureLoads(path)
+    local ok, id = callFunction(self.environment.GetFileIDFromPath, path)
+    if not ok then
+        return nil
+    end
+    return type(id) == "number"
+end
+
 -- The class color as an "ffrrggbb" hex string, or nil.
 function Client:GetClassColor(classToken)
     local colors = self.environment.RAID_CLASS_COLORS

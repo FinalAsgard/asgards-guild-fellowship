@@ -21,6 +21,14 @@ local _, addon = ...
 -- even on an add-on that never saw it at the other rank. Stale records are
 -- ignored, pruned (Prune), and never sent.
 --
+-- An officer's Not ready snoozes a character's timer marker (see
+-- PromotionPolicy.TimeMetSet) until `untilTime`, server time:
+--   { t = "snooze", character, rank, untilTime, at, by }
+-- One per character, newest wins, and stale like a tick. A snooze whose
+-- end has passed stops snoozing (IsSnoozed) but is kept and sent like any
+-- other, so an older snooze can't come back in its place. There's no
+-- unsnooze; Ready ignores snoozes.
+--
 -- Pure: the caller passes the saved table and the facts.
 local PromotionChecks = {
     PROTOCOL = 1,
@@ -47,20 +55,44 @@ local function isWhole(value, low, high)
     return type(value) == "number" and value == math.floor(value) and value >= low and value <= high
 end
 
--- True when `record` has the shape of a tick record.
+-- True when `record` has the shape of a tick or snooze record.
 function PromotionChecks.IsRecord(record)
-    return type(record) == "table" and record.t == "tick" and isText(record.character) and #record.character <= 80
-        and isWhole(record.rank, 0, 9) and isText(record.item) and #record.item <= 80
+    if type(record) ~= "table" or not isText(record.character) or #record.character > 80
+        or not isWhole(record.rank, 0, 9) or not isWhole(record.at, 1, math.huge) or not isText(record.by)
+    then
+        return false
+    end
+    if record.t == "snooze" then
+        return isWhole(record.untilTime, 1, math.huge)
+    end
+    return record.t == "tick" and isText(record.item) and #record.item <= 80
         and type(record.ticked) == "boolean"
         and (record.note == nil or (type(record.note) == "string" and #record.note <= PromotionChecks.MAX_NOTE))
-        and isWhole(record.at, 1, math.huge) and isText(record.by)
+end
+
+-- A snooze's key can't be an item's: item keys use \31.
+local function snoozeKey(character)
+    return character .. "\30snooze"
 end
 
 local function keyOf(record)
+    if record.t == "snooze" then
+        return snoozeKey(record.character)
+    end
     return record.character .. "\31" .. record.item
 end
 
 local function copy(record)
+    if record.t == "snooze" then
+        return {
+            t = "snooze",
+            character = record.character,
+            rank = record.rank,
+            untilTime = record.untilTime,
+            at = record.at,
+            by = record.by,
+        }
+    end
     return {
         t = "tick",
         character = record.character,
@@ -112,13 +144,18 @@ function Checks:current(record)
     return not okStart or type(start) ~= "number" or record.at >= start
 end
 
+-- Whether `record` has a record's shape and is current.
+function Checks:live(record)
+    return PromotionChecks.IsRecord(record) and self:current(record)
+end
+
 -- Applies a record received from another add-on (or made here): when it
 -- has the right shape, is for the character's current rank, its author is
 -- an officer, and it's newer than the one held. `fromOfficer` is true when
 -- an officer's add-on sent it: then its author need only have been an
 -- officer when they ticked it. Returns true when applied.
 function Checks:Apply(record, fromOfficer)
-    if not PromotionChecks.IsRecord(record) or not self:current(record) then
+    if not self:live(record) then
         return false
     end
     if fromOfficer ~= true then
@@ -141,7 +178,7 @@ end
 -- ticked at an earlier rank).
 function Checks:Record(character, item)
     local record = self.saved.records[character .. "\31" .. item]
-    if PromotionChecks.IsRecord(record) and self:current(record) then
+    if self:live(record) and record.t == "tick" then
         return record
     end
     return nil
@@ -200,6 +237,59 @@ function Checks:Set(character, item, ticked, note, author, at)
     return { record }
 end
 
+-- The snooze on `character`'s timer marker at its current rank, ended or
+-- not: { untilTime, by, at }, or nil.
+function Checks:SnoozeOf(character)
+    local record = self.saved.records[snoozeKey(character)]
+    if PromotionChecks.IsRecord(record) and record.t == "snooze" and self:current(record) then
+        return { untilTime = record.untilTime, by = record.by, at = record.at }
+    end
+    return nil
+end
+
+-- Whether `character`'s timer marker is snoozed at `now`: until its
+-- snooze's end, not at it.
+function Checks:IsSnoozed(character, now)
+    local snooze = self:SnoozeOf(character)
+    return snooze ~= nil and type(now) == "number" and now < snooze.untilTime
+end
+
+-- An officer (`author`) snoozes `character`'s timer marker at `rank` (its
+-- current rank) until `untilTime`, at `at`. Returns the records to share,
+-- or nil and why not.
+function Checks:Snooze(character, rank, untilTime, author, at)
+    local ok, officer = pcall(self.isOfficer, author)
+    if not ok or officer ~= true then
+        return nil, "only officers can snooze a promotion check"
+    end
+    local okRank, current = pcall(self.rankOf, character)
+    if not okRank or current == nil then
+        return nil, "that character isn't in the guild"
+    end
+    if rank ~= current then
+        return nil, "that character's rank has changed"
+    end
+    if type(untilTime) ~= "number" or type(at) ~= "number" or untilTime <= at then
+        return nil, "a snooze has to end later"
+    end
+    local held = self.saved.records[snoozeKey(character)]
+    if PromotionChecks.IsRecord(held) and held.t == "snooze" and self:current(held) and at <= held.at then
+        at = held.at + 1
+    end
+    local record = {
+        t = "snooze",
+        character = character,
+        rank = rank,
+        untilTime = math.floor(untilTime),
+        at = math.floor(at),
+        by = author,
+    }
+    if not self:Apply(record) then
+        return nil, "that can't be saved"
+    end
+    return { record }
+end
+
 -- Drops every stale record (made at another rank than the character's
 -- current one, or for a character no longer in the guild). Returns how
 -- many were dropped.
@@ -207,7 +297,7 @@ function Checks:Prune()
     local dropped = 0
     local key, record
     for key, record in pairs(self.saved.records) do
-        if not PromotionChecks.IsRecord(record) or not self:current(record) then
+        if not self:live(record) then
             self.saved.records[key] = nil
             dropped = dropped + 1
         end
@@ -220,7 +310,7 @@ function Checks:Snapshot()
     local records = {}
     local _, record
     for _, record in pairs(self.saved.records) do
-        if PromotionChecks.IsRecord(record) and self:current(record) then
+        if self:live(record) then
             table.insert(records, copy(record))
         end
     end

@@ -39,6 +39,10 @@ local HEADER_BACKGROUND = { 0.35, 0.27, 0.05, 0.35 }
 local STRIPE_BACKGROUND = { 1, 1, 1, 0.04 }
 local NO_BACKGROUND = { 0, 0, 0, 0 }
 
+-- The officers' timer marker, as text (options.timerIcon, see
+-- RosterViewModel.TimerIcon).
+local timerIcon = ""
+
 local function frameworkFrom(client)
     local framework = client:GetGlobal("DetailsFramework")
     if type(framework) ~= "table" or framework.FrameWorkVersion == nil
@@ -136,10 +140,14 @@ local function cellText(row, field)
     if row.departed and field == "location" then
         return "|cff7f7f7f" .. tostring(row.location) .. "|r"
     end
-    -- Officers see who is ready for promotion (see RosterViewModel.MarkReady).
-    if field == "rank" and row.ready then
-        -- First, so a long rank name never hides it.
+    -- Officers see who is ready for promotion, and whose time is up (see
+    -- RosterViewModel.MarkReady), first, so a long rank name never hides it.
+    local marker = field == "rank" and addon.RosterViewModel.RankMarker(row) or nil
+    if marker == "ready" then
         return "|cff40ff40Ready|r " .. tostring(row.rank or "")
+    end
+    if marker == "timer" then
+        return timerIcon .. " " .. tostring(row.rank or "")
     end
     local value = row[field]
     return value ~= nil and tostring(value) or ""
@@ -728,6 +736,11 @@ local function buildPlayerPanel(framework, options, frameName, anchor, actions)
         toggle = function(key, expanded)
             if options.onPanelPromotionToggle ~= nil then
                 options.onPanelPromotionToggle(key, expanded)
+            end
+        end,
+        snooze = function(key)
+            if options.onPromotionsSnooze ~= nil then
+                options.onPromotionsSnooze(key)
             end
         end,
         redraw = function()
@@ -1612,7 +1625,8 @@ end
 -- promotion requirements editor. (Add-ons can't promote, and each
 -- character's checklist is worked on the player panel's Promotion tab.) <
 -- and > pick a rank, a check box beside it sets whether alts are matched
--- to it, a warning shows when the rank was set up under
+-- to it, a number box under that sets how many days Not ready snoozes
+-- for there, a warning shows when the rank was set up under
 -- another name, the automatic checks are listed with a check box each (and
 -- a number box for one that takes days or a level), and below them a box
 -- adds a custom requirement (with whether it needs a note) or edits one,
@@ -1673,6 +1687,48 @@ local function buildPromotions(framework, page, frameName, options)
         local checked = self:GetChecked() == true
         if not call("onPromotionsMatchAlts", checked) then
             self:SetChecked(not checked)
+        end
+    end)
+    -- How many days Not ready snoozes for at this rank, under the match
+    -- box: saved on Enter, or on leaving the box.
+    editor.snoozeDays = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+    editor.snoozeDays:SetSize(32, 20)
+    editor.snoozeDays:SetPoint("TOPLEFT", holder, "TOPLEFT", 596, -46)
+    editor.snoozeDays:SetAutoFocus(false)
+    editor.snoozeDays:SetMaxLetters(3)
+    editor.snoozeDays:SetNumeric(true)
+    local snoozeLabel = editor.snoozeDays:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    snoozeLabel:SetPoint("RIGHT", editor.snoozeDays, "LEFT", -8, 0)
+    snoozeLabel:SetText("Not ready snoozes for")
+    local snoozeUnit = editor.snoozeDays:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    snoozeUnit:SetPoint("LEFT", editor.snoozeDays, "RIGHT", 4, 0)
+    snoozeUnit:SetText("days")
+    editor.snoozeDays:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+    end)
+    editor.snoozeDays:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+    end)
+    -- Only what this officer typed is saved: a value synced in while the
+    -- box had focus is kept when they leave it untouched.
+    editor.snoozeDays:SetScript("OnEditFocusGained", function(self)
+        self.typed = false
+    end)
+    editor.snoozeDays:SetScript("OnTextChanged", function(self, userInput)
+        if userInput then
+            self.typed = true
+        end
+    end)
+    editor.snoozeDays:SetScript("OnEditFocusLost", function(self)
+        local typed = self.typed
+        self.typed = false
+        if editor.snoozeShown == nil then
+            return
+        end
+        if not typed or (tonumber(self:GetText()) ~= editor.snoozeShown
+            and not call("onPromotionsSnoozeDays", self:GetText()))
+        then
+            self:SetText(tostring(editor.snoozeShown))
         end
     end)
     editor.mismatch = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2265,12 +2321,14 @@ end
 -- searchPlayers(key, query), aliasOf(key), and onMenuUnavailable() run them;
 -- options.onSearch(text), onToggleOnlineOnly(), onExpandAll(), and
 -- onCollapseAll() drive the controls row; options.onSelectCharacter(key)
--- opens a player's edit panel and onClosePanel() runs when it closes.
+-- opens a player's edit panel and onClosePanel() runs when it closes;
+-- options.timerIcon is the text of the officers' timer marker.
 function RosterWindow.Create(client, options)
     local framework = frameworkFrom(client)
     if framework == nil then
         return nil, "the Details! Framework is not available"
     end
+    timerIcon = options.timerIcon or addon.RosterViewModel.TimerIcon(nil)
 
     local ok, host, scroll, status, conflicts, playerPanel, recruiters, recentAds, counts, guildLog, promotions =
         pcall(build, framework, options)
@@ -2433,6 +2491,15 @@ function Window:SetPromotions(model)
         else
             editor.matchCheck:SetChecked(model.matchAlts)
             editor.matchCheck:Show()
+        end
+        editor.snoozeShown = model.snoozeDays
+        if model.snoozeDays == nil then
+            editor.snoozeDays:Hide()
+        else
+            if not editor.snoozeDays:HasFocus() then
+                editor.snoozeDays:SetText(tostring(model.snoozeDays))
+            end
+            editor.snoozeDays:Show()
         end
         if editor.confirm.id ~= nil and editor.confirm:IsShown() then
             local found = false

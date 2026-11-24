@@ -54,6 +54,9 @@ local promotions = {
     readyKeys = function()
         return nil
     end,
+    timeMetKeys = function()
+        return nil
+    end,
     panelRows = function()
         return nil
     end,
@@ -210,6 +213,9 @@ if clientProfile.supported then
         readyKeys = function()
             return promotions.readyKeys()
         end,
+        timeMetKeys = function()
+            return promotions.timeMetKeys()
+        end,
         grouped = function(keys)
             local guild, partition = rosterController:QuietContext()
             if guild == nil then
@@ -245,6 +251,7 @@ if clientProfile.supported then
         createWindow = function()
             return addon.RosterWindow.Create(client, {
                 navigator = pages,
+                timerIcon = addon.RosterViewModel.TimerIcon(client:TextureLoads(addon.RosterViewModel.TIMER_TEXTURE)),
                 drawPages = {
                     group = function(content)
                         if drawGroupFinder ~= nil then
@@ -316,6 +323,9 @@ if clientProfile.supported then
                 onPromotionsMatchAlts = function(on)
                     return promotions.matchAlts(on)
                 end,
+                onPromotionsSnoozeDays = function(days)
+                    return promotions.snoozeDays(days)
+                end,
                 onPromotionsMove = function(id, step)
                     return promotions.move(id, step)
                 end,
@@ -327,6 +337,9 @@ if clientProfile.supported then
                 end,
                 onPanelPromotionToggle = function(key, expanded)
                     return promotions.togglePanel(key, expanded)
+                end,
+                onPromotionsSnooze = function(key)
+                    return promotions.snooze(key)
                 end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
@@ -2449,6 +2462,15 @@ if clientProfile.supported then
         end
         return addon.PromotionPolicy.ReadySet(inputs)
     end
+    -- The characters whose time is up but who aren't ready, as a set, for
+    -- the roster's timer marker: officers only.
+    promotions.timeMetKeys = function()
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        return addon.PromotionPolicy.TimeMetSet(inputs)
+    end
     -- The characters to promote to match their player, as key -> target
     -- rank, for the roster's marker: officers only.
     promotions.matchKeys = function()
@@ -2532,13 +2554,17 @@ if clientProfile.supported then
             local character = partition:GetCharacter(key)
             if character ~= nil and partition:IsInGuild(key) and type(character.rank) == "number" then
                 local match = officer and addon.PromotionPolicy.MatchTarget(inputs, key) or nil
+                local snoozed = officer and inputs.checks:IsSnoozed(key, inputs.now)
+                local profile = addon.PromotionPolicy.ProfileOf(partition, key)
                 table.insert(characters, {
+                    follows = profile ~= key and nameOf(profile) or nil,
                     key = key,
                     name = nameOf(key),
                     rankName = inputs.rankNames[character.rank + 1] or ("Rank " .. character.rank),
                     evaluated = addon.PromotionPolicy.Evaluate(inputs, key),
                     lastPromotion = dates and dates:LastPromotion(key) or nil,
                     matchRankName = match and (inputs.rankNames[match + 1] or ("Rank " .. match)) or nil,
+                    snooze = snoozed and inputs.checks:SnoozeOf(key) or nil,
                 })
             end
         end
@@ -2569,6 +2595,31 @@ if clientProfile.supported then
             return false, "that requirement no longer exists"
         end
         local records, reason = checks:Set(key, item, ticked, note, author, now)
+        if records == nil then
+            return false, reason
+        end
+        ticksSync:Share(records)
+        promotions.changed()
+        return true
+    end
+    -- Not ready: snoozes `key`'s timer marker for its rank's snooze length,
+    -- from now. Returns true, or false and why.
+    promotions.snooze = function(key)
+        local inputs = promotionInputs()
+        local author = rosterController:SelfKey()
+        if inputs == nil or author == nil or inputs.now == nil then
+            return false, "saved data is unavailable"
+        end
+        if not selfIsOfficer() then
+            return false, "only officers can snooze a promotion check"
+        end
+        local character = inputs.partition:GetCharacter(key)
+        if character == nil or type(character.rank) ~= "number" then
+            return false, "that character isn't in the guild"
+        end
+        local days = inputs.requirements:SnoozeDays(character.rank)
+        local records, reason = inputs.checks:Snooze(key, character.rank,
+            inputs.now + days * addon.PromotionPolicy.DAY, author, inputs.now)
         if records == nil then
             return false, reason
         end
@@ -2686,6 +2737,17 @@ if clientProfile.supported then
                 return nil, "the guild's ranks aren't known yet"
             end
             return requirements:SetMatchesAlts(rank, on == true, author, now)
+        end)
+    end
+    -- Sets how many days Not ready snoozes for at the rank shown (`days`
+    -- as typed).
+    promotions.snoozeDays = function(days)
+        return editRequirements(function(requirements, author, now)
+            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, rankNames())
+            if rank == nil then
+                return nil, "the guild's ranks aren't known yet"
+            end
+            return requirements:SetSnoozeDays(rank, tonumber(days), author, now)
         end)
     end
     promotions.move = function(id, step)
@@ -2853,11 +2915,36 @@ if clientProfile.supported then
             client:Print("  " .. lines[index])
         end
     end
+    -- Whether the timer marker's art loads, and how many characters it
+    -- marks. Changes nothing.
+    local function probeTimer()
+        if not selfIsOfficer() then
+            rosterController:Print("Only officers can probe the timer marker.")
+            return
+        end
+        local loads = client:TextureLoads(addon.RosterViewModel.TIMER_TEXTURE)
+        local count = 0
+        local key
+        for key in pairs(promotions.timeMetKeys() or {}) do
+            count = count + 1
+        end
+        rosterController:Print("Timer marker probe:")
+        client:Print("  Texture: " .. addon.RosterViewModel.TIMER_TEXTURE)
+        if loads == true then
+            client:Print("  Loaded: yes")
+        elseif loads == false then
+            client:Print("  Loaded: no, so the roster shows " .. addon.RosterViewModel.TIMER_FALLBACK .. " instead")
+        else
+            client:Print("  Loaded: unknown (this client can't say)")
+        end
+        client:Print("  Time requirement met: " .. count)
+    end
     router:Register("probe",
         "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..
         " notes changed; probe forgeries: the guild sync edits caught as forged in your name; probe log: the" ..
         " guild event log; probe officer: the officer channel; probe ready: the Ready flags on the game's" ..
-        " guild roster; officers; probe player <name or alias>: a player's alias, links and Discord, with who" ..
+        " guild roster; officers; probe timer: the roster's timer marker, officers; probe player <name or" ..
+        " alias>: a player's alias, links and Discord, with who" ..
         " set each and when, and its logged changes; probe greet: your greet weight and how long it holds your" ..
         " prompts back; probe realm: the realm or region your guild's data is kept under)",
         function(arguments)
@@ -2872,7 +2959,7 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer, probe ready, probe player <name>, probe greet or probe realm.")
+                        " probe officer, probe ready, probe timer, probe player <name>, probe greet or probe realm.")
                 end
                 return
             end
@@ -2935,6 +3022,10 @@ if clientProfile.supported then
                 probeReady()
                 return
             end
+            if what == "timer" then
+                probeTimer()
+                return
+            end
             if what == "realm" then
                 rosterController:Print("Realm probe:")
                 local guild = client:GetGuildIdentity()
@@ -2968,7 +3059,8 @@ if clientProfile.supported then
                 rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe forgeries, " ..
                     addon.Identity.slashCommand .. " probe log, " ..
                     addon.Identity.slashCommand .. " probe officer, " .. addon.Identity.slashCommand ..
-                    " probe ready, " .. addon.Identity.slashCommand .. " probe player <name> or " ..
+                    " probe ready, " .. addon.Identity.slashCommand .. " probe timer, " ..
+                    addon.Identity.slashCommand .. " probe player <name> or " ..
                     addon.Identity.slashCommand .. " probe greet.")
                 return
             end

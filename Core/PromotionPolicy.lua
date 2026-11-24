@@ -1,8 +1,9 @@
 local _, addon = ...
 
--- The promotion rules engine: for each character, the next rank, each
--- requirement's status, progress, whether it's ready, its player's highest
--- rank, and the rank to promote it to so it matches its player's other
+-- The promotion rules engine: for each player, one rank-up profile (on its
+-- highest-ranked character, see ProfileOf) with the next rank, each
+-- requirement's status, progress, and whether it's ready; and for each
+-- character, the rank to promote it to so it matches its player's other
 -- characters. Pure: the caller passes everything in.
 --
 -- inputs:
@@ -149,22 +150,35 @@ function PromotionPolicy.HighestCharacter(partition, playerId)
     return bestKey, best
 end
 
+-- The character that holds `key`'s player's rank-up profile: the player's
+-- highest-ranked character in the guild (see HighestCharacter), or `key`
+-- itself when it has no player. A player has one checklist, its ticks and
+-- snooze kept on that character; the others follow it ("Promote to
+-- match").
+function PromotionPolicy.ProfileOf(partition, key)
+    local character = partition:GetCharacter(key)
+    if character == nil or character.player == nil then
+        return key
+    end
+    return (PromotionPolicy.HighestCharacter(partition, character.player)) or key
+end
+
 -- One character's promotion status, or nil when it isn't in the guild,
--- its rank is the top one (nothing above it), or its rank has no
--- requirements:
---   { key, rank, rankName, nextRank, nextRankName, items, met, total, ready,
---     highestRank, highestRankName }
+-- doesn't hold its player's profile (see ProfileOf), its rank is the top
+-- one (nothing above it), or its rank has no requirements:
+--   { key, rank, rankName, nextRank, nextRankName, items, met, total, ready }
 -- where each item is { id, label, kind, automated, met, detail,
 -- overridden, record }: `record` is the officer's tick (or override) when
 -- there is one, `detail` an automated item's status in words, and
 -- `overridden` true when an officer's override is what meets a failed
--- automated item. `highestRank` is the player's highest rank when it's
--- higher than this character's, else nil.
+-- automated item.
 -- `key`'s record and its rank's items, or nil when it has no checklist.
 local function checklistOf(inputs, key, itemsOf)
     local partition = inputs.partition
     local character = partition:GetCharacter(key)
-    if character == nil or not partition:IsInGuild(key) or type(character.rank) ~= "number" or character.rank < 1 then
+    if character == nil or not partition:IsInGuild(key) or type(character.rank) ~= "number" or character.rank < 1
+        or PromotionPolicy.ProfileOf(partition, key) ~= key
+    then
         return nil
     end
     local items = itemsOf and itemsOf(character.rank) or inputs.requirements:Items(character.rank)
@@ -192,25 +206,44 @@ local function judgeItem(inputs, key, item, character)
     return met, detail, record, automated, overridden
 end
 
+-- The time kinds: when a rank has any, a character whose every one is met
+-- is due a promotion check (see TimeMetSet).
+PromotionPolicy.TIME_KINDS = {
+    ["char-guild-days"] = true,
+    ["player-guild-days"] = true,
+    ["rank-days"] = true,
+}
+
 -- Just enough of `key`'s status to tell whether it's ready (see
--- ReadySet): { key, rank, met, total, ready }, or nil as for Evaluate.
+-- ReadySet) and whether its time is up (see TimeMetSet): { key, rank,
+-- met, total, ready, timeMet }, or nil as for Evaluate. `timeMet` is true
+-- when its rank has a time item and every one is met.
 function PromotionPolicy.Summarize(inputs, key, itemsOf)
     local character, items = checklistOf(inputs, key, itemsOf)
     if character == nil then
         return nil
     end
     local met = 0
+    local timeItems, timeMet = 0, 0
     local index
     for index = 1, #items do
-        if judgeItem(inputs, key, items[index], character) then
+        local item = items[index]
+        local itemMet = judgeItem(inputs, key, item, character)
+        if itemMet then
             met = met + 1
         end
+        if PromotionPolicy.TIME_KINDS[item.kind] then
+            timeItems = timeItems + 1
+            if itemMet then
+                timeMet = timeMet + 1
+            end
+        end
     end
-    return { key = key, rank = character.rank, met = met, total = #items, ready = met == #items }
+    return { key = key, rank = character.rank, met = met, total = #items, ready = met == #items,
+        timeMet = timeItems > 0 and timeMet == timeItems }
 end
 
 function PromotionPolicy.Evaluate(inputs, key, itemsOf)
-    local partition = inputs.partition
     local character, items = checklistOf(inputs, key, itemsOf)
     if character == nil then
         return nil
@@ -227,6 +260,7 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
         met = 0,
         total = #items,
     }
+    local timeItems, timeMet = 0, 0
     local index
     for index = 1, #items do
         local item = items[index]
@@ -236,13 +270,15 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
         if met then
             result.met = result.met + 1
         end
+        if PromotionPolicy.TIME_KINDS[item.kind] then
+            timeItems = timeItems + 1
+            if met then
+                timeMet = timeMet + 1
+            end
+        end
     end
     result.ready = result.met == result.total
-    local highest = PromotionPolicy.HighestRank(partition, character.player)
-    if highest ~= nil and highest < rank then
-        result.highestRank = highest
-        result.highestRankName = names[highest + 1] or ("Rank " .. highest)
-    end
+    result.timeMet = timeItems > 0 and timeMet == timeItems
     return result
 end
 
@@ -339,4 +375,21 @@ function PromotionPolicy.ReadySet(inputs)
         end
     end)
     return ready
+end
+
+-- The characters whose time is up but who aren't fully ready, as a set of
+-- keys: their rank has a time item and every one is met (see Summarize),
+-- and no officer has snoozed them (see PromotionChecks:IsSnoozed) until
+-- after `now`. ReadySet ignores snoozes.
+function PromotionPolicy.TimeMetSet(inputs)
+    local due = {}
+    eachCandidate(inputs, function(key, character, itemsOf)
+        local summary = PromotionPolicy.Summarize(inputs, key, itemsOf)
+        if summary ~= nil and summary.timeMet and not summary.ready
+            and not inputs.checks:IsSnoozed(key, inputs.now)
+        then
+            due[key] = true
+        end
+    end)
+    return due
 end

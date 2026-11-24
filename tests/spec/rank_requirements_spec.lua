@@ -519,6 +519,94 @@ test.test("a match change reaches every add-on, and one that logs in later catch
     test.assertFalse(late.nodes["late-area52"].requirements():MatchesAlts(1))
 end)
 
+-- Snooze length -------------------------------------------------------------------
+
+test.test("Not ready snoozes for 7 days until an officer sets 1 to 90 whole days for a rank", function()
+    local requirements, addon = newRequirements()
+
+    test.assertEqual(7, requirements:SnoozeDays(3))
+    test.assertEqual(0, #requirements:SetSnoozeDays(3, 7, OFFICER, NOW), "already 7: nothing to share")
+    local records = requirements:SetSnoozeDays(3, 14, OFFICER, NOW)
+    test.assertEqual(1, #records)
+    local record = records[1]
+    test.assertEqual("snooze", record.t)
+    test.assertEqual(3, record.rank)
+    test.assertEqual(14, record.days)
+    test.assertEqual(NOW, record.at)
+    test.assertEqual(OFFICER, record.by)
+    test.assertEqual(14, requirements:SnoozeDays(3))
+    test.assertEqual(7, requirements:SnoozeDays(2), "only that rank")
+    test.assertEqual(1, requirements:SetSnoozeDays(3, 1, OFFICER, NOW)[1].days)
+    test.assertEqual(90, requirements:SetSnoozeDays(3, 90, OFFICER, NOW)[1].days)
+
+    local value
+    for _, value in ipairs({ 0, 91, 2.5, -3 }) do
+        local refused, reason = requirements:SetSnoozeDays(3, value, OFFICER, NOW)
+        test.assertEqual(nil, refused, tostring(value) .. " is refused")
+        test.assertEqual("a snooze needs to be 1 to 90 whole days", reason)
+    end
+    test.assertEqual(nil, (requirements:SetSnoozeDays(3, nil, OFFICER, NOW)), "not a number")
+    test.assertEqual(nil, (requirements:SetSnoozeDays(3, "10", OFFICER, NOW)), "text isn't a number")
+    test.assertEqual(nil, (requirements:SetSnoozeDays(0, 10, OFFICER, NOW)), "not the guild master's rank")
+    local refused, reason = requirements:SetSnoozeDays(3, 30, MEMBER, NOW)
+    test.assertEqual(nil, refused)
+    test.assertEqual("only officers can change promotion requirements", reason)
+    test.assertEqual(90, requirements:SnoozeDays(3))
+
+    -- The editor shows it.
+    local Model = addon.PromotionsViewModel
+    test.assertEqual(90, Model.Editor({ requirements = requirements, rank = 3, rankNames = RANKS }).snoozeDays)
+    test.assertEqual(7, Model.Editor({ requirements = requirements, rank = 2, rankNames = RANKS }).snoozeDays)
+end)
+
+test.test("snooze records are officer-only, the newest wins, and they're in the snapshot", function()
+    local requirements, addon = newRequirements()
+    local function snooze(days, at, by)
+        return { t = "snooze", rank = 3, days = days, at = at, by = by }
+    end
+
+    test.assertFalse(requirements:Apply(snooze(30, NOW, MEMBER)), "a member's record is refused")
+    test.assertEqual(7, requirements:SnoozeDays(3))
+    test.assertTrue(requirements:Apply(snooze(30, NOW, OFFICER)))
+    test.assertFalse(requirements:Apply(snooze(3, NOW - 1, OTHER_OFFICER)), "an older change loses")
+    test.assertEqual(30, requirements:SnoozeDays(3))
+    test.assertTrue(requirements:Apply(snooze(3, NOW + 1, OTHER_OFFICER)))
+    test.assertEqual(3, requirements:SnoozeDays(3))
+    test.assertFalse(addon.RankRequirements.IsRecord(snooze(91, NOW, OFFICER)))
+    test.assertFalse(addon.RankRequirements.IsRecord(snooze(1.5, NOW, OFFICER)))
+    test.assertFalse(addon.RankRequirements.IsRecord({ t = "snooze", rank = 0, days = 7, at = NOW, by = OFFICER }))
+
+    requirements:SetMatchesAlts(2, false, OFFICER, NOW)
+    requirements:Add(3, "Hi", "check", "Veteran", OFFICER, NOW)
+    local snapshot = requirements:Snapshot()
+    test.assertEqual("rank,match,snooze,item",
+        snapshot[1].t .. "," .. snapshot[2].t .. "," .. snapshot[3].t .. "," .. snapshot[4].t)
+    local other = newRequirements()
+    local index
+    for index = 1, #snapshot do
+        other:Apply(snapshot[index])
+    end
+    test.assertEqual(3, other:SnoozeDays(3))
+    test.assertTrue(requirements:CoveredBy(other:Snapshot()))
+    test.assertFalse(requirements:CoveredBy({ snapshot[1], snapshot[2], snapshot[4] }), "without the snooze record")
+end)
+
+-- (An older add-on refuses a snooze record alone, as it does any type it
+-- doesn't know: see "records of a type an add-on doesn't know".)
+test.test("a snooze length reaches every add-on, and one that logs in later catches up", function()
+    local hub = newHub({ OFFICER, MEMBER })
+    local officer = hub.nodes[OFFICER]
+    officer.sync:Share(officer.requirements():SetSnoozeDays(2, 21, OFFICER, NOW))
+    hub:deliver()
+    test.assertEqual(21, hub.nodes[MEMBER].requirements():SnoozeDays(2))
+
+    local late = newHub({ OFFICER, "late-area52" })
+    late.nodes[OFFICER].saved = officer.saved
+    late.nodes["late-area52"].sync:AskOnce()
+    late:runTimers()
+    test.assertEqual(21, late.nodes["late-area52"].requirements():SnoozeDays(2))
+end)
+
 -- In the composed add-on -----------------------------------------------------------
 
 local NAMES = {
@@ -620,5 +708,29 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertEqual(0, #late.addon.promotions.view().items)
         settle(channel, 200)
         test.assertEqual("Attend a guild event", late.addon.promotions.view().items[1].label)
+    end)
+
+    test.test(profile .. " an officer sets the rank's snooze length on the Promotions page, and members get it",
+        function()
+        local channel = fixtures.newChannel()
+        local tool = login(profile, channel, names[1])
+        local hammer = login(profile, channel, names[2])
+        settle(channel, 5)
+        local promotions = tool.addon.promotions
+
+        test.assertEqual(7, promotions.view().snoozeDays)
+        test.assertTrue(promotions.snoozeDays("14"))
+        test.assertEqual(14, promotions.view().snoozeDays)
+        local ok, reason = promotions.snoozeDays("0")
+        test.assertFalse(ok)
+        test.assertEqual("a snooze needs to be 1 to 90 whole days", reason)
+        test.assertFalse((promotions.snoozeDays("")), "a blank box is refused")
+        test.assertEqual(14, promotions.view().snoozeDays)
+        settle(channel, 5)
+
+        test.assertEqual(14, hammer.addon.promotions.view().snoozeDays)
+        ok, reason = hammer.addon.promotions.snoozeDays("30")
+        test.assertFalse(ok)
+        test.assertEqual("only officers can change promotion requirements", reason)
     end)
 end
