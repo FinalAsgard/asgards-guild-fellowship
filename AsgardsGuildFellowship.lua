@@ -103,6 +103,8 @@ local lfgJoin = {
     fillSlot = function() end,
     postSlot = function() end,
     partyListing = function() return nil end,
+    -- /agfdev lfgtest's stand-in "fill the empty slot?" is showing.
+    standInSlot = false,
 }
 local LFG_HAND_OFF_SECONDS = 5
 -- A guildmate's group-friend tier by character key (set up with the group
@@ -1755,13 +1757,13 @@ if clientProfile.supported then
         end
         local view = lfgDrawer:Update({
             groups = groups,
-            party = lfgParty(),
+            party = lfgJoin.standInSlot and addon.LfgStandIns.Party() or lfgParty(),
             combat = comm:IsBusy(),
             instance = client:IsInInstance(),
             dnd = settings:Get("dnd") == true,
             ask = lfgTrigger:Asking(),
             gate = lfgTrigger:Gating(),
-            slotOpen = lfgTrigger:SlotOpen(),
+            slotOpen = lfgTrigger:SlotOpen() or lfgJoin.standInSlot,
             requests = lfgJoin.sweep(),
             requestOf = function(id)
                 return lfgBoard:Request(id, client:Timestamp())
@@ -1992,7 +1994,11 @@ if clientProfile.supported then
     -- The player answered "fill the empty slot?": the party's other
     -- guildmates hear it (and stop being asked); Yes posts it.
     lfgJoin.fillSlot = function(yes)
-        if lfgTrigger:SlotAnswered(yes) then
+        -- The stand-in's answer goes nowhere.
+        if lfgJoin.standInSlot then
+            lfgJoin.standInSlot = false
+            rosterController:Print("Stand-in slot answered " .. (yes and "Yes" or "No") .. "; nothing was sent.")
+        elseif lfgTrigger:SlotAnswered(yes) then
             comm:Broadcast(addon.LfgProtocol.Slot(yes), addon.Comm.PRIORITY_NORMAL)
             if yes then
                 lfgJoin.postSlot()
@@ -2048,6 +2054,13 @@ if clientProfile.supported then
     -- Asks to join `listing` as the current character, whispered to its
     -- leader.
     lfgJoin.ask = function(listing, role)
+        -- A stand-in's leader isn't real: the request stays pending here.
+        if addon.LfgStandIns.IsStandIn(listing.id) then
+            lfgBoard:Ask(listing.id, role, client:Timestamp() or 0)
+            rosterController:Print("Asked the stand-in " .. listing.leader .. "; nothing was sent.")
+            lfgRefresh()
+            return
+        end
         local message = addon.LfgProtocol.Ask(role, client:GetPlayerLevel(), client:GetPlayerClass())
         if comm:Whisper(message, listing.sender, true) then
             lfgBoard:Ask(listing.id, role, client:Timestamp() or 0)
@@ -2063,11 +2076,15 @@ if clientProfile.supported then
         if type(request) ~= "table" or lfgJoin.requests:Remove(request.key) == nil then
             return
         end
-        comm:Whisper(addon.LfgProtocol.Answer(answer), request.sender, true)
+        if request.standIn then
+            rosterController:Print("Stand-in request " .. answer .. "; nothing was sent.")
+        else
+            comm:Whisper(addon.LfgProtocol.Answer(answer), request.sender, true)
+        end
         lfgRefresh()
     end
     lfgJoin.invite = function(request)
-        if type(request) == "table" and lfgJoin.requests:Get(request.key) ~= nil then
+        if type(request) == "table" and not request.standIn and lfgJoin.requests:Get(request.key) ~= nil then
             client:InviteToParty(request.sender)
         end
         lfgJoin.answer(request, "invited")
@@ -2086,7 +2103,9 @@ if clientProfile.supported then
         local function tell(dropped, answer)
             local index
             for index = 1, #dropped do
-                comm:Whisper(addon.LfgProtocol.Answer(answer), dropped[index].sender, true)
+                if not dropped[index].standIn then
+                    comm:Whisper(addon.LfgProtocol.Answer(answer), dropped[index].sender, true)
+                end
             end
         end
         tell(requests:Expire(client:Timestamp()), "expired")
@@ -2095,6 +2114,32 @@ if clientProfile.supported then
             tell(requests:Filled(fields.k == "dungeon" and fields.r or nil, fields.s >= fields.x), "roleFilled")
         end
         return requests:List()
+    end
+    -- Dev build only: every look of the board without five people online.
+    -- Stand-in listings go on this player's board alone, and a stand-in slot
+    -- question and Ask to join request show on the button; nothing about
+    -- them is ever sent.
+    if addon.Identity.isDev then
+        router:Register("lfgtest", "fill the Guild LFG Board with stand-in listings, and show a stand-in" ..
+            " slot question and Ask to join request; nothing is sent", function()
+            local now = client:Timestamp() or 0
+            local current, alts = lfgCharacters()
+            local listings, why = addon.LfgStandIns.Listings({ level = current.level, alt = alts[1],
+                dungeons = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()) })
+            local index
+            for index = 1, #listings do
+                lfgBoard:OnListing(listings[index].message, listings[index].key, listings[index].sender, now)
+            end
+            lfgJoin.standInSlot = true
+            lfgJoin.requests:Add(addon.LfgStandIns.Request(), now)
+            rosterController:Print(#listings .. " stand-in listings are on your Guild LFG Board for " ..
+                math.floor(addon.LfgBoard.STALE_SECONDS / 60) .. " minutes, with a stand-in slot question and" ..
+                " Ask to join request." .. (why and (" Left out: " .. why .. ".") or ""))
+            lfgRefresh()
+            if lfgButton ~= nil and lfgButton:IsShowing() and not lfgButton:DrawerOpen() then
+                lfgButton:OpenDrawer()
+            end
+        end)
     end
     drawLfgBoard = function(content, ui)
         lfgPage = addon.LfgBoardPage.Create(content, ui, {

@@ -191,8 +191,9 @@ local function guild()
     }
 end
 
-local function login(channel, playerName)
-    local world = fixtures.newEnvironment("Forever", { guild = guild(), playerName = playerName })
+local function login(channel, playerName, addonName)
+    local world = fixtures.newEnvironment("Forever", { guild = guild(), playerName = playerName,
+        addonName = addonName })
     world.playerLevel = 60
     world.grouped = false
     world.environment.IsInGroup = function() return world.grouped end
@@ -1458,4 +1459,62 @@ test.test("Forever an older version's Group Finder messages are ignored", functi
     -- No reply, and the listing is still on the board.
     test.assertEqual(0, #hammer.sentMessages)
     test.assertTrue(addon.lfgBoard:Get("tool box-camelot", hammer.time) ~= nil)
+end)
+
+-- /agfdev lfgtest ------------------------------------------------------------------------
+
+test.test("Forever /agfdev lfgtest shows every look with stand-ins, and nothing about them is sent", function()
+    local channel = fixtures.newChannel()
+    local world, addon = login(channel, "Tool Box", "AsgardsGuildFellowshipDev")
+    local invited
+    world.environment.C_PartyInfo = { InviteUnit = function(name) invited = name end }
+    world.sentMessages = {}
+
+    fixtures.slash(world, "lfgtest")
+
+    test.assertContains(table.concat(world.messages, "\n"), "stand-in listings are on your Guild LFG Board")
+    -- The slot question glows orange and opens the drawer, with the request
+    -- under it.
+    local button = addon.lfgButton
+    test.assertTrue(button:DrawerOpen())
+    test.assertEqual("orange", button.view.glow)
+    test.assertEqual("Yes", button.listButton.label.text)
+    test.assertContains(button.toasts[1].name.text, "Brightleaf")
+    test.assertEqual("Healer, 24", button.toasts[1].details.text)
+    -- The board: relevant (with a note and a raid), greyed and full ones.
+    test.assertTrue(addon.agfWindow:Open("lfg"))
+    local current = { level = 60, roles = { "tank", "dps" } }
+    local groups = addon.lfgBoard:Groups(world.time, current, {})
+    test.assertEqual(3, #groups.relevant)
+    test.assertEqual(2, #groups.other)
+
+    -- Asking a stand-in, answering the request and the slot: nothing goes out.
+    local card = addon.lfgPage.largeCards[1]
+    click(card.ask)
+    if addon.lfgPage.roleMenu:IsOpen() then
+        click(addon.lfgPage.roleMenu.rows[1])
+    end
+    test.assertEqual("pending", addon.lfgBoard:Request(card.listing.id, world.time).state)
+    click(button.toasts[1].invite)
+    test.assertEqual(nil, invited)
+    click(button.listButton)
+    test.assertEqual(nil, button.view.glow)
+    -- Not even once the stand-ins' requests would expire. (Guild sync
+    -- goes on as usual.)
+    fixtures.runTimers(world, 180)
+    local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
+    local index
+    for index = 1, #world.sentMessages do
+        local _, message = serializer:Deserialize(world.sentMessages[index].text)
+        local kind = type(message) == "table" and tostring(message.t) or ""
+        test.assertFalse(string.sub(kind, 1, 4) == "lfg-", "sent " .. kind)
+    end
+end)
+
+test.test("Forever the release build has no lfgtest command", function()
+    local world = login(fixtures.newChannel(), "Tool Box")
+
+    fixtures.slash(world, "help")
+
+    test.assertFalse(string.find(table.concat(world.messages, "\n"), "lfgtest", 1, true) ~= nil)
 end)

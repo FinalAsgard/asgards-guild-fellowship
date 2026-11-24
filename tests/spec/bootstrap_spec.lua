@@ -79,6 +79,7 @@ local MANIFEST_FILES = {
     "Core/LfgTrigger.lua",
     "Core/RoleCatalog.lua",
     "Core/LfgNearby.lua",
+    "Core/LfgStandIns.lua",
     "Core/GroupHistory.lua",
     "Core/GroupFriends.lua",
     "Core/GuildLog.lua",
