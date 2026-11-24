@@ -80,6 +80,11 @@ local lfgRefresh = function() end
 local lfgTrigger = addon.LfgTrigger.Create()
 local lfgOnParty = function() end
 local lfgOnZone = function() end
+-- The player says yes to listing a party led from outside the guild: they
+-- claim contact (see LfgTrigger).
+local lfgClaim = function() end
+-- A guildmate logged off: their listing is handed on or dropped.
+local lfgOnOffline = function() end
 local LFG_HAND_OFF_SECONDS = 5
 -- A guildmate's group-friend tier by character key (set up with the group
 -- friends below).
@@ -1349,8 +1354,14 @@ if clientProfile.supported then
         end,
         -- The leader's question: what it's for goes through the board's
         -- card; Not looking (or no answer) and the snooze ask nothing more.
+        -- Yes to listing a party led from outside the guild makes the
+        -- player its contact first.
         onListParty = function()
-            lfgTrigger:Answered()
+            if lfgTrigger:Gating() and client:IsInGroup() and not client:IsGroupLeader() then
+                lfgClaim()
+            else
+                lfgTrigger:Answered()
+            end
             openBoard()
             if lfgPage ~= nil and not lfgListing:IsActive() then
                 lfgPage:StartEditing()
@@ -1608,6 +1619,7 @@ if clientProfile.supported then
                     isPlayer = member.isPlayer,
                     isLeader = member.isLeader,
                     inGuild = member.inGuild,
+                    online = member.online,
                 })
                 if member.isLeader then
                     leaderIndex = #members
@@ -1638,12 +1650,32 @@ if clientProfile.supported then
             sendLfg(addon.LfgProtocol.Listing(fields))
         end
     end
-    local function endListing()
+    -- Ends the listing; `left` when the player left the party, so a
+    -- guildmate still in it can take it over.
+    local function endListing(left)
         if lfgListing:IsActive() then
             lfgListing:End()
-            sendLfg(addon.LfgProtocol.End())
+            sendLfg(addon.LfgProtocol.End(left))
         end
         refreshLfg()
+    end
+    -- Whether the player speaks for their listing: solo, leading the
+    -- party, or its contact.
+    local function lfgLister()
+        if not client:IsInGroup() or client:IsGroupLeader() then
+            return true
+        end
+        local selfKey = rosterController:SelfKey()
+        return selfKey ~= nil and lfgTrigger:Contact() == selfKey
+    end
+    -- A listing on the board by its lister's key, or the one they had when
+    -- they left the party or logged off.
+    local function lfgListingOf(key, now)
+        return lfgBoard:Get(key, now) or lfgBoard:Ended(key)
+    end
+    -- The party's members' roster keys.
+    local function lfgKeyOf(member)
+        return rosterController:RosterKeyFor(member.fullName or member.name, member.guid)
     end
     local function lfgTick()
         lfgHeartbeat = false
@@ -1808,6 +1840,7 @@ if clientProfile.supported then
             instance = client:IsInInstance(),
             dnd = settings:Get("dnd") == true,
             ask = lfgTrigger:Asking(),
+            gate = lfgTrigger:Gating(),
         })
         if lfgButton ~= nil then
             lfgButton:Update(view)
@@ -1830,9 +1863,10 @@ if clientProfile.supported then
             purpose.minLevel = levels and levels.minLevel or nil
             purpose.maxLevel = levels and levels.maxLevel or nil
         end
-        -- Only the party's leader lists it.
+        -- Only the party's leader lists it, or its contact when the leader
+        -- isn't in the guild.
         local inGroup = client:IsInGroup()
-        if inGroup and not client:IsGroupLeader() then
+        if not lfgLister() then
             return false, "only your party's leader can list it"
         end
         local saved, reason
@@ -1895,19 +1929,35 @@ if clientProfile.supported then
         local now = client:Timestamp() or 0
         local inGroup = client:IsInGroup()
         local leaderKey
-        local size, guildmates = 0, 0
+        local size, guildmates, outsiders = 0, 0, 0
+        local guildLed = true
+        local selfKey = rosterController:SelfKey()
+        local present = {}
         if inGroup then
             local members = lfgMembers()
             if members[1] ~= nil and members[1].isLeader then
-                leaderKey = rosterController:RosterKeyFor(members[1].fullName or members[1].name, members[1].guid)
+                leaderKey = lfgKeyOf(members[1])
+                guildLed = members[1].isPlayer == true
+                    or (members[1].inGuild == true and members[1].online ~= false)
             end
             size = #members
             local index
             for index = 1, #members do
-                if not members[index].isPlayer and members[index].inGuild then
+                local member = members[index]
+                if not member.isPlayer and member.inGuild then
                     guildmates = guildmates + 1
+                elseif not member.isPlayer then
+                    outsiders = outsiders + 1
+                end
+                if member.isPlayer then
+                    table.insert(present, selfKey)
+                elseif member.inGuild and member.online ~= false then
+                    table.insert(present, lfgKeyOf(member))
                 end
             end
+            table.sort(present, function(a, b)
+                return tostring(a) < tostring(b)
+            end)
         end
         local actions = lfgTrigger:Observe({
             inGroup = inGroup,
@@ -1916,16 +1966,20 @@ if clientProfile.supported then
             leaderKey = leaderKey,
             listed = lfgListing:IsActive(),
             listingOf = function(key)
-                return lfgBoard:Get(key, now)
+                return lfgListingOf(key, now)
             end,
             size = size,
             guildmates = guildmates,
+            outsiders = outsiders,
+            guildLed = guildLed,
+            selfKey = selfKey,
+            present = present,
             hidden = settings:Get("lfgButton") ~= true,
         }, now)
         local index
         for index = 1, #actions do
             local action = actions[index]
-            if action.action == addon.LfgTrigger.ASK then
+            if action.action == addon.LfgTrigger.ASK or action.action == addon.LfgTrigger.GATE then
                 if lfgButton ~= nil and lfgButton:IsShowing() then
                     lfgRefresh()
                     lfgButton:OpenDrawer()
@@ -1946,25 +2000,51 @@ if clientProfile.supported then
                 lfgListing:Start(purposeOf(action.listing), action.listing.note, now, true)
             elseif action.action == addon.LfgTrigger.RAID then
                 lfgListing:Update({ kind = "raid" }, lfgListing:Note())
+            elseif action.action == addon.LfgTrigger.CLAIM then
+                lfgClaim()
             elseif action.action == addon.LfgTrigger.END then
-                endListing()
+                endListing(not inGroup)
             elseif action.action == addon.LfgTrigger.HAND_OFF then
                 -- The new leader takes it over from the board, so it ends a
                 -- little later.
                 client:After(LFG_HAND_OFF_SECONDS, function()
-                    if lfgListing:IsActive() and not (client:IsInGroup() and client:IsGroupLeader()) then
+                    if lfgListing:IsActive() and not lfgLister() then
                         endListing()
                     end
                 end)
             end
         end
-        if lfgListing:IsActive() and (not inGroup or client:IsGroupLeader()) then
+        if lfgListing:IsActive() and lfgLister() then
             announceListing()
             if not lfgHeartbeat then
                 lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
             end
         end
         lfgRefresh()
+    end
+    -- The player claims contact for their party, led from outside the
+    -- guild, and tells its guildmates (they stop being asked).
+    lfgClaim = function()
+        lfgTrigger:Claim(rosterController:SelfKey())
+        local leader = lfgMembers()[1]
+        if client:IsInGroup() and leader ~= nil and leader.isPlayer == false then
+            comm:Broadcast(addon.LfgProtocol.Contact(leader.fullName or leader.name), addon.Comm.PRIORITY_NORMAL)
+        end
+        lfgRefresh()
+    end
+    -- A guildmate logged off: their listing comes off the board, kept so a
+    -- guildmate in their party can take it over, and the party is looked
+    -- at again.
+    lfgOnOffline = function(name)
+        local key = keyOfSender(name)
+        if key ~= nil and lfgBoard:Get(key, client:Timestamp()) ~= nil then
+            lfgBoard:OnEnd(key, true)
+        end
+        if client:IsInGroup() then
+            lfgOnParty()
+        else
+            lfgRefresh()
+        end
     end
     drawLfgBoard = function(content, ui)
         lfgPage = addon.LfgBoardPage.Create(content, ui, {
@@ -2003,12 +2083,16 @@ if clientProfile.supported then
                 if not client:IsInGroup() then
                     return { inParty = false, isLeader = true }
                 end
-                local isLeader = client:IsGroupLeader()
+                -- The contact for a party led from outside the guild edits
+                -- its listing as a leader would.
+                local isLeader = lfgLister()
                 local listing
                 if not isLeader then
-                    local leader = lfgMembers()[1]
-                    local key = leader and leader.isLeader
-                        and rosterController:RosterKeyFor(leader.fullName or leader.name, leader.guid)
+                    local key = lfgTrigger:Contact()
+                    if key == nil then
+                        local leader = lfgMembers()[1]
+                        key = leader and leader.isLeader and lfgKeyOf(leader)
+                    end
                     listing = key and lfgBoard:Get(key, client:Timestamp()) or nil
                 end
                 return { inParty = true, isLeader = isLeader, listing = listing }
@@ -2059,8 +2143,21 @@ if clientProfile.supported then
         end
         if message.t == addon.LfgProtocol.TYPE_LISTING then
             lfgBoard:OnListing(message, senderKey, sender, client:Timestamp() or 0)
+        elseif message.t == addon.LfgProtocol.TYPE_CONTACT then
+            -- Only a claim from a guildmate in the player's party counts.
+            local inParty = false
+            local members = client:IsInGroup() and lfgMembers() or {}
+            local index
+            for index = 1, #members do
+                if not members[index].isPlayer and lfgKeyOf(members[index]) == senderKey then
+                    inParty = true
+                end
+            end
+            if inParty and lfgTrigger:Claimed(senderKey, rosterController:SelfKey()) then
+                endListing()
+            end
         else
-            lfgBoard:OnEnd(senderKey)
+            lfgBoard:OnEnd(senderKey, message.lf == true)
         end
         refreshLfg()
     end
@@ -5314,6 +5411,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             or kind == "notFound")
         then
             dropLocationOf(name)
+        end
+        if kind == "offline" then
+            lfgOnOffline(name)
         end
         if kind == "notFound" then
             return

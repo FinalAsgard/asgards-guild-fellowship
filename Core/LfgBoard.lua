@@ -17,7 +17,7 @@ local Board = {}
 Board.__index = Board
 
 function LfgBoard.Create()
-    return setmetatable({ listings = {} }, Board)
+    return setmetatable({ listings = {}, ended = {} }, Board)
 end
 
 local function bareName(name)
@@ -38,6 +38,7 @@ function Board:OnListing(message, leader, sender, now)
     for index = 1, #(message.r or {}) do
         openRoles[index] = message.r[index]
     end
+    self.ended[leader] = nil
     self.listings[leader] = {
         id = leader,
         leader = bareName(sender) or leader,
@@ -52,14 +53,26 @@ function Board:OnListing(message, leader, sender, now)
         note = message.no,
         members = members,
         acceptsAsk = message.aj == true,
+        -- The sender is the contact, not the party's leader.
+        contact = message.ct == true,
         listedAt = known ~= nil and known.listedAt or now,
         heardAt = now,
     }
 end
 
--- Leader `leader`'s listing ended.
-function Board:OnEnd(leader)
+-- Leader `leader`'s listing ended. When it ended because they `left` the
+-- party (or logged off), it's kept for Ended, so a guildmate still in the
+-- party can take it over.
+function Board:OnEnd(leader, left)
+    if left and self.listings[leader] ~= nil then
+        self.ended[leader] = self.listings[leader]
+    end
     self.listings[leader] = nil
+end
+
+-- The listing leader `id` had when they left their party, or nil.
+function Board:Ended(id)
+    return id ~= nil and self.ended[id] or nil
 end
 
 local function isStale(listing, now)

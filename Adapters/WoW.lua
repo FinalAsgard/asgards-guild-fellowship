@@ -1108,7 +1108,7 @@ Compatibility.ASSIGNED_ROLES = { TANK = "tank", HEALER = "healer", DAMAGER = "dp
 Compatibility.PARTY_UNITS = { "player", "party1", "party2", "party3", "party4" }
 
 -- One group unit as a member { key, name, classToken, level, guid,
--- assignedRole, inGuild, isPlayer, isLeader }, or nil when there's no one
+-- assignedRole, inGuild, isPlayer, isLeader, online }, or nil when there's no one
 -- there.
 local function readUnit(environment, unit, isPlayer)
     local existsOk, exists = callFunction(environment.UnitExists, unit)
@@ -1138,6 +1138,7 @@ local function readUnit(environment, unit, isPlayer)
     local role = value(environment.UnitGroupRolesAssigned)
     local inGuild = value(environment.UnitIsInMyGuild)
     local leader = value(environment.UnitIsGroupLeader)
+    local connected = value(environment.UnitIsConnected)
     return {
         isLeader = leader ~= nil and leader ~= false,
         key = type(guid) == "string" and guid ~= "" and guid or name,
@@ -1148,6 +1149,8 @@ local function readUnit(environment, unit, isPlayer)
         assignedRole = Compatibility.ASSIGNED_ROLES[role],
         inGuild = isPlayer or (inGuild ~= nil and inGuild ~= false),
         isPlayer = isPlayer,
+        -- Logged in; a client without UnitIsConnected counts everyone.
+        online = isPlayer or connected ~= false,
     }
 end
 

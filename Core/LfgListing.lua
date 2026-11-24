@@ -298,8 +298,9 @@ local function openRoles(members)
 end
 
 -- What the guild is told of the listing, as LfgProtocol.Listing's fields,
--- given the party's `members` (each { name, classToken?, level?, role? },
--- the leader first); nil when it isn't listed.
+-- given the party's `members` (each { name, classToken?, level?, role?,
+-- isPlayer? }, the leader first); nil when it isn't listed. When the
+-- leader isn't the player (isPlayer false), the player is its contact.
 function Listing:Announcement(members)
     if not self.active then
         return nil
@@ -319,6 +320,7 @@ function Listing:Announcement(members)
         no = self.note,
         mb = listed,
         aj = true,
+        ct = members[1] ~= nil and members[1].isPlayer == false or nil,
     }
     if purpose.kind == "dungeon" then
         fields.lo = purpose.dungeon.minLevel

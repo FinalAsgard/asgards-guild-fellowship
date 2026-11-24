@@ -218,6 +218,8 @@ local CHARACTERS = {
     ["Tool Box"] = { class = "WARRIOR" },
     ["Hammer Smith"] = { class = "PALADIN" },
     ["Zap Arcane"] = { class = "MAGE" },
+    -- Not in the guild.
+    ["Stranger Danger"] = { class = "ROGUE", outsider = true },
 }
 
 -- Puts `world` in a party of `names` (the player among them), led by
@@ -236,7 +238,8 @@ local function partyUp(world, names, leader)
             unit = "party" .. others
         end
         units[unit] = { name = string.match(name, "^(%S+)"), guid = "Player-1-" .. name,
-            class = CHARACTERS[name].class, leader = name == leader }
+            class = CHARACTERS[name].class, leader = name == leader,
+            outsider = CHARACTERS[name].outsider == true }
     end
     local environment = world.environment
     environment.UnitExists = function(unit) return units[unit] ~= nil end
@@ -244,7 +247,7 @@ local function partyUp(world, names, leader)
     environment.UnitGUID = function(unit) return units[unit] and units[unit].guid end
     environment.UnitClass = function(unit) return "Localized", units[unit] and units[unit].class, 1 end
     environment.UnitLevel = function() return 60 end
-    environment.UnitIsInMyGuild = function(unit) return units[unit] ~= nil end
+    environment.UnitIsInMyGuild = function(unit) return units[unit] ~= nil and not units[unit].outsider end
     environment.UnitIsGroupLeader = function(unit) return units[unit] ~= nil and units[unit].leader end
     world.grouped = #names > 1
     fixtures.fire(world, "GROUP_ROSTER_UPDATE")
@@ -551,4 +554,291 @@ test.test("Forever with the button hidden, a new party is listed quietly with a 
     test.assertContains(tool.messages[#tool.messages],
         "Your party is listed on the Guild LFG Board as Questing in Ironforge. Type /agf lfg to take part.")
     test.assertEqual(1, #hammer.addon.lfgBoard:Listings(hammer.time))
+end)
+
+-- Parties led from outside the guild ----------------------------------------------------
+
+test.test("lfg trigger: a party with players outside the guild asks first whether to list it", function()
+    local trigger, LfgTrigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual(LfgTrigger.GATE, names(trigger:Observe(party({ isLeader = true, leaderKey = "me",
+        outsiders = 1, size = 2 }), 0)))
+    test.assertTrue(trigger:Asking())
+    test.assertTrue(trigger:Gating())
+
+    -- No: nothing more is asked in this party, even made leader again.
+    trigger:NotLooking()
+    trigger:Observe(party({ outsiders = 1, size = 2 }), 10)
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", outsiders = 1,
+        size = 2 }), 20)))
+    test.assertFalse(trigger:Asking())
+
+    -- Made leader of an unlisted party with an outsider in it: asked first.
+    trigger = newTrigger()
+    trigger:Observe(party({ outsiders = 1, size = 2 }), 0)
+    test.assertEqual("gate", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", outsiders = 1,
+        size = 2, listingOf = function() return nil end }), 0)))
+end)
+
+test.test("lfg trigger: a party with outsiders is never listed quietly", function()
+    local trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", outsiders = 1,
+        size = 2, hidden = true }), 0)))
+
+    trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2, outsiders = 1 }), 0)
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
+        guildmates = 1, outsiders = 3 }), 0)))
+    test.assertTrue(trigger:Gating())
+end)
+
+test.test("lfg trigger: led from outside the guild, its guildmates are asked; the first yes is contact", function()
+    local trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("gate", names(trigger:Observe(party({ leaderKey = "stranger", guildLed = false,
+        outsiders = 1, selfKey = "me", present = { "me", "zap" } }), 0)))
+
+    -- I say yes.
+    trigger:Claim("me")
+    test.assertEqual("me", trigger:Contact())
+    test.assertFalse(trigger:Asking())
+
+    -- Someone else said yes first: they're contact, and I'm not asked.
+    trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    trigger:Observe(party({ leaderKey = "stranger", guildLed = false, outsiders = 1, selfKey = "me",
+        present = { "me", "zap" } }), 0)
+    test.assertFalse(trigger:Claimed("zap", "me"))
+    test.assertEqual("zap", trigger:Contact())
+    test.assertFalse(trigger:Asking())
+
+    -- Both at once: the lower key keeps it.
+    trigger:Claim("me")
+    test.assertFalse(trigger:Claimed("zap", "me"))
+    test.assertEqual("me", trigger:Contact())
+    test.assertTrue(trigger:Claimed("amy", "me"))
+    test.assertEqual("amy", trigger:Contact())
+
+    -- Hidden button: never asked.
+    trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("", names(trigger:Observe(party({ leaderKey = "stranger", guildLed = false, outsiders = 1,
+        selfKey = "me", present = { "me" }, hidden = true }), 0)))
+end)
+
+test.test("lfg trigger: handing the lead to someone outside the guild keeps me on as contact", function()
+    local trigger = newTrigger()
+    trigger:Observe(party({ isLeader = true, leaderKey = "me", listed = true, selfKey = "me" }), 0)
+    test.assertEqual("claim", names(trigger:Observe(party({ leaderKey = "stranger", guildLed = false,
+        outsiders = 1, listed = true, selfKey = "me", present = { "me" } }), 0)))
+    test.assertEqual("me", trigger:Contact())
+    -- Nothing changes while I'm still there.
+    test.assertEqual("", names(trigger:Observe(party({ leaderKey = "stranger", guildLed = false,
+        outsiders = 1, listed = true, selfKey = "me", present = { "me" } }), 0)))
+end)
+
+test.test("lfg trigger: when the contact or guild leader goes, the first guildmate left takes it over", function()
+    local listed = { id = "tool", purpose = "Stratholme" }
+    local function listingOf(key)
+        return key == "tool" and listed or nil
+    end
+    local function led(fields)
+        local facts = party({ leaderKey = "stranger", guildLed = false, outsiders = 1, selfKey = "me",
+            listingOf = listingOf })
+        local name, value
+        for name, value in pairs(fields) do
+            facts[name] = value
+        end
+        return facts
+    end
+
+    -- The contact (tool) leaves; I'm first of those left.
+    local trigger = newTrigger()
+    trigger:Observe(led({ present = { "me", "tool" } }), 0)
+    trigger:Claimed("tool", "me")
+    local actions = trigger:Observe(led({ present = { "me", "zap" } }), 10)
+    test.assertEqual("takeOver,claim", names(actions))
+    test.assertEqual(listed, actions[1].listing)
+    test.assertEqual("me", trigger:Contact())
+
+    -- Someone else is first: they take it, I do nothing.
+    trigger = newTrigger()
+    trigger:Observe(led({ present = { "me", "tool" } }), 0)
+    trigger:Claimed("tool", "me")
+    test.assertEqual("", names(trigger:Observe(led({ present = { "amy", "me" } }), 10)))
+    test.assertEqual("amy", trigger:Contact())
+
+    -- The guild leader logs off (the lead stays with them): taken over too.
+    trigger = newTrigger()
+    trigger:Observe(party({ leaderKey = "tool", selfKey = "me", present = { "me", "tool" } }), 0)
+    test.assertEqual("takeOver,claim", names(trigger:Observe(led({ leaderKey = "tool", outsiders = 0,
+        present = { "me" } }), 10)))
+
+    -- Nothing was listed: nothing to take over, and nobody's asked again.
+    trigger = newTrigger()
+    trigger:Observe(led({ present = { "me", "tool" } }), 0)
+    trigger:Claimed("tool", "me")
+    test.assertEqual("", names(trigger:Observe(led({ present = { "me" }, listingOf = function() return nil end }),
+        10)))
+end)
+
+-- LfgProtocol and LfgBoard: contacts ---------------------------------------------------
+
+test.test("lfg protocol: contact claims, contact listings and ends by leaving are validated", function()
+    local addon = test.newAddon("Core/LfgProtocol.lua")
+    local protocol = addon.LfgProtocol
+    test.assertTrue(protocol.IsValid(protocol.Contact("Stranger")))
+    test.assertFalse(protocol.IsValid(protocol.Contact(nil)))
+    test.assertFalse(protocol.IsValid(protocol.Contact("")))
+    test.assertFalse(protocol.IsValid(protocol.Contact(string.rep("a", protocol.TEXT_LETTERS + 1))))
+    test.assertFalse(protocol.IsValid(protocol.Contact(7)))
+
+    test.assertTrue(protocol.IsValid(protocol.End(true)))
+    test.assertEqual(true, protocol.End(true).lf)
+    test.assertEqual(nil, protocol.End().lf)
+    local bad = protocol.End()
+    bad.lf = "yes"
+    test.assertFalse(protocol.IsValid(bad))
+
+    local listing = protocol.Listing({ k = "raid", s = 1, x = 40, mb = { { n = "Tool" } }, aj = true, ct = true })
+    test.assertTrue(protocol.IsValid(listing))
+    listing.ct = false
+    test.assertFalse(protocol.IsValid(listing))
+end)
+
+test.test("lfg board: a listing ended by leaving is kept for a guildmate to take over", function()
+    local addon = test.newAddon("Core/LfgProtocol.lua", "Core/LfgRelevance.lua", "Core/LfgBoard.lua")
+    local board = addon.LfgBoard.Create()
+    local message = addon.LfgProtocol.Listing({ k = "raid", s = 2, x = 40,
+        mb = { { n = "Stranger" }, { n = "Tool" } }, aj = true, ct = true })
+    board:OnListing(message, "tool", "Tool-Camelot", 0)
+    test.assertTrue(board:Get("tool", 0).contact)
+    board:OnEnd("tool", true)
+    test.assertEqual(nil, board:Get("tool", 0))
+    test.assertEqual("Tool", board:Ended("tool").leader)
+
+    -- Heard again, it's live; ended plainly, it's gone for good.
+    board:OnListing(message, "tool", "Tool-Camelot", 10)
+    test.assertEqual(nil, board:Ended("tool"))
+    board:OnEnd("tool")
+    test.assertEqual(nil, board:Ended("tool"))
+end)
+
+test.test("lfg listing: a listing announced by its contact says so", function()
+    local addon = test.newAddon("Core/LfgProtocol.lua", "Core/LfgListing.lua")
+    local listing = addon.LfgListing.Create()
+    listing:Start({ kind = "raid" }, nil, 0, true)
+    test.assertEqual(true, listing:Announcement({ { name = "Stranger", isPlayer = false },
+        { name = "Tool", isPlayer = true } }).ct)
+    test.assertEqual(nil, listing:Announcement({ { name = "Tool", isPlayer = true } }).ct)
+end)
+
+test.test("Forever a party led from outside the guild: the first guildmate to say yes is its contact", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = login(channel, "Tool Box")
+    local hammer, addon = login(channel, "Hammer Smith")
+    local zap = login(channel, "Zap Arcane")
+    local members = { "Stranger Danger", "Tool Box", "Hammer Smith" }
+    partyUp(tool, members, "Stranger Danger")
+    partyUp(hammer, members, "Stranger Danger")
+
+    -- Both guildmates are asked whether to list it.
+    local button = toolAddon.lfgButton
+    test.assertTrue(button:DrawerOpen())
+    test.assertEqual(toolAddon.LfgButton.GATE_TEXT, button.drawer.question.text)
+    test.assertEqual("Yes", button.listButton.label.text)
+    test.assertFalse(button.snoozeButton.shown)
+    test.assertTrue(addon.lfgTrigger:Gating())
+
+    -- Tool says yes first, and lists it as its contact.
+    click(button.listButton)
+    fixtures.deliver(channel)
+    test.assertFalse(addon.lfgTrigger:Asking())
+    test.assertEqual("edit", toolAddon.lfgPage:Mode())
+    toolAddon.lfgPage.draft.kind = "raid"
+    test.assertTrue(toolAddon.lfgPage:Save())
+    fixtures.deliver(channel)
+
+    local heard = zap.addon.lfgBoard:Listings(zap.time)[1]
+    test.assertTrue(heard.contact)
+    test.assertEqual("Tool Box", heard.leader)
+    test.assertEqual("Stranger", heard.members[1].name)
+    test.assertTrue(zap.addon.agfWindow:Open("lfg"))
+    local card = zap.addon.lfgPage.largeCards[1]
+    test.assertContains(card.details.text, "contact Tool Box")
+    test.assertEqual("Whisper Tool Box", card.whisper.label.text)
+    -- The leader's name doesn't whisper them: the contact speaks for the party.
+    test.assertEqual(false, card.members[1].whisper)
+
+    -- Hammer sees it read-only, named by its contact, and can't edit it.
+    test.assertTrue(addon.agfWindow:Open("lfg"))
+    test.assertEqual("member", addon.lfgPage:Mode())
+    test.assertContains(addon.lfgPage.view.details.text, "contact Tool Box")
+    local saved = addon.lfgPage.options.onSave({ kind = "raid" }, nil)
+    test.assertFalse(saved)
+end)
+
+test.test("Forever when the contact leaves, a guildmate still in the party takes the listing over", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = login(channel, "Tool Box")
+    local hammer, addon = login(channel, "Hammer Smith")
+    local zap = login(channel, "Zap Arcane")
+    local members = { "Stranger Danger", "Tool Box", "Hammer Smith" }
+    partyUp(tool, members, "Stranger Danger")
+    partyUp(hammer, members, "Stranger Danger")
+    click(toolAddon.lfgButton.listButton)
+    fixtures.deliver(channel)
+    toolAddon.lfgPage.draft.kind = "raid"
+    toolAddon.lfgPage.draft.note = "Come along"
+    test.assertTrue(toolAddon.lfgPage:Save())
+    fixtures.deliver(channel)
+
+    leaveParty(tool)
+    fixtures.deliver(channel)
+    partyUp(hammer, { "Stranger Danger", "Hammer Smith" }, "Stranger Danger")
+    fixtures.deliver(channel)
+
+    test.assertTrue(addon.lfgListing:IsActive())
+    test.assertEqual("Come along", addon.lfgListing:Note())
+    local listings = zap.addon.lfgBoard:Listings(zap.time)
+    test.assertEqual(1, #listings)
+    test.assertEqual("Hammer Smith", listings[1].leader)
+    test.assertTrue(listings[1].contact)
+
+    -- With no guildmate left, the listing goes with the last one.
+    leaveParty(hammer)
+    fixtures.deliver(channel)
+    test.assertEqual(0, #zap.addon.lfgBoard:Listings(zap.time))
+end)
+
+test.test("Forever when a listed guild leader logs off, a guildmate in the party takes the listing over", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = login(channel, "Tool Box")
+    local hammer, addon = login(channel, "Hammer Smith")
+    local zap = login(channel, "Zap Arcane")
+    local members = { "Tool Box", "Hammer Smith", "Stranger Danger" }
+    partyUp(tool, members, "Tool Box")
+    partyUp(hammer, members, "Tool Box")
+    -- The leader is asked first whether to list a party with an outsider.
+    test.assertTrue(toolAddon.lfgTrigger:Gating())
+    click(toolAddon.lfgButton.listButton)
+    toolAddon.lfgPage.draft.kind = "raid"
+    test.assertTrue(toolAddon.lfgPage:Save())
+    fixtures.deliver(channel)
+    test.assertEqual(1, #zap.addon.lfgBoard:Listings(zap.time))
+
+    -- Tool logs off, still leading.
+    hammer.environment.UnitIsConnected = function(unit) return unit ~= "party1" end
+    fixtures.fire(hammer, "CHAT_MSG_SYSTEM", "Tool Box has gone offline.")
+    fixtures.fire(zap, "CHAT_MSG_SYSTEM", "Tool Box has gone offline.")
+    fixtures.deliver(channel)
+
+    test.assertTrue(addon.lfgListing:IsActive())
+    test.assertEqual(hammer.addon.rosterController:SelfKey(), addon.lfgTrigger:Contact())
+    local listings = zap.addon.lfgBoard:Listings(zap.time)
+    test.assertEqual(1, #listings)
+    test.assertEqual("Hammer Smith", listings[1].leader)
+    test.assertTrue(listings[1].contact)
 end)

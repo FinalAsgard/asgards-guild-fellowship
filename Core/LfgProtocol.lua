@@ -13,11 +13,18 @@ local LfgProtocol = {
     -- { v, t, k = purpose kind, p = purpose text?, lo, hi = level range?,
     -- r = open roles (dungeon only), s = size, x = most players, no = note?,
     -- mb = the members, each { n = name, c = class token?, l = level?,
-    -- r = role? }, aj = accepts Ask to join }: the sender's party listing,
-    -- re-sent every HEARTBEAT_SECONDS while it lasts. The sender leads it.
+    -- r = role? }, aj = accepts Ask to join, ct = true when the sender is
+    -- the contact for a party whose leader isn't in the guild }: the
+    -- sender's party listing, re-sent every HEARTBEAT_SECONDS while it
+    -- lasts. The sender leads it, or is its contact.
     TYPE_LISTING = "lfg-listing",
-    -- { v, t }: the sender's listing ended.
+    -- { v, t, lf = true when the sender left the party }: the sender's
+    -- listing ended. One that ended by leaving can be handed on.
     TYPE_END = "lfg-end",
+    -- { v, t, ld = the party leader's name }: the sender claims contact for
+    -- their party, whose leader isn't in the guild. The party's other
+    -- guildmates stop being asked about it.
+    TYPE_CONTACT = "lfg-contact",
     HEARTBEAT_SECONDS = 60,
     -- The most characters a note or a free-text purpose holds.
     TEXT_LETTERS = 60,
@@ -117,9 +124,13 @@ local CHECKS = {
             and isMembers(message.mb, message.s)
             and (message.no == nil or isShortText(message.no))
             and type(message.aj) == "boolean"
+            and (message.ct == nil or message.ct == true)
     end,
-    [LfgProtocol.TYPE_END] = function()
-        return true
+    [LfgProtocol.TYPE_END] = function(message)
+        return message.lf == nil or message.lf == true
+    end,
+    [LfgProtocol.TYPE_CONTACT] = function(message)
+        return isShortText(message.ld)
     end,
 }
 
@@ -130,7 +141,7 @@ for type_ in pairs(CHECKS) do
     LfgProtocol.TYPES[type_] = true
 end
 
--- A listing message carrying `fields` (k, p, lo, hi, r, s, x, no, mb, aj),
+-- A listing message carrying `fields` (k, p, lo, hi, r, s, x, no, mb, aj, ct),
 -- as LfgListing's Announcement gives them.
 function LfgProtocol.Listing(fields)
     local message = { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_LISTING }
@@ -141,8 +152,15 @@ function LfgProtocol.Listing(fields)
     return message
 end
 
-function LfgProtocol.End()
-    return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_END }
+-- The listing's end; `left` when it ended because the sender left the
+-- party.
+function LfgProtocol.End(left)
+    return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_END, lf = left == true or nil }
+end
+
+-- A contact claim for the party led by `leaderName`.
+function LfgProtocol.Contact(leaderName)
+    return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_CONTACT, ld = leaderName }
 end
 
 -- Whether `message` is a Guild LFG Board message this version understands.

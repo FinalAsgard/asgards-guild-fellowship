@@ -472,7 +472,7 @@ function Page:refreshMemberView()
     view.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
     view.details:SetText(join({ addon.LfgListing.KindLabel(listing.kind), range(listing.minLevel, listing.maxLevel),
         listing.kind == "raid" and (listing.size .. " players") or (listing.size .. "/" .. listing.maxSize),
-        "led by " .. listing.leader }))
+        (listing.contact and "contact " or "led by ") .. listing.leader }))
     view.note:SetText(listing.note or "")
     if listing.kind == "dungeon" then
         showRoles(view.tiles, listing.members)
@@ -764,8 +764,9 @@ function Page:showLarge(card, listing)
     end
     card.listing = listing
     card.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
+    -- A party led from outside the guild names its contact.
     card.details:SetText(join({ addon.LfgListing.KindLabel(listing.kind), range(listing.minLevel, listing.maxLevel),
-        sizeText(listing) }))
+        sizeText(listing), listing.contact and ("contact " .. listing.leader) or nil }))
     local row
     for row = 1, #card.members do
         local line, member = card.members[row], listing.members[row]
@@ -774,7 +775,9 @@ function Page:showLarge(card, listing)
         else
             local leader = row == 1
             line.name:SetText(colored(member.name, options.classColor(member.classToken)))
-            line.whisper = leader and listing.sender or false
+            -- The leader's name whispers them, unless they're outside the
+            -- guild and the contact speaks for the party.
+            line.whisper = leader and not listing.contact and listing.sender or false
             setShown(line.crown, leader)
             local tier = options.friendTier(member.name)
             line.friend = tier == addon.GroupFriends.FREQUENT or tier == addon.GroupFriends.TOP
