@@ -87,7 +87,9 @@ local lfgClaim = function() end
 local lfgOnOffline = function() end
 -- Ask to join: the roles the current character can ask a dungeon listing
 -- for, asking, and the leader's Invite and Decline; and announcing the
--- player's listing again (when whether it takes asks changed).
+-- player's listing again (when whether it takes asks changed); and the
+-- slot-open path: the party as last seen, the open slot (false, or { role
+-- }), the answer to "fill the empty slot?" and the party's listing.
 -- (One table: the main chunk is near Lua's 200-local limit.)
 local lfgJoin = {
     askRoles = function() return {} end,
@@ -96,6 +98,11 @@ local lfgJoin = {
     decline = function() end,
     announce = function() end,
     sweep = function() return {} end,
+    before = {},
+    slot = false,
+    fillSlot = function() end,
+    postSlot = function() end,
+    partyListing = function() return nil end,
 }
 local LFG_HAND_OFF_SECONDS = 5
 -- A guildmate's group-friend tier by character key (set up with the group
@@ -1388,6 +1395,9 @@ if clientProfile.supported then
             lfgTrigger:Snooze(client:Timestamp() or 0)
             lfgRefresh()
         end,
+        onFillSlot = function(yes)
+            lfgJoin.fillSlot(yes)
+        end,
         dungeonIcon = function(name)
             local dungeon = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
             return dungeon and dungeon.icon or nil
@@ -1712,6 +1722,16 @@ if clientProfile.supported then
     local function lfgKeyOf(member)
         return rosterController:RosterKeyFor(member.fullName or member.name, member.guid)
     end
+    -- The player's party's listing on the board, by its contact or leader,
+    -- when someone else lists it.
+    lfgJoin.partyListing = function()
+        local key = lfgTrigger:Contact()
+        if key == nil then
+            local leader = lfgMembers()[1]
+            key = leader and leader.isLeader and lfgKeyOf(leader)
+        end
+        return key and lfgBoard:Get(key, client:Timestamp()) or nil
+    end
     local function lfgTick()
         lfgHeartbeat = false
         if not lfgListing:IsActive() then
@@ -1853,6 +1873,16 @@ if clientProfile.supported then
             party.kind, party.label, party.note = fields.k, addon.LfgListing.Label(fields.k, fields.p), fields.no
             party.openRoles = fields.r
         end
+        -- Fill the empty slot? What it would be posted as: the party's
+        -- purpose (from the board when a guildmate lists it) and, for a
+        -- dungeon, the open role.
+        if lfgTrigger:SlotOpen() then
+            local listing = fields == nil and lfgJoin.partyListing() or nil
+            if listing ~= nil then
+                party.kind, party.label = listing.kind, addon.LfgListing.Label(listing.kind, listing.purpose)
+            end
+            party.slotRole = party.kind == "dungeon" and lfgJoin.slot and lfgJoin.slot.role or nil
+        end
         return party
     end
     -- Redraws the button (count, glow, drawer) and the board. New groups for
@@ -1876,6 +1906,7 @@ if clientProfile.supported then
             dnd = settings:Get("dnd") == true,
             ask = lfgTrigger:Asking(),
             gate = lfgTrigger:Gating(),
+            slotOpen = lfgTrigger:SlotOpen(),
             requests = lfgJoin.sweep(),
             requestOf = function(id)
                 return lfgBoard:Request(id, client:Timestamp())
@@ -2043,6 +2074,22 @@ if clientProfile.supported then
                 lfgClaim()
             elseif action.action == addon.LfgTrigger.END then
                 endListing(not inGroup)
+            elseif action.action == addon.LfgTrigger.SLOT_OPEN or action.action == addon.LfgTrigger.SLOT_REMIND then
+                -- The listing stays as the party was until the slot's
+                -- posted: by Yes, or with no answer after SLOT_SECONDS.
+                lfgJoin.slot = { role = lfgJoin.leftRole(lfgJoin.before, lfgMembers()) }
+                lfgListing:Hold(lfgJoin.before)
+                if action.action == addon.LfgTrigger.SLOT_REMIND then
+                    rosterController:Print("Someone left your party. Type " .. addon.Identity.slashCommand ..
+                        " lfg to fill the empty slot on the Guild LFG Board.")
+                else
+                    client:After(addon.LfgTrigger.SLOT_SECONDS + 1, function()
+                        if lfgTrigger:SlotDue(client:Timestamp() or 0) then
+                            lfgJoin.postSlot()
+                        end
+                        lfgRefresh()
+                    end)
+                end
             elseif action.action == addon.LfgTrigger.HAND_OFF then
                 -- The new leader takes it over from the board, so it ends a
                 -- little later.
@@ -2057,6 +2104,43 @@ if clientProfile.supported then
             announceListing()
             if not lfgHeartbeat then
                 lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
+            end
+        end
+        lfgJoin.before = inGroup and lfgMembers() or {}
+        lfgRefresh()
+    end
+    -- The role of whoever left (in `before`, not in `after`): the game's, or
+    -- the one the leader chose; else DPS, the best guess.
+    lfgJoin.leftRole = function(before, after)
+        local still = {}
+        local index
+        for index = 1, #after do
+            still[after[index].key] = true
+        end
+        local chosen = lfgListing:ChosenRoles()
+        for index = 1, #before do
+            local member = before[index]
+            if not still[member.key] then
+                return member.assignedRole or chosen[member.key] or "dps"
+            end
+        end
+        return "dps"
+    end
+    -- The open slot goes on the board: the lister announces the party as it
+    -- is now.
+    lfgJoin.postSlot = function()
+        if lfgListing:IsActive() and lfgLister() then
+            lfgListing:Post(lfgJoin.slot and lfgJoin.slot.role or nil)
+            announceListing()
+        end
+    end
+    -- The player answered "fill the empty slot?": the party's other
+    -- guildmates hear it (and stop being asked); Yes posts it.
+    lfgJoin.fillSlot = function(yes)
+        if lfgTrigger:SlotAnswered(yes) then
+            comm:Broadcast(addon.LfgProtocol.Slot(yes), addon.Comm.PRIORITY_NORMAL)
+            if yes then
+                lfgJoin.postSlot()
             end
         end
         lfgRefresh()
@@ -2208,12 +2292,7 @@ if clientProfile.supported then
                 local isLeader = lfgLister()
                 local listing
                 if not isLeader then
-                    local key = lfgTrigger:Contact()
-                    if key == nil then
-                        local leader = lfgMembers()[1]
-                        key = leader and leader.isLeader and lfgKeyOf(leader)
-                    end
-                    listing = key and lfgBoard:Get(key, client:Timestamp()) or nil
+                    listing = lfgJoin.partyListing()
                 end
                 return { inParty = true, isLeader = isLeader, listing = listing }
             end,
@@ -2263,8 +2342,9 @@ if clientProfile.supported then
         end
         if message.t == addon.LfgProtocol.TYPE_LISTING then
             lfgBoard:OnListing(message, senderKey, sender, client:Timestamp() or 0)
-        elseif message.t == addon.LfgProtocol.TYPE_CONTACT then
-            -- Only a claim from a guildmate in the player's party counts.
+        elseif message.t == addon.LfgProtocol.TYPE_CONTACT or message.t == addon.LfgProtocol.TYPE_SLOT then
+            -- Only a claim or an answer from a guildmate in the player's
+            -- party counts.
             local inParty = false
             local members = client:IsInGroup() and lfgMembers() or {}
             local index
@@ -2273,7 +2353,14 @@ if clientProfile.supported then
                     inParty = true
                 end
             end
-            if inParty and lfgTrigger:Claimed(senderKey, rosterController:SelfKey()) then
+            if not inParty then
+                return
+            end
+            if message.t == addon.LfgProtocol.TYPE_SLOT then
+                if lfgTrigger:SlotAnswered(message.y) and message.y then
+                    lfgJoin.postSlot()
+                end
+            elseif lfgTrigger:Claimed(senderKey, rosterController:SelfKey()) then
                 endListing()
             end
         elseif message.t == addon.LfgProtocol.TYPE_ASK then

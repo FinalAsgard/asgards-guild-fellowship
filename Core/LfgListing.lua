@@ -146,6 +146,8 @@ function Listing:Start(purpose, note, now, party, guessed)
     self.startedAt = now
     self.joined = party == true
     self.guessed = guessed == true
+    self.held = nil
+    self.openRole = nil
     return true
 end
 
@@ -191,6 +193,29 @@ end
 function Listing:SetRole(key, role)
     self.roles = self.roles or {}
     self.roles[key] = role
+    -- The leader's roles say what's open now.
+    self.openRole = nil
+end
+
+-- Someone left: the listing is announced with `members` (the party as it
+-- was) until the open slot is posted or the party fills up again.
+function Listing:Hold(members)
+    if self.active and self.held == nil then
+        self.held = members
+    end
+end
+
+-- Whether the listing is held as the party was.
+function Listing:Held()
+    return self.held ~= nil
+end
+
+-- Posts the open slot: the listing is announced as the party is now, and a
+-- dungeon's one open slot as `role` (the role of whoever left, where it's
+-- known), until the leader sets roles or the party changes size.
+function Listing:Post(role)
+    self.held = nil
+    self.openRole = role
 end
 
 -- The roles the leader set, by member key.
@@ -249,6 +274,8 @@ function Listing:End()
     self.purpose = nil
     self.note = nil
     self.startedAt = nil
+    self.held = nil
+    self.openRole = nil
 end
 
 function Listing:IsActive()
@@ -302,10 +329,21 @@ end
 -- isPlayer? }, the leader first); nil when it isn't listed. When the
 -- leader isn't the player (isPlayer false), the player is its contact.
 -- Ask to join is accepted unless `accepts` is false (the LFG button is
--- hidden) or the player is the contact (they can't invite).
+-- hidden) or the player is the contact (they can't invite). While held,
+-- it's the party as it was, until the party is that big again.
 function Listing:Announcement(members, accepts)
     if not self.active then
         return nil
+    end
+    if self.held ~= nil then
+        if #members >= #self.held then
+            self.held = nil
+        else
+            members = self.held
+        end
+    end
+    if self.held == nil and #members ~= LfgListing.PARTY_SIZE - 1 then
+        self.openRole = nil
     end
     local purpose = self.purpose
     local listed = {}
@@ -328,6 +366,9 @@ function Listing:Announcement(members, accepts)
         fields.lo = purpose.dungeon.minLevel
         fields.hi = purpose.dungeon.maxLevel
         fields.r = openRoles(members)
+        if self.openRole ~= nil then
+            fields.r = { self.openRole }
+        end
     elseif purpose.kind == "questing" then
         fields.lo = purpose.minLevel
         fields.hi = purpose.maxLevel

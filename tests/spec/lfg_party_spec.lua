@@ -972,3 +972,317 @@ test.test("Forever in Do Not Disturb, Ask to join requests are declined without 
     fixtures.deliver(channel)
     test.assertEqual("declined", addon.lfgBoard:Request(card.listing.id, hammer.time).state)
 end)
+
+-- Someone left --------------------------------------------------------------------------
+
+local function fullParty(fields)
+    return party(fields and fields or { isLeader = true, leaderKey = "me", listed = true, size = 5, guildmates = 4 })
+end
+
+test.test("lfg trigger: someone leaving a full, listed party opens the slot; 60 seconds without an answer posts it",
+    function()
+        local trigger, LfgTrigger = newTrigger()
+        trigger:Observe(fullParty(), 0)
+        test.assertFalse(trigger:SlotOpen())
+
+        local four = fullParty()
+        four.size = 4
+        test.assertEqual("slotOpen", names(trigger:Observe(four, 10)))
+        test.assertTrue(trigger:SlotOpen())
+        -- No popup: nothing is asked.
+        test.assertFalse(trigger:Asking())
+
+        test.assertFalse(trigger:SlotDue(10 + LfgTrigger.SLOT_SECONDS - 1))
+        test.assertTrue(trigger:SlotOpen())
+        test.assertTrue(trigger:SlotDue(10 + LfgTrigger.SLOT_SECONDS))
+        test.assertFalse(trigger:SlotOpen())
+        -- Posted once.
+        test.assertFalse(trigger:SlotDue(10 + 2 * LfgTrigger.SLOT_SECONDS))
+    end)
+
+test.test("lfg trigger: another leaving or the party disbanding within the 60 seconds keeps the slot off", function()
+    local trigger = newTrigger()
+    trigger:Observe(fullParty(), 0)
+    local four = fullParty()
+    four.size = 4
+    trigger:Observe(four, 0)
+    local three = fullParty()
+    three.size = 3
+    test.assertEqual("", names(trigger:Observe(three, 20)))
+    test.assertFalse(trigger:SlotOpen())
+    test.assertFalse(trigger:SlotDue(100))
+
+    trigger = newTrigger()
+    trigger:Observe(fullParty(), 0)
+    trigger:Observe(four, 0)
+    test.assertEqual("end", names(trigger:Observe({ inGroup = false, listed = true }, 20)))
+    test.assertFalse(trigger:SlotOpen())
+    test.assertFalse(trigger:SlotDue(100))
+end)
+
+test.test("lfg trigger: Yes posts the open slot, No keeps it off; filling up again closes the question", function()
+    local trigger = newTrigger()
+    local four = fullParty()
+    four.size = 4
+    trigger:Observe(fullParty(), 0)
+    trigger:Observe(four, 0)
+    test.assertTrue(trigger:SlotAnswered(false))
+    test.assertFalse(trigger:SlotOpen())
+    test.assertFalse(trigger:SlotAnswered(true))
+    test.assertFalse(trigger:SlotDue(100))
+
+    trigger = newTrigger()
+    trigger:Observe(fullParty(), 0)
+    trigger:Observe(four, 0)
+    test.assertTrue(trigger:SlotAnswered(true))
+    test.assertFalse(trigger:SlotOpen())
+
+    trigger = newTrigger()
+    trigger:Observe(fullParty(), 0)
+    trigger:Observe(four, 0)
+    test.assertEqual("", names(trigger:Observe(fullParty(), 5)))
+    test.assertFalse(trigger:SlotOpen())
+end)
+
+test.test("lfg trigger: a guildmate in the party is asked too, when the party's listed; an unlisted one isn't",
+    function()
+        local trigger = newTrigger()
+        local listed = { id = "tool" }
+        local member = party({ size = 5, guildmates = 4, listingOf = function(key)
+            return key == "tool" and listed or nil
+        end })
+        trigger:Observe(member, 0)
+        member.size = 4
+        test.assertEqual("slotOpen", names(trigger:Observe(member, 0)))
+
+        trigger = newTrigger()
+        local unlisted = party({ size = 5, guildmates = 4 })
+        trigger:Observe(unlisted, 0)
+        unlisted.size = 4
+        test.assertEqual("", names(trigger:Observe(unlisted, 0)))
+        test.assertFalse(trigger:SlotOpen())
+    end)
+
+test.test("lfg trigger: with the button hidden, the leader gets a reminder and nothing is posted", function()
+    local trigger = newTrigger()
+    local hidden = fullParty()
+    hidden.hidden = true
+    trigger:Observe(hidden, 0)
+    hidden.size = 4
+    test.assertEqual("slotRemind", names(trigger:Observe(hidden, 0)))
+    test.assertFalse(trigger:SlotOpen())
+    test.assertFalse(trigger:SlotDue(100))
+
+    -- A member who isn't the lister: not even a reminder.
+    trigger = newTrigger()
+    local member = party({ size = 5, guildmates = 4, hidden = true, listingOf = function()
+        return { id = "tool" }
+    end })
+    trigger:Observe(member, 0)
+    member.size = 4
+    test.assertEqual("", names(trigger:Observe(member, 0)))
+end)
+
+test.test("lfg trigger: no slot opens in a raid, a party that wasn't full, or one the player said Not looking to",
+    function()
+        local trigger = newTrigger()
+        local four = fullParty()
+        four.size = 4
+        local three = fullParty()
+        three.size = 3
+        trigger:Observe(four, 0)
+        test.assertEqual("", names(trigger:Observe(three, 0)))
+
+        trigger = newTrigger()
+        local raid = fullParty()
+        raid.isRaid, raid.size = true, 10
+        trigger:Observe(raid, 0)
+        raid.size = 9
+        test.assertEqual("", names(trigger:Observe(raid, 0)))
+
+        trigger = newTrigger()
+        trigger:Observe(fullParty(), 0)
+        trigger:NotLooking()
+        test.assertEqual("", names(trigger:Observe(four, 0)))
+    end)
+
+test.test("lfg drawer model: an open slot glows orange and asks to fill it, under the party's questions", function()
+    local addon = test.newAddon("Core/LfgDrawerModel.lua")
+    local model = addon.LfgDrawerModel.Create()
+    local info = { label = "Stratholme", kind = "dungeon", size = 5, maxSize = 5, slotRole = "dps" }
+    local view = model:Update({ party = info, slotOpen = true })
+    test.assertEqual("orange", view.glow)
+    test.assertEqual("slot", view.top.kind)
+    test.assertEqual("dps", view.top.party.slotRole)
+    test.assertEqual("ask", model:Update({ party = info, slotOpen = true, ask = true }).top.kind)
+    view = model:Update({ party = info })
+    test.assertEqual(nil, view.glow)
+    test.assertEqual("party", view.top.kind)
+end)
+
+test.test("lfg listing: held as the party was until the slot's posted, then as it is with the open role", function()
+    local listing = newListing().LfgListing.Create()
+    local strat = { kind = "dungeon", dungeon = { name = "Stratholme", minLevel = 58, maxLevel = 60 } }
+    test.assertTrue(listing:Start(strat, nil, 0, true))
+    local function member(name, role)
+        return { name = name, role = role }
+    end
+    local five = { member("Tool", "tank"), member("Hammer", "healer"), member("Zap", "dps"), member("Spark", "dps"),
+        member("Bolt", "dps") }
+    local four = { five[1], five[2], five[3], five[4] }
+    listing:Hold(five)
+    test.assertTrue(listing:Held())
+    local fields = listing:Announcement(four)
+    test.assertEqual(5, fields.s)
+    test.assertEqual(0, #fields.r)
+
+    listing:Post("healer")
+    test.assertFalse(listing:Held())
+    fields = listing:Announcement(four)
+    test.assertEqual(4, fields.s)
+    test.assertEqual("healer", table.concat(fields.r, ","))
+    -- The leader setting roles says what's open.
+    listing:SetRole("x", "dps")
+    test.assertEqual("dps", table.concat(listing:Announcement(four).r, ","))
+
+    -- Filling up again lets go of a hold.
+    listing:Hold(five)
+    test.assertEqual(5, listing:Announcement(five).s)
+    test.assertFalse(listing:Held())
+end)
+
+test.test("lfg protocol: the answer to fill the empty slot", function()
+    local addon = test.newAddon("Core/LfgProtocol.lua")
+    local Protocol = addon.LfgProtocol
+    test.assertTrue(Protocol.IsValid(Protocol.Slot(true)))
+    test.assertTrue(Protocol.IsValid(Protocol.Slot(false)))
+    test.assertFalse(Protocol.Slot(false).y)
+    test.assertFalse(Protocol.IsValid({ v = Protocol.VERSION, t = Protocol.TYPE_SLOT }))
+end)
+
+CHARACTERS["Flint Smith"] = { class = "WARRIOR" }
+
+local FULL = { "Tool Box", "Hammer Smith", "Spark Arcane", "Bolt Smith", "Flint Smith" }
+local BOLT_LEFT = { "Tool Box", "Hammer Smith", "Spark Arcane", "Flint Smith" }
+
+-- Tool leads a full party in Stratholme, listed quietly; Hammer is in it.
+local function fullStrat(channel)
+    local tool, toolAddon = login(channel, "Tool Box")
+    local hammer, addon = login(channel, "Hammer Smith")
+    tool.environment.GetInstanceInfo = function()
+        return "Stratholme", "party"
+    end
+    partyUp(tool, FULL, "Tool Box")
+    fixtures.deliver(channel)
+    test.assertEqual("Stratholme", addon.lfgBoard:Listings(hammer.time)[1].purpose)
+    partyUp(hammer, FULL, "Tool Box")
+    return tool, toolAddon, hammer, addon
+end
+
+local function boltLeaves(...)
+    local worlds = { ... }
+    local index
+    for index = 1, #worlds do
+        partyUp(worlds[index], BOLT_LEFT, "Tool Box")
+    end
+end
+
+test.test("Forever someone leaving a full party glows orange, asks to fill the slot, and posts it after 60 seconds",
+    function()
+        local channel = fixtures.newChannel()
+        local tool, toolAddon, hammer, addon = fullStrat(channel)
+        boltLeaves(tool, hammer)
+        fixtures.deliver(channel)
+
+        local button = toolAddon.lfgButton
+        test.assertEqual("orange", button.view.glow)
+        test.assertEqual("orange", addon.lfgButton.view.glow)
+        -- No popup.
+        test.assertFalse(button:DrawerOpen())
+        button:OpenDrawer()
+        test.assertEqual("Someone left \226\128\148 fill the empty slot?", button.drawer.question.text)
+        test.assertEqual("Stratholme \194\183 needs DPS", button.drawer.slotDetails.text)
+        test.assertEqual("Yes", button.listButton.label.text)
+        test.assertEqual("No", button.notLookingButton.label.text)
+        test.assertFalse(button.snoozeButton.shown)
+        addon.lfgButton:OpenDrawer()
+        test.assertEqual("Stratholme \194\183 needs DPS", addon.lfgButton.drawer.slotDetails.text)
+        -- Closing the drawer isn't an answer.
+        button:CloseDrawer()
+        test.assertTrue(toolAddon.lfgTrigger:SlotOpen())
+        -- Still listed as it was.
+        test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
+
+        fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+        fixtures.deliver(channel)
+        local heard = addon.lfgBoard:Listings(hammer.time)[1]
+        test.assertEqual(4, heard.size)
+        test.assertEqual("dps", table.concat(heard.openRoles, ","))
+        test.assertEqual(nil, button.view.glow)
+    end)
+
+test.test("Forever no slot is posted when another member leaves within the 60 seconds", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = fullStrat(channel)
+    boltLeaves(tool)
+    partyUp(tool, { "Tool Box", "Hammer Smith", "Spark Arcane" }, "Tool Box")
+    test.assertEqual(nil, toolAddon.lfgButton.view.glow)
+    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    fixtures.deliver(channel)
+    test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
+end)
+
+test.test("Forever No keeps the slot off the board, and a guildmate's answer is everyone's", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = fullStrat(channel)
+    boltLeaves(tool, hammer)
+    local button = toolAddon.lfgButton
+    button:OpenDrawer()
+    click(button.notLookingButton)
+    fixtures.deliver(channel)
+    test.assertFalse(addon.lfgTrigger:SlotOpen())
+    test.assertEqual(nil, addon.lfgButton.view.glow)
+    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    fixtures.deliver(channel)
+    test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
+    -- Still listed.
+    test.assertTrue(toolAddon.lfgListing:IsActive())
+
+    -- Hammer, not the leader, says Yes: the leader posts it.
+    channel = fixtures.newChannel()
+    tool, toolAddon, hammer, addon = fullStrat(channel)
+    boltLeaves(tool, hammer)
+    addon.lfgButton:OpenDrawer()
+    click(addon.lfgButton.listButton)
+    fixtures.deliver(channel)
+    test.assertFalse(toolAddon.lfgTrigger:SlotOpen())
+    fixtures.deliver(channel)
+    test.assertEqual(4, addon.lfgBoard:Listings(hammer.time)[1].size)
+end)
+
+test.test("Forever with the button hidden, someone leaving only reminds the leader, and nothing is posted", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = fullStrat(channel)
+    toolAddon.settings:Set("lfgButton", false)
+    boltLeaves(tool)
+    test.assertContains(tool.messages[#tool.messages],
+        "Someone left your party. Type /agf lfg to fill the empty slot on the Guild LFG Board.")
+    test.assertEqual(nil, toolAddon.lfgButton.view.glow)
+    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    fixtures.deliver(channel)
+    test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
+end)
+
+test.test("Forever a posted open slot reaches a guildmate who fits it with the count and the gold glow", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = fullStrat(channel)
+    local zap, zapAddon = login(channel, "Zap Arcane")
+    fixtures.deliver(channel)
+    test.assertEqual(0, zapAddon.lfgButton.view.count)
+    boltLeaves(tool)
+    toolAddon.lfgButton:OpenDrawer()
+    click(toolAddon.lfgButton.listButton)
+    fixtures.deliver(channel)
+    test.assertEqual(1, zapAddon.lfgButton.view.count)
+    test.assertEqual("gold", zapAddon.lfgButton.view.glow)
+end)

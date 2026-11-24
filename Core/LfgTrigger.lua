@@ -37,6 +37,16 @@ local _, addon = ...
 -- party's guildmates still there (by key) takes the listing over and
 -- becomes contact; with none left, it's gone with them.
 --
+-- The slot-open path: when someone leaves a full, listed party, its
+-- guildmates are asked (SLOT_OPEN, with an orange glow and no popup)
+-- whether to fill the empty slot, and the listing stays as it was until
+-- someone answers. Yes posts the open slot, No keeps it off the board.
+-- With no answer it's posted after SLOT_SECONDS, unless another member
+-- leaves within them (a party winding down), which keeps it off; the
+-- party disbanding ends it all. With the button hidden nothing is asked
+-- or posted: the lister gets a SLOT_REMIND chat line. The party filling
+-- up again closes the question.
+--
 -- Asking is snoozed for the rest of a party once the player says Not
 -- looking (or ignores the question), and for every new party for
 -- SNOOZE_SECONDS after "don't ask for 30 minutes". Snoozes live only in
@@ -55,6 +65,12 @@ local LfgTrigger = {
     GATE = "gate",
     -- The player is now the contact: tell the party's guildmates.
     CLAIM = "claim",
+    -- Someone left the full party: fill the empty slot?
+    SLOT_OPEN = "slotOpen",
+    -- Someone left, with the button hidden: a chat line, nothing posted.
+    SLOT_REMIND = "slotRemind",
+    -- How long an open slot waits for an answer before it's posted.
+    SLOT_SECONDS = 60,
     -- A party this big, not a raid, is full.
     PARTY_SIZE = 5,
 }
@@ -105,6 +121,7 @@ function Trigger:Observe(facts, now)
         leaderKey = facts.leaderKey,
         full = full,
         guildLed = facts.guildLed ~= false,
+        size = type(facts.size) == "number" and facts.size or 0,
     }
     local listed = facts.listed == true
     local gated = (facts.outsiders or 0) > 0
@@ -133,6 +150,7 @@ function Trigger:Observe(facts, now)
         end
         self.asking = false
         self.contact = nil
+        self.slot = nil
         return actions
     end
     if facts.guildLed ~= false then
@@ -143,6 +161,7 @@ function Trigger:Observe(facts, now)
         self.party = self.party + 1
         self.asking = false
         self.contact = nil
+        self.slot = nil
         if facts.isLeader then
             if listed then
                 act(LfgTrigger.JOINED)
@@ -183,6 +202,7 @@ function Trigger:Observe(facts, now)
     elseif facts.guildLed == false and not facts.isLeader then
         self:succeed(facts, before, listed, act, ask)
     end
+    self:slotPath(facts, before, full, listed, now, act)
     -- Filled up with another guildmate in it: listed quietly, unless the
     -- player said Not looking for this party.
     local filled = full and not (before.inGroup and before.full)
@@ -237,6 +257,65 @@ function Trigger:succeed(facts, before, listed, act, ask)
     elseif old == nil and before.guildLed and not listed then
         ask(true)
     end
+end
+
+-- Someone leaving a full party, the same party as before: the slot is
+-- open (or, with the button hidden, the lister is reminded). Another
+-- leaving while it's open keeps it off the board; filling up closes it.
+function Trigger:slotPath(facts, before, full, listed, now, act)
+    if full or facts.isRaid then
+        self.slot = nil
+        return
+    end
+    local size = type(facts.size) == "number" and facts.size or 0
+    if not before.inGroup or before.isRaid or size >= before.size then
+        return
+    end
+    if self:SlotOpen() then
+        self.slot.state = "kept"
+        return
+    end
+    if not before.full or self.partySnoozed == self.party then
+        return
+    end
+    local key = self.contact or facts.leaderKey
+    if not listed and (key == nil or facts.listingOf == nil or facts.listingOf(key) == nil) then
+        return
+    end
+    if facts.hidden then
+        self.slot = { state = "kept" }
+        if facts.isLeader or (self.contact ~= nil and self.contact == facts.selfKey) then
+            act(LfgTrigger.SLOT_REMIND)
+        end
+        return
+    end
+    self.slot = { state = "open", at = type(now) == "number" and now or 0 }
+    act(LfgTrigger.SLOT_OPEN)
+end
+
+-- Whether "fill the empty slot?" is waiting for an answer.
+function Trigger:SlotOpen()
+    return self.slot ~= nil and self.slot.state == "open"
+end
+
+-- The open slot went SLOT_SECONDS without an answer by `now`: it's posted.
+-- True when that happened now.
+function Trigger:SlotDue(now)
+    if not self:SlotOpen() or type(now) ~= "number" or now - self.slot.at < LfgTrigger.SLOT_SECONDS then
+        return false
+    end
+    self.slot.state = "posted"
+    return true
+end
+
+-- "Fill the empty slot?" answered (by the player or a guildmate in the
+-- party): `yes` posts it, no keeps it off. True when it was open.
+function Trigger:SlotAnswered(yes)
+    if not self:SlotOpen() then
+        return false
+    end
+    self.slot.state = yes and "posted" or "kept"
+    return true
 end
 
 -- Whether the player is being asked about their party now (what it's for,

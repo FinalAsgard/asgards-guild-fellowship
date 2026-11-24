@@ -32,6 +32,10 @@ local LfgProtocol = {
     -- { v, t, a = one of ANSWERS }: whispered back to whoever asked.
     TYPE_ANSWER = "lfg-answer",
     ANSWERS = { invited = true, declined = true, expired = true, roleFilled = true },
+    -- { v, t, y = true to post the open slot, false to keep it off }: a
+    -- guildmate in the sender's party answered "Someone left — fill the
+    -- empty slot?". The others stop being asked.
+    TYPE_SLOT = "lfg-slot",
     HEARTBEAT_SECONDS = 60,
     -- The most characters a note or a free-text purpose holds.
     TEXT_LETTERS = 60,
@@ -146,6 +150,9 @@ local CHECKS = {
     [LfgProtocol.TYPE_ANSWER] = function(message)
         return LfgProtocol.ANSWERS[message.a] == true
     end,
+    [LfgProtocol.TYPE_SLOT] = function(message)
+        return type(message.y) == "boolean"
+    end,
 }
 
 -- Every Guild LFG Board message type, for routing.
@@ -186,6 +193,11 @@ end
 -- The answer `answer` (invited, declined, expired or roleFilled) to an ask.
 function LfgProtocol.Answer(answer)
     return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_ANSWER, a = answer }
+end
+
+-- The answer to "fill the empty slot?": `yes` posts it.
+function LfgProtocol.Slot(yes)
+    return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_SLOT, y = yes == true }
 end
 
 -- Whether `message` is a Guild LFG Board message this version understands.

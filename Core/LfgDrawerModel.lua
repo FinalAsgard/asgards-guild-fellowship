@@ -14,8 +14,8 @@ local _, addon = ...
 --
 -- The drawer's top section asks whether to list a party with outsiders in
 -- it, or the leader what their party is for, while they're being asked;
--- else it's the player's party when they're in one, otherwise the newest
--- relevant group, or none.
+-- then whether to fill a slot someone left open; else it's the player's
+-- party when they're in one, otherwise the newest relevant group, or none.
 local LfgDrawerModel = {
     NONE = "none",
     NEWEST = "newest",
@@ -25,6 +25,8 @@ local LfgDrawerModel = {
     -- The player is asked whether to list a party with players outside the
     -- guild.
     GATE = "gate",
+    -- Someone left the player's full party: fill the empty slot?
+    SLOT = "slot",
 }
 addon.LfgDrawerModel = LfgDrawerModel
 
@@ -43,7 +45,8 @@ end
 -- What to show now. facts:
 --   groups    LfgBoard:Groups for the current character ({ relevant, ... })
 --   party     nil when not in a party, else { label?, kind?, size, maxSize,
---             openRoles?, note? }: the party and its listing, if any
+--             openRoles?, note?, slotRole? }: the party and its listing, if
+--             any; slotRole is the role an open slot would be posted as
 --   combat    in combat, a boss encounter or a keystone run
 --   instance  in an instance
 --   dnd       Do Not Disturb is on
@@ -96,6 +99,8 @@ function Model:Update(facts)
         top = { kind = LfgDrawerModel.GATE, party = facts.party }
     elseif facts.ask then
         top = { kind = LfgDrawerModel.ASK, party = facts.party }
+    elseif facts.slotOpen and facts.party ~= nil then
+        top = { kind = LfgDrawerModel.SLOT, party = facts.party }
     elseif facts.party ~= nil then
         top = { kind = LfgDrawerModel.PARTY, party = facts.party }
     elseif relevant[1] ~= nil then

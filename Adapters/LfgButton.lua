@@ -27,10 +27,11 @@ local LfgButton = {
     DRAWER_GAP = 6,
     -- How far the drawer slides in from.
     SLIDE = 24,
-    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 132, ask = 178, gate = 146 },
+    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 132, ask = 178, gate = 146, slot = 164 },
     NONE_TEXT = "No groups for you right now",
     ASK_TEXT = "You're leading a party. List it on the Guild LFG Board?",
     GATE_TEXT = "Your party has players from outside the guild. List it on the Guild LFG Board?",
+    SLOT_TEXT = "Someone left \226\128\148 fill the empty slot?",
     -- An Ask to join request under the drawer.
     TOAST_HEIGHT = 74,
 }
@@ -55,6 +56,8 @@ Button.__index = Button
 --                   listing a party with outsiders), or closed the drawer
 --                   on the question
 --   onSnooze        function(): "don't ask for 30 minutes"
+--   onFillSlot      function(yes): the answer to "Someone left — fill the
+--                   empty slot?"
 --   askRoles        function(listing) -> the open roles the current
 --                   character can ask to join a dungeon listing as
 --   onAsk           function(listing, role?): Ask to join
@@ -179,15 +182,26 @@ function Button:buildDrawer()
     drawer.question:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
     drawer.question:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad)
     drawer.question:SetJustifyH("LEFT")
+    -- The same Yes and No answer "fill the empty slot?".
     self.listButton = ui:Button(drawer, "Choose what it's for", "primary", function()
+        local slot = drawer.kind == addon.LfgDrawerModel.SLOT
         owner:CloseDrawer(true)
-        owner.options.onListParty()
+        if slot then
+            owner.options.onFillSlot(true)
+        else
+            owner.options.onListParty()
+        end
     end)
     self.listButton:SetPoint("TOPLEFT", drawer.question, "BOTTOMLEFT", 0, -Theme.SPACING.s)
     self.listButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
     self.notLookingButton = ui:Button(drawer, "Not looking", "secondary", function()
+        local slot = drawer.kind == addon.LfgDrawerModel.SLOT
         owner:CloseDrawer(true)
-        owner.options.onNotLooking()
+        if slot then
+            owner.options.onFillSlot(false)
+        else
+            owner.options.onNotLooking()
+        end
     end)
     self.notLookingButton:SetPoint("TOPLEFT", self.listButton, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
     self.notLookingButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
@@ -197,6 +211,10 @@ function Button:buildDrawer()
     end)
     self.snoozeButton:SetPoint("TOPLEFT", self.notLookingButton, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
     self.snoozeButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+    -- Someone left: what the open slot would be posted as.
+    drawer.slotDetails = ui:Text(drawer, "", "regular", "small", "muted")
+    drawer.slotDetails:SetPoint("TOPLEFT", drawer.question, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    drawer.slotDetails:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad)
 
     -- Your party: its purpose, size and needs, note, and filled slots.
     drawer.party = ui:Text(drawer, "", "semibold", "title", "text")
@@ -388,19 +406,32 @@ function Button:refreshDrawer()
     local kind = top.kind
     drawer.kind = kind
     drawer:SetHeight(LfgButton.DRAWER_HEIGHTS[kind] or LfgButton.DRAWER_HEIGHTS.none)
-    local gate = kind == addon.LfgDrawerModel.GATE
+    local slot = kind == addon.LfgDrawerModel.SLOT
+    local gate = kind == addon.LfgDrawerModel.GATE or slot
     local asking = kind == addon.LfgDrawerModel.ASK or gate
     local headings = { [addon.LfgDrawerModel.PARTY] = "Your party", [addon.LfgDrawerModel.ASK] = "List your party?",
-        [addon.LfgDrawerModel.GATE] = "List your party?" }
+        [addon.LfgDrawerModel.GATE] = "List your party?", [addon.LfgDrawerModel.SLOT] = "Your party" }
     drawer.heading:SetText(Theme.Label(headings[kind] or "New for you"))
-    -- Asking whether to list a party with outsiders is a plain yes or no.
-    drawer.question:SetText(gate and LfgButton.GATE_TEXT or LfgButton.ASK_TEXT)
+    -- Asking whether to list a party with outsiders, or to fill an empty
+    -- slot, is a plain yes or no.
+    drawer.question:SetText(slot and LfgButton.SLOT_TEXT or gate and LfgButton.GATE_TEXT or LfgButton.ASK_TEXT)
     self.listButton:SetLabel(gate and "Yes" or "Choose what it's for")
     self.notLookingButton:SetLabel(gate and "No" or "Not looking")
     setShown(drawer.question, asking)
+    setShown(drawer.slotDetails, slot)
+    self.listButton:ClearAllPoints()
+    self.listButton:SetPoint("TOPLEFT", slot and drawer.slotDetails or drawer.question, "BOTTOMLEFT", 0,
+        -Theme.SPACING.s)
+    self.listButton:SetPoint("RIGHT", drawer, "RIGHT", -Theme.SPACING.m, 0)
     setShown(self.listButton, asking)
     setShown(self.notLookingButton, asking)
     setShown(self.snoozeButton, asking and not gate)
+    if slot then
+        -- Posted as: the purpose and the open role, where they're known.
+        local info = top.party or {}
+        local role = info.slotRole and ("needs " .. (addon.Widgets.ROLE_LABELS[info.slotRole] or info.slotRole))
+        drawer.slotDetails:SetText(join({ info.label or "Not listed", role }))
+    end
     local newest, party = kind == addon.LfgDrawerModel.NEWEST, kind == addon.LfgDrawerModel.PARTY
     setShown(drawer.icon, newest)
     setShown(drawer.purpose, newest)
