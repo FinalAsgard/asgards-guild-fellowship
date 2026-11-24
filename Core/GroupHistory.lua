@@ -1,7 +1,7 @@
 local _, addon = ...
 
 -- A local record of the parties this player was in with guildmates, any
--- party, not just the Group Finder's: { at, characters = { key, ... },
+-- party, not just listed ones: { at, characters = { key, ... },
 -- dungeon? } per party, kept in the guild partition and never synced. A
 -- party lasts while it keeps someone from the last look at it: guildmates
 -- who join are added to its entry, and one swapped for another doesn't

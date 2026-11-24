@@ -1428,3 +1428,34 @@ test.test("Forever the History tab lists my parties with hearts and Whisper, 20 
     test.assertTrue(page.historyRows[25].shown)
     test.assertFalse(page.moreButton.shown)
 end)
+
+-- Replacing the Group Finder ----------------------------------------------------------
+
+test.test("Forever group history records the dungeon the party is listed for, for the lister and the member", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = listedStrat(channel)
+
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    partyUp(hammer, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+
+    local _, toolPartition = toolAddon.rosterController:QuietContext()
+    test.assertEqual("Stratholme", toolPartition:GetGroupHistory()[1].dungeon)
+    local _, hammerPartition = addon.rosterController:QuietContext()
+    test.assertEqual("Stratholme", hammerPartition:GetGroupHistory()[1].dungeon)
+end)
+
+test.test("Forever an older version's Group Finder messages are ignored", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = listedStrat(channel)
+    hammer.sentMessages = {}
+
+    toolAddon.comm:Broadcast({ v = 1, t = "gf-ask" }, toolAddon.Comm.PRIORITY_NORMAL)
+    toolAddon.comm:Broadcast({ v = 1, t = "gf-group-end" }, toolAddon.Comm.PRIORITY_NORMAL)
+    fixtures.deliver(channel)
+    fixtures.runTimers(hammer, 10)
+
+    -- No reply, and the listing is still on the board.
+    test.assertEqual(0, #hammer.sentMessages)
+    test.assertTrue(addon.lfgBoard:Get("tool box-camelot", hammer.time) ~= nil)
+end)

@@ -643,7 +643,8 @@ local function registerProfileTests(profile)
         test.assertEqual("profile", tabs[2].id)
         test.assertEqual("My Profile", tabs[2].label)
         test.assertEqual(addon.MasterFrame.ICONS.profile, tabs[2].icon)
-        test.assertEqual("group", tabs[3].id)
+        -- The Group Finder tab is gone: Recruitment follows.
+        test.assertEqual("recruitment", tabs[3].id)
     end)
 
     test.test(profile .. " /agf help lists /agf profile", function()
@@ -685,7 +686,7 @@ local function registerProfileTests(profile)
         test.assertTrue(page.rows[1].checks[1].button:GetChecked())
     end)
 
-    test.test(profile .. " My Profile's Do Not Disturb is the Group Finder's, Settings' and /agf dnd's", function()
+    test.test(profile .. " My Profile's Do Not Disturb is the Settings' and /agf dnd's", function()
         local world, addon = loggedIn(profile)
         local page = openProfile(world)
         test.assertFalse(page.dndButton:GetChecked())

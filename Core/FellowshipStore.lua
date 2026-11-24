@@ -1024,14 +1024,15 @@ function Store:SetGuildMapEnabled(setting, enabled)
     return true
 end
 
--- Whether Do Not Disturb is on for the Group Finder, on every character.
+-- Whether Do Not Disturb is on, on every character. Saved under the old
+-- Group Finder's key, so earlier choices are kept.
 function Store:GroupFinderDnd()
     local state = type(self.database) == "table" and self.database.groupFinder or nil
     return type(state) == "table" and state.dnd == true
 end
 
 -- Turns Do Not Disturb on or off. Refuses when an unusable value is stored
--- for the Group Finder.
+-- under that key.
 function Store:SetGroupFinderDnd(enabled)
     if type(self.database) ~= "table" then
         return false

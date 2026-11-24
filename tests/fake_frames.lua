@@ -137,7 +137,7 @@ function FakeFrames.install(environment)
     return environment
 end
 
--- A master frame tab's content frame, as the Group Finder draws on: a page
+-- A master frame tab's content frame for a page to draw on: one
 -- that knows whether it's shown (IsShown), with its hooked scripts kept.
 function FakeFrames.host(environment)
     local host = environment.CreateFrame("Frame", nil, nil)

@@ -327,7 +327,13 @@ local function registerProfileTests(profile)
         fakeFrames.install(world.environment)
 
         fixtures.slash(world, "help")
-        test.assertContains(table.concat(world.messages, "\n"), "/agf lfg - show the LFG button and open the Guild LFG Board")
+        local help = table.concat(world.messages, "\n")
+        test.assertContains(help, "/agf lfg - show the LFG button and open the Guild LFG Board")
+        test.assertContains(help, "/agf dnd - turn Do Not Disturb on or off")
+        -- The Group Finder and its command are gone.
+        test.assertFalse(string.find(help, "/agf group", 1, true) ~= nil)
+        fixtures.slash(world, "group")
+        test.assertContains(world.messages[#world.messages], "Unknown command 'group'")
 
         fixtures.slash(world, "lfg")
         test.assertTrue(addon.agfWindow:IsOpen())

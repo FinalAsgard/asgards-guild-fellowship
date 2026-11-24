@@ -1103,7 +1103,7 @@ function Client:IsInGroup()
     return ok and type(count) == "number" and count > 0
 end
 
--- The game's assigned roles, as the Group Finder names them.
+-- The game's assigned roles, as the Guild LFG Board names them.
 Compatibility.ASSIGNED_ROLES = { TANK = "tank", HEALER = "healer", DAMAGER = "dps" }
 Compatibility.PARTY_UNITS = { "player", "party1", "party2", "party3", "party4" }
 
@@ -1271,7 +1271,7 @@ function Client:ObserveParty(onChange)
     return registered
 end
 
--- The game's Dungeon Finder classifies each entry; the Group Finder lists
+-- The game's Dungeon Finder classifies each entry; the Guild LFG Board lists
 -- only regular dungeons at normal difficulty, not random queues or heroics.
 Compatibility.LFG_TYPE_RANDOM = 6
 Compatibility.LFG_SUBTYPE_DUNGEON = 1

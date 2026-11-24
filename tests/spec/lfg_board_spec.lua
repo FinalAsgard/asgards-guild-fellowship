@@ -76,14 +76,13 @@ test.test("lfg protocol: unknown versions and types, and malformed fields, are i
 end)
 
 test.test("lfg protocol: the old Group Finder's gf- messages are ignored", function()
-    local addon = test.newAddon("Core/GroupFinderProtocol.lua", "Core/LfgProtocol.lua")
-    local old = addon.GroupFinderProtocol.Group({ name = "Stratholme", minLevel = 58, maxLevel = 60 }, {
-        { r = "tank" }, { r = "healer" }, { r = "dps" }, { r = "dps" }, { r = "dps" },
-    })
-    old.v = addon.LfgProtocol.VERSION
+    local addon = test.newAddon("Core/LfgProtocol.lua")
+    -- As older versions still send them.
+    local old = { v = addon.LfgProtocol.VERSION, t = "gf-group", dn = "Stratholme", lo = 58, hi = 60,
+        s = { { r = "tank" }, { r = "healer" }, { r = "dps" }, { r = "dps" }, { r = "dps" } } }
 
     test.assertFalse(addon.LfgProtocol.IsValid(old))
-    test.assertFalse(addon.LfgProtocol.IsValid(addon.GroupFinderProtocol.GroupEnd()))
+    test.assertFalse(addon.LfgProtocol.IsValid({ v = addon.LfgProtocol.VERSION, t = "gf-group-end" }))
     local type_
     for type_ in pairs(addon.LfgProtocol.TYPES) do
         test.assertEqual("lfg-", string.sub(type_, 1, 4))

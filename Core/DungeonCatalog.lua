@@ -1,6 +1,6 @@
 local _, addon = ...
 
--- The dungeons the Group Finder can form a group for, each
+-- The dungeons a Guild LFG Board listing can be for, each
 -- { id, name, minLevel, maxLevel, icon? (the game's texture, where it has
 -- one) }. Where the client has a Dungeon Finder
 -- (Retail's, or WoW Forever's Classic-era one), the WoW adapter supplies its
