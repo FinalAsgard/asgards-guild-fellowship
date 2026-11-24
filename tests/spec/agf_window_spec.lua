@@ -253,7 +253,7 @@ end)
 test.test("agf window: the Settings page's Chat tags switch round-trips the shared setting", function()
     local _, window, environment, settings, state = newWindow()
     window:Open("settings")
-    local switch = window.switches.chatTags
+    local switch = window:Switches("chatTags")[1]
 
     test.assertTrue(contains(environment.pages[1].texts, "Chat"))
     test.assertTrue(contains(environment.pages[1].texts, "Chat tags"))
@@ -327,7 +327,7 @@ local function registerProfileTests(profile)
         fakeFrames.install(world.environment)
 
         fixtures.slash(world, "help")
-        test.assertContains(table.concat(world.messages, "\n"), "/agf lfg - open the Guild LFG Board")
+        test.assertContains(table.concat(world.messages, "\n"), "/agf lfg - show the LFG button and open the Guild LFG Board")
 
         fixtures.slash(world, "lfg")
         test.assertTrue(addon.agfWindow:IsOpen())
@@ -343,7 +343,7 @@ local function registerProfileTests(profile)
         fixtures.fire(world, "PLAYER_LOGIN")
         fakeFrames.install(world.environment)
         addon.agfWindow:Open("settings")
-        local switch = addon.agfWindow.switches.chatTags
+        local switch = addon.agfWindow:Switches("chatTags")[1]
         local before = addon.settings:Get("chatTags")
         test.assertEqual(before, switch:IsOn())
 

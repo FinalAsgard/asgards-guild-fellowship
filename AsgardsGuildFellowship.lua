@@ -65,8 +65,14 @@ local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority, 
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local resync
 local guildNoteOverlay
--- The add-on's new window (see AgfWindow), set up with the settings below.
-local agfWindow
+-- The add-on's new window (see AgfWindow) and the LFG button (see
+-- LfgButton), set up with the settings below.
+local agfWindow, lfgButton
+-- The key the new UI saves this character's layout under: its GUID, the
+-- same in every guild (or with none), else its full name.
+local function layoutKey()
+    return client:GetPlayerGuid() or client:GetPlayerFullName()
+end
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations, dropLocationOf
 local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
@@ -505,6 +511,27 @@ if clientProfile.supported then
         end,
         set = function(shown)
             return entryPoints:SetMinimapShown(shown)
+        end,
+    })
+    -- The LFG button, per character. Hidden means "not participating right
+    -- now"; later parts of the Guild LFG Board read it from here.
+    settings:Add("general", {
+        id = "lfgButton",
+        kind = "toggle",
+        label = "Show LFG button",
+        get = function()
+            local store, key = rosterController:Store(), layoutKey()
+            return store == nil or key == nil or store:LfgButtonShown(key)
+        end,
+        set = function(shown)
+            local store, key = rosterController:Store(), layoutKey()
+            if store == nil or key == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetLfgButtonShown(key, shown) then
+                return nil, "the saved layout is unreadable"
+            end
+            return true
         end,
     })
     settings:Add("general", {
@@ -1214,7 +1241,8 @@ if clientProfile.supported then
     agfWindow = addon.AgfWindow.Create(client, {
         frameName = addon.Identity.addonName .. "Window",
         modules = {
-            { id = "lfg", label = "LFG", title = "Guild LFG Board" },
+            { id = "lfg", label = "LFG", title = "Guild LFG Board",
+                settingsRows = { { id = "lfgButton", label = "Show LFG button" } } },
         },
         settings = settings,
         settingsTabs = {
@@ -1238,21 +1266,64 @@ if clientProfile.supported then
         end,
         version = version,
         loadPosition = function()
-            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
-            return store and selfKey and store:WindowPosition(selfKey) or nil
+            local store, key = rosterController:Store(), layoutKey()
+            return store and key and store:WindowPosition(key) or nil
         end,
         savePosition = function(position)
-            local store, selfKey = rosterController:Store(), rosterController:SelfKey()
-            if store ~= nil and selfKey ~= nil then
-                store:SetWindowPosition(selfKey, position)
+            local store, key = rosterController:Store(), layoutKey()
+            if store ~= nil and key ~= nil then
+                store:SetWindowPosition(key, position)
             end
         end,
     })
-    router:Register("lfg", "open the Guild LFG Board", function()
+    local function openBoard()
         local opened, failure = agfWindow:Open("lfg")
         if not opened then
             rosterController:Print("The Guild LFG Board can't open on this client: " .. tostring(failure))
         end
+    end
+    lfgButton = addon.LfgButton.Create(client, {
+        frameName = addon.Identity.addonName .. "LfgButton",
+        shown = function()
+            return settings:Get("lfgButton") == true
+        end,
+        onOpenBoard = openBoard,
+        onHide = function()
+            local hidden, reason = settings:Set("lfgButton", false)
+            if hidden then
+                rosterController:Print("LFG button hidden. Type " .. addon.Identity.slashCommand ..
+                    " lfg to bring it back.")
+            else
+                rosterController:Print("Can't hide the LFG button: " .. tostring(reason) .. ".")
+            end
+        end,
+        loadPosition = function()
+            local store, key = rosterController:Store(), layoutKey()
+            return store and key and store:LfgButtonPosition(key) or nil
+        end,
+        savePosition = function(position)
+            local store, key = rosterController:Store(), layoutKey()
+            if store ~= nil and key ~= nil then
+                store:SetLfgButtonPosition(key, position)
+            end
+        end,
+    })
+    -- However it's switched (the gear popup, the old window, the menu), the
+    -- button follows.
+    settings:OnChange(function(id)
+        if id == "lfgButton" then
+            lfgButton:Refresh()
+        end
+    end)
+    -- Brings the button back if it was hidden, and opens the board.
+    router:Register("lfg", "show the LFG button and open the Guild LFG Board", function()
+        if settings:Get("lfgButton") ~= true then
+            local shown, reason = settings:Set("lfgButton", true)
+            if not shown then
+                rosterController:Print("Can't show the LFG button: " .. tostring(reason) .. ".")
+            end
+        end
+        openBoard()
     end)
     -- The Group Finder's own window, made on first use. Its dungeons come
     -- from the game's Dungeon Finder where the client has one, read each
@@ -4554,6 +4625,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- In case the region wasn't known yet when saved data loaded.
     persistence:MoveToHomeRealm()
     rosterController:OnSavedDataReady()
+    if lfgButton ~= nil then
+        lfgButton:Refresh()
+    end
     -- Without the comm libraries, sync simply stays off, and Guild Greet and
     -- Guild Recruit work uncoordinated.
     comm:OnHeard(function(sender)
@@ -4732,6 +4806,7 @@ addon.chatAnnotator = chatAnnotator
 addon.comm = comm
 addon.settings = settings
 addon.agfWindow = agfWindow
+addon.lfgButton = lfgButton
 addon.settingsPanel = settingsPanel
 addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet

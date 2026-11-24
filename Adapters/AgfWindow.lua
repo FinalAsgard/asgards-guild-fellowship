@@ -39,9 +39,10 @@ Window.__index = Window
 -- options:
 --   frameName     the window's global name, so Escape closes it
 --   modules       a list of { id, label, title, draw(content, ui),
---                 drawSettings(body, ui) }: label names the sidebar button
---                 and the gear popup, title heads the page; draw and
---                 drawSettings are optional
+--                 settingsRows }: label names the sidebar button and the
+--                 gear popup, title heads the page; draw is optional, and
+--                 settingsRows ({ id, label, info } toggles in `settings`)
+--                 are the gear popup's switches
 --   settings      the SettingsModel the Settings page's switches use
 --   settingsTabs  a list of { id, label, rows = { { id, label, info } } },
 --                 each row a toggle in `settings`
@@ -229,9 +230,16 @@ function Window:buildSwitchRow(content, setting, position)
         local info = ui:Text(card, setting.info, "regular", "small", "muted")
         info:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
     end
+    local switch = self:newSwitch(card, setting)
+    switch:SetPoint("RIGHT", card, "RIGHT", -Theme.SPACING.l, 0)
+end
+
+-- A switch for the SettingsModel toggle `setting`. Every switch for the
+-- same setting shows what's saved, wherever it's drawn.
+function Window:newSwitch(parent, setting)
     local settings = self.options.settings
     local window = self
-    local switch = ui:Toggle(card, function(wanted)
+    local switch = self.ui:Toggle(parent, function(wanted)
         local changed, reason = settings:Set(setting.id, wanted)
         if not changed then
             window.client:Print(addon.Identity.chatPrefix .. " " .. setting.label .. " can't be changed: " ..
@@ -240,16 +248,23 @@ function Window:buildSwitchRow(content, setting, position)
         -- Whatever happened, it shows what's saved now.
         window:refreshSwitch(setting.id)
     end)
-    switch:SetPoint("RIGHT", card, "RIGHT", -Theme.SPACING.l, 0)
-    self.switches[setting.id] = switch
+    self.switches[setting.id] = self.switches[setting.id] or {}
+    table.insert(self.switches[setting.id], switch)
     self:refreshSwitch(setting.id)
+    return switch
 end
 
 function Window:refreshSwitch(id)
-    local switch = self.switches[id]
-    if switch ~= nil then
-        switch:SetOn(self.options.settings:Get(id) == true)
+    local switches = self.switches[id] or {}
+    local index
+    for index = 1, #switches do
+        switches[index]:SetOn(self.options.settings:Get(id) == true)
     end
+end
+
+-- The switches drawn for setting `id`, in the order they were made.
+function Window:Switches(id)
+    return self.switches[id] or {}
 end
 
 function Window:showSettingsTab(id)
@@ -299,8 +314,13 @@ function Window:buildPopup(frame)
         local body = ui:frame("Frame", popup)
         body:SetPoint("TOPLEFT", popup, "TOPLEFT", Theme.SPACING.l, -40)
         body:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -Theme.SPACING.l, Theme.SPACING.m)
-        if module.drawSettings ~= nil then
-            module.drawSettings(body, ui)
+        local rows = module.settingsRows or {}
+        local position
+        for position = 1, #rows do
+            local label = ui:Text(body, rows[position].label, "regular", "body", "text")
+            label:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -(position - 1) * 30 - 4)
+            local switch = self:newSwitch(body, rows[position])
+            switch:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -(position - 1) * 30)
         end
         body:Hide()
         popup.bodies[module.id] = body

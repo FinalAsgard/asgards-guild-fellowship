@@ -10,6 +10,7 @@ local MANIFEST_FILES = {
     "Adapters/Theme.lua",
     "Adapters/Widgets.lua",
     "Adapters/AgfWindow.lua",
+    "Adapters/LfgButton.lua",
     "Adapters/PromotionLines.lua",
     "Adapters/RosterWindow.lua",
     "Adapters/EntryPoints.lua",
