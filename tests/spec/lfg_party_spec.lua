@@ -974,6 +974,64 @@ test.test("Forever in Do Not Disturb, Ask to join requests are declined without 
     test.assertEqual("declined", addon.lfgBoard:Request(card.listing.id, hammer.time).state)
 end)
 
+test.test("Forever an invite the game refuses keeps the request, to try again", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = listedStrat(channel)
+    tool.environment.C_PartyInfo = { InviteUnit = function() error("refused") end }
+    local card = addon.lfgPage.largeCards[1]
+    click(card.ask)
+    click(addon.lfgPage.roleMenu.rows[1])
+    fixtures.deliver(channel)
+    local toast = toolAddon.lfgButton.toasts[1]
+
+    click(toast.invite)
+    test.assertTrue(toast.shown)
+    test.assertContains(tool.messages[#tool.messages], "Couldn't invite Hammer")
+    fixtures.deliver(channel)
+    test.assertEqual("pending", addon.lfgBoard:Request(card.listing.id, hammer.time).state)
+end)
+
+test.test("Forever an ask whispered from outside the guild never reaches the leader", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, _, addon = listedStrat(channel)
+    click(addon.lfgPage.largeCards[1].ask)
+    click(addon.lfgPage.roleMenu.rows[1])
+    -- Hammer's ask, whispered instead by someone outside the guild.
+    local index
+    for index = 1, #channel.queue do
+        local message = channel.queue[index]
+        if message.distribution == "WHISPER" then
+            tool.commHandlers[message.prefix](message.prefix, message.text, "WHISPER", "Stranger Danger")
+        end
+    end
+    test.assertFalse(toolAddon.lfgButton:DrawerOpen())
+    test.assertEqual(nil, toolAddon.lfgButton.toasts[1])
+    -- The same ask from Hammer gets through.
+    fixtures.deliver(channel)
+    test.assertTrue(toolAddon.lfgButton.toasts[1].shown)
+end)
+
+test.test("Forever roles chosen in the editor are dropped by Cancel and applied by Save", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local zap = login(channel, "Zap Arcane")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    click(addon.lfgButton.listButton)
+    local page = addon.lfgPage
+    click(roleRow(page, "Hammer").buttons[2])
+    test.assertTrue(roleRow(page, "Hammer").buttons[2].selected)
+    click(page.cancelButton)
+    test.assertEqual(nil, next(addon.lfgListing:ChosenRoles()))
+
+    page:StartEditing()
+    test.assertFalse(roleRow(page, "Hammer").buttons[2].selected)
+    click(roleRow(page, "Hammer").buttons[3])
+    page.draft.dungeon = addon.DungeonCatalog.For("forever", nil):Get("strat")
+    test.assertTrue(page:Save())
+    fixtures.deliver(channel)
+    test.assertEqual("dps", zap.addon.lfgBoard:Listings(zap.time)[1].members[2].role)
+end)
+
 -- Someone left --------------------------------------------------------------------------
 
 local function fullParty(fields)
@@ -1121,6 +1179,120 @@ test.test("lfg drawer model: an open slot glows orange and asks to fill it, unde
     test.assertEqual("party", view.top.kind)
 end)
 
+test.test("lfg trigger: an outsider joining while I'm asked what the party's for asks whether to list it", function()
+    local trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2, guildmates = 1 }), 0)
+    test.assertFalse(trigger:Gating())
+    test.assertEqual("gate", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 3,
+        guildmates = 1, outsiders = 1 }), 5)))
+    test.assertTrue(trigger:Gating())
+
+    -- A question already put away isn't asked again.
+    trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2, guildmates = 1 }), 0)
+    trigger:NotLooking()
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 3,
+        guildmates = 1, outsiders = 1 }), 5)))
+    test.assertFalse(trigger:Asking())
+end)
+
+test.test("lfg trigger: refilling while handing the lead on leaves no slot open", function()
+    local trigger = newTrigger()
+    local four = fullParty()
+    four.size = 4
+    trigger:Observe(fullParty(), 0)
+    trigger:Observe(four, 0)
+    test.assertTrue(trigger:SlotOpen())
+    test.assertEqual("handOff", names(trigger:Observe(party({ size = 5, guildmates = 4, listed = true }), 5)))
+    test.assertFalse(trigger:SlotOpen())
+    test.assertFalse(trigger:SlotDue(100))
+end)
+
+test.test("lfg trigger: a slot waits while the button's hidden, and is asked about again when it's back",
+    function()
+        local trigger, LfgTrigger = newTrigger()
+        local hidden = fullParty()
+        hidden.hidden = true
+        trigger:Observe(hidden, 0)
+        hidden.size = 4
+        trigger:Observe(hidden, 0)
+        test.assertFalse(trigger:SlotOpen())
+        test.assertTrue(trigger:Resume(30))
+        test.assertTrue(trigger:SlotOpen())
+        test.assertFalse(trigger:SlotDue(30 + LfgTrigger.SLOT_SECONDS - 1))
+        test.assertTrue(trigger:SlotDue(30 + LfgTrigger.SLOT_SECONDS))
+
+        -- Hidden while it's open: it waits instead of posting.
+        trigger = newTrigger()
+        local four = fullParty()
+        four.size = 4
+        trigger:Observe(fullParty(), 0)
+        trigger:Observe(four, 0)
+        trigger:Pause()
+        test.assertFalse(trigger:SlotOpen())
+        test.assertFalse(trigger:SlotDue(100))
+        test.assertTrue(trigger:Resume(200))
+        test.assertTrue(trigger:SlotOpen())
+
+        -- No is never asked again.
+        trigger = newTrigger()
+        trigger:Observe(fullParty(), 0)
+        trigger:Observe(four, 0)
+        trigger:SlotAnswered(false)
+        test.assertFalse(trigger:Resume(10))
+        test.assertFalse(trigger:SlotOpen())
+    end)
+
+test.test("lfg trigger: two claims at once settle on the lower key for everyone in the party", function()
+    local trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    trigger:Observe(party({ leaderKey = "stranger", guildLed = false, outsiders = 1, selfKey = "me",
+        present = { "amy", "me", "zap" } }), 0)
+    -- A third guildmate hears amy's claim, then zap's.
+    trigger:Claimed("amy", "me")
+    trigger:Claimed("zap", "me")
+    test.assertEqual("amy", trigger:Contact())
+end)
+
+test.test("lfg listing: a full dungeon party asks for no roles", function()
+    local listing = newListing().LfgListing.Create()
+    listing:Start({ kind = "dungeon", dungeon = { name = "Stratholme", minLevel = 58, maxLevel = 60 } }, nil, 0, true)
+    local dps = {}
+    local index
+    for index = 1, 5 do
+        dps[index] = { name = "Dps" .. index, role = "dps" }
+    end
+    local fields = listing:Announcement(dps)
+    test.assertEqual(0, #fields.r)
+    test.assertEqual(nil, newListing().LfgListing.GuildLine(fields))
+end)
+
+test.test("lfg board: a listing's end takes the player's answered request with it", function()
+    local addon = test.newAddon("Core/LfgBoard.lua")
+    local board = addon.LfgBoard.Create()
+    board:Ask("tool", "healer", 0)
+    board:OnAnswer("tool", "declined")
+    test.assertEqual("declined", board:Request("tool", 10).state)
+    board:OnEnd("tool", false)
+    test.assertEqual(nil, board:Request("tool", 20))
+end)
+
+test.test("lfg drawer model: a group that appears in combat pulses once combat's over", function()
+    local addon = test.newAddon("Core/LfgDrawerModel.lua")
+    local model = addon.LfgDrawerModel.Create()
+    local groups = { relevant = { { id = "tool", listedAt = 1 } } }
+    local view = model:Update({ groups = groups, combat = true })
+    test.assertEqual(0, #view.fresh)
+    test.assertEqual(nil, view.glow)
+    view = model:Update({ groups = groups })
+    test.assertEqual(1, #view.fresh)
+    test.assertEqual("gold", view.glow)
+    -- Once.
+    test.assertEqual(0, #model:Update({ groups = groups }).fresh)
+end)
+
 test.test("lfg listing: held as the party was until the slot's posted, then as it is with the open role", function()
     local listing = newListing().LfgListing.Create()
     local strat = { kind = "dungeon", dungeon = { name = "Stratholme", minLevel = 58, maxLevel = 60 } }
@@ -1202,12 +1374,13 @@ test.test("Forever someone leaving a full party glows orange, asks to fill the s
         test.assertFalse(button:DrawerOpen())
         button:OpenDrawer()
         test.assertEqual("Someone left \226\128\148 fill the empty slot?", button.drawer.question.text)
-        test.assertEqual("Stratholme \194\183 needs DPS", button.drawer.slotDetails.text)
+        -- Bolt, a priest, was listed as the healer.
+        test.assertEqual("Stratholme \194\183 needs Healer", button.drawer.slotDetails.text)
         test.assertEqual("Yes", button.listButton.label.text)
         test.assertEqual("No", button.notLookingButton.label.text)
         test.assertFalse(button.snoozeButton.shown)
         addon.lfgButton:OpenDrawer()
-        test.assertEqual("Stratholme \194\183 needs DPS", addon.lfgButton.drawer.slotDetails.text)
+        test.assertEqual("Stratholme \194\183 needs Healer", addon.lfgButton.drawer.slotDetails.text)
         -- Closing the drawer isn't an answer.
         button:CloseDrawer()
         test.assertTrue(toolAddon.lfgTrigger:SlotOpen())
@@ -1218,7 +1391,7 @@ test.test("Forever someone leaving a full party glows orange, asks to fill the s
         fixtures.deliver(channel)
         local heard = addon.lfgBoard:Listings(hammer.time)[1]
         test.assertEqual(4, heard.size)
-        test.assertEqual("dps", table.concat(heard.openRoles, ","))
+        test.assertEqual("healer", table.concat(heard.openRoles, ","))
         test.assertEqual(nil, button.view.glow)
     end)
 
@@ -1280,12 +1453,40 @@ test.test("Forever a posted open slot reaches a guildmate who fits it with the c
     local zap, zapAddon = login(channel, "Zap Arcane")
     fixtures.deliver(channel)
     test.assertEqual(0, zapAddon.lfgButton.view.count)
-    boltLeaves(tool)
+    -- Spark, a mage, leaves: a DPS slot, which Zap fits.
+    partyUp(tool, { "Tool Box", "Hammer Smith", "Bolt Smith", "Flint Smith" }, "Tool Box")
     toolAddon.lfgButton:OpenDrawer()
     click(toolAddon.lfgButton.listButton)
     fixtures.deliver(channel)
     test.assertEqual(1, zapAddon.lfgButton.view.count)
     test.assertEqual("gold", zapAddon.lfgButton.view.glow)
+end)
+
+test.test("Forever a slot that opened while the button was hidden is offered when it's shown again", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = fullStrat(channel)
+    toolAddon.settings:Set("lfgButton", false)
+    boltLeaves(tool)
+    test.assertFalse(toolAddon.lfgTrigger:SlotOpen())
+
+    fixtures.slash(tool, "lfg")
+    test.assertTrue(toolAddon.lfgTrigger:SlotOpen())
+    test.assertEqual("orange", toolAddon.lfgButton.view.glow)
+    test.assertTrue(toolAddon.lfgButton:DrawerOpen())
+    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    fixtures.deliver(channel)
+    test.assertEqual(4, addon.lfgBoard:Listings(hammer.time)[1].size)
+end)
+
+test.test("Forever hiding the button while a slot is open keeps it off the board", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon = fullStrat(channel)
+    boltLeaves(tool)
+    test.assertTrue(toolAddon.lfgTrigger:SlotOpen())
+    toolAddon.settings:Set("lfgButton", false)
+    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    fixtures.deliver(channel)
+    test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
 end)
 
 -- Ask in guild --------------------------------------------------------------------------

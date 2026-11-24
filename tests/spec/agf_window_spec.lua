@@ -274,6 +274,18 @@ test.test("agf window: it's moved and saved, and opens where it was left", funct
     state.position = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 100, y = 700 }
     window:Open("lfg")
 
+    -- It's placed where it was saved.
+    local placed = {}
+    window.frame.SetPoint = function(_, point, _, relativePoint, x, y)
+        table.insert(placed, { point = point, relativePoint = relativePoint, x = x, y = y })
+    end
+    window:place()
+    test.assertEqual(1, #placed)
+    test.assertEqual("TOPLEFT", placed[1].point)
+    test.assertEqual("BOTTOMLEFT", placed[1].relativePoint)
+    test.assertEqual(100, placed[1].x)
+    test.assertEqual(700, placed[1].y)
+
     window.frame.GetPoint = function()
         return "TOPLEFT", nil, "BOTTOMLEFT", 120, 680
     end

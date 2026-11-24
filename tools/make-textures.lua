@@ -65,9 +65,18 @@ local function write(name, width, height, shade)
         32, -- bits per pixel
         8 + 32 -- 8 alpha bits, top-left origin
     )
-    local handle = assert(io.open(OUT .. name, "wb"))
-    handle:write(header, table.concat(rows))
-    handle:close()
+    -- Written beside it first, so a failed write never leaves half a
+    -- texture in its place.
+    local temporary = OUT .. name .. ".tmp"
+    local handle = assert(io.open(temporary, "wb"))
+    local written, writeError = handle:write(header, table.concat(rows))
+    local closed, closeError = handle:close()
+    if not written or not closed then
+        os.remove(temporary)
+        error("couldn't write " .. OUT .. name .. ": " .. tostring(writeError or closeError))
+    end
+    os.remove(OUT .. name)
+    assert(os.rename(temporary, OUT .. name))
     print("wrote " .. OUT .. name)
 end
 

@@ -137,6 +137,7 @@ function Button:buildDrawer()
     local drawer = ui:Panel(self.environment.UIParent, { fill = "background" })
     drawer:SetFrameStrata("MEDIUM")
     drawer:SetWidth(LfgButton.DRAWER_WIDTH)
+    drawer:SetClampedToScreen(true)
     drawer:SetPoint("TOPRIGHT", self.button, "TOPLEFT", -LfgButton.DRAWER_GAP, 0)
     drawer:EnableMouse(true)
     -- A click on the drawer itself, not one of its buttons, opens the board.
@@ -478,6 +479,19 @@ function Button:refreshDrawer()
     self:refreshToasts()
 end
 
+-- The drawer opens to the button's left, or to its right when the button
+-- sits too near the screen's left edge for it.
+function Button:anchorDrawer()
+    local left = type(self.button.GetLeft) == "function" and self.button:GetLeft() or nil
+    local right = type(left) == "number" and left < LfgButton.DRAWER_WIDTH + LfgButton.DRAWER_GAP
+    self.drawer:ClearAllPoints()
+    if right then
+        self.drawer:SetPoint("TOPLEFT", self.button, "TOPRIGHT", LfgButton.DRAWER_GAP, 0)
+    else
+        self.drawer:SetPoint("TOPRIGHT", self.button, "TOPLEFT", -LfgButton.DRAWER_GAP, 0)
+    end
+end
+
 -- Opens the drawer, or closes it when open.
 function Button:ToggleDrawer()
     if self:DrawerOpen() then
@@ -492,6 +506,7 @@ function Button:OpenDrawer()
         return
     end
     self.drawerOpen = true
+    self:anchorDrawer()
     self:refreshDrawer()
     self.drawer:Show()
     if self.drawerSlide ~= nil then

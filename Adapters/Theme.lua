@@ -116,7 +116,9 @@ end
 function Theme.Font(text, style, size, color)
     local height = Theme.FONT_SIZE[size] or size or Theme.FONT_SIZE.body
     local path = Theme.FONTS[style] or Theme.FONTS.regular
-    if not pcall(text.SetFont, text, path, height, "") then
+    -- SetFont can fail by raising or by returning false.
+    local ok, set = pcall(text.SetFont, text, path, height, "")
+    if not ok or set == false then
         pcall(text.SetFontObject, text, "GameFontHighlight")
     end
     if color ~= nil then

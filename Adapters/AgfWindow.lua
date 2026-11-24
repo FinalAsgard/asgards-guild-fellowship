@@ -355,9 +355,8 @@ function Window:build()
     frame:SetScript("OnHide", function()
         window:CloseSettingsPopup()
     end)
-    if type(self.options.frameName) == "string" and type(environment.UISpecialFrames) == "table" then
-        table.insert(environment.UISpecialFrames, self.options.frameName)
-    end
+    -- Hidden until it's all built.
+    frame:Hide()
 
     self:buildBackground(frame)
     self:buildSidebar(frame)
@@ -392,7 +391,10 @@ function Window:build()
     for index = 1, #self.moduleButtons do
         self.moduleButtons[index]:SetFrameLevel(level + 50)
     end
-    frame:Hide()
+    -- Escape closes it, once it's built.
+    if type(self.options.frameName) == "string" and type(environment.UISpecialFrames) == "table" then
+        table.insert(environment.UISpecialFrames, self.options.frameName)
+    end
 end
 
 -- Position ------------------------------------------------------------------
@@ -448,12 +450,23 @@ function Window:Open(id)
     if self.frame == nil then
         local ok, failure = pcall(self.build, self)
         if not ok then
+            -- What was built is put away, and the next open starts over.
+            if self.frame ~= nil then
+                self.frame:Hide()
+            end
             self.frame = nil
+            self.pages, self.moduleButtons, self.switches = {}, {}, {}
             return false, failure
         end
     end
-    self:refreshCharacter()
-    self:ShowPage(id or self.current)
+    local ok, failure = pcall(function()
+        self:refreshCharacter()
+        self:ShowPage(id or self.current)
+    end)
+    if not ok then
+        self:Close()
+        return false, failure
+    end
     self.frame:Show()
     self.open = true
     return true

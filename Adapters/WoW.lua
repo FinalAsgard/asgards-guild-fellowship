@@ -1109,7 +1109,7 @@ Compatibility.PARTY_UNITS = { "player", "party1", "party2", "party3", "party4" }
 
 -- One group unit as a member { key, name, classToken, level, guid,
 -- assignedRole, inGuild, isPlayer, isLeader, online }, or nil when there's no one
--- there.
+-- there. inGuild is nil when the client can't say.
 local function readUnit(environment, unit, isPlayer)
     local existsOk, exists = callFunction(environment.UnitExists, unit)
     if not isPlayer and not (existsOk and exists) then
@@ -1139,6 +1139,15 @@ local function readUnit(environment, unit, isPlayer)
     local inGuild = value(environment.UnitIsInMyGuild)
     local leader = value(environment.UnitIsGroupLeader)
     local connected = value(environment.UnitIsConnected)
+    -- A client without UnitIsInMyGuild can't say: nil, for the guild
+    -- roster to answer.
+    if isPlayer then
+        inGuild = true
+    elseif type(environment.UnitIsInMyGuild) == "function" then
+        inGuild = inGuild ~= nil and inGuild ~= false
+    else
+        inGuild = nil
+    end
     return {
         isLeader = leader ~= nil and leader ~= false,
         key = type(guid) == "string" and guid ~= "" and guid or name,
@@ -1147,7 +1156,7 @@ local function readUnit(environment, unit, isPlayer)
         classToken = type(classToken) == "string" and classToken or nil,
         level = type(level) == "number" and level > 0 and level or nil,
         assignedRole = Compatibility.ASSIGNED_ROLES[role],
-        inGuild = isPlayer or (inGuild ~= nil and inGuild ~= false),
+        inGuild = inGuild,
         isPlayer = isPlayer,
         -- Logged in; a client without UnitIsConnected counts everyone.
         online = isPlayer or connected ~= false,

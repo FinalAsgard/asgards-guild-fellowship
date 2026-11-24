@@ -34,7 +34,7 @@ local Model = {}
 Model.__index = Model
 
 function LfgDrawerModel.Create()
-    return setmetatable({ known = {}, unseen = {} }, Model)
+    return setmetatable({ known = {}, unseen = {}, deferred = {} }, Model)
 end
 
 -- A listing as one appearance: a leader listing again later is new again.
@@ -75,10 +75,17 @@ function Model:Update(facts)
             self.known[key] = true
             if not ignored then
                 self.unseen[key] = true
-                if not hidden then
+                if hidden then
+                    -- Held back in combat or an instance: its pulse (and
+                    -- chat line) comes once that's over.
+                    self.deferred[key] = true
+                else
                     table.insert(fresh, relevant[index])
                 end
             end
+        elseif self.deferred[key] and not hidden then
+            self.deferred[key] = nil
+            table.insert(fresh, relevant[index])
         end
     end
     -- What's gone from the board no longer glows.
@@ -86,6 +93,7 @@ function Model:Update(facts)
     for key in pairs(self.unseen) do
         if not current[key] then
             self.unseen[key] = nil
+            self.deferred[key] = nil
         end
     end
     local glow
@@ -115,4 +123,5 @@ end
 -- The drawer was opened: everything on the board has been seen.
 function Model:Seen()
     self.unseen = {}
+    self.deferred = {}
 end

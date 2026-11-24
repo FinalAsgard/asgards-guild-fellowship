@@ -99,8 +99,9 @@ local function loginForever(channel, playerName, addonName)
     return world
 end
 
--- Puts `units` (unit -> { name, guid, class }) in the organizer's party, as
--- the Forever client reports it, and tells the add-on.
+-- Puts `units` (unit -> { name, guid, class, outsider? }) in the
+-- organizer's party, as the Forever client reports it, and tells the
+-- add-on. Everyone but an outsider is in the guild.
 local function joinParty(world, units)
     local environment = world.environment
     environment.UnitExists = function(unit) return units[unit] ~= nil end
@@ -109,7 +110,7 @@ local function joinParty(world, units)
     environment.UnitClass = function(unit)
         return "Localized", units[unit] and units[unit].class, 1
     end
-    environment.UnitIsInMyGuild = function(unit) return units[unit] ~= nil end
+    environment.UnitIsInMyGuild = function(unit) return units[unit] ~= nil and not units[unit].outsider end
     world.grouped = true
     fixtures.fire(world, "GROUP_ROSTER_UPDATE")
 end
@@ -205,7 +206,7 @@ test.test("composed: on Forever, an outsider sharing a guildmate's first name is
 
     joinParty(world, {
         player = { name = "Tool", guid = "Player-1-Tool Box", class = "WARRIOR" },
-        party1 = { name = "Zap", guid = "Player-2-Stranger", class = "MAGE" },
+        party1 = { name = "Zap", guid = "Player-2-Stranger", class = "MAGE", outsider = true },
     })
 
     local _, partition = world.addon.rosterController:QuietContext()

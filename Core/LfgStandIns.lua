@@ -48,9 +48,48 @@ local function fittingDungeon(dungeons, level)
     return "Stand-in Dungeon", clamp(level - 2), clamp(level + 2)
 end
 
+-- A 6-level range neither `level` nor any of `alts` (each { level }) fits:
+-- 13-18 for a high character and 55-60 for a low one when those are clear,
+-- else the clear one farthest from `level`. Nil when there's none.
+local function awayRange(level, alts)
+    local levels = { level }
+    local index
+    for index = 1, #(alts or {}) do
+        if type(alts[index].level) == "number" then
+            table.insert(levels, alts[index].level)
+        end
+    end
+    local function clear(lo)
+        for index = 1, #levels do
+            if levels[index] >= lo and levels[index] <= lo + 5 then
+                return false
+            end
+        end
+        return true
+    end
+    local preferred = level > 30 and 13 or 55
+    if clear(preferred) then
+        return preferred, preferred + 5
+    end
+    local best, farthest
+    local lo
+    for lo = 1, 75 do
+        local distance = math.abs(lo + 2.5 - level)
+        if clear(lo) and (best == nil or distance > farthest) then
+            best, farthest = lo, distance
+        end
+    end
+    if best == nil then
+        return nil
+    end
+    return best, best + 5
+end
+
 -- The stand-in listings for a character, facts:
 --   level     the character's level
 --   alt       optional { name, level }: one of the player's alts
+--   alts      optional list of every alt ({ level }), which the greyed
+--             listing must not fit
 --   dungeons  optional DungeonCatalog for real dungeon names
 -- Returns { { key, sender, message, case } }: a relevant dungeon, a
 -- relevant purpose with a note, a dungeon only the alt fits (when the alt's
@@ -80,9 +119,14 @@ function LfgStandIns.Listings(facts)
     else
         note = "no alt far enough from this character's level for an alts-only listing"
     end
-    local away = level > 30 and { 13, 18 } or { 55, 60 }
-    add("greyed", { k = "dungeon", p = "Far Away Keep", lo = away[1], hi = away[2], r = { "dps" }, s = 4, x = 5,
-        mb = members(4, away[2], { "tank", "healer", "dps", "dps" }) })
+    local awayLo, awayHi = awayRange(level, facts.alts)
+    if awayLo ~= nil then
+        add("greyed", { k = "dungeon", p = "Far Away Keep", lo = awayLo, hi = awayHi, r = { "dps" }, s = 4, x = 5,
+            mb = members(4, awayHi, { "tank", "healer", "dps", "dps" }) })
+    else
+        note = (note and (note .. "; ") or "") .. "no level range that this character and its alts all miss," ..
+            " for a greyed listing"
+    end
     add("full", { k = "dungeon", p = name, lo = lo, hi = hi, r = {}, s = 5, x = 5,
         mb = members(5, level, { "tank", "healer", "dps", "dps", "dps" }) })
     add("raid", { k = "raid", p = "Guild event", s = 12, x = 40, mb = members(12, level) })

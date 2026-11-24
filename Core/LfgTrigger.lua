@@ -196,11 +196,21 @@ function Trigger:Observe(facts, now)
         elseif listed then
             act(LfgTrigger.HAND_OFF)
         end
+        -- Refilled (or made a raid) in the same update: no slot is open.
+        if full or facts.isRaid then
+            self.slot = nil
+        end
         return actions
     elseif facts.isLeader and facts.isRaid and not before.isRaid and listed then
         act(LfgTrigger.RAID)
     elseif facts.guildLed == false and not facts.isLeader then
         self:succeed(facts, before, listed, act, ask)
+    end
+    -- Someone outside the guild joined while the player was being asked
+    -- what the party's for: they're asked whether to list it at all.
+    if before.inGroup and gated and self.asking == "purpose" then
+        self.asking = "gate"
+        act(LfgTrigger.GATE)
     end
     self:slotPath(facts, before, full, listed, now, act)
     -- Filled up with another guildmate in it: listed quietly, unless the
@@ -283,8 +293,10 @@ function Trigger:slotPath(facts, before, full, listed, now, act)
         return
     end
     if facts.hidden then
+        -- The lister's slot waits for the button to come back (Resume).
         self.slot = { state = "kept" }
         if facts.isLeader or (self.contact ~= nil and self.contact == facts.selfKey) then
+            self.slot.state = "waiting"
             act(LfgTrigger.SLOT_REMIND)
         end
         return
@@ -296,6 +308,24 @@ end
 -- Whether "fill the empty slot?" is waiting for an answer.
 function Trigger:SlotOpen()
     return self.slot ~= nil and self.slot.state == "open"
+end
+
+-- The LFG button was hidden: an open slot waits, unasked and unposted, for
+-- it to come back.
+function Trigger:Pause()
+    if self:SlotOpen() then
+        self.slot.state = "waiting"
+    end
+end
+
+-- The LFG button came back at `now`: a slot waiting for it is asked about
+-- again, with SLOT_SECONDS to answer. True when it was.
+function Trigger:Resume(now)
+    if self.slot == nil or self.slot.state ~= "waiting" then
+        return false
+    end
+    self.slot = { state = "open", at = type(now) == "number" and now or 0 }
+    return true
 end
 
 -- The open slot went SLOT_SECONDS without an answer by `now`: it's posted.
@@ -342,13 +372,14 @@ function Trigger:Claim(selfKey)
 end
 
 -- Guildmate `key` in the party claimed contact. Two at once: the lower key
--- keeps it. True when the player (`selfKey`) was contact and no longer is.
+-- keeps it, on every client. True when the player (`selfKey`) was contact
+-- and no longer is.
 function Trigger:Claimed(key, selfKey)
     if key == nil or key == selfKey then
         return false
     end
     local mine = self.contact ~= nil and self.contact == selfKey
-    if mine and tostring(selfKey) < tostring(key) then
+    if self.contact ~= nil and tostring(self.contact) < tostring(key) then
         return false
     end
     self.contact = key

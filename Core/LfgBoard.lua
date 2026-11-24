@@ -70,12 +70,14 @@ end
 
 -- Leader `leader`'s listing ended. When it ended because they `left` the
 -- party (or logged off), it's kept for Ended, so a guildmate still in the
--- party can take it over.
+-- party can take it over. The player's request to it goes with it, so a
+-- new listing of theirs can be asked again.
 function Board:OnEnd(leader, left)
     if left and self.listings[leader] ~= nil then
         self.ended[leader] = self.listings[leader]
     end
     self.listings[leader] = nil
+    self.requests[leader] = nil
 end
 
 -- The listing leader `id` had when they left their party, or nil.

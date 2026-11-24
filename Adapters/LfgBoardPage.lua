@@ -100,8 +100,9 @@ Page.__index = Page
 --   partyRoles    function() -> the members for Roles in your party, each
 --                 { key, name, role, assigned (by the game), canPlay =
 --                 { tank, healer, dps } }
---   onSetRole     function(key, role): the leader chose a member's role
---   onSave        function(purpose, note) -> true, or false and why not
+--   onSave        function(purpose, note, roles) -> true, or false and why
+--                 not; `roles` are the members' roles the leader chose, by
+--                 key, applied only when it saves
 --   onAskInGuild  function(line): types `line` into guild chat, unsent
 --   onNotLooking  function()
 function LfgBoardPage.Create(content, ui, options)
@@ -222,9 +223,10 @@ function Page:roleTiles(parent, size)
     return tiles
 end
 
--- Shows `tiles` for a dungeon party's `members`: a member's role is
--- filled (grey), the rest open.
-local function showRoles(tiles, members)
+-- Shows `tiles` for a dungeon party's `members` (each { role }): a
+-- member's role is filled (grey), the rest open, except roles missing from
+-- `openRoles` (what the listing asks for, when given), which aren't.
+local function showRoles(tiles, members, openRoles)
     local taken = {}
     local index
     for index = 1, #(members or {}) do
@@ -233,11 +235,18 @@ local function showRoles(tiles, members)
             taken[role] = (taken[role] or 0) + 1
         end
     end
+    local wanted
+    if openRoles ~= nil then
+        wanted = {}
+        for index = 1, #openRoles do
+            wanted[openRoles[index]] = true
+        end
+    end
     local seen = {}
     for index = 1, #tiles do
         local role = tiles[index].role
         seen[role] = (seen[role] or 0) + 1
-        tiles[index]:SetFilled(seen[role] <= (taken[role] or 0))
+        tiles[index]:SetFilled(seen[role] <= (taken[role] or 0) or (wanted ~= nil and not wanted[role]))
         tiles[index]:Show()
     end
 end
@@ -281,7 +290,16 @@ function Page:buildEditor(card)
 
     self.search = ui:SearchBox(fields, LfgBoardPage.FIELD_WIDTH, "Search dungeons", function(text)
         owner.draft.search = text
+        owner.draft.offset = 0
         owner:refreshDungeons()
+    end)
+    -- The mouse wheel scrolls the dungeon list past its first rows.
+    fields:EnableMouseWheel(true)
+    fields:SetScript("OnMouseWheel", function(_, delta)
+        if owner.draft ~= nil and owner.draft.kind == "dungeon" then
+            owner.draft.offset = (owner.draft.offset or 0) - delta
+            owner:refreshDungeons()
+        end
     end)
     self.search:SetPoint("TOPLEFT", fields, "TOPLEFT", 0, 0)
     self.dungeonRows = {}
@@ -352,9 +370,10 @@ function Page:buildEditor(card)
             choice.role = roles[position]
             choice.label = ui:Text(choice, Widgets.ROLE_LABELS[roles[position]], "semibold", "small", "text")
             choice.label:SetPoint("CENTER", choice, "CENTER", 0, 0)
+            -- Kept in the draft until Save; Cancel drops it.
             choice:SetScript("OnClick", function(self)
                 if self.enabled and line.key then
-                    owner.options.onSetRole(line.key, self.role)
+                    owner.draft.roles[line.key] = self.role
                     owner:refreshRoles()
                 end
             end)
@@ -389,6 +408,9 @@ function Page:StartEditing()
         text = purpose and purpose.text or "",
         note = listing:IsActive() and listing:Note() or "",
         search = "",
+        offset = 0,
+        -- Members' roles chosen in the editor, by key.
+        roles = {},
     }
     self.editing = true
     self.search:SetValue("")
@@ -414,7 +436,7 @@ end
 -- Saves the draft: the listing starts, or changes. A draft that can't be
 -- saved says why and stays open.
 function Page:Save()
-    local saved, reason = self.options.onSave(self:draftPurpose(), self.draft.note)
+    local saved, reason = self.options.onSave(self:draftPurpose(), self.draft.note, self.draft.roles)
     if not saved then
         self.errorText:SetText("Can't save: " .. tostring(reason) .. ".")
         return false
@@ -484,7 +506,14 @@ function Page:refreshView()
         fields.k == "raid" and (fields.s .. " players") or (fields.s .. "/" .. fields.x) }))
     view.note:SetText(listing:Note() or "")
     if purpose.kind == "dungeon" then
-        showRoles(view.tiles, members)
+        -- As the guild sees it: the roster announced (the party as it was,
+        -- until an open slot's posted) and the roles asked for.
+        local announced = {}
+        local index
+        for index = 1, #fields.mb do
+            announced[index] = { role = fields.mb[index].r }
+        end
+        showRoles(view.tiles, announced, fields.r)
     else
         hideAll(view.tiles)
     end
@@ -504,7 +533,7 @@ function Page:refreshMemberView()
         (listing.contact and "contact " or "led by ") .. listing.leader }))
     view.note:SetText(listing.note or "")
     if listing.kind == "dungeon" then
-        showRoles(view.tiles, listing.members)
+        showRoles(view.tiles, listing.members, listing.openRoles)
     else
         hideAll(view.tiles)
     end
@@ -531,7 +560,11 @@ function Page:refreshRoles()
                 local choice = line.buttons[position]
                 local playable = member.canPlay[choice.role] == true
                 choice.enabled = playable and not member.assigned
-                choice.selected = member.role == choice.role
+                local role = member.role
+                if not member.assigned and self.draft.roles[member.key] ~= nil then
+                    role = self.draft.roles[member.key]
+                end
+                choice.selected = role == choice.role
                 choice:SetFill(choice.selected and "green" or "raised")
                 choice.label:SetTextColor(Theme.Color(playable and "text" or "disabled"))
             end
@@ -574,9 +607,12 @@ function Page:refreshDungeons()
         end
     end
     self.dungeonEntries = entries
+    -- Scrolled by the wheel, never past the last full view.
+    local offset = math.max(0, math.min(self.draft.offset or 0, #entries - #self.dungeonRows))
+    self.draft.offset = offset
     local chosen = self.draft.dungeon
     for index = 1, #self.dungeonRows do
-        local row, entry = self.dungeonRows[index], entries[index]
+        local row, entry = self.dungeonRows[index], entries[index + offset]
         if entry == nil then
             row.dungeon = nil
             row:Hide()
@@ -695,7 +731,9 @@ local function showTiles(card, listing)
     card.raidTile:Hide()
     card.count:SetText("")
     if listing.kind == "dungeon" then
-        showRoles(card.roleTiles, listing.members)
+        -- Open tiles are the roles asked for, the same ones Ask to join
+        -- offers.
+        showRoles(card.roleTiles, listing.members, listing.openRoles)
     elseif listing.kind == "raid" then
         card.raidTile:SetFilled(not addon.LfgRelevance.HasRoom(listing))
         card.raidTile:Show()
@@ -781,7 +819,7 @@ function Page:largeCard(index)
     -- Ask to join, then Whisper <leader>; a leader who takes no asks (not
     -- in the guild, or their LFG button hidden) has Whisper alone.
     card.ask = ui:Button(card, "Ask to join", "primary", function(button)
-        owner:ask(button, card.listing)
+        owner:ask(button, card.listing, card)
     end)
     card.ask:SetWidth(150)
     card.ask:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad)
@@ -1079,12 +1117,42 @@ end
 function Page:Refresh()
     self:refreshCard()
     self:refreshTab()
+    -- The role menu goes once its card is hidden or shows another listing.
+    local asked = self.roleMenuFor
+    if asked ~= nil and self.roleMenu ~= nil and self.roleMenu:IsOpen() then
+        local now = asked.card and asked.card.listing
+        local shown = asked.card == nil or type(asked.card.IsShown) ~= "function" or asked.card:IsShown()
+        if not shown or now == nil or now.id ~= asked.id or now.listedAt ~= asked.listedAt then
+            self.roleMenu:Close()
+            self.roleMenuFor = nil
+        end
+    end
 end
 
--- Ask to join `listing` as the current character: a dungeon's ask picks
--- one open role the character can play, from a menu when there's a
--- choice; other kinds carry no role.
-function Page:ask(anchor, listing)
+-- Leader `id`'s listing on the board now, or nil.
+function Page:listingNow(id)
+    local groups = self.options.groups() or {}
+    local lists = { groups.relevant or {}, groups.other or {} }
+    local index, position
+    for index = 1, #lists do
+        for position = 1, #lists[index] do
+            if lists[index][position].id == id then
+                return lists[index][position]
+            end
+        end
+    end
+    for index = 1, #(groups.alts or {}) do
+        if groups.alts[index].listing.id == id then
+            return groups.alts[index].listing
+        end
+    end
+    return nil
+end
+
+-- Ask to join `listing` (shown on `card`) as the current character: a
+-- dungeon's ask picks one open role the character can play, from a menu
+-- when there's a choice; other kinds carry no role.
+function Page:ask(anchor, listing, card)
     if type(listing) ~= "table" or not listing.acceptsAsk then
         return
     end
@@ -1097,12 +1165,28 @@ function Page:ask(anchor, listing)
         self.options.onAsk(listing, roles[1])
     elseif #roles > 1 then
         self.roleMenu = self.roleMenu or self.ui:ContextMenu(self.content)
+        self.roleMenuFor = { card = card, id = listing.id, listedAt = listing.listedAt }
+        local owner = self
         local items = {}
         local index
         for index = 1, #roles do
             local role = roles[index]
             items[index] = { label = "Ask as " .. (Widgets.ROLE_LABELS[role] or role), onClick = function()
-                self.options.onAsk(listing, role)
+                owner.roleMenuFor = nil
+                -- Only while that listing still takes asks with the role
+                -- open.
+                local now = owner:listingNow(listing.id)
+                if now == nil or now.listedAt ~= listing.listedAt or not now.acceptsAsk then
+                    return
+                end
+                local still = owner.options.askRoles(now)
+                local position
+                for position = 1, #still do
+                    if still[position] == role then
+                        owner.options.onAsk(now, role)
+                        return
+                    end
+                end
             end }
         end
         self.roleMenu:Open(anchor, items)

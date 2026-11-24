@@ -312,7 +312,19 @@ function UI:Tabs(parent, items, onSelect)
     row:SetHeight(28)
     row.tabs = {}
     local ui = self
-    local x = 0
+    -- Each tab as wide as its label, one after another.
+    local function layout()
+        local x = 0
+        local position
+        for position = 1, #row.tabs do
+            local tab = row.tabs[position]
+            local width = math.max((tab.label:GetStringWidth() or 0) + 4, 48)
+            tab:SetSize(width, 28)
+            tab:ClearAllPoints()
+            tab:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", x, 0)
+            x = x + width + Theme.SPACING.l
+        end
+    end
     local index
     for index = 1, #items do
         local item = items[index]
@@ -320,10 +332,6 @@ function UI:Tabs(parent, items, onSelect)
         tab.id = item.id
         tab.label = ui:Text(tab, item.label, "semibold", "body", "muted")
         tab.label:SetPoint("LEFT", tab, "LEFT", 0, 2)
-        local width = (tab.label:GetStringWidth() or 0) + 4
-        width = math.max(width, 48)
-        tab:SetSize(width, 28)
-        tab:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", x, 0)
         tab.underline = tab:CreateTexture(nil, "ARTWORK")
         tab.underline:SetTexture(Theme.TEXTURES.white)
         tab.underline:SetVertexColor(Theme.Color("green"))
@@ -337,8 +345,8 @@ function UI:Tabs(parent, items, onSelect)
             end
         end)
         row.tabs[index] = tab
-        x = x + width + Theme.SPACING.l
     end
+    layout()
     function row.Select(_, id)
         row.selected = id
         local position
@@ -363,6 +371,8 @@ function UI:Tabs(parent, items, onSelect)
                 row.tabs[position].label:SetText(text)
             end
         end
+        -- A longer label (a count added) widens its tab and moves the rest.
+        layout()
     end
     if items[1] ~= nil then
         row:Select(items[1].id)

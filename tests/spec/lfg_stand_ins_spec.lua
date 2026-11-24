@@ -60,6 +60,33 @@ test.test("lfg stand-ins: a low character with no alts gets every case but the a
     test.assertContains(why, "alt")
 end)
 
+test.test("lfg stand-ins: the greyed listing misses every alt too, or is left out with a reason", function()
+    local addon = load()
+    -- Level 30 would get 55-60, which a level-57 alt fits.
+    local current = { level = 30, roles = { "dps" } }
+    local alts = { { name = "Bolt", level = 57, roles = { "dps" } } }
+
+    local relevant, forAlts, other, why = sorted(addon, { level = 30, alt = alts[1], alts = alts }, current, alts)
+
+    test.assertEqual("note,raid,relevant", relevant)
+    test.assertEqual("alts", forAlts)
+    test.assertEqual("full,greyed", other)
+    test.assertEqual(nil, why)
+
+    -- Alts at every level: no range is clear.
+    local everyLevel = {}
+    local level
+    for level = 1, 80 do
+        everyLevel[level] = { level = level }
+    end
+    local listings, note = addon.LfgStandIns.Listings({ level = 30, alts = everyLevel })
+    local index
+    for index = 1, #listings do
+        test.assertFalse(listings[index].case == "greyed")
+    end
+    test.assertContains(note, "greyed")
+end)
+
 test.test("lfg stand-ins: the relevant ones carry a note, and only stand-in keys count as stand-ins", function()
     local addon = load()
     local listings = addon.LfgStandIns.Listings({ level = 40 })

@@ -304,8 +304,12 @@ function Listing:Expired(now, size)
         and now - self.startedAt >= LfgListing.SOLO_SECONDS
 end
 
--- A dungeon party's open roles, given its `members`' roles.
+-- A dungeon party's open roles, given its `members`' roles; none once it's
+-- full.
 local function openRoles(members)
+    if #members >= LfgListing.PARTY_SIZE then
+        return {}
+    end
     local taken = {}
     local index
     for index = 1, #members do
