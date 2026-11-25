@@ -975,6 +975,11 @@ test.test("Forever a group only your alt fits shows under Your alts could join, 
     end
     whisperName(board, board.nearbyCard.rows[1])
     test.assertContains(board.nearbyCard.rows[1].name.text, string.match(whispered, "^[^%-]+"))
+
+    -- The LFG button's Show Nearby is handed the same guildmates.
+    local nearby = hammer.addon.lfgButton.options.nearby()
+    test.assertEqual("Ironforge", nearby.zone)
+    test.assertContains(board.nearbyCard.rows[1].name.text, nearby.people[1].name)
 end)
 
 test.test("Forever questing is listed in the zone's levels, and the probe says where they came from", function()

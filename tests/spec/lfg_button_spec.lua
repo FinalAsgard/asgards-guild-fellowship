@@ -4,12 +4,14 @@ local fakeFrames = require("tests.fake_frames")
 
 -- The button on its own -------------------------------------------------------
 
--- An LFG button over fake frames whose shown setting is `state.shown`.
-local function newButton()
-    local addon = test.newAddon("Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/LfgButton.lua")
+-- An LFG button over fake frames whose shown setting is `state.shown`,
+-- with `extra` options on top of the usual.
+local function newButton(extra)
+    local addon = test.newAddon("Adapters/Theme.lua", "Adapters/Widgets.lua", "Core/LfgDrawerModel.lua",
+        "Adapters/LfgButton.lua")
     local environment = fakeFrames.install({})
     local state = { shown = true, opened = 0, hidden = 0 }
-    local button = addon.LfgButton.Create({ environment = environment }, {
+    local options = {
         frameName = "AgfTestLfgButton",
         shown = function()
             return state.shown
@@ -27,7 +29,12 @@ local function newButton()
         savePosition = function(position)
             state.saved = position
         end,
-    })
+    }
+    local name, value
+    for name, value in pairs(extra or {}) do
+        options[name] = value
+    end
+    local button = addon.LfgButton.Create({ environment = environment }, options)
     return button, state
 end
 
@@ -53,7 +60,57 @@ test.test("lfg button: shows or hides as its setting says, made the first time i
     test.assertFalse(button.button.shown)
 end)
 
-test.test("lfg button: right-click offers Open Guild LFG Board and Hide LFG button", function()
+test.test("lfg button: Show Nearby opens the drawer on the guildmates nearby, each name a whisper menu", function()
+    local whispered = {}
+    local people = {
+        { name = "Hammer", whisper = "Hammer-Camelot", level = 24, classToken = "WARRIOR" },
+        { name = "Zap", whisper = "Zap-Camelot" },
+    }
+    local button = newButton({
+        nearby = function() return { zone = "Ironforge", people = people } end,
+        classColor = function(classToken) return classToken == "WARRIOR" and "ffc79c6e" or nil end,
+        onWhisper = function(name) table.insert(whispered, name) end,
+    })
+    button:Refresh()
+    button:Update({ count = 0, fresh = {}, top = { kind = "none" } })
+
+    rightClick(button)
+    button.menu.rows[2].scripts.OnClick(button.menu.rows[2])
+    local drawer = button.drawer
+    test.assertTrue(button:DrawerOpen())
+    test.assertEqual("NEARBY IN IRONFORGE", drawer.heading.text)
+    test.assertTrue(drawer.nearby.shown)
+    test.assertFalse(button.startButton.shown)
+    test.assertFalse(drawer.nearby.empty.shown)
+    -- A guildmate per line, the level left of the name in class color.
+    local rows = drawer.nearby.rows
+    test.assertEqual("24", rows[1].level.text)
+    test.assertEqual("|cffc79c6eHammer|r", rows[1].name.text)
+    test.assertEqual("", rows[2].level.text)
+    test.assertEqual("Zap", rows[2].name.text)
+    -- A name opens a menu with it at the top, and Whisper.
+    rows[2].scripts.OnClick(rows[2])
+    test.assertTrue(button.nameMenu:IsOpen())
+    test.assertEqual("Zap", button.nameMenu.titleText)
+    button.nameMenu.rows[1].scripts.OnClick(button.nameMenu.rows[1])
+    test.assertEqual("Zap-Camelot", whispered[1])
+
+    -- Closed, the drawer goes back to its usual contents.
+    button:CloseDrawer()
+    button:OpenDrawer()
+    test.assertFalse(drawer.nearby.shown)
+    test.assertEqual("NEW FOR YOU", drawer.heading.text)
+    test.assertTrue(button.startButton.shown)
+
+    -- Nobody nearby: one line.
+    people = {}
+    button:CloseDrawer()
+    button:ShowNearby()
+    test.assertTrue(drawer.nearby.empty.shown)
+    test.assertFalse(rows[1].shown)
+end)
+
+test.test("lfg button: right-click offers Open Guild LFG Board, Show Nearby and Hide LFG button", function()
     local button, state = newButton()
     button:Refresh()
 
@@ -61,14 +118,15 @@ test.test("lfg button: right-click offers Open Guild LFG Board and Hide LFG butt
     local menu = button.menu
     test.assertTrue(menu:IsOpen())
     test.assertEqual("Open Guild LFG Board", menu.items[1].label)
-    test.assertEqual("Hide LFG button", menu.items[2].label)
+    test.assertEqual("Show Nearby", menu.items[2].label)
+    test.assertEqual("Hide LFG button", menu.items[3].label)
 
     menu.rows[1].scripts.OnClick(menu.rows[1])
     test.assertEqual(1, state.opened)
     test.assertFalse(menu:IsOpen())
 
     rightClick(button)
-    menu.rows[2].scripts.OnClick(menu.rows[2])
+    menu.rows[3].scripts.OnClick(menu.rows[3])
     test.assertEqual(1, state.hidden)
     button:Refresh()
     test.assertFalse(button:IsShowing())
@@ -146,7 +204,7 @@ local function registerProfileTests(profile)
         local world, addon = loggedIn(profile)
         addon.lfgButton:OpenMenu()
         local menu = addon.lfgButton.menu
-        menu.rows[2].scripts.OnClick(menu.rows[2])
+        menu.rows[3].scripts.OnClick(menu.rows[3])
 
         test.assertFalse(addon.lfgButton:IsShowing())
         test.assertFalse(addon.settings:Get("lfgButton"))

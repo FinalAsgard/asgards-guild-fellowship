@@ -548,7 +548,7 @@ A small rounded button with a tree sits wherever you drag it (saved per characte
 - A **gold count** in its corner shows how many listed groups the character you're on could join.
 - A **gold glow** means a group you could join appeared since you last opened the drawer, with one pulse per new group. There's no glow while you're in a party, in combat, in an instance or in [Do Not Disturb](#do-not-disturb). For a chat line too, turn on the new-groups chat line in the LFG settings.
 - An **orange glow** means someone left your full party (see [Someone leaves](#someone-leaves)).
-- **Right-click** it for **Open Guild LFG Board** and **Hide LFG button**. Hiding it means "not taking part right now": it stays hidden on that character until you type `/agf lfg` or turn **Show LFG button** back on. Your party is still listed with a best guess, but nothing asks you anything, and guildmates whisper you instead of asking to join.
+- **Right-click** it for **Open Guild LFG Board**, **Show Nearby** and **Hide LFG button**. **Show Nearby** opens the drawer on the guildmates in your zone, one per line with their level, each name a menu to whisper them. Hiding it means "not taking part right now": it stays hidden on that character until you type `/agf lfg` or turn **Show LFG button** back on. Your party is still listed with a best guess, but nothing asks you anything, and guildmates whisper you instead of asking to join.
 
 ### The drawer
 
@@ -556,7 +556,9 @@ Click the button to slide a small drawer out to its left; click again, or its **
 
 - **Not in a party:** the newest group you could join, with **Ask to join**, and **Start a group** under it (or "No groups for you right now").
 - **In a party:** your party's purpose, size, the roles it needs, and its note, with its slots as on your listing's card: a dungeon's Tank, Healer and DPS tiles with their icons (open ones in color, filled ones grey), a person tile per player otherwise.
-- **While you're being asked something** (what your party is for, whether to list a party with players outside the guild, or whether to fill an empty slot), the question and its answers.
+- **While you're being asked something** (what your party is for, whether to list a party with players outside the guild, whether to fill an empty slot, or, when you lead a questing party into another zone, whether to move the listing there), the question and its answers. Saying No to a zone means you're not asked about that zone again.
+
+Long names wrap onto more lines at the spaces between words, and the drawer grows to fit.
 
 ### The window
 

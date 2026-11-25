@@ -112,6 +112,8 @@ local lfgJoin = {
     zoneDeclined = false,
     checkZone = function() end,
     moveZone = function() end,
+    -- The guildmates in the player's zone, for the button's Show Nearby.
+    nearby = function() return nil end,
 }
 local LFG_HAND_OFF_SECONDS = 5
 -- A guildmate's group-friend tier by character key (set up with the group
@@ -1400,6 +1402,9 @@ if clientProfile.supported then
         onMoveZone = function(yes)
             lfgJoin.moveZone(yes)
         end,
+        nearby = function()
+            return lfgJoin.nearby()
+        end,
         dungeonIcon = function(name)
             local dungeon = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
             return dungeon and dungeon.icon or nil
@@ -1707,6 +1712,7 @@ if clientProfile.supported then
         end
         return { zone = zone.name, people = people }
     end
+    lfgJoin.nearby = lfgNearby
     -- /agf probe lfg: where questing's zone levels come from, and what's on
     -- the board for this character.
     probeLfg = function()

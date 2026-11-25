@@ -36,6 +36,12 @@ local LfgButton = {
     SLOT_TEXT = "Someone left \226\128\148 fill the empty slot?",
     -- %s: the zone the leader moved to.
     ZONE_TEXT = "You're in %s now. Move your questing listing here?",
+    -- Show Nearby: the names it lists (more are counted), each row's
+    -- height, and the levels' column.
+    NEARBY_ROWS = 25,
+    NEARBY_ROW_HEIGHT = 18,
+    LEVEL_WIDTH = 22,
+    NEARBY_NONE_TEXT = "No guildmates nearby right now.",
     -- An Ask to join request under the drawer.
     TOAST_HEIGHT = 74,
 }
@@ -88,10 +94,13 @@ end
 --                   empty slot?"
 --   onMoveZone      function(yes): the answer to moving a questing listing
 --                   to the zone its leader went to
+--   nearby          function() -> { zone, people = { { name, whisper,
+--                   level?, classToken? } } } of guildmates in the player's
+--                   zone, or nil; the menu's Show Nearby lists them
 --   askRoles        function(listing) -> the open roles the current
 --                   character can ask to join a dungeon listing as
 --   onAsk           function(listing, role?): Ask to join
---   onWhisper       function(name): whispers a leader
+--   onWhisper       function(name): whispers someone
 --   onInvite        function(request): the leader invited an asker
 --   onDecline       function(request): the leader declined one
 --   classColor      function(classToken) -> "ffrrggbb", or nil
@@ -274,6 +283,19 @@ function Button:buildDrawer()
     drawer.raidTile = ui:RoleTile(drawer, "any", LfgButton.TILE_SIZE, LfgButton.TILE_SIZE)
     drawer.raidTile:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad)
 
+    -- Show Nearby (the button's menu): the guildmates in the player's zone,
+    -- as the board's Nearby tab lists them, each name opening a menu to
+    -- whisper them. Its rows are made as they're needed.
+    drawer.nearby = ui:frame("Frame", drawer)
+    drawer.nearby:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
+    drawer.nearby:SetPoint("BOTTOMRIGHT", drawer, "BOTTOMRIGHT", -pad, pad)
+    drawer.nearby.rows = {}
+    drawer.nearby.empty = ui:Text(drawer.nearby, LfgButton.NEARBY_NONE_TEXT, "regular", "body", "muted")
+    drawer.nearby.empty:SetPoint("TOPLEFT", drawer.nearby, "TOPLEFT", 0, 0)
+    drawer.nearby.more = ui:Text(drawer.nearby, "", "regular", "small", "label")
+    drawer.nearby:Hide()
+    self.nameMenu = ui:ContextMenu(self.environment.UIParent)
+
     -- It slides in from the button's side where the client can animate.
     if type(drawer.CreateAnimationGroup) == "function" then
         local ok, group = pcall(drawer.CreateAnimationGroup, drawer)
@@ -447,6 +469,12 @@ function Button:refreshDrawer()
     if drawer == nil or view == nil then
         return
     end
+    if self.nearbyMode then
+        self:refreshNearby()
+        self:refreshToasts()
+        return
+    end
+    drawer.nearby:Hide()
     local top = view.top or { kind = addon.LfgDrawerModel.NONE }
     local kind = top.kind
     drawer.kind = kind
@@ -551,6 +579,90 @@ function Button:refreshDrawer()
     self:refreshToasts()
 end
 
+-- Show Nearby: the drawer lists the guildmates in the player's zone in
+-- place of its usual contents, until it's closed.
+function Button:ShowNearby()
+    if self.drawer == nil then
+        return
+    end
+    self.nearbyMode = true
+    if self:DrawerOpen() then
+        self:refreshDrawer()
+    else
+        self:OpenDrawer()
+    end
+end
+
+-- The drawer's Nearby list: "Nearby in <zone>", then a guildmate per line,
+-- their level in a column left of their name in class color; a click on a
+-- name opens a menu to whisper them.
+function Button:refreshNearby()
+    local drawer, options, ui, owner = self.drawer, self.options, self.ui, self
+    drawer.kind = "nearby"
+    local hidden = { drawer.icon, drawer.purpose, drawer.details, drawer.empty, drawer.question, drawer.slotDetails,
+        drawer.party, drawer.partyDetails, drawer.note, drawer.raidTile, self.askButton, self.startButton,
+        self.listButton, self.notLookingButton, self.snoozeButton }
+    local index
+    for index = 1, #hidden do
+        hidden[index]:Hide()
+    end
+    for index = 1, 5 do
+        drawer.roleTiles[index]:Hide()
+        drawer.anyTiles[index]:Hide()
+    end
+    local nearby = options.nearby and options.nearby() or nil
+    local people = nearby ~= nil and nearby.people or {}
+    drawer.heading:SetText(Theme.Label(nearby ~= nil and ("Nearby in " .. nearby.zone) or "Nearby"))
+    local list = drawer.nearby
+    setShown(list.empty, #people == 0)
+    local shown = math.min(#people, LfgButton.NEARBY_ROWS)
+    for index = 1, math.max(shown, #list.rows) do
+        local row = list.rows[index]
+        if index <= shown then
+            if row == nil then
+                row = ui:frame("Button", list)
+                row:SetHeight(LfgButton.NEARBY_ROW_HEIGHT)
+                row:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -(index - 1) * LfgButton.NEARBY_ROW_HEIGHT)
+                row:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+                row.level = ui:Text(row, "", "regular", "small", "muted")
+                row.level:SetWidth(LfgButton.LEVEL_WIDTH)
+                row.level:SetJustifyH("RIGHT")
+                row.level:SetPoint("LEFT", row, "LEFT", 0, 0)
+                row.name = ui:Text(row, "", "regular", "body", "text")
+                row.name:SetPoint("LEFT", row, "LEFT", LfgButton.LEVEL_WIDTH + Theme.SPACING.s, 0)
+                row:SetScript("OnClick", function(self)
+                    local whisper = self.whisper
+                    owner.nameMenu:Open(self, {
+                        { label = "Whisper", onClick = function()
+                            if whisper then
+                                options.onWhisper(whisper)
+                            end
+                        end },
+                    }, self.title)
+                end)
+                list.rows[index] = row
+            end
+            local person = people[index]
+            local color = options.classColor and options.classColor(person.classToken) or nil
+            row.title = type(color) == "string" and ("|c" .. color .. person.name .. "|r") or person.name
+            row.whisper = person.whisper or person.name
+            row.level:SetText(person.level ~= nil and tostring(person.level) or "")
+            row.name:SetText(row.title)
+            row:Show()
+        elseif row ~= nil then
+            row:Hide()
+        end
+    end
+    local more = #people - shown
+    list.more:ClearAllPoints()
+    list.more:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -shown * LfgButton.NEARBY_ROW_HEIGHT)
+    list.more:SetText(more > 0 and ("and " .. more .. " more") or "")
+    list:Show()
+    local pad = Theme.SPACING.m
+    local rows = math.max(shown, 1) * LfgButton.NEARBY_ROW_HEIGHT + (more > 0 and 16 or 0)
+    drawer:SetHeight(pad + 14 + Theme.SPACING.s + rows + pad)
+end
+
 -- The drawer opens to the button's left, or to its right when the button
 -- sits too near the screen's left edge for it.
 function Button:anchorDrawer()
@@ -596,6 +708,11 @@ function Button:CloseDrawer(answered)
     local wasAsking = self:DrawerOpen() and self.drawer ~= nil
         and (self.drawer.kind == addon.LfgDrawerModel.ASK or self.drawer.kind == addon.LfgDrawerModel.GATE)
     self.drawerOpen = false
+    -- Show Nearby lasts until the drawer closes.
+    self.nearbyMode = false
+    if self.nameMenu ~= nil then
+        self.nameMenu:Close()
+    end
     if self.drawer ~= nil then
         self.drawer:Hide()
         self:refreshToasts()
@@ -656,10 +773,13 @@ end
 
 -- The right-click menu, under the button.
 function Button:OpenMenu()
-    local options = self.options
+    local options, owner = self.options, self
     self.menu:Open(self.button, {
         { label = "Open Guild LFG Board", onClick = function()
             options.onOpenBoard()
+        end },
+        { label = "Show Nearby", onClick = function()
+            owner:ShowNearby()
         end },
         { label = "Hide LFG button", onClick = function()
             options.onHide()
