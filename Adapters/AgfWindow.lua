@@ -28,8 +28,9 @@ local AgfWindow = {
     POPUP_WIDTH = 260,
     MODULE_ROW_HEIGHT = 32,
     SETTINGS_ROW_HEIGHT = 44,
-    -- A color setting's swatches.
+    -- A color setting's swatches, and its Custom... button.
     SWATCH_SIZE = 20,
+    CUSTOM_WIDTH = 84,
     -- The Settings page, which isn't a module.
     SETTINGS = "settings",
 }
@@ -255,7 +256,8 @@ end
 
 -- One color setting (SettingsModel `entry`) on the Settings page: its label
 -- with a sample in the chosen color, then a row of swatches, the chosen one
--- outlined, on a card at `top`. Returns its height.
+-- outlined, and Custom... for any other color, on a card at `top`. Returns
+-- its height.
 function Window:buildColorRow(content, setting, entry, top)
     local ui, window = self.ui, self
     local height = AgfWindow.SETTINGS_ROW_HEIGHT + 12 + AgfWindow.SWATCH_SIZE + Theme.SPACING.s
@@ -284,6 +286,28 @@ function Window:buildColorRow(content, setting, entry, top)
             window:refreshSwitch(setting.id)
         end)
         card.swatches[index] = swatch
+    end
+    -- Where the client has the game's color picker, Custom... opens it for
+    -- any other color: saved as it changes, the old one back on cancel.
+    if type(self.client.environment.ColorPickerFrame) == "table" then
+        card.custom = ui:Button(card, "Custom...", "secondary", function()
+            local settings = window.options.settings
+            local start = settings:Get(setting.id) or (entry.swatches[1] and entry.swatches[1].color) or "ffffff"
+            addon.Widgets.OpenColorPicker(window.client.environment, start, function(color, cancelled)
+                if cancelled and settings:Get(setting.id) == start then
+                    return
+                end
+                local changed, reason = settings:Set(setting.id, color)
+                if not changed and not cancelled then
+                    window.client:Print(addon.Identity.chatPrefix .. " " .. setting.label .. " can't be changed: " ..
+                        tostring(reason) .. ".")
+                end
+                window:refreshSwitch(setting.id)
+            end)
+        end)
+        card.custom:SetWidth(AgfWindow.CUSTOM_WIDTH)
+        card.custom:SetPoint("LEFT", card.swatches[#card.swatches] or card, #card.swatches > 0 and "RIGHT" or "LEFT",
+            Theme.SPACING.m, 0)
     end
     self.colorRows[setting.id] = self.colorRows[setting.id] or {}
     table.insert(self.colorRows[setting.id], card)

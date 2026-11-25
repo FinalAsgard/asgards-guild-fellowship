@@ -511,62 +511,28 @@ function Panel:addAction(frame, entry)
     return { kind = "action", id = entry.id, frame = button, controls = { button } }
 end
 
--- "rrggbb" as red, green and blue from 0 to 1, and back.
+-- "rrggbb" as red, green and blue from 0 to 1.
 local function toRGB(color)
     return tonumber(string.sub(color, 1, 2), 16) / 255, tonumber(string.sub(color, 3, 4), 16) / 255,
         tonumber(string.sub(color, 5, 6), 16) / 255
 end
 
-local function toHex(r, g, b)
-    local function byte(value)
-        return math.max(0, math.min(255, math.floor(value * 255 + 0.5)))
-    end
-    return string.format("%02x%02x%02x", byte(r), byte(g), byte(b))
-end
-
--- Opens the game's color picker on a color entry's current color: the
--- color picked is saved as it changes, and cancelling puts the starting
--- color back. Retail sets the picker up with one call; older clients set
--- its fields and show it. Returns false where there's no picker.
+-- Opens the game's color picker (Widgets.OpenColorPicker) on a color
+-- entry's current color: the color picked is saved as it changes, and
+-- cancelling puts the starting color back. Returns false where there's no
+-- picker.
 function Panel:OpenColorPicker(entry)
-    local picker = self.environment.ColorPickerFrame
-    if type(picker) ~= "table" then
-        return false
-    end
     local start = self.model:Get(entry.id) or entry.swatches[1].color
-    local r, g, b = toRGB(start)
-    local function picked()
-        local ok, newR, newG, newB = pcall(picker.GetColorRGB, picker)
-        if ok and type(newR) == "number" and type(newG) == "number" and type(newB) == "number" then
-            self:report(entry.id, self.model:Set(entry.id, toHex(newR, newG, newB)))
-        end
-        self:Refresh()
-    end
-    local function cancelled()
-        if self.model:Get(entry.id) ~= start then
-            self.model:Set(entry.id, start)
-        end
-        self:Refresh()
-    end
-    return (pcall(function()
-        if type(picker.SetupColorPickerAndShow) == "function" then
-            picker:SetupColorPickerAndShow({
-                r = r, g = g, b = b, hasOpacity = false, swatchFunc = picked, cancelFunc = cancelled,
-            })
-            return
-        end
-        picker.hasOpacity = false
-        picker.opacityFunc = nil
-        picker.func = picked
-        picker.cancelFunc = cancelled
-        picker.previousValues = { r, g, b }
-        picker:SetColorRGB(r, g, b)
-        if type(self.environment.ShowUIPanel) == "function" then
-            self.environment.ShowUIPanel(picker)
+    return addon.Widgets.OpenColorPicker(self.environment, start, function(color, cancelled)
+        if cancelled then
+            if self.model:Get(entry.id) ~= start then
+                self.model:Set(entry.id, start)
+            end
         else
-            picker:Show()
+            self:report(entry.id, self.model:Set(entry.id, color))
         end
-    end))
+        self:Refresh()
+    end)
 end
 
 -- A color: its label with a sample in the chosen color, then a row of

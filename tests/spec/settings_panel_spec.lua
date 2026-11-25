@@ -12,7 +12,8 @@ local contains = fakeFrames.contains
 -- and, after an officer heading, an officer toggle shown only while
 -- `state.officer` is true.
 local function newPanel(environment)
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local state = { officer = false, opened = 0 }
     local model = addon.SettingsModel.Create()
     model:AddSection("about", "Asgard's Guild Fellowship", { home = true })
@@ -142,7 +143,8 @@ end)
 
 -- A model with one text setting backed by `saved.ad`, on the main page.
 local function newTextPanel(environment, savedAd, lines)
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local saved = { ad = savedAd or "" }
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
@@ -226,7 +228,8 @@ end)
 
 test.test("settings panel: leaving a box unchanged saves nothing", function()
     local environment = newEnvironment()
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local saves = 0
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
@@ -279,7 +282,8 @@ end)
 
 test.test("settings panel: a slider shows its value as it's dragged and saves it on release", function()
     local environment = newEnvironment()
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local saved = { gap = 60 }
     local saves = 0
     local model = addon.SettingsModel.Create()
@@ -327,7 +331,8 @@ test.test("settings panel: a setting with info gets an icon that shows it in the
     function tooltip:Hide() self.shown = false end
     environment.GameTooltip = tooltip
     environment.InterfaceOptions_AddCategory = function() end
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local ad = "Knights recruit!"
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
@@ -366,7 +371,8 @@ test.test("settings panel: a change that isn't saved says why in chat", function
     local environment = newEnvironment()
     local printed = {}
     environment.InterfaceOptions_AddCategory = function() end
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local model = addon.SettingsModel.Create()
     model:AddSection("recruitment", "Recruitment")
     model:Add("recruitment", { id = "ad", kind = "input", label = "My ad", maxLength = 255,
@@ -399,7 +405,8 @@ end
 test.test("settings panel: an officer-style heading is drawn as a tinted block, unlike a plain heading", function()
     local environment = newEnvironment()
     environment.InterfaceOptions_AddCategory = function() end
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local model = addon.SettingsModel.Create()
     model:AddSection("greet", "Guild Greet")
     model:Add("greet", { id = "timing", kind = "heading", label = "Timing" })
@@ -419,7 +426,8 @@ test.test("settings panel: a mode button's label follows its mode, and closing t
     local environment = newEnvironment()
     local printed = {}
     environment.InterfaceOptions_AddCategory = function() end
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local state = { moving = false, refuse = nil }
     local model = addon.SettingsModel.Create()
     model:AddSection("greet", "Guild Greet")
@@ -465,7 +473,8 @@ end)
 test.test("settings panel: a setting changed in one host reads back in the other", function()
     local environment = newEnvironment()
     environment.InterfaceOptions_AddCategory = function() end
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local saved = { minimap = true }
     local model = addon.SettingsModel.Create()
     model:AddSection("general", "General")
@@ -528,7 +537,8 @@ end)
 
 -- A model with one color setting backed by `saved.color`.
 local function newColorPanel(environment)
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local saved = { color = "4a90ff" }
     local model = addon.SettingsModel.Create()
     model:AddSection("chatTags", "Chat Tags")
@@ -607,7 +617,8 @@ end)
 test.test("settings panel: a color that can't be read shows its entry's default, not the first swatch", function()
     local environment = newEnvironment()
     environment.InterfaceOptions_AddCategory = function() end
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local model = addon.SettingsModel.Create()
     model:AddSection("chatTags", "Chat Tags")
     model:Add("chatTags", { id = "mainColor", kind = "color", label = "Main's name tag color", sample = "[Hammer]",
@@ -625,7 +636,8 @@ test.test("settings panel: a color that can't be read shows its entry's default,
 end)
 
 test.test("settings panel: a scroll area's content keeps a text box's width, and its footer follows the area", function()
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local Panel = addon.SettingsPanel
     local least = Panel.INPUT_WIDTH + 2 * Panel.LEFT + 40
 
@@ -646,7 +658,8 @@ end)
 
 test.test("settings panel: resizing a page re-fits its scroll area's content and footer", function()
     local environment = newEnvironment()
-    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/SettingsPanel.lua")
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
     local model = addon.SettingsModel.Create()
     model:AddSection("guildGreet", "Guild Greet", { page = "greetings" })
     model:Add("guildGreet", { id = "on", kind = "toggle", label = "On",

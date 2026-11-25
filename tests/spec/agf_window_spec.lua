@@ -327,6 +327,38 @@ test.test("agf window: the Settings page's Chat tab sets a tag's color from its 
     -- Changed elsewhere (the old window): the row follows.
     settings:Set("chatTagColor:alias", "4a90ff")
     test.assertTrue(card.swatches[1].selected)
+    -- Without the game's color picker there's no Custom... button.
+    test.assertEqual(nil, rawget(card, "custom"))
+end)
+
+test.test("agf window: Custom... picks any color with the game's color picker, and cancel puts it back", function()
+    local _, window, environment, _, state = newWindow()
+    local picker = { rgb = { 0, 0, 0 } }
+    function picker.SetupColorPickerAndShow(_, info)
+        picker.info = info
+    end
+    function picker.GetColorRGB()
+        return picker.rgb[1], picker.rgb[2], picker.rgb[3]
+    end
+    environment.ColorPickerFrame = picker
+    window:Open("settings")
+    local card = window.colorRows["chatTagColor:alias"][1]
+    test.assertTrue(card.custom ~= nil)
+
+    card.custom.scripts.OnClick(card.custom)
+    -- It opens on the saved color.
+    test.assertEqual(0x4a / 255, picker.info.r)
+    test.assertEqual(0xff / 255, picker.info.b)
+    -- A color picked is saved as it changes, none of the swatches outlined.
+    picker.rgb = { 1, 0.5, 0 }
+    picker.info.swatchFunc()
+    test.assertEqual("ff8000", state.aliasColor)
+    test.assertEqual("|cffff8000[TheTool]|r", card.sample.text)
+    test.assertFalse(card.swatches[1].selected)
+    -- Cancelled: the color it started with comes back.
+    picker.info.cancelFunc()
+    test.assertEqual("4a90ff", state.aliasColor)
+    test.assertTrue(card.swatches[1].selected)
 end)
 
 test.test("agf window: it's moved and saved, and opens where it was left", function()

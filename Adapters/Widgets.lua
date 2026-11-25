@@ -23,6 +23,59 @@ local Widgets = {
 }
 addon.Widgets = Widgets
 
+local function toRGB(color)
+    return tonumber(string.sub(color, 1, 2), 16) / 255, tonumber(string.sub(color, 3, 4), 16) / 255,
+        tonumber(string.sub(color, 5, 6), 16) / 255
+end
+
+local function toHex(r, g, b)
+    local function byte(value)
+        return math.max(0, math.min(255, math.floor(value * 255 + 0.5)))
+    end
+    return string.format("%02x%02x%02x", byte(r), byte(g), byte(b))
+end
+
+-- Opens the game's color picker on `start` ("rrggbb"), for both windows'
+-- color settings: `onColor(color)` gets each color picked as it changes,
+-- and `onColor(start, true)` on cancel. Retail sets the picker up with one
+-- call; older clients set its fields and show it. False where there's no
+-- picker.
+function Widgets.OpenColorPicker(environment, start, onColor)
+    local picker = environment.ColorPickerFrame
+    if type(picker) ~= "table" then
+        return false
+    end
+    local r, g, b = toRGB(start)
+    local function picked()
+        local ok, newR, newG, newB = pcall(picker.GetColorRGB, picker)
+        if ok and type(newR) == "number" and type(newG) == "number" and type(newB) == "number" then
+            onColor(toHex(newR, newG, newB))
+        end
+    end
+    local function cancelled()
+        onColor(start, true)
+    end
+    return (pcall(function()
+        if type(picker.SetupColorPickerAndShow) == "function" then
+            picker:SetupColorPickerAndShow({
+                r = r, g = g, b = b, hasOpacity = false, swatchFunc = picked, cancelFunc = cancelled,
+            })
+            return
+        end
+        picker.hasOpacity = false
+        picker.opacityFunc = nil
+        picker.func = picked
+        picker.cancelFunc = cancelled
+        picker.previousValues = { r, g, b }
+        picker:SetColorRGB(r, g, b)
+        if type(environment.ShowUIPanel) == "function" then
+            environment.ShowUIPanel(picker)
+        else
+            picker:Show()
+        end
+    end))
+end
+
 local UI = {}
 UI.__index = UI
 
