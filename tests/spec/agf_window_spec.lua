@@ -175,6 +175,14 @@ local function newWindow()
             state.tags = enabled
             return true
         end })
+    state.aliasColor = "4a90ff"
+    settings:Add("chatTags", { id = "chatTagColor:alias", kind = "color", label = "Alias tag color",
+        sample = "[TheTool]", swatches = { { label = "Blue", color = "4a90ff" }, { label = "Gold", color = "ffd100" } },
+        get = function() return state.aliasColor end,
+        set = function(color)
+            state.aliasColor = color
+            return true
+        end })
     local client = {
         environment = environment,
         Print = function(_, message)
@@ -186,7 +194,8 @@ local function newWindow()
         modules = { { id = "lfg", label = "LFG", title = "Guild LFG Board" } },
         settings = settings,
         settingsTabs = { { id = "chat", label = "Chat",
-            rows = { { id = "chatTags", label = "Chat tags", info = "Tag speakers." } } } },
+            rows = { { id = "chatTags", label = "Chat tags", info = "Tag speakers." },
+                { id = "chatTagColor:alias", label = "Alias tag color", info = "The alias tag's color." } } } },
         character = function()
             return { name = "Hammer", level = 24, className = "Paladin", classColor = "fff58cba" }
         end,
@@ -296,6 +305,28 @@ test.test("agf window: the Settings page's Chat tags switch round-trips the shar
     settings:Toggle("chatTags")
     test.assertTrue(state.tags)
     test.assertTrue(switch:IsOn())
+end)
+
+test.test("agf window: the Settings page's Chat tab sets a tag's color from its swatches", function()
+    local _, window, environment, settings, state = newWindow()
+    window:Open("settings")
+    local card = window.colorRows["chatTagColor:alias"][1]
+
+    test.assertTrue(contains(environment.pages[1].texts, "Alias tag color"))
+    -- The sample in the saved color, that swatch outlined.
+    test.assertEqual("|cff4a90ff[TheTool]|r", card.sample.text)
+    test.assertTrue(card.swatches[1].selected)
+    test.assertFalse(card.swatches[2].selected)
+
+    card.swatches[2].scripts.OnClick(card.swatches[2])
+    test.assertEqual("ffd100", state.aliasColor)
+    test.assertEqual("|cffffd100[TheTool]|r", card.sample.text)
+    test.assertTrue(card.swatches[2].selected)
+    test.assertFalse(card.swatches[1].selected)
+
+    -- Changed elsewhere (the old window): the row follows.
+    settings:Set("chatTagColor:alias", "4a90ff")
+    test.assertTrue(card.swatches[1].selected)
 end)
 
 test.test("agf window: it's moved and saved, and opens where it was left", function()

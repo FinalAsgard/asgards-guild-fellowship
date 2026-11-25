@@ -114,6 +114,15 @@ function Theme.Color(name)
     return color[1], color[2], color[3], color[4]
 end
 
+-- A saved "rrggbb" color as r, g, b, a (0 to 1); white for anything else.
+function Theme.Hex(hex)
+    if type(hex) ~= "string" or string.find(hex, "^%x%x%x%x%x%x$") == nil then
+        return 1, 1, 1, 1
+    end
+    return tonumber(string.sub(hex, 1, 2), 16) / 255, tonumber(string.sub(hex, 3, 4), 16) / 255,
+        tonumber(string.sub(hex, 5, 6), 16) / 255, 1
+end
+
 -- Sets font string `text` in Inter (`style`: "regular", "semibold" or
 -- "italic"; `size`: a FONT_SIZE name or a number), colored `color` (a
 -- COLORS name). A client that can't load the font keeps the game's.

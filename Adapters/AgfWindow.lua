@@ -28,6 +28,8 @@ local AgfWindow = {
     POPUP_WIDTH = 260,
     MODULE_ROW_HEIGHT = 32,
     SETTINGS_ROW_HEIGHT = 44,
+    -- A color setting's swatches.
+    SWATCH_SIZE = 20,
     -- The Settings page, which isn't a module.
     SETTINGS = "settings",
 }
@@ -58,6 +60,7 @@ function AgfWindow.Create(client, options)
         options = options,
         modules = options.modules or {},
         switches = {},
+        colorRows = {},
         pages = {},
         moduleButtons = {},
     }, Window)
@@ -204,9 +207,15 @@ function Window:buildSettingsPage(frame)
         content:SetPoint("TOPLEFT", row, "BOTTOMLEFT", 0, -Theme.SPACING.l)
         content:SetPoint("BOTTOMRIGHT", page.body, "BOTTOMRIGHT", 0, 0)
         local rows = tabs[index].rows or {}
+        local top = 0
         local position
         for position = 1, #rows do
-            self:buildSwitchRow(content, rows[position], position)
+            local entry = self.options.settings and self.options.settings:Entry(rows[position].id) or nil
+            if entry ~= nil and entry.kind == "color" then
+                top = top + self:buildColorRow(content, rows[position], entry, top) + Theme.SPACING.s
+            else
+                top = top + self:buildSwitchRow(content, rows[position], top) + Theme.SPACING.s
+            end
         end
         contents[tabs[index].id] = content
     end
@@ -217,23 +226,69 @@ function Window:buildSettingsPage(frame)
     end
 end
 
--- One setting on the Settings page: its label and info on the left, its
--- switch on the right, on a card.
-function Window:buildSwitchRow(content, setting, position)
+-- A setting's card on the Settings page, `height` tall at `top`, with its
+-- label and info at the top left.
+function Window:settingCard(content, setting, top, height)
     local ui = self.ui
     local card = ui:Panel(content, { fill = "surface" })
-    card:SetHeight(AgfWindow.SETTINGS_ROW_HEIGHT + 12)
-    card:SetPoint("TOPLEFT", content, "TOPLEFT", 0,
-        -(position - 1) * (AgfWindow.SETTINGS_ROW_HEIGHT + 12 + Theme.SPACING.s))
+    card:SetHeight(height)
+    card:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -top)
     card:SetPoint("RIGHT", content, "RIGHT", 0, 0)
-    local label = ui:Text(card, setting.label, "semibold", "body", "text")
-    label:SetPoint("TOPLEFT", card, "TOPLEFT", Theme.SPACING.l, -Theme.SPACING.m)
+    card.label = ui:Text(card, setting.label, "semibold", "body", "text")
+    card.label:SetPoint("TOPLEFT", card, "TOPLEFT", Theme.SPACING.l, -Theme.SPACING.m)
     if setting.info ~= nil then
-        local info = ui:Text(card, setting.info, "regular", "small", "muted")
-        info:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+        card.info = ui:Text(card, setting.info, "regular", "small", "muted")
+        card.info:SetPoint("TOPLEFT", card.label, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
     end
+    return card
+end
+
+-- One on/off setting on the Settings page: its label and info on the
+-- left, its switch on the right, on a card at `top`. Returns its height.
+function Window:buildSwitchRow(content, setting, top)
+    local height = AgfWindow.SETTINGS_ROW_HEIGHT + 12
+    local card = self:settingCard(content, setting, top, height)
     local switch = self:newSwitch(card, setting)
     switch:SetPoint("RIGHT", card, "RIGHT", -Theme.SPACING.l, 0)
+    return height
+end
+
+-- One color setting (SettingsModel `entry`) on the Settings page: its label
+-- with a sample in the chosen color, then a row of swatches, the chosen one
+-- outlined, on a card at `top`. Returns its height.
+function Window:buildColorRow(content, setting, entry, top)
+    local ui, window = self.ui, self
+    local height = AgfWindow.SETTINGS_ROW_HEIGHT + 12 + AgfWindow.SWATCH_SIZE + Theme.SPACING.s
+    local card = self:settingCard(content, setting, top, height)
+    card.sample = ui:Text(card, entry.sample or "", "semibold", "body", "text")
+    card.sample:SetPoint("LEFT", card.label, "RIGHT", Theme.SPACING.s, 0)
+    card.id = setting.id
+    card.swatches = {}
+    local index
+    for index = 1, #(entry.swatches or {}) do
+        local choice = entry.swatches[index]
+        local swatch = ui:frame("Button", card)
+        swatch:SetSize(AgfWindow.SWATCH_SIZE, AgfWindow.SWATCH_SIZE)
+        swatch:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT",
+            Theme.SPACING.l + (index - 1) * (AgfWindow.SWATCH_SIZE + Theme.SPACING.s), Theme.SPACING.m)
+        ui:Round(swatch, Theme.RADIUS.small, "surface", "border")
+        swatch.fillShape:SetColor(Theme.Hex(choice.color))
+        swatch.color = choice.color
+        swatch.label = choice.label
+        swatch:SetScript("OnClick", function(self)
+            local changed, reason = window.options.settings:Set(setting.id, self.color)
+            if not changed then
+                window.client:Print(addon.Identity.chatPrefix .. " " .. setting.label .. " can't be changed: " ..
+                    tostring(reason) .. ".")
+            end
+            window:refreshSwitch(setting.id)
+        end)
+        card.swatches[index] = swatch
+    end
+    self.colorRows[setting.id] = self.colorRows[setting.id] or {}
+    table.insert(self.colorRows[setting.id], card)
+    self:refreshSwitch(setting.id)
+    return height
 end
 
 -- A switch for the SettingsModel toggle `setting`. Every switch for the
@@ -256,11 +311,26 @@ function Window:newSwitch(parent, setting)
     return switch
 end
 
+-- Redraws what shows setting `id`: its switches, or its color rows (the
+-- sample in the saved color, that swatch outlined).
 function Window:refreshSwitch(id)
     local switches = self.switches[id] or {}
     local index
     for index = 1, #switches do
         switches[index]:SetOn(self.options.settings:Get(id) == true)
+    end
+    local cards = self.colorRows[id] or {}
+    for index = 1, #cards do
+        local card = cards[index]
+        local color = self.options.settings:Get(id)
+        local text = self.options.settings:Entry(id) and self.options.settings:Entry(id).sample or ""
+        card.sample:SetText(type(color) == "string" and ("|cff" .. color .. text .. "|r") or text)
+        local position
+        for position = 1, #card.swatches do
+            local swatch = card.swatches[position]
+            swatch.selected = swatch.color == color
+            swatch:SetBorder(swatch.selected and "text" or "border")
+        end
     end
 end
 
@@ -456,7 +526,7 @@ function Window:Open(id)
                 self.frame:Hide()
             end
             self.frame = nil
-            self.pages, self.moduleButtons, self.switches = {}, {}, {}
+            self.pages, self.moduleButtons, self.switches, self.colorRows = {}, {}, {}, {}
             return false, failure
         end
     end

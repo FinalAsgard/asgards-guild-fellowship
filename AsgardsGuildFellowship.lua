@@ -1326,6 +1326,10 @@ if clientProfile.supported then
                 rows = {
                     { id = "chatTags", label = "Chat tags",
                         info = "Tag guild chat speakers with their alias or main." },
+                    { id = "chatTagColor:alias", label = "Alias tag color",
+                        info = "The color of a speaker's alias tag." },
+                    { id = "chatTagColor:main", label = "Main's name tag color",
+                        info = "The color of a speaker's main's name tag." },
                 },
             },
         },
