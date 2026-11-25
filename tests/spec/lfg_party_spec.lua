@@ -268,11 +268,37 @@ end
 local function roleRow(page, name)
     local index
     for index = 1, #page.roleRows do
-        if page.roleRows[index].shown and page.roleRows[index].name.text == name then
+        if page.roleRows[index].shown and page.roleRows[index].memberName == name then
             return page.roleRows[index]
         end
     end
     return nil
+end
+
+-- The roles `name`'s name menu offers (in Roles in your party), as
+-- "Tank,Healer · current,…".
+local function roleChoices(page, name)
+    click(roleRow(page, name))
+    local labels = {}
+    local index
+    for index = 1, #page.namesMenu.items do
+        labels[index] = page.namesMenu.items[index].label
+    end
+    page.namesMenu:Close()
+    return table.concat(labels, ",")
+end
+
+-- Picks `role` for `name` from their name menu in Roles in your party.
+local function chooseRole(page, name, role)
+    click(roleRow(page, name))
+    local index
+    for index = 1, #page.namesMenu.items do
+        if page.namesMenu.items[index].role == role then
+            click(page.namesMenu.rows[index])
+            return
+        end
+    end
+    error("no " .. role .. " for " .. name)
 end
 
 test.test("Forever forming a party opens the drawer to ask; listing it goes through the board with roles", function()
@@ -291,14 +317,18 @@ test.test("Forever forming a party opens the drawer to ask; listing it goes thro
     local page = addon.lfgPage
     test.assertTrue(addon.agfWindow:IsOpen())
     test.assertEqual("edit", page:Mode())
-    -- Roles in your party: the warrior can't heal.
+    -- Roles in your party: each member's role icon by their name, which
+    -- opens their name menu with the roles they can play; the warrior
+    -- can't heal.
     local toolRow = roleRow(page, "Tool")
     local hammerRow = roleRow(page, "Hammer")
     test.assertTrue(toolRow ~= nil and hammerRow ~= nil)
-    test.assertFalse(toolRow.buttons[2].enabled)
-    test.assertTrue(hammerRow.buttons[2].enabled)
-    click(hammerRow.buttons[2])
-    test.assertTrue(roleRow(page, "Hammer").buttons[2].selected)
+    test.assertTrue(toolRow.roleIcon.shown)
+    test.assertEqual(nil, string.find(roleChoices(page, "Tool"), "Healer", 1, true))
+    test.assertContains(roleChoices(page, "Hammer"), "Healer")
+    chooseRole(page, "Hammer", "healer")
+    test.assertEqual("healer", roleRow(page, "Hammer").role)
+    test.assertContains(roleChoices(page, "Hammer"), "Healer \194\183 current")
 
     page.draft.dungeon = addon.DungeonCatalog.For("forever", nil):Get("strat")
     test.assertTrue(page:Save())
@@ -1019,14 +1049,14 @@ test.test("Forever roles chosen in the editor are dropped by Cancel and applied 
     partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
     click(addon.lfgButton.listButton)
     local page = addon.lfgPage
-    click(roleRow(page, "Hammer").buttons[2])
-    test.assertTrue(roleRow(page, "Hammer").buttons[2].selected)
+    chooseRole(page, "Hammer", "healer")
+    test.assertEqual("healer", roleRow(page, "Hammer").role)
     click(page.cancelButton)
     test.assertEqual(nil, next(addon.lfgListing:ChosenRoles()))
 
     page:StartEditing()
-    test.assertFalse(roleRow(page, "Hammer").buttons[2].selected)
-    click(roleRow(page, "Hammer").buttons[3])
+    test.assertTrue(roleRow(page, "Hammer").role ~= "healer")
+    chooseRole(page, "Hammer", "dps")
     page.draft.dungeon = addon.DungeonCatalog.For("forever", nil):Get("strat")
     test.assertTrue(page:Save())
     fixtures.deliver(channel)
@@ -1509,7 +1539,7 @@ test.test("Forever a role the leader edits is the one whoever leaves leaves open
     test.assertTrue(toolAddon.agfWindow:Open("lfg"))
     local page = toolAddon.lfgPage
     page:StartEditing()
-    click(roleRow(page, "Hammer").buttons[2])
+    chooseRole(page, "Hammer", "healer")
     page.draft.dungeon = toolAddon.DungeonCatalog.For("forever", nil):Get("strat")
     test.assertTrue(page:Save())
 

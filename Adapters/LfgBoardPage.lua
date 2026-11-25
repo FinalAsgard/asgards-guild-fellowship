@@ -10,8 +10,9 @@ local _, addon = ...
 -- lists a party. Below it are the tabs:
 --   Relevant Parties  large gold-bordered cards for groups the current
 --                     character could join, two per row, then small cards
---                     under "Your alts could join", with a Nearby card on
---                     the right listing guildmates in the player's zone
+--                     under "Your alts could join"
+--   Nearby            a card listing the guildmates in the player's zone,
+--                     their levels in a column left of their names
 --   Other Parties     small greyed cards for the rest
 --   History           the player's own recent parties (LfgHistoryView),
 --                     newest first, 20 at a time with Show more
@@ -37,11 +38,13 @@ local LfgBoardPage = {
     HISTORY_MEMBERS = 8,
     HISTORY_MEMBER_HEIGHT = 20,
     MEMBER_HEIGHT = 14,
-    -- The Nearby card on the right of Relevant Parties: its width, and the
-    -- names it lists (more are counted).
-    NEARBY_WIDTH = 160,
-    NEARBY_ROWS = 20,
+    -- The Nearby tab's card: its width, and the names it lists (more are
+    -- counted).
+    NEARBY_WIDTH = 320,
+    NEARBY_ROWS = 40,
     NEARBY_ROW_HEIGHT = 18,
+    -- The levels' column left of the names.
+    LEVEL_WIDTH = 22,
     -- Other Parties' cards are faded to this.
     GREYED_ALPHA = 0.5,
     -- The tab list's width until the window lays it out.
@@ -53,8 +56,7 @@ local LfgBoardPage = {
     DUNGEON_ROW_HEIGHT = 20,
     -- Roles in your party: one row per member.
     ROLE_ROWS = 5,
-    ROLE_ROW_HEIGHT = 24,
-    ROLE_BUTTON_WIDTH = 56,
+    ROLE_ROW_HEIGHT = 20,
     FIELD_WIDTH = 320,
     KINDS = {
         { id = "dungeon", label = "Dungeon" },
@@ -64,6 +66,7 @@ local LfgBoardPage = {
     },
     EMPTY = {
         relevant = "No relevant groups for you right now.",
+        nearby = "No guildmates nearby right now.",
         other = "No other groups right now.",
         history = "No parties in your history yet.",
     },
@@ -82,7 +85,7 @@ Page.__index = Page
 --   catalog       function() -> the DungeonCatalog to search
 --   groups        function() -> the board's listings sorted for the player
 --                 (LfgBoard:Groups: relevant, alts, other)
---   nearby        function() -> { zone, people = { { name, whisper,
+--   nearby        function() -> { zone, people = { { name, whisper, level?,
 --                 classToken? } } } of guildmates in the player's zone, or
 --                 nil
 --   classColor    function(classToken) -> "ffrrggbb" or nil
@@ -169,6 +172,7 @@ function Page:build()
     local owner = self
     self.tabs = ui:Tabs(content, {
         { id = "relevant", label = "Relevant Parties" },
+        { id = "nearby", label = "Nearby" },
         { id = "other", label = "Other Parties" },
         { id = "history", label = "History" },
     }, function(id)
@@ -332,41 +336,22 @@ function Page:buildEditor(card)
     self.errorText = ui:Text(editor, "", "regular", "small", "orange")
     self.errorText:SetPoint("TOPLEFT", self.note, "BOTTOMLEFT", 0, -Theme.SPACING.s)
 
-    -- Roles in your party (dungeons): Tank, Healer or DPS for each member,
-    -- the roles their class can't play greyed out. A role the game assigned
-    -- can't be changed here.
+    -- Roles in your party (dungeons): each member's role icon left of their
+    -- name; clicking the name opens the name menu with the roles their
+    -- class can play. A role the game assigned can't be changed here.
     editor.rolesLabel = ui:SectionLabel(editor, "Roles in your party")
     editor.rolesLabel:SetPoint("TOPLEFT", self.note, "BOTTOMLEFT", 0, -28)
+    editor.rolesHint = ui:Text(editor, "Click a name to change their role.", "regular", "small", "muted")
+    editor.rolesHint:SetPoint("LEFT", editor.rolesLabel, "RIGHT", Theme.SPACING.s, 0)
     self.roleRows = {}
     local row
     for row = 1, LfgBoardPage.ROLE_ROWS do
-        local line = ui:frame("Frame", editor)
-        line:SetSize(LfgBoardPage.FIELD_WIDTH, LfgBoardPage.ROLE_ROW_HEIGHT)
+        local line = self:nameButton(editor, LfgBoardPage.ROLE_ROW_HEIGHT, function(self)
+            owner:pickRole(self)
+        end)
+        line:SetWidth(LfgBoardPage.FIELD_WIDTH)
         line:SetPoint("TOPLEFT", editor.rolesLabel, "BOTTOMLEFT", 0,
             -Theme.SPACING.xs - (row - 1) * LfgBoardPage.ROLE_ROW_HEIGHT)
-        line.name = ui:Text(line, "", "regular", "body", "text")
-        line.name:SetPoint("LEFT", line, "LEFT", 0, 0)
-        line.buttons = {}
-        local roles = { "tank", "healer", "dps" }
-        local position
-        for position = 1, #roles do
-            local choice = ui:frame("Button", line)
-            choice:SetSize(LfgBoardPage.ROLE_BUTTON_WIDTH, LfgBoardPage.ROLE_ROW_HEIGHT - 4)
-            choice:SetPoint("RIGHT", line, "RIGHT",
-                -(#roles - position) * (LfgBoardPage.ROLE_BUTTON_WIDTH + Theme.SPACING.xs), 0)
-            ui:Round(choice, Theme.RADIUS.small, "raised", "border")
-            choice.role = roles[position]
-            choice.label = ui:Text(choice, Widgets.ROLE_LABELS[roles[position]], "semibold", "small", "text")
-            choice.label:SetPoint("CENTER", choice, "CENTER", 0, 0)
-            -- Kept in the draft until Save; Cancel drops it.
-            choice:SetScript("OnClick", function(self)
-                if self.enabled and line.key then
-                    owner.draft.roles[line.key] = self.role
-                    owner:refreshRoles()
-                end
-            end)
-            line.buttons[position] = choice
-        end
         self.roleRows[row] = line
     end
 
@@ -534,6 +519,7 @@ end
 function Page:refreshRoles()
     local members = self.draft.kind == "dungeon" and (self.options.partyRoles and self.options.partyRoles()) or {}
     setShown(self.editor.rolesLabel, #members > 0)
+    setShown(self.editor.rolesHint, #members > 0)
     local index
     for index = 1, #self.roleRows do
         local line, member = self.roleRows[index], members[index]
@@ -542,23 +528,52 @@ function Page:refreshRoles()
             line:Hide()
         else
             line.key = member.key
-            line.name:SetText(member.name)
-            local position
-            for position = 1, #line.buttons do
-                local choice = line.buttons[position]
-                local playable = member.canPlay[choice.role] == true
-                choice.enabled = playable and not member.assigned
-                local role = member.role
-                if not member.assigned and self.draft.roles[member.key] ~= nil then
-                    role = self.draft.roles[member.key]
-                end
-                choice.selected = role == choice.role
-                choice:SetFill(choice.selected and "green" or "raised")
-                choice.label:SetTextColor(Theme.Color(playable and "text" or "disabled"))
+            line.memberName = member.name
+            line.canPlay = member.canPlay or {}
+            line.assigned = member.assigned == true
+            -- The role chosen here (kept in the draft until Save; Cancel
+            -- drops it), else the one it has.
+            local role = member.role
+            if not member.assigned and self.draft.roles[member.key] ~= nil then
+                role = self.draft.roles[member.key]
             end
-            line:Show()
+            self:showName(line, { text = colored(member.name, self.options.classColor
+                and self.options.classColor(member.classToken)), role = role })
         end
     end
+end
+
+-- The name menu for a Roles in your party row: the roles the member's
+-- class can play, their current one marked; a role the game assigned
+-- can't be changed.
+function Page:pickRole(line)
+    if not line.key then
+        return
+    end
+    local owner, items = self, {}
+    if line.assigned then
+        items[1] = { label = "Role set by the game" }
+    else
+        local roles = { "tank", "healer", "dps" }
+        local index
+        for index = 1, #roles do
+            local role = roles[index]
+            if line.canPlay[role] == true then
+                table.insert(items, {
+                    role = role,
+                    label = Widgets.ROLE_LABELS[role] .. (line.role == role and DOT .. "current" or ""),
+                    onClick = function()
+                        owner.nameMenuFor = nil
+                        if owner.draft ~= nil and line.key then
+                            owner.draft.roles[line.key] = role
+                            owner:refreshRoles()
+                        end
+                    end,
+                })
+            end
+        end
+    end
+    self:openNameMenu(line, items)
 end
 
 function Page:refreshEditor()
@@ -646,9 +661,6 @@ function Page:buildList()
         end
     end)
     self.area, self.list = area, list
-    -- Where the cards go: the list's width, less the Nearby card's when it
-    -- shows.
-    self.cards = ui:frame("Frame", list)
     self.emptyText = ui:Text(list, "", "regular", "body", "muted")
     self.altsLabel = ui:SectionLabel(list, "Your alts could join")
     self:buildNearby()
@@ -681,8 +693,8 @@ function Page:buildNearby()
     self.nearbyCard = card
 end
 
--- Shows the Nearby card for `nearby` ({ zone, people }) at the list's top
--- right. Returns its height.
+-- Shows the Nearby card for `nearby` ({ zone, people }) at the list's top.
+-- Returns its height.
 function Page:showNearby(nearby)
     local card, pad = self.nearbyCard, Theme.SPACING.m
     local options = self.options
@@ -701,7 +713,7 @@ function Page:showNearby(nearby)
             end
             local person = nearby.people[index]
             self:showName(row, { text = colored(person.name, options.classColor(person.classToken)),
-                whisper = person.whisper })
+                whisper = person.whisper, level = person.level or "" })
         else
             row:Hide()
         end
@@ -713,45 +725,41 @@ function Page:showNearby(nearby)
     local height = top + shown * LfgBoardPage.NEARBY_ROW_HEIGHT + (more > 0 and 16 or 0) + pad
     card:SetHeight(height)
     card:ClearAllPoints()
-    card:SetPoint("TOPRIGHT", self.list, "TOPRIGHT", 0, 0)
+    card:SetPoint("TOPLEFT", self.list, "TOPLEFT", 0, 0)
     card:Show()
     return height
 end
 
--- Lets the cards use the list's whole width, or leaves `inset` on the
--- right (for the Nearby card).
-function Page:inset(inset)
-    self.cards:ClearAllPoints()
-    self.cards:SetPoint("TOPLEFT", self.list, "TOPLEFT", 0, 0)
-    self.cards:SetPoint("BOTTOMRIGHT", self.list, "BOTTOMRIGHT", -(inset or 0), 0)
-end
-
--- Places `frame` at height `top` of the cards' area: across its whole
--- width, or in the left or right `column` of two.
+-- Places `frame` at height `top` of the list: across the whole width, or in
+-- the left or right `column` of two.
 function Page:place(frame, top, column)
-    local area = self.cards
+    local list = self.list
     frame:ClearAllPoints()
     if column == "right" then
-        frame:SetPoint("TOPLEFT", area, "TOP", Theme.SPACING.xs, -top)
-        frame:SetPoint("RIGHT", area, "RIGHT", 0, 0)
+        frame:SetPoint("TOPLEFT", list, "TOP", Theme.SPACING.xs, -top)
+        frame:SetPoint("RIGHT", list, "RIGHT", 0, 0)
     elseif column == "left" then
-        frame:SetPoint("TOPLEFT", area, "TOPLEFT", 0, -top)
-        frame:SetPoint("RIGHT", area, "CENTER", -Theme.SPACING.xs, 0)
+        frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top)
+        frame:SetPoint("RIGHT", list, "CENTER", -Theme.SPACING.xs, 0)
     else
-        frame:SetPoint("TOPLEFT", area, "TOPLEFT", 0, -top)
+        frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top)
     end
 end
 
--- A name that opens the name menu when clicked, `height` tall, with room
--- for a role icon on its left and a crown (the leader) and star (a top
--- group friend) after it. Shown with showName; placed by its owner.
-function Page:nameButton(parent, height)
+-- A name that opens the name menu when clicked (or calls `onClick(line)`
+-- instead), `height` tall, with room for a level column and a role icon on
+-- its left, and a crown (the leader) and star (a top group friend) after
+-- it. Shown with showName; placed by its owner.
+function Page:nameButton(parent, height, onClick)
     local ui, owner = self.ui, self
     local line = ui:frame("Button", parent)
     line:SetHeight(height)
+    line.level = ui:Text(line, "", "regular", "small", "muted")
+    line.level:SetWidth(LfgBoardPage.LEVEL_WIDTH)
+    line.level:SetJustifyH("RIGHT")
+    line.level:SetPoint("LEFT", line, "LEFT", 0, 0)
     line.roleIcon = line:CreateTexture(nil, "ARTWORK")
     line.roleIcon:SetSize(12, 12)
-    line.roleIcon:SetPoint("LEFT", line, "LEFT", 0, 0)
     line.name = ui:Text(line, "", "regular", "body", "text")
     line.crown = line:CreateTexture(nil, "ARTWORK")
     line.crown:SetTexture(Theme.TEXTURES.crown)
@@ -763,17 +771,32 @@ function Page:nameButton(parent, height)
     line.star:SetVertexColor(Theme.Color("gold"))
     line.star:SetSize(10, 10)
     line:SetScript("OnClick", function(self)
-        owner:nameMenu(self)
+        if onClick ~= nil then
+            onClick(self)
+        else
+            owner:nameMenu(self)
+        end
     end)
     return line
 end
 
 -- Shows name button `line` for `fields`: text (the name, maybe in class
--- color), whisper (whom Whisper whispers), role (its icon, in the role's
+-- color), whisper (whom Whisper whispers), level (shown in the levels'
+-- column when given, "" for an unknown one), role (its icon, in the role's
 -- color), leader (the crown) and top (the star).
 function Page:showName(line, fields)
     local role = fields.role
     line.role = role
+    local left = 0
+    if fields.level ~= nil then
+        line.level:SetText(tostring(fields.level))
+        line.level:Show()
+        left = LfgBoardPage.LEVEL_WIDTH + Theme.SPACING.s
+    else
+        line.level:Hide()
+    end
+    line.roleIcon:ClearAllPoints()
+    line.roleIcon:SetPoint("LEFT", line, "LEFT", left, 0)
     line.name:ClearAllPoints()
     if role ~= nil and Widgets.ROLE_ICONS[role] ~= nil then
         line.roleIcon:SetTexture(Theme.TEXTURES[Widgets.ROLE_ICONS[role]])
@@ -782,7 +805,7 @@ function Page:showName(line, fields)
         line.name:SetPoint("LEFT", line.roleIcon, "RIGHT", 4, 0)
     else
         line.roleIcon:Hide()
-        line.name:SetPoint("LEFT", line, "LEFT", 0, 0)
+        line.name:SetPoint("LEFT", line, "LEFT", left, 0)
     end
     line.name:SetText(fields.text)
     line.title = fields.text
@@ -795,9 +818,9 @@ function Page:showName(line, fields)
     line:Show()
 end
 
--- The menu a name opens, under it: the name over a line, then Whisper. A
--- second click on the same name closes it.
-function Page:nameMenu(anchor)
+-- Opens the name menu under `anchor` with its name as the title, over a
+-- line, then `items`. A second click on the same name closes it.
+function Page:openNameMenu(anchor, items)
     self.namesMenu = self.namesMenu or self.ui:ContextMenu(self.content)
     local menu = self.namesMenu
     if menu:IsOpen() and self.nameMenuFor ~= nil and self.nameMenuFor.anchor == anchor then
@@ -805,16 +828,21 @@ function Page:nameMenu(anchor)
         self.nameMenuFor = nil
         return
     end
+    self.nameMenuFor = { anchor = anchor, title = anchor.title, whisper = anchor.whisper }
+    menu:Open(anchor, items, anchor.title)
+end
+
+-- The menu a name opens: the name, then Whisper.
+function Page:nameMenu(anchor)
     local owner, whisper = self, anchor.whisper
-    self.nameMenuFor = { anchor = anchor, title = anchor.title, whisper = whisper }
-    menu:Open(anchor, {
+    self:openNameMenu(anchor, {
         { label = "Whisper", onClick = function()
             owner.nameMenuFor = nil
             if whisper then
                 owner.options.onWhisper(whisper)
             end
         end },
-    }, anchor.title)
+    })
 end
 
 -- Shows `tiles` (5 person tiles) with the first `size` filled.
@@ -1037,7 +1065,10 @@ end
 function Page:refreshTab()
     local groups = self.options.groups() or { relevant = {}, alts = {}, other = {} }
     self.groups = groups
+    local nearby = self.options.nearby()
+    local people = nearby ~= nil and nearby.people or {}
     self.tabs:SetLabel("relevant", "Relevant Parties" .. DOT .. #groups.relevant)
+    self.tabs:SetLabel("nearby", "Nearby" .. DOT .. #people)
     self.tabs:SetLabel("other", "Other Parties" .. DOT .. #groups.other)
     self.tabs:Select(self.tab)
     hideAll(self.largeCards)
@@ -1049,19 +1080,6 @@ function Page:refreshTab()
     self.emptyText:Hide()
     local used = { small = 0 }
     local top = 0
-    -- Relevant Parties has the Nearby card on its right, when anyone's
-    -- nearby; the cards take the rest.
-    local nearby = self.tab == "relevant" and self.options.nearby() or nil
-    if nearby ~= nil and #(nearby.people or {}) == 0 then
-        nearby = nil
-    end
-    local nearbyHeight = 0
-    if nearby ~= nil then
-        nearbyHeight = self:showNearby(nearby)
-        self:inset(LfgBoardPage.NEARBY_WIDTH + Theme.SPACING.s)
-    else
-        self:inset(0)
-    end
     local function empty(text)
         self.emptyText:SetText(text)
         self:place(self.emptyText, top)
@@ -1086,6 +1104,12 @@ function Page:refreshTab()
             self.altsLabel:Show()
             top = self:smallRows(groups.alts, top + 24, false, used)
         end
+    elseif self.tab == "nearby" then
+        if #people == 0 then
+            empty(LfgBoardPage.EMPTY.nearby)
+        else
+            top = self:showNearby(nearby)
+        end
     elseif self.tab == "other" then
         if #groups.other == 0 then
             empty(LfgBoardPage.EMPTY.other)
@@ -1099,7 +1123,7 @@ function Page:refreshTab()
     else
         top = self:historyList(top, empty)
     end
-    self.list:SetHeight(math.max(top, nearbyHeight, 1))
+    self.list:SetHeight(math.max(top, 1))
     -- The name menu goes once its name is hidden or shows someone else.
     local named = self.nameMenuFor
     if named ~= nil and self.namesMenu ~= nil and self.namesMenu:IsOpen() then

@@ -1692,7 +1692,7 @@ if clientProfile.supported then
                 local character = entries[index].characters[position]
                 local saved = partition:GetCharacter(character.key)
                 table.insert(people, { name = character.name, whisper = saved and saved.name or character.name,
-                    classToken = character.class })
+                    level = character.level, classToken = character.class })
             end
         end
         return { zone = zone.name, people = people }
@@ -2295,6 +2295,7 @@ if clientProfile.supported then
                     rows[index] = {
                         key = member.key,
                         name = member.name,
+                        classToken = member.classToken,
                         role = member.role,
                         assigned = member.assignedRole ~= nil,
                         canPlay = {

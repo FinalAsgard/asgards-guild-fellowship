@@ -655,9 +655,10 @@ function Widgets.ShowRoles(tiles, members, openRoles)
     end
 end
 
--- A small menu of text items. Open(anchor, items) shows it under `anchor`
--- with one row per item ({ label, onClick }); picking one closes it and
--- runs its onClick. Close() hides it.
+-- A small menu of text items. Open(anchor, items, title?) shows it under
+-- `anchor` with one row per item ({ label, onClick }); picking one closes
+-- it and runs its onClick, and a click anywhere outside it closes it.
+-- Close() hides it.
 function UI:ContextMenu(parent)
     local menu = self:Panel(parent, { radius = Theme.RADIUS.button, fill = "raised" })
     menu:SetFrameStrata("DIALOG")
@@ -674,6 +675,18 @@ function UI:ContextMenu(parent)
     menu.divider:SetHeight(1)
     menu.divider:SetPoint("TOPLEFT", menu, "TOPLEFT", Theme.SPACING.s, -4 - 22 - 2)
     menu.divider:SetPoint("RIGHT", menu, "RIGHT", -Theme.SPACING.s, 0)
+    -- A click anywhere outside the open menu closes it: a catcher covering
+    -- the screen sits just under it.
+    local host = self.environment.UIParent or parent
+    local catcher = self:frame("Button", host)
+    catcher:SetAllPoints(host)
+    catcher:SetFrameStrata("DIALOG")
+    catcher:RegisterForClicks("AnyDown")
+    catcher:SetScript("OnClick", function()
+        menu:Close()
+    end)
+    catcher:Hide()
+    menu.catcher = catcher
     local ui = self
     -- Opens under `anchor` with `items`; `title` (text, may carry color
     -- codes) heads them when given.
@@ -732,10 +745,14 @@ function UI:ContextMenu(parent)
         menu:ClearAllPoints()
         menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
         menu.open = true
+        local level = type(menu.GetFrameLevel) == "function" and menu:GetFrameLevel() or nil
+        catcher:SetFrameLevel(math.max((tonumber(level) or 2) - 1, 1))
+        catcher:Show()
         menu:Show()
     end
     function menu.Close()
         menu.open = false
+        catcher:Hide()
         menu:Hide()
     end
     function menu.IsOpen()

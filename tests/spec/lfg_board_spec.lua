@@ -413,7 +413,7 @@ local function registerProfileTests(profile)
         -- Hammer, a paladin at the dungeon's level, can heal: relevant.
         local board = openBoard(hammer)
         test.assertEqual("Relevant Parties \194\183 1", board.tabs.tabs[1].label.text)
-        test.assertEqual("Other Parties \194\183 0", board.tabs.tabs[2].label.text)
+        test.assertEqual("Other Parties \194\183 0", board.tabs.tabs[3].label.text)
         local card = board.largeCards[1]
         test.assertTrue(card.shown)
         test.assertEqual(DUNGEON[profile].name, card.purpose.text)
@@ -451,9 +451,9 @@ local function registerProfileTests(profile)
 
         local board = openBoard(zap)
         test.assertEqual("Relevant Parties \194\183 0", board.tabs.tabs[1].label.text)
-        test.assertEqual("Other Parties \194\183 1", board.tabs.tabs[2].label.text)
+        test.assertEqual("Other Parties \194\183 1", board.tabs.tabs[3].label.text)
         test.assertEqual("No relevant groups for you right now.", board.emptyText.text)
-        click(board.tabs.tabs[2])
+        click(board.tabs.tabs[3])
         test.assertFalse(board.emptyText.shown)
         local card = board.smallCards[1]
         test.assertTrue(card.shown)
@@ -543,7 +543,7 @@ test.test("lfg page: the editor shows each kind's fields, and Cancel goes back",
     test.assertEqual("solo", page:Mode())
     test.assertTrue(page.solo.shown)
     test.assertEqual("No relevant groups for you right now.", page.emptyText.text)
-    click(page.tabs.tabs[3])
+    click(page.tabs.tabs[4])
     test.assertEqual("No parties in your history yet.", page.emptyText.text)
 
     click(page.startButton)
@@ -827,17 +827,10 @@ test.test("lfg page: questing and raid cards give their size, with no role icons
     test.assertContains(big.details.text, "12 players")
 end)
 
-test.test("lfg page: alts' groups as small cards naming the alt, beside a Nearby card", function()
+test.test("lfg page: alts' groups as small cards naming the alt", function()
     local listing = listingOf("dungeon", { purpose = "Wailing Caverns", minLevel = 17, maxLevel = 24 })
-    local page, whispered = pageWith({ relevant = {},
-        alts = { { listing = listing, alt = { name = "Bolt", level = 20 } } }, other = {} }, {
-        nearby = function()
-            return { zone = "Ironforge", people = {
-                { name = "Hammer", whisper = "Hammer-Camelot", classToken = "WARRIOR" },
-                { name = "Zap", whisper = "Zap-Camelot", classToken = "MAGE" },
-            } }
-        end,
-    })
+    local page = pageWith({ relevant = {},
+        alts = { { listing = listing, alt = { name = "Bolt", level = 20 } } }, other = {} })
 
     test.assertFalse(page.emptyText.shown)
     test.assertTrue(page.altsLabel.shown)
@@ -846,31 +839,96 @@ test.test("lfg page: alts' groups as small cards naming the alt, beside a Nearby
     test.assertEqual("Wailing Caverns", card.purpose.text)
     test.assertContains(card.details.text, "Tool")
     test.assertContains(card.details.text, "Bolt (20)")
-    -- The Nearby card lists each name on its own line, in class color, and
-    -- each opens the name menu.
-    local nearby = page.nearbyCard
-    test.assertTrue(nearby.shown)
-    test.assertEqual("NEARBY IN IRONFORGE", nearby.title.text)
-    test.assertEqual("|cffc79c6eHammer|r", nearby.rows[1].name.text)
-    test.assertEqual("Zap", nearby.rows[2].name.text)
-    whisperName(page, nearby.rows[2])
-    test.assertEqual("Zap-Camelot", whispered[1])
-    -- Other Parties has no Nearby card.
-    page:ShowTab("other")
-    test.assertFalse(nearby.shown)
+    test.assertFalse(page.nearbyCard.shown)
 end)
 
-test.test("lfg page: the name menu closes on a second click, and when its name goes", function()
+local NEARBY = {
+    nearby = function()
+        return { zone = "Ironforge", people = {
+            { name = "Hammer", whisper = "Hammer-Camelot", level = 24, classToken = "WARRIOR" },
+            { name = "Zap", whisper = "Zap-Camelot", level = 60, classToken = "MAGE" },
+            { name = "Bolt", whisper = "Bolt-Camelot" },
+        } }
+    end,
+}
+
+test.test("lfg page: the Nearby tab lists guildmates with their levels in a column, each name a menu", function()
+    local page, whispered = pageWith({ relevant = {}, alts = {}, other = {} }, NEARBY)
+
+    -- Its own tab, between Relevant Parties and Other Parties, counted.
+    test.assertEqual("nearby", page.tabs.tabs[2].id)
+    test.assertEqual("Nearby \194\183 3", page.tabs.tabs[2].label.text)
+    test.assertEqual("other", page.tabs.tabs[3].id)
+    test.assertFalse(page.nearbyCard.shown)
+    click(page.tabs.tabs[2])
+    local nearby = page.nearbyCard
+    test.assertTrue(nearby.shown)
+    -- Wider now it has the tab to itself.
+    test.assertEqual(320, nearby.width)
+    test.assertEqual("NEARBY IN IRONFORGE", nearby.title.text)
+    -- One per line, the level left of the name, the name in class color.
+    test.assertEqual("24", nearby.rows[1].level.text)
+    test.assertTrue(nearby.rows[1].level.shown)
+    test.assertEqual("|cffc79c6eHammer|r", nearby.rows[1].name.text)
+    test.assertEqual("60", nearby.rows[2].level.text)
+    test.assertEqual("Zap", nearby.rows[2].name.text)
+    -- An unknown level leaves the column empty, the name still in line.
+    test.assertEqual("", nearby.rows[3].level.text)
+    whisperName(page, nearby.rows[2])
+    test.assertEqual("Zap-Camelot", whispered[1])
+
+    -- Nobody nearby: one line.
+    local empty = pageWith({ relevant = {}, alts = {}, other = {} })
+    empty:ShowTab("nearby")
+    test.assertEqual("Nearby \194\183 0", empty.tabs.tabs[2].label.text)
+    test.assertTrue(empty.emptyText.shown)
+    test.assertEqual("No guildmates nearby right now.", empty.emptyText.text)
+end)
+
+test.test("lfg page: Roles in your party puts each role's icon by the name, picked from its name menu", function()
     local page = pageWith({ relevant = {}, alts = {}, other = {} }, {
-        nearby = function()
-            return { zone = "Ironforge", people = { { name = "Zap", whisper = "Zap-Camelot" } } }
+        partyRoles = function()
+            return {
+                { key = "tool", name = "Tool", classToken = "WARRIOR", role = "tank", assigned = true,
+                    canPlay = { tank = true, dps = true } },
+                { key = "zap", name = "Zap", classToken = "MAGE", role = "dps",
+                    canPlay = { dps = true } },
+            }
         end,
     })
+    page:StartEditing()
+    local tool, zap = page.roleRows[1], page.roleRows[2]
+    test.assertEqual("|cffc79c6eTool|r", tool.name.text)
+    test.assertEqual("tank", tool.role)
+    test.assertTrue(tool.roleIcon.shown)
+    test.assertTrue(page.editor.rolesHint.shown)
+    -- A role the game assigned can't be changed.
+    click(tool)
+    test.assertEqual(1, #page.namesMenu.items)
+    test.assertEqual("Role set by the game", page.namesMenu.items[1].label)
+    click(page.namesMenu.rows[1])
+    test.assertEqual("tank", page.roleRows[1].role)
+    -- A mage plays DPS only.
+    click(zap)
+    test.assertEqual("|cffc79c6eTool|r", tool.name.text)
+    test.assertEqual(1, #page.namesMenu.items)
+    test.assertEqual("DPS \194\183 current", page.namesMenu.items[1].label)
+end)
+
+test.test("lfg page: the name menu closes on a second click, a click outside it, and when its name goes", function()
+    local page = pageWith({ relevant = {}, alts = {}, other = {} }, NEARBY)
+    page:ShowTab("nearby")
     local row = page.nearbyCard.rows[1]
     click(row)
     test.assertTrue(page.namesMenu:IsOpen())
+    test.assertTrue(page.namesMenu.catcher.shown)
     click(row)
     test.assertFalse(page.namesMenu:IsOpen())
+    -- A click anywhere outside it.
+    click(row)
+    click(page.namesMenu.catcher)
+    test.assertFalse(page.namesMenu:IsOpen())
+    test.assertFalse(page.namesMenu.catcher.shown)
     click(row)
     page:ShowTab("history")
     test.assertFalse(page.namesMenu:IsOpen())
@@ -889,6 +947,7 @@ test.test("Forever a group only your alt fits shows under Your alts could join, 
     test.assertEqual("Relevant Parties \194\183 0", board.tabs.tabs[1].label.text)
     test.assertTrue(board.altsLabel.shown)
     test.assertContains(board.smallCards[1].details.text, "Bolt Smith (59)")
+    board:ShowTab("nearby")
     test.assertTrue(board.nearbyCard.shown)
     test.assertEqual("NEARBY IN IRONFORGE", board.nearbyCard.title.text)
     local names = {}
