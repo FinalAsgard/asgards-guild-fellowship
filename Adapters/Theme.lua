@@ -76,9 +76,9 @@ local Theme = {
         gear = MEDIA .. "Textures\\Gear",
         close = MEDIA .. "Textures\\Close",
         glow = MEDIA .. "Textures\\Glow",
-        -- The party's leader, and group friends (Frequent and Top 5).
+        -- The party's leader, and top group friends (Top 5).
         crown = MEDIA .. "Textures\\Crown",
-        heart = MEDIA .. "Textures\\Heart",
+        star = MEDIA .. "Textures\\Star",
         -- A role tile where any role will do.
         person = MEDIA .. "Textures\\Person",
         -- Role tiles too small for the role's name: Tank, Healer, DPS.

@@ -11,7 +11,7 @@ addon.LfgNearby = LfgNearby
 --   members    live roster facts by key ({ online, zone, level, name })
 --   display    optional function(name) -> the name as shown
 -- Returns the players with a character online in `zone` (a zone name),
--- sorted by label: { id, label, characters = { { name, level, class } } }
+-- sorted by label: { id, label, characters = { { key, name, level, class } } }
 -- with their characters online there, by name. The player of `selfKey` is
 -- left out.
 function LfgNearby.List(inputs, zone, selfKey)
@@ -39,7 +39,7 @@ function LfgNearby.List(inputs, zone, selfKey)
                 byPlayer[character.player] = entry
                 table.insert(entries, entry)
             end
-            table.insert(entry.characters, { name = nameOf(key), level = live.level or character.level,
+            table.insert(entry.characters, { key = key, name = nameOf(key), level = live.level or character.level,
                 class = character.class })
         end
     end

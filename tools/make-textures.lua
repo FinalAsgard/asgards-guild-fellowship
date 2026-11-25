@@ -167,11 +167,31 @@ write("Glow.tga", 64, 64, function(x, y)
     return 1, 1, 1, fade * fade
 end)
 
--- A white heart, for group friends: the classic heart curve, point down.
-write("Heart.tga", 32, 32, function(x, y)
-    local hx, hy = (x - 16) / 12, (16 - y) / 12 + 0.25
-    local shape = (hx * hx + hy * hy - 1) ^ 3 - hx * hx * hy * hy * hy
-    return 1, 1, 1, inside(shape <= 0)
+-- A white five-pointed star, point up, for top group friends.
+local STAR = {}
+do
+    local point
+    for point = 0, 9 do
+        local angle = -math.pi / 2 + point * math.pi / 5
+        local reach = point % 2 == 0 and 14 or 5.6
+        STAR[#STAR + 1] = { 16 + reach * math.cos(angle), 16.5 + reach * math.sin(angle) }
+    end
+end
+write("Star.tga", 32, 32, function(x, y)
+    -- Inside the outline by the even-odd rule.
+    local within = false
+    local index
+    local previous = STAR[#STAR]
+    for index = 1, #STAR do
+        local current = STAR[index]
+        if (current[2] > y) ~= (previous[2] > y)
+            and x < (previous[1] - current[1]) * (y - current[2]) / (previous[2] - current[2]) + current[1]
+        then
+            within = not within
+        end
+        previous = current
+    end
+    return 1, 1, 1, inside(within)
 end)
 
 -- A white crown, for the party's leader: a band with three points above it.

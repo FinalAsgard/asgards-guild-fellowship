@@ -1670,7 +1670,8 @@ if clientProfile.supported then
         end)
         return current, alts
     end
-    -- Guildmates online in the player's zone, for the Nearby line.
+    -- Guildmates online in the player's zone, for the Nearby card: each
+    -- character there, whispered by their full name.
     local function lfgNearby()
         local zone = client:GetZone()
         local guild, partition, normalizer = rosterController:QuietContext()
@@ -1684,12 +1685,17 @@ if clientProfile.supported then
                 return normalizer:Display(name)
             end,
         }, zone.name, rosterController:SelfKey())
-        local names = {}
-        local index
+        local people = {}
+        local index, position
         for index = 1, #entries do
-            names[index] = entries[index].label
+            for position = 1, #entries[index].characters do
+                local character = entries[index].characters[position]
+                local saved = partition:GetCharacter(character.key)
+                table.insert(people, { name = character.name, whisper = saved and saved.name or character.name,
+                    classToken = character.class })
+            end
         end
-        return { zone = zone.name, names = names }
+        return { zone = zone.name, people = people }
     end
     -- /agf probe lfg: where questing's zone levels come from, and what's on
     -- the board for this character.
@@ -1749,6 +1755,12 @@ if clientProfile.supported then
         if fields ~= nil then
             party.kind, party.label, party.note = fields.k, addon.LfgListing.Label(fields.k, fields.p), fields.no
             party.openRoles = fields.r
+            -- The roster as announced, for the drawer's role tiles.
+            party.members = {}
+            local index
+            for index = 1, #fields.mb do
+                party.members[index] = { role = fields.mb[index].r }
+            end
         end
         -- Fill the empty slot? What it would be posted as: the party's
         -- purpose (from the board when a guildmate lists it) and, for a

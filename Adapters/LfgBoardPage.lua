@@ -10,7 +10,8 @@ local _, addon = ...
 -- lists a party. Below it are the tabs:
 --   Relevant Parties  large gold-bordered cards for groups the current
 --                     character could join, two per row, then small cards
---                     under "Your alts could join", then a Nearby line
+--                     under "Your alts could join", with a Nearby card on
+--                     the right listing guildmates in the player's zone
 --   Other Parties     small greyed cards for the rest
 --   History           the player's own recent parties (LfgHistoryView),
 --                     newest first, 20 at a time with Show more
@@ -34,10 +35,13 @@ local LfgBoardPage = {
     CARD_MEMBERS = 5,
     -- The guildmates a History party lists; more are counted.
     HISTORY_MEMBERS = 8,
-    HISTORY_MEMBER_HEIGHT = 22,
+    HISTORY_MEMBER_HEIGHT = 20,
     MEMBER_HEIGHT = 14,
-    -- The role tiles' width on a large card.
-    TILE_BLOCK_WIDTH = 76,
+    -- The Nearby card on the right of Relevant Parties: its width, and the
+    -- names it lists (more are counted).
+    NEARBY_WIDTH = 160,
+    NEARBY_ROWS = 20,
+    NEARBY_ROW_HEIGHT = 18,
     -- Other Parties' cards are faded to this.
     GREYED_ALPHA = 0.5,
     -- The tab list's width until the window lays it out.
@@ -78,17 +82,20 @@ Page.__index = Page
 --   catalog       function() -> the DungeonCatalog to search
 --   groups        function() -> the board's listings sorted for the player
 --                 (LfgBoard:Groups: relevant, alts, other)
---   nearby        function() -> { zone, names } of guildmates in the
---                 player's zone, or nil
+--   nearby        function() -> { zone, people = { { name, whisper,
+--                 classToken? } } } of guildmates in the player's zone, or
+--                 nil
 --   classColor    function(classToken) -> "ffrrggbb" or nil
 --   friendTier    function(name) -> the guildmate's GroupFriends tier, or nil
+-- Every name shown (a card's members, Nearby, History) opens a menu: the
+-- name, then Whisper.
 --   history       function() -> the player's GroupHistory entries
 --   historyMember function(key) -> a guildmate's { name, whisper,
 --                 classToken? }, or nil
 --   keyTier       function(key) -> a guildmate's GroupFriends tier, or nil
 --   formatDate    function(at) -> the date it shows for a party
 --   dungeonIcon   function(name) -> the game's icon for the dungeon, or nil
---   onWhisper     function(name): whispers a leader
+--   onWhisper     function(name): whispers someone
 --   requestOf     function(id) -> the player's request to join leader
 --                 `id`'s listing (LfgBoard:Request), or nil
 --   askRoles      function(listing) -> the open roles the current
@@ -119,15 +126,32 @@ local function range(minLevel, maxLevel)
     return minLevel .. DASH .. maxLevel
 end
 
+-- `parts` joined with dots, leaving out the empty ones. Its holes (nil
+-- parts) make #parts unreliable, so it runs to the highest index.
 local function join(parts)
+    local last = 0
+    local key
+    for key in pairs(parts) do
+        if type(key) == "number" and key > last then
+            last = key
+        end
+    end
     local kept = {}
     local index
-    for index = 1, #parts do
+    for index = 1, last do
         if parts[index] ~= nil and parts[index] ~= "" then
             table.insert(kept, parts[index])
         end
     end
     return table.concat(kept, DOT)
+end
+
+-- `name` in its class color, where `color` ("ffrrggbb") is known.
+local function colored(name, color)
+    if type(color) ~= "string" then
+        return name
+    end
+    return "|c" .. color .. name .. "|r"
 end
 
 -- Building --------------------------------------------------------------------
@@ -210,47 +234,10 @@ end
 
 -- A party's five role tiles in a row: Tank, Healer and three DPS.
 function Page:roleTiles(parent, size)
-    local tiles = {}
-    local roles = { "tank", "healer", "dps", "dps", "dps" }
-    local index
-    for index = 1, #roles do
-        tiles[index] = self.ui:RoleTile(parent, roles[index], size, size)
-        -- Too small for the role's name: its icon.
-        tiles[index]:ShowIcon()
-        if index > 1 then
-            tiles[index]:SetPoint("LEFT", tiles[index - 1], "RIGHT", 4, 0)
-        end
-    end
-    return tiles
+    return self.ui:RoleRow(parent, size)
 end
 
--- Shows `tiles` for a dungeon party's `members` (each { role }): a
--- member's role is filled (grey), the rest open, except roles missing from
--- `openRoles` (what the listing asks for, when given), which aren't.
-local function showRoles(tiles, members, openRoles)
-    local taken = {}
-    local index
-    for index = 1, #(members or {}) do
-        local role = members[index].role
-        if role ~= nil then
-            taken[role] = (taken[role] or 0) + 1
-        end
-    end
-    local wanted
-    if openRoles ~= nil then
-        wanted = {}
-        for index = 1, #openRoles do
-            wanted[openRoles[index]] = true
-        end
-    end
-    local seen = {}
-    for index = 1, #tiles do
-        local role = tiles[index].role
-        seen[role] = (seen[role] or 0) + 1
-        tiles[index]:SetFilled(seen[role] <= (taken[role] or 0) or (wanted ~= nil and not wanted[role]))
-        tiles[index]:Show()
-    end
-end
+local showRoles = Widgets.ShowRoles
 
 local function setShown(frame, shown)
     if shown then
@@ -659,11 +646,12 @@ function Page:buildList()
         end
     end)
     self.area, self.list = area, list
+    -- Where the cards go: the list's width, less the Nearby card's when it
+    -- shows.
+    self.cards = ui:frame("Frame", list)
     self.emptyText = ui:Text(list, "", "regular", "body", "muted")
     self.altsLabel = ui:SectionLabel(list, "Your alts could join")
-    self.nearbyText = ui:Text(list, "", "regular", "small", "muted")
-    self.nearbyText:SetWidth(LfgBoardPage.LIST_WIDTH)
-    self.nearbyText:SetJustifyH("LEFT")
+    self:buildNearby()
     self.largeCards, self.smallCards = {}, {}
     self.historyRows = {}
     self.historyView = addon.LfgHistoryView.Create()
@@ -676,43 +664,157 @@ function Page:buildList()
     self.moreButton:Hide()
 end
 
--- Places `frame` at height `top` of the list: across the whole width, or in
--- the left or right `column` of two.
+-- The Nearby card: "Nearby in <zone>", then the guildmates there one per
+-- line, in class color, each name opening the name menu.
+function Page:buildNearby()
+    local ui, pad = self.ui, Theme.SPACING.m
+    local card = ui:Panel(self.list)
+    card:SetWidth(LfgBoardPage.NEARBY_WIDTH)
+    card.title = ui:SectionLabel(card, "")
+    card.title:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -pad)
+    card.title:SetPoint("RIGHT", card, "RIGHT", -pad, 0)
+    card.title:SetJustifyH("LEFT")
+    card.title:SetWordWrap(false)
+    card.rows = {}
+    card.more = ui:Text(card, "", "regular", "small", "label")
+    card:Hide()
+    self.nearbyCard = card
+end
+
+-- Shows the Nearby card for `nearby` ({ zone, people }) at the list's top
+-- right. Returns its height.
+function Page:showNearby(nearby)
+    local card, pad = self.nearbyCard, Theme.SPACING.m
+    local options = self.options
+    card.title:SetText(Theme.Label("Nearby in " .. nearby.zone))
+    local top = pad + 16 + Theme.SPACING.xs
+    local shown = math.min(#nearby.people, LfgBoardPage.NEARBY_ROWS)
+    local index
+    for index = 1, math.max(shown, #card.rows) do
+        local row = card.rows[index]
+        if index <= shown then
+            if row == nil then
+                row = self:nameButton(card, LfgBoardPage.NEARBY_ROW_HEIGHT)
+                row:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -top - (index - 1) * LfgBoardPage.NEARBY_ROW_HEIGHT)
+                row:SetPoint("RIGHT", card, "RIGHT", -pad, 0)
+                card.rows[index] = row
+            end
+            local person = nearby.people[index]
+            self:showName(row, { text = colored(person.name, options.classColor(person.classToken)),
+                whisper = person.whisper })
+        else
+            row:Hide()
+        end
+    end
+    local more = #nearby.people - shown
+    card.more:ClearAllPoints()
+    card.more:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -top - shown * LfgBoardPage.NEARBY_ROW_HEIGHT)
+    card.more:SetText(more > 0 and ("and " .. more .. " more") or "")
+    local height = top + shown * LfgBoardPage.NEARBY_ROW_HEIGHT + (more > 0 and 16 or 0) + pad
+    card:SetHeight(height)
+    card:ClearAllPoints()
+    card:SetPoint("TOPRIGHT", self.list, "TOPRIGHT", 0, 0)
+    card:Show()
+    return height
+end
+
+-- Lets the cards use the list's whole width, or leaves `inset` on the
+-- right (for the Nearby card).
+function Page:inset(inset)
+    self.cards:ClearAllPoints()
+    self.cards:SetPoint("TOPLEFT", self.list, "TOPLEFT", 0, 0)
+    self.cards:SetPoint("BOTTOMRIGHT", self.list, "BOTTOMRIGHT", -(inset or 0), 0)
+end
+
+-- Places `frame` at height `top` of the cards' area: across its whole
+-- width, or in the left or right `column` of two.
 function Page:place(frame, top, column)
-    local list = self.list
+    local area = self.cards
     frame:ClearAllPoints()
     if column == "right" then
-        frame:SetPoint("TOPLEFT", list, "TOP", Theme.SPACING.xs, -top)
-        frame:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+        frame:SetPoint("TOPLEFT", area, "TOP", Theme.SPACING.xs, -top)
+        frame:SetPoint("RIGHT", area, "RIGHT", 0, 0)
     elseif column == "left" then
-        frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top)
-        frame:SetPoint("RIGHT", list, "CENTER", -Theme.SPACING.xs, 0)
+        frame:SetPoint("TOPLEFT", area, "TOPLEFT", 0, -top)
+        frame:SetPoint("RIGHT", area, "CENTER", -Theme.SPACING.xs, 0)
     else
-        frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top)
+        frame:SetPoint("TOPLEFT", area, "TOPLEFT", 0, -top)
     end
 end
 
--- Role tiles laid out as on a large card: two on top (Tank and Healer),
--- three smaller below filling the same width. `role` is nil for a party's
--- real roles, or "any" for person tiles.
-function Page:tileBlock(parent, role)
-    local width, height, gap = LfgBoardPage.TILE_BLOCK_WIDTH, 20, 4
-    local top = (width - gap) / 2
-    local bottom = (width - 2 * gap) / 3
-    local roles = { role or "tank", role or "healer", role or "dps", role or "dps", role or "dps" }
-    local tiles = {}
-    local index
-    for index = 1, 5 do
-        tiles[index] = self.ui:RoleTile(parent, roles[index], index <= 2 and top or bottom, height)
-        if role ~= nil then
-            tiles[index].label:SetText("")
-        end
+-- A name that opens the name menu when clicked, `height` tall, with room
+-- for a role icon on its left and a crown (the leader) and star (a top
+-- group friend) after it. Shown with showName; placed by its owner.
+function Page:nameButton(parent, height)
+    local ui, owner = self.ui, self
+    local line = ui:frame("Button", parent)
+    line:SetHeight(height)
+    line.roleIcon = line:CreateTexture(nil, "ARTWORK")
+    line.roleIcon:SetSize(12, 12)
+    line.roleIcon:SetPoint("LEFT", line, "LEFT", 0, 0)
+    line.name = ui:Text(line, "", "regular", "body", "text")
+    line.crown = line:CreateTexture(nil, "ARTWORK")
+    line.crown:SetTexture(Theme.TEXTURES.crown)
+    line.crown:SetVertexColor(Theme.Color("gold"))
+    line.crown:SetSize(10, 10)
+    line.crown:SetPoint("LEFT", line.name, "RIGHT", 4, 0)
+    line.star = line:CreateTexture(nil, "ARTWORK")
+    line.star:SetTexture(Theme.TEXTURES.star)
+    line.star:SetVertexColor(Theme.Color("gold"))
+    line.star:SetSize(10, 10)
+    line:SetScript("OnClick", function(self)
+        owner:nameMenu(self)
+    end)
+    return line
+end
+
+-- Shows name button `line` for `fields`: text (the name, maybe in class
+-- color), whisper (whom Whisper whispers), role (its icon, in the role's
+-- color), leader (the crown) and top (the star).
+function Page:showName(line, fields)
+    local role = fields.role
+    line.role = role
+    line.name:ClearAllPoints()
+    if role ~= nil and Widgets.ROLE_ICONS[role] ~= nil then
+        line.roleIcon:SetTexture(Theme.TEXTURES[Widgets.ROLE_ICONS[role]])
+        line.roleIcon:SetVertexColor(Theme.Color(role))
+        line.roleIcon:Show()
+        line.name:SetPoint("LEFT", line.roleIcon, "RIGHT", 4, 0)
+    else
+        line.roleIcon:Hide()
+        line.name:SetPoint("LEFT", line, "LEFT", 0, 0)
     end
-    tiles[2]:SetPoint("LEFT", tiles[1], "RIGHT", gap, 0)
-    tiles[3]:SetPoint("TOPLEFT", tiles[1], "BOTTOMLEFT", 0, -gap)
-    tiles[4]:SetPoint("LEFT", tiles[3], "RIGHT", gap, 0)
-    tiles[5]:SetPoint("LEFT", tiles[4], "RIGHT", gap, 0)
-    return tiles
+    line.name:SetText(fields.text)
+    line.title = fields.text
+    line.whisper = fields.whisper or false
+    setShown(line.crown, fields.leader == true)
+    line.star:ClearAllPoints()
+    line.star:SetPoint("LEFT", fields.leader and line.crown or line.name, "RIGHT", 4, 0)
+    line.topFriend = fields.top == true
+    setShown(line.star, line.topFriend)
+    line:Show()
+end
+
+-- The menu a name opens, under it: the name over a line, then Whisper. A
+-- second click on the same name closes it.
+function Page:nameMenu(anchor)
+    self.namesMenu = self.namesMenu or self.ui:ContextMenu(self.content)
+    local menu = self.namesMenu
+    if menu:IsOpen() and self.nameMenuFor ~= nil and self.nameMenuFor.anchor == anchor then
+        menu:Close()
+        self.nameMenuFor = nil
+        return
+    end
+    local owner, whisper = self, anchor.whisper
+    self.nameMenuFor = { anchor = anchor, title = anchor.title, whisper = whisper }
+    menu:Open(anchor, {
+        { label = "Whisper", onClick = function()
+            owner.nameMenuFor = nil
+            if whisper then
+                owner.options.onWhisper(whisper)
+            end
+        end },
+    }, anchor.title)
 end
 
 -- Shows `tiles` (5 person tiles) with the first `size` filled.
@@ -751,18 +853,25 @@ local function sizeText(listing)
     return listing.size .. "/" .. listing.maxSize
 end
 
--- `name` in its class color, where `color` ("ffrrggbb") is known.
-local function colored(name, color)
-    if type(color) ~= "string" then
-        return name
+-- What a dungeon listing still needs, as its open roles ("needs Healer,
+-- DPS"); nil for other kinds, or when it needs nobody.
+local function needsText(listing)
+    if listing.kind ~= "dungeon" then
+        return nil
     end
-    return "|c" .. color .. name .. "|r"
+    local names = {}
+    local index
+    for index = 1, #(listing.openRoles or {}) do
+        names[index] = Widgets.ROLE_LABELS[listing.openRoles[index]] or listing.openRoles[index]
+    end
+    return #names > 0 and ("needs " .. table.concat(names, ", ")) or nil
 end
 
 -- A large card, made on first use: the purpose with its icon, then its
--- type, levels and size; the members on the left (the leader crowned,
--- group friends with a heart) and the role tiles on the right; the note;
--- and Whisper <leader>.
+-- type, levels, size and what it needs; the members, each with their
+-- role's icon (a dungeon's), the leader crowned and top group friends
+-- starred, every name opening the name menu; the note; and Ask to join and
+-- Whisper <leader> side by side.
 function Page:largeCard(index)
     local card = self.largeCards[index]
     if card ~= nil then
@@ -781,53 +890,27 @@ function Page:largeCard(index)
     card.members = {}
     local row
     for row = 1, LfgBoardPage.CARD_MEMBERS do
-        local line = ui:frame("Button", card)
-        line:SetSize(150, LfgBoardPage.MEMBER_HEIGHT)
+        local line = self:nameButton(card, LfgBoardPage.MEMBER_HEIGHT)
         line:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -54 - (row - 1) * LfgBoardPage.MEMBER_HEIGHT)
-        line.crown = line:CreateTexture(nil, "ARTWORK")
-        line.crown:SetTexture(Theme.TEXTURES.crown)
-        line.crown:SetVertexColor(Theme.Color("gold"))
-        line.crown:SetSize(10, 10)
-        line.crown:SetPoint("LEFT", line, "LEFT", 0, 0)
-        line.name = ui:Text(line, "", "regular", "body", "text")
-        line.name:SetPoint("LEFT", line, "LEFT", 14, 0)
-        line.heart = line:CreateTexture(nil, "ARTWORK")
-        line.heart:SetTexture(Theme.TEXTURES.heart)
-        line.heart:SetVertexColor(Theme.Color("dps"))
-        line.heart:SetSize(10, 10)
-        line.heart:SetPoint("LEFT", line.name, "RIGHT", 4, 0)
-        -- The leader's name whispers them.
-        line:SetScript("OnClick", function(self)
-            if self.whisper then
-                owner.options.onWhisper(self.whisper)
-            end
-        end)
+        line:SetPoint("RIGHT", card, "RIGHT", -pad, 0)
         card.members[row] = line
     end
     card.more = ui:Text(card, "", "regular", "small", "label")
     card.more:SetPoint("TOPLEFT", card, "TOPLEFT", pad,
         -54 - LfgBoardPage.CARD_MEMBERS * LfgBoardPage.MEMBER_HEIGHT)
-    card.roleTiles = self:tileBlock(card, nil)
-    card.roleTiles[1]:SetPoint("TOPLEFT", card, "TOPRIGHT", -pad - LfgBoardPage.TILE_BLOCK_WIDTH, -54)
-    card.anyTiles = self:tileBlock(card, "any")
-    card.anyTiles[1]:SetPoint("TOPLEFT", card.roleTiles[1], "TOPLEFT", 0, 0)
-    card.raidTile = ui:RoleTile(card, "any", LfgBoardPage.TILE_BLOCK_WIDTH, 20)
-    card.raidTile:SetPoint("TOPLEFT", card.roleTiles[1], "TOPLEFT", 0, 0)
-    card.count = ui:Text(card, "", "regular", "small", "muted")
-    card.count:SetPoint("TOP", card.raidTile, "BOTTOM", 0, -4)
     card.note = ui:Text(card, "", "italic", "small", "muted")
     card.note:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad + Widgets.BUTTON_HEIGHT + Theme.SPACING.s)
-    -- Ask to join, then Whisper <leader>; a leader who takes no asks (not
-    -- in the guild, or their LFG button hidden) has Whisper alone.
+    -- Ask to join and Whisper <leader> share the bottom; a leader who
+    -- takes no asks (not in the guild, or their LFG button hidden) has
+    -- Whisper alone.
     card.ask = ui:Button(card, "Ask to join", "primary", function(button)
         owner:ask(button, card.listing, card)
     end)
-    card.ask:SetWidth(150)
     card.ask:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad)
+    card.ask:SetPoint("BOTTOMRIGHT", card, "BOTTOM", -Theme.SPACING.xs, pad)
     card.whisper = ui:Button(card, "Whisper", "secondary", function(button)
         owner.options.onWhisper(button.target)
     end)
-    card.whisper:SetWidth(150)
     self.largeCards[index] = card
     return card
 end
@@ -850,7 +933,7 @@ function Page:showLarge(card, listing)
     card.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
     -- A party led from outside the guild names its contact.
     card.details:SetText(join({ addon.LfgListing.KindLabel(listing.kind), range(listing.minLevel, listing.maxLevel),
-        sizeText(listing), listing.contact and ("contact " .. listing.leader) or nil }))
+        sizeText(listing), needsText(listing), listing.contact and ("contact " .. listing.leader) or nil }))
     local row
     for row = 1, #card.members do
         local line, member = card.members[row], listing.members[row]
@@ -858,20 +941,19 @@ function Page:showLarge(card, listing)
             line:Hide()
         else
             local leader = row == 1
-            line.name:SetText(colored(member.name, options.classColor(member.classToken)))
-            -- The leader's name whispers them, unless they're outside the
-            -- guild and the contact speaks for the party.
-            line.whisper = leader and not listing.contact and listing.sender or false
-            setShown(line.crown, leader)
-            local tier = options.friendTier(member.name)
-            line.friend = tier == addon.GroupFriends.FREQUENT or tier == addon.GroupFriends.TOP
-            setShown(line.heart, line.friend)
-            line:Show()
+            self:showName(line, {
+                text = colored(member.name, options.classColor(member.classToken)),
+                -- The leader by the name they listed from, unless they're
+                -- outside the guild and the contact speaks for the party.
+                whisper = leader and not listing.contact and listing.sender or member.name,
+                role = listing.kind == "dungeon" and member.role or nil,
+                leader = leader,
+                top = options.friendTier(member.name) == addon.GroupFriends.TOP,
+            })
         end
     end
     local more = #listing.members - #card.members
     card.more:SetText(more > 0 and ("and " .. more .. " more") or "")
-    showTiles(card, listing)
     card.note:SetText(listing.note or "")
     card.whisper.target = listing.sender
     card.whisper:SetLabel("Whisper " .. listing.leader)
@@ -881,11 +963,12 @@ function Page:showLarge(card, listing)
         card.ask:SetLabel(label)
         card.ask:SetActive(active)
         card.ask:Show()
-        card.whisper:SetPoint("LEFT", card.ask, "RIGHT", Theme.SPACING.s, 0)
+        card.whisper:SetPoint("BOTTOMLEFT", card, "BOTTOM", Theme.SPACING.xs, pad)
     else
         card.ask:Hide()
-        card.whisper:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", Theme.SPACING.m, Theme.SPACING.m)
+        card.whisper:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad)
     end
+    card.whisper:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -pad, pad)
     card:Show()
 end
 
@@ -962,10 +1045,23 @@ function Page:refreshTab()
     hideAll(self.historyRows)
     self.moreButton:Hide()
     self.altsLabel:Hide()
-    self.nearbyText:Hide()
+    self.nearbyCard:Hide()
     self.emptyText:Hide()
     local used = { small = 0 }
     local top = 0
+    -- Relevant Parties has the Nearby card on its right, when anyone's
+    -- nearby; the cards take the rest.
+    local nearby = self.tab == "relevant" and self.options.nearby() or nil
+    if nearby ~= nil and #(nearby.people or {}) == 0 then
+        nearby = nil
+    end
+    local nearbyHeight = 0
+    if nearby ~= nil then
+        nearbyHeight = self:showNearby(nearby)
+        self:inset(LfgBoardPage.NEARBY_WIDTH + Theme.SPACING.s)
+    else
+        self:inset(0)
+    end
     local function empty(text)
         self.emptyText:SetText(text)
         self:place(self.emptyText, top)
@@ -990,13 +1086,6 @@ function Page:refreshTab()
             self.altsLabel:Show()
             top = self:smallRows(groups.alts, top + 24, false, used)
         end
-        local nearby = self.options.nearby()
-        if nearby ~= nil and #nearby.names > 0 then
-            self.nearbyText:SetText("Nearby in " .. nearby.zone .. ": " .. table.concat(nearby.names, ", "))
-            self:place(self.nearbyText, top + Theme.SPACING.xs)
-            self.nearbyText:Show()
-            top = top + 28
-        end
     elseif self.tab == "other" then
         if #groups.other == 0 then
             empty(LfgBoardPage.EMPTY.other)
@@ -1010,41 +1099,38 @@ function Page:refreshTab()
     else
         top = self:historyList(top, empty)
     end
-    self.list:SetHeight(math.max(top, 1))
+    self.list:SetHeight(math.max(top, nearbyHeight, 1))
+    -- The name menu goes once its name is hidden or shows someone else.
+    local named = self.nameMenuFor
+    if named ~= nil and self.namesMenu ~= nil and self.namesMenu:IsOpen() then
+        local anchor = named.anchor
+        local shown = type(anchor.IsShown) ~= "function" or anchor:IsShown()
+        if not shown or anchor.title ~= named.title or anchor.whisper ~= named.whisper then
+            self.namesMenu:Close()
+            self.nameMenuFor = nil
+        end
+    end
 end
 
 -- One History party, made on first use: its date and dungeon or zone,
--- then its guildmates (group friends with a heart), each with Whisper.
+-- then its guildmates (top group friends starred), each name opening the
+-- name menu.
 function Page:historyRow(index)
     local row = self.historyRows[index]
     if row ~= nil then
         return row
     end
-    local ui, pad, owner = self.ui, Theme.SPACING.m, self
+    local ui, pad = self.ui, Theme.SPACING.m
     row = ui:Panel(self.list)
     row.title = ui:Text(row, "", "semibold", "body", "text")
     row.title:SetPoint("TOPLEFT", row, "TOPLEFT", pad, -Theme.SPACING.s)
     row.members = {}
     local line
     for line = 1, LfgBoardPage.HISTORY_MEMBERS do
-        local member = ui:frame("Frame", row)
-        member:SetSize(260, LfgBoardPage.HISTORY_MEMBER_HEIGHT)
+        local member = self:nameButton(row, LfgBoardPage.HISTORY_MEMBER_HEIGHT)
+        member:SetWidth(260)
         member:SetPoint("TOPLEFT", row, "TOPLEFT", pad,
             -28 - (line - 1) * LfgBoardPage.HISTORY_MEMBER_HEIGHT)
-        member.name = ui:Text(member, "", "regular", "body", "text")
-        member.name:SetPoint("LEFT", member, "LEFT", 0, 0)
-        member.heart = member:CreateTexture(nil, "ARTWORK")
-        member.heart:SetTexture(Theme.TEXTURES.heart)
-        member.heart:SetVertexColor(Theme.Color("dps"))
-        member.heart:SetSize(10, 10)
-        member.heart:SetPoint("LEFT", member.name, "RIGHT", 4, 0)
-        member.whisper = ui:Button(member, "Whisper", "secondary", function(button)
-            if button.target then
-                owner.options.onWhisper(button.target)
-            end
-        end)
-        member.whisper:SetWidth(80)
-        member.whisper:SetPoint("RIGHT", member, "RIGHT", 0, 0)
         row.members[line] = member
     end
     row.more = ui:Text(row, "", "regular", "small", "label")
@@ -1076,11 +1162,8 @@ function Page:historyList(top, empty)
             if entry == nil then
                 member:Hide()
             else
-                member.name:SetText(colored(entry.name, options.classColor(entry.classToken)))
-                member.friend = entry.friend == true
-                setShown(member.heart, member.friend)
-                member.whisper.target = entry.whisper or false
-                member:Show()
+                self:showName(member, { text = colored(entry.name, options.classColor(entry.classToken)),
+                    whisper = entry.whisper, top = entry.tier == addon.GroupFriends.TOP })
             end
         end
         local shown = math.min(#party.members, #row.members)

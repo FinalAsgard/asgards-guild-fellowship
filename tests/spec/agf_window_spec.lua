@@ -135,9 +135,19 @@ test.test("agf window: widgets draw on fake frames and keep their state", functi
     menu:Open(page, { { label = "Open Guild LFG Board", onClick = function() chosen = "open" end },
         { label = "Hide LFG button", onClick = function() chosen = "hide" end } })
     test.assertTrue(menu:IsOpen())
+    test.assertFalse(menu.title.shown)
+    test.assertFalse(menu.divider.shown)
     menu.rows[2].scripts.OnClick(menu.rows[2])
     test.assertEqual("hide", chosen)
     test.assertFalse(menu:IsOpen())
+    -- A title heads the items, with a line under it.
+    menu:Open(page, { { label = "Whisper", onClick = function() chosen = "whisper" end } }, "Hammer")
+    test.assertTrue(menu.title.shown)
+    test.assertEqual("Hammer", menu.title.text)
+    test.assertTrue(menu.divider.shown)
+    test.assertFalse(menu.rows[2].shown)
+    menu.rows[1].scripts.OnClick(menu.rows[1])
+    test.assertEqual("whisper", chosen)
 end)
 
 test.test("agf window: a UTF-8 note counts characters, not bytes", function()

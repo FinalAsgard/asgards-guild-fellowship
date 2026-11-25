@@ -340,6 +340,16 @@ local function click(button)
     button.scripts.OnClick(button, "LeftButton")
 end
 
+-- Clicks the name `line` on `page`, then the name menu's Whisper.
+local function whisperName(page, line)
+    click(line)
+    test.assertTrue(page.namesMenu:IsOpen())
+    test.assertEqual(line.title, page.namesMenu.titleText)
+    test.assertEqual("Whisper", page.namesMenu.rows[1].label.text)
+    click(page.namesMenu.rows[1])
+    test.assertFalse(page.namesMenu:IsOpen())
+end
+
 local function type_(field, text)
     field.box:SetText(text)
     field.box.scripts.OnTextChanged(field.box, true)
@@ -421,7 +431,12 @@ local function registerProfileTests(profile)
         click(card.whisper)
         test.assertContains(whispered, "Tool")
         whispered = nil
+        -- The leader's name opens the name menu, whose Whisper whispers
+        -- them.
         click(card.members[1])
+        test.assertEqual(nil, whispered)
+        click(card.members[1])
+        whisperName(board, card.members[1])
         test.assertContains(whispered, "Tool")
         -- Tool's own board doesn't list Tool.
         test.assertEqual(0, #tool.addon.lfgBoard:Listings(tool.time))
@@ -754,7 +769,7 @@ local function listingOf(kind, fields)
     return listing
 end
 
-test.test("lfg page: a large card marks the leader, group friends, filled roles and the game's icon", function()
+test.test("lfg page: a large card marks the leader, top friends, members' roles and the game's icon", function()
     local listing = listingOf("dungeon", {
         purpose = "Stratholme", size = 3, note = "3 bosses down",
         members = {
@@ -770,52 +785,58 @@ test.test("lfg page: a large card marks the leader, group friends, filled roles 
     test.assertEqual("|cffc79c6eTool|r", card.members[1].name.text)
     test.assertTrue(card.members[1].crown.shown)
     test.assertFalse(card.members[2].crown.shown)
-    -- Top 5 and Frequent get a heart; Grouped doesn't.
-    test.assertTrue(card.members[2].friend)
-    test.assertFalse(card.members[3].friend)
+    -- Top 5 get a star; Grouped doesn't.
+    test.assertTrue(card.members[2].topFriend)
+    test.assertTrue(card.members[2].star.shown)
+    test.assertFalse(card.members[3].topFriend)
+    test.assertFalse(card.members[3].star.shown)
     test.assertFalse(card.members[4].shown)
     test.assertEqual("3 bosses down", card.note.text)
-    -- Tank taken, healer open, two of three DPS taken.
-    local filled = {}
-    local index
-    for index = 1, 5 do
-        filled[index] = card.roleTiles[index].filled and "x" or "o"
-    end
-    test.assertEqual("xoxxo", table.concat(filled))
-    -- Only the leader's name whispers.
-    click(card.members[2])
-    click(card.members[1])
+    -- Each member's role icon is beside their name; the card says what's
+    -- still needed, with no role grid.
+    test.assertEqual("tank", card.members[1].role)
+    test.assertTrue(card.members[1].roleIcon.shown)
+    test.assertEqual("dps", card.members[2].role)
+    test.assertContains(card.details.text, "needs Healer, DPS")
+    test.assertEqual(nil, rawget(card, "roleTiles"))
+    -- Every name opens the name menu; its Whisper whispers that member,
+    -- the leader by the name they listed from.
+    whisperName(page, card.members[2])
+    whisperName(page, card.members[1])
     click(card.whisper)
-    test.assertEqual("Tool-Camelot,Tool-Camelot", table.concat(whispered, ","))
+    test.assertEqual("Hammer,Tool-Camelot,Tool-Camelot", table.concat(whispered, ","))
 end)
 
-test.test("lfg page: questing uses person tiles, a raid one tile and its player count", function()
-    local questing = listingOf("questing", { purpose = "Duskwood", size = 2, minLevel = 18, maxLevel = 30 })
+test.test("lfg page: questing and raid cards give their size, with no role icons", function()
+    local questing = listingOf("questing", { purpose = "Duskwood", size = 2, minLevel = 18, maxLevel = 30,
+        members = { { name = "Tool", classToken = "WARRIOR" }, { name = "Zap", classToken = "MAGE" } } })
     local raid = listingOf("raid", { size = 12 })
     local page = pageWith({ relevant = { questing, raid }, alts = {}, other = {} })
 
     local quest = page.largeCards[1]
     test.assertEqual("Questing in Duskwood", quest.purpose.text)
     test.assertContains(quest.details.text, "18\226\128\14730")
-    test.assertTrue(quest.anyTiles[1].filled)
-    test.assertTrue(quest.anyTiles[2].filled)
-    test.assertFalse(quest.anyTiles[3].filled)
-    test.assertFalse(quest.roleTiles[1].shown)
+    test.assertContains(quest.details.text, "2/5")
+    test.assertFalse(quest.members[1].roleIcon.shown)
+    test.assertFalse(quest.members[2].roleIcon.shown)
     -- No dungeon, no icon.
     test.assertFalse(quest.iconTexture)
 
     local big = page.largeCards[2]
     test.assertEqual("Raid", big.purpose.text)
-    test.assertTrue(big.raidTile.shown)
-    test.assertFalse(big.anyTiles[1].shown)
-    test.assertEqual("12 players", big.count.text)
+    test.assertContains(big.details.text, "12 players")
 end)
 
-test.test("lfg page: alts' groups as small cards naming the alt, then Nearby", function()
+test.test("lfg page: alts' groups as small cards naming the alt, beside a Nearby card", function()
     local listing = listingOf("dungeon", { purpose = "Wailing Caverns", minLevel = 17, maxLevel = 24 })
-    local page = pageWith({ relevant = {}, alts = { { listing = listing, alt = { name = "Bolt", level = 20 } } },
-        other = {} }, {
-        nearby = function() return { zone = "Ironforge", names = { "Hammer", "Zap" } } end,
+    local page, whispered = pageWith({ relevant = {},
+        alts = { { listing = listing, alt = { name = "Bolt", level = 20 } } }, other = {} }, {
+        nearby = function()
+            return { zone = "Ironforge", people = {
+                { name = "Hammer", whisper = "Hammer-Camelot", classToken = "WARRIOR" },
+                { name = "Zap", whisper = "Zap-Camelot", classToken = "MAGE" },
+            } }
+        end,
     })
 
     test.assertFalse(page.emptyText.shown)
@@ -825,8 +846,34 @@ test.test("lfg page: alts' groups as small cards naming the alt, then Nearby", f
     test.assertEqual("Wailing Caverns", card.purpose.text)
     test.assertContains(card.details.text, "Tool")
     test.assertContains(card.details.text, "Bolt (20)")
-    test.assertEqual("Nearby in Ironforge: Hammer, Zap", page.nearbyText.text)
-    test.assertTrue(page.nearbyText.shown)
+    -- The Nearby card lists each name on its own line, in class color, and
+    -- each opens the name menu.
+    local nearby = page.nearbyCard
+    test.assertTrue(nearby.shown)
+    test.assertEqual("NEARBY IN IRONFORGE", nearby.title.text)
+    test.assertEqual("|cffc79c6eHammer|r", nearby.rows[1].name.text)
+    test.assertEqual("Zap", nearby.rows[2].name.text)
+    whisperName(page, nearby.rows[2])
+    test.assertEqual("Zap-Camelot", whispered[1])
+    -- Other Parties has no Nearby card.
+    page:ShowTab("other")
+    test.assertFalse(nearby.shown)
+end)
+
+test.test("lfg page: the name menu closes on a second click, and when its name goes", function()
+    local page = pageWith({ relevant = {}, alts = {}, other = {} }, {
+        nearby = function()
+            return { zone = "Ironforge", people = { { name = "Zap", whisper = "Zap-Camelot" } } }
+        end,
+    })
+    local row = page.nearbyCard.rows[1]
+    click(row)
+    test.assertTrue(page.namesMenu:IsOpen())
+    click(row)
+    test.assertFalse(page.namesMenu:IsOpen())
+    click(row)
+    page:ShowTab("history")
+    test.assertFalse(page.namesMenu:IsOpen())
 end)
 
 -- The composed add-on: alts, Nearby, questing levels and the probe ------------------
@@ -842,9 +889,25 @@ test.test("Forever a group only your alt fits shows under Your alts could join, 
     test.assertEqual("Relevant Parties \194\183 0", board.tabs.tabs[1].label.text)
     test.assertTrue(board.altsLabel.shown)
     test.assertContains(board.smallCards[1].details.text, "Bolt Smith (59)")
-    test.assertContains(board.nearbyText.text, "Nearby in Ironforge:")
-    test.assertContains(board.nearbyText.text, "Zap Arcane")
-    test.assertContains(board.nearbyText.text, "Tool Box")
+    test.assertTrue(board.nearbyCard.shown)
+    test.assertEqual("NEARBY IN IRONFORGE", board.nearbyCard.title.text)
+    local names = {}
+    local index
+    for index = 1, #board.nearbyCard.rows do
+        if board.nearbyCard.rows[index].shown then
+            table.insert(names, board.nearbyCard.rows[index].name.text)
+        end
+    end
+    local listed = table.concat(names, ",")
+    test.assertContains(listed, "Zap")
+    test.assertContains(listed, "Tool")
+    -- Each name whispers that character, by the name the guild has saved.
+    local whispered
+    hammer.environment.ChatFrame_SendTell = function(name)
+        whispered = name
+    end
+    whisperName(board, board.nearbyCard.rows[1])
+    test.assertContains(board.nearbyCard.rows[1].name.text, string.match(whispered, "^[^%-]+"))
 end)
 
 test.test("Forever questing is listed in the zone's levels, and the probe says where they came from", function()

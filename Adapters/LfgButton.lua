@@ -27,7 +27,9 @@ local LfgButton = {
     DRAWER_GAP = 6,
     -- How far the drawer slides in from.
     SLIDE = 24,
-    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 132, ask = 178, gate = 146, slot = 164 },
+    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 146, ask = 178, gate = 146, slot = 164 },
+    -- The party's role tiles, as on the Your listing card.
+    TILE_SIZE = 22,
     NONE_TEXT = "No groups for you right now",
     ASK_TEXT = "You're leading a party. List it on the Guild LFG Board?",
     GATE_TEXT = "Your party has players from outside the guild. List it on the Guild LFG Board?",
@@ -217,7 +219,9 @@ function Button:buildDrawer()
     drawer.slotDetails:SetPoint("TOPLEFT", drawer.question, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
     drawer.slotDetails:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad)
 
-    -- Your party: its purpose, size and needs, note, and filled slots.
+    -- Your party: its purpose, size and needs, note, and its slots as the
+    -- Your listing card shows them (role tiles with icons, open ones in
+    -- color, filled ones grey).
     drawer.party = ui:Text(drawer, "", "semibold", "title", "text")
     drawer.party:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
     drawer.partyDetails = ui:Text(drawer, "", "regular", "small", "muted")
@@ -225,19 +229,16 @@ function Button:buildDrawer()
     drawer.note = ui:Text(drawer, "", "italic", "small", "muted")
     drawer.note:SetPoint("TOPLEFT", drawer.partyDetails, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
     drawer.note:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad)
-    drawer.slots = {}
-    local slotWidth = (LfgButton.DRAWER_WIDTH - 2 * pad - 4 * 4) / 5
+    drawer.roleTiles = ui:RoleRow(drawer, LfgButton.TILE_SIZE)
+    drawer.roleTiles[1]:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad)
+    drawer.anyTiles = {}
     local index
     for index = 1, 5 do
-        local slot = ui:Panel(drawer, { radius = Theme.RADIUS.small, fill = "raised", border = false })
-        slot:SetSize(slotWidth, 8)
-        if index == 1 then
-            slot:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad)
-        else
-            slot:SetPoint("LEFT", drawer.slots[index - 1], "RIGHT", 4, 0)
-        end
-        drawer.slots[index] = slot
+        drawer.anyTiles[index] = ui:RoleTile(drawer, "any", LfgButton.TILE_SIZE, LfgButton.TILE_SIZE)
+        drawer.anyTiles[index]:SetPoint("LEFT", drawer.roleTiles[index], "LEFT", 0, 0)
     end
+    drawer.raidTile = ui:RoleTile(drawer, "any", LfgButton.TILE_SIZE, LfgButton.TILE_SIZE)
+    drawer.raidTile:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad)
 
     -- It slides in from the button's side where the client can animate.
     if type(drawer.CreateAnimationGroup) == "function" then
@@ -379,10 +380,19 @@ local function needs(listing)
     return wanted > 0 and ("needs " .. wanted) or nil
 end
 
+-- `parts` joined with dots, leaving out the empty ones. Its holes (nil
+-- parts) make #parts unreliable, so it runs to the highest index.
 local function join(parts)
+    local last = 0
+    local key
+    for key in pairs(parts) do
+        if type(key) == "number" and key > last then
+            last = key
+        end
+    end
     local kept = {}
     local index
-    for index = 1, #parts do
+    for index = 1, last do
         if parts[index] ~= nil and parts[index] ~= "" then
             table.insert(kept, parts[index])
         end
@@ -444,9 +454,11 @@ function Button:refreshDrawer()
     setShown(drawer.partyDetails, party)
     setShown(drawer.note, party)
     local index
-    for index = 1, #drawer.slots do
-        setShown(drawer.slots[index], party)
+    for index = 1, 5 do
+        drawer.roleTiles[index]:Hide()
+        drawer.anyTiles[index]:Hide()
     end
+    drawer.raidTile:Hide()
     if newest then
         local listing = top.listing
         local icon = listing.kind == "dungeon"
@@ -470,10 +482,18 @@ function Button:refreshDrawer()
         drawer.party:SetText(info.label or "Not listed")
         drawer.partyDetails:SetText(join({ sizeText(info), needs(info) }))
         drawer.note:SetText(info.note or "")
-        for index = 1, #drawer.slots do
-            local filled = index <= math.min(info.size or 0, 5)
-            drawer.slots[index].filled = filled
-            drawer.slots[index]:SetFill(filled and "green" or "raised")
+        if info.kind == "dungeon" then
+            -- Without the roster (a party listed by someone else), only
+            -- the roles it asks for are open.
+            addon.Widgets.ShowRoles(drawer.roleTiles, info.members or {}, info.openRoles)
+        elseif info.kind == "raid" then
+            drawer.raidTile:SetFilled((info.size or 0) >= (info.maxSize or 0))
+            drawer.raidTile:Show()
+        else
+            for index = 1, 5 do
+                drawer.anyTiles[index]:SetFilled(index <= (info.size or 0))
+                drawer.anyTiles[index]:Show()
+            end
         end
     end
     self:refreshToasts()

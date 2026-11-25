@@ -555,7 +555,7 @@ A small rounded button with a tree sits wherever you drag it (saved per characte
 Click the button to slide a small drawer out to its left; click again, or its **X**, to close it. Click anywhere in it other than a button to open the full board.
 
 - **Not in a party:** the newest group you could join, with **Ask to join**, and **Start a group** under it (or "No groups for you right now").
-- **In a party:** your party's purpose, size, the roles it needs, and its note.
+- **In a party:** your party's purpose, size, the roles it needs, and its note, with its slots as on your listing's card: a dungeon's Tank, Healer and DPS tiles with their icons (open ones in color, filled ones grey), a person tile per player otherwise.
 - **While you're being asked something** (what your party is for, whether to list a party with players outside the guild, or whether to fill an empty slot), the question and its answers.
 
 ### The window
@@ -572,9 +572,11 @@ At the top is **your party's card**:
 
 Below it are three tabs:
 
-- **Relevant Parties · N:** large gold-bordered cards for groups you could join on this character: the purpose, level range and size, the members in class color (a crown for the leader, a heart for [group friends](#group-friends)), role tiles (open roles in color, filled ones grey), the note, **Ask to join** and **Whisper**. Then, under **Your alts could join**, small cards naming which alt fits. At the bottom, **Nearby in <zone>** lists guildmates in your zone, for finding people to quest with.
+- **Relevant Parties · N:** large gold-bordered cards for groups you could join on this character: the purpose, level range, size and the roles a dungeon still needs; the members in class color, each with their role's icon in a dungeon (a crown for the leader, a star for your Top 5 [group friends](#group-friends)); the note, **Ask to join** and **Whisper**. Then, under **Your alts could join**, small cards naming which alt fits. On the right, a **Nearby in <zone>** card lists the guildmates in your zone, one per line in class color, for finding people to quest with.
 - **Other Parties · N:** small greyed cards for full groups and groups nothing of yours fits.
-- **History:** your own recent parties, newest first, 20 at a time with **Show more**: the date, the dungeon when known, and the guildmates, each with a heart for group friends and a **Whisper** (see [Group history](#group-history)).
+- **History:** your own recent parties, newest first, 20 at a time with **Show more**: the date, the dungeon when known, and the guildmates, with a star for Top 5 group friends (see [Group history](#group-history)).
+
+Click any name on the board (a card's members, Nearby, History) for a menu with the name at the top and **Whisper** under it.
 
 A dungeon is relevant when your level fits and a role you play (by your [role preferences](#role-preferences)) is open; questing when your level fits the zone and there's room; a raid or other purpose when you fit its level range, or always for a raid with none.
 

@@ -82,4 +82,6 @@ test.test("lfg nearby: one entry per player, with each of their characters there
 
     test.assertEqual("Thunderer", labels(nearby))
     test.assertEqual("Bolt 22, Hammer 24", names(nearby[1].characters))
+    -- Each character carries its key, to whisper it by its saved name.
+    test.assertEqual("hammer", nearby[1].characters[2].key)
 end)

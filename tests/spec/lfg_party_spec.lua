@@ -770,8 +770,9 @@ test.test("Forever a party led from outside the guild: the first guildmate to sa
     local card = zap.addon.lfgPage.largeCards[1]
     test.assertContains(card.details.text, "contact Tool Box")
     test.assertEqual("Whisper Tool Box", card.whisper.label.text)
-    -- The leader's name doesn't whisper them: the contact speaks for the party.
-    test.assertEqual(false, card.members[1].whisper)
+    -- Whisper goes to the contact, who speaks for the party; the leader's
+    -- own name (its menu) whispers the leader.
+    test.assertEqual("Stranger", card.members[1].whisper)
 
     -- Hammer sees it read-only, named by its contact, and can't edit it.
     test.assertTrue(addon.agfWindow:Open("lfg"))
@@ -1620,7 +1621,7 @@ test.test("lfg history view: newest first, 20 at a time, guildmates with their f
     test.assertFalse(page.more)
 end)
 
-test.test("Forever the History tab lists my parties with hearts and Whisper, 20 at a time with Show more", function()
+test.test("Forever the History tab lists my parties with stars and name menus, 20 at a time with Show more", function()
     local channel = fixtures.newChannel()
     local tool, addon = login(channel, "Tool Box")
     local _, partition = addon.rosterController:QuietContext()
@@ -1659,9 +1660,16 @@ test.test("Forever the History tab lists my parties with hearts and Whisper, 20 
     test.assertContains(row.title.text, "Stratholme")
     local member = row.members[1]
     test.assertContains(member.name.text, "Hammer")
-    -- 25 parties together: a Frequent group friend.
-    test.assertTrue(member.heart.shown)
-    click(member.whisper)
+    -- 25 parties together, and nobody grouped with more: a top group
+    -- friend, starred.
+    test.assertTrue(member.star.shown)
+    -- No Whisper button: the name opens the name menu, whose Whisper
+    -- whispers them.
+    test.assertEqual("string", type(member.whisper))
+    click(member)
+    test.assertTrue(page.namesMenu:IsOpen())
+    test.assertContains(page.namesMenu.titleText, "Hammer")
+    click(page.namesMenu.rows[1])
     test.assertContains(whispered, "Hammer")
 
     test.assertTrue(page.moreButton.shown)

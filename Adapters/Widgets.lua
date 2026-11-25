@@ -611,6 +611,50 @@ function UI:RoleTile(parent, role, width, height)
     return tile
 end
 
+-- A dungeon party's five role tiles in a row, with their icons: Tank,
+-- Healer and three DPS, `size` square and 4 apart. Placed by the first.
+function UI:RoleRow(parent, size)
+    local tiles = {}
+    local roles = { "tank", "healer", "dps", "dps", "dps" }
+    local index
+    for index = 1, #roles do
+        tiles[index] = self:RoleTile(parent, roles[index], size, size)
+        tiles[index]:ShowIcon()
+        if index > 1 then
+            tiles[index]:SetPoint("LEFT", tiles[index - 1], "RIGHT", 4, 0)
+        end
+    end
+    return tiles
+end
+
+-- Shows role `tiles` for a dungeon party's `members` (each { role }): a
+-- member's role is filled (grey), the rest open, except roles missing from
+-- `openRoles` (what the listing asks for, when given), which aren't.
+function Widgets.ShowRoles(tiles, members, openRoles)
+    local taken = {}
+    local index
+    for index = 1, #(members or {}) do
+        local role = members[index].role
+        if role ~= nil then
+            taken[role] = (taken[role] or 0) + 1
+        end
+    end
+    local wanted
+    if openRoles ~= nil then
+        wanted = {}
+        for index = 1, #openRoles do
+            wanted[openRoles[index]] = true
+        end
+    end
+    local seen = {}
+    for index = 1, #tiles do
+        local role = tiles[index].role
+        seen[role] = (seen[role] or 0) + 1
+        tiles[index]:SetFilled(seen[role] <= (taken[role] or 0) or (wanted ~= nil and not wanted[role]))
+        tiles[index]:Show()
+    end
+end
+
 -- A small menu of text items. Open(anchor, items) shows it under `anchor`
 -- with one row per item ({ label, onClick }); picking one closes it and
 -- runs its onClick. Close() hides it.
@@ -620,8 +664,31 @@ function UI:ContextMenu(parent)
     menu:SetWidth(180)
     menu:Hide()
     menu.rows = {}
+    -- An optional title over the items, with a line under it.
+    menu.title = self:Text(menu, "", "semibold", "body", "text")
+    menu.title:SetPoint("TOPLEFT", menu, "TOPLEFT", 4 + Theme.SPACING.s, -4)
+    menu.title:SetHeight(22)
+    menu.divider = menu:CreateTexture(nil, "ARTWORK")
+    menu.divider:SetTexture(Theme.TEXTURES.white)
+    menu.divider:SetVertexColor(Theme.Color("border"))
+    menu.divider:SetHeight(1)
+    menu.divider:SetPoint("TOPLEFT", menu, "TOPLEFT", Theme.SPACING.s, -4 - 22 - 2)
+    menu.divider:SetPoint("RIGHT", menu, "RIGHT", -Theme.SPACING.s, 0)
     local ui = self
-    function menu.Open(_, anchor, items)
+    -- Opens under `anchor` with `items`; `title` (text, may carry color
+    -- codes) heads them when given.
+    function menu.Open(_, anchor, items, title)
+        local hasTitle = title ~= nil and title ~= ""
+        menu.titleText = hasTitle and title or nil
+        menu.title:SetText(hasTitle and title or "")
+        if hasTitle then
+            menu.title:Show()
+            menu.divider:Show()
+        else
+            menu.title:Hide()
+            menu.divider:Hide()
+        end
+        local first = hasTitle and (22 + 5) or 0
         local index
         for index = 1, math.max(#items, #menu.rows) do
             local item = items[index]
@@ -644,11 +711,12 @@ function UI:ContextMenu(parent)
                         self.onClick()
                     end
                 end)
-                row:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4 - (index - 1) * 22)
-                row:SetPoint("RIGHT", menu, "RIGHT", -4, 0)
                 menu.rows[index] = row
             end
             if row ~= nil then
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4 - first - (index - 1) * 22)
+                row:SetPoint("RIGHT", menu, "RIGHT", -4, 0)
                 if item ~= nil then
                     row.label:SetText(item.label)
                     row.onClick = item.onClick
@@ -659,7 +727,8 @@ function UI:ContextMenu(parent)
             end
         end
         menu.items = items
-        menu:SetHeight(8 + #items * 22)
+        menu.anchor = anchor
+        menu:SetHeight(8 + first + #items * 22)
         menu:ClearAllPoints()
         menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
         menu.open = true

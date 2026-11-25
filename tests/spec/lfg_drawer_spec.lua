@@ -205,15 +205,39 @@ test.test("lfg button: the drawer's newest group, none, and the party", function
     test.assertTrue(button.startButton.shown)
 
     button:Update({ count = 0, fresh = {}, top = { kind = "party", party = {
-        kind = "dungeon", label = "Stratholme", size = 3, maxSize = 5, openRoles = { "healer" }, note = "Live side",
+        kind = "dungeon", label = "Stratholme", size = 3, maxSize = 5, openRoles = { "healer", "dps" },
+        note = "Live side", members = { { role = "tank" }, { role = "dps" }, { role = "dps" } },
     } } })
     test.assertEqual("YOUR PARTY", drawer.heading.text)
     test.assertEqual("Stratholme", drawer.party.text)
-    test.assertEqual("3/5 \194\183 needs Healer", drawer.partyDetails.text)
+    test.assertEqual("3/5 \194\183 needs Healer, DPS", drawer.partyDetails.text)
     test.assertEqual("Live side", drawer.note.text)
-    test.assertTrue(drawer.slots[3].filled)
-    test.assertFalse(drawer.slots[4].filled)
+    -- The slots as the Your listing card shows them: role tiles with their
+    -- icons, filled grey, open in color.
+    local filled = {}
+    local index
+    for index = 1, 5 do
+        test.assertTrue(drawer.roleTiles[index].shown)
+        test.assertTrue(drawer.roleTiles[index].icon.shown)
+        filled[index] = drawer.roleTiles[index].filled and "x" or "o"
+    end
+    test.assertEqual("xoxxo", table.concat(filled))
+    test.assertFalse(drawer.anyTiles[1].shown)
     test.assertFalse(button.startButton.shown)
+
+    -- Questing: person tiles, the first `size` filled; a raid: one tile.
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = {
+        kind = "questing", label = "Questing in Duskwood", size = 2, maxSize = 5,
+    } } })
+    test.assertFalse(drawer.roleTiles[1].shown)
+    test.assertTrue(drawer.anyTiles[2].filled)
+    test.assertFalse(drawer.anyTiles[3].filled)
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = {
+        kind = "raid", label = "Raid", size = 12, maxSize = 40,
+    } } })
+    test.assertTrue(drawer.raidTile.shown)
+    test.assertFalse(drawer.raidTile.filled)
+    test.assertFalse(drawer.anyTiles[1].shown)
 end)
 
 -- The composed add-on ----------------------------------------------------------------
