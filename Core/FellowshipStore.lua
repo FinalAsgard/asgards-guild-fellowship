@@ -438,6 +438,102 @@ function Store:SetPlayerPanelPosition(position)
     return true
 end
 
+-- A usable saved screen position: { point, relativePoint, x, y }.
+local function isPosition(position)
+    return type(position) == "table" and type(position.point) == "string"
+        and type(position.relativePoint) == "string" and type(position.x) == "number"
+        and type(position.y) == "number"
+end
+
+-- The character `key`'s own layout table (the new window's and the LFG
+-- button's places, whether that button is hidden), or nil when it's absent
+-- or unusable. With `create`, an absent one is made.
+function Store:characterLayout(key, create)
+    if type(self.database) ~= "table" or not isText(key) then
+        return nil
+    end
+    if self.database.characterLayout == nil and create then
+        self.database.characterLayout = {}
+    end
+    local layouts = self.database.characterLayout
+    if type(layouts) ~= "table" then
+        return nil
+    end
+    if layouts[key] == nil and create then
+        layouts[key] = {}
+    end
+    if type(layouts[key]) ~= "table" then
+        return nil
+    end
+    return layouts[key]
+end
+
+function Store:layoutPosition(key, field)
+    local layout = self:characterLayout(key)
+    local position = layout and layout[field] or nil
+    if not isPosition(position) then
+        return nil
+    end
+    return { point = position.point, relativePoint = position.relativePoint, x = position.x, y = position.y }
+end
+
+function Store:setLayoutPosition(key, field, position)
+    if not isPosition(position) then
+        return false
+    end
+    local layout = self:characterLayout(key, true)
+    if layout == nil then
+        return false
+    end
+    layout[field] = { point = position.point, relativePoint = position.relativePoint, x = position.x, y = position.y }
+    return true
+end
+
+-- Where the add-on's new window was last left on the character `key`'s
+-- screen ({ point, relativePoint, x, y }), or nil when it was never moved
+-- there or an unusable value is stored. Each character keeps its own.
+function Store:WindowPosition(key)
+    return self:layoutPosition(key, "window")
+end
+
+-- Saves where the new window was left on the character `key`. An
+-- unusable existing value is left alone.
+function Store:SetWindowPosition(key, position)
+    return self:setLayoutPosition(key, "window", position)
+end
+
+-- Where the LFG button was last left on the character `key`'s screen, as
+-- WindowPosition.
+function Store:LfgButtonPosition(key)
+    return self:layoutPosition(key, "lfgButton")
+end
+
+function Store:SetLfgButtonPosition(key, position)
+    return self:setLayoutPosition(key, "lfgButton", position)
+end
+
+-- Whether the LFG button shows on the character `key`: yes unless it was
+-- hidden there. Hidden means "not participating right now", and it stays
+-- hidden across reloads and logins until it's brought back.
+function Store:LfgButtonShown(key)
+    local layout = self:characterLayout(key)
+    return layout == nil or layout.lfgButtonHidden ~= true
+end
+
+-- Shows or hides the LFG button on the character `key`. An unusable
+-- existing layout is left alone.
+function Store:SetLfgButtonShown(key, shown)
+    if type(shown) ~= "boolean" then
+        return false
+    end
+    local layout = self:characterLayout(key, true)
+    if layout == nil then
+        return false
+    end
+    layout.lfgButtonHidden = (not shown) or nil
+    return true
+end
+
 -- The minimap button's saved state (LibDBIcon's angle and hidden flag),
 -- created on first use. Nil when an unusable value is stored there; it is
 -- then left alone.
@@ -469,6 +565,24 @@ function Store:SetChatTagsEnabled(enabled)
         return false
     end
     self.database.chatTags = enabled
+    return true
+end
+
+-- Whether a chat line announces each new Guild LFG Board group the
+-- character could join; off unless turned on. Account-wide.
+function Store:LfgChatLine()
+    return type(self.database) == "table" and self.database.lfgChatLine == true
+end
+
+-- Turns that chat line on or off. An unusable existing value is left alone.
+function Store:SetLfgChatLine(enabled)
+    if type(self.database) ~= "table" or type(enabled) ~= "boolean" then
+        return false
+    end
+    if self.database.lfgChatLine ~= nil and type(self.database.lfgChatLine) ~= "boolean" then
+        return false
+    end
+    self.database.lfgChatLine = enabled
     return true
 end
 
@@ -910,14 +1024,15 @@ function Store:SetGuildMapEnabled(setting, enabled)
     return true
 end
 
--- Whether Do Not Disturb is on for the Group Finder, on every character.
+-- Whether Do Not Disturb is on, on every character. Saved under the old
+-- Group Finder's key, so earlier choices are kept.
 function Store:GroupFinderDnd()
     local state = type(self.database) == "table" and self.database.groupFinder or nil
     return type(state) == "table" and state.dnd == true
 end
 
 -- Turns Do Not Disturb on or off. Refuses when an unusable value is stored
--- for the Group Finder.
+-- under that key.
 function Store:SetGroupFinderDnd(enabled)
     if type(self.database) ~= "table" then
         return false

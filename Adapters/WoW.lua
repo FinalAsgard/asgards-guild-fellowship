@@ -663,6 +663,21 @@ function Client:zoneMapId()
     return mapId
 end
 
+-- The player's zone's level range as the game reports it ({ minLevel,
+-- maxLevel }), or nil on a client without zone level data.
+function Client:GetZoneLevels()
+    local maps = self.environment.C_Map
+    local mapId = self:zoneMapId()
+    if type(maps) ~= "table" or mapId == nil then
+        return nil
+    end
+    local ok, minLevel, maxLevel = callFunction(maps.GetMapLevels, mapId)
+    if not ok or type(minLevel) ~= "number" or type(maxLevel) ~= "number" or minLevel < 1 or minLevel > maxLevel then
+        return nil
+    end
+    return { minLevel = minLevel, maxLevel = maxLevel }
+end
+
 -- The name of the map `mapID`, as the client shows it, or nil.
 function Client:GetMapName(mapID)
     local maps = self.environment.C_Map
@@ -818,6 +833,15 @@ function Client:GetPlayerClass()
         return nil
     end
     return classToken
+end
+
+-- The logged-in character's class as the game names it ("Warrior"), or nil.
+function Client:GetPlayerClassName()
+    local ok, className = callFunction(self.environment.UnitClass, "player")
+    if not ok or type(className) ~= "string" or className == "" then
+        return nil
+    end
+    return className
 end
 
 -- True in a dungeon, raid, scenario, battleground or arena, or a keystone
@@ -1079,12 +1103,13 @@ function Client:IsInGroup()
     return ok and type(count) == "number" and count > 0
 end
 
--- The game's assigned roles, as the Group Finder names them.
+-- The game's assigned roles, as the Guild LFG Board names them.
 Compatibility.ASSIGNED_ROLES = { TANK = "tank", HEALER = "healer", DAMAGER = "dps" }
 Compatibility.PARTY_UNITS = { "player", "party1", "party2", "party3", "party4" }
 
 -- One group unit as a member { key, name, classToken, level, guid,
--- assignedRole, inGuild, isPlayer }, or nil when there's no one there.
+-- assignedRole, inGuild, isPlayer, isLeader, online }, or nil when there's no one
+-- there. inGuild is nil when the client can't say.
 local function readUnit(environment, unit, isPlayer)
     local existsOk, exists = callFunction(environment.UnitExists, unit)
     if not isPlayer and not (existsOk and exists) then
@@ -1112,15 +1137,29 @@ local function readUnit(environment, unit, isPlayer)
     local level = value(environment.UnitLevel)
     local role = value(environment.UnitGroupRolesAssigned)
     local inGuild = value(environment.UnitIsInMyGuild)
+    local leader = value(environment.UnitIsGroupLeader)
+    local connected = value(environment.UnitIsConnected)
+    -- A client without UnitIsInMyGuild can't say: nil, for the guild
+    -- roster to answer.
+    if isPlayer then
+        inGuild = true
+    elseif type(environment.UnitIsInMyGuild) == "function" then
+        inGuild = inGuild ~= nil and inGuild ~= false
+    else
+        inGuild = nil
+    end
     return {
+        isLeader = leader ~= nil and leader ~= false,
         key = type(guid) == "string" and guid ~= "" and guid or name,
         name = name,
         guid = type(guid) == "string" and guid ~= "" and guid or nil,
         classToken = type(classToken) == "string" and classToken or nil,
         level = type(level) == "number" and level > 0 and level or nil,
         assignedRole = Compatibility.ASSIGNED_ROLES[role],
-        inGuild = isPlayer or (inGuild ~= nil and inGuild ~= false),
+        inGuild = inGuild,
         isPlayer = isPlayer,
+        -- Logged in; a client without UnitIsConnected counts everyone.
+        online = isPlayer or connected ~= false,
     }
 end
 
@@ -1139,6 +1178,28 @@ function Client:GetPartyMembers()
         end
     end
     return members
+end
+
+-- The dungeon the player is in, by name as the client gives it, or nil
+-- outside a dungeon (a party instance).
+function Client:GetDungeonInstanceName()
+    local ok, name, instanceType = callFunction(self.environment.GetInstanceInfo)
+    if not ok or instanceType ~= "party" or type(name) ~= "string" or name == "" then
+        return nil
+    end
+    return name
+end
+
+-- Whether the player leads their party or raid. False when the client
+-- can't say.
+function Client:IsGroupLeader()
+    local environment = self.environment
+    local ok, leader = callFunction(environment.UnitIsGroupLeader, "player")
+    if ok then
+        return leader ~= nil and leader ~= false
+    end
+    ok, leader = callFunction(environment.IsPartyLeader)
+    return ok and leader ~= nil and leader ~= false
 end
 
 Compatibility.RAID_SIZE = 40
@@ -1219,7 +1280,7 @@ function Client:ObserveParty(onChange)
     return registered
 end
 
--- The game's Dungeon Finder classifies each entry; the Group Finder lists
+-- The game's Dungeon Finder classifies each entry; the Guild LFG Board lists
 -- only regular dungeons at normal difficulty, not random queues or heroics.
 Compatibility.LFG_TYPE_RANDOM = 6
 Compatibility.LFG_SUBTYPE_DUNGEON = 1
@@ -1277,12 +1338,16 @@ function Client:GetDungeonList()
     local index
     for index = 1, #order do
         local id = order[index]
-        local infoOk, name, typeId, subtypeId, minLevel, maxLevel = callFunction(environment.GetLFGDungeonInfo, id)
+        local infoOk, name, typeId, subtypeId, minLevel, maxLevel, _, _, _, _, _, texture =
+            callFunction(environment.GetLFGDungeonInfo, id)
         if infoOk and type(name) == "string" and name ~= ""
             and typeId ~= Compatibility.LFG_TYPE_RANDOM and subtypeId == Compatibility.LFG_SUBTYPE_DUNGEON
             and type(minLevel) == "number" and type(maxLevel) == "number"
         then
-            table.insert(dungeons, { id = id, name = name, minLevel = minLevel, maxLevel = maxLevel })
+            -- The Dungeon Finder's icon for it, where the client names one.
+            local icon = type(texture) == "string" and texture ~= "" and ("Interface\\LFGFrame\\LFGIcon-" .. texture)
+                or nil
+            table.insert(dungeons, { id = id, name = name, minLevel = minLevel, maxLevel = maxLevel, icon = icon })
         end
     end
     if #dungeons == 0 then

@@ -6,7 +6,7 @@ local _, addon = ...
 -- version doesn't know, or fields of the wrong shape is ignored, so mixed
 -- add-on versions in one guild never break each other. Types are prefixed
 -- "gm-" so they never clash with guild sync's, Guild Greet's, Guild
--- Recruit's or the Group Finder's on the same endpoint. Pure: it never
+-- Recruit's or the Guild LFG Board's on the same endpoint. Pure: it never
 -- touches the game.
 local LocationProtocol = {
     VERSION = 1,

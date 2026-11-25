@@ -49,6 +49,13 @@ a pin in both files together.
 Each library keeps its own license file inside its folder (for example,
 LibSharedMedia-3.0 is LGPL). The add-on's own code is MIT, in `LICENSE`.
 
+### Media
+
+`Media/` is committed and ships as is. The Inter font files in `Media/Fonts`
+are under the SIL Open Font License, in `Media/Fonts/Inter-LICENSE.txt`. The
+textures in `Media/Textures` are drawn by `luajit tools/make-textures.lua`;
+change a shape there and run it again rather than editing the files.
+
 ## Build and inspect locally
 
 ```sh

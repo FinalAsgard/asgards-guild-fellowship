@@ -80,7 +80,7 @@ local function registerProfileTests(profile)
         test.assertEqual(7, #pages)
         test.assertEqual(addon.Identity.displayName, pages[1].name)
         test.assertEqual(nil, pages[1].parent)
-        local expected = { "General", "Chat Tags", "Guild Greet", "Group Finder", "Guild Map", "Recruitment" }
+        local expected = { "General", "Chat Tags", "Guild Greet", "Do Not Disturb", "Guild Map", "Recruitment" }
         local index
         for index = 1, #expected do
             local page = pages[index + 1]

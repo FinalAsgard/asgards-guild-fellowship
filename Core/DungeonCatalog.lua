@@ -1,7 +1,8 @@
 local _, addon = ...
 
--- The dungeons the Group Finder can form a group for, each
--- { id, name, minLevel, maxLevel }. Where the client has a Dungeon Finder
+-- The dungeons a Guild LFG Board listing can be for, each
+-- { id, name, minLevel, maxLevel, icon? (the game's texture, where it has
+-- one) }. Where the client has a Dungeon Finder
 -- (Retail's, or WoW Forever's Classic-era one), the WoW adapter supplies its
 -- dungeons and their live ranges; otherwise, or when it supplies none, the
 -- client's static table below is used. It answers which dungeons fit a
@@ -101,6 +102,9 @@ function DungeonCatalog.Create(entries)
         local entry = entries[index]
         if isDungeon(entry) and byId[entry.id] == nil then
             local copy = dungeon(entry.id, entry.name, entry.minLevel, entry.maxLevel)
+            if type(entry.icon) == "string" and entry.icon ~= "" then
+                copy.icon = entry.icon
+            end
             table.insert(dungeons, copy)
             byId[copy.id] = copy
         end
@@ -123,6 +127,17 @@ function Catalog:Get(id)
     return self.byId[id]
 end
 
+-- The dungeon named `name`, or nil.
+function Catalog:Named(name)
+    local index
+    for index = 1, #self.dungeons do
+        if self.dungeons[index].name == name then
+            return self.dungeons[index]
+        end
+    end
+    return nil
+end
+
 -- Whether `level` is within the range of the dungeon with `id`.
 function Catalog:Fits(id, level)
     local found = self.byId[id]
@@ -143,4 +158,27 @@ function Catalog:Split(level)
         end
     end
     return fitting, others
+end
+
+-- The Guild LFG Board's dungeon search. With no `text`, the dungeons
+-- `level` fits; with text, every dungeon whose name holds it (ignoring
+-- case), those `level` fits first. Returns the fitting and the others, each
+-- lowest range first.
+function Catalog:Search(text, level)
+    local wanted = string.lower(string.gsub(text or "", "^%s*(.-)%s*$", "%1"))
+    local fitting, others = self:Split(level)
+    if wanted == "" then
+        return fitting, {}
+    end
+    local function matching(list)
+        local found = {}
+        local index
+        for index = 1, #list do
+            if string.find(string.lower(list[index].name), wanted, 1, true) ~= nil then
+                table.insert(found, list[index])
+            end
+        end
+        return found
+    end
+    return matching(fitting), matching(others)
 end

@@ -65,16 +65,71 @@ local guildGreet, greetPrompts, guildRecruit, recruitPrompts, officerAuthority, 
 local guildMail, guildMailWindow, mailboxTab, guildWelcome
 local resync
 local guildNoteOverlay
+-- The add-on's new window (see AgfWindow) and the LFG button (see
+-- LfgButton), set up with the settings below.
+local agfWindow, lfgButton
+-- The Guild LFG Board: the player's own listing, the listings heard from
+-- guildmates, and the page drawing them (set up with the settings below).
+local lfgListing, lfgBoard, lfgPage, drawLfgBoard, onLfgMessage, probeLfg
+-- What the LFG button and drawer show (LfgDrawerModel), and the redraw of
+-- the button and the board when anything they show may have changed.
+local lfgDrawer = addon.LfgDrawerModel.Create()
+local lfgRefresh = function() end
+-- When the party changes, what happens to the listing (LfgTrigger), and
+-- how long a leader who handed the lead on keeps it before ending it.
+local lfgTrigger = addon.LfgTrigger.Create()
+local lfgOnParty = function() end
+local lfgOnZone = function() end
+-- The player says yes to listing a party led from outside the guild: they
+-- claim contact (see LfgTrigger).
+local lfgClaim = function() end
+-- A guildmate logged off: their listing is handed on or dropped.
+local lfgOnOffline = function() end
+-- Ask to join: the roles the current character can ask a dungeon listing
+-- for, asking, and the leader's Invite and Decline; and announcing the
+-- player's listing again (when whether it takes asks changed); and the
+-- slot-open path: the party as last seen, the open slot (false, or { role
+-- }), the answer to "fill the empty slot?" and the party's listing.
+-- (One table: the main chunk is near Lua's 200-local limit.)
+local lfgJoin = {
+    askRoles = function() return {} end,
+    ask = function() end,
+    invite = function() end,
+    decline = function() end,
+    announce = function() end,
+    sweep = function() return {} end,
+    before = {},
+    slot = false,
+    fillSlot = function() end,
+    postSlot = function() end,
+    partyListing = function() return nil end,
+    -- /agfdev lfgtest's stand-in "fill the empty slot?" is showing.
+    standInSlot = false,
+    -- A questing listing's leader moved: the zone they're asked to move it
+    -- to (false when not asking), the zones they said No to (a set), looking
+    -- at the zone, and the answer.
+    zoneMove = false,
+    zoneDeclined = {},
+    checkZone = function() end,
+    moveZone = function() end,
+    -- The guildmates in the player's zone, for the button's Show Nearby.
+    nearby = function() return nil end,
+}
+local LFG_HAND_OFF_SECONDS = 5
+-- A guildmate's group-friend tier by character key (set up with the group
+-- friends below).
+local lfgFriendTier = function() return nil end
+-- The key the new UI saves this character's layout under: its GUID, the
+-- same in every guild (or with none), else its full name.
+local function layoutKey()
+    return client:GetPlayerGuid() or client:GetPlayerFullName()
+end
 local locationBoard, locationScheduler, mapPins, onLocationMessage, startLocations, shareLocationNow
 local dropOfflineLocations, dropLocationOf
-local groupFinder, groupSession, syncParty, groupAvailability, joinRequests, joinPrompts, onGroupFinderMessage
-local onSlotsChanged, groupBoard, announceGroup
--- Draws the Group Finder on its tab (set up with the Group Finder below).
-local drawGroupFinder
 -- Draws My Profile on its tab (set up with My Profile below).
 local drawProfile
--- Records the party in the local group history (set up with the Group
--- Finder below).
+-- Records the party in the local group history (set up with the Guild LFG
+-- Board below).
 local recordParty = function() end
 -- Remembers that this install logged in on the current character (set up
 -- with the roster below).
@@ -93,7 +148,6 @@ if clientProfile.supported then
     pages = addon.PageNavigator.Create()
     pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
     pages:Add("profile", "My Profile", addon.MasterFrame.ICONS.profile)
-    pages:Add("group", "Group Finder", addon.MasterFrame.ICONS.group)
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
     pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
@@ -124,7 +178,7 @@ if clientProfile.supported then
         end
     end
     -- Which roles each class can fill here, for role preferences and the
-    -- Group Finder.
+    -- Guild LFG Board.
     local roleCatalog = addon.RoleCatalog.For(clientProfile.id)
     -- The roles a character is willing to play: its own preferences, else
     -- its class's roles. Nil outside a guild or for an unknown character.
@@ -253,11 +307,6 @@ if clientProfile.supported then
                 navigator = pages,
                 timerIcon = addon.RosterViewModel.TimerIcon(client:TextureLoads(addon.RosterViewModel.TIMER_TEXTURE)),
                 drawPages = {
-                    group = function(content)
-                        if drawGroupFinder ~= nil then
-                            drawGroupFinder(content)
-                        end
-                    end,
                     profile = function(content)
                         if drawProfile ~= nil then
                             drawProfile(content)
@@ -503,6 +552,48 @@ if clientProfile.supported then
         end,
         set = function(shown)
             return entryPoints:SetMinimapShown(shown)
+        end,
+    })
+    -- The LFG button, per character. Hidden means "not participating right
+    -- now"; later parts of the Guild LFG Board read it from here.
+    settings:Add("general", {
+        id = "lfgButton",
+        kind = "toggle",
+        label = "Show LFG button",
+        get = function()
+            local store, key = rosterController:Store(), layoutKey()
+            return store == nil or key == nil or store:LfgButtonShown(key)
+        end,
+        set = function(shown)
+            local store, key = rosterController:Store(), layoutKey()
+            if store == nil or key == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetLfgButtonShown(key, shown) then
+                return nil, "the saved layout is unreadable"
+            end
+            return true
+        end,
+    })
+    -- A chat line for each new Guild LFG Board group the character could
+    -- join, account-wide, off unless turned on.
+    settings:Add("general", {
+        id = "lfgChatLine",
+        kind = "toggle",
+        label = "Chat line for new LFG groups for you",
+        get = function()
+            local store = rosterController:Store()
+            return store ~= nil and store:LfgChatLine()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetLfgChatLine(enabled) then
+                return nil, "the saved setting is unreadable"
+            end
+            return true
         end,
     })
     settings:Add("general", {
@@ -858,7 +949,7 @@ if clientProfile.supported then
         end
         return true
     end
-    settings:AddSection("groupFinder", "Group Finder")
+    settings:AddSection("groupFinder", "Do Not Disturb")
     -- Account-wide, so it applies on every character.
     settings:Add("groupFinder", {
         id = "dnd",
@@ -1204,494 +1295,1149 @@ if clientProfile.supported then
             rosterController:Print("Chat tags off.")
         end
     end)
-    -- The Group Finder's own window, made on first use. Its dungeons come
-    -- from the game's Dungeon Finder where the client has one, read each
-    -- time it opens; its place is saved account-wide. The group outlives
-    -- the window and follows the party.
-    groupSession = addon.GroupSession.Create(roleCatalog)
-    -- Group Finder messages the player didn't click to send wait until
-    -- they're out of combat (or an encounter or keystone run), in order.
-    local waitingToSend = {}
-    local function flushWhenFree()
-        if comm:IsBusy() then
-            if not client:After(2, flushWhenFree) then
-                waitingToSend = {}
-            end
-            return
-        end
-        local queued = waitingToSend
-        waitingToSend = {}
-        local index
-        for index = 1, #queued do
-            comm:Broadcast(queued[index], addon.Comm.PRIORITY_NORMAL)
-        end
-    end
-    local function sendWhenFree(message)
-        table.insert(waitingToSend, message)
-        if #waitingToSend == 1 then
-            flushWhenFree()
-        end
-    end
-    -- The groups other organizers are forming, as their add-ons announce
-    -- them, and this player's offers to fill their slots.
-    groupBoard = addon.GroupBoard.Create()
-    local showJoinPrompts
-    -- How many offers the prompts show, so they close when the group ends.
-    local promptedOffers = 0
-    -- This player's group, as the guild hears it: announced whenever it
-    -- changes, every GROUP_RESEND_SECONDS while it lasts, and in answer to
-    -- an ask; its end once, when it ends.
-    local announced, resending
-    local function groupSignature(message)
-        local parts = { message.dn, tostring(message.lo), tostring(message.hi) }
-        local index
-        for index = 1, #message.s do
-            local slot = message.s[index]
-            table.insert(parts, table.concat({ slot.r, slot.n or "", tostring(slot.l or ""), slot.k or "",
-                slot.c or "", slot.w and "w" or "" }, ","))
-        end
-        return table.concat(parts, ";")
-    end
-    announceGroup = function(force)
-        local dungeon = groupSession:IsActive()
-            and addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Get(groupSession:Dungeon()) or nil
-        if dungeon == nil then
-            if announced ~= nil then
-                announced = nil
-                sendWhenFree(addon.GroupFinderProtocol.GroupEnd())
-            end
-            if promptedOffers > 0 and groupSession:Offers()[1] == nil then
-                showJoinPrompts()
-            end
-            return
-        end
-        local message = addon.GroupFinderProtocol.Group(dungeon, groupSession:Summary())
-        local signature = groupSignature(message)
-        if force or signature ~= announced then
-            announced = signature
-            sendWhenFree(message)
-        end
-        if not resending then
-            resending = client:After(addon.GroupFinderProtocol.GROUP_RESEND_SECONDS, function()
-                resending = false
-                announceGroup(true)
-            end)
-        end
-    end
-    syncParty = function()
-        if groupSession:IsActive() then
-            -- Each member's guild roster key, so an invitee who joined is
-            -- recognized. Forever gives party members only their first
-            -- name, so the roster decides, as for the player's own key.
-            local members = client:GetPartyMembers()
-            local index
-            for index = 1, #members do
-                members[index].rosterKey = rosterController:RosterKeyFor(members[index].name, members[index].guid)
-            end
-            -- Leaving the party ends the group: invitees still deciding
-            -- are told it's off.
-            local _, dropped = groupSession:UpdateParty(members, client:IsInGroup())
-            for index = 1, #(dropped or {}) do
-                sendWhenFree(addon.GroupFinderProtocol.Cancel(dropped[index].to, dropped[index].id))
-            end
-            if onSlotsChanged ~= nil then
-                onSlotsChanged()
-            end
-        end
-        announceGroup()
-    end
-    -- Who runs the add-on and is available, asked each time the Group
-    -- Finder opens.
-    groupAvailability = addon.GroupAvailability.Create({
-        send = function(message)
-            return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+    -- The add-on's new window, which features move into one at a time; for
+    -- now it has the Guild LFG Board. Its fonts are shared through
+    -- LibSharedMedia. It's made on first open, and its place is saved per
+    -- character.
+    addon.Theme.Register(client:GetLibrary("LibSharedMedia-3.0"))
+    agfWindow = addon.AgfWindow.Create(client, {
+        frameName = addon.Identity.addonName .. "Window",
+        modules = {
+            { id = "lfg", label = "LFG", title = "Guild LFG Board",
+                settingsRows = {
+                    { id = "lfgButton", label = "Show LFG button" },
+                    { id = "lfgChatLine", label = "Chat line for new groups",
+                        info = "A line in chat for each new group you could join." },
+                },
+                draw = function(content, ui)
+                    drawLfgBoard(content, ui)
+                end,
+                onShow = function()
+                    if lfgPage ~= nil then
+                        lfgPage:Refresh()
+                    end
+                end },
+        },
+        settings = settings,
+        settingsTabs = {
+            {
+                id = "chat",
+                label = "Chat",
+                rows = {
+                    { id = "chatTags", label = "Chat tags",
+                        info = "Tag guild chat speakers with their alias or main." },
+                    { id = "chatTagColor:alias", label = "Alias tag color",
+                        info = "The color of a speaker's alias tag." },
+                    { id = "chatTagColor:main", label = "Main's name tag color",
+                        info = "The color of a speaker's main's name tag." },
+                },
+            },
+        },
+        character = function()
+            local fullName = client:GetPlayerFullName()
+            return {
+                name = fullName and string.match(fullName, "^[^%-]+") or nil,
+                level = client:GetPlayerLevel(),
+                className = client:GetPlayerClassName(),
+                classColor = client:GetClassColor(client:GetPlayerClass()),
+            }
         end,
-        after = function(seconds, callback)
-            return client:After(seconds, callback)
+        version = version,
+        loadPosition = function()
+            local store, key = rosterController:Store(), layoutKey()
+            return store and key and store:WindowPosition(key) or nil
         end,
-        random = function(low, high)
-            return client:Random(low, high)
-        end,
-        selfKey = function()
-            return rosterController:SelfKey()
-        end,
-        keyOf = function(sender)
-            local guild, _, normalizer = rosterController:QuietContext()
-            return guild and normalizer:Key(sender) or nil
-        end,
-        doNotDisturb = function()
-            return settings:Get("dnd") == true
-        end,
-        occupied = function()
-            return client:IsInGroup() or client:IsInInstance()
-        end,
-        busy = function()
-            return comm:IsBusy()
-        end,
-        onChanged = function()
-            if groupFinder ~= nil then
-                groupFinder:Refresh()
+        savePosition = function(position)
+            local store, key = rosterController:Store(), layoutKey()
+            if store ~= nil and key ~= nil then
+                store:SetWindowPosition(key, position)
             end
         end,
     })
-    -- Join requests. Small interactive messages, heard within seconds.
-    local function sendGroupFinder(message)
-        return comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+    local function openBoard()
+        local opened, failure = agfWindow:Open("lfg")
+        if not opened then
+            rosterController:Print("The Guild LFG Board can't open on this client: " .. tostring(failure))
+        end
     end
+    lfgButton = addon.LfgButton.Create(client, {
+        frameName = addon.Identity.addonName .. "LfgButton",
+        shown = function()
+            return settings:Get("lfgButton") == true
+        end,
+        onOpenBoard = openBoard,
+        onDrawerOpened = function()
+            lfgDrawer:Seen()
+            lfgRefresh()
+        end,
+        onStartGroup = function()
+            openBoard()
+            if lfgPage ~= nil and not lfgListing:IsActive() then
+                lfgPage:StartEditing()
+            end
+        end,
+        -- The leader's question: what it's for goes through the board's
+        -- card; Not looking (or no answer) and the snooze ask nothing more.
+        -- Yes to listing a party led from outside the guild makes the
+        -- player its contact first.
+        onListParty = function()
+            if lfgTrigger:Gating() and client:IsInGroup() and not client:IsGroupLeader() then
+                lfgClaim()
+            else
+                lfgTrigger:Answered()
+            end
+            openBoard()
+            if lfgPage ~= nil and not lfgListing:IsActive() then
+                lfgPage:StartEditing()
+            end
+            lfgRefresh()
+        end,
+        onNotLooking = function()
+            lfgTrigger:NotLooking()
+            lfgRefresh()
+        end,
+        onSnooze = function()
+            lfgTrigger:Snooze(client:Timestamp() or 0)
+            lfgRefresh()
+        end,
+        onFillSlot = function(yes)
+            lfgJoin.fillSlot(yes)
+        end,
+        onMoveZone = function(yes)
+            lfgJoin.moveZone(yes)
+        end,
+        nearby = function()
+            return lfgJoin.nearby()
+        end,
+        dungeonIcon = function(name)
+            local dungeon = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
+            return dungeon and dungeon.icon or nil
+        end,
+        askRoles = function(listing)
+            return lfgJoin.askRoles(listing)
+        end,
+        onAsk = function(listing, role)
+            lfgJoin.ask(listing, role)
+        end,
+        onWhisper = function(name)
+            client:OpenWhisper(name)
+        end,
+        onInvite = function(request)
+            lfgJoin.invite(request)
+        end,
+        onDecline = function(request)
+            lfgJoin.decline(request)
+        end,
+        classColor = function(classToken)
+            return client:GetClassColor(classToken)
+        end,
+        onHide = function()
+            local hidden, reason = settings:Set("lfgButton", false)
+            if hidden then
+                rosterController:Print("LFG button hidden. Type " .. addon.Identity.slashCommand ..
+                    " lfg to bring it back.")
+            else
+                rosterController:Print("Can't hide the LFG button: " .. tostring(reason) .. ".")
+            end
+        end,
+        loadPosition = function()
+            local store, key = rosterController:Store(), layoutKey()
+            return store and key and store:LfgButtonPosition(key) or nil
+        end,
+        savePosition = function(position)
+            local store, key = rosterController:Store(), layoutKey()
+            if store ~= nil and key ~= nil then
+                store:SetLfgButtonPosition(key, position)
+            end
+        end,
+    })
+    -- However it's switched (the gear popup, the old window, the menu), the
+    -- button follows.
+    settings:OnChange(function(id)
+        if id == "lfgButton" then
+            lfgButton:Refresh()
+            -- A hidden button takes no asks: guildmates see Whisper.
+            lfgJoin.announce()
+            -- An open slot waits while it's hidden, and is asked about again
+            -- when it's back.
+            if settings:Get("lfgButton") ~= true then
+                lfgTrigger:Pause()
+            elseif lfgTrigger:Resume(client:Timestamp() or 0) then
+                lfgJoin.slotTimer()
+                lfgRefresh()
+                if lfgButton:IsShowing() and not lfgButton:DrawerOpen() then
+                    lfgButton:OpenDrawer()
+                end
+            end
+        end
+        -- Do Not Disturb stops the glow; a shown button needs its count.
+        if id == "lfgButton" or id == "dnd" then
+            lfgRefresh()
+        end
+    end)
+    -- Brings the button back if it was hidden, and opens the board.
+    router:Register("lfg", "show the LFG button and open the Guild LFG Board", function()
+        if settings:Get("lfgButton") ~= true then
+            local shown, reason = settings:Set("lfgButton", true)
+            if not shown then
+                rosterController:Print("Can't show the LFG button: " .. tostring(reason) .. ".")
+            end
+        end
+        openBoard()
+    end)
     local function keyOfSender(sender)
         local guild, _, normalizer = rosterController:QuietContext()
         return guild and normalizer:Key(sender) or nil
     end
-    joinRequests = addon.JoinRequests.Create({
-        partition = function()
-            local guild, partition = rosterController:QuietContext()
-            return guild and partition or nil
-        end,
-        roles = roleCatalog,
-        selfKey = function()
-            return rosterController:SelfKey()
-        end,
-        members = function()
-            local guild, _, normalizer = rosterController:QuietContext()
-            return guild and rosterController:LiveMembers(normalizer) or {}
-        end,
-        available = function()
-            return groupAvailability:IsAvailable()
-        end,
-        display = function(name)
-            local guild, _, normalizer = rosterController:QuietContext()
-            return guild and normalizer:Display(name) or name
-        end,
-    })
-    joinPrompts = addon.JoinPrompts.Create(client)
-    local function refreshGroupFinder()
-        if groupFinder ~= nil then
-            groupFinder:Refresh()
-        end
+    -- The Guild LFG Board. The player's listing is announced when it
+    -- starts or changes and every HEARTBEAT_SECONDS while it lasts; its end
+    -- once. Nothing goes out in combat, a boss encounter or a keystone run:
+    -- the latest announcement waits until they're over.
+    lfgListing = addon.LfgListing.Create()
+    lfgBoard = addon.LfgBoard.Create()
+    -- Ask to join requests to the player's listing.
+    lfgJoin.requests = addon.LfgRequests.Create()
+    local lfgWaiting, lfgFlushing, lfgHeartbeat
+    local function refreshLfg()
+        lfgRefresh()
     end
-    local function bareName(name)
-        return string.match(name or "", "^([^%-]+)") or name
-    end
-    -- The organizer's offers from guildmates to fill a slot, as prompts.
-    local function offerPrompts()
-        local prompts = {}
-        local offers = groupSession:Offers()
-        local index
-        for index = 1, #offers do
-            local offer = offers[index]
-            table.insert(prompts, {
-                id = offer.id,
-                offer = true,
-                heading = tostring(bareName(offer.sender)) .. " offers to fill your "
-                    .. addon.RoleCatalog.LABELS[offer.role] .. " slot",
-                options = {
-                    { label = "Accept " .. offer.character.name .. " (" .. tostring(offer.character.level) .. ")" },
-                },
-            })
-        end
-        return prompts
-    end
-    local function findOffer(id)
-        local offers = groupSession:Offers()
-        local index
-        for index = 1, #offers do
-            if offers[index].id == id then
-                return offers[index]
-            end
-        end
-        return nil
-    end
-    -- The organizer accepts or turns down offer `id`; the guildmate hears
-    -- which.
-    local function answerOffer(id, accepted)
-        local waiting = findOffer(id)
-        if waiting == nil then
-            return
-        end
-        if not accepted then
-            groupSession:DeclineOffer(id)
-            sendGroupFinder(addon.GroupFinderProtocol.OfferAnswer(waiting.from, id, false))
-            return
-        end
-        local guild, partition = rosterController:QuietContext()
-        local character = guild and partition:GetCharacter(waiting.from)
-        local offer, request = groupSession:AcceptOffer(id, client:Timestamp() or 0, rosterController:SelfKey(),
-            character and character.player)
-        if offer ~= nil then
-            sendGroupFinder(addon.GroupFinderProtocol.OfferAnswer(offer.from, id, request ~= nil))
-            if request ~= nil then
-                onSlotsChanged()
-            end
-            refreshGroupFinder()
-        end
-    end
-    -- The invitee answers by clicking, so an answer goes out even while busy.
-    showJoinPrompts = function()
-        local prompts = joinRequests:Pending()
-        local offers = offerPrompts()
-        promptedOffers = #offers
-        local index
-        for index = 1, #offers do
-            table.insert(prompts, offers[index])
-        end
-        joinPrompts:Show(prompts, {
-            -- Accepting one declines the rest: those organizers hear the
-            -- invitee joined another group.
-            accept = function(id, choice)
-                if findOffer(id) ~= nil then
-                    answerOffer(id, true)
-                    showJoinPrompts()
-                    return
-                end
-                local prompt, option, others = joinRequests:Accept(id, choice)
-                if prompt ~= nil then
-                    sendGroupFinder(addon.GroupFinderProtocol.Answer(prompt.organizer, id, option))
-                    if option.key ~= rosterController:SelfKey() then
-                        local organizer = string.match(prompt.sender or "", "^([^%-]+)") or prompt.sender
-                        rosterController:Print("Log over to " .. option.name .. " to join " .. tostring(organizer) ..
-                            "'s group for " .. prompt.dungeon.name .. ". They'll invite you once you're on.")
-                    end
-                    local index
-                    for index = 1, #others do
-                        sendGroupFinder(addon.GroupFinderProtocol.JoinedElsewhere(others[index].organizer,
-                            others[index].id))
-                    end
-                end
-                showJoinPrompts()
-            end,
-            decline = function(id)
-                if findOffer(id) ~= nil then
-                    answerOffer(id, false)
-                    showJoinPrompts()
-                    return
-                end
-                local prompt = joinRequests:Decline(id)
-                if prompt ~= nil then
-                    sendGroupFinder(addon.GroupFinderProtocol.Answer(prompt.organizer, id, nil))
-                end
-                showJoinPrompts()
-            end,
-        })
-    end
-    -- Requests expire on both sides; while any wait, this checks every few
-    -- seconds.
-    local ticking = false
-    -- Offers left unanswered too long, or whose role filled, close; the
-    -- guildmate hears they weren't taken.
-    local function dropOffers(now)
-        local dropped = groupSession:ExpireOffers(now)
-        local index
-        for index = 1, #dropped do
-            sendWhenFree(addon.GroupFinderProtocol.OfferAnswer(dropped[index].from, dropped[index].id, false))
-        end
-        if dropped[1] ~= nil then
-            showJoinPrompts()
-        end
-    end
-    local function tick()
-        local now = client:Timestamp()
-        if now ~= nil then
-            if groupSession:Expire(now)[1] ~= nil then
-                refreshGroupFinder()
-            end
-            if joinRequests:Expire(now)[1] ~= nil then
-                showJoinPrompts()
-            end
-            dropOffers(now)
-        end
-        if groupSession:PendingRequests()[1] == nil and joinRequests:Pending()[1] == nil
-            and groupSession:Offers()[1] == nil
-        then
-            ticking = false
-            return
-        end
-        if not client:After(5, tick) then
-            ticking = false
-        end
-    end
-    local function startTicking()
-        if not ticking then
-            ticking = client:After(5, tick)
-        end
-    end
-    local function sendRequest(entry)
-        local dungeon = groupFinder ~= nil and groupFinder:Picked() or nil
-        local now = client:Timestamp()
-        if dungeon == nil or now == nil then
+    local function flushLfg()
+        lfgFlushing = false
+        if lfgWaiting == nil then
             return
         end
         if comm:IsBusy() then
-            rosterController:Print("Requests wait until you're out of combat.")
-            return
-        end
-        -- Nothing open, nothing to ask for: no request is made.
-        local open = groupSession:OpenRoleSet()
-        if open[1] == nil then
-            return
-        end
-        local request = groupSession:Request({ playerId = entry.id, key = entry.current.key, label = entry.label }, now,
-            rosterController:SelfKey())
-        if request == nil then
-            return
-        end
-        sendGroupFinder(addon.GroupFinderProtocol.Request(request.to, request.id, dungeon, open))
-        startTicking()
-    end
-    -- After slots filled or freed up: invitees with open requests hear the
-    -- roles still open, or that nothing is left; offers for a role that
-    -- filled close; the guild hears the group as it is now.
-    onSlotsChanged = function()
-        local updates, withdrawals = groupSession:SlotChanges()
-        local index
-        for index = 1, #updates do
-            sendWhenFree(addon.GroupFinderProtocol.Slots(updates[index].to, updates[index].id, updates[index].roles))
-        end
-        for index = 1, #withdrawals do
-            sendWhenFree(addon.GroupFinderProtocol.Withdraw(withdrawals[index].to, withdrawals[index].id))
-        end
-        local now = client:Timestamp()
-        if now ~= nil then
-            dropOffers(now)
-        end
-        if updates[1] ~= nil or withdrawals[1] ~= nil then
-            refreshGroupFinder()
-        end
-        announceGroup()
-    end
-    local function cancelRequest(id)
-        local request = groupSession:Cancel(id)
-        if request ~= nil then
-            sendGroupFinder(addon.GroupFinderProtocol.Cancel(request.to, id))
-        end
-    end
-    -- Every Group Finder message: availability asks and replies, groups
-    -- being formed, and targeted messages, which only their recipient
-    -- handles.
-    onGroupFinderMessage = function(message, sender)
-        local protocol = addon.GroupFinderProtocol
-        if message.t == protocol.TYPE_ASK or message.t == protocol.TYPE_AVAILABLE then
-            groupAvailability:OnMessage(message, sender)
-            -- Someone opened the Group Finder: they hear this player's group.
-            if message.t == protocol.TYPE_ASK and groupSession:IsActive() then
-                announceGroup(true)
+            lfgFlushing = client:After(2, flushLfg)
+            if not lfgFlushing then
+                lfgWaiting = nil
             end
             return
+        end
+        local message = lfgWaiting
+        lfgWaiting = nil
+        comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+    end
+    local function sendLfg(message)
+        lfgWaiting = message
+        if not lfgFlushing then
+            flushLfg()
+        end
+    end
+    -- The party as the listing announces it, the leader first: the player
+    -- alone, or their party (the whole raid in a raid). Each member's role
+    -- is the game's (set in its party menu), else the first their class
+    -- can play (the player's own: the first they're willing to).
+    local function lfgMembers()
+        local classToken = client:GetPlayerClass()
+        local preferred = (rolesOf(rosterController:SelfKey()) or {})[1]
+        local members = {}
+        if client:IsInGroup() then
+            local group = client:IsInRaid() and client:GetGroupMembers() or client:GetPartyMembers()
+            local leaderIndex
+            local index
+            for index = 1, #(group or {}) do
+                local member = group[index]
+                local inGuild = member.inGuild
+                if inGuild == nil then
+                    -- The client can't say: the guild roster does.
+                    local guildKey = rosterController:RosterKeyFor(member.name, member.guid)
+                    local _, partition = rosterController:QuietContext()
+                    inGuild = guildKey ~= nil and partition ~= nil and partition:IsInGuild(guildKey)
+                end
+                table.insert(members, {
+                    key = member.key,
+                    name = string.match(member.name, "^[^%-]+") or member.name,
+                    fullName = member.name,
+                    guid = member.guid,
+                    classToken = member.classToken,
+                    level = member.level,
+                    assignedRole = member.assignedRole,
+                    role = member.isPlayer and preferred or nil,
+                    isPlayer = member.isPlayer,
+                    isLeader = member.isLeader,
+                    inGuild = inGuild,
+                    online = member.online,
+                })
+                if member.isLeader then
+                    leaderIndex = #members
+                end
+            end
+            if leaderIndex ~= nil and leaderIndex > 1 then
+                table.insert(members, 1, table.remove(members, leaderIndex))
+            end
+        end
+        if members[1] == nil then
+            local fullName = client:GetPlayerFullName()
+            members[1] = {
+                key = "player",
+                name = fullName and string.match(fullName, "^[^%-]+") or fullName or "?",
+                classToken = classToken,
+                level = client:GetPlayerLevel(),
+                role = preferred,
+                isPlayer = true,
+            }
+        end
+        return addon.LfgListing.FillRoles(members, function(token)
+            return roleCatalog:RolesFor(token)
+        end)
+    end
+    local function announceListing()
+        local fields = lfgListing:Announcement(lfgMembers(), settings:Get("lfgButton") == true)
+        if fields ~= nil then
+            sendLfg(addon.LfgProtocol.Listing(fields))
+        end
+    end
+    -- Ends the listing; `left` when the player left the party, so a
+    -- guildmate still in it can take it over.
+    local function endListing(left)
+        if lfgListing:IsActive() then
+            lfgListing:End()
+            sendLfg(addon.LfgProtocol.End(left))
+        end
+        lfgJoin.requests:Clear()
+        refreshLfg()
+    end
+    -- Whether the player speaks for their listing: solo, leading the
+    -- party, or its contact.
+    local function lfgLister()
+        if not client:IsInGroup() or client:IsGroupLeader() then
+            return true
         end
         local selfKey = rosterController:SelfKey()
-        local senderKey = keyOfSender(sender)
-        if message.t == protocol.TYPE_GROUP or message.t == protocol.TYPE_GROUP_END then
-            if protocol.IsValid(message) and senderKey ~= nil and senderKey ~= selfKey then
-                if message.t == protocol.TYPE_GROUP then
-                    groupBoard:OnGroup(message, senderKey, sender, client:Timestamp() or 0)
-                else
-                    groupBoard:OnEnd(senderKey)
-                end
-                refreshGroupFinder()
-            end
+        return selfKey ~= nil and lfgTrigger:Contact() == selfKey
+    end
+    -- A listing on the board by its lister's key, or the one they had when
+    -- they left the party or logged off.
+    local function lfgListingOf(key, now)
+        return lfgBoard:Get(key, now) or lfgBoard:Ended(key)
+    end
+    -- The party's members' roster keys.
+    local function lfgKeyOf(member)
+        return rosterController:RosterKeyFor(member.fullName or member.name, member.guid)
+    end
+    -- The player's party's listing on the board, by its contact or leader,
+    -- when someone else lists it.
+    lfgJoin.partyListing = function()
+        local key = lfgTrigger:Contact()
+        if key == nil then
+            local leader = lfgMembers()[1]
+            key = leader and leader.isLeader and lfgKeyOf(leader)
+        end
+        return key and lfgBoard:Get(key, client:Timestamp()) or nil
+    end
+    local function lfgTick()
+        lfgHeartbeat = false
+        if not lfgListing:IsActive() then
             return
         end
-        if not protocol.IsValid(message) or selfKey == nil or message.to ~= selfKey
-            or senderKey == nil or senderKey == selfKey
+        if lfgListing:Expired(client:Timestamp() or 0, #lfgMembers()) then
+            endListing()
+            rosterController:Print("Your Guild LFG Board listing ended: nobody joined in 30 minutes.")
+            return
+        end
+        announceListing()
+        lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
+    end
+    -- The player's zone's level range (ZoneLevels): the game's, else the
+    -- party's levels ± ZoneLevels.MARGIN.
+    local function lfgZoneLevels()
+        local levels = {}
+        local members = lfgMembers()
+        local index
+        -- Only the levels known, with no gaps.
+        for index = 1, #members do
+            if members[index].level ~= nil then
+                table.insert(levels, members[index].level)
+            end
+        end
+        return addon.ZoneLevels.For(client:GetZoneLevels(), levels)
+    end
+    -- Who the board is sorted for: the logged-in character ({ level, roles
+    -- }), and its player's other characters in the guild as alts ({ name,
+    -- level, roles }), highest level first.
+    local function lfgCharacters()
+        local selfKey = rosterController:SelfKey()
+        local current = {
+            level = client:GetPlayerLevel(),
+            roles = rolesOf(selfKey) or roleCatalog:RolesFor(client:GetPlayerClass()),
+        }
+        local guild, partition, normalizer = rosterController:QuietContext()
+        local own = guild and selfKey and partition:GetCharacter(selfKey)
+        if own == nil then
+            return current, {}
+        end
+        local live = rosterController:LiveMembers(normalizer)
+        local alts = {}
+        local keys = partition:CharactersOf(own.player)
+        local index
+        for index = 1, #keys do
+            local key = keys[index]
+            local character = partition:GetCharacter(key)
+            if key ~= selfKey and character ~= nil and partition:IsInGuild(key) then
+                table.insert(alts, {
+                    name = normalizer:Display((live[key] and live[key].name) or character.name or key) or key,
+                    level = (live[key] and live[key].level) or character.level,
+                    roles = roleCatalog:PreferencesOf(partition, key) or {},
+                })
+            end
+        end
+        table.sort(alts, function(a, b)
+            if (a.level or 0) ~= (b.level or 0) then
+                return (a.level or 0) > (b.level or 0)
+            end
+            return a.name < b.name
+        end)
+        return current, alts
+    end
+    -- Guildmates online in the player's zone, for the Nearby card: each
+    -- character there, whispered by their full name.
+    local function lfgNearby()
+        local zone = client:GetZone()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if zone == nil or guild == nil then
+            return nil
+        end
+        local entries = addon.LfgNearby.List({
+            partition = partition,
+            members = rosterController:LiveMembers(normalizer),
+            display = function(name)
+                return normalizer:Display(name)
+            end,
+        }, zone.name, rosterController:SelfKey())
+        local people = {}
+        local index, position
+        for index = 1, #entries do
+            for position = 1, #entries[index].characters do
+                local character = entries[index].characters[position]
+                local saved = partition:GetCharacter(character.key)
+                table.insert(people, { name = character.name, whisper = saved and saved.name or character.name,
+                    level = character.level, classToken = character.class })
+            end
+        end
+        return { zone = zone.name, people = people }
+    end
+    lfgJoin.nearby = lfgNearby
+    -- /agf probe lfg: where questing's zone levels come from, and what's on
+    -- the board for this character.
+    probeLfg = function()
+        rosterController:Print("Guild LFG Board probe:")
+        local zone = client:GetZone()
+        local levels = lfgZoneLevels()
+        local zoneLine = "  Zone levels" .. (zone and (" in " .. zone.name) or "") .. ": "
+        if levels == nil then
+            client:Print(zoneLine .. "unknown.")
+        elseif levels.source == addon.ZoneLevels.GAME then
+            client:Print(zoneLine .. levels.minLevel .. "-" .. levels.maxLevel .. ", from the game.")
+        else
+            client:Print(zoneLine .. levels.minLevel .. "-" .. levels.maxLevel .. ", the fallback (your party's" ..
+                " levels, " .. addon.ZoneLevels.MARGIN .. " either way); the game gives none here.")
+        end
+        local own = lfgListing:Announcement(lfgMembers())
+        client:Print("  Your listing: " .. (own and addon.LfgListing.Label(own.k, own.p) or "none") .. ".")
+        local current, alts = lfgCharacters()
+        local groups = lfgBoard:Groups(client:Timestamp(), current, alts)
+        client:Print("  On the board: " .. #groups.relevant .. " relevant, " .. #groups.alts .. " for your alts, " ..
+            #groups.other .. " other.")
+        local function describe(where, listing, alt)
+            local parts = { where, addon.LfgListing.Label(listing.kind, listing.purpose), "by " .. listing.leader,
+                listing.size .. "/" .. listing.maxSize }
+            if listing.minLevel ~= nil then
+                table.insert(parts, "levels " .. listing.minLevel .. "-" .. listing.maxLevel)
+            end
+            if alt ~= nil then
+                table.insert(parts, "fits " .. alt.name)
+            end
+            client:Print("    " .. table.concat(parts, ", "))
+        end
+        local index
+        for index = 1, #groups.relevant do
+            describe("Relevant", groups.relevant[index])
+        end
+        for index = 1, #groups.alts do
+            describe("Alts", groups.alts[index].listing, groups.alts[index].alt)
+        end
+        for index = 1, #groups.other do
+            describe("Other", groups.other[index])
+        end
+    end
+    -- The player's party for the drawer, or nil when they're not in one:
+    -- its listing when they lead one, else just its size.
+    local function lfgParty()
+        if not client:IsInGroup() then
+            return nil
+        end
+        local raid = client:IsInRaid() == true
+        -- A raid's every subgroup, not just the player's own.
+        local size = #((raid and client:GetGroupMembers() or client:GetPartyMembers()) or {})
+        local party = { kind = raid and "raid" or "other", size = math.max(size, 1),
+            maxSize = raid and addon.LfgListing.RAID_SIZE or addon.LfgListing.PARTY_SIZE }
+        local fields = lfgListing:IsActive() and lfgListing:Announcement(lfgMembers()) or nil
+        if fields ~= nil then
+            party.kind, party.label, party.note = fields.k, addon.LfgListing.Label(fields.k, fields.p), fields.no
+            party.openRoles = fields.r
+            -- The roster as announced, for the drawer's role tiles.
+            party.members = {}
+            local index
+            for index = 1, #fields.mb do
+                party.members[index] = { role = fields.mb[index].r }
+            end
+        end
+        -- Fill the empty slot? What it would be posted as: the party's
+        -- purpose (from the board when a guildmate lists it) and, for a
+        -- dungeon, the open role.
+        if lfgTrigger:SlotOpen() then
+            local listing = fields == nil and lfgJoin.partyListing() or nil
+            if listing ~= nil then
+                party.kind, party.label = listing.kind, addon.LfgListing.Label(listing.kind, listing.purpose)
+            end
+            party.slotRole = party.kind == "dungeon" and lfgJoin.slot and lfgJoin.slot.role or nil
+        end
+        return party
+    end
+    -- Redraws the button (count, glow, drawer) and the board. New groups for
+    -- the player get a chat line when they asked for one.
+    lfgRefresh = function()
+        if lfgPage ~= nil then
+            lfgPage:Refresh()
+        end
+        -- With nothing heard, there's nothing to sort (and the guild's saved
+        -- data isn't touched).
+        local groups = { relevant = {}, alts = {}, other = {} }
+        if lfgBoard:Listings(client:Timestamp())[1] ~= nil then
+            local current, alts = lfgCharacters()
+            groups = lfgBoard:Groups(client:Timestamp(), current, alts)
+        end
+        local view = lfgDrawer:Update({
+            groups = groups,
+            party = lfgJoin.standInSlot and addon.LfgStandIns.Party() or lfgParty(),
+            combat = comm:IsBusy(),
+            instance = client:IsInInstance(),
+            dnd = settings:Get("dnd") == true,
+            ask = lfgTrigger:Asking(),
+            gate = lfgTrigger:Gating(),
+            slotOpen = lfgTrigger:SlotOpen() or lfgJoin.standInSlot,
+            zoneMove = lfgJoin.zoneMove ~= false and lfgListing:IsActive()
+                and lfgListing:Purpose().kind == "questing" and lfgJoin.zoneMove or nil,
+            requests = lfgJoin.sweep(),
+            requestOf = function(id)
+                return lfgBoard:Request(id, client:Timestamp())
+            end,
+        })
+        if lfgButton ~= nil then
+            lfgButton:Update(view)
+        end
+        if settings:Get("lfgChatLine") == true then
+            local index
+            for index = 1, #view.fresh do
+                local listing = view.fresh[index]
+                rosterController:Print("New group for you on the Guild LFG Board: " ..
+                    addon.LfgListing.Label(listing.kind, listing.purpose) .. " (" .. listing.leader .. "). Type " ..
+                    addon.Identity.slashCommand .. " lfg to see it.")
+            end
+        end
+    end
+    -- Start a group (or Edit) saved: the listing starts or changes, and the
+    -- guild hears it now. Questing is in the zone's level range.
+    local function saveListing(purpose, note)
+        if type(purpose) == "table" and purpose.kind == "questing" then
+            local levels = lfgZoneLevels()
+            purpose.minLevel = levels and levels.minLevel or nil
+            purpose.maxLevel = levels and levels.maxLevel or nil
+        end
+        -- Only the party's leader lists it, or its contact when the leader
+        -- isn't in the guild.
+        local inGroup = client:IsInGroup()
+        if not lfgLister() then
+            return false, "only your party's leader can list it"
+        end
+        if type(purpose) == "table" and purpose.kind ~= "raid" and #lfgMembers() > addon.LfgListing.PARTY_SIZE then
+            return false, "a group of more than five can only be listed as a raid"
+        end
+        local saved, reason
+        if lfgListing:IsActive() then
+            saved, reason = lfgListing:Update(purpose, note)
+        else
+            saved, reason = lfgListing:Start(purpose, note, client:Timestamp() or 0, inGroup)
+        end
+        if not saved then
+            return false, reason
+        end
+        -- The party as last seen keeps its members, with the roles as
+        -- they're listed now (the game's may have changed since), for
+        -- whoever leaves next.
+        local listed = {}
+        local members = lfgMembers()
+        local index
+        for index = 1, #members do
+            listed[members[index].key] = members[index].role
+        end
+        for index = 1, #(lfgJoin.before or {}) do
+            local member = lfgJoin.before[index]
+            if listed[member.key] ~= nil then
+                member.role = listed[member.key]
+            end
+        end
+        lfgTrigger:Answered()
+        announceListing()
+        if not lfgHeartbeat then
+            lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
+        end
+        lfgRefresh()
+        return true
+    end
+    -- A board listing's purpose, as the listing keeps it, for taking over
+    -- the party's listing from the leader before.
+    local function purposeOf(listing)
+        if listing.kind == "dungeon" then
+            return { kind = "dungeon", dungeon = {
+                name = listing.purpose, minLevel = listing.minLevel, maxLevel = listing.maxLevel,
+            } }
+        elseif listing.kind == "questing" then
+            return { kind = "questing", zone = listing.purpose, minLevel = listing.minLevel,
+                maxLevel = listing.maxLevel }
+        elseif listing.kind == "other" then
+            return { kind = "other", text = listing.purpose }
+        end
+        return { kind = "raid" }
+    end
+    -- The dungeon the player is in, from the dungeon list, or nil.
+    local function lfgCurrentDungeon()
+        local name = client:GetDungeonInstanceName()
+        local dungeon = name and addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
+        if dungeon == nil then
+            return nil
+        end
+        return { id = dungeon.id, name = dungeon.name, minLevel = dungeon.minLevel, maxLevel = dungeon.maxLevel }
+    end
+    -- A best guess at the party's purpose: its dungeon, else questing here.
+    local function lfgGuess()
+        local zone = client:GetZone()
+        return addon.LfgListing.Guess(lfgCurrentDungeon(), zone and zone.name, lfgZoneLevels())
+    end
+    -- Entering a dungeon makes a guessed purpose that dungeon.
+    lfgOnZone = function()
+        if lfgListing:IsActive() and lfgListing:EnteredDungeon(lfgCurrentDungeon()) then
+            announceListing()
+        end
+        lfgJoin.checkZone()
+        lfgRefresh()
+    end
+    -- The leader of a questing listing moved to another zone, outside an
+    -- instance: the drawer asks whether to move the listing there. A zone
+    -- they said No to isn't asked about again; back in the listing's zone,
+    -- nothing's asked. With the button hidden, nothing is.
+    lfgJoin.checkZone = function()
+        local purpose = lfgListing:IsActive() and lfgListing:Purpose() or nil
+        local zone = client:GetZone()
+        local name = zone and zone.name or nil
+        if purpose == nil or purpose.kind ~= "questing" or not lfgLister() or client:IsInInstance()
+            or name == nil or name == purpose.zone or lfgJoin.zoneDeclined[name]
+            or settings:Get("lfgButton") ~= true
+        then
+            lfgJoin.zoneMove = false
+            return
+        end
+        if lfgJoin.zoneMove ~= name then
+            lfgJoin.zoneMove = name
+            if lfgButton ~= nil and lfgButton:IsShowing() and not lfgButton:DrawerOpen() then
+                lfgRefresh()
+                lfgButton:OpenDrawer()
+            end
+        end
+    end
+    -- Yes moves the questing listing to the zone, with its levels, and the
+    -- guild hears it; No leaves it where it is.
+    lfgJoin.moveZone = function(yes)
+        local zone = lfgJoin.zoneMove
+        lfgJoin.zoneMove = false
+        if zone and yes then
+            local saved, reason = saveListing({ kind = "questing", zone = zone }, lfgListing:Note())
+            if not saved then
+                rosterController:Print("Couldn't move your listing: " .. tostring(reason) .. ".")
+            end
+        elseif zone then
+            lfgJoin.zoneDeclined[zone] = true
+        end
+        lfgRefresh()
+    end
+    -- The party changed: LfgTrigger says what that means for the listing
+    -- (ask, take over, hand off, end, become a raid's), and a live listing
+    -- is announced with the party as it is now.
+    lfgOnParty = function()
+        local now = client:Timestamp() or 0
+        local inGroup = client:IsInGroup()
+        local leaderKey
+        local size, guildmates, outsiders = 0, 0, 0
+        local guildLed = true
+        local selfKey = rosterController:SelfKey()
+        local present = {}
+        if inGroup then
+            local members = lfgMembers()
+            if members[1] ~= nil and members[1].isLeader then
+                leaderKey = lfgKeyOf(members[1])
+                guildLed = members[1].isPlayer == true
+                    or (members[1].inGuild == true and members[1].online ~= false)
+            end
+            size = #members
+            local index
+            for index = 1, #members do
+                local member = members[index]
+                if not member.isPlayer and member.inGuild then
+                    guildmates = guildmates + 1
+                elseif not member.isPlayer then
+                    outsiders = outsiders + 1
+                end
+                if member.isPlayer then
+                    table.insert(present, selfKey)
+                elseif member.inGuild and member.online ~= false then
+                    table.insert(present, lfgKeyOf(member))
+                end
+            end
+            table.sort(present, function(a, b)
+                return tostring(a) < tostring(b)
+            end)
+        end
+        local actions = lfgTrigger:Observe({
+            inGroup = inGroup,
+            isLeader = inGroup and client:IsGroupLeader(),
+            isRaid = inGroup and client:IsInRaid(),
+            leaderKey = leaderKey,
+            listed = lfgListing:IsActive(),
+            listingOf = function(key)
+                return lfgListingOf(key, now)
+            end,
+            size = size,
+            guildmates = guildmates,
+            outsiders = outsiders,
+            guildLed = guildLed,
+            selfKey = selfKey,
+            present = present,
+            hidden = settings:Get("lfgButton") ~= true,
+        }, now)
+        local index
+        for index = 1, #actions do
+            local action = actions[index]
+            if action.action == addon.LfgTrigger.ASK or action.action == addon.LfgTrigger.GATE then
+                if lfgButton ~= nil and lfgButton:IsShowing() then
+                    lfgRefresh()
+                    lfgButton:OpenDrawer()
+                end
+            elseif action.action == addon.LfgTrigger.LIST_QUIETLY then
+                local purpose = lfgGuess()
+                if purpose ~= nil then
+                    lfgListing:Start(purpose, nil, now, true, true)
+                end
+            elseif action.action == addon.LfgTrigger.REMIND then
+                if lfgListing:IsActive() then
+                    local fields = lfgListing:Announcement(lfgMembers())
+                    rosterController:Print("Your party is listed on the Guild LFG Board as " ..
+                        addon.LfgListing.Label(fields.k, fields.p) .. ". Type " .. addon.Identity.slashCommand ..
+                        " lfg to take part.")
+                end
+            elseif action.action == addon.LfgTrigger.TAKE_OVER then
+                lfgListing:Start(purposeOf(action.listing), action.listing.note, now, true)
+            elseif action.action == addon.LfgTrigger.RAID then
+                lfgListing:Update({ kind = "raid" }, lfgListing:Note())
+            elseif action.action == addon.LfgTrigger.CLAIM then
+                lfgClaim()
+            elseif action.action == addon.LfgTrigger.END then
+                endListing(not inGroup)
+            elseif action.action == addon.LfgTrigger.SLOT_OPEN or action.action == addon.LfgTrigger.SLOT_REMIND then
+                -- The listing stays as the party was until the slot's
+                -- posted: by Yes, or with no answer after SLOT_SECONDS.
+                lfgJoin.slot = { role = lfgJoin.leftRole(lfgJoin.before, lfgMembers()) }
+                lfgListing:Hold(lfgJoin.before)
+                if action.action == addon.LfgTrigger.SLOT_REMIND then
+                    rosterController:Print("Someone left your party. Type " .. addon.Identity.slashCommand ..
+                        " lfg to fill the empty slot on the Guild LFG Board.")
+                else
+                    lfgJoin.slotTimer()
+                end
+            elseif action.action == addon.LfgTrigger.HAND_OFF then
+                -- The new leader takes it over from the board, so it ends a
+                -- little later: after the latest hand-off only.
+                lfgJoin.handOffs = (lfgJoin.handOffs or 0) + 1
+                local handOff = lfgJoin.handOffs
+                client:After(LFG_HAND_OFF_SECONDS, function()
+                    if handOff == lfgJoin.handOffs and lfgListing:IsActive() and not lfgLister() then
+                        endListing()
+                    end
+                end)
+            end
+        end
+        if lfgListing:IsActive() and lfgLister() then
+            -- Grown past five (a raid that filled up): only a raid listing
+            -- can say so.
+            local purpose = lfgListing:Purpose()
+            if purpose.kind ~= "raid" and size > addon.LfgListing.PARTY_SIZE then
+                lfgListing:Update({ kind = "raid" }, lfgListing:Note())
+            end
+            announceListing()
+            if not lfgHeartbeat then
+                lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
+            end
+        end
+        lfgJoin.before = inGroup and lfgMembers() or {}
+        lfgRefresh()
+    end
+    -- The role of whoever left (in `before`, not in `after`): the one the
+    -- party's slotting gave them (the game's, the leader's, or their
+    -- class's); else DPS, the best guess.
+    lfgJoin.leftRole = function(before, after)
+        local still = {}
+        local index
+        for index = 1, #after do
+            still[after[index].key] = true
+        end
+        for index = 1, #before do
+            local member = before[index]
+            if not still[member.key] then
+                return member.role or "dps"
+            end
+        end
+        return "dps"
+    end
+    -- An open slot unanswered after SLOT_SECONDS is posted.
+    lfgJoin.slotTimer = function()
+        client:After(addon.LfgTrigger.SLOT_SECONDS + 1, function()
+            if lfgTrigger:SlotDue(client:Timestamp() or 0) then
+                lfgJoin.postSlot()
+            end
+            lfgRefresh()
+        end)
+    end
+    -- The open slot goes on the board: the lister announces the party as it
+    -- is now. Never with the button hidden.
+    lfgJoin.postSlot = function()
+        if lfgListing:IsActive() and lfgLister() and settings:Get("lfgButton") == true then
+            lfgListing:Post(lfgJoin.slot and lfgJoin.slot.role or nil)
+            announceListing()
+        end
+    end
+    -- The player answered "fill the empty slot?": the party's other
+    -- guildmates hear it (and stop being asked); Yes posts it.
+    lfgJoin.fillSlot = function(yes)
+        -- The stand-in's answer goes nowhere.
+        if lfgJoin.standInSlot then
+            lfgJoin.standInSlot = false
+            rosterController:Print("Stand-in slot answered " .. (yes and "Yes" or "No") .. "; nothing was sent.")
+        elseif lfgTrigger:SlotAnswered(yes) then
+            comm:Broadcast(addon.LfgProtocol.Slot(yes), addon.Comm.PRIORITY_NORMAL)
+            if yes then
+                lfgJoin.postSlot()
+            end
+        end
+        lfgRefresh()
+    end
+    -- The player claims contact for their party, led from outside the
+    -- guild, and tells its guildmates (they stop being asked).
+    lfgClaim = function()
+        lfgTrigger:Claim(rosterController:SelfKey())
+        local leader = lfgMembers()[1]
+        if client:IsInGroup() and leader ~= nil and leader.isPlayer == false then
+            comm:Broadcast(addon.LfgProtocol.Contact(leader.fullName or leader.name), addon.Comm.PRIORITY_NORMAL)
+        end
+        lfgRefresh()
+    end
+    -- A guildmate logged off: their listing comes off the board, kept so a
+    -- guildmate in their party can take it over, and the party is looked
+    -- at again.
+    lfgOnOffline = function(name)
+        local key = keyOfSender(name)
+        if key ~= nil and lfgBoard:Get(key, client:Timestamp()) ~= nil then
+            lfgBoard:OnEnd(key, true)
+        end
+        if client:IsInGroup() then
+            lfgOnParty()
+        else
+            lfgRefresh()
+        end
+    end
+    lfgJoin.announce = function()
+        if lfgListing:IsActive() and lfgLister() then
+            announceListing()
+        end
+    end
+    -- Of a dungeon listing's open roles, those the current character plays.
+    lfgJoin.askRoles = function(listing)
+        local current = lfgCharacters()
+        local playable = {}
+        local index
+        for index = 1, #(current.roles or {}) do
+            playable[current.roles[index]] = true
+        end
+        local roles = {}
+        for index = 1, #(listing.openRoles or {}) do
+            if playable[listing.openRoles[index]] then
+                table.insert(roles, listing.openRoles[index])
+            end
+        end
+        return roles
+    end
+    -- Asks to join `listing` as the current character, whispered to its
+    -- leader.
+    lfgJoin.ask = function(listing, role)
+        -- A stand-in's leader isn't real: the request stays pending here.
+        if addon.LfgStandIns.IsStandIn(listing.id) then
+            lfgBoard:Ask(listing.id, role, client:Timestamp() or 0)
+            rosterController:Print("Asked the stand-in " .. listing.leader .. "; nothing was sent.")
+            lfgRefresh()
+            return
+        end
+        local message = addon.LfgProtocol.Ask(role, client:GetPlayerLevel(), client:GetPlayerClass())
+        if comm:Whisper(message, listing.sender, true) then
+            lfgBoard:Ask(listing.id, role, client:Timestamp() or 0)
+        else
+            rosterController:Print("Couldn't ask to join " .. listing.leader .. "'s group. Try whispering them.")
+        end
+        lfgRefresh()
+    end
+    -- The leader's answers: Invite sends the game's party invite (the
+    -- add-on never invites by itself) and tells the asker; Decline tells
+    -- them no.
+    lfgJoin.answer = function(request, answer)
+        if type(request) ~= "table" or lfgJoin.requests:Remove(request.key) == nil then
+            return
+        end
+        if request.standIn then
+            rosterController:Print("Stand-in request " .. answer .. "; nothing was sent.")
+        else
+            comm:Whisper(addon.LfgProtocol.Answer(answer), request.sender, true)
+        end
+        lfgRefresh()
+    end
+    lfgJoin.invite = function(request)
+        if type(request) == "table" and not request.standIn and lfgJoin.requests:Get(request.key) ~= nil
+            and not client:InviteToParty(request.sender)
+        then
+            -- The request stays, to try again.
+            rosterController:Print("Couldn't invite " .. tostring(request.name) .. ". Try inviting them yourself.")
+            return
+        end
+        lfgJoin.answer(request, "invited")
+    end
+    lfgJoin.decline = function(request)
+        lfgJoin.answer(request, "declined")
+    end
+    -- Tidies the requests and returns those left: ones unanswered for two
+    -- minutes are expired, and once a role (or the whole party) fills, the
+    -- ones it no longer has room for are declined with "role filled".
+    lfgJoin.sweep = function()
+        local requests = lfgJoin.requests
+        if requests:List()[1] == nil then
+            return {}
+        end
+        local function tell(dropped, answer)
+            local index
+            for index = 1, #dropped do
+                if not dropped[index].standIn then
+                    comm:Whisper(addon.LfgProtocol.Answer(answer), dropped[index].sender, true)
+                end
+            end
+        end
+        tell(requests:Expire(client:Timestamp()), "expired")
+        local fields = lfgListing:Announcement(lfgMembers())
+        if fields ~= nil then
+            tell(requests:Filled(fields.k == "dungeon" and fields.r or nil, fields.s >= fields.x), "roleFilled")
+        end
+        return requests:List()
+    end
+    -- Dev build only: every look of the board without five people online.
+    -- Stand-in listings go on this player's board alone, and a stand-in slot
+    -- question and Ask to join request show on the button; nothing about
+    -- them is ever sent.
+    if addon.Identity.isDev then
+        router:Register("lfgtest", "fill the Guild LFG Board with stand-in listings, and show a stand-in" ..
+            " slot question and Ask to join request; nothing is sent", function()
+            local now = client:Timestamp() or 0
+            local current, alts = lfgCharacters()
+            local listings, why = addon.LfgStandIns.Listings({ level = current.level, alt = alts[1], alts = alts,
+                dungeons = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()) })
+            local index
+            for index = 1, #listings do
+                lfgBoard:OnListing(listings[index].message, listings[index].key, listings[index].sender, now)
+            end
+            lfgJoin.standInSlot = true
+            lfgJoin.requests:Add(addon.LfgStandIns.Request(), now)
+            rosterController:Print(#listings .. " stand-in listings are on your Guild LFG Board for " ..
+                math.floor(addon.LfgBoard.STALE_SECONDS / 60) .. " minutes, with a stand-in slot question and" ..
+                " Ask to join request." .. (why and (" Left out: " .. why .. ".") or ""))
+            lfgRefresh()
+            if lfgButton ~= nil and lfgButton:IsShowing() and not lfgButton:DrawerOpen() then
+                lfgButton:OpenDrawer()
+            end
+        end)
+    end
+    drawLfgBoard = function(content, ui)
+        lfgPage = addon.LfgBoardPage.Create(content, ui, {
+            listing = lfgListing,
+            members = lfgMembers,
+            level = function()
+                return client:GetPlayerLevel()
+            end,
+            zone = function()
+                local zone = client:GetZone()
+                return zone and zone.name or nil
+            end,
+            catalog = function()
+                return addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList())
+            end,
+            groups = function()
+                local current, alts = lfgCharacters()
+                return lfgBoard:Groups(client:Timestamp(), current, alts)
+            end,
+            nearby = lfgNearby,
+            classColor = function(classToken)
+                return client:GetClassColor(classToken)
+            end,
+            friendTier = function(name)
+                local key = keyOfSender(name)
+                return key and lfgFriendTier(key) or nil
+            end,
+            -- History: the player's own parties, as GroupHistory keeps them.
+            history = function()
+                local guild, partition = rosterController:QuietContext()
+                return guild and partition:GetGroupHistory() or {}
+            end,
+            historyMember = function(key)
+                local guild, partition = rosterController:QuietContext()
+                local character = guild and partition:GetCharacter(key)
+                if not character then
+                    return nil
+                end
+                local name = character.name or key
+                return { name = string.match(name, "^[^%-]+") or name, whisper = name, classToken = character.class }
+            end,
+            keyTier = function(key)
+                return lfgFriendTier(key)
+            end,
+            formatDate = function(at)
+                return client:FormatDate(at)
+            end,
+            dungeonIcon = function(name)
+                local dungeon = addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Named(name)
+                return dungeon and dungeon.icon or nil
+            end,
+            onWhisper = function(name)
+                client:OpenWhisper(name)
+            end,
+            requestOf = function(id)
+                return lfgBoard:Request(id, client:Timestamp())
+            end,
+            askRoles = function(listing)
+                return lfgJoin.askRoles(listing)
+            end,
+            onAsk = function(listing, role)
+                lfgJoin.ask(listing, role)
+            end,
+            party = function()
+                if not client:IsInGroup() then
+                    return { inParty = false, isLeader = true }
+                end
+                -- The contact for a party led from outside the guild edits
+                -- its listing as a leader would.
+                local isLeader = lfgLister()
+                local listing
+                if not isLeader then
+                    listing = lfgJoin.partyListing()
+                end
+                return { inParty = true, isLeader = isLeader, listing = listing }
+            end,
+            partyRoles = function()
+                local members = lfgMembers()
+                local rows = {}
+                local index
+                for index = 1, #members do
+                    local member = members[index]
+                    rows[index] = {
+                        key = member.key,
+                        name = member.name,
+                        classToken = member.classToken,
+                        role = member.role,
+                    }
+                end
+                return rows
+            end,
+            onSave = saveListing,
+            onAskInGuild = function(line)
+                client:OpenGuildChat(line)
+            end,
+            onNotLooking = function()
+                lfgTrigger:NotLooking()
+                endListing()
+            end,
+        })
+        -- Drawn on the window's first open; specs reach it here.
+        addon.lfgPage = lfgPage
+    end
+    -- Guildmates' listings and their ends; the player's own echo is
+    -- ignored.
+    onLfgMessage = function(message, sender)
+        local senderKey = keyOfSender(sender)
+        if not addon.LfgProtocol.IsValid(message) or senderKey == nil
+            or senderKey == rosterController:SelfKey()
         then
             return
         end
-        if message.t == protocol.TYPE_REQUEST then
-            local refused = joinRequests:OnRequest(message, senderKey, sender, client:Timestamp() or 0)
-            if refused ~= nil then
-                sendWhenFree(protocol.Answer(senderKey, message.id, nil))
-                return
-            end
-            showJoinPrompts()
-            startTicking()
-        elseif message.t == protocol.TYPE_ANSWER then
-            local option
-            if message.ok then
-                option = { role = message.role, key = message.c, name = message.n, level = message.l }
-            end
-            local state = groupSession:Answer(message.id, senderKey, option, message.w == true)
-            if state == addon.GroupSession.ACCEPTED then
-                onSlotsChanged()
-            end
-            if state ~= nil then
-                refreshGroupFinder()
-            end
-        elseif message.t == protocol.TYPE_CANCEL or message.t == protocol.TYPE_WITHDRAW then
-            if joinRequests:OnCancel(message.id, senderKey) then
-                showJoinPrompts()
-            end
-        elseif message.t == protocol.TYPE_SLOTS then
-            local result = joinRequests:OnSlots(message.id, senderKey, message.r)
-            if result == "closed" then
-                sendWhenFree(protocol.Answer(senderKey, message.id, nil, true))
-            end
-            if result ~= nil then
-                showJoinPrompts()
-            end
-        elseif message.t == protocol.TYPE_JOINED_ELSEWHERE then
-            if groupSession:JoinedElsewhere(message.id, senderKey) then
-                refreshGroupFinder()
-            end
-        elseif message.t == protocol.TYPE_OFFER then
-            -- A guildmate offers to fill a slot: the organizer decides.
-            local offer = groupSession:Offer({
-                id = message.id, from = senderKey, sender = sender, role = message.role,
-                character = { key = message.c, name = message.n, level = message.l },
-            }, client:Timestamp() or 0)
-            if offer == nil then
-                sendWhenFree(protocol.OfferAnswer(senderKey, message.id, false))
-                return
-            end
-            showJoinPrompts()
-            startTicking()
-        elseif message.t == protocol.TYPE_OFFER_ANSWER then
-            local offer = groupBoard:OnOfferAnswer(message.id, senderKey, message.ok)
-            if offer ~= nil then
-                local organizer = tostring(bareName(sender))
-                if not message.ok then
-                    rosterController:Print(organizer .. " turned down your offer.")
-                elseif offer.key ~= selfKey then
-                    rosterController:Print(organizer .. " accepted your offer. Log over to " .. offer.name ..
-                        "; they'll invite you once you're on.")
-                else
-                    rosterController:Print(organizer .. " accepted your offer. They'll invite you.")
-                end
-                refreshGroupFinder()
-            end
-        elseif message.t == protocol.TYPE_ROLE then
-            -- A party member asks for another role.
-            local member = groupSession:MemberByRosterKey(senderKey)
-            if member ~= nil and groupSession:ChangeRole(member.key, message.role) then
-                onSlotsChanged()
-                refreshGroupFinder()
-            end
-        elseif message.t == protocol.TYPE_ALT then
-            -- A party member will come as one of their alts instead: the
-            -- alt takes their slot, waiting to be invited.
-            local member = groupSession:MemberByRosterKey(senderKey)
-            local guild, partition = rosterController:QuietContext()
-            local own = guild and partition:GetCharacter(senderKey)
-            local alt = guild and partition:GetCharacter(message.c)
-            if member ~= nil and own and alt and alt.player == own.player then
-                local request = groupSession:Accept({ playerId = own.player, key = senderKey, label = bareName(sender) },
-                    { role = message.role, key = message.c, name = message.n, level = message.l },
-                    client:Timestamp() or 0, selfKey, member.key)
-                if request ~= nil then
-                    rosterController:Print(tostring(bareName(sender)) .. " will come as " .. message.n ..
-                        ". Invite " .. message.n .. " once it's online.")
-                    onSlotsChanged()
-                    refreshGroupFinder()
+        if message.t == addon.LfgProtocol.TYPE_LISTING then
+            lfgBoard:OnListing(message, senderKey, sender, client:Timestamp() or 0)
+        elseif message.t == addon.LfgProtocol.TYPE_CONTACT or message.t == addon.LfgProtocol.TYPE_SLOT then
+            -- Only a claim or an answer from a guildmate in the player's
+            -- party counts.
+            local inParty = false
+            local members = client:IsInGroup() and lfgMembers() or {}
+            local index
+            for index = 1, #members do
+                if not members[index].isPlayer and lfgKeyOf(members[index]) == senderKey then
+                    inParty = true
                 end
             end
+            if not inParty then
+                return
+            end
+            if message.t == addon.LfgProtocol.TYPE_SLOT then
+                if lfgTrigger:SlotAnswered(message.y) and message.y then
+                    lfgJoin.postSlot()
+                end
+            elseif lfgTrigger:Claimed(senderKey, rosterController:SelfKey()) then
+                endListing()
+            end
+        elseif message.t == addon.LfgProtocol.TYPE_ASK then
+            -- Only a listing that takes asks hears them: led by the player,
+            -- with the LFG button shown, and asked by a guildmate. A new one
+            -- opens the drawer.
+            local _, partition = rosterController:QuietContext()
+            if not lfgListing:IsActive() or not (not client:IsInGroup() or client:IsGroupLeader())
+                or partition == nil or not partition:IsInGuild(senderKey)
+                or settings:Get("lfgButton") ~= true
+            then
+                return
+            end
+            -- Do Not Disturb declines them without a word to the player.
+            if settings:Get("dnd") == true then
+                comm:Whisper(addon.LfgProtocol.Answer("declined"), sender, true)
+                return
+            end
+            local added = lfgJoin.requests:Add({ key = senderKey, sender = sender,
+                name = string.match(sender, "^[^%-]+") or sender, classToken = message.c, level = message.l,
+                role = message.r }, client:Timestamp() or 0)
+            -- Looked at again when it would expire.
+            client:After(addon.LfgRequests.EXPIRE_SECONDS, lfgRefresh)
+            lfgRefresh()
+            if added and lfgButton ~= nil and lfgButton:IsShowing() and not lfgButton:DrawerOpen() then
+                lfgButton:OpenDrawer()
+            end
+            return
+        elseif message.t == addon.LfgProtocol.TYPE_ANSWER then
+            lfgBoard:OnAnswer(senderKey, message.a)
+        else
+            lfgBoard:OnEnd(senderKey, message.lf == true)
         end
+        refreshLfg()
     end
-    settings:OnChange(function(id)
-        if id == "dnd" and groupFinder ~= nil then
-            groupFinder:Refresh()
-        end
-    end)
     -- Group history: the guildmates in the party or raid now (this player's own
-    -- characters left out), and the dungeon when known: the Group Finder's
-    -- pick, else the instance the player is in.
+    -- characters left out), and the dungeon when known: the party's Guild LFG
+    -- Board listing's, else the instance the player is in.
     local groupHistory
     recordParty = function()
         local guild, partition = rosterController:QuietContext()
@@ -1719,9 +2465,10 @@ if clientProfile.supported then
                 end
             end
         end
-        local dungeon = groupSession:IsActive()
-            and addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList()):Get(groupSession:Dungeon()) or nil
-        local name = dungeon and dungeon.name or nil
+        local purpose = lfgListing:IsActive() and lfgListing:Purpose() or nil
+        local listing = client:IsInGroup() and lfgJoin.partyListing() or nil
+        local name = purpose and purpose.kind == "dungeon" and purpose.dungeon.name
+            or listing and listing.kind == "dungeon" and listing.purpose or nil
         if name == nil and client:IsInInstance() then
             local zone = client:GetZone()
             name = zone and zone.name or nil
@@ -1729,235 +2476,15 @@ if clientProfile.supported then
         groupHistory:OnParty(keys, now, name)
         rosterController:Invalidate()
     end
-    router:Register("dnd", "turn Group Finder Do Not Disturb on or off", function()
+    router:Register("dnd", "turn Do Not Disturb on or off", function()
         local enabled, reason = settings:Toggle("dnd")
         if enabled == nil then
             rosterController:Print("Do Not Disturb can't be changed: " .. tostring(reason) .. ".")
         elseif enabled then
-            rosterController:Print("Do Not Disturb on: you won't get group requests, on any character.")
+            rosterController:Print("Do Not Disturb on: you won't get Ask to join requests, on any character.")
         else
             rosterController:Print("Do Not Disturb off.")
         end
-    end)
-    -- Makes each of this player's offers' ids unique.
-    local offerCount = 0
-    -- The Group Finder's tab, drawn when the master frame is first built.
-    -- Each time the tab comes into view it asks the guild who is around.
-    drawGroupFinder = function(content)
-        local reason
-        groupFinder, reason = addon.GroupFinderWindow.Create(client, content, {
-            dungeons = function()
-                return addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList())
-            end,
-            playerLevel = function()
-                return client:GetPlayerLevel()
-            end,
-            session = groupSession,
-            roles = roleCatalog,
-            syncParty = syncParty,
-            replies = function()
-                return groupAvailability:Replies()
-            end,
-            openGuildChat = function(text)
-                return client:OpenGuildChat(text)
-            end,
-            request = sendRequest,
-            cancelRequest = cancelRequest,
-            classColor = function(classToken)
-                return client:GetClassColor(classToken)
-            end,
-            refresh = function()
-                syncParty()
-                groupAvailability:Ask()
-            end,
-            zone = function()
-                local zone = client:GetZone()
-                return zone and zone.name or nil
-            end,
-            selfKey = function()
-                return rosterController:SelfKey()
-            end,
-            isOnline = function(key)
-                local guild, _, normalizer = rosterController:QuietContext()
-                local live = guild and rosterController:LiveMembers(normalizer)[key]
-                return live ~= nil and live.online == true
-            end,
-            -- Only ever from the organizer's click on Invite.
-            invite = function(key)
-                local guild, partition, normalizer = rosterController:QuietContext()
-                if guild == nil then
-                    return false
-                end
-                local live = rosterController:LiveMembers(normalizer)[key]
-                local character = partition:GetCharacter(key)
-                local name = (live and live.name) or (character and character.name)
-                return name ~= nil and client:InviteToParty(name)
-            end,
-            -- From a click on a guildmate's name.
-            whisper = function(key)
-                local guild, partition, normalizer = rosterController:QuietContext()
-                if guild == nil then
-                    return false
-                end
-                local live = rosterController:LiveMembers(normalizer)[key]
-                local character = partition:GetCharacter(key)
-                local name = (live and live.name) or (character and character.name)
-                return name ~= nil and client:OpenWhisper(name)
-            end,
-            -- The guild as it is now: the live roster, the replies to
-            -- the last ask, and who is left out (this character's
-            -- player and the party).
-            candidates = function()
-                local guild, partition, normalizer = rosterController:QuietContext()
-                if guild == nil then
-                    return nil
-                end
-                local replies, excluded = {}, {}
-                local list = groupAvailability:Replies()
-                local index
-                for index = 1, #list do
-                    replies[list[index].key] = list[index]
-                end
-                local selfKey = rosterController:SelfKey()
-                if selfKey ~= nil then
-                    excluded[selfKey] = true
-                end
-                -- Invitees who accepted already have a slot.
-                local requests = groupSession:Requests()
-                for index = 1, #requests do
-                    if requests[index].state == addon.GroupSession.ACCEPTED then
-                        excluded[requests[index].to] = true
-                    end
-                end
-                local members = groupSession:IsActive() and groupSession:Members() or {}
-                for index = 1, #members do
-                    if members[index].rosterKey ~= nil then
-                        excluded[members[index].rosterKey] = true
-                    end
-                end
-                return addon.GroupCandidates.Create({
-                    partition = partition,
-                    members = rosterController:LiveMembers(normalizer),
-                    roles = roleCatalog,
-                    replies = replies,
-                    excluded = excluded,
-                    display = function(name)
-                        return normalizer:Display(name)
-                    end,
-                })
-            end,
-            dnd = {
-                get = function()
-                    return settings:Get("dnd") == true
-                end,
-                set = function(enabled)
-                    return settings:Set("dnd", enabled)
-                end,
-            },
-            onShown = function()
-                groupAvailability:Ask()
-            end,
-            changed = function()
-                announceGroup()
-            end,
-            groups = function()
-                return groupBoard:Groups(client:GetPlayerLevel(), client:Timestamp())
-            end,
-            boardGroup = function(id)
-                return groupBoard:Get(id, client:Timestamp())
-            end,
-            -- The group of an organizer in the player's party.
-            partyGroup = function()
-                if not client:IsInGroup() then
-                    return nil
-                end
-                local now = client:Timestamp()
-                local members = client:GetPartyMembers()
-                local index
-                for index = 1, #members do
-                    if not members[index].isPlayer then
-                        local key = rosterController:RosterKeyFor(members[index].name, members[index].guid)
-                        local group = key and groupBoard:Get(key, now)
-                        if group then
-                            return group
-                        end
-                    end
-                end
-                return nil
-            end,
-            -- Nothing to fill for a player who already holds a slot, on any
-            -- of their characters (an accepted invitee not in the party yet).
-            fillOptions = function(group, role)
-                local guild, partition = rosterController:QuietContext()
-                local selfKey = rosterController:SelfKey()
-                local own = guild and selfKey and partition:GetCharacter(selfKey)
-                local index
-                for index = 1, #group.slots do
-                    local key = group.slots[index].key
-                    local character = own and key and partition:GetCharacter(key)
-                    if key == selfKey or (character and character.player == own.player) then
-                        return {}
-                    end
-                end
-                return joinRequests:OptionsFor({ r = { role }, lo = group.dungeon.minLevel, hi = group.dungeon.maxLevel })
-            end,
-            offer = function(group, option)
-                local now = client:Timestamp()
-                local selfKey = rosterController:SelfKey()
-                if now == nil or selfKey == nil then
-                    return false
-                end
-                offerCount = offerCount + 1
-                local id = selfKey .. ":offer:" .. tostring(now) .. "-" .. offerCount
-                groupBoard:Offer(group.id, id, option, now)
-                return sendGroupFinder(addon.GroupFinderProtocol.Offer(group.organizer, id, option))
-            end,
-            offerFor = function(group)
-                return groupBoard:OfferFor(group.id, client:Timestamp())
-            end,
-            setRole = function(group, role)
-                return sendGroupFinder(addon.GroupFinderProtocol.Role(group.organizer, role))
-            end,
-            -- The player's other characters that could come instead: in
-            -- their own role, or any role still open.
-            altOptions = function(group)
-                local selfKey = rosterController:SelfKey()
-                local roles, seen = {}, {}
-                local index
-                for index = 1, #group.slots do
-                    local slot = group.slots[index]
-                    if (slot.name == nil or (slot.key ~= nil and slot.key == selfKey)) and not seen[slot.role] then
-                        seen[slot.role] = true
-                        table.insert(roles, slot.role)
-                    end
-                end
-                local options = joinRequests:OptionsFor({ r = roles, lo = group.dungeon.minLevel,
-                    hi = group.dungeon.maxLevel })
-                local alts = {}
-                for index = 1, #options do
-                    if options[index].key ~= selfKey then
-                        table.insert(alts, options[index])
-                    end
-                end
-                return alts
-            end,
-            joinAsAlt = function(group, option)
-                if sendGroupFinder(addon.GroupFinderProtocol.Alt(group.organizer, option)) == false then
-                    return false
-                end
-                rosterController:Print("Log over to " .. option.name .. ". " .. group.label .. " will invite " ..
-                    option.name .. " once it's on.")
-                return true
-            end,
-        })
-        if groupFinder == nil then
-            rosterController:Print("The Group Finder can't be shown: " .. tostring(reason) .. ".")
-        end
-    end
-    -- Opens the master frame on the Group Finder's tab, or closes it when
-    -- that tab is already showing.
-    router:Register("group", "open or close the Group Finder", function()
-        rosterController:Toggle("group")
     end)
     -- My Profile's tab, drawn when the master frame is first built. Its
     -- roles and Do Not Disturb are the settings above, so a change on any of
@@ -2946,7 +3473,8 @@ if clientProfile.supported then
         " guild roster; officers; probe timer: the roster's timer marker, officers; probe player <name or" ..
         " alias>: a player's alias, links and Discord, with who" ..
         " set each and when, and its logged changes; probe greet: your greet weight and how long it holds your" ..
-        " prompts back; probe realm: the realm or region your guild's data is kept under)",
+        " prompts back; probe realm: the realm or region your guild's data is kept under; probe lfg: the Guild" ..
+        " LFG Board's zone levels and listings)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
@@ -2959,7 +3487,8 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer, probe ready, probe timer, probe player <name>, probe greet or probe realm.")
+                        " probe officer, probe ready, probe timer, probe player <name>, probe greet, probe realm or" ..
+                        " probe lfg.")
                 end
                 return
             end
@@ -3046,6 +3575,10 @@ if clientProfile.supported then
                 end
                 return
             end
+            if what == "lfg" then
+                probeLfg()
+                return
+            end
             if what == "greet" then
                 rosterController:Print("Greet weight probe:")
                 local lines = guildGreet:WeightProbeLines(client:Timestamp())
@@ -3060,8 +3593,9 @@ if clientProfile.supported then
                     addon.Identity.slashCommand .. " probe log, " ..
                     addon.Identity.slashCommand .. " probe officer, " .. addon.Identity.slashCommand ..
                     " probe ready, " .. addon.Identity.slashCommand .. " probe timer, " ..
-                    addon.Identity.slashCommand .. " probe player <name> or " ..
-                    addon.Identity.slashCommand .. " probe greet.")
+                    addon.Identity.slashCommand .. " probe player <name>, " ..
+                    addon.Identity.slashCommand .. " probe greet or " ..
+                    addon.Identity.slashCommand .. " probe lfg.")
                 return
             end
             if guildLogOf() == nil then
@@ -3695,6 +4229,7 @@ if clientProfile.supported then
         local friends = currentFriends()
         return friends and friends:TierOf(key) or nil
     end
+    lfgFriendTier = friendTier
     guildGreet = addon.GuildGreet.Create({
         context = function()
             local guild, partition, normalizer = rosterController:QuietContext()
@@ -3973,10 +4508,6 @@ if clientProfile.supported then
         -- officer's add-on keeps the guild log up to date.
         rosterController:RefreshPages()
         requestGuildLog()
-        -- Who is online decides the Group Finder's Invite buttons.
-        if groupFinder ~= nil then
-            groupFinder:Refresh()
-        end
         -- The roster's zones count on the world map, and guildmates it shows
         -- offline or gone leave the board.
         if mapPins ~= nil then
@@ -4192,7 +4723,7 @@ if clientProfile.supported then
     end
     -- The roster keys of everyone in the player's party or raid, or nil
     -- outside a group. Forever gives group members only their first name,
-    -- so the roster decides, as for the Group Finder. Looked up again when
+    -- so the roster decides, as for the group history. Looked up again when
     -- the group or the roster's size changes, or while a guildmate in it
     -- can't be placed.
     local groupCache = { signature = nil, keys = nil }
@@ -4504,6 +5035,16 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- In case the region wasn't known yet when saved data loaded.
     persistence:MoveToHomeRealm()
     rosterController:OnSavedDataReady()
+    if lfgButton ~= nil then
+        lfgButton:Refresh()
+    end
+    -- The board drops listings gone quiet, and the button follows, even
+    -- with nothing else happening.
+    local function tickLfg()
+        lfgRefresh()
+        client:After(addon.LfgBoard.REFRESH_SECONDS, tickLfg)
+    end
+    tickLfg()
     -- Without the comm libraries, sync simply stays off, and Guild Greet and
     -- Guild Recruit work uncoordinated.
     comm:OnHeard(function(sender)
@@ -4518,8 +5059,11 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             guildWelcome:OnMessage(message, sender)
         elseif addon.SlowModeConfig.TYPES[message.t] ~= nil then
             slowModeConfig:OnMessage(message, sender)
-        elseif addon.GroupFinderProtocol.TYPES[message.t] ~= nil then
-            onGroupFinderMessage(message, sender)
+        elseif addon.LfgProtocol.TYPES[message.t] ~= nil and message.t ~= addon.LfgProtocol.TYPE_ASK
+            and message.t ~= addon.LfgProtocol.TYPE_ANSWER
+        then
+            -- Asks and answers are only ever whispered.
+            onLfgMessage(message, sender)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
         elseif addon.RankRequirements.TYPES[message.t] ~= nil then
@@ -4530,11 +5074,13 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             syncSession:Receive(message, sender)
         end
     end, function(message, sender)
-        -- Only guild map updates, resync requests and answers, and, to
-        -- officers who miss the officer channel, guild log messages are
-        -- whispered.
+        -- Only guild map updates, resync requests and answers, Guild LFG
+        -- Board asks and answers, and, to officers who miss the officer
+        -- channel, guild log messages are whispered.
         if addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
+        elseif message.t == addon.LfgProtocol.TYPE_ASK or message.t == addon.LfgProtocol.TYPE_ANSWER then
+            onLfgMessage(message, sender)
         elseif addon.GuildLogSync.TYPES[message.t] ~= nil then
             guildLogSync:Receive(message, sender)
         elseif addon.Resync.TYPES[message.t] ~= nil then
@@ -4573,6 +5119,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         then
             dropLocationOf(name)
         end
+        if kind == "offline" then
+            lfgOnOffline(name)
+        end
         if kind == "notFound" then
             return
         end
@@ -4585,6 +5134,8 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     local busy = client:ObserveCombat(function(inCombat)
         guildGreet:OnCombatChanged(inCombat)
         guildRecruit:OnCombatChanged(inCombat)
+        -- The LFG button's glow waits out combat.
+        lfgRefresh()
         -- A location held back by combat goes out once it ends.
         if not inCombat and shareLocationNow ~= nil then
             client:After(1, shareLocationNow)
@@ -4599,16 +5150,18 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     client:ObserveZone(function()
         guildRecruit:Refresh()
         guildGreet:OnZoneChanged()
+        -- A guessed purpose follows the party into a dungeon; relevance and
+        -- Nearby follow the zone; no glow in instances.
+        lfgOnZone()
     end)
     guildRecruit:Refresh()
-    -- The Group Finder's slots follow the party, and every party with
-    -- guildmates goes into the local group history.
+    -- Every party with guildmates goes into the local group history.
     client:ObserveParty(function()
-        syncParty()
+        -- The listing follows the party, and the drawer shows it; no glow
+        -- while in one. A listing taken over first, so history has its
+        -- dungeon.
+        lfgOnParty()
         recordParty()
-        if groupFinder ~= nil then
-            groupFinder:Refresh()
-        end
         -- Groupmates leave the maps' dots, and those outside the group
         -- are dimmed.
         if mapPins ~= nil then
@@ -4681,17 +5234,17 @@ addon.mapPins = mapPins
 addon.chatAnnotator = chatAnnotator
 addon.comm = comm
 addon.settings = settings
+addon.agfWindow = agfWindow
+addon.lfgButton = lfgButton
 addon.settingsPanel = settingsPanel
 addon.frameSettings = frameSettings
 addon.guildGreet = guildGreet
 addon.guildRecruit = guildRecruit
 addon.guildWelcome = guildWelcome
 addon.promotions = promotions
-addon.groupSession = groupSession
-addon.groupBoard = groupBoard
-addon.groupAvailability = groupAvailability
-addon.joinRequests = joinRequests
-addon.joinPrompts = joinPrompts
+addon.lfgListing = lfgListing
+addon.lfgBoard = lfgBoard
+addon.lfgTrigger = lfgTrigger
 addon.syncSession = syncSession
 addon.router = router
 addon.version = version

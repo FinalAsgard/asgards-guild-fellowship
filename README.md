@@ -19,9 +19,9 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf options` | Opens the window on the **Settings** tab. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
-| `/agf group` | Opens the window on the **Group Finder** tab (see [Group Finder](#group-finder)), or closes it. |
+| `/agf lfg` | Shows the LFG button if it's hidden, and opens the [Guild LFG Board](#guild-lfg-board). |
 | `/agf profile` | Opens the window on the **My Profile** tab (see [My Profile](#my-profile)), or closes it. |
-| `/agf dnd` | Turns Group Finder [Do Not Disturb](#do-not-disturb) on, or back off. |
+| `/agf dnd` | Turns [Do Not Disturb](#do-not-disturb) on, or back off. |
 | `/agf advertise` | Posts your guild ad to General where you are, now. `/agf advertise trade` posts it to Trade. Works in a macro. Won't post again before your timer allows (see [Guild Recruit](#channels-and-timing)). |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
 | `/agf mail` | Opens [Guild Mail](#guild-mail), to mail the guild ranks you pick (officers only). |
@@ -43,15 +43,14 @@ Everything the add-on does is in one window, with picture tabs down its right ed
 
 - **Roster**: the guild's players, mains and alts (see [Using the roster](#using-the-roster)).
 - **My Profile**: your own player, its characters and their role preferences, and Do Not Disturb (see [My Profile](#my-profile)).
-- **Group Finder**: build a dungeon group from the guild (see [Group Finder](#group-finder)).
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
 - **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
 - **Promotion Requirements** (officers only): each rank's promotion requirements (see [Promotions](#promotions)). Characters' checklists are in the player panel, and ready members are flagged on the game's guild roster.
 - **Guild Log** (officers only): the guild's long-term record of joins, invites, leaves, kicks, promotions and demotions (see [Guild Log](#guild-log)).
-- **Settings**: everything else (General, Chat Tags, Guild Map, and the Group Finder's Do Not Disturb), and the version you're running.
+- **Settings**: everything else (General, Chat Tags, Guild Map, and Do Not Disturb), and the version you're running.
 
-The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf group`, `/agf profile`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
+The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf profile`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
 
 ## Settings
 
@@ -59,6 +58,7 @@ The settings are in two places that always agree: the window's tabs, and **Esc �
 
 - **General**: show or hide the minimap button, and the version you're running.
 - **Chat Tags**: turn chat tags on or off, and choose the colors of the alias tag and the main's-name tag (see [Chat tags](#chat-tags)).
+- **Do Not Disturb**: the same switch as on My Profile and `/agf dnd` (see [Do Not Disturb](#do-not-disturb)).
 - **Guild Map**: **Share my location with the guild** and **Show guildmates on the map and minimap**, both on unless you turn them off (see [Guild map](#guild-map)).
 - **Guild Greet**: first, **Show greet prompts** turns Guild Greet on or off on every character; under **Prompts**, turn it off on just the character you're playing, choose whether to greet during dungeons and raids, turn **Highlight group friends** and **Only greet players I've grouped with** on or off (see [Group friends](#group-friends)), and press **Move greeting pop-ups** to move the prompts; under **Which arrivals to prompt for**, turn each category's prompts on or off; under **Timing**, set the welcome-back minutes; under **Close my prompt after**, set how many greetings close your prompt for a login, welcome back or long absence, and how many welcomes close it for someone who just joined. Last comes a tinted **Officer settings (officer only)** area with the guild's **Slow mode** slider, from 0 (off, the default) to 15 minutes between each greeter's greetings. It applies to everyone in the guild: officers change it, and the newest officer change reaches every add-on user. Everyone else sees the guild's value greyed out, with a line saying only officers can change it. On the window's Greetings tab the greetings editor follows, under its own **Greetings** heading. In the AddOns options it also has an **Edit Greetings** button that opens the window's Greetings tab.
 - **Recruitment**: how many guild ads you've posted (all your characters together, and in the last 30 days), then turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, choose whether you also post the officers' guild ad (hover the info icon beside it to read the guild ad), and set your own timers (sliders) for how long General and Trade go without a guild ad before you're asked. On a character that can't invite to the guild these are greyed out, with a line saying why. Officers also get the guild ad, the guild's floor under everyone's timers for General and for Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild. Regular members don't see the officer settings.
@@ -535,81 +535,80 @@ While it's on, a character your add-on first sees in the guild (the "has joined 
 
 Due welcomes collect in a **Welcome mails** row in the Guild Mail tab, and the tab's title counts them: **Guild Mail (3)**. The row reads "Welcome mails: 3 waiting", with **Edit** (the welcome mail's page), **View** and **Send**. Send fills each one in with the welcome mail as it is then, and sends them like any other mail, pausing at the limit and kept across reloads. Each welcome that goes is shared with the other officers' add-ons, which drop that player from their own Welcome mails, so nobody is welcomed twice (unless two officers press Send within seconds of each other). Switching welcome mail off adds nobody new; welcomes already waiting stay until sent or cancelled, and cancelled ones aren't due again.
 
-## Group Finder
+## Guild LFG Board
 
-The **Group Finder** is a tab of the add-on's window, right below **My Profile**. Click its tab, or type `/agf group` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it checks your level and party again and asks the guild who is around.
+The **Guild LFG Board** (**LFG** where space is short) shows the parties your guildmates are forming, and lists yours. Listings come from parties, not forms: lead a party and you're asked what it's for, and a full party with guildmates in it is listed quietly with a best guess. Nobody ever gets a prompt they didn't ask for: you **Ask to join** a listing, and the leader decides.
 
-The window has three parts: the dungeon picker, or once you've picked one, your group's slots on the left; the groups other guildmates are forming, the guildmates who could join and those nearby on the right; and along the bottom, who else runs the add-on, with a **Do Not Disturb** box.
+Only guildmates with the add-on see the board. To reach the others, use [Ask in guild](#ask-in-guild).
 
-The window starts with a dungeon picker. The dungeons whose level range includes your character's level are listed first, lowest range first. Tick **Show all** to see the rest too, for a different character or a lower dungeon. Click a dungeon to pick it: it shows at the top as the group's dungeon, with its level range, for example **Dungeon: The Deadmines (17–26)**.
+### The LFG button
 
-The list and its level ranges come from the game's own Dungeon Finder, on WoW Retail and WoW Forever, so they stay current without add-on updates. Only if the game's Dungeon Finder lists nothing does the add-on fall back to its own list of dungeons with fixed level ranges.
+A small rounded button with a tree sits wherever you drag it (saved per character). It's separate from the minimap button, which stays as it is.
 
-Picking a dungeon starts your group and shows its five slots: 1 tank, 1 healer and 3 DPS. Everyone already in your party, guild members or not, fills a slot, and the slots update as people join or leave:
+- A **gold count** in its corner shows how many listed groups the character you're on could join.
+- A **gold glow** means a group you could join appeared since you last opened the drawer, with one pulse per new group. There's no glow while you're in a party, in combat, in an instance or in [Do Not Disturb](#do-not-disturb). For a chat line too, turn on the new-groups chat line in the LFG settings.
+- An **orange glow** means someone left your full party (see [Someone leaves](#someone-leaves)).
+- **Right-click** it for **Open Guild LFG Board**, **Show Nearby** and **Hide LFG button**. **Show Nearby** opens the drawer on the guildmates in your zone, one per line with their level, each name a menu to whisper them. Hiding it means "not taking part right now": it stays hidden on that character until you type `/agf lfg` or turn **Show LFG button** back on. Your party is still listed with a best guess, but nothing asks you anything, and guildmates whisper you instead of asking to join.
 
-- On Retail, each party member takes the slot for the role the game assigned them.
-- Anyone without an assigned role (everyone on WoW Forever) starts in the first open slot their class can fill: tank, then healer, then DPS. Under **Party roles**, use the **Tank**, **Healer** and **DPS** buttons beside each name (yours included) to put them where they belong. Only the roles their class can play have buttons.
+### The drawer
 
-### Changing or ending the group
+Click the button to slide a small drawer out to its left; click again, or its **X**, to close it. Click anywhere in it other than a button to open the full board.
 
-When all five slots are filled, the window shows **Group complete**. **Change dungeon** takes you back to the list to pick another dungeon, keeping everyone in their slots. **End group** ends the group, and so does leaving the party. Switching to another tab or closing the window doesn't: come back to the Group Finder tab and your group is still there.
+- **Not in a party:** the newest group you could join, with **Ask to join**, and **Start a group** under it (or "No groups for you right now").
+- **In a party:** your party's purpose, size, the roles it needs, and its note, with its slots as on your listing's card: a dungeon's Tank, Healer and DPS tiles with their icons (open ones in color, filled ones grey), a person tile per player otherwise.
+- **While you're being asked something** (what your party is for, whether to list a party with players outside the guild, whether to fill an empty slot, or, when you lead a questing party into another zone, whether to move the listing there), the question and its answers. Saying No to a zone means you're not asked about that zone again.
 
-### Who could join
+Long names wrap onto more lines at the spaces between words, and the drawer grows to fit.
 
-Beside the slots, each role that's still open lists the guildmates online right now who could fill it, for example:
+### The window
 
-**Bolt 22, Hammer 24**
+`/agf lfg` and **Open Guild LFG Board** open the add-on's new window on the board. It has one size and can be dragged. The sidebar has the add-on's name, an **LFG** button, and **Settings** at the bottom, with your character and the add-on's version under it. The **gear** at the top right opens the LFG settings (**Show LFG button**, and the chat line for new groups); the **X** closes the window. The Settings page has a **Chat** tab with the chat tags switch, the same setting as `/agf tags`, and the **Alias tag color** and **Main's name tag color**: click a swatch, or **Custom...** for any color from the game's color picker, and the sample shows the tag in that color. They're the same colors as in the old window's options.
 
-Each player gets one line, listing every character of theirs that fits, each name in its class color (as throughout the window). Hover over the line to see which character they're on and where they are, and click it to whisper that character. A character fits when its level is within the dungeon's range, its class can play the role, and the role is on in its [role preferences](#role-preferences). That includes offline alts, since they can log over. A role already filled lists nobody.
+### The board
 
-Guildmates whose add-on didn't answer (see [Who is around](#who-is-around)) are listed after the add-on users, and are suggested by what their class can do. They can't get a request, so their line has a **Whisper** button instead of **Request**, and hovering it says so. Guildmates who answered as unavailable (Do Not Disturb, in a group or in an instance) aren't listed, and neither are you or anyone already in your party.
+At the top is **your party's card**:
 
-### Requesting a guildmate
+- **Solo:** **Start a group**, which lists you as a group of one. Your listing becomes your party's when someone joins, and ends after 30 minutes with nobody joining (a chat line tells you).
+- **Leading** (or the guild contact of a party whose leader isn't in the guild): your listing as others see it, with **Edit**, **Ask in guild** and **Not looking**. **Edit** opens it in the card: **What's it for?** — **Dungeon** (search the list; dungeons that fit your level come first, and typing finds any dungeon), **Questing** in your current zone, **Raid**, or **Other** (your own words) — and a **Note** of up to 60 characters. **Roles in your party** shows each member's role icon by their name. Set roles in the game's party menu; the listing follows them.
+- **In someone else's party:** the listing, read-only.
 
-Guildmates with the add-on have a **Request** button beside their suggestion. Pressing it sends them a request, and their line shows its state: **pending** until they answer, then **accepted**, **declined**, **expired** (after about 2 minutes with no answer) or **cancelled**. While it's pending the button reads **Cancel**, to withdraw it. **End group** withdraws every pending request.
+Below it are four tabs:
 
-The guildmate gets a small **Group Finder** prompt: **Toolbox asks you to join The Deadmines (17–26)**, with a button for each way they could join, shown as **Healer — Hammer (24)**. Only roles you still need are offered, only roles that character's preferences allow, and only characters whose level fits the dungeon (alts included). Choosing one puts them in that slot in your window; **Decline** says no. A guildmate in Do Not Disturb, in a group or in an instance declines automatically, as does one with no character that fits. The prompt closes if you cancel or the request expires.
+- **Relevant Parties · N:** large gold-bordered cards for groups you could join on this character: the purpose, level range and size; the members in class color, each with their role's icon in a dungeon (a crown for the leader, a star for your Top 5 [group friends](#group-friends)); role tiles on the right with their icons (open roles in color, filled ones grey); the note, **Ask to join** and **Whisper**. Then, under **Your alts could join**, small cards with the type, levels and leader (in class color; click to whisper) and a row of small role tiles.
+- **Nearby · N:** a **Nearby in <zone>** card listing the guildmates in your zone, one per line, their levels in a column left of their names in class color, for finding people to quest with.
+- **Other Parties · N:** small greyed cards for full groups and groups nothing of yours fits.
+- **History:** your own recent parties, newest first, 20 at a time with **Show more**: the date, the dungeon when known, and the guildmates, with a star for Top 5 group friends (see [Group history](#group-history)).
 
-Once someone accepts, getting them into your party is up to you; the add-on never invites anyone on its own. If they're already on the character they chose, its slot has an **Invite** button that sends the game's party invite. If they chose another character, the slot reads **Waiting for Bolt to log in**, and they're reminded in chat to log over to it. The **Invite** button appears as soon as that character is online. When the character joins your party, it fills the slot like any other party member, in the role they chose.
+Click any name on the board (a card's members, Nearby, History) for a menu with the name at the top and **Whisper** under it. A click anywhere outside the menu closes it.
 
-Prompts keep up with your group. When a slot fills, whether someone accepted or joined your party, everyone you've asked loses the options for that role. Anyone left with no option has their prompt closed, and their line in your window shows **withdrawn**. Once every role is filled, the remaining requests are withdrawn too.
+A dungeon is relevant when your level fits and a role you play (by your [role preferences](#role-preferences)) is open; questing when your level fits the zone and there's room; a raid or other purpose when you fit its level range, or always for a raid with none.
 
-Asked by two organizers at once, a guildmate sees both prompts stacked. Accepting one declines the others, and those organizers see **joined another group**.
+### Listing your party
 
-### Groups being formed
+- **Becoming a party's leader** (inviting someone, or being promoted in an unlisted party) asks what the party is for. Answering lists it; ignoring the question means **Not looking**, which keeps it off the board. There's also a "don't ask for 30 minutes" choice for quick trading parties. Taking over a listed party's lead keeps its listing.
+- **A party with players outside the guild** asks first whether to list it at all. If the leader isn't in the guild, the first guildmate to answer becomes the listing's contact.
+- **A full party with another guildmate in it** is listed quietly with a guessed purpose, updated when you enter a dungeon (a purpose you set yourself is left alone).
+- A listing goes as soon as its party disbands or its leader chooses **Not looking**, and after 5 minutes without word from its party's add-ons. If its leader or contact logs off, it's handed to another guildmate in the party.
 
-Until you start a group of your own, the right side of the window opens with **Groups forming**: every group a guildmate with the add-on is forming right now, one line each, for example **Toolbox: The Deadmines (17–26), 3/5**. Groups whose range is within 2 levels of your character's level come first; the rest are listed in grey. A group drops off the list when its organizer ends it, or a few minutes after their add-on was last heard from.
+### Someone leaves
 
-Click a group to see its slots in place of the dungeon picker: who's in each one, with **(coming)** beside anyone the organizer is still waiting on, and **open** for the rest. An open slot you could fill has a **Fill Slot** button: your character's level must fit the dungeon, its class must play the role, and the role must be on in its [role preferences](#role-preferences). If the character you're on can't, the button reads **Fill as Alt** and opens a list of your alts that can, each with its level. Pick one to offer it. **Back** returns to the dungeon picker.
+When someone leaves your full party, your button glows orange and the drawer asks **Someone left — fill the empty slot?** with the open role. **Yes** posts the slot; **No** keeps the party listed as it was. Saying nothing posts it after 60 seconds, unless someone else leaves or the party disbands first. With the button hidden, the leader gets a chat line pointing to `/agf lfg` instead, and nothing is posted.
 
-**Fill Slot** doesn't put you in the group. It sends the organizer a prompt, **Hammer offers to fill your Healer slot**, with **Accept** and **Decline**. Under the slots you see where your offer stands, and the add-on tells you in chat when the organizer answers. An offer the organizer accepts works like an accepted request: the slot is held for you until they invite you. An offer goes unanswered after about 2 minutes, and closes if that role fills in the meantime.
+### Ask to join
 
-### In someone else's group
+**Ask to join** is for the character you're on. For a dungeon you pick the open role you'd fill; to bring an alt, whisper the leader. The button then shows **pending**, **accepted**, **declined** or **expired**. When the leader's add-on can't take requests (a leader outside the guild, or one who hid the button), you get **Whisper** instead.
 
-Once you're in the party of a guildmate who is forming a group with the add-on, the Group Finder shows you their group, as it fills, instead of the dungeon picker. You can't invite or request anyone from it, but two things are yours to change:
-
-- **Your role:** the **Tank**, **Healer** and **DPS** buttons ask the organizer to move you to another open role your class can play. The organizer's add-on moves you as soon as it hears.
-- **Join as an alt:** one button for each of your alts that could come instead, for example **DPS — Bolt (23)**. Choosing one tells the organizer you're coming on that alt: it takes your slot, and their window shows **Waiting for Bolt to log in**, then **Invite** once Bolt is online. Log over to the alt and wait for the invite.
-
-You can also just log over to an alt without telling the organizer, as before.
+The leader's drawer opens and the request slides out under it, such as **Hammer — Healer, 24**, with **Invite** (the game's party invite) and **Decline**. Requests stack, expire after 2 minutes, and are declined with "role filled" when their role fills, or all of them when the party fills. Requests to a leader in Do Not Disturb are declined automatically.
 
 ### Ask in guild
 
-To reach guildmates without the add-on, press **Ask in guild** (shown while any role is open). Your chat box opens on guild chat with a ready-made line already typed, for example **LF healer and 2 DPS for The Deadmines (17–26), whisper me!**, naming the open roles, the dungeon and its level range. Change it however you like and press Enter to send it, or Escape to send nothing. The add-on never posts it for you.
-
-### Who is around
-
-Each time the Group Finder tab comes into view, your add-on asks the guild who else runs it. Every guildmate online with the add-on answers within a few seconds, and the bottom of the tab lists them, for example **Add-on users online: Hammer, Wrench (unavailable)**. Guildmates without the add-on don't answer, so they aren't listed here. People log on and off while you have it open: press **Refresh** at the bottom right to ask again and update everything.
-
-### Nearby
-
-The right side of the window always ends with **Nearby in <zone>**: the guildmates online in the same zone as you, at any level, one line per player under their alias (or main), with the characters they have there and their levels, for example **Thunderer — Bolt 22**. It's there before you pick a dungeon too, so you can see who you might quest with. It's worked out again each time the window opens or refreshes.
+**Ask in guild** on your party's card opens guild chat with a ready-made line, for example **LF healer and 2 DPS for Stratholme (58–60), whisper me!**: the open roles for a dungeon, otherwise how many players you need. Change it as you like and press Enter, or Escape to send nothing. The add-on never posts it for you.
 
 ### Do Not Disturb
 
-Turn on **Do Not Disturb** when you don't want group requests. It's in four places that always agree: the check box at the bottom of the Group Finder, the same check box at the bottom of [My Profile](#my-profile), **Do Not Disturb** under **Group Finder** in the settings, and `/agf dnd`. It applies to every character on your account. While it's on, your add-on tells organizers you're unavailable.
+Turn on **Do Not Disturb** when you don't want group glows or requests. It's in three places that always agree: the check box at the bottom of [My Profile](#my-profile), **Do Not Disturb** in the settings, and `/agf dnd`. It applies to every character on your account. While it's on, the LFG button doesn't glow for new groups, and [Ask to join](#ask-to-join) requests to you are declined automatically.
 
-You're also unavailable automatically while you're in a group or inside an instance, with nothing to turn on.
+The button never glows while you're in a party, in combat or inside an instance either, with nothing to turn on.
 
 ### Role preferences
 
@@ -619,7 +618,7 @@ Your role preferences reach the whole guild through [guild sync](#guild-sync), e
 
 ### Group history
 
-Your add-on remembers, on your computer only, each party you've been in with guildmates: any party, not just ones from the Group Finder. It records when, which guild characters, and the dungeon when it knows it (the one you picked in the Group Finder, or the instance you're in). Guildmates joining later count as the same party, and so does reloading while in it. Your own alts never count. The history is never sent to anyone.
+Your add-on remembers, on your computer only, each party you've been in with guildmates: any party, not just listed ones. It records when, which guild characters, and the dungeon when it knows it (the one your party is listed for on the [Guild LFG Board](#guild-lfg-board), or the instance you're in). Guildmates joining later count as the same party, and so does reloading while in it. Your own alts never count. The history is never sent to anyone.
 
 A guildmate's player panel then shows **Grouped together 3 times** in its header, counted across all their characters, and its Log tab says when you last grouped. Players you've never grouped with show **Grouped together 0 times**. Guild Greet uses the same history to mark your [group friends](#group-friends) on their prompts. The history is never trimmed, however long it gets.
 
@@ -682,7 +681,7 @@ These belong to your player, not to one character: whichever of your characters 
 
 Under each character are its [role preferences](#role-preferences). The character you're logged in on has a check box for each role its class can fill. Ticking one changes it, and the guild hears about it through [guild sync](#guild-sync). Your other characters' roles are shown but can't be changed here: log in on that character to change them.
 
-Along the bottom is the **Do Not Disturb** check box, the same setting as in the Group Finder, the settings and `/agf dnd` (see [Do Not Disturb](#do-not-disturb)).
+Along the bottom is the **Do Not Disturb** check box, the same setting as in the settings and `/agf dnd` (see [Do Not Disturb](#do-not-disturb)).
 
 On a character that isn't in a guild, My Profile just says it needs one. Right after joining, before the add-on has scanned the roster, it asks you to try again after the next scan.
 
@@ -764,6 +763,7 @@ The production add-on lives in `AsgardsGuildFellowship` (managed by CurseForge) 
 The development build also has testing commands the production build leaves out:
 
 - `/agfdev greettest` shows a greet prompt right away in each look: never grouped with, Grouped, Frequent and Top 5, so you can see them without waiting for a friend to log in. Each tier shows a guildmate really in it when your party history has one, and otherwise another guildmate drawn in that tier's look (chat marks them "stand-in"). **Greet** on a test prompt posts nothing to guild chat and just closes it. `/agfdev greettest hold` shows the Frequent and Top 5 prompts held as in Slow mode, counting down 30 seconds.
+- `/agfdev lfgtest` fills your Guild LFG Board with stand-in listings for every look: relevant ones (one with a note, and a raid), one only an alt of yours fits (when you have an alt far enough from your level), one nothing of yours fits, and a full one. It also glows the LFG button orange with a stand-in **Someone left — fill the empty slot?**, and slides out a stand-in Ask to join request. Nothing about the stand-ins is ever sent: asking to join one, **Invite**, **Decline**, **Yes** and **No** only print a line in chat. The stand-in listings leave the board after 5 minutes.
 - To test with your production party history, quit WoW, copy `AsgardsGuildFellowship.lua` in `WTF/Account/<ACCOUNT>/SavedVariables/` to `AsgardsGuildFellowshipDev.lua`, and change its first line to `AsgardsGuildFellowshipDevDB = {`.
 
 ## Running the tests
