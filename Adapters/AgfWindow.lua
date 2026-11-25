@@ -119,9 +119,10 @@ function Window:buildSidebar(frame)
         button:SetHeight(AgfWindow.MODULE_ROW_HEIGHT)
         button:SetPoint("LEFT", sidebar, "LEFT", Theme.SPACING.s, 0)
         button:SetPoint("RIGHT", sidebar, "RIGHT", -Theme.SPACING.s, 0)
-        local panel = ui:Panel(button, { radius = Theme.RADIUS.button, fill = "surface", border = false })
-        panel:SetAllPoints(button)
-        button.panel = panel
+        -- The button is its own rounded fill: a child panel would draw over
+        -- the label.
+        ui:Round(button, Theme.RADIUS.button, "surface", false)
+        button.panel = button
         button.id = id
         button.label = ui:Text(button, label, "semibold", "body", "muted")
         button.label:SetPoint("LEFT", button, "LEFT", Theme.SPACING.m, 0)

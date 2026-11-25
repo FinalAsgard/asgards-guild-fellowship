@@ -194,6 +194,11 @@ test.test("agf window: opens on the LFG page, titled Guild LFG Board, with the s
     test.assertTrue(contains(texts, "Version 1.2.3"))
     test.assertTrue(window.pages.lfg.shown)
     test.assertFalse(window.pages.settings.shown)
+    -- Each sidebar button is its own fill, so nothing draws over its label.
+    local index
+    for index = 1, #window.moduleButtons do
+        test.assertTrue(rawget(window.moduleButtons[index], "fillShape") ~= nil)
+    end
     -- Escape closes it.
     test.assertEqual("AgfTestWindow", environment.UISpecialFrames[1])
 
