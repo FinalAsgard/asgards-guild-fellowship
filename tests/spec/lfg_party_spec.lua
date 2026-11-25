@@ -575,6 +575,14 @@ test.test("Forever a questing leader who changes zones is asked whether to move 
     test.assertEqual("Ironforge", addon.lfgListing:Purpose().zone)
     fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
     test.assertFalse(addon.lfgButton:DrawerOpen())
+    -- Every zone said No to stays that way, not just the last one.
+    tool.zone = { name = "Wetlands", mapID = tool.zone.mapID }
+    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
+    test.assertEqual("zone", drawer.kind)
+    click(addon.lfgButton.notLookingButton)
+    tool.zone = { name = "Dun Morogh", mapID = tool.zone.mapID }
+    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
+    test.assertFalse(addon.lfgButton:DrawerOpen())
 
     -- Another zone asks again; Yes moves it, and guildmates hear.
     tool.zone = { name = "Loch Modan", mapID = tool.zone.mapID }

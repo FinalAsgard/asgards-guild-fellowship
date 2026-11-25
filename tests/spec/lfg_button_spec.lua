@@ -94,6 +94,15 @@ test.test("lfg button: Show Nearby opens the drawer on the guildmates nearby, ea
     test.assertEqual("Zap", button.nameMenu.titleText)
     button.nameMenu.rows[1].scripts.OnClick(button.nameMenu.rows[1])
     test.assertEqual("Zap-Camelot", whispered[1])
+    -- A refresh that keeps Zap on their row keeps their menu open; one that
+    -- puts someone else there closes it.
+    rows[2].scripts.OnClick(rows[2])
+    button:ShowNearby()
+    test.assertTrue(button.nameMenu:IsOpen())
+    people = { people[1], { name = "Bolt", whisper = "Bolt-Camelot" } }
+    button:ShowNearby()
+    test.assertFalse(button.nameMenu:IsOpen())
+    test.assertEqual("Bolt", rows[2].name.text)
 
     -- Closed, the drawer goes back to its usual contents.
     button:CloseDrawer()

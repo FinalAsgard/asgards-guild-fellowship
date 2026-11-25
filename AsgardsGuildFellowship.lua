@@ -106,10 +106,10 @@ local lfgJoin = {
     -- /agfdev lfgtest's stand-in "fill the empty slot?" is showing.
     standInSlot = false,
     -- A questing listing's leader moved: the zone they're asked to move it
-    -- to (false when not asking), the last one they said No to, looking
+    -- to (false when not asking), the zones they said No to (a set), looking
     -- at the zone, and the answer.
     zoneMove = false,
-    zoneDeclined = false,
+    zoneDeclined = {},
     checkZone = function() end,
     moveZone = function() end,
     -- The guildmates in the player's zone, for the button's Show Nearby.
@@ -1931,7 +1931,7 @@ if clientProfile.supported then
         local zone = client:GetZone()
         local name = zone and zone.name or nil
         if purpose == nil or purpose.kind ~= "questing" or not lfgLister() or client:IsInInstance()
-            or name == nil or name == purpose.zone or name == lfgJoin.zoneDeclined
+            or name == nil or name == purpose.zone or lfgJoin.zoneDeclined[name]
             or settings:Get("lfgButton") ~= true
         then
             lfgJoin.zoneMove = false
@@ -1956,7 +1956,7 @@ if clientProfile.supported then
                 rosterController:Print("Couldn't move your listing: " .. tostring(reason) .. ".")
             end
         elseif zone then
-            lfgJoin.zoneDeclined = zone
+            lfgJoin.zoneDeclined[zone] = true
         end
         lfgRefresh()
     end

@@ -740,6 +740,12 @@ function UI:ContextMenu(parent)
     end)
     catcher:Hide()
     menu.catcher = catcher
+    -- However the menu goes (closed, or hidden with its window), its
+    -- catcher goes with it, so it never eats the next click.
+    menu:SetScript("OnHide", function()
+        menu.open = false
+        catcher:Hide()
+    end)
     local ui = self
     -- Opens under `anchor` with `items`; `title` (text, may carry color
     -- codes) heads them when given.

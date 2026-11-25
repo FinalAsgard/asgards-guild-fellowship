@@ -630,8 +630,10 @@ function Button:refreshNearby()
                 row.level:SetPoint("LEFT", row, "LEFT", 0, 0)
                 row.name = ui:Text(row, "", "regular", "body", "text")
                 row.name:SetPoint("LEFT", row, "LEFT", LfgButton.LEVEL_WIDTH + Theme.SPACING.s, 0)
+                row.index = index
                 row:SetScript("OnClick", function(self)
                     local whisper = self.whisper
+                    owner.nameMenuFor = { row = self, whisper = whisper }
                     owner.nameMenu:Open(self, {
                         { label = "Whisper", onClick = function()
                             if whisper then
@@ -652,6 +654,14 @@ function Button:refreshNearby()
         elseif row ~= nil then
             row:Hide()
         end
+    end
+    -- A name's menu goes once its row is hidden or shows someone else.
+    local named = self.nameMenuFor
+    if named ~= nil and self.nameMenu:IsOpen()
+        and (named.row.index > shown or named.row.whisper ~= named.whisper)
+    then
+        self.nameMenu:Close()
+        self.nameMenuFor = nil
     end
     local more = #people - shown
     list.more:ClearAllPoints()

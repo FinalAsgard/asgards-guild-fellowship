@@ -148,6 +148,13 @@ test.test("agf window: widgets draw on fake frames and keep their state", functi
     test.assertFalse(menu.rows[2].shown)
     menu.rows[1].scripts.OnClick(menu.rows[1])
     test.assertEqual("whisper", chosen)
+    -- Hidden with its window rather than closed: its catcher goes too, so
+    -- it never eats the next click.
+    menu:Open(page, { { label = "Whisper", onClick = function() end } }, "Hammer")
+    test.assertTrue(menu.catcher.shown)
+    menu.scripts.OnHide(menu)
+    test.assertFalse(menu:IsOpen())
+    test.assertFalse(menu.catcher.shown)
 end)
 
 test.test("agf window: a UTF-8 note counts characters, not bytes", function()

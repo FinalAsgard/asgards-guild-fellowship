@@ -1105,11 +1105,12 @@ function Page:refreshTab()
         top = self:historyList(top, empty)
     end
     self.list:SetHeight(math.max(top, 1))
-    -- The name menu goes once its name is hidden or shows someone else.
+    -- The name menu goes once its name is hidden (or its card is) or shows
+    -- someone else.
     local named = self.nameMenuFor
     if named ~= nil and self.namesMenu ~= nil and self.namesMenu:IsOpen() then
         local anchor = named.anchor
-        local shown = type(anchor.IsShown) ~= "function" or anchor:IsShown()
+        local shown = type(anchor.IsVisible) ~= "function" or anchor:IsVisible()
         if not shown or anchor.title ~= named.title or anchor.whisper ~= named.whisper then
             self.namesMenu:Close()
             self.nameMenuFor = nil
@@ -1210,7 +1211,7 @@ function Page:Refresh()
     local asked = self.roleMenuFor
     if asked ~= nil and self.roleMenu ~= nil and self.roleMenu:IsOpen() then
         local now = asked.card and asked.card.listing
-        local shown = asked.card == nil or type(asked.card.IsShown) ~= "function" or asked.card:IsShown()
+        local shown = asked.card == nil or type(asked.card.IsVisible) ~= "function" or asked.card:IsVisible()
         if not shown or now == nil or now.id ~= asked.id or now.listedAt ~= asked.listedAt then
             self.roleMenu:Close()
             self.roleMenuFor = nil
