@@ -72,6 +72,13 @@ test.test("agf window: widgets draw on fake frames and keep their state", functi
     test.assertTrue(contains(page.texts, "Relevant Parties · 3"))
     tabs.tabs[2].scripts.OnClick(tabs.tabs[2])
     test.assertEqual("other", tabs:Selected())
+    -- Tabs are buttons: the selected one green, the others the surface.
+    test.assertEqual("green", tabs.tabs[2].fillColor)
+    test.assertEqual("surface", tabs.tabs[1].fillColor)
+    tabs.tabs[1].scripts.OnEnter(tabs.tabs[1])
+    test.assertEqual("hover", tabs.tabs[1].fillColor)
+    tabs.tabs[2].scripts.OnEnter(tabs.tabs[2])
+    test.assertEqual("green", tabs.tabs[2].fillColor)
 
     local wanted
     local switch = ui:Toggle(page, function(on)
@@ -108,6 +115,13 @@ test.test("agf window: widgets draw on fake frames and keep their state", functi
     local tile = ui:RoleTile(page, "healer", 40)
     tile:SetFilled(true)
     test.assertTrue(tile.filled)
+    -- The role's name, until a small tile shows its icon instead.
+    test.assertEqual("Healer", tile.label.text)
+    test.assertFalse(tile.icon.shown)
+    tile:ShowIcon()
+    test.assertEqual("", tile.label.text)
+    test.assertTrue(tile.icon.shown)
+    test.assertTrue(ui:RoleTile(page, "any", 12).icon.shown)
 
     local glow = ui:Glow(page)
     glow:SetGlow("gold")

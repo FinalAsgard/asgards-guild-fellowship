@@ -81,6 +81,10 @@ local Theme = {
         heart = MEDIA .. "Textures\\Heart",
         -- A role tile where any role will do.
         person = MEDIA .. "Textures\\Person",
+        -- Role tiles too small for the role's name: Tank, Healer, DPS.
+        shield = MEDIA .. "Textures\\Shield",
+        cross = MEDIA .. "Textures\\Cross",
+        sword = MEDIA .. "Textures\\Sword",
         -- For a dungeon the game gives no icon for.
         dungeon = MEDIA .. "Textures\\Dungeon",
         -- A plain white square for flat, tinted fills; on every client.

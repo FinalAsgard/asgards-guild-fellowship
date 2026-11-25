@@ -210,3 +210,44 @@ write("Dungeon.tga", 64, 64, function(x, y)
     local inDoor = x >= 18 and x <= 46 and y >= 30 and y <= 58 or (y < 30 and ax * ax + ay * ay <= 1)
     return 1, 1, 1, inside(inWall and not inDoor)
 end)
+
+-- Whether (px, py) is within `radius` of the segment from (ax, ay) to
+-- (bx, by).
+local function nearSegment(px, py, ax, ay, bx, by, radius)
+    local vx, vy = bx - ax, by - ay
+    local t = clamp(((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy))
+    local cx, cy = ax + t * vx - px, ay + t * vy - py
+    return cx * cx + cy * cy <= radius * radius
+end
+
+-- The role icons, for the small role tiles too small for a role's name.
+
+-- A white shield, for Tank: a flat top whose sides curve in to a point.
+write("Shield.tga", 32, 32, function(x, y)
+    if y < 4 or y > 29 then
+        return 0, 0, 0, 0
+    end
+    local half = 11
+    if y > 13 then
+        local down = (y - 13) / 16
+        half = 11 * math.sqrt(math.max(1 - down * down, 0))
+    end
+    return 1, 1, 1, inside(math.abs(x - 16) <= half)
+end)
+
+-- A white cross, for Healer: a thick plus.
+write("Cross.tga", 32, 32, function(x, y)
+    local across = math.abs(x - 16) <= 4.5 and y >= 4 and y <= 28
+    local down = math.abs(y - 16) <= 4.5 and x >= 4 and x <= 28
+    return 1, 1, 1, inside(across or down)
+end)
+
+-- A white sword, for DPS: a diagonal blade, a crossguard, a grip and a
+-- round pommel.
+write("Sword.tga", 32, 32, function(x, y)
+    local blade = nearSegment(x, y, 26, 6, 12, 20, 2.6)
+    local guard = nearSegment(x, y, 8, 16, 16, 24, 2)
+    local grip = nearSegment(x, y, 12, 20, 7, 25, 1.8)
+    local px, py = x - 6, y - 26
+    return 1, 1, 1, inside(blade or guard or grip or px * px + py * py <= 2.8 * 2.8)
+end)

@@ -215,7 +215,8 @@ function Page:roleTiles(parent, size)
     local index
     for index = 1, #roles do
         tiles[index] = self.ui:RoleTile(parent, roles[index], size, size)
-        tiles[index].label:SetText("")
+        -- Too small for the role's name: its icon.
+        tiles[index]:ShowIcon()
         if index > 1 then
             tiles[index]:SetPoint("LEFT", tiles[index - 1], "RIGHT", 4, 0)
         end

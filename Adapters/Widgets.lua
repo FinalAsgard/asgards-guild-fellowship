@@ -18,6 +18,8 @@ local Widgets = {
     TOGGLE_HEIGHT = 18,
     INPUT_HEIGHT = 26,
     ROLE_LABELS = { tank = "Tank", healer = "Healer", dps = "DPS" },
+    -- Each role's icon (a Theme.TEXTURES name); "any" is a person.
+    ROLE_ICONS = { tank = "shield", healer = "cross", dps = "sword", any = "person" },
 }
 addon.Widgets = Widgets
 
@@ -304,25 +306,26 @@ function UI:Segmented(parent, items, width, onSelect)
     return strip
 end
 
--- A row of text tabs with a green underline under the selected one. Like
--- Segmented: `items` { id, label }, onSelect(id), Select(id), Selected(),
--- and SetLabel(id, text) for a tab whose label carries a count.
+-- A row of tabs drawn as rounded buttons, the selected one green, as the
+-- window's sidebar buttons are. Like Segmented: `items` { id, label },
+-- onSelect(id), Select(id), Selected(), and SetLabel(id, text) for a tab
+-- whose label carries a count.
 function UI:Tabs(parent, items, onSelect)
     local row = self:frame("Frame", parent)
     row:SetHeight(28)
     row.tabs = {}
     local ui = self
-    -- Each tab as wide as its label, one after another.
+    -- Each tab as wide as its label and its padding, one after another.
     local function layout()
         local x = 0
         local position
         for position = 1, #row.tabs do
             local tab = row.tabs[position]
-            local width = math.max((tab.label:GetStringWidth() or 0) + 4, 48)
+            local width = math.max((tab.label:GetStringWidth() or 0) + 2 * Theme.SPACING.m, 48)
             tab:SetSize(width, 28)
             tab:ClearAllPoints()
             tab:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", x, 0)
-            x = x + width + Theme.SPACING.l
+            x = x + width + Theme.SPACING.xs
         end
     end
     local index
@@ -330,14 +333,19 @@ function UI:Tabs(parent, items, onSelect)
         local item = items[index]
         local tab = ui:frame("Button", row)
         tab.id = item.id
+        round(tab, Theme.RADIUS.button, "surface", false)
         tab.label = ui:Text(tab, item.label, "semibold", "body", "muted")
-        tab.label:SetPoint("LEFT", tab, "LEFT", 0, 2)
-        tab.underline = tab:CreateTexture(nil, "ARTWORK")
-        tab.underline:SetTexture(Theme.TEXTURES.white)
-        tab.underline:SetVertexColor(Theme.Color("green"))
-        tab.underline:SetHeight(2)
-        tab.underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 0, 0)
-        tab.underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
+        tab.label:SetPoint("CENTER", tab, "CENTER", 0, 0)
+        tab:SetScript("OnEnter", function(self)
+            if self.id ~= row.selected then
+                self:SetFill("hover")
+            end
+        end)
+        tab:SetScript("OnLeave", function(self)
+            if self.id ~= row.selected then
+                self:SetFill("surface")
+            end
+        end)
         tab:SetScript("OnClick", function(self)
             row:Select(self.id)
             if onSelect ~= nil then
@@ -353,12 +361,8 @@ function UI:Tabs(parent, items, onSelect)
         for position = 1, #row.tabs do
             local tab = row.tabs[position]
             local on = tab.id == id
+            tab:SetFill(on and "green" or "surface")
             tab.label:SetTextColor(Theme.Color(on and "text" or "muted"))
-            if on then
-                tab.underline:Show()
-            else
-                tab.underline:Hide()
-            end
         end
     end
     function row.Selected()
@@ -569,7 +573,9 @@ function UI:Glow(parent, spread)
 end
 
 -- A role tile: a rounded square in the role's color ("tank", "healer",
--- "dps", or "any" for a person of any role), grey once SetFilled(true).
+-- "dps", or "any" for a person of any role), grey once SetFilled(true). It
+-- shows the role's name; ShowIcon() swaps that for the role's icon, for a
+-- tile too small for the name. "any" always shows its person.
 function UI:RoleTile(parent, role, width, height)
     local tile = self:Panel(parent, { radius = Theme.RADIUS.small, fill = role == "any" and "green" or role,
         border = false })
@@ -577,13 +583,19 @@ function UI:RoleTile(parent, role, width, height)
     tile.role = role
     tile.label = self:Text(tile, Widgets.ROLE_LABELS[role] or "", "semibold", "small", "text")
     tile.label:SetPoint("CENTER", tile, "CENTER", 0, 0)
-    -- Any role: a person instead of a role's name.
-    if role == "any" then
-        local inset = math.floor(math.min(width, height or width) * 0.2)
-        tile.icon = tile:CreateTexture(nil, "ARTWORK")
-        tile.icon:SetTexture(Theme.TEXTURES.person)
-        tile.icon:SetPoint("TOPLEFT", tile, "TOPLEFT", inset, -inset)
-        tile.icon:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -inset, inset)
+    -- A square in the middle, so the icon keeps its shape on a wide tile.
+    local side = math.min(width, height or width)
+    local size = side - 2 * math.max(math.floor(side * 0.15), 1)
+    tile.icon = tile:CreateTexture(nil, "ARTWORK")
+    tile.icon:SetTexture(Theme.TEXTURES[Widgets.ROLE_ICONS[role]])
+    tile.icon:SetSize(size, size)
+    tile.icon:SetPoint("CENTER", tile, "CENTER", 0, 0)
+    if role ~= "any" then
+        tile.icon:Hide()
+    end
+    function tile.ShowIcon()
+        tile.label:SetText("")
+        tile.icon:Show()
     end
     function tile.SetFilled(_, filled)
         tile.filled = filled == true
@@ -594,9 +606,7 @@ function UI:RoleTile(parent, role, width, height)
             tile:SetFill(role == "any" and "green" or role)
             tile.label:SetTextColor(Theme.Color("text"))
         end
-        if role == "any" then
-            tile.icon:SetVertexColor(Theme.Color(tile.filled and "muted" or "text"))
-        end
+        tile.icon:SetVertexColor(Theme.Color(tile.filled and "muted" or "text"))
     end
     return tile
 end
