@@ -116,24 +116,24 @@ local function newListing()
     return test.newAddon("Core/LfgProtocol.lua", "Core/LfgListing.lua", "Core/RoleCatalog.lua")
 end
 
-test.test("lfg listing: a dungeon role is the game's, else the leader's choice, else the class's first", function()
+test.test("lfg listing: a dungeon role is the game's, else the player's own, else the class's first", function()
     local addon = newListing()
     local roles = addon.RoleCatalog.For("forever")
     local members = {
-        { key = "a", classToken = "WARRIOR", assignedRole = "dps" },
+        { key = "a", classToken = "WARRIOR", assignedRole = "dps", role = "tank" },
         { key = "b", classToken = "PALADIN" },
         { key = "c", classToken = "MAGE" },
         { key = "d", classToken = "PRIEST", role = "dps" },
         { key = "e", classToken = "DRUID" },
     }
-    local filled = addon.LfgListing.FillRoles(members, { a = "tank", b = "healer", c = "tank" }, function(token)
+    local filled = addon.LfgListing.FillRoles(members, function(token)
         return roles:RolesFor(token)
     end)
 
-    -- The game's role wins over a choice; a choice the class can't play is
-    -- ignored; a player's own willing role comes before the class's first.
+    -- The game's role (set in its party menu) wins; a player's own willing
+    -- role comes before the class's first.
     test.assertEqual("dps", filled[1].role)
-    test.assertEqual("healer", filled[2].role)
+    test.assertEqual(roles:RolesFor("PALADIN")[1], filled[2].role)
     test.assertEqual("dps", filled[3].role)
     test.assertEqual("dps", filled[4].role)
     test.assertEqual("tank", filled[5].role)
@@ -275,30 +275,16 @@ local function roleRow(page, name)
     return nil
 end
 
--- The roles `name`'s name menu offers (in Roles in your party), as
--- "Tank,Healer · current,…".
-local function roleChoices(page, name)
-    click(roleRow(page, name))
-    local labels = {}
-    local index
-    for index = 1, #page.namesMenu.items do
-        labels[index] = page.namesMenu.items[index].label
+-- The game's party menu gives `name` (a unit's name) the role `role`
+-- ("TANK", "HEALER" or "DAMAGER") on `world`'s client.
+local function setGameRole(world, name, role)
+    world.gameRoles = world.gameRoles or {}
+    world.gameRoles[name] = role
+    local environment = world.environment
+    environment.UnitGroupRolesAssigned = function(unit)
+        local unitName = environment.UnitName and environment.UnitName(unit)
+        return unitName and world.gameRoles[unitName] or "NONE"
     end
-    page.namesMenu:Close()
-    return table.concat(labels, ",")
-end
-
--- Picks `role` for `name` from their name menu in Roles in your party.
-local function chooseRole(page, name, role)
-    click(roleRow(page, name))
-    local index
-    for index = 1, #page.namesMenu.items do
-        if page.namesMenu.items[index].role == role then
-            click(page.namesMenu.rows[index])
-            return
-        end
-    end
-    error("no " .. role .. " for " .. name)
 end
 
 test.test("Forever forming a party opens the drawer to ask; listing it goes through the board with roles", function()
@@ -317,18 +303,15 @@ test.test("Forever forming a party opens the drawer to ask; listing it goes thro
     local page = addon.lfgPage
     test.assertTrue(addon.agfWindow:IsOpen())
     test.assertEqual("edit", page:Mode())
-    -- Roles in your party: each member's role icon by their name, which
-    -- opens their name menu with the roles they can play; the warrior
-    -- can't heal.
+    -- Roles in your party: each member's role icon by their name, the
+    -- role the game's party menu gave them.
     local toolRow = roleRow(page, "Tool")
     local hammerRow = roleRow(page, "Hammer")
     test.assertTrue(toolRow ~= nil and hammerRow ~= nil)
     test.assertTrue(toolRow.roleIcon.shown)
-    test.assertEqual(nil, string.find(roleChoices(page, "Tool"), "Healer", 1, true))
-    test.assertContains(roleChoices(page, "Hammer"), "Healer")
-    chooseRole(page, "Hammer", "healer")
+    setGameRole(tool, "Hammer", "HEALER")
+    page:Refresh()
     test.assertEqual("healer", roleRow(page, "Hammer").role)
-    test.assertContains(roleChoices(page, "Hammer"), "Healer \194\183 current")
 
     page.draft.dungeon = addon.DungeonCatalog.For("forever", nil):Get("strat")
     test.assertTrue(page:Save())
@@ -1042,21 +1025,15 @@ test.test("Forever an ask whispered from outside the guild never reaches the lea
     test.assertTrue(toolAddon.lfgButton.toasts[1].shown)
 end)
 
-test.test("Forever roles chosen in the editor are dropped by Cancel and applied by Save", function()
+test.test("Forever the roles the game's party menu gives go out with the listing", function()
     local channel = fixtures.newChannel()
     local tool, addon = login(channel, "Tool Box")
     local zap = login(channel, "Zap Arcane")
     partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    setGameRole(tool, "Hammer", "DAMAGER")
     click(addon.lfgButton.listButton)
     local page = addon.lfgPage
-    chooseRole(page, "Hammer", "healer")
-    test.assertEqual("healer", roleRow(page, "Hammer").role)
-    click(page.cancelButton)
-    test.assertEqual(nil, next(addon.lfgListing:ChosenRoles()))
-
-    page:StartEditing()
-    test.assertTrue(roleRow(page, "Hammer").role ~= "healer")
-    chooseRole(page, "Hammer", "dps")
+    test.assertEqual("dps", roleRow(page, "Hammer").role)
     page.draft.dungeon = addon.DungeonCatalog.For("forever", nil):Get("strat")
     test.assertTrue(page:Save())
     fixtures.deliver(channel)
@@ -1369,9 +1346,6 @@ test.test("lfg listing: held as the party was until the slot's posted, then as i
     fields = listing:Announcement(four)
     test.assertEqual(4, fields.s)
     test.assertEqual("healer", table.concat(fields.r, ","))
-    -- The leader setting roles says what's open.
-    listing:SetRole("x", "dps")
-    test.assertEqual("dps", table.concat(listing:Announcement(four).r, ","))
 
     -- Filling up again lets go of a hold.
     listing:Hold(five)
@@ -1533,13 +1507,13 @@ test.test("Forever a slot that opened while the button was hidden is offered whe
     test.assertEqual(4, addon.lfgBoard:Listings(hammer.time)[1].size)
 end)
 
-test.test("Forever a role the leader edits is the one whoever leaves leaves open", function()
+test.test("Forever a role the game's party menu changes is the one whoever leaves leaves open", function()
     local channel = fixtures.newChannel()
     local tool, toolAddon = fullStrat(channel)
     test.assertTrue(toolAddon.agfWindow:Open("lfg"))
     local page = toolAddon.lfgPage
     page:StartEditing()
-    chooseRole(page, "Hammer", "healer")
+    setGameRole(tool, "Hammer", "HEALER")
     page.draft.dungeon = toolAddon.DungeonCatalog.For("forever", nil):Get("strat")
     test.assertTrue(page:Save())
 

@@ -1506,8 +1506,8 @@ if clientProfile.supported then
     end
     -- The party as the listing announces it, the leader first: the player
     -- alone, or their party (the whole raid in a raid). Each member's role
-    -- is the game's, else the one the leader chose, else the first their
-    -- class can play (the player's own: the first they're willing to).
+    -- is the game's (set in its party menu), else the first their class
+    -- can play (the player's own: the first they're willing to).
     local function lfgMembers()
         local classToken = client:GetPlayerClass()
         local preferred = (rolesOf(rosterController:SelfKey()) or {})[1]
@@ -1558,7 +1558,7 @@ if clientProfile.supported then
                 isPlayer = true,
             }
         end
-        return addon.LfgListing.FillRoles(members, lfgListing:ChosenRoles(), function(token)
+        return addon.LfgListing.FillRoles(members, function(token)
             return roleCatalog:RolesFor(token)
         end)
     end
@@ -1814,10 +1814,9 @@ if clientProfile.supported then
             end
         end
     end
-    -- Start a group (or Edit) saved: the listing starts or changes, with the
-    -- members' `roles` the leader chose (by key), and the guild hears it
-    -- now. Questing is in the zone's level range.
-    local function saveListing(purpose, note, roles)
+    -- Start a group (or Edit) saved: the listing starts or changes, and the
+    -- guild hears it now. Questing is in the zone's level range.
+    local function saveListing(purpose, note)
         if type(purpose) == "table" and purpose.kind == "questing" then
             local levels = lfgZoneLevels()
             purpose.minLevel = levels and levels.minLevel or nil
@@ -1841,12 +1840,9 @@ if clientProfile.supported then
         if not saved then
             return false, reason
         end
-        local key, role
-        for key, role in pairs(type(roles) == "table" and roles or {}) do
-            lfgListing:SetRole(key, role)
-        end
         -- The party as last seen keeps its members, with the roles as
-        -- they're listed now, for whoever leaves next.
+        -- they're listed now (the game's may have changed since), for
+        -- whoever leaves next.
         local listed = {}
         local members = lfgMembers()
         local index
@@ -2297,12 +2293,6 @@ if clientProfile.supported then
                         name = member.name,
                         classToken = member.classToken,
                         role = member.role,
-                        assigned = member.assignedRole ~= nil,
-                        canPlay = {
-                            tank = roleCatalog:Can(member.classToken, "tank"),
-                            healer = roleCatalog:Can(member.classToken, "healer"),
-                            dps = roleCatalog:Can(member.classToken, "dps"),
-                        },
                     }
                 end
                 return rows

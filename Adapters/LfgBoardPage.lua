@@ -45,6 +45,12 @@ local LfgBoardPage = {
     NEARBY_ROW_HEIGHT = 18,
     -- The levels' column left of the names.
     LEVEL_WIDTH = 22,
+    -- The role tiles on a large card's right: their width, and each row's
+    -- height.
+    TILE_BLOCK_WIDTH = 84,
+    TILE_HEIGHT = 22,
+    -- The leader's name on a small card's second line.
+    SMALL_LEADER_WIDTH = 120,
     -- Other Parties' cards are faded to this.
     GREYED_ALPHA = 0.5,
     -- The tab list's width until the window lays it out.
@@ -108,11 +114,8 @@ Page.__index = Page
 --   party         function() -> { inParty, isLeader, listing? (the party's
 --                 listing on the board, when someone else leads it) }
 --   partyRoles    function() -> the members for Roles in your party, each
---                 { key, name, role, assigned (by the game), canPlay =
---                 { tank, healer, dps } }
---   onSave        function(purpose, note, roles) -> true, or false and why
---                 not; `roles` are the members' roles the leader chose, by
---                 key, applied only when it saves
+--                 { key, name, classToken?, role }
+--   onSave        function(purpose, note) -> true, or false and why not
 --   onAskInGuild  function(line): types `line` into guild chat, unsent
 --   onNotLooking  function()
 function LfgBoardPage.Create(content, ui, options)
@@ -337,18 +340,14 @@ function Page:buildEditor(card)
     self.errorText:SetPoint("TOPLEFT", self.note, "BOTTOMLEFT", 0, -Theme.SPACING.s)
 
     -- Roles in your party (dungeons): each member's role icon left of their
-    -- name; clicking the name opens the name menu with the roles their
-    -- class can play. A role the game assigned can't be changed here.
+    -- name in class color. Roles are set in the game's party menu, not
+    -- here, so the names aren't clicked.
     editor.rolesLabel = ui:SectionLabel(editor, "Roles in your party")
     editor.rolesLabel:SetPoint("TOPLEFT", self.note, "BOTTOMLEFT", 0, -28)
-    editor.rolesHint = ui:Text(editor, "Click a name to change their role.", "regular", "small", "muted")
-    editor.rolesHint:SetPoint("LEFT", editor.rolesLabel, "RIGHT", Theme.SPACING.s, 0)
     self.roleRows = {}
     local row
     for row = 1, LfgBoardPage.ROLE_ROWS do
-        local line = self:nameButton(editor, LfgBoardPage.ROLE_ROW_HEIGHT, function(self)
-            owner:pickRole(self)
-        end)
+        local line = self:nameButton(editor, LfgBoardPage.ROLE_ROW_HEIGHT, function() end)
         line:SetWidth(LfgBoardPage.FIELD_WIDTH)
         line:SetPoint("TOPLEFT", editor.rolesLabel, "BOTTOMLEFT", 0,
             -Theme.SPACING.xs - (row - 1) * LfgBoardPage.ROLE_ROW_HEIGHT)
@@ -382,8 +381,6 @@ function Page:StartEditing()
         note = listing:IsActive() and listing:Note() or "",
         search = "",
         offset = 0,
-        -- Members' roles chosen in the editor, by key.
-        roles = {},
     }
     self.editing = true
     self.search:SetValue("")
@@ -409,7 +406,7 @@ end
 -- Saves the draft: the listing starts, or changes. A draft that can't be
 -- saved says why and stays open.
 function Page:Save()
-    local saved, reason = self.options.onSave(self:draftPurpose(), self.draft.note, self.draft.roles)
+    local saved, reason = self.options.onSave(self:draftPurpose(), self.draft.note)
     if not saved then
         self.errorText:SetText("Can't save: " .. tostring(reason) .. ".")
         return false
@@ -515,11 +512,10 @@ function Page:refreshMemberView()
     self.askGuildButton:Hide()
 end
 
--- Roles in your party: each member's role, and the ones they could play.
+-- Roles in your party: each member's role icon by their name.
 function Page:refreshRoles()
     local members = self.draft.kind == "dungeon" and (self.options.partyRoles and self.options.partyRoles()) or {}
     setShown(self.editor.rolesLabel, #members > 0)
-    setShown(self.editor.rolesHint, #members > 0)
     local index
     for index = 1, #self.roleRows do
         local line, member = self.roleRows[index], members[index]
@@ -529,51 +525,10 @@ function Page:refreshRoles()
         else
             line.key = member.key
             line.memberName = member.name
-            line.canPlay = member.canPlay or {}
-            line.assigned = member.assigned == true
-            -- The role chosen here (kept in the draft until Save; Cancel
-            -- drops it), else the one it has.
-            local role = member.role
-            if not member.assigned and self.draft.roles[member.key] ~= nil then
-                role = self.draft.roles[member.key]
-            end
             self:showName(line, { text = colored(member.name, self.options.classColor
-                and self.options.classColor(member.classToken)), role = role })
+                and self.options.classColor(member.classToken)), role = member.role })
         end
     end
-end
-
--- The name menu for a Roles in your party row: the roles the member's
--- class can play, their current one marked; a role the game assigned
--- can't be changed.
-function Page:pickRole(line)
-    if not line.key then
-        return
-    end
-    local owner, items = self, {}
-    if line.assigned then
-        items[1] = { label = "Role set by the game" }
-    else
-        local roles = { "tank", "healer", "dps" }
-        local index
-        for index = 1, #roles do
-            local role = roles[index]
-            if line.canPlay[role] == true then
-                table.insert(items, {
-                    role = role,
-                    label = Widgets.ROLE_LABELS[role] .. (line.role == role and DOT .. "current" or ""),
-                    onClick = function()
-                        owner.nameMenuFor = nil
-                        if owner.draft ~= nil and line.key then
-                            owner.draft.roles[line.key] = role
-                            owner:refreshRoles()
-                        end
-                    end,
-                })
-            end
-        end
-    end
-    self:openNameMenu(line, items)
 end
 
 function Page:refreshEditor()
@@ -881,25 +836,33 @@ local function sizeText(listing)
     return listing.size .. "/" .. listing.maxSize
 end
 
--- What a dungeon listing still needs, as its open roles ("needs Healer,
--- DPS"); nil for other kinds, or when it needs nobody.
-local function needsText(listing)
-    if listing.kind ~= "dungeon" then
-        return nil
-    end
-    local names = {}
+-- Role tiles laid out as on a large card, with their icons: two on top
+-- (Tank and Healer), three smaller below filling the same width. `role` is
+-- nil for a party's real roles, or "any" for person tiles.
+function Page:tileBlock(parent, role)
+    local width, height, gap = LfgBoardPage.TILE_BLOCK_WIDTH, LfgBoardPage.TILE_HEIGHT, 4
+    local top = (width - gap) / 2
+    local bottom = (width - 2 * gap) / 3
+    local roles = { role or "tank", role or "healer", role or "dps", role or "dps", role or "dps" }
+    local tiles = {}
     local index
-    for index = 1, #(listing.openRoles or {}) do
-        names[index] = Widgets.ROLE_LABELS[listing.openRoles[index]] or listing.openRoles[index]
+    for index = 1, 5 do
+        tiles[index] = self.ui:RoleTile(parent, roles[index], index <= 2 and top or bottom, height)
+        tiles[index]:ShowIcon()
     end
-    return #names > 0 and ("needs " .. table.concat(names, ", ")) or nil
+    tiles[2]:SetPoint("LEFT", tiles[1], "RIGHT", gap, 0)
+    tiles[3]:SetPoint("TOPLEFT", tiles[1], "BOTTOMLEFT", 0, -gap)
+    tiles[4]:SetPoint("LEFT", tiles[3], "RIGHT", gap, 0)
+    tiles[5]:SetPoint("LEFT", tiles[4], "RIGHT", gap, 0)
+    return tiles
 end
 
 -- A large card, made on first use: the purpose with its icon, then its
--- type, levels, size and what it needs; the members, each with their
--- role's icon (a dungeon's), the leader crowned and top group friends
--- starred, every name opening the name menu; the note; and Ask to join and
--- Whisper <leader> side by side.
+-- type, levels and size; the members on the left, each with their role's
+-- icon (a dungeon's), the leader crowned and top group friends starred,
+-- every name opening the name menu; the role tiles on the right (open in
+-- color, filled grey); the note; and Ask to join and Whisper <leader>
+-- side by side.
 function Page:largeCard(index)
     local card = self.largeCards[index]
     if card ~= nil then
@@ -920,12 +883,20 @@ function Page:largeCard(index)
     for row = 1, LfgBoardPage.CARD_MEMBERS do
         local line = self:nameButton(card, LfgBoardPage.MEMBER_HEIGHT)
         line:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -54 - (row - 1) * LfgBoardPage.MEMBER_HEIGHT)
-        line:SetPoint("RIGHT", card, "RIGHT", -pad, 0)
+        line:SetPoint("RIGHT", card, "RIGHT", -pad - LfgBoardPage.TILE_BLOCK_WIDTH - Theme.SPACING.s, 0)
         card.members[row] = line
     end
     card.more = ui:Text(card, "", "regular", "small", "label")
     card.more:SetPoint("TOPLEFT", card, "TOPLEFT", pad,
         -54 - LfgBoardPage.CARD_MEMBERS * LfgBoardPage.MEMBER_HEIGHT)
+    card.roleTiles = self:tileBlock(card, nil)
+    card.roleTiles[1]:SetPoint("TOPLEFT", card, "TOPRIGHT", -pad - LfgBoardPage.TILE_BLOCK_WIDTH, -54)
+    card.anyTiles = self:tileBlock(card, "any")
+    card.anyTiles[1]:SetPoint("TOPLEFT", card.roleTiles[1], "TOPLEFT", 0, 0)
+    card.raidTile = ui:RoleTile(card, "any", LfgBoardPage.TILE_BLOCK_WIDTH, LfgBoardPage.TILE_HEIGHT)
+    card.raidTile:SetPoint("TOPLEFT", card.roleTiles[1], "TOPLEFT", 0, 0)
+    card.count = ui:Text(card, "", "regular", "small", "muted")
+    card.count:SetPoint("TOP", card.raidTile, "BOTTOM", 0, -4)
     card.note = ui:Text(card, "", "italic", "small", "muted")
     card.note:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", pad, pad + Widgets.BUTTON_HEIGHT + Theme.SPACING.s)
     -- Ask to join and Whisper <leader> share the bottom; a leader who
@@ -961,7 +932,7 @@ function Page:showLarge(card, listing)
     card.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
     -- A party led from outside the guild names its contact.
     card.details:SetText(join({ addon.LfgListing.KindLabel(listing.kind), range(listing.minLevel, listing.maxLevel),
-        sizeText(listing), needsText(listing), listing.contact and ("contact " .. listing.leader) or nil }))
+        sizeText(listing), listing.contact and ("contact " .. listing.leader) or nil }))
     local row
     for row = 1, #card.members do
         local line, member = card.members[row], listing.members[row]
@@ -982,6 +953,7 @@ function Page:showLarge(card, listing)
     end
     local more = #listing.members - #card.members
     card.more:SetText(more > 0 and ("and " .. more .. " more") or "")
+    showTiles(card, listing)
     card.note:SetText(listing.note or "")
     card.whisper.target = listing.sender
     card.whisper:SetLabel("Whisper " .. listing.leader)
@@ -1015,6 +987,11 @@ function Page:smallCard(index)
     card.purpose:SetPoint("TOPLEFT", card, "TOPLEFT", Theme.SPACING.m, -Theme.SPACING.s)
     card.details = ui:Text(card, "", "regular", "small", "label")
     card.details:SetPoint("TOPLEFT", card.purpose, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    -- The leader after the details, in class color, opening the name menu.
+    card.leader = self:nameButton(card, LfgBoardPage.MEMBER_HEIGHT)
+    card.leader:SetWidth(LfgBoardPage.SMALL_LEADER_WIDTH)
+    card.leader:SetPoint("LEFT", card.details, "RIGHT", 0, 0)
+    Theme.Font(card.leader.name, "regular", "small", "text")
     card.roleTiles = self:roleTiles(card, 12)
     card.roleTiles[1]:SetPoint("RIGHT", card, "RIGHT", -Theme.SPACING.m - 4 * 16, 0)
     card.anyTiles = {}
@@ -1031,14 +1008,18 @@ function Page:smallCard(index)
     return card
 end
 
--- Shows a small card for `listing`; `alt` names the alt that fits, and
--- `greyed` fades it out (Other Parties).
-function Page:showSmall(card, listing, alt, greyed)
+-- Shows a small card for `listing`; `greyed` fades it out (Other
+-- Parties). Its second line is the type and levels, then the leader.
+function Page:showSmall(card, listing, greyed)
     card.listing = listing
     card.purpose:SetText(addon.LfgListing.Label(listing.kind, listing.purpose))
-    local fits = alt and (alt.level and (alt.name .. " (" .. alt.level .. ")") or alt.name) or nil
-    card.details:SetText(join({ addon.LfgListing.KindLabel(listing.kind), range(listing.minLevel, listing.maxLevel),
-        listing.leader, fits or sizeText(listing) }))
+    local details = join({ addon.LfgListing.KindLabel(listing.kind), range(listing.minLevel, listing.maxLevel) })
+    card.details:SetText(details ~= "" and (details .. DOT) or "")
+    -- A party led from outside the guild is named by its contact, whose
+    -- class the listing doesn't carry.
+    local leader = listing.members ~= nil and listing.members[1] or nil
+    local color = not listing.contact and leader ~= nil and self.options.classColor(leader.classToken) or nil
+    self:showName(card.leader, { text = colored(listing.leader, color), whisper = listing.sender })
     showTiles(card, listing)
     card.greyed = greyed == true
     card.purpose:SetTextColor(Theme.Color(card.greyed and "muted" or "text"))
@@ -1056,7 +1037,7 @@ function Page:smallRows(entries, top, greyed, used)
         local row = math.floor((index - 1) / 2)
         self:place(card, top + row * (LfgBoardPage.SMALL_CARD_HEIGHT + Theme.SPACING.s),
             index % 2 == 1 and "left" or "right")
-        self:showSmall(card, entries[index].listing, entries[index].alt, greyed)
+        self:showSmall(card, entries[index].listing, greyed)
     end
     local rows = math.ceil(#entries / 2)
     return top + rows * (LfgBoardPage.SMALL_CARD_HEIGHT + Theme.SPACING.s)

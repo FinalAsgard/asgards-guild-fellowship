@@ -189,14 +189,6 @@ function Listing:EnteredDungeon(dungeon)
     return true
 end
 
--- The leader set member `key`'s role (for a client that assigns none).
-function Listing:SetRole(key, role)
-    self.roles = self.roles or {}
-    self.roles[key] = role
-    -- The leader's roles say what's open now.
-    self.openRole = nil
-end
-
 -- Someone left: the listing is announced with `members` (the party as it
 -- was) until the open slot is posted or the party fills up again.
 function Listing:Hold(members)
@@ -212,21 +204,17 @@ end
 
 -- Posts the open slot: the listing is announced as the party is now, and a
 -- dungeon's one open slot as `role` (the role of whoever left, where it's
--- known), until the leader sets roles or the party changes size.
+-- known), until the party changes size.
 function Listing:Post(role)
     self.held = nil
     self.openRole = role
 end
 
--- The roles the leader set, by member key.
-function Listing:ChosenRoles()
-    return self.roles or {}
-end
-
--- `members` (each { key, classToken, assignedRole?, ... }) with each one's
--- dungeon role: the game's, else the one `chosen` (by key) when the class
--- can play it, else the first `rolesFor(classToken)` gives.
-function LfgListing.FillRoles(members, chosen, rolesFor)
+-- `members` (each { key, classToken, assignedRole?, role?, ... }) with each
+-- one's dungeon role: the game's (set in the game's party menu), else the
+-- one they have (the player's own preference), else the first
+-- `rolesFor(classToken)` gives.
+function LfgListing.FillRoles(members, rolesFor)
     local filled = {}
     local index
     for index = 1, #members do
@@ -237,16 +225,7 @@ function LfgListing.FillRoles(members, chosen, rolesFor)
             copy[name] = value
         end
         local playable = rolesFor(member.classToken) or {}
-        local role = member.assignedRole
-        if role == nil and chosen ~= nil and chosen[member.key] ~= nil then
-            local position
-            for position = 1, #playable do
-                if playable[position] == chosen[member.key] then
-                    role = chosen[member.key]
-                end
-            end
-        end
-        copy.role = role or member.role or playable[1]
+        copy.role = member.assignedRole or member.role or playable[1]
         filled[index] = copy
     end
     return filled

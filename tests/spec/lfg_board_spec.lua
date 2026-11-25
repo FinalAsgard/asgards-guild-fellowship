@@ -459,8 +459,8 @@ local function registerProfileTests(profile)
         test.assertTrue(card.shown)
         test.assertTrue(card.greyed)
         test.assertEqual(DUNGEON[profile].name, card.purpose.text)
-        test.assertContains(card.details.text, "Tool Box")
-        test.assertContains(card.details.text, "1/5")
+        test.assertContains(card.leader.name.text, "Tool Box")
+        test.assertTrue(card.roleTiles[1].shown)
     end)
 
     test.test(profile .. " Not looking takes the listing off guildmates' boards", function()
@@ -792,13 +792,19 @@ test.test("lfg page: a large card marks the leader, top friends, members' roles 
     test.assertFalse(card.members[3].star.shown)
     test.assertFalse(card.members[4].shown)
     test.assertEqual("3 bosses down", card.note.text)
-    -- Each member's role icon is beside their name; the card says what's
-    -- still needed, with no role grid.
+    -- Each member's role icon is beside their name, and the role tiles on
+    -- the right, with their icons, show what's open: tank taken, healer
+    -- open, two of three DPS taken.
     test.assertEqual("tank", card.members[1].role)
     test.assertTrue(card.members[1].roleIcon.shown)
     test.assertEqual("dps", card.members[2].role)
-    test.assertContains(card.details.text, "needs Healer, DPS")
-    test.assertEqual(nil, rawget(card, "roleTiles"))
+    local filled = {}
+    local index
+    for index = 1, 5 do
+        test.assertTrue(card.roleTiles[index].icon.shown)
+        filled[index] = card.roleTiles[index].filled and "x" or "o"
+    end
+    test.assertEqual("xoxxo", table.concat(filled))
     -- Every name opens the name menu; its Whisper whispers that member,
     -- the leader by the name they listed from.
     whisperName(page, card.members[2])
@@ -807,7 +813,7 @@ test.test("lfg page: a large card marks the leader, top friends, members' roles 
     test.assertEqual("Hammer,Tool-Camelot,Tool-Camelot", table.concat(whispered, ","))
 end)
 
-test.test("lfg page: questing and raid cards give their size, with no role icons", function()
+test.test("lfg page: questing uses person tiles and no role icons, a raid one tile and its count", function()
     local questing = listingOf("questing", { purpose = "Duskwood", size = 2, minLevel = 18, maxLevel = 30,
         members = { { name = "Tool", classToken = "WARRIOR" }, { name = "Zap", classToken = "MAGE" } } })
     local raid = listingOf("raid", { size = 12 })
@@ -819,17 +825,23 @@ test.test("lfg page: questing and raid cards give their size, with no role icons
     test.assertContains(quest.details.text, "2/5")
     test.assertFalse(quest.members[1].roleIcon.shown)
     test.assertFalse(quest.members[2].roleIcon.shown)
+    test.assertTrue(quest.anyTiles[2].filled)
+    test.assertFalse(quest.anyTiles[3].filled)
+    test.assertFalse(quest.roleTiles[1].shown)
     -- No dungeon, no icon.
     test.assertFalse(quest.iconTexture)
 
     local big = page.largeCards[2]
     test.assertEqual("Raid", big.purpose.text)
     test.assertContains(big.details.text, "12 players")
+    test.assertTrue(big.raidTile.shown)
+    test.assertEqual("12 players", big.count.text)
 end)
 
-test.test("lfg page: alts' groups as small cards naming the alt", function()
-    local listing = listingOf("dungeon", { purpose = "Wailing Caverns", minLevel = 17, maxLevel = 24 })
-    local page = pageWith({ relevant = {},
+test.test("lfg page: alts' groups as small cards, the leader's name a menu in class color", function()
+    local listing = listingOf("dungeon", { purpose = "Wailing Caverns", minLevel = 17, maxLevel = 24,
+        members = { { name = "Tool", classToken = "WARRIOR", role = "tank" } } })
+    local page, whispered = pageWith({ relevant = {},
         alts = { { listing = listing, alt = { name = "Bolt", level = 20 } } }, other = {} })
 
     test.assertFalse(page.emptyText.shown)
@@ -837,8 +849,12 @@ test.test("lfg page: alts' groups as small cards naming the alt", function()
     local card = page.smallCards[1]
     test.assertFalse(card.greyed)
     test.assertEqual("Wailing Caverns", card.purpose.text)
-    test.assertContains(card.details.text, "Tool")
-    test.assertContains(card.details.text, "Bolt (20)")
+    -- The second line: type and levels, then the leader, and nothing
+    -- after (the role tiles share the row).
+    test.assertEqual("Dungeon \194\183 17\226\128\14724 \194\183 ", card.details.text)
+    test.assertEqual("|cffc79c6eTool|r", card.leader.name.text)
+    whisperName(page, card.leader)
+    test.assertEqual("Tool-Camelot", whispered[1])
     test.assertFalse(page.nearbyCard.shown)
 end)
 
@@ -885,14 +901,13 @@ test.test("lfg page: the Nearby tab lists guildmates with their levels in a colu
     test.assertEqual("No guildmates nearby right now.", empty.emptyText.text)
 end)
 
-test.test("lfg page: Roles in your party puts each role's icon by the name, picked from its name menu", function()
+
+test.test("lfg page: Roles in your party shows each role's icon by the name, read-only", function()
     local page = pageWith({ relevant = {}, alts = {}, other = {} }, {
         partyRoles = function()
             return {
-                { key = "tool", name = "Tool", classToken = "WARRIOR", role = "tank", assigned = true,
-                    canPlay = { tank = true, dps = true } },
-                { key = "zap", name = "Zap", classToken = "MAGE", role = "dps",
-                    canPlay = { dps = true } },
+                { key = "tool", name = "Tool", classToken = "WARRIOR", role = "tank" },
+                { key = "zap", name = "Zap", classToken = "MAGE", role = "dps" },
             }
         end,
     })
@@ -901,18 +916,11 @@ test.test("lfg page: Roles in your party puts each role's icon by the name, pick
     test.assertEqual("|cffc79c6eTool|r", tool.name.text)
     test.assertEqual("tank", tool.role)
     test.assertTrue(tool.roleIcon.shown)
-    test.assertTrue(page.editor.rolesHint.shown)
-    -- A role the game assigned can't be changed.
+    test.assertEqual("dps", zap.role)
+    test.assertFalse(page.roleRows[3].shown)
+    -- Roles are set in the game's party menu: the names open nothing.
     click(tool)
-    test.assertEqual(1, #page.namesMenu.items)
-    test.assertEqual("Role set by the game", page.namesMenu.items[1].label)
-    click(page.namesMenu.rows[1])
-    test.assertEqual("tank", page.roleRows[1].role)
-    -- A mage plays DPS only.
-    click(zap)
-    test.assertEqual("|cffc79c6eTool|r", tool.name.text)
-    test.assertEqual(1, #page.namesMenu.items)
-    test.assertEqual("DPS \194\183 current", page.namesMenu.items[1].label)
+    test.assertTrue(page.namesMenu == nil or not page.namesMenu:IsOpen())
 end)
 
 test.test("lfg page: the name menu closes on a second click, a click outside it, and when its name goes", function()
@@ -946,7 +954,7 @@ test.test("Forever a group only your alt fits shows under Your alts could join, 
     local board = openBoard(hammer)
     test.assertEqual("Relevant Parties \194\183 0", board.tabs.tabs[1].label.text)
     test.assertTrue(board.altsLabel.shown)
-    test.assertContains(board.smallCards[1].details.text, "Bolt Smith (59)")
+    test.assertContains(board.smallCards[1].leader.name.text, "Tool")
     board:ShowTab("nearby")
     test.assertTrue(board.nearbyCard.shown)
     test.assertEqual("NEARBY IN IRONFORGE", board.nearbyCard.title.text)
