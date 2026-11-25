@@ -27,13 +27,15 @@ local LfgButton = {
     DRAWER_GAP = 6,
     -- How far the drawer slides in from.
     SLIDE = 24,
-    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 146, ask = 178, gate = 146, slot = 164 },
+    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 146, ask = 178, gate = 146, slot = 164, zone = 146 },
     -- The party's role tiles, as on the Your listing card.
     TILE_SIZE = 22,
     NONE_TEXT = "No groups for you right now",
     ASK_TEXT = "You're leading a party. List it on the Guild LFG Board?",
     GATE_TEXT = "Your party has players from outside the guild. List it on the Guild LFG Board?",
     SLOT_TEXT = "Someone left \226\128\148 fill the empty slot?",
+    -- %s: the zone the leader moved to.
+    ZONE_TEXT = "You're in %s now. Move your questing listing here?",
     -- An Ask to join request under the drawer.
     TOAST_HEIGHT = 74,
 }
@@ -43,6 +45,30 @@ local DOT = " \194\183 "
 
 local Button = {}
 Button.__index = Button
+
+-- Font string `text` wraps within `width` at spaces, never inside a word.
+local function wrapAtWords(text, width)
+    text:SetWidth(width)
+    text:SetJustifyH("LEFT")
+    text:SetWordWrap(true)
+    if type(text.SetNonSpaceWrap) == "function" then
+        text:SetNonSpaceWrap(false)
+    end
+end
+
+-- How much taller font string `text` is than `lines` lines of it, as the
+-- client lays it out: 0 where the client can't say.
+local function extraHeight(text, lines)
+    if type(text.GetStringHeight) ~= "function" or type(text.GetNumLines) ~= "function" then
+        return 0
+    end
+    local height, count = text:GetStringHeight(), text:GetNumLines()
+    height, count = tonumber(height), tonumber(count)
+    if height == nil or count == nil or count <= lines or height <= 0 then
+        return 0
+    end
+    return height * (count - lines) / count
+end
 
 -- options:
 --   frameName       the button's global name
@@ -60,6 +86,8 @@ Button.__index = Button
 --   onSnooze        function(): "don't ask for 30 minutes"
 --   onFillSlot      function(yes): the answer to "Someone left — fill the
 --                   empty slot?"
+--   onMoveZone      function(yes): the answer to moving a questing listing
+--                   to the zone its leader went to
 --   askRoles        function(listing) -> the open roles the current
 --                   character can ask to join a dungeon listing as
 --   onAsk           function(listing, role?): Ask to join
@@ -160,10 +188,10 @@ function Button:buildDrawer()
     drawer.icon:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
     drawer.purpose = ui:Text(drawer, "", "semibold", "title", "text")
     drawer.purpose:SetPoint("TOPLEFT", drawer.icon, "TOPRIGHT", Theme.SPACING.s, -2)
-    drawer.purpose:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad - 48)
+    wrapAtWords(drawer.purpose, LfgButton.DRAWER_WIDTH - 2 * pad - 48)
     drawer.details = ui:Text(drawer, "", "regular", "small", "muted")
     drawer.details:SetPoint("TOPLEFT", drawer.purpose, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
-    drawer.details:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad - 48)
+    wrapAtWords(drawer.details, LfgButton.DRAWER_WIDTH - 2 * pad - 48)
     -- Ask to join, or Whisper when the leader takes no asks.
     self.askButton = ui:Button(drawer, "Ask to join", "primary", function(button)
         owner:askOrWhisper(button, button.listing)
@@ -183,14 +211,16 @@ function Button:buildDrawer()
     -- or don't ask for a while.
     drawer.question = ui:Text(drawer, LfgButton.ASK_TEXT, "regular", "body", "text")
     drawer.question:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
-    drawer.question:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad)
-    drawer.question:SetJustifyH("LEFT")
-    -- The same Yes and No answer "fill the empty slot?".
+    wrapAtWords(drawer.question, LfgButton.DRAWER_WIDTH - 2 * pad)
+    -- The same Yes and No answer "fill the empty slot?" and "move your
+    -- questing listing here?".
     self.listButton = ui:Button(drawer, "Choose what it's for", "primary", function()
-        local slot = drawer.kind == addon.LfgDrawerModel.SLOT
+        local kind = drawer.kind
         owner:CloseDrawer(true)
-        if slot then
+        if kind == addon.LfgDrawerModel.SLOT then
             owner.options.onFillSlot(true)
+        elseif kind == addon.LfgDrawerModel.ZONE then
+            owner.options.onMoveZone(true)
         else
             owner.options.onListParty()
         end
@@ -198,10 +228,12 @@ function Button:buildDrawer()
     self.listButton:SetPoint("TOPLEFT", drawer.question, "BOTTOMLEFT", 0, -Theme.SPACING.s)
     self.listButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
     self.notLookingButton = ui:Button(drawer, "Not looking", "secondary", function()
-        local slot = drawer.kind == addon.LfgDrawerModel.SLOT
+        local kind = drawer.kind
         owner:CloseDrawer(true)
-        if slot then
+        if kind == addon.LfgDrawerModel.SLOT then
             owner.options.onFillSlot(false)
+        elseif kind == addon.LfgDrawerModel.ZONE then
+            owner.options.onMoveZone(false)
         else
             owner.options.onNotLooking()
         end
@@ -224,11 +256,13 @@ function Button:buildDrawer()
     -- color, filled ones grey).
     drawer.party = ui:Text(drawer, "", "semibold", "title", "text")
     drawer.party:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
+    wrapAtWords(drawer.party, LfgButton.DRAWER_WIDTH - 2 * pad)
     drawer.partyDetails = ui:Text(drawer, "", "regular", "small", "muted")
     drawer.partyDetails:SetPoint("TOPLEFT", drawer.party, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    wrapAtWords(drawer.partyDetails, LfgButton.DRAWER_WIDTH - 2 * pad)
     drawer.note = ui:Text(drawer, "", "italic", "small", "muted")
     drawer.note:SetPoint("TOPLEFT", drawer.partyDetails, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
-    drawer.note:SetWidth(LfgButton.DRAWER_WIDTH - 2 * pad)
+    wrapAtWords(drawer.note, LfgButton.DRAWER_WIDTH - 2 * pad)
     drawer.roleTiles = ui:RoleRow(drawer, LfgButton.TILE_SIZE)
     drawer.roleTiles[1]:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad)
     drawer.anyTiles = {}
@@ -416,16 +450,19 @@ function Button:refreshDrawer()
     local top = view.top or { kind = addon.LfgDrawerModel.NONE }
     local kind = top.kind
     drawer.kind = kind
-    drawer:SetHeight(LfgButton.DRAWER_HEIGHTS[kind] or LfgButton.DRAWER_HEIGHTS.none)
     local slot = kind == addon.LfgDrawerModel.SLOT
-    local gate = kind == addon.LfgDrawerModel.GATE or slot
+    local zone = kind == addon.LfgDrawerModel.ZONE
+    local gate = kind == addon.LfgDrawerModel.GATE or slot or zone
     local asking = kind == addon.LfgDrawerModel.ASK or gate
     local headings = { [addon.LfgDrawerModel.PARTY] = "Your party", [addon.LfgDrawerModel.ASK] = "List your party?",
-        [addon.LfgDrawerModel.GATE] = "List your party?", [addon.LfgDrawerModel.SLOT] = "Your party" }
+        [addon.LfgDrawerModel.GATE] = "List your party?", [addon.LfgDrawerModel.SLOT] = "Your party",
+        [addon.LfgDrawerModel.ZONE] = "Your party" }
     drawer.heading:SetText(Theme.Label(headings[kind] or "New for you"))
-    -- Asking whether to list a party with outsiders, or to fill an empty
-    -- slot, is a plain yes or no.
-    drawer.question:SetText(slot and LfgButton.SLOT_TEXT or gate and LfgButton.GATE_TEXT or LfgButton.ASK_TEXT)
+    -- Asking whether to list a party with outsiders, to fill an empty slot,
+    -- or to move a questing listing is a plain yes or no.
+    drawer.question:SetText(zone and string.format(LfgButton.ZONE_TEXT, tostring(top.zone))
+        or slot and LfgButton.SLOT_TEXT or kind == addon.LfgDrawerModel.GATE and LfgButton.GATE_TEXT
+        or LfgButton.ASK_TEXT)
     self.listButton:SetLabel(gate and "Yes" or "Choose what it's for")
     self.notLookingButton:SetLabel(gate and "No" or "Not looking")
     setShown(drawer.question, asking)
@@ -496,6 +533,21 @@ function Button:refreshDrawer()
             end
         end
     end
+    -- Text wrapped onto more lines than the drawer's height allows for
+    -- (a long zone or dungeon name, a long note) makes it taller, and what
+    -- sits under it moves down.
+    local extra = 0
+    if newest then
+        extra = extraHeight(drawer.purpose, 1) + extraHeight(drawer.details, 1)
+        self.askButton:ClearAllPoints()
+        self.askButton:SetPoint("TOPLEFT", drawer.icon, "BOTTOMLEFT", 0, -Theme.SPACING.s - extra)
+        self.askButton:SetPoint("RIGHT", drawer, "RIGHT", -Theme.SPACING.m, 0)
+    elseif party then
+        extra = extraHeight(drawer.party, 1) + extraHeight(drawer.partyDetails, 1) + extraHeight(drawer.note, 1)
+    elseif zone then
+        extra = extraHeight(drawer.question, 2)
+    end
+    drawer:SetHeight((LfgButton.DRAWER_HEIGHTS[kind] or LfgButton.DRAWER_HEIGHTS.none) + extra)
     self:refreshToasts()
 end
 

@@ -552,6 +552,47 @@ test.test("Forever a purpose set by hand stays when the party enters a dungeon",
     test.assertEqual("raid", addon.lfgListing:Purpose().kind)
 end)
 
+test.test("Forever a questing leader who changes zones is asked whether to move the listing there", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local hammer = login(channel, "Hammer Smith")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    click(addon.lfgButton.listButton)
+    addon.lfgPage.draft.kind = "questing"
+    test.assertTrue(addon.lfgPage:Save())
+    addon.lfgButton:CloseDrawer(true)
+    local drawer = addon.lfgButton.drawer
+
+    -- Moving zones asks, in the drawer, which opens.
+    tool.zone = { name = "Dun Morogh", mapID = tool.zone.mapID }
+    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
+    test.assertTrue(addon.lfgButton:DrawerOpen())
+    test.assertEqual("zone", drawer.kind)
+    test.assertEqual("You're in Dun Morogh now. Move your questing listing here?", drawer.question.text)
+    test.assertEqual("Yes", addon.lfgButton.listButton.label.text)
+    -- No leaves it where it was, and that zone isn't asked about again.
+    click(addon.lfgButton.notLookingButton)
+    test.assertEqual("Ironforge", addon.lfgListing:Purpose().zone)
+    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
+    test.assertFalse(addon.lfgButton:DrawerOpen())
+
+    -- Another zone asks again; Yes moves it, and guildmates hear.
+    tool.zone = { name = "Loch Modan", mapID = tool.zone.mapID }
+    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
+    test.assertEqual("zone", drawer.kind)
+    click(addon.lfgButton.listButton)
+    test.assertEqual("Loch Modan", addon.lfgListing:Purpose().zone)
+    fixtures.deliver(channel)
+    test.assertEqual("Loch Modan", hammer.addon.lfgBoard:Listings(hammer.time)[1].purpose)
+    test.assertFalse(addon.lfgButton:DrawerOpen())
+
+    -- A dungeon isn't a zone to quest in: nothing's asked inside one.
+    tool.inInstance = "party"
+    tool.zone = { name = "Stratholme", mapID = tool.zone.mapID }
+    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
+    test.assertFalse(addon.lfgButton:DrawerOpen())
+end)
+
 test.test("Forever with the button hidden, a new party is listed quietly with a reminder", function()
     local channel = fixtures.newChannel()
     local tool, addon = login(channel, "Tool Box")

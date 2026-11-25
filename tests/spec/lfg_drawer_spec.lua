@@ -238,6 +238,17 @@ test.test("lfg button: the drawer's newest group, none, and the party", function
     test.assertTrue(drawer.raidTile.shown)
     test.assertFalse(drawer.raidTile.filled)
     test.assertFalse(drawer.anyTiles[1].shown)
+
+    -- A title too long for one line wraps (at words, within the drawer)
+    -- and the drawer grows by the extra line.
+    local oneLine = drawer.height
+    rawset(drawer.party, "GetNumLines", function() return 2 end)
+    rawset(drawer.party, "GetStringHeight", function() return 36 end)
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = {
+        kind = "questing", label = "Questing in Stranglethorn Vale", size = 2, maxSize = 5,
+    } } })
+    test.assertEqual(oneLine + 18, drawer.height)
+    test.assertTrue(drawer.party.wordWrap)
 end)
 
 -- The composed add-on ----------------------------------------------------------------
