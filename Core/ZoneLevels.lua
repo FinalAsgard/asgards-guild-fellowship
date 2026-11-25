@@ -7,7 +7,7 @@ local _, addon = ...
 -- `/agf probe lfg` reports it. Pure: the game's range and the levels are
 -- handed in.
 local ZoneLevels = {
-    MARGIN = 3,
+    MARGIN = 5,
     GAME = "game",
     FALLBACK = "fallback",
 }

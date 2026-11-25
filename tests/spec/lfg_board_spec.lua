@@ -696,7 +696,7 @@ end)
 
 -- ZoneLevels ----------------------------------------------------------------------
 
-test.test("zone levels: the game's range when it has one, else the party's levels 3 either way", function()
+test.test("zone levels: the game's range when it has one, else the party's levels 5 either way", function()
     local ZoneLevels = load().ZoneLevels
 
     local game = ZoneLevels.For({ minLevel = 20, maxLevel = 30 }, { 50 })
@@ -705,8 +705,8 @@ test.test("zone levels: the game's range when it has one, else the party's level
     test.assertEqual(ZoneLevels.GAME, game.source)
 
     local fallback = ZoneLevels.For(nil, { 24, 27, 22 })
-    test.assertEqual(19, fallback.minLevel)
-    test.assertEqual(30, fallback.maxLevel)
+    test.assertEqual(17, fallback.minLevel)
+    test.assertEqual(32, fallback.maxLevel)
     test.assertEqual(ZoneLevels.FALLBACK, fallback.source)
     -- An unusable game range falls back too; levels never go under 1.
     local low = ZoneLevels.For({ minLevel = 0, maxLevel = 0 }, { 2 })
@@ -992,20 +992,20 @@ test.test("Forever questing is listed in the zone's levels, and the probe says w
     click(page.saveButton)
     fixtures.deliver(channel)
 
-    -- No zone levels from this client: Tool's level, 3 either way.
+    -- No zone levels from this client: Tool's level, 5 either way.
     local listing = zap.addon.lfgBoard:Listings(zap.time)[1]
     test.assertEqual("Ironforge", listing.purpose)
-    test.assertEqual(57, listing.minLevel)
-    test.assertEqual(63, listing.maxLevel)
+    test.assertEqual(55, listing.minLevel)
+    test.assertEqual(65, listing.maxLevel)
     fixtures.slash(tool, "probe lfg")
     local printed = table.concat(tool.messages, "\n")
-    test.assertContains(printed, "Zone levels in Ironforge: 57-63, the fallback")
+    test.assertContains(printed, "Zone levels in Ironforge: 55-65, the fallback")
     test.assertContains(printed, "Your listing: Questing in Ironforge.")
 
     fixtures.slash(zap, "probe lfg")
     printed = table.concat(zap.messages, "\n")
     test.assertContains(printed, "On the board: 0 relevant, 0 for your alts, 1 other.")
-    test.assertContains(printed, "Other, Questing in Ironforge, by Tool Box, 1/5, levels 57-63")
+    test.assertContains(printed, "Other, Questing in Ironforge, by Tool Box, 1/5, levels 55-65")
 
     -- Where the game knows the zone's levels, they're used.
     tool.environment.C_Map.GetMapLevels = function()
