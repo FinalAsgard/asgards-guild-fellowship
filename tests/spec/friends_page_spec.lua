@@ -6,13 +6,13 @@ local contains = fakeFrames.contains
 -- The Friends page on fake frames, over a list of pinned players held here.
 -- Each player is { playerId, key, name }; `pinned` lists those pinned.
 local function setup(pinnedNames)
-    local addon = test.newAddon("Core/FellowshipStore.lua", "Core/GroupFriends.lua", "Core/PlayerDetailViewModel.lua",
+    local addon = test.newAddon("Core/FellowshipStore.lua", "Core/GroupFriends.lua", "Core/LfgHistoryView.lua", "Core/PlayerDetailViewModel.lua",
         "Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/PlayerCards.lua", "Adapters/PlayerDetailPanel.lua",
         "Adapters/FriendsPage.lua")
     local environment = fakeFrames.install({})
     local ui = addon.Widgets.Create(environment)
     local content = environment.CreateFrame("Frame")
-    local world = { addon = addon, content = content, calls = {}, players = {}, pinned = {} }
+    local world = { addon = addon, content = content, calls = {}, players = {}, pinned = {}, shown = {} }
     local _, name
     for _, name in ipairs({ "Anvil", "Bolt", "Cog" }) do
         world.players[name] = { playerId = string.byte(name), key = string.lower(name), name = name,
@@ -90,7 +90,8 @@ local function setup(pinnedNames)
             table.remove(world.pinned, find(playerId))
         end,
         -- The detail view, as PlayerDetailViewModel builds it.
-        detail = function(playerId)
+        detail = function(playerId, shown)
+            table.insert(world.shown, shown or 0)
             local _, player
             for _, player in pairs(world.players) do
                 if player.playerId == playerId and not world.gone then
@@ -110,6 +111,30 @@ local function setup(pinnedNames)
                             full = full,
                             canToggle = isFriend or not full,
                         },
+                        characters = {
+                            { name = player.name, isMain = true, level = 60, className = "Warrior",
+                                status = "Online", roles = "Tank" },
+                            { name = player.name .. "alt", isMain = false, level = 20, className = "Priest",
+                                status = "Offline" },
+                        },
+                        bioRows = {
+                            { kind = "section", text = "Location" },
+                            { kind = "empty", text = "Not set" },
+                            { kind = "section", text = "Bio" },
+                            { kind = "about", text = "Likes boats" },
+                        },
+                        grouped = {
+                            parties = world.parties or {},
+                            more = world.groupedMore == true,
+                            total = #(world.parties or {}),
+                            empty = "You haven't grouped with " .. player.name .. " yet",
+                        },
+                        logRows = {
+                            { kind = "log", text = "Posted 3 ads" },
+                            { kind = "section", text = "History" },
+                            { kind = "history", name = "Oldie", role = "Alt", dates = "until 1", reason = "left the guild" },
+                        },
+                        shown = shown,
                         tiles = {
                             { label = "Discord", value = "Not set", notSet = true },
                             { label = "Grouped", value = "3 times", notSet = false },
@@ -120,6 +145,9 @@ local function setup(pinnedNames)
                 end
             end
             return nil
+        end,
+        formatDate = function(at)
+            return "day " .. at
         end,
         onWhisper = function(target)
             table.insert(world.calls, "whisper " .. target)
@@ -395,4 +423,65 @@ test.test("friends page: a Friend whose player is gone still shows their name, w
     test.assertFalse(world.page.detail.tiles[1].shown)
     click(world.page.detail.star)
     test.assertEqual("remove " .. world.players.Anvil.playerId, world.calls[1])
+end)
+
+test.test("friends page: the detail tabs draw Characters, Bio, Grouped with Show more, and Log", function()
+    local world = setup({ "Anvil" })
+    local detail = world.page.detail
+
+    -- Characters is first: a card each, the main with its MAIN badge.
+    test.assertEqual("characters", detail.tabs:Selected())
+    test.assertEqual("Characters · 2", detail.tabs.tabs[1].label.text)
+    test.assertEqual("Bio", detail.tabs.tabs[2].label.text)
+    test.assertEqual("Grouped · 0", detail.tabs.tabs[3].label.text)
+    test.assertEqual("Log", detail.tabs.tabs[4].label.text)
+    test.assertEqual(4, #detail.tabs.tabs)
+    local main, alt = detail.characterCards[1], detail.characterCards[2]
+    test.assertEqual("Anvil", main.name.text)
+    test.assertTrue(main.main.shown)
+    test.assertFalse(alt.main.shown)
+    test.assertEqual("Level 60 Warrior · Online", main.sub.text)
+    test.assertEqual("Tank", main.roles.text)
+
+    click(detail.tabs.tabs[2])
+    test.assertFalse(main.shown)
+    test.assertEqual("LOCATION", detail.lines[1].text)
+    test.assertEqual("Not set", detail.lines[2].text)
+    test.assertEqual("Likes boats", detail.lines[4].text)
+
+    click(detail.tabs.tabs[3])
+    test.assertEqual("You haven't grouped with Anvil yet", detail.lines[1].text)
+    test.assertFalse(detail.more.shown)
+
+    world.parties = {
+        { at = 300, place = "Deadmines", members = { { name = "Anvil", theirs = true }, { name = "Bolt" } } },
+        { at = 100, members = { { name = "Anvil", theirs = true } } },
+    }
+    world.groupedMore = true
+    world.page:Refresh()
+    test.assertEqual("grouped", detail.tabs:Selected())
+    test.assertEqual("Grouped · 2", detail.tabs.tabs[3].label.text)
+    test.assertEqual("day 300 · Deadmines", detail.parties[1].title.text)
+    test.assertEqual("day 100 · Party", detail.parties[2].title.text)
+    test.assertTrue(string.find(detail.parties[1].members.text, "|cffd9b038Anvil|r, Bolt", 1, true) ~= nil)
+    test.assertTrue(detail.more.shown)
+    click(detail.more)
+    test.assertEqual(40, world.shown[#world.shown])
+
+    click(detail.tabs.tabs[4])
+    test.assertEqual("Posted 3 ads", detail.lines[1].text)
+    test.assertEqual("HISTORY", detail.lines[2].text)
+    test.assertEqual("Oldie · Alt · until 1 · left the guild", detail.lines[3].text)
+    test.assertFalse(detail.parties[1].shown)
+end)
+
+test.test("friends page: another player's Grouped tab starts at its first page", function()
+    local world = setup({ "Anvil", "Bolt" })
+    world.groupedMore = true
+    world.page:Refresh()
+    click(world.page.detail.more)
+    test.assertEqual(40, world.shown[#world.shown])
+
+    click(world.page.cards[2])
+    test.assertEqual(0, world.shown[#world.shown])
 end)

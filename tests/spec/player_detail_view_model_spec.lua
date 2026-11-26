@@ -6,7 +6,7 @@ local RULES = { twoPartNames = false, homeRealm = "Area52" }
 -- Anvil, and Bolt. `live` sets roster facts by character name.
 local function setup(live)
     local addon = test.newAddon("Core/NameNormalizer.lua", "Core/FellowshipStore.lua", "Core/RosterViewModel.lua",
-        "Core/PlayerPanelViewModel.lua", "Core/PlayerDetailViewModel.lua")
+        "Core/PlayerPanelViewModel.lua", "Core/LfgHistoryView.lua", "Core/PlayerDetailViewModel.lua")
     local partition = addon.FellowshipStore.Create({ schemaVersion = 1, guilds = {} })
         :Partition({ name = "Knights", realm = "Area52" })
     local normalizer = addon.NameNormalizer.Create(RULES)
@@ -197,4 +197,119 @@ test.test("player detail view model: a player who no longer exists has no view",
         playerId = "nobody",
         members = {},
     }))
+end)
+
+test.test("player detail view model: Characters lists in-guild characters, main first, leaving out departed ones", function()
+    local world = setup({ Nail = { online = true, zone = "Duskwood" } })
+    world.partition:MarkDeparted(world.keys.Hammer, 1790000000)
+    local characters = world.build("Nail", {
+        rolesOf = function(key)
+            return key == world.keys.Toolbox and "Tank, DPS" or nil
+        end,
+    }).characters
+
+    test.assertEqual(2, #characters)
+    test.assertEqual("Toolbox", characters[1].name)
+    test.assertTrue(characters[1].isMain)
+    test.assertEqual("Warrior", characters[1].className)
+    test.assertEqual(60, characters[1].level)
+    test.assertEqual("Tank, DPS", characters[1].roles)
+    test.assertEqual("ffwarrio", characters[1].color)
+    test.assertEqual("Nail", characters[2].name)
+    test.assertFalse(characters[2].isMain)
+    test.assertEqual("Online, Duskwood", characters[2].status)
+end)
+
+test.test("player detail view model: Grouped shows only parties with this player, newest first, their characters marked", function()
+    local world = setup()
+    local entries = {
+        { at = 100, characters = { world.keys.Hammer, world.keys.Anvil } },
+        { at = 200, characters = { world.keys.Bolt, world.keys.Anvil } },
+        { at = 300, characters = { world.keys.Nail, world.keys.Bolt }, dungeon = "Deadmines" },
+    }
+    local grouped = world.build("Toolbox", {
+        history = function()
+            return entries
+        end,
+        historyMember = function(key)
+            local character = world.partition:GetCharacter(key)
+            return { name = string.match(character.name, "^[^%-]+"), whisper = character.name }
+        end,
+    }).grouped
+
+    test.assertEqual(2, grouped.total)
+    test.assertFalse(grouped.more)
+    test.assertEqual(300, grouped.parties[1].at)
+    test.assertEqual("Deadmines", grouped.parties[1].place)
+    test.assertEqual("Nail", grouped.parties[1].members[1].name)
+    test.assertTrue(grouped.parties[1].members[1].theirs)
+    test.assertFalse(grouped.parties[1].members[2].theirs)
+    test.assertEqual(100, grouped.parties[2].at)
+    test.assertEqual(nil, grouped.parties[2].place)
+end)
+
+test.test("player detail view model: Grouped is paged as the LFG History is, and says so when there's nothing", function()
+    local world = setup()
+    local entries = {}
+    local index
+    for index = 1, 25 do
+        entries[index] = { at = index, characters = { world.keys.Bolt } }
+    end
+    local function build(shown)
+        return world.build("Bolt", {
+            groupedShown = shown,
+            history = function()
+                return entries
+            end,
+            historyMember = function()
+                return { name = "Bolt", whisper = "Bolt-Area52" }
+            end,
+        }).grouped
+    end
+
+    local first = build(nil)
+    test.assertEqual(20, #first.parties)
+    test.assertTrue(first.more)
+    test.assertEqual(25, first.total)
+    local all = build(40)
+    test.assertEqual(25, #all.parties)
+    test.assertFalse(all.more)
+
+    local none = world.build("Toolbox").grouped
+    test.assertEqual(0, none.total)
+    test.assertEqual("You haven't grouped with TheTool yet", none.empty)
+end)
+
+test.test("player detail view model: Bio and Log are the old player panel's rows, unchanged", function()
+    local world = setup()
+    world.partition:SetProfileText(world.keys.Bolt, "bio", "Likes boats", 1790000000, world.keys.Bolt)
+    local fields = {
+        adStats = function()
+            return "Posted 3 ads"
+        end,
+    }
+    local view = world.build("Bolt", fields)
+    local old = world.addon.PlayerPanelViewModel.Build({
+        partition = world.partition,
+        playerId = world.playerOf("Bolt"),
+        members = world.members,
+        normalizer = world.addon.NameNormalizer.Create(RULES),
+        formatDate = function(at)
+            return "day " .. at
+        end,
+        adStats = fields.adStats,
+        grouped = function()
+            return 0
+        end,
+    })
+
+    test.assertEqual(#old.logRows, #view.logRows)
+    local index
+    for index = 1, #old.logRows do
+        test.assertEqual(old.logRows[index].text, view.logRows[index].text)
+        test.assertEqual(old.logRows[index].kind, view.logRows[index].kind)
+    end
+    test.assertEqual("Posted 3 ads", view.logRows[1].text)
+    test.assertEqual(#old.bioRows, #view.bioRows)
+    test.assertEqual("Likes boats", view.bioRows[4].text)
 end)

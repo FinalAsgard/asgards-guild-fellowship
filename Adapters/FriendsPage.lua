@@ -44,8 +44,10 @@ Page.__index = Page
 --   onRemove  function(playerId)
 --   onReplace function(playerId, key) -> true, or false and why not
 --   onError   function(text): tells the user why something didn't happen
---   detail    function(playerId) -> PlayerDetailViewModel.Build's view, or
---             nil when the player is gone
+--   detail    function(playerId, groupedShown) -> PlayerDetailViewModel
+--             .Build's view (showing `groupedShown` Grouped parties, nil for
+--             the first page), or nil when the player is gone
+--   formatDate function(at) -> text, for the Grouped tab
 --   onWhisper function(target): whispers that character
 --   onInvite  function(target): invites that character
 function FriendsPage.Create(content, ui, options)
@@ -181,6 +183,14 @@ function Page:buildDetail(side)
         end,
         onToggleFriend = function(view)
             owner:toggleFriend(view)
+        end,
+        onMoreGrouped = function()
+            owner.groupedShown = (owner.groupedShown or addon.LfgHistoryView.PAGE_SIZE)
+                + addon.LfgHistoryView.PAGE_SIZE
+            owner:showDetail()
+        end,
+        formatDate = function(at)
+            return owner.options.formatDate and owner.options.formatDate(at) or nil
         end,
     })
 end
@@ -360,7 +370,11 @@ function Page:showDetail()
         self.detail:ShowEmpty(FriendsPage.EMPTY)
         return
     end
-    local view = self.options.detail ~= nil and self.options.detail(friend.playerId) or nil
+    -- Another player's Grouped tab starts at its first page.
+    if self.detailFor ~= friend.playerId then
+        self.detailFor, self.groupedShown = friend.playerId, nil
+    end
+    local view = self.options.detail ~= nil and self.options.detail(friend.playerId, self.groupedShown) or nil
     self.detail:ShowPlayer(view or fallbackView(friend, self:isFriend(friend.playerId)))
 end
 

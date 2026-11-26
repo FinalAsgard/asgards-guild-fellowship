@@ -20,6 +20,17 @@ local PlayerDetailPanel = {
     TILE_COUNT = 4,
     FRIEND = "Friend",
     MOST_GROUPED = "Most grouped",
+    SCROLL_STEP = 48,
+    -- The Theme's gold, for this player's own characters in a party.
+    THEIRS_COLOR = "ffd9b038",
+    LINE_HEIGHT = 18,
+    PARTY_MEMBER_HEIGHT = 16,
+    TABS = {
+        { id = "characters", label = "Characters" },
+        { id = "bio", label = "Bio" },
+        { id = "grouped", label = "Grouped" },
+        { id = "log", label = "Log" },
+    },
 }
 addon.PlayerDetailPanel = PlayerDetailPanel
 
@@ -74,12 +85,17 @@ end
 --   onWhisper       function(target, view)
 --   onInvite        function(target, view)
 --   onToggleFriend  function(view): the star button
+--   onMoreGrouped   function(view): Show more on the Grouped tab; the
+--                   owner shows the view again with another page
+--   formatDate      function(at) -> text, for the Grouped tab's dates
 -- ShowPlayer(view) fills and shows it; ShowEmpty(text) shows only `text`.
 function PlayerDetailPanel.Create(ui, parent, callbacks)
     callbacks = callbacks or {}
     local pad = Theme.SPACING.l
     local panel = ui:frame("Frame", parent)
     panel:SetAllPoints(parent)
+    -- What's shown, kept off the frame.
+    local state = {}
 
     panel.name = ui:Text(panel, "", "semibold", "heading", "text")
     panel.name:SetPoint("TOPLEFT", panel, "TOPLEFT", pad, -pad)
@@ -99,7 +115,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
 
     -- Invite, Whisper and the star, from the right.
     panel.invite = ui:Button(panel, "Invite", "secondary", function()
-        local view = panel.view
+        local view = state.view
         if view ~= nil and view.header.target ~= nil and callbacks.onInvite ~= nil then
             callbacks.onInvite(view.header.target, view)
         end
@@ -107,7 +123,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     panel.invite:SetWidth(PlayerDetailPanel.BUTTON_WIDTH)
     panel.invite:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -pad, -pad)
     panel.whisper = ui:Button(panel, "Whisper", "secondary", function()
-        local view = panel.view
+        local view = state.view
         if view ~= nil and view.header.target ~= nil and callbacks.onWhisper ~= nil then
             callbacks.onWhisper(view.header.target, view)
         end
@@ -115,7 +131,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     panel.whisper:SetWidth(PlayerDetailPanel.BUTTON_WIDTH)
     panel.whisper:SetPoint("RIGHT", panel.invite, "LEFT", -Theme.SPACING.s, 0)
     panel.star = ui:IconButton(panel, Theme.TEXTURES.star, PlayerDetailPanel.STAR_SIZE, function()
-        local view = panel.view
+        local view = state.view
         if view ~= nil and view.header.canToggle and callbacks.onToggleFriend ~= nil then
             callbacks.onToggleFriend(view)
         end
@@ -123,7 +139,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     panel.star:SetPoint("RIGHT", panel.whisper, "LEFT", -Theme.SPACING.s, 0)
     -- Gold for a Friend, grey to add one, dim when every slot is taken.
     local function tintStar(hovered)
-        local header = panel.view and panel.view.header or {}
+        local header = state.view and state.view.header or {}
         local color = "muted"
         if header.isFriend then
             color = "gold"
@@ -176,6 +192,201 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         end
     end)
 
+    -- The tabs over a scrolling body.
+    panel.tab = PlayerDetailPanel.TABS[1].id
+    panel.tabs = ui:Tabs(panel, PlayerDetailPanel.TABS, function(id)
+        panel:ShowTab(id)
+    end)
+    panel.tabs:SetPoint("TOPLEFT", panel, "TOPLEFT", pad, -pad - 64 - PlayerDetailPanel.TILE_HEIGHT - Theme.SPACING.m)
+    panel.tabs:SetPoint("RIGHT", panel, "RIGHT", -pad, 0)
+    local area = ui:frame("ScrollFrame", panel)
+    area:SetPoint("TOPLEFT", panel.tabs, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+    area:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -pad, pad)
+    local list = ui:frame("Frame", area)
+    list:SetSize(400, 1)
+    area:SetScrollChild(list)
+    area:EnableMouseWheel(true)
+    area:SetScript("OnMouseWheel", function(self, delta)
+        local most = self:GetVerticalScrollRange() or 0
+        local scroll = (self:GetVerticalScroll() or 0) - delta * PlayerDetailPanel.SCROLL_STEP
+        self:SetVerticalScroll(math.max(0, math.min(most, scroll)))
+    end)
+    area:SetScript("OnSizeChanged", function(_, width)
+        if type(width) == "number" and width > 0 then
+            list:SetWidth(width)
+        end
+    end)
+    panel.area, panel.list = area, list
+    panel.characterCards, panel.lines, panel.parties = {}, {}, {}
+    panel.more = ui:Button(list, "Show more", "secondary", function()
+        if state.view ~= nil and callbacks.onMoreGrouped ~= nil then
+            callbacks.onMoreGrouped(state.view)
+        end
+    end)
+    panel.more:SetWidth(120)
+    panel.more:Hide()
+
+    -- Places `frame` at height `top` of the list, across it.
+    local function place(frame, top, height)
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top)
+        frame:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+        if height ~= nil then
+            frame:SetHeight(height)
+        end
+        frame:Show()
+    end
+    -- Line `index` of the Bio and Log tabs, made on first use.
+    local function line(index)
+        local text = panel.lines[index]
+        if text == nil then
+            text = ui:Text(list, "", "regular", "body", "text")
+            text:SetJustifyH("LEFT")
+            text:SetWordWrap(false)
+            panel.lines[index] = text
+        end
+        return text
+    end
+    local function characterCard(index)
+        local card = panel.characterCards[index]
+        if card == nil then
+            card = addon.PlayerCards.Character(ui, list)
+            panel.characterCards[index] = card
+        end
+        return card
+    end
+    -- A Grouped party: its date and dungeon or "Party", then its members.
+    local function partyRow(index)
+        local row = panel.parties[index]
+        if row == nil then
+            row = ui:Panel(list)
+            row.title = ui:Text(row, "", "semibold", "body", "text")
+            row.title:SetPoint("TOPLEFT", row, "TOPLEFT", Theme.SPACING.m, -Theme.SPACING.s)
+            row.members = ui:Text(row, "", "regular", "body", "muted")
+            row.members:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+            row.members:SetPoint("RIGHT", row, "RIGHT", -Theme.SPACING.m, 0)
+            row.members:SetJustifyH("LEFT")
+            row.members:SetWordWrap(true)
+            panel.parties[index] = row
+        end
+        return row
+    end
+    local function hideAll(frames)
+        local frameIndex
+        for frameIndex = 1, #frames do
+            frames[frameIndex]:Hide()
+        end
+    end
+
+    -- Bio and Log rows: section headings, lines, history entries and empty
+    -- states.
+    local function textRows(rows, top)
+        local used = 0
+        local rowIndex
+        for rowIndex = 1, #(rows or {}) do
+            local row = rows[rowIndex]
+            used = used + 1
+            local text = line(used)
+            local words, color, style, size = row.text or "", "text", "regular", "body"
+            if row.kind == "section" then
+                words, color, style, size = Theme.Label(row.text), "label", "semibold", "small"
+                if rowIndex > 1 then
+                    top = top + Theme.SPACING.s
+                end
+            elseif row.kind == "empty" then
+                color = "muted"
+            elseif row.kind == "history" then
+                local parts = { row.name, row.role }
+                if row.dates ~= nil and row.dates ~= "" then
+                    table.insert(parts, row.dates)
+                end
+                if row.reason ~= nil and row.reason ~= "" then
+                    table.insert(parts, row.reason)
+                end
+                words = table.concat(parts, DOT)
+            end
+            Theme.Font(text, style, size, color)
+            text:SetText(words)
+            text.kind = row.kind
+            place(text, top, PlayerDetailPanel.LINE_HEIGHT)
+            top = top + PlayerDetailPanel.LINE_HEIGHT
+        end
+        return top
+    end
+
+    -- Draws the selected tab's body.
+    function panel.refreshBody()
+        hideAll(panel.characterCards)
+        hideAll(panel.lines)
+        hideAll(panel.parties)
+        panel.more:Hide()
+        local view = state.view
+        if view == nil then
+            return
+        end
+        local top = 0
+        if panel.tab == "characters" then
+            local characters = view.characters or {}
+            local cardIndex
+            for cardIndex = 1, #characters do
+                local card = characterCard(cardIndex)
+                place(card, top, addon.PlayerCards.CHARACTER_HEIGHT)
+                card:ShowCharacter(characters[cardIndex])
+                top = top + addon.PlayerCards.CHARACTER_HEIGHT + Theme.SPACING.xs
+            end
+        elseif panel.tab == "bio" then
+            top = textRows(view.bioRows, top)
+        elseif panel.tab == "grouped" then
+            local grouped = view.grouped or { parties = {} }
+            if grouped.parties[1] == nil then
+                top = textRows({ { kind = "empty", text = grouped.empty } }, top)
+            end
+            local partyIndex
+            for partyIndex = 1, #grouped.parties do
+                local party = grouped.parties[partyIndex]
+                local row = partyRow(partyIndex)
+                row.party = party
+                local date = callbacks.formatDate and callbacks.formatDate(party.at) or nil
+                local title = {}
+                if date ~= nil then
+                    table.insert(title, date)
+                end
+                table.insert(title, party.place or "Party")
+                row.title:SetText(table.concat(title, DOT))
+                -- Their character in gold, the rest in grey.
+                local names = {}
+                local memberIndex
+                for memberIndex = 1, #party.members do
+                    local member = party.members[memberIndex]
+                    table.insert(names, member.theirs and colored(member.name, PlayerDetailPanel.THEIRS_COLOR) or member.name)
+                end
+                row.members:SetText(table.concat(names, ", "))
+                local lines = math.max(1, math.ceil(#party.members / 6))
+                local height = 2 * Theme.SPACING.s + PlayerDetailPanel.LINE_HEIGHT + Theme.SPACING.xs
+                    + lines * PlayerDetailPanel.PARTY_MEMBER_HEIGHT
+                place(row, top, height)
+                top = top + height + Theme.SPACING.xs
+            end
+            if grouped.more then
+                panel.more:ClearAllPoints()
+                panel.more:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top - Theme.SPACING.xs)
+                panel.more:Show()
+                top = top + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.s
+            end
+        else
+            top = textRows(view.logRows, top)
+        end
+        list:SetHeight(math.max(top, 1))
+    end
+
+    -- Shows tab `id` from the top.
+    function panel.ShowTab(_, id)
+        panel.tab = id
+        panel.tabs:Select(id)
+        area:SetVerticalScroll(0)
+        panel.refreshBody()
+    end
+
     -- The empty state's words.
     panel.hint = ui:Text(panel, "", "regular", "body", "muted")
     panel.hint:SetPoint("TOPLEFT", panel, "TOPLEFT", pad, -pad)
@@ -184,7 +395,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     panel.hint:SetWordWrap(true)
 
     local function showParts(shown)
-        local parts = { panel.name, panel.sub, panel.star, panel.whisper, panel.invite }
+        local parts = { panel.name, panel.sub, panel.star, panel.whisper, panel.invite, panel.tabs, panel.area }
         local partIndex
         for partIndex = 1, #parts do
             setShown(parts[partIndex], shown)
@@ -196,7 +407,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     end
 
     function panel.ShowPlayer(_, view)
-        panel.view = view
+        state.view, panel.view = view, view
         local header = view.header
         showParts(true)
         panel.name:SetText(header.name or "")
@@ -225,17 +436,24 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
                 box:Hide()
             end
         end
+        local count = #(view.characters or {})
+        local grouped = view.grouped and view.grouped.total or 0
+        panel.tabs:SetLabel("characters", "Characters" .. DOT .. count)
+        panel.tabs:SetLabel("grouped", "Grouped" .. DOT .. grouped)
+        panel.tabs:Select(panel.tab)
+        panel.refreshBody()
         panel:Show()
     end
 
     function panel.ShowEmpty(_, text)
-        panel.view = nil
+        state.view, panel.view = nil, nil
         showParts(false)
         panel.badge:Hide()
         panel.badgeStar:Hide()
         panel.name:SetText("")
         panel.sub:SetText("")
         panel.hint:SetText(text or "")
+        panel.refreshBody()
         panel:Show()
     end
 

@@ -14,6 +14,11 @@ local PlayerDetailViewModel = {
     FRIEND = "friend",
     TOP = "top",
 }
+
+-- "You haven't grouped with <name> yet": the Grouped tab with no parties.
+function PlayerDetailViewModel.NeverGrouped(name)
+    return "You haven't grouped with " .. tostring(name) .. " yet"
+end
 addon.PlayerDetailViewModel = PlayerDetailViewModel
 
 local DOT = " · "
@@ -78,8 +83,16 @@ end
 --   raceOf      function(key) -> the character's race, or nil when unknown
 --   friendKeys  the pinned character keys (FellowshipStore:GetFriends)
 --   mostGrouped GroupFriends:MostGrouped(): { { player, count } } in order
+--   history     function() -> the user's GroupHistory entries ({ at,
+--               characters, dungeon? })
+--   historyMember function(key) -> a guildmate's { name, whisper,
+--               classToken? }, or nil for one no longer known
+--   tierOf      function(key) -> their GroupFriends tier, or nil
+--   groupedShown how many of the Grouped tab's parties to show (default
+--               LfgHistoryView.PAGE_SIZE; Show more adds a page)
 -- Returns nil when the player no longer exists, or:
---   { playerId, panel (PlayerPanelViewModel's view), header, tiles }
+--   { playerId, panel (PlayerPanelViewModel's view), header, tiles,
+--     characters, bioRows, grouped, logRows }
 -- header: { name (the alias, else the main's name), alias, mainName,
 --   color, level, race, className, rank, facts ("Level 60 Dwarf Warrior ·
 --   Officer"), badge (nil, or { kind = FRIEND } or { kind = TOP, rank }),
@@ -91,6 +104,15 @@ end
 --   can add or remove them) }
 -- tiles: Discord, Grouped, Last grouped and Joined guild, each { id, label,
 --   value, notSet }.
+-- characters: the in-guild characters, main first, each { key, name,
+--   color, level, race, className, isMain, status, roles } (the Characters
+--   tab; departed characters are left out).
+-- bioRows and logRows: the old player panel's Bio and Log rows, as-is.
+-- grouped: the Grouped tab, LfgHistoryView's page of the parties holding
+--   any of this player's characters: { parties = { { at, place?, members =
+--   { { key, name, whisper, classToken?, tier?, friend, theirs } } } },
+--   more, total, empty (the words for no parties) }; `theirs` marks this
+--   player's characters.
 function PlayerDetailViewModel.Build(inputs)
     local panel = addon.PlayerPanelViewModel.Build(inputs)
     if panel == nil then
@@ -197,9 +219,71 @@ function PlayerDetailViewModel.Build(inputs)
         tile("joined", "Joined guild", joined, PlayerDetailViewModel.NOT_SET),
     }
 
+    -- The Characters tab: in-guild characters, main first (as the old
+    -- panel lists them).
+    local characters = {}
+    for index = 1, #panel.rows do
+        local row = panel.rows[index]
+        if row.kind == "character" and row.inGuild then
+            local character = partition:GetCharacter(row.key) or {}
+            local token = (members[row.key] or {}).classToken or character.class
+            table.insert(characters, {
+                key = row.key,
+                name = row.name,
+                color = row.color,
+                level = row.level,
+                race = ask(inputs.raceOf, row.key),
+                className = ask(inputs.className, token),
+                isMain = row.isMain,
+                status = row.status,
+                roles = row.roles,
+            })
+        end
+    end
+
+    -- The Grouped tab: the parties holding any of this player's
+    -- characters, newest first, a page at a time.
+    local own = {}
+    for index = 1, #keys do
+        own[keys[index]] = true
+    end
+    local together = {}
+    local entries = ask(inputs.history)
+    for index = 1, type(entries) == "table" and #entries or 0 do
+        local entry = entries[index]
+        local characterIndex
+        for characterIndex = 1, #(entry.characters or {}) do
+            if own[entry.characters[characterIndex]] then
+                table.insert(together, entry)
+                break
+            end
+        end
+    end
+    local history = addon.LfgHistoryView.Create()
+    if type(inputs.groupedShown) == "number" and inputs.groupedShown > 0 then
+        history.shown = inputs.groupedShown
+    end
+    local grouped = history:Page(together, function(key)
+        return ask(inputs.historyMember, key)
+    end, function(key)
+        return ask(inputs.tierOf, key)
+    end)
+    for index = 1, #grouped.parties do
+        local partyMembers = grouped.parties[index].members
+        local memberIndex
+        for memberIndex = 1, #partyMembers do
+            partyMembers[memberIndex].theirs = own[partyMembers[memberIndex].key] == true
+        end
+    end
+    grouped.empty = PlayerDetailViewModel.NeverGrouped(alias or panel.mainName)
+
     return {
         playerId = playerId,
         panel = panel,
+        characters = characters,
+        bioRows = panel.bioRows,
+        logRows = panel.logRows,
+        grouped = grouped,
         header = {
             name = alias or panel.mainName,
             alias = alias,

@@ -4306,10 +4306,38 @@ if clientProfile.supported then
             onError = function(text)
                 rosterController:Print(text)
             end,
-            detail = function(playerId)
+            detail = function(playerId, groupedShown)
                 local friends = currentFriends()
                 local fields = inputs({
                     playerId = playerId,
+                    groupedShown = groupedShown,
+                    rolesOf = function(key)
+                        local roles = rolesOf(key)
+                        return roles and addon.RoleCatalog.Describe(roles) or nil
+                    end,
+                    adStats = function(keys)
+                        return guildRecruit:StatsLine(keys)
+                    end,
+                    membership = function(keys)
+                        return membershipLines(keys)
+                    end,
+                    history = function()
+                        local _, partition = rosterController:QuietContext()
+                        return partition:GetGroupHistory()
+                    end,
+                    historyMember = function(key)
+                        local _, partition, normalizer = rosterController:QuietContext()
+                        local character = partition:GetCharacter(key)
+                        if not character then
+                            return nil
+                        end
+                        local name = character.name or key
+                        return { name = normalizer:Display(name) or name, whisper = name,
+                            classToken = character.class }
+                    end,
+                    tierOf = function(key)
+                        return lfgFriendTier(key)
+                    end,
                     mostGrouped = friends and friends:MostGrouped() or {},
                     formatDate = function(timestamp)
                         return client:FormatDate(timestamp)
@@ -4323,6 +4351,9 @@ if clientProfile.supported then
                     end,
                 })
                 return fields and addon.PlayerDetailViewModel.Build(fields) or nil
+            end,
+            formatDate = function(at)
+                return client:FormatDate(at)
             end,
             onWhisper = function(target)
                 client:OpenWhisper(target)

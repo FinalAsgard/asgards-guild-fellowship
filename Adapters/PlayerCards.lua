@@ -8,6 +8,7 @@ local Theme = addon.Theme
 
 local PlayerCards = {
     SMALL_HEIGHT = 44,
+    CHARACTER_HEIGHT = 48,
     INITIAL_SIZE = 30,
     DOT_SIZE = 8,
     STAR_SIZE = 12,
@@ -185,6 +186,79 @@ function PlayerCards.Small(ui, parent, callbacks)
     function card.SetSelected(_, selected)
         card.selected = selected == true
         card:SetBorder(card.selected and "green" or "border")
+    end
+
+    return card
+end
+
+-- "Level 60 Dwarf Warrior", leaving out what isn't known.
+local function levelRaceClass(fields)
+    local words = {}
+    if type(fields.level) == "number" then
+        table.insert(words, "Level " .. fields.level)
+    end
+    if type(fields.race) == "string" and fields.race ~= "" then
+        table.insert(words, fields.race)
+    end
+    if type(fields.className) == "string" and fields.className ~= "" then
+        table.insert(words, fields.className)
+    end
+    return table.concat(words, " ")
+end
+
+-- A character card on `parent`: the initial on a rounded tile, the name in
+-- class color with a MAIN badge for the main, "Level 60 Dwarf Warrior",
+-- the status, and the roles on the right. ShowCharacter(fields) fills and
+-- shows it: name, color ("ffrrggbb"), isMain, level, race, className,
+-- status, roles (text).
+function PlayerCards.Character(ui, parent)
+    local card = ui:frame("Frame", parent)
+    card:SetHeight(PlayerCards.CHARACTER_HEIGHT)
+    ui:Round(card, Theme.RADIUS.card, "surface", "border")
+    local pad = Theme.SPACING.s
+
+    card.tile = ui:Panel(card, { radius = Theme.RADIUS.button, fill = "raised", border = false })
+    card.tile:SetSize(PlayerCards.INITIAL_SIZE, PlayerCards.INITIAL_SIZE)
+    card.tile:SetPoint("LEFT", card, "LEFT", pad + 2, 0)
+    card.initial = ui:Text(card.tile, "", "semibold", "title", "text")
+    card.initial:SetPoint("CENTER", card.tile, "CENTER", 0, 0)
+
+    card.name = ui:Text(card, "", "semibold", "title", "text")
+    card.name:SetPoint("TOPLEFT", card.tile, "TOPRIGHT", pad, -1)
+    card.name:SetWordWrap(false)
+    card.main = ui:Panel(card, { radius = Theme.RADIUS.small, fill = "green", border = false })
+    card.main:SetSize(38, 14)
+    card.main:SetPoint("LEFT", card.name, "RIGHT", Theme.SPACING.s, 0)
+    card.main.label = ui:Text(card.main, "MAIN", "semibold", "small", "text")
+    card.main.label:SetPoint("CENTER", card.main, "CENTER", 0, 0)
+    card.sub = ui:Text(card, "", "regular", "small", "muted")
+    card.sub:SetPoint("TOPLEFT", card.name, "BOTTOMLEFT", 0, -3)
+    card.sub:SetJustifyH("LEFT")
+    card.sub:SetWordWrap(false)
+    card.roles = ui:Text(card, "", "regular", "small", "muted")
+    card.roles:SetPoint("RIGHT", card, "RIGHT", -pad - 2, 0)
+    card.roles:SetJustifyH("RIGHT")
+
+    function card.ShowCharacter(_, fields)
+        local initial = PlayerCards.Initial(fields.name)
+        card.initial:SetText(colored(initial, fields.color))
+        card.name:SetText(colored(fields.name or "", fields.color))
+        if fields.isMain then
+            card.main:Show()
+        else
+            card.main:Hide()
+        end
+        local parts = {}
+        local facts = levelRaceClass(fields)
+        if facts ~= "" then
+            table.insert(parts, facts)
+        end
+        if type(fields.status) == "string" and fields.status ~= "" then
+            table.insert(parts, fields.status)
+        end
+        card.sub:SetText(table.concat(parts, " · "))
+        card.roles:SetText(fields.roles or "")
+        card:Show()
     end
 
     return card

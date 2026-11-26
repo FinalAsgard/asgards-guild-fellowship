@@ -1049,6 +1049,11 @@ test.test("friends: the window opens on Friends, the page is built on show, and 
     test.assertEqual("Friend", page.detail.badge.text)
     test.assertTrue(page.detail.tiles[1].shown)
     test.assertEqual("Discord", page.detail.view.tiles[1].label)
+    -- Its tabs: Hammer and the alt Bolt, and the Log from the old panel.
+    test.assertEqual("Characters · 2", page.detail.tabs.tabs[1].label.text)
+    local cardName = string.gsub(string.gsub(page.detail.characterCards[1].name.text, "|c%x%x%x%x%x%x%x%x", ""), "|r", "")
+    test.assertEqual("Hammer Smith", cardName)
+    test.assertTrue(page.detail.view.logRows[1] ~= nil)
 
     -- Hammer's alt Bolt shares the Friend tier, with Guild Greet's perks.
     local _, partition, normalizer = addon.rosterController:QuietContext()
