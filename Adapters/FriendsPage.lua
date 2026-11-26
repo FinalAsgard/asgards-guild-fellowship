@@ -406,10 +406,13 @@ function Page:showPicker(shown)
     setShown(self.detail, not shown)
 end
 
--- Lays out the picker's rows for what's typed.
+-- Lays out the picker's rows for what's typed, from the top: a list
+-- scrolled down before a search would otherwise hide its few matches
+-- above the visible part.
 function Page:showRows()
     local picker = self.picker
     local rows = self.options.picker(self.query or "") or {}
+    picker.area:SetVerticalScroll(0)
     local index
     for index = 1, math.max(#rows, #picker.rows) do
         local entry = rows[index]

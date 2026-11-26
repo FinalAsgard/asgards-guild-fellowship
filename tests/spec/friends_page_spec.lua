@@ -233,6 +233,28 @@ test.test("friends page: + Add a friend opens Choose a friend, and picking fills
     test.assertEqual(world.players.Bolt.playerId, world.page:Selected())
 end)
 
+test.test("friends page: a search shows its matches from the top, even after scrolling down", function()
+    local world = setup({ "Anvil" })
+    local area = world.page.picker.area
+    rawset(area, "SetVerticalScroll", function(self, offset)
+        rawset(self, "scrolled", offset)
+    end)
+    click(world.page.cards[2])
+    test.assertEqual(0, rawget(area, "scrolled"))
+
+    area:SetVerticalScroll(400)
+    world.page.picker.search.box:SetText("bo")
+    world.page.picker.search.box.scripts.OnTextChanged(world.page.picker.search.box, true)
+    test.assertEqual(0, rawget(area, "scrolled"))
+    test.assertTrue(pickerRow(world, "Bolt") ~= nil)
+
+    -- Opened again: back at the top too.
+    click(world.page.picker.cancel)
+    area:SetVerticalScroll(400)
+    click(world.page.cards[2])
+    test.assertEqual(0, rawget(area, "scrolled"))
+end)
+
 test.test("friends page: Cancel backs out of Choose a friend without changing anything", function()
     local world = setup({ "Anvil" })
     click(world.page.cards[2])
