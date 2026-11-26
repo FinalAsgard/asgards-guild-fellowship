@@ -1328,3 +1328,52 @@ test.test("friends: Open in Guild Fellowship on a guildmate's menu opens the win
     test.assertTrue(page.detail.view.header.canToggle)
     test.assertFalse(page.detail.view.header.isFriend)
 end)
+
+test.test("greetings: 🗑 asks Delete? first, and an empty category says it won't prompt", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    local library = addon.guildGreet:Library()
+    click(page.categories.buttons[2])
+    local count = #library:Greetings("login")
+
+    -- The first click turns 🗑 into a red Delete?; nothing is deleted.
+    local row = page.rows[1]
+    row.scripts.OnEnter(row)
+    click(row.delete)
+    test.assertTrue(row.confirm.shown)
+    test.assertFalse(row.delete.shown)
+    test.assertEqual("Delete?", row.confirm.label.text)
+    test.assertEqual(count, #library:Greetings("login"))
+    -- Left alone, it goes back to 🗑 after 5 seconds.
+    fixtures.runTimers(world, 6)
+    test.assertFalse(row.confirm.shown)
+    test.assertEqual(count, #library:Greetings("login"))
+
+    -- A second click deletes.
+    click(row.delete)
+    click(row.confirm)
+    test.assertEqual(count - 1, #library:Greetings("login"))
+    test.assertFalse(row.confirm.shown)
+
+    -- Down to the last one, then none.
+    while #library:Greetings("login") > 1 do
+        library:Remove("login", 1)
+    end
+    page:Refresh()
+    click(page.rows[1].delete)
+    test.assertEqual("Delete? (last one)", page.rows[1].confirm.label.text)
+    click(page.rows[1].confirm)
+    test.assertEqual(0, #library:Greetings("login"))
+    test.assertTrue(page.empty.shown)
+    test.assertEqual("No Login greetings yet. You won't get login prompts until you add one.", page.empty.text)
+    test.assertTrue(page.add.shown)
+    test.assertFalse(page.rows[1].shown)
+    test.assertTrue(page.categories.buttons[2].dotShown)
+
+    -- Join still has greetings: no empty text there.
+    click(page.categories.buttons[1])
+    test.assertFalse(page.empty.shown)
+end)

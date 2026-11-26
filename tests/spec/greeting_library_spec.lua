@@ -131,26 +131,10 @@ test.test("greeting library: empty and over-long greetings are refused, not cut"
     test.assertEqual(nil, library:Add("party", "Hi"))
 end)
 
-test.test("greeting library: restoring puts back the starters in one category or all", function()
+test.test("greeting library: there is no Restore, so starters never replace the user's greetings", function()
     local addon = load()
-    local starters = addon.GreetingLibrary.STARTERS
-    local state = { greetings = { login = { "Mine" }, join = {}, welcomeBack = { "Also mine" } } }
-    local library = addon.GreetingLibrary.Create(state, lowest)
 
-    test.assertTrue(library:Restore("login"))
-    test.assertEqual(table.concat(starters.login, ","), table.concat(library:Greetings("login"), ","))
-    test.assertEqual("Also mine", library:Greetings("welcomeBack")[1])
-    test.assertEqual(0, #library:Greetings("join"))
-
-    test.assertTrue(library:Restore())
-    local index
-    for index = 1, #addon.GreetingLibrary.CATEGORIES do
-        local category = addon.GreetingLibrary.CATEGORIES[index].id
-        test.assertEqual(table.concat(starters[category], ","), table.concat(library:Greetings(category), ","))
-    end
-    -- The saved copies are the user's own again, apart from the starters.
-    library:Add("login", "New")
-    test.assertEqual(3, #starters.login)
+    test.assertEqual(nil, addon.GreetingLibrary.Create({}, lowest).Restore)
 end)
 
 test.test("greeting library: without usable saved data nothing is changed", function()
@@ -160,7 +144,7 @@ test.test("greeting library: without usable saved data nothing is changed", func
     local ok, reason = addon.GreetingLibrary.Create(nil, lowest):Add("login", "Hi")
     test.assertEqual(nil, ok)
     test.assertEqual("saved data is unavailable", reason)
-    test.assertEqual(nil, addon.GreetingLibrary.Create(nil, lowest):Restore())
+    test.assertEqual(nil, (addon.GreetingLibrary.Create(nil, lowest):Remove("login", 1)))
 
     ok, reason = addon.GreetingLibrary.Create(corrupt, lowest):Remove("login", 1)
     test.assertEqual(nil, ok)

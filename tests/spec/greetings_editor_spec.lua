@@ -26,6 +26,9 @@ local function newEditor(state, world)
         names = function()
             return world.names
         end,
+        now = function()
+            return world.now or 0
+        end,
     })
     return editor, addon, world
 end
@@ -284,4 +287,127 @@ test.test("greetings editor: the preview fills the draft with the user's own nam
     test.assertEqual(nil, editor:View().preview)
     editor:Cancel()
     test.assertEqual(nil, editor:View().preview)
+end)
+
+test.test("greetings editor: 🗑 arms a red Delete?, and a second click within 5 seconds deletes", function()
+    local state = { greetings = { login = { "One", "Two", "Three" } } }
+    local editor, addon, world = newEditor(state, { now = 100 })
+    editor:Select("login")
+
+    test.assertEqual("armed", editor:Delete(2))
+    local view = editor:View()
+    test.assertEqual(nil, view.rows[1].confirm)
+    test.assertEqual(addon.GreetingsEditor.DELETE, view.rows[2].confirm)
+    test.assertEqual("Delete?", view.rows[2].confirm)
+    -- Nothing is deleted on the first click.
+    test.assertEqual(3, #state.greetings.login)
+
+    world.now = 104
+    test.assertEqual("deleted", editor:Delete(2))
+    test.assertEqual("One,Three", table.concat(state.greetings.login, ","))
+    test.assertEqual(nil, editor:View().rows[2].confirm)
+end)
+
+test.test("greetings editor: Delete? expires after 5 seconds, and moves with the last click", function()
+    local state = { greetings = { login = { "One", "Two" } } }
+    local editor, _, world = newEditor(state, { now = 100 })
+    editor:Select("login")
+
+    editor:Delete(1)
+    world.now = 105
+    test.assertEqual(nil, editor:View().rows[1].confirm)
+    -- After it expired, a click arms it again rather than deleting.
+    test.assertEqual("armed", editor:Delete(1))
+    test.assertEqual(2, #state.greetings.login)
+
+    -- Another row's 🗑 moves it there.
+    test.assertEqual("armed", editor:Delete(2))
+    test.assertEqual(nil, editor:View().rows[1].confirm)
+    test.assertEqual("Delete?", editor:View().rows[2].confirm)
+    test.assertEqual("armed", editor:Delete(1))
+    test.assertEqual(2, #state.greetings.login)
+
+    -- Another category drops it.
+    editor:Select("join")
+    editor:Select("login")
+    test.assertEqual(nil, editor:View().rows[1].confirm)
+end)
+
+test.test("greetings editor: a Delete? whose greeting changed elsewhere doesn't delete", function()
+    local state = { greetings = { login = { "One", "Two" } } }
+    local editor = newEditor(state, { now = 100 })
+    editor:Select("login")
+
+    editor:Delete(1)
+    table.remove(state.greetings.login, 1)
+    test.assertEqual(nil, editor:View().rows[1].confirm)
+    test.assertEqual("armed", editor:Delete(1))
+    test.assertEqual("Two", state.greetings.login[1])
+
+    local ok, reason = editor:Delete(5)
+    test.assertEqual(nil, ok)
+    test.assertEqual("that greeting is gone", reason)
+end)
+
+test.test("greetings editor: the last Join, Login or Welcome back greeting reads Delete? (last one)", function()
+    local editor, addon = newEditor({ greetings = { join = { "Hi" }, login = { "Hi" }, welcomeBack = { "WB" } } })
+
+    local id
+    for _, id in ipairs({ "join", "login", "welcomeBack" }) do
+        editor:Select(id)
+        editor:Delete(1)
+        test.assertEqual(addon.GreetingsEditor.DELETE_LAST, editor:View().rows[1].confirm)
+        test.assertEqual("Delete? (last one)", editor:View().rows[1].confirm)
+    end
+end)
+
+test.test("greetings editor: deleting keeps the open box on its greeting, or closes it with it", function()
+    local state = { greetings = { login = { "One", "Two", "Three" } } }
+    local editor = newEditor(state)
+    editor:Select("login")
+
+    editor:StartEdit(3)
+    editor:SetDraft("Three, changed")
+    editor:Delete(1)
+    editor:Delete(1)
+    local view = editor:View()
+    test.assertEqual(2, view.open)
+    test.assertEqual("Three, changed", view.draft)
+    test.assertTrue(editor:Save())
+    test.assertEqual("Two,Three, changed", table.concat(state.greetings.login, ","))
+
+    editor:StartEdit(1)
+    editor:Delete(1)
+    editor:Delete(1)
+    test.assertEqual(nil, editor:View().open)
+end)
+
+test.test("greetings editor: without saved data a Delete? deletes nothing and says why", function()
+    local state = { greetings = { login = { "One" } } }
+    local editor, _, world = newEditor(state)
+    editor:Select("login")
+
+    editor:Delete(1)
+    world.unavailable = true
+    local ok, reason = editor:Delete(1)
+    test.assertEqual(nil, ok)
+    test.assertEqual("that greeting is gone", reason)
+    world.unavailable = false
+    test.assertEqual("One", state.greetings.login[1])
+end)
+
+test.test("greetings editor: an empty category says it won't prompt until a greeting is added", function()
+    local editor = newEditor({ greetings = { join = {}, login = {}, welcomeBack = {} } })
+
+    test.assertEqual("No Join greetings yet. You won't get join prompts until you add one.", editor:View().empty)
+    editor:Select("login")
+    test.assertEqual("No Login greetings yet. You won't get login prompts until you add one.", editor:View().empty)
+    editor:Select("welcomeBack")
+    test.assertEqual("No Welcome back greetings yet. You won't get welcome back prompts until you add one.",
+        editor:View().empty)
+    -- + Add a greeting works from there.
+    editor:StartAdd()
+    editor:SetDraft("WB {name}!")
+    test.assertTrue(editor:Save())
+    test.assertEqual(nil, editor:View().empty)
 end)

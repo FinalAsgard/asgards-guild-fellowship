@@ -29,8 +29,9 @@ local Theme = {
         gold = { 0.85, 0.69, 0.22, 1 },
         -- "A slot opened in your party".
         orange = { 0.95, 0.55, 0.18, 1 },
-        -- Errors, e.g. a greeting that can't be saved.
+        -- Errors, e.g. a greeting that can't be saved, and Delete?.
         red = { 0.92, 0.36, 0.33, 1 },
+        redHover = { 0.98, 0.45, 0.42, 1 },
         -- Roles: an open role in full color, a filled one in grey.
         tank = { 0.27, 0.52, 0.92, 1 },
         healer = { 0.30, 0.74, 0.40, 1 },

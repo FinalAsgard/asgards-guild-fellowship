@@ -237,11 +237,12 @@ end
 local BUTTON_COLORS = {
     primary = { fill = "green", hover = "greenHover", text = "text", border = false },
     secondary = { fill = "raised", hover = "hover", text = "text", border = "border" },
+    danger = { fill = "red", hover = "redHover", text = "text", border = false },
 }
 
--- A rounded text button. `kind`: "primary" (green) or "secondary"; `onClick`
--- runs on a left click while it's enabled. SetLabel renames it and
--- SetActive enables or greys it out.
+-- A rounded text button. `kind`: "primary" (green), "secondary" or "danger"
+-- (red); `onClick` runs on a left click while it's enabled. SetLabel
+-- renames it and SetActive enables or greys it out.
 function UI:Button(parent, label, kind, onClick)
     local button = self:frame("Button", parent)
     local colors = BUTTON_COLORS[kind] or BUTTON_COLORS.secondary

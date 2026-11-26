@@ -14,8 +14,13 @@ local _, addon = ...
 -- or Save (Enter) and Cancel (Escape), and a short error under it when a
 -- save is refused. Under the box, Insert chips put {name}, {main} or
 -- {character} at the cursor (More ▼ has the rarer ones), and a preview
--- fills the draft in with the user's own names. Switching category or tab, opening another row, or the
--- page hiding (another module, the window closing) drops the draft.
+-- fills the draft in with the user's own names. Switching category or tab,
+-- opening another row, or the page hiding (another module, the window
+-- closing) drops the draft.
+--
+-- 🗑 turns into a red Delete? (Delete? (last one) on the last greeting)
+-- that deletes on a second click within 5 seconds. An empty category says
+-- it won't prompt until a greeting is added, above + Add a greeting.
 --
 -- Everything it shows comes from GreetingsEditor and the SettingsModel;
 -- Refresh redraws it from them (and so from saved data).
@@ -34,6 +39,7 @@ local AgfGreetingsPage = {
     DIMMED_ALPHA = 0.5,
     BUTTON_WIDTH = 80,
     ADD_WIDTH = 150,
+    CONFIRM_WIDTH = 140,
     ADD_GREETING = "+ Add a greeting",
     CHIP_WIDTH = 92,
     MORE = "More ▼",
@@ -50,9 +56,8 @@ Page.__index = Page
 --   editor    the GreetingsEditor
 --   settings  the SettingsModel holding the category switches
 --   onError   function(text): tells the user why something didn't happen
---   onDelete  function(category, index) (optional): a row's 🗑
 --   after     function(seconds, callback) (optional): a timer, to clear a
---             save error
+--             save error and a Delete? that wasn't clicked
 function AgfGreetingsPage.Create(content, ui, options)
     local page = setmetatable({ content = content, ui = ui, options = options, rows = {} }, Page)
     page:build()
@@ -125,6 +130,10 @@ function Page:build()
     self.area:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -110)
     self.area:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, 0)
     self:buildEditBox()
+    self.empty = ui:Text(self.list, "", "regular", "body", "muted")
+    self.empty:SetJustifyH("LEFT")
+    self.empty:SetWordWrap(true)
+    self.empty:Hide()
     self.add = ui:Button(self.list, AgfGreetingsPage.ADD_GREETING, "secondary", function()
         page.options.editor:StartAdd()
         page:Refresh()
@@ -341,23 +350,24 @@ function Page:row(index)
     row:SetHeight(AgfGreetingsPage.ROW_HEIGHT)
     local pad = Theme.SPACING.m
     row.text = ui:Text(row, "", "regular", "body", "text")
-    row.text:SetPoint("LEFT", row, "LEFT", pad, 0)
-    row.text:SetPoint("RIGHT", row, "RIGHT", -pad - 2 * AgfGreetingsPage.ICON_SIZE - Theme.SPACING.s, 0)
     row.text:SetJustifyH("LEFT")
     row.text:SetWordWrap(true)
     -- Two lines at most; the game ends a longer one in "…".
     if type(row.text.SetMaxLines) == "function" then
         row.text:SetMaxLines(2)
     end
-    local function act(callback)
-        return function()
-            if callback ~= nil and row.greeting ~= nil then
-                callback(page.view.category, row.greeting.index)
-            end
+    local function delete()
+        if row.greeting ~= nil then
+            page:Delete(row.greeting.index)
         end
     end
-    row.delete = ui:IconButton(row, Theme.TEXTURES.trash, AgfGreetingsPage.ICON_SIZE, act(self.options.onDelete))
+    row.delete = ui:IconButton(row, Theme.TEXTURES.trash, AgfGreetingsPage.ICON_SIZE, delete)
     row.delete:SetPoint("RIGHT", row, "RIGHT", -pad, 0)
+    -- 🗑's armed state, in its place.
+    row.confirm = ui:Button(row, addon.GreetingsEditor.DELETE, "danger", delete)
+    row.confirm:SetWidth(AgfGreetingsPage.CONFIRM_WIDTH)
+    row.confirm:SetPoint("RIGHT", row, "RIGHT", -pad, 0)
+    row.confirm:Hide()
     row.edit = ui:IconButton(row, Theme.TEXTURES.pencil, AgfGreetingsPage.ICON_SIZE, function()
         if row.greeting ~= nil then
             page.options.editor:StartEdit(row.greeting.index)
@@ -365,7 +375,6 @@ function Page:row(index)
             page:focus()
         end
     end)
-    row.edit:SetPoint("RIGHT", row.delete, "LEFT", -Theme.SPACING.xs, 0)
     local function inside(frame)
         return type(frame.IsMouseOver) == "function" and frame:IsMouseOver()
     end
@@ -374,9 +383,12 @@ function Page:row(index)
         row:SetFill(on and "hover" or "surface")
         if on then
             row.edit:Show()
-            row.delete:Show()
         else
             row.edit:Hide()
+        end
+        if on and row.confirm.armed ~= true then
+            row.delete:Show()
+        else
             row.delete:Hide()
         end
         local tooltip = ui.environment.GameTooltip
@@ -406,11 +418,74 @@ function Page:row(index)
     end
     row.edit:HookScript("OnLeave", leaveIcon)
     row.delete:HookScript("OnLeave", leaveIcon)
+    row.confirm:HookScript("OnLeave", leaveIcon)
     row.hover = hovered
     row.edit:Hide()
     row.delete:Hide()
+    self:arm(row, nil)
     self.rows[index] = row
     return row
+end
+
+-- Shows row's Delete? labelled `confirm` in place of 🗑, or hides it (nil).
+-- ✎ and the text make room for it.
+function Page:arm(row, confirm)
+    local pad = Theme.SPACING.m
+    row.confirm.armed = confirm ~= nil
+    local rightOf = AgfGreetingsPage.ICON_SIZE
+    if confirm ~= nil then
+        row.confirm:SetLabel(confirm)
+        row.confirm:Show()
+        row.delete:Hide()
+        rightOf = AgfGreetingsPage.CONFIRM_WIDTH
+    else
+        row.confirm:Hide()
+        if row.hovered then
+            row.delete:Show()
+        end
+    end
+    row.edit:ClearAllPoints()
+    row.edit:SetPoint("RIGHT", row, "RIGHT", -pad - rightOf - Theme.SPACING.xs, 0)
+    row.text:ClearAllPoints()
+    row.text:SetPoint("LEFT", row, "LEFT", pad, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -pad - rightOf - AgfGreetingsPage.ICON_SIZE - Theme.SPACING.s, 0)
+end
+
+-- 🗑 or Delete? on the row at `index`: arms the confirm, or deletes. A
+-- Delete? left alone goes back to 🗑 when it expires.
+function Page:Delete(index)
+    local editor = self.options.editor
+    local result, reason = editor:Delete(index)
+    if result == nil and self.options.onError ~= nil then
+        self.options.onError("Can't delete: " .. tostring(reason) .. ".")
+    end
+    self:Refresh()
+    if result == "armed" and self.options.after ~= nil then
+        local page = self
+        -- The clock counts whole seconds, so look again shortly if it
+        -- hasn't quite run out yet.
+        local checks = 0
+        local function expire()
+            page:Refresh()
+            checks = checks + 1
+            if checks < 3 and page:armed() then
+                page.options.after(1, expire)
+            end
+        end
+        self.options.after(addon.GreetingsEditor.CONFIRM_SECONDS, expire)
+    end
+    return result
+end
+
+-- Whether any row's Delete? is showing.
+function Page:armed()
+    local index
+    for index = 1, #self.view.rows do
+        if self.view.rows[index].confirm ~= nil then
+            return true
+        end
+    end
+    return false
 end
 
 -- Redraws the Greetings tab from the editor's view.
@@ -425,6 +500,7 @@ function Page:Refresh()
     self.description:SetText(view.description)
     self.switchLabel:SetText(view.switchLabel or "")
     self.switch:SetOn(view.enabled)
+    self.empty:SetText(view.empty or "")
     self.offNote:SetText(view.offNote or "")
     if view.offNote ~= nil then
         self.offNote:Show()
@@ -436,6 +512,7 @@ function Page:Refresh()
         row.greeting = view.rows[index]
         row.text:SetText(view.rows[index].text)
         row.text:SetTextColor(Theme.Color(view.enabled and "text" or "disabled"))
+        self:arm(row, view.rows[index].confirm)
     end
     for index = #view.rows + 1, #self.rows do
         self.rows[index].greeting = nil
@@ -455,8 +532,9 @@ function Page:Refresh()
     self:refreshEditButtons()
 end
 
--- Lays the list out top to bottom: the rows, the open one swapped for the
--- edit box, then the edit box for a new greeting or + Add a greeting.
+-- Lays the list out top to bottom: the rows (or, with none, why the
+-- category won't prompt), the open one swapped for the edit box, then the
+-- edit box for a new greeting or + Add a greeting.
 function Page:layout()
     local view = self.view
     if view == nil then
@@ -471,6 +549,16 @@ function Page:layout()
         frame:Show()
     end
     local top = 0
+    if view.empty ~= nil then
+        self.empty:ClearAllPoints()
+        self.empty:SetPoint("TOPLEFT", list, "TOPLEFT", 0, 0)
+        self.empty:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+        self.empty:Show()
+        local height = self.empty:GetStringHeight()
+        top = (type(height) == "number" and height or 14) + Theme.SPACING.m
+    else
+        self.empty:Hide()
+    end
     local index
     for index = 1, #view.rows do
         local row = self.rows[index]

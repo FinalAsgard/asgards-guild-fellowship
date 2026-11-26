@@ -4,7 +4,7 @@ local _, addon = ...
 -- Greet's settings, built with the Details! Framework like the roster: a
 -- button per Guild Greet category, that category's greetings each with
 -- Edit, a box to add a greeting or change (or delete) the one being edited,
--- Restore controls, and a key to the placeholders. Every change goes
+-- and a key to the placeholders. Every change goes
 -- through the GreetingLibrary, which saves it account-wide, so the next
 -- prompt uses it. It is not unit tested; the in-game checklist covers it.
 --
@@ -23,8 +23,6 @@ local GreetingsPage = {
     HEIGHT = 530,
     LINE_HEIGHT = 24,
     LINES = 8,
-    -- How long a Restore button waits for its confirming second click.
-    CONFIRM_SECONDS = 5,
 }
 addon.GreetingsPage = GreetingsPage
 
@@ -188,20 +186,8 @@ local function build(page, framework, parent)
     page.status:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, inputY - 28)
     page.status:SetJustifyH("LEFT")
 
-    -- Restoring replaces greetings, so each button asks for a second click.
-    page.restoreOne = button(parent, "Restore starter greetings", 200)
-    page.restoreOne:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, inputY - 50)
-    page.restoreOne:SetScript("OnClick", function()
-        page:Restore(false)
-    end)
-    page.restoreAll = button(parent, "Restore all categories", 200)
-    page.restoreAll:SetPoint("LEFT", page.restoreOne, "RIGHT", 8, 0)
-    page.restoreAll:SetScript("OnClick", function()
-        page:Restore(true)
-    end)
-
     -- The placeholder key.
-    local keyY = inputY - 86
+    local keyY = inputY - 50
     local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     header:SetPoint("TOPLEFT", parent, "TOPLEFT", 14, keyY)
     header:SetText("Placeholders (upper or lower case both work)")
@@ -313,8 +299,6 @@ function Page:Redraw()
             self.delete:Hide()
             self.cancel:Hide()
         end
-        self.restoreOne:SetText(self.confirming == "one" and "Click again to restore" or "Restore starter greetings")
-        self.restoreAll:SetText(self.confirming == "all" and "Click again to restore all" or "Restore all categories")
     end))
 end
 
@@ -322,7 +306,6 @@ end
 function Page:Select(category)
     self.category = category
     self.editing = nil
-    self.confirming = nil
     self.input:SetText("")
     self:setStatus(nil)
     self:Redraw()
@@ -379,35 +362,5 @@ function Page:Delete(position)
     end
     self.editing = nil
     self:setStatus("Greeting deleted.")
-    self:Redraw()
-end
-
--- The first click arms the button and the second, within a few seconds,
--- restores this category's starters (`all` false) or every category's.
-function Page:Restore(all)
-    local which = all and "all" or "one"
-    if self.confirming ~= which then
-        self.confirming = which
-        self:Redraw()
-        if type(self.after) == "function" then
-            self.after(GreetingsPage.CONFIRM_SECONDS, function()
-                if self.confirming == which then
-                    self.confirming = nil
-                    self:Redraw()
-                end
-            end)
-        end
-        return
-    end
-    self.confirming = nil
-    self.editing = nil
-    self.input:SetText("")
-    local ok, reason = self.library():Restore(not all and self.category or nil)
-    if not ok then
-        self:setStatus("Not restored: " .. tostring(reason) .. ".", true)
-    else
-        self:setStatus(all and "Starter greetings restored in every category."
-            or "Starter greetings restored.")
-    end
     self:Redraw()
 end

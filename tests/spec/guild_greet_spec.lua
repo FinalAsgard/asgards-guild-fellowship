@@ -572,7 +572,7 @@ end)
 
 -- Editing greetings -------------------------------------------------------------
 
-test.test("guild greet: a category with no greetings shows no prompts, and restoring brings them back", function()
+test.test("guild greet: a category with no greetings shows no prompts, and adding one brings them back", function()
     local world = setup("Retail")
     local library = world.greet:Library()
     while #library:Greetings("login") > 0 do
@@ -586,7 +586,7 @@ test.test("guild greet: a category with no greetings shows no prompts, and resto
     test.assertEqual(1, #world.shown)
     test.assertEqual("join", world.shown[1].category)
 
-    world.greet:Library():Restore("login")
+    world.greet:Library():Add("login", "Hi {name}")
     world.greet:OnPresence("online", world.names.anvil)
     test.assertEqual(2, #world.shown)
     test.assertEqual("login", world.shown[2].category)
@@ -595,7 +595,6 @@ end)
 test.test("guild greet: a greeting added or edited in the window is used by the next greet", function()
     local world = setup("Forever")
     local library = world.greet:Library()
-    library:Restore("login")
     library:Remove("login", 3)
     library:Remove("login", 2)
     library:Edit("login", 1, "Ahoy {characterFirst}!")

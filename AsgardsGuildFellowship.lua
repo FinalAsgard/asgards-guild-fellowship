@@ -1372,6 +1372,9 @@ if clientProfile.supported then
                                 end
                                 return guildGreet:Names(normalizer and normalizer:Key(fullName) or fullName, fullName)
                             end,
+                            now = function()
+                                return client:Timestamp()
+                            end,
                         }),
                         settings = settings,
                         onError = function(text)

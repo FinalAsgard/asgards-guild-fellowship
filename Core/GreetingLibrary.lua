@@ -43,17 +43,23 @@ local GreetingLibrary = {
     -- panel list them, with the panel's on/off label for each, and the
     -- switch's label beside them on the new window's Greetings page.
     -- whenMinutes (a format given the minutes and "minute"/"minutes") is
-    -- the "when" line once the minutes are known.
+    -- the "when" line once the minutes are known. empty is what the page
+    -- says while the category has no greetings, and lastOne marks one
+    -- whose last greeting's delete warns that it will stop prompting.
     CATEGORIES = {
         { id = "join", label = "Join", when = "Someone joins the guild.",
-            toggle = "Prompt when someone joins the guild", switch = "Prompt me" },
+            toggle = "Prompt when someone joins the guild", switch = "Prompt me", lastOne = true,
+            empty = "No Join greetings yet. You won't get join prompts until you add one." },
         { id = "login", label = "Login", when = "Someone's first login you see this session.",
-            toggle = "Prompt for first logins", switch = "Prompt me" },
+            toggle = "Prompt for first logins", switch = "Prompt me", lastOne = true,
+            empty = "No Login greetings yet. You won't get login prompts until you add one." },
         { id = "welcomeBack", label = "Welcome back", when = "Someone you saw log off comes back after a break.",
             whenMinutes = "Someone you saw log off comes back after more than %d %s away.",
-            toggle = "Prompt for welcome backs", switch = "Prompt me" },
+            toggle = "Prompt for welcome backs", switch = "Prompt me", lastOne = true,
+            empty = "No Welcome back greetings yet. You won't get welcome back prompts until you add one." },
         { id = "longAbsence", label = "Long absence", when = "Someone logs in after a long time away.",
-            toggle = "Prompt after a long absence", switch = "Prompt me" },
+            toggle = "Prompt after a long absence", switch = "Prompt me", lastOne = true,
+            empty = "No Long absence greetings yet. You won't get long absence prompts until you add one." },
     },
     -- Every placeholder and what it's filled with. Case doesn't matter.
     PLACEHOLDERS = {
@@ -354,24 +360,5 @@ function Library:Remove(category, index)
         return nil, "that greeting is gone"
     end
     table.remove(list, index)
-    return true
-end
-
--- Puts back the starter greetings in `category`, or in every category when
--- it's nil, replacing what's there. Returns true, or nil and the reason.
-function Library:Restore(category)
-    if category ~= nil and GreetingLibrary.STARTERS[category] == nil then
-        return nil, "there is no such category"
-    end
-    local greetings = self:stored()
-    if greetings == nil then
-        return nil, "saved data is unavailable"
-    end
-    local id, starters
-    for id, starters in pairs(GreetingLibrary.STARTERS) do
-        if category == nil or category == id then
-            greetings[id] = copy(starters)
-        end
-    end
     return true
 end

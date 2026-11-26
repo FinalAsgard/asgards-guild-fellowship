@@ -13,6 +13,11 @@ local _, addon = ...
 -- Selecting a category, or Cancel (another tab, another row, the window
 -- closing), drops the draft quietly.
 --
+-- 🗑 asks first: the first click arms that row's red Delete? (Delete?
+-- (last one) on a category's last greeting), and a second click within
+-- CONFIRM_SECONDS deletes it. An empty category says so, and that it won't
+-- prompt until a greeting is added.
+--
 -- Greetings are read from the library each time View is asked, so a page
 -- showing it reloads what's saved.
 local GreetingsEditor = {
@@ -20,6 +25,9 @@ local GreetingsEditor = {
     NEW = "new",
     ADD = "Add",
     SAVE = "Save",
+    DELETE = "Delete?",
+    DELETE_LAST = "Delete? (last one)",
+    CONFIRM_SECONDS = 5,
 }
 addon.GreetingsEditor = GreetingsEditor
 
@@ -45,6 +53,7 @@ end
 --   promptsOn   function() -> whether greet prompts are on at all
 --   names       function() -> the user's own names for the preview, keyed
 --               like GuildGreet:Names (name, main, character, ...)
+--   now         function() -> the time in seconds, for the delete confirm
 function GreetingsEditor.Create(options)
     return setmetatable({
         options = options or {},
@@ -73,6 +82,7 @@ function Editor:Select(id)
     end
     if id ~= self.selected then
         self:Cancel()
+        self.confirm = nil
     end
     self.selected = id
     return true
@@ -185,6 +195,51 @@ function Editor:Save()
     return true
 end
 
+function Editor:now()
+    local now = self.options.now and self.options.now() or nil
+    return type(now) == "number" and now or 0
+end
+
+-- Whether the row at `index` has its Delete? showing: armed on that
+-- greeting less than CONFIRM_SECONDS ago.
+function Editor:confirming(index, greetings)
+    local confirm = self.confirm
+    return confirm ~= nil and confirm.index == index and confirm.category == self.selected
+        and (greetings or self:greetings(self.selected))[index] == confirm.text
+        and self:now() - confirm.at < GreetingsEditor.CONFIRM_SECONDS
+end
+
+-- 🗑 on the greeting at `index`: the first click arms its Delete?, and a
+-- second while it shows deletes the greeting through the library. Returns
+-- "armed" or "deleted", or nil and the reason it can't be deleted.
+function Editor:Delete(index)
+    local greetings = self:greetings(self.selected)
+    if greetings[index] == nil then
+        self.confirm = nil
+        return nil, "that greeting is gone"
+    end
+    if not self:confirming(index, greetings) then
+        self.confirm = { index = index, category = self.selected, text = greetings[index], at = self:now() }
+        return "armed"
+    end
+    self.confirm = nil
+    local library = self.options.library and self.options.library() or nil
+    if library == nil then
+        return nil, "saved data is unavailable"
+    end
+    local removed, reason = library:Remove(self.selected, index)
+    if not removed then
+        return nil, reason
+    end
+    -- The open box follows its greeting, or closes with it.
+    if self.open == index then
+        self:Cancel()
+    elseif type(self.open) == "number" and self.open > index then
+        self.open = self.open - 1
+    end
+    return "deleted"
+end
+
 function Editor:Selected()
     return self.selected
 end
@@ -211,7 +266,9 @@ end
 --   switchId     its switch's SettingsModel id; switchLabel its label
 --   enabled      whether its switch is on
 --   offNote      the note shown over its greetings while it's off, or nil
---   rows         its greetings, { index, text }, in saved order
+--   rows         its greetings, { index, text, confirm }, in saved order;
+--                confirm is the Delete? label while that row's is armed
+--   empty        what the list says while it has no greetings, or nil
 --   dimmed       whether greet prompts are off, so the page is dimmed
 --   open         the open greeting's position, NEW, or nil
 --   draft        the open box's text
@@ -235,7 +292,11 @@ function Editor:View()
     local rows = {}
     local greetings = self:greetings(selected.id)
     for index = 1, #greetings do
-        rows[index] = { index = index, text = greetings[index] }
+        local confirm
+        if self:confirming(index, greetings) then
+            confirm = (#greetings == 1 and selected.lastOne) and GreetingsEditor.DELETE_LAST or GreetingsEditor.DELETE
+        end
+        rows[index] = { index = index, text = greetings[index], confirm = confirm }
     end
     local minutes = self.options.minutes and self.options.minutes() or nil
     return {
@@ -247,6 +308,7 @@ function Editor:View()
         enabled = enabled,
         offNote = not enabled and GreetingsEditor.OFF_NOTE or nil,
         rows = rows,
+        empty = #rows == 0 and selected.empty or nil,
         dimmed = self.options.promptsOn ~= nil and self.options.promptsOn() == false,
         open = self.open,
         draft = self.draft,
