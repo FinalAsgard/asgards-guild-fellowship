@@ -1158,8 +1158,10 @@ function UI:ContextMenu(parent)
         catcher:Hide()
     end)
     local ui = self
+    -- The width it was made, read on first open.
+    local baseWidth
     -- Opens under `anchor` with `items`; `title` (text, may carry color
-    -- codes) heads them when given.
+    -- codes) heads them when given. It widens to fit its longest line.
     function menu.Open(_, anchor, items, title)
         local hasTitle = title ~= nil and title ~= ""
         menu.titleText = hasTitle and title or nil
@@ -1218,6 +1220,19 @@ function UI:ContextMenu(parent)
         end
         menu.items = items
         menu.anchor = anchor
+        -- As wide as it was made, or wider when a line needs it, so no text
+        -- runs past its edge.
+        local function number(value)
+            return type(value) == "number" and value or nil
+        end
+        if baseWidth == nil then
+            baseWidth = number(menu:GetWidth()) or 180
+        end
+        local widest = hasTitle and (number(menu.title:GetStringWidth()) or 0) or 0
+        for index = 1, #items do
+            widest = math.max(widest, number(menu.rows[index].label:GetStringWidth()) or 0)
+        end
+        menu:SetWidth(math.max(baseWidth, math.ceil(widest) + 2 * (4 + Theme.SPACING.s)))
         menu:SetHeight(8 + first + #items * 22)
         menu:ClearAllPoints()
         menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)

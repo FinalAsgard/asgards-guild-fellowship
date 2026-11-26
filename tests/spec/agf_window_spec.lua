@@ -742,3 +742,31 @@ test.test("agf window: stepping and typed values are pure, and a slider shows it
     test.assertEqual("9 min", slider.text.text)
     test.assertEqual(1, #changes)
 end)
+
+test.test("agf window: a menu widens to fit its longest line, and never narrows below its width", function()
+    local addon = loadUi()
+    local environment = fakeFrames.install({})
+    local ui = addon.Widgets.Create(environment)
+    local anchor = ui:frame("Frame", nil)
+    local menu = ui:ContextMenu(anchor)
+    rawset(menu, "GetWidth", function()
+        return 300
+    end)
+    local items = { { label = "{characterFirst}  the first part of that character's name" }, { label = "Short" } }
+    menu:Open(anchor, items)
+    test.assertEqual(300, rawget(menu, "width"))
+
+    rawset(menu.rows[1].label, "GetStringWidth", function()
+        return 361.4
+    end)
+    menu:Close()
+    menu:Open(anchor, items)
+    test.assertEqual(362 + 2 * (4 + addon.Theme.SPACING.s), rawget(menu, "width"))
+
+    -- Short items again: back to the width it was made.
+    rawset(menu.rows[1].label, "GetStringWidth", function()
+        return 40
+    end)
+    menu:Open(anchor, items)
+    test.assertEqual(300, rawget(menu, "width"))
+end)
