@@ -392,6 +392,38 @@ test.test("Forever the chat line for new groups is off by default and can be tur
     test.assertContains(hammer.messages[#hammer.messages], "New group for you on the Guild LFG Board: Stratholme")
 end)
 
+test.test("lfg auto-list setting: off by default, saved, and unusable saved data reads as off", function()
+    local addon = test.newAddon("Core/FellowshipStore.lua")
+    local database = { schemaVersion = 1, guilds = {} }
+    local store = addon.FellowshipStore.Create(database)
+
+    test.assertFalse(store:LfgAutoList())
+    test.assertTrue(store:SetLfgAutoList(true))
+    test.assertTrue(addon.FellowshipStore.Create(database):LfgAutoList())
+    test.assertTrue(store:SetLfgAutoList(false))
+    test.assertFalse(store:LfgAutoList())
+    test.assertFalse(store:SetLfgAutoList("yes"))
+
+    database.lfgAutoList = "corrupt"
+    test.assertFalse(store:LfgAutoList())
+    test.assertFalse(store:SetLfgAutoList(true))
+    test.assertEqual("corrupt", database.lfgAutoList)
+end)
+
+test.test("Forever Auto-list my parties is off by default, in the LFG popup and the AddOns options", function()
+    local channel = fixtures.newChannel()
+    local hammer, addon = login(channel, "Hammer Smith")
+    test.assertFalse(addon.settings:Get("lfgAutoList"))
+    test.assertTrue(addon.settings:InHost("lfgAutoList", "options"))
+    addon.agfWindow:Open("lfg")
+    addon.agfWindow:ToggleSettingsPopup()
+    local switch = addon.agfWindow:Switches("lfgAutoList")[1]
+    test.assertFalse(switch:IsOn())
+    test.assertTrue(addon.agfWindow.infoIcons.lfgAutoList ~= nil)
+    switch.scripts.OnClick(switch)
+    test.assertTrue(addon.settings:Get("lfgAutoList"))
+end)
+
 test.test("Forever no glow in a party or in Do Not Disturb, and the drawer shows the party", function()
     local channel = fixtures.newChannel()
     local tool = login(channel, "Tool Box")

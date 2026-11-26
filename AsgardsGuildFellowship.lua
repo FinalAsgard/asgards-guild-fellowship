@@ -593,6 +593,33 @@ if clientProfile.supported then
             return true
         end,
     })
+    -- Whether the player's parties are listed on the Guild LFG Board when
+    -- they form, account-wide, off unless turned on. Off, nothing is listed
+    -- or asked until the player lists one.
+    settings:Add("general", {
+        id = "lfgAutoList",
+        kind = "toggle",
+        label = "Auto-list my parties on the Guild LFG Board",
+        info = function()
+            return "Off by default: a party you form or come to lead isn't listed, and you aren't asked. " ..
+                "Turn it on to list it as soon as it forms, for what it looks like it's for, or to be asked " ..
+                "when that isn't clear (or when someone in it isn't in the guild)."
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store ~= nil and store:LfgAutoList()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetLfgAutoList(enabled) then
+                return nil, "the saved setting is unreadable"
+            end
+            return true
+        end,
+    })
     settings:Add("general", {
         id = "version",
         kind = "text",
@@ -1324,6 +1351,7 @@ if clientProfile.supported then
             { id = "lfg", label = "LFG", title = "Guild LFG Board",
                 settingsRows = {
                     { id = "lfgButton", label = "Show LFG button" },
+                    { id = "lfgAutoList", label = "Auto-list my parties", info = true },
                     { id = "lfgChatLine", label = "Chat line for new groups",
                         info = "A line in chat for each new group you could join." },
                 },
@@ -1563,7 +1591,6 @@ if clientProfile.supported then
             if settings:Get("lfgButton") ~= true then
                 lfgTrigger:Pause()
             elseif lfgTrigger:Resume(client:Timestamp() or 0) then
-                lfgJoin.slotTimer()
                 lfgRefresh()
                 if lfgButton:IsShowing() and not lfgButton:DrawerOpen() then
                     lfgButton:OpenDrawer()
@@ -2155,6 +2182,8 @@ if clientProfile.supported then
             selfKey = selfKey,
             present = present,
             hidden = settings:Get("lfgButton") ~= true,
+            autoList = settings:Get("lfgAutoList") == true,
+            canGuess = inGroup and lfgGuess() ~= nil,
         }, now)
         local index
         for index = 1, #actions do
@@ -2164,18 +2193,15 @@ if clientProfile.supported then
                     lfgRefresh()
                     lfgButton:OpenDrawer()
                 end
-            elseif action.action == addon.LfgTrigger.LIST_QUIETLY then
+            elseif action.action == addon.LfgTrigger.AUTO_LIST then
+                -- Auto-list is on: listed for what it looks like it's for.
                 local purpose = lfgGuess()
                 if purpose ~= nil then
                     lfgListing:Start(purpose, nil, now, true, true)
                 end
             elseif action.action == addon.LfgTrigger.REMIND then
-                if lfgListing:IsActive() then
-                    local fields = lfgListing:Announcement(lfgMembers())
-                    rosterController:Print("Your party is listed on the Guild LFG Board as " ..
-                        addon.LfgListing.Label(fields.k, fields.p) .. ". Type " .. addon.Identity.slashCommand ..
-                        " lfg to take part.")
-                end
+                rosterController:Print("Your party wasn't listed on the Guild LFG Board: your LFG button is " ..
+                    "hidden. Type " .. addon.Identity.slashCommand .. " lfg to list it.")
             elseif action.action == addon.LfgTrigger.TAKE_OVER then
                 lfgListing:Start(purposeOf(action.listing), action.listing.note, now, true)
             elseif action.action == addon.LfgTrigger.RAID then
@@ -2185,15 +2211,13 @@ if clientProfile.supported then
             elseif action.action == addon.LfgTrigger.END then
                 endListing(not inGroup)
             elseif action.action == addon.LfgTrigger.SLOT_OPEN or action.action == addon.LfgTrigger.SLOT_REMIND then
-                -- The listing stays as the party was until the slot's
-                -- posted: by Yes, or with no answer after SLOT_SECONDS.
+                -- The listing stays as the party was until someone says Yes
+                -- to posting the slot; nothing is posted on a timer.
                 lfgJoin.slot = { role = lfgJoin.leftRole(lfgJoin.before, lfgMembers()) }
                 lfgListing:Hold(lfgJoin.before)
                 if action.action == addon.LfgTrigger.SLOT_REMIND then
                     rosterController:Print("Someone left your party. Type " .. addon.Identity.slashCommand ..
                         " lfg to fill the empty slot on the Guild LFG Board.")
-                else
-                    lfgJoin.slotTimer()
                 end
             elseif action.action == addon.LfgTrigger.HAND_OFF then
                 -- The new leader takes it over from the board, so it ends a
@@ -2238,15 +2262,6 @@ if clientProfile.supported then
             end
         end
         return "dps"
-    end
-    -- An open slot unanswered after SLOT_SECONDS is posted.
-    lfgJoin.slotTimer = function()
-        client:After(addon.LfgTrigger.SLOT_SECONDS + 1, function()
-            if lfgTrigger:SlotDue(client:Timestamp() or 0) then
-                lfgJoin.postSlot()
-            end
-            lfgRefresh()
-        end)
     end
     -- The open slot goes on the board: the lister announces the party as it
     -- is now. Never with the button hidden.

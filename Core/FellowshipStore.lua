@@ -590,6 +590,25 @@ function Store:SetLfgChatLine(enabled)
     return true
 end
 
+-- Whether a party the player forms or comes to lead is listed on the
+-- Guild LFG Board straight away (Auto-list my parties); off unless turned
+-- on, and an unusable saved value reads as off. Account-wide.
+function Store:LfgAutoList()
+    return type(self.database) == "table" and self.database.lfgAutoList == true
+end
+
+-- Turns Auto-list on or off. An unusable existing value is left alone.
+function Store:SetLfgAutoList(enabled)
+    if type(self.database) ~= "table" or type(enabled) ~= "boolean" then
+        return false
+    end
+    if self.database.lfgAutoList ~= nil and type(self.database.lfgAutoList) ~= "boolean" then
+        return false
+    end
+    self.database.lfgAutoList = enabled
+    return true
+end
+
 -- The kinds of chat tag whose color can be chosen (see ChatAnnotator).
 local CHAT_TAG_KINDS = { alias = true, main = true }
 

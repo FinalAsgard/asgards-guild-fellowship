@@ -549,7 +549,7 @@ Due welcomes collect in a **Welcome mails** row in the Guild Mail tab, and the t
 
 ## Guild LFG Board
 
-The **Guild LFG Board** (**LFG** where space is short) shows the parties your guildmates are forming, and lists yours. Listings come from parties, not forms: lead a party and you're asked what it's for, and a full party with guildmates in it is listed quietly with a best guess. Nobody ever gets a prompt they didn't ask for: you **Ask to join** a listing, and the leader decides.
+The **Guild LFG Board** (**LFG** where space is short) shows the parties your guildmates are forming, and lists yours. Listings come from parties, not forms, and a party is never listed without your yes: list it yourself, or turn on **Auto-list my parties**. Nobody ever gets a prompt they didn't ask for: you **Ask to join** a listing, and the leader decides.
 
 Only guildmates with the add-on see the board. To reach the others, use [Ask in guild](#ask-in-guild).
 
@@ -597,14 +597,16 @@ A dungeon is relevant when your level fits and a role you play (by your [role pr
 
 ### Listing your party
 
-- **Becoming a party's leader** (inviting someone, or being promoted in an unlisted party) asks what the party is for. Answering lists it; ignoring the question means **Not looking**, which keeps it off the board. There's also a "don't ask for 30 minutes" choice for quick trading parties. Taking over a listed party's lead keeps its listing.
-- **A party with players outside the guild** asks first whether to list it at all. If the leader isn't in the guild, the first guildmate to answer becomes the listing's contact.
-- **A full party with another guildmate in it** is listed quietly with a guessed purpose, updated when you enter a dungeon (a purpose you set yourself is left alone).
+- **Auto-list my parties** (in the LFG gear menu and the AddOns options) is **off by default**. Off, a party you form or come to lead isn't listed and you aren't asked anything: list it from the board's **Start a group** when you want to. A party filling up never lists it either.
+- **With Auto-list on**, becoming a party's leader (inviting someone, or being promoted in an unlisted party) lists it straight away for what it looks like it's for: the dungeon you're in, else questing in your zone, updated when you enter a dungeon (a purpose you set yourself is left alone). When the add-on can't tell, the drawer asks what it's for; ignoring the question means **Not looking**, which keeps it off the board, and there's a "don't ask for 30 minutes" choice for quick trading parties. **Not looking** or **End listing** keeps that party off the board for good.
+- **A party with players outside the guild** (with Auto-list on) asks first whether to list it at all. If the leader isn't in the guild, the first guildmate to answer becomes the listing's contact.
+- With your LFG button hidden, nothing is listed; with Auto-list on, a chat line says your party wasn't listed and how to list it.
+- Taking over a listed party's lead keeps its listing, Auto-list or not.
 - A listing goes as soon as its party disbands or its leader chooses **Not looking**, and after 5 minutes without word from its party's add-ons. If its leader or contact logs off, it's handed to another guildmate in the party.
 
 ### Someone leaves
 
-When someone leaves your full party, your button glows orange and the drawer asks **Someone left — fill the empty slot?** with the open role. **Yes** posts the slot; **No** keeps the party listed as it was. Saying nothing posts it after 60 seconds, unless someone else leaves or the party disbands first. With the button hidden, the leader gets a chat line pointing to `/agf lfg` instead, and nothing is posted.
+When someone leaves your full party, your button glows orange and the drawer asks **Someone left — fill the empty slot?** with the open role. **Yes** posts the slot; **No** keeps the party listed as it was. Nothing is posted without an answer: the question waits, glowing orange, until someone answers, the party fills again, someone else leaves, or it disbands. With the button hidden, the leader gets a chat line pointing to `/agf lfg` instead, and nothing is posted.
 
 ### Ask to join
 
