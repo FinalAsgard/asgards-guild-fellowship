@@ -23,6 +23,8 @@ local FellowshipStore = {
     GREET_CAP_MAX = 10,
     -- The longest recruitment ad: one chat message.
     RECRUIT_AD_MAX = 255,
+    -- How many players the user can pin as Friends.
+    FRIEND_SLOTS = 5,
 }
 -- Player profile text fields (schema 4), each with its longest value. A
 -- character's own: stored on the character that wrote it, as `<field>`,
@@ -1787,6 +1789,121 @@ function Partition:GroupHistoryMark()
     end
     local last = stored[index]
     return #stored, last, last and #last.characters or 0
+end
+
+-- The Friend slots ----------------------------------------------------------
+
+-- The player a pinned character key belongs to: its player's id, or the key
+-- itself when the character is no longer stored.
+function Partition:friendOwner(key)
+    local character = self.data.characters[key]
+    if type(character) == "table" and character.player ~= nil then
+        return character.player
+    end
+    return key
+end
+
+-- The character keys pinned in the Friend slots, in the order they were
+-- pinned: local only, never synced or pruned. Each is read as its player
+-- (two keys of one player are one Friend). Unusable saved data reads as
+-- none.
+function Partition:GetFriends()
+    local stored = self.data.friends
+    local keys = {}
+    if type(stored) ~= "table" then
+        return keys
+    end
+    local index
+    for index = 1, #stored do
+        if isText(stored[index]) then
+            table.insert(keys, stored[index])
+        end
+    end
+    return keys
+end
+
+-- The players pinned as Friends: a set of owners (see friendOwner), and
+-- how many.
+function Partition:friendPlayers()
+    local keys = self:GetFriends()
+    local players, count = {}, 0
+    local index
+    for index = 1, #keys do
+        local owner = self:friendOwner(keys[index])
+        if not players[owner] then
+            players[owner] = true
+            count = count + 1
+        end
+    end
+    return players, count
+end
+
+-- Pins character `key`'s player as a Friend. False and why when all the
+-- slots are taken or the player is already pinned.
+function Partition:AddFriend(key)
+    if not isText(key) then
+        return false, "that character is not known"
+    end
+    local players, count = self:friendPlayers()
+    if players[self:friendOwner(key)] then
+        return false, "they're already a friend"
+    end
+    if count >= FellowshipStore.FRIEND_SLOTS then
+        return false, "all " .. FellowshipStore.FRIEND_SLOTS .. " friend slots are taken"
+    end
+    if type(self.data.friends) ~= "table" then
+        self.data.friends = {}
+    end
+    table.insert(self.data.friends, key)
+    return true
+end
+
+-- Unpins player `playerId` (an owner, as friendOwner gives): every slot
+-- holding one of their characters. False when they weren't pinned.
+function Partition:RemoveFriend(playerId)
+    local stored = self.data.friends
+    if type(stored) ~= "table" then
+        return false
+    end
+    local removed = false
+    local index
+    for index = #stored, 1, -1 do
+        if isText(stored[index]) and self:friendOwner(stored[index]) == playerId then
+            table.remove(stored, index)
+            removed = true
+        end
+    end
+    return removed
+end
+
+-- Puts character `key`'s player in player `playerId`'s slot. False and why
+-- when `playerId` isn't pinned or `key`'s player already is.
+function Partition:ReplaceFriend(playerId, key)
+    if not isText(key) then
+        return false, "that character is not known"
+    end
+    local owner = self:friendOwner(key)
+    if owner == playerId then
+        return true
+    end
+    local players = self:friendPlayers()
+    if not players[playerId] then
+        return false, "they're not a friend"
+    end
+    if players[owner] then
+        return false, "they're already a friend"
+    end
+    local stored = self.data.friends
+    local slot
+    local index
+    for index = #stored, 1, -1 do
+        if isText(stored[index]) and self:friendOwner(stored[index]) == playerId then
+            table.remove(stored, index)
+            slot = index
+        end
+    end
+    table.insert(stored, slot, key)
+    return true
 end
 
 -- Guild Recruit's ad counts heard from other add-on users, by character

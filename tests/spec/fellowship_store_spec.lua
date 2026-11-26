@@ -579,3 +579,95 @@ test.test("an unreadable ignored note quarantines its character intact", functio
     local quarantined = database.guilds["Knights of Camelot-Area52"].quarantine
     test.assertEqual("character ignored note is invalid", quarantined[1].reason)
 end)
+
+-- The Friend slots ----------------------------------------------------------------
+
+-- A partition holding characters `keys`, each its own player, and the data
+-- behind it.
+local function withCharacters(keys)
+    local database = foundationRoot()
+    local store = newStore(database)
+    local partition = store:Partition(GUILD)
+    local index
+    for index = 1, #keys do
+        partition:RecordCharacter(keys[index], { name = keys[index], classToken = "WARRIOR", level = 60 })
+    end
+    return partition, database.guilds["Knights of Camelot-Area52"]
+end
+
+test.test("friend slots: add, remove and replace work by player", function()
+    local partition = withCharacters({ "anvil", "bolt", "cog" })
+    test.assertEqual(0, #partition:GetFriends())
+
+    test.assertTrue(partition:AddFriend("anvil"))
+    test.assertTrue(partition:AddFriend("bolt"))
+    test.assertEqual("anvil", partition:GetFriends()[1])
+    test.assertEqual("bolt", partition:GetFriends()[2])
+
+    -- Replace keeps the slot's place.
+    test.assertTrue(partition:ReplaceFriend(partition:GetCharacter("anvil").player, "cog"))
+    test.assertEqual("cog", partition:GetFriends()[1])
+    test.assertEqual("bolt", partition:GetFriends()[2])
+
+    test.assertTrue(partition:RemoveFriend(partition:GetCharacter("bolt").player))
+    test.assertEqual(1, #partition:GetFriends())
+    test.assertFalse(partition:RemoveFriend(partition:GetCharacter("bolt").player))
+end)
+
+test.test("friend slots: a 6th friend or the same player twice is refused", function()
+    local partition = withCharacters({ "a1", "a2", "a3", "a4", "a5", "a6", "alt" })
+    partition:JoinPlayerOf("alt", "a1", "manual")
+    local index
+    for index = 1, 5 do
+        test.assertTrue(partition:AddFriend("a" .. index))
+    end
+
+    local added, why = partition:AddFriend("a6")
+    test.assertFalse(added)
+    test.assertContains(why, "5 friend slots")
+    -- The alt belongs to a pinned player.
+    added, why = partition:AddFriend("alt")
+    test.assertFalse(added)
+    test.assertContains(why, "already")
+    added = partition:ReplaceFriend(partition:GetCharacter("a2").player, "alt")
+    test.assertFalse(added)
+    test.assertEqual(5, #partition:GetFriends())
+end)
+
+test.test("friend slots: keys follow their player, and two of one player's keys count once", function()
+    local partition = withCharacters({ "anvil", "tongs", "bolt" })
+    test.assertTrue(partition:AddFriend("anvil"))
+    test.assertTrue(partition:AddFriend("tongs"))
+
+    -- tongs is linked to anvil's player: both keys are kept, as one Friend.
+    partition:JoinPlayerOf("tongs", "anvil", "manual")
+    test.assertEqual(2, #partition:GetFriends())
+    test.assertTrue(partition:AddFriend("bolt"))
+    test.assertTrue(partition:RemoveFriend(partition:GetCharacter("anvil").player))
+    test.assertEqual("bolt", partition:GetFriends()[1])
+    test.assertEqual(1, #partition:GetFriends())
+end)
+
+test.test("friend slots: unusable saved data reads as none, and bad entries are skipped", function()
+    local partition, data = withCharacters({ "anvil" })
+    data.friends = "anvil"
+    test.assertEqual(0, #partition:GetFriends())
+    test.assertTrue(partition:AddFriend("anvil"))
+    test.assertEqual(1, #partition:GetFriends())
+
+    data.friends = { 42, "anvil", {} }
+    test.assertEqual(1, #partition:GetFriends())
+    test.assertEqual("anvil", partition:GetFriends()[1])
+    test.assertFalse(partition:AddFriend(nil))
+end)
+
+test.test("friend slots: a pinned character who left and was purged keeps its slot", function()
+    local partition = withCharacters({ "anvil", "bolt" })
+    partition:AddFriend("anvil")
+    partition:MarkDeparted("anvil", 1790000000)
+    partition:Purge("anvil", 1790000100)
+
+    test.assertEqual("anvil", partition:GetFriends()[1])
+    -- Removed by its own key, the player it no longer has.
+    test.assertTrue(partition:RemoveFriend("anvil"))
+end)
