@@ -3,9 +3,10 @@ local _, addon = ...
 -- The player detail panel for the new window: one player's header and
 -- tiles, drawn from PlayerDetailViewModel. The header has the big name, a
 -- gold Friend or Most grouped badge, the main's name in class color with
--- their level, class and rank, and where they are, then a star button and
--- Whisper and Invite. Four tiles sit under it: Discord, Grouped, Last
--- grouped and Joined guild.
+-- their level, class and rank, and where they are (wrapping to a second
+-- line when it's long), with a star button at the top right, then Whisper
+-- and Invite on a row of their own. Four tiles sit under it: Discord,
+-- Grouped, Last grouped and Joined guild.
 --
 -- It takes the view and callbacks only, with no Friends-specific code, so
 -- the roster can embed it as-is when it moves to the new window.
@@ -110,10 +111,14 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     panel.badge:SetPoint("LEFT", panel.badgeStar, "RIGHT", Theme.SPACING.xs, 0)
     panel.sub = ui:Text(panel, "", "regular", "body", "muted")
     panel.sub:SetPoint("TOPLEFT", panel.name, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    panel.sub:SetPoint("RIGHT", panel, "RIGHT", -pad, 0)
     panel.sub:SetJustifyH("LEFT")
-    panel.sub:SetWordWrap(false)
+    panel.sub:SetWordWrap(true)
+    if type(panel.sub.SetMaxLines) == "function" then
+        panel.sub:SetMaxLines(2)
+    end
 
-    -- Invite, Whisper and the star, from the right.
+    -- Whisper and Invite on their own row under it.
     panel.invite = ui:Button(panel, "Invite", "secondary", function()
         local view = state.view
         if view ~= nil and view.header.target ~= nil and callbacks.onInvite ~= nil then
@@ -121,7 +126,6 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         end
     end)
     panel.invite:SetWidth(PlayerDetailPanel.BUTTON_WIDTH)
-    panel.invite:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -pad, -pad)
     panel.whisper = ui:Button(panel, "Whisper", "secondary", function()
         local view = state.view
         if view ~= nil and view.header.target ~= nil and callbacks.onWhisper ~= nil then
@@ -129,14 +133,15 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         end
     end)
     panel.whisper:SetWidth(PlayerDetailPanel.BUTTON_WIDTH)
-    panel.whisper:SetPoint("RIGHT", panel.invite, "LEFT", -Theme.SPACING.s, 0)
+    panel.whisper:SetPoint("TOPLEFT", panel.sub, "BOTTOMLEFT", 0, -Theme.SPACING.s)
+    panel.invite:SetPoint("LEFT", panel.whisper, "RIGHT", Theme.SPACING.s, 0)
     panel.star = ui:IconButton(panel, Theme.TEXTURES.star, PlayerDetailPanel.STAR_SIZE, function()
         local view = state.view
         if view ~= nil and view.header.canToggle and callbacks.onToggleFriend ~= nil then
             callbacks.onToggleFriend(view)
         end
     end)
-    panel.star:SetPoint("RIGHT", panel.whisper, "LEFT", -Theme.SPACING.s, 0)
+    panel.star:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -pad, -pad)
     -- Gold for a Friend, grey to add one, dim when every slot is taken.
     local function tintStar(hovered)
         local header = state.view and state.view.header or {}
@@ -157,7 +162,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         tintStar(false)
     end)
 
-    -- The tiles, side by side under the header.
+    -- The tiles, side by side under Whisper and Invite.
     panel.tiles = {}
     local index
     for index = 1, PlayerDetailPanel.TILE_COUNT do
@@ -181,7 +186,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         for tileIndex = 1, #panel.tiles do
             local box = panel.tiles[tileIndex]
             box:ClearAllPoints()
-            box:SetPoint("TOPLEFT", panel, "TOPLEFT", pad + (tileIndex - 1) * (tileWidth + gap), -pad - 64)
+            box:SetPoint("TOPLEFT", panel.whisper, "BOTTOMLEFT", (tileIndex - 1) * (tileWidth + gap), -Theme.SPACING.m)
             box:SetWidth(tileWidth)
         end
     end
@@ -197,7 +202,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     panel.tabs = ui:Tabs(panel, PlayerDetailPanel.TABS, function(id)
         panel:ShowTab(id)
     end)
-    panel.tabs:SetPoint("TOPLEFT", panel, "TOPLEFT", pad, -pad - 64 - PlayerDetailPanel.TILE_HEIGHT - Theme.SPACING.m)
+    panel.tabs:SetPoint("TOPLEFT", panel.tiles[1], "BOTTOMLEFT", 0, -Theme.SPACING.m)
     panel.tabs:SetPoint("RIGHT", panel, "RIGHT", -pad, 0)
     local area = ui:frame("ScrollFrame", panel)
     area:SetPoint("TOPLEFT", panel.tabs, "BOTTOMLEFT", 0, -Theme.SPACING.m)
