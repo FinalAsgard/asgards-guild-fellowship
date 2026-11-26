@@ -1621,6 +1621,63 @@ test.test("Forever Ask in guild types the line into guild chat and never sends i
     test.assertEqual(nil, sent)
 end)
 
+test.test("lfg listing: the Ask in guild line ends with the listing's note, shortened to fit one message", function()
+    local LfgListing = newListing().LfgListing
+    local fields = { k = "other", p = "Ony first", s = 4, x = 5, mb = {}, no = "  bring a key  " }
+    test.assertEqual("LF 1 more for Ony first, whisper me! Note: bring a key", LfgListing.GuildLine(fields))
+    fields.no = ""
+    test.assertEqual("LF 1 more for Ony first, whisper me!", LfgListing.GuildLine(fields))
+    -- Letters of several bytes each: the note is cut at a whole letter.
+    fields.no = string.rep("\226\130\172", 60)
+    local line = LfgListing.GuildLine(fields)
+    test.assertTrue(#line <= LfgListing.CHAT_BYTES)
+    test.assertContains(line, "whisper me! Note: \226\130\172")
+    test.assertEqual(0, (#line - #"LF 1 more for Ony first, whisper me! Note: ") % 3)
+    -- Nobody needed: still no line, note or not.
+    fields.s = 5
+    test.assertEqual(nil, LfgListing.GuildLine(fields))
+end)
+
+test.test("Forever the drawer's Ask in guild types my listed party's line, with its note, while slots are open", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local opened
+    tool.environment.ChatFrameUtil = nil
+    tool.environment.ChatFrame_OpenChat = function(line) opened = line end
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    local button = addon.lfgButton
+    click(button.listButton)
+    local page = addon.lfgPage
+    page.draft.dungeon = addon.DungeonCatalog.For("forever", nil):Get("strat")
+    page.draft.note = "Live side, have key"
+    test.assertTrue(page:Save())
+
+    button:OpenDrawer()
+    test.assertEqual("YOUR PARTY", button.drawer.heading.text)
+    test.assertTrue(button.askGuildButton.shown)
+    click(button.askGuildButton)
+    test.assertContains(opened, "/g LF ")
+    test.assertContains(opened, " for Stratholme (")
+    test.assertContains(opened, "whisper me! Note: Live side, have key")
+    test.assertFalse(button:DrawerOpen())
+    -- The board's Ask in guild says the same.
+    opened = nil
+    click(page.askGuildButton)
+    test.assertContains(opened, "whisper me! Note: Live side, have key")
+end)
+
+test.test("Forever the drawer has no Ask in guild for a party that isn't listed", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    local button = addon.lfgButton
+    click(button.notLookingButton)
+
+    button:OpenDrawer()
+    test.assertEqual("YOUR PARTY", button.drawer.heading.text)
+    test.assertFalse(button.askGuildButton.shown)
+end)
+
 -- History -------------------------------------------------------------------------------
 
 test.test("lfg history view: newest first, 20 at a time, guildmates with their friend tier", function()

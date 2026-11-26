@@ -1445,6 +1445,9 @@ if clientProfile.supported then
             return settings:Get("lfgButton") == true
         end,
         onOpenBoard = openBoard,
+        onAskInGuild = function(line)
+            client:OpenGuildChat(line)
+        end,
         onDrawerOpened = function()
             lfgDrawer:Seen()
             lfgRefresh()
@@ -1854,6 +1857,8 @@ if clientProfile.supported then
         if fields ~= nil then
             party.kind, party.label, party.note = fields.k, addon.LfgListing.Label(fields.k, fields.p), fields.no
             party.openRoles = fields.r
+            -- What the drawer's Ask in guild types, while slots are open.
+            party.guildLine = addon.LfgListing.GuildLine(fields)
             -- The roster as announced, for the drawer's role tiles.
             party.members = {}
             local index

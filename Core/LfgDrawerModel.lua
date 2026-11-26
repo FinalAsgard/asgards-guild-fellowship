@@ -49,7 +49,8 @@ end
 -- What to show now. facts:
 --   groups    LfgBoard:Groups for the current character ({ relevant, ... })
 --   party     nil when not in a party, else { label?, kind?, size, maxSize,
---             openRoles?, note?, slotRole? }: the party and its listing, if
+--             openRoles?, note?, slotRole?, guildLine? }: the party and its
+--             listing (guildLine: what Ask in guild would type), if
 --             any; slotRole is the role an open slot would be posted as
 --   combat    in combat, a boss encounter or a keystone run
 --   instance  in an instance

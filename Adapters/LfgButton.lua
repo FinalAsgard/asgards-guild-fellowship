@@ -101,6 +101,9 @@ end
 --                   character can ask to join a dungeon listing as
 --   onAsk           function(listing, role?): Ask to join
 --   onWhisper       function(name): whispers someone
+--   onAskInGuild    function(line): types `line` into guild chat, unsent;
+--                   the drawer's Ask in guild for the player's listed
+--                   party with open slots (the party's `guildLine`)
 --   onInvite        function(request): the leader invited an asker
 --   onDecline       function(request): the leader declined one
 --   classColor      function(classToken) -> "ffrrggbb", or nil
@@ -282,6 +285,17 @@ function Button:buildDrawer()
     end
     drawer.raidTile = ui:RoleTile(drawer, "any", LfgButton.TILE_SIZE, LfgButton.TILE_SIZE)
     drawer.raidTile:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad)
+    -- Ask in guild, over the tiles, while the listed party has open slots:
+    -- types the line (with the note) into guild chat for the player to send.
+    self.askGuildButton = ui:Button(drawer, "Ask in guild", "secondary", function(button)
+        if button.line ~= nil and owner.options.onAskInGuild ~= nil then
+            owner:CloseDrawer()
+            owner.options.onAskInGuild(button.line)
+        end
+    end)
+    self.askGuildButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad + LfgButton.TILE_SIZE + Theme.SPACING.s)
+    self.askGuildButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+    self.askGuildButton:Hide()
 
     -- Show Nearby (the button's menu): the guildmates in the player's zone,
     -- as the board's Nearby tab lists them, each name opening a menu to
@@ -518,6 +532,9 @@ function Button:refreshDrawer()
     setShown(drawer.party, party)
     setShown(drawer.partyDetails, party)
     setShown(drawer.note, party)
+    local guildLine = party and top.party ~= nil and top.party.guildLine or nil
+    self.askGuildButton.line = guildLine
+    setShown(self.askGuildButton, guildLine ~= nil and self.options.onAskInGuild ~= nil)
     local index
     for index = 1, 5 do
         drawer.roleTiles[index]:Hide()
@@ -574,6 +591,9 @@ function Button:refreshDrawer()
         extra = extraHeight(drawer.party, 1) + extraHeight(drawer.partyDetails, 1) + extraHeight(drawer.note, 1)
     elseif zone then
         extra = extraHeight(drawer.question, 2)
+    end
+    if party and self.askGuildButton.line ~= nil and self.options.onAskInGuild ~= nil then
+        extra = extra + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.s
     end
     drawer:SetHeight((LfgButton.DRAWER_HEIGHTS[kind] or LfgButton.DRAWER_HEIGHTS.none) + extra)
     self:refreshToasts()

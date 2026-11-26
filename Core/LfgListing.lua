@@ -16,6 +16,10 @@ local Protocol = addon.LfgProtocol
 local LfgListing = {
     SOLO_SECONDS = 30 * 60,
     NOTE_LETTERS = Protocol.TEXT_LETTERS,
+    -- Ask in guild's line: one guild chat message, and what goes before the
+    -- listing's note in it.
+    CHAT_BYTES = 255,
+    NOTE_PREFIX = " Note: ",
     PURPOSE_LETTERS = Protocol.TEXT_LETTERS,
     PARTY_SIZE = 5,
     RAID_SIZE = 40,
@@ -362,7 +366,9 @@ end
 -- The line Ask in guild types into guild chat for guildmates without the
 -- add-on, from an Announcement's `fields`: the open roles for a dungeon
 -- ("LF healer and 2 DPS for Stratholme (58–60), whisper me!"), else how
--- many more players. Nil when nobody's needed.
+-- many more players, then the listing's note when it has one ("... whisper
+-- me! Note: bring a key"). Nil when nobody's needed. A note too long for
+-- one chat message is shortened to fit.
 function LfgListing.GuildLine(fields)
     if type(fields) ~= "table" then
         return nil
@@ -407,5 +413,19 @@ function LfgListing.GuildLine(fields)
     for index = 2, #wanted do
         roles = roles .. (index == #wanted and " and " or ", ") .. wanted[index]
     end
-    return "LF " .. roles .. " for " .. label .. ", whisper me!"
+    local line = "LF " .. roles .. " for " .. label .. ", whisper me!"
+    local note = type(fields.no) == "string" and string.match(fields.no, "^%s*(.-)%s*$") or ""
+    if note == "" then
+        return line
+    end
+    local room = LfgListing.CHAT_BYTES - #line - #LfgListing.NOTE_PREFIX
+    local letters = Protocol.Length(note)
+    while #note > room and letters > 0 do
+        letters = letters - 1
+        note = LfgListing.Truncate(note, letters)
+    end
+    if note == "" then
+        return line
+    end
+    return line .. LfgListing.NOTE_PREFIX .. note
 end
