@@ -275,15 +275,17 @@ end
 -- Showing ---------------------------------------------------------------------
 
 -- Builds the page again from saved data and the roster, keeping the
--- selection where that player still has a card. Closes the picker.
-function Page:Refresh()
+-- selection where that player still has a card. Given `focus` (a player
+-- id), shows that player on the right instead, with their card selected
+-- when they have one and none when they don't. Closes the picker.
+function Page:Refresh(focus)
     self.menu:Close()
-    self.view = self.options.model(self.selected)
+    self.view = self.options.model(focus or self.selected)
     if self.view == nil then
         self.view = { friends = {}, empty = 0, full = true, mostGrouped = {} }
     end
     self.view.mostGrouped = self.view.mostGrouped or {}
-    self.selected = self.view.selected or self.view.default
+    self.selected = focus or self.view.selected or self.view.default
     local index
     for index = 1, #self.cards do
         local card, friend = self.cards[index], self.view.friends[index]
@@ -366,6 +368,10 @@ end
 
 function Page:showDetail()
     local friend = self:selectedFriend()
+    if friend == nil and self.selected ~= nil then
+        -- A player with no card, opened from elsewhere.
+        friend = { playerId = self.selected }
+    end
     if friend == nil then
         self.detail:ShowEmpty(FriendsPage.EMPTY)
         return
@@ -375,6 +381,11 @@ function Page:showDetail()
         self.detailFor, self.groupedShown = friend.playerId, nil
     end
     local view = self.options.detail ~= nil and self.options.detail(friend.playerId, self.groupedShown) or nil
+    if view == nil and friend.name == nil then
+        self.selected = nil
+        self.detail:ShowEmpty(FriendsPage.EMPTY)
+        return
+    end
     self.detail:ShowPlayer(view or fallbackView(friend, self:isFriend(friend.playerId)))
 end
 

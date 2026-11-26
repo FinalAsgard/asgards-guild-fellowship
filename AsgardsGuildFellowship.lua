@@ -1320,9 +1320,10 @@ if clientProfile.supported then
                 draw = function(content, ui)
                     friendsUi.draw(content, ui)
                 end,
-                onShow = function()
+                -- Given a player id (Open in Guild Fellowship), shows them.
+                onShow = function(playerId)
                     if friendsUi.page ~= nil then
-                        friendsUi.page:Refresh()
+                        friendsUi.page:Refresh(playerId)
                     end
                 end },
             { id = "lfg", label = "LFG", title = "Guild LFG Board",
@@ -3496,7 +3497,8 @@ if clientProfile.supported then
         " alias>: a player's alias, links and Discord, with who" ..
         " set each and when, and its logged changes; probe greet: your greet weight and how long it holds your" ..
         " prompts back; probe realm: the realm or region your guild's data is kept under; probe lfg: the Guild" ..
-        " LFG Board's zone levels and listings)",
+        " LFG Board's zone levels and listings; probe menu: which of the game's right-click menus have Open in" ..
+        " Guild Fellowship)",
         function(arguments)
             local what = string.match(arguments or "", "^%s*(%S*)")
             what = string.lower(what or "")
@@ -3509,8 +3511,8 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer, probe ready, probe timer, probe player <name>, probe greet, probe realm or" ..
-                        " probe lfg.")
+                        " probe officer, probe ready, probe timer, probe player <name>, probe greet, probe realm," ..
+                        " probe lfg or probe menu.")
                 end
                 return
             end
@@ -3601,6 +3603,15 @@ if clientProfile.supported then
                 probeLfg()
                 return
             end
+            if what == "menu" then
+                rosterController:Print("Right-click menu probe:")
+                local lines = friendsUi.menu:ProbeLines()
+                local index
+                for index = 1, #lines do
+                    client:Print("  " .. lines[index])
+                end
+                return
+            end
             if what == "greet" then
                 rosterController:Print("Greet weight probe:")
                 local lines = guildGreet:WeightProbeLines(client:Timestamp())
@@ -3616,8 +3627,9 @@ if clientProfile.supported then
                     addon.Identity.slashCommand .. " probe officer, " .. addon.Identity.slashCommand ..
                     " probe ready, " .. addon.Identity.slashCommand .. " probe timer, " ..
                     addon.Identity.slashCommand .. " probe player <name>, " ..
-                    addon.Identity.slashCommand .. " probe greet or " ..
-                    addon.Identity.slashCommand .. " probe lfg.")
+                    addon.Identity.slashCommand .. " probe greet, " ..
+                    addon.Identity.slashCommand .. " probe lfg or " ..
+                    addon.Identity.slashCommand .. " probe menu.")
                 return
             end
             if guildLogOf() == nil then
@@ -4371,6 +4383,31 @@ if clientProfile.supported then
         -- Drawn on the window's first open; specs reach it here.
         addon.friendsPage = friendsUi.page
     end
+    -- Open in Guild Fellowship, on the game's right-click menus for a
+    -- guildmate: the new window on Friends, showing their player.
+    friendsUi.menu = addon.GameMenu.Create(client.environment, {
+        resolve = function(name)
+            local guild, partition, normalizer = rosterController:QuietContext()
+            local key = guild and normalizer:Key(name) or nil
+            if key == nil or partition:GetCharacter(key) == nil or not partition:IsInGuild(key) then
+                return nil
+            end
+            return key
+        end,
+        onOpen = function(key)
+            local _, partition = rosterController:QuietContext()
+            local character = partition and partition:GetCharacter(key)
+            if character == nil then
+                return
+            end
+            local opened, failure = agfWindow:Open("friends", character.player)
+            if not opened then
+                rosterController:Print("Couldn't open the window: " .. tostring(failure))
+            end
+        end,
+    })
+    friendsUi.menu:Install()
+    addon.gameMenu = friendsUi.menu
     local function friendTier(key)
         local friends = currentFriends()
         return friends and friends:TierOf(key) or nil

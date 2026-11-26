@@ -485,3 +485,26 @@ test.test("friends page: another player's Grouped tab starts at its first page",
     click(world.page.cards[2])
     test.assertEqual(0, world.shown[#world.shown])
 end)
+
+test.test("friends page: opened on a player with no card, none is selected and the star offers to add them", function()
+    local world = setup({ "Anvil" })
+    world.page:Refresh(world.players.Cog.playerId)
+
+    test.assertEqual(world.players.Cog.playerId, world.page:Selected())
+    test.assertEqual("Cog", world.page.detail.name.text)
+    test.assertFalse(world.page.cards[1].selected)
+    test.assertFalse(world.page.detail.badge.shown)
+    click(world.page.detail.star)
+    test.assertEqual("add cog", world.calls[1])
+    test.assertEqual("Cog", world.page.cards[2].name.text)
+    test.assertTrue(world.page.cards[2].selected)
+
+    -- Opened on a Friend, their card is selected.
+    world.page:Refresh(world.players.Anvil.playerId)
+    test.assertTrue(world.page.cards[1].selected)
+    test.assertEqual("Anvil", world.page.detail.name.text)
+    -- A player who's gone shows the empty side.
+    world.gone = true
+    world.page:Refresh("nobody")
+    test.assertEqual(nil, world.page:Selected())
+end)

@@ -45,8 +45,10 @@ Window.__index = Window
 --                 settingsRows, onShow }: label names the sidebar button
 --                 and the gear popup, title heads the page; draw is
 --                 optional, settingsRows ({ id, label, info } toggles in
---                 `settings`) are the gear popup's switches, and onShow()
---                 (optional) runs each time the page is shown
+--                 `settings`) are the gear popup's switches, and
+--                 onShow(argument) (optional) runs each time the page is
+--                 shown, with what Open or ShowPage was given for it (e.g.
+--                 the player Friends shows), or nil
 --   settings      the SettingsModel the Settings page's switches use
 --   settingsTabs  a list of { id, label, rows = { { id, label, info } } },
 --                 each row a toggle in `settings`
@@ -540,8 +542,9 @@ function Window:refreshCharacter()
 end
 
 -- Opens the window on page `id` (a module's id or "settings"; nil keeps
--- the page it showed last). True, or false and why it couldn't open.
-function Window:Open(id)
+-- the page it showed last), handing `argument` to the module's onShow.
+-- True, or false and why it couldn't open.
+function Window:Open(id, argument)
     if self.frame == nil then
         local ok, failure = pcall(self.build, self)
         if not ok then
@@ -556,7 +559,7 @@ function Window:Open(id)
     end
     local ok, failure = pcall(function()
         self:refreshCharacter()
-        self:ShowPage(id or self.current)
+        self:ShowPage(id or self.current, argument)
     end)
     if not ok then
         self:Close()
@@ -595,11 +598,12 @@ function Window:Page()
     return self.current
 end
 
--- Shows page `id`: a module's or "settings". An unknown id keeps the
--- current page.
-function Window:ShowPage(id)
+-- Shows page `id`: a module's or "settings", handing `argument` to the
+-- module's onShow. An unknown id keeps the current page, without the
+-- argument.
+function Window:ShowPage(id, argument)
     if id ~= AgfWindow.SETTINGS and self:module(id) == nil then
-        id = self.current
+        id, argument = self.current, nil
     end
     self.current = id
     if self.frame == nil then
@@ -632,7 +636,7 @@ function Window:ShowPage(id)
         end
         local module = self:module(id)
         if module.onShow ~= nil then
-            module.onShow()
+            module.onShow(argument)
         end
     end
 end

@@ -1066,3 +1066,45 @@ test.test("friends: the window opens on Friends, the page is built on show, and 
     addon.agfWindow:ShowPage("friends")
     test.assertEqual("Hammer Smith", page.cards[1].name.text)
 end)
+
+test.test("friends: Open in Guild Fellowship on a guildmate's menu opens the window on their player", function()
+    local profile = fixtures.PROFILES[1]
+    local world = fixtures.newEnvironment(profile, { guild = guild(profile), playerName = "Tool Box" })
+    world.playerLevel = TOP_LEVEL[profile]
+    local callbacks = {}
+    world.environment.Menu = {
+        ModifyMenu = function(tag, callback)
+            callbacks[tag] = callback
+        end,
+    }
+    fixtures.joinChannel(fixtures.newChannel(), world)
+    local addon = fixtures.loadAddon(world)
+    fixtures.fire(world, "ADDON_LOADED", world.addonName)
+    world.loggedIn = true
+    fixtures.fire(world, "PLAYER_LOGIN")
+    fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world)
+    fakeFrames.install(world.environment)
+    test.assertTrue(callbacks.MENU_UNIT_FRIEND ~= nil)
+
+    local root = { buttons = {} }
+    function root:CreateButton(text, onClick)
+        table.insert(self.buttons, { text = text, onClick = onClick })
+    end
+    -- Bolt Smith is Hammer Smith's alt; someone outside the guild gets nothing.
+    callbacks.MENU_UNIT_FRIEND(nil, root, { name = "Bolt Smith" })
+    callbacks.MENU_UNIT_FRIEND(nil, root, { name = "Nobody Here" })
+    test.assertEqual(1, #root.buttons)
+    root.buttons[1].onClick()
+
+    test.assertTrue(addon.agfWindow:IsOpen())
+    test.assertEqual("friends", addon.agfWindow:Page())
+    local page = addon.friendsPage
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertEqual(partition:GetCharacter(normalizer:Key("Bolt Smith")).player, page:Selected())
+    test.assertEqual("Hammer Smith", page.detail.name.text)
+    test.assertTrue(page.cards[1].empty)
+    test.assertTrue(page.detail.view.header.canToggle)
+    test.assertFalse(page.detail.view.header.isFriend)
+end)
