@@ -1377,3 +1377,40 @@ test.test("greetings: 🗑 asks Delete? first, and an empty category says it won
     click(page.categories.buttons[1])
     test.assertFalse(page.empty.shown)
 end)
+
+test.test("greetings: loading deletes saved Long absence greetings and its switch, and the page shows Friends", function()
+    local profile = fixtures.PROFILES[1]
+    local database = {
+        schemaVersion = 4,
+        guilds = {},
+        greet = {
+            greetings = { login = { "Hi {name}" }, longAbsence = { "Ages, {name}!" } },
+            lastUsed = { longAbsence = "Ages, {name}!" },
+            categories = { longAbsence = false },
+        },
+    }
+    local world = fixtures.newEnvironment(profile, { guild = guild(profile), playerName = "Tool Box",
+        database = database })
+    world.playerLevel = TOP_LEVEL[profile]
+    fixtures.joinChannel(fixtures.newChannel(), world)
+    local addon = fixtures.loadAddon(world)
+    fixtures.fire(world, "ADDON_LOADED", world.addonName)
+    world.loggedIn = true
+    fixtures.fire(world, "PLAYER_LOGIN")
+    fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world)
+
+    local greet = world.database.greet
+    test.assertEqual(nil, greet.greetings.longAbsence)
+    test.assertEqual(nil, greet.lastUsed.longAbsence)
+    test.assertEqual(nil, greet.categories.longAbsence)
+    test.assertEqual("Hi {name}", greet.greetings.login[1])
+
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    click(page.categories.buttons[4])
+    test.assertEqual("Use for friends", page.switchLabel.text)
+    test.assertEqual("There you are, {name}!", page.rows[1].text.text)
+end)

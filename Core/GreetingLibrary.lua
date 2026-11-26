@@ -28,10 +28,10 @@ local GreetingLibrary = {
             "WB {name}!",
             "Look who's back, {name}!",
         },
-        longAbsence = {
-            "{name}! Long time no see, welcome back!",
-            "Look who it is! Good to have you back, {name}!",
-            "{name}! It's been ages, welcome back!",
+        friends = {
+            "There you are, {name}!",
+            "{name}! Good to see you, friend!",
+            "Hey {name}, ready for another run?",
         },
     },
     -- Starters that were replaced, and what replaces them in saved
@@ -45,7 +45,14 @@ local GreetingLibrary = {
     -- whenMinutes (a format given the minutes and "minute"/"minutes") is
     -- the "when" line once the minutes are known. empty is what the page
     -- says while the category has no greetings, and lastOne marks one
-    -- whose last greeting's delete warns that it will stop prompting.
+    -- whose last greeting's delete warns that it will stop prompting. off
+    -- is the note while it's switched off, when it differs from the
+    -- page's usual one.
+    --
+    -- Friends isn't an occasion: a starred friend's login or welcome back
+    -- picks its words from it (GuildGreet.GreetingsCategory), so its
+    -- switch only changes the words, and without it they get the usual
+    -- ones.
     CATEGORIES = {
         { id = "join", label = "Join", when = "Someone joins the guild.",
             toggle = "Prompt when someone joins the guild", switch = "Prompt me", lastOne = true,
@@ -57,9 +64,10 @@ local GreetingLibrary = {
             whenMinutes = "Someone you saw log off comes back after more than %d %s away.",
             toggle = "Prompt for welcome backs", switch = "Prompt me", lastOne = true,
             empty = "No Welcome back greetings yet. You won't get welcome back prompts until you add one." },
-        { id = "longAbsence", label = "Long absence", when = "Someone logs in after a long time away.",
-            toggle = "Prompt after a long absence", switch = "Prompt me", lastOne = true,
-            empty = "No Long absence greetings yet. You won't get long absence prompts until you add one." },
+        { id = "friends", label = "Friends", when = "A starred friend logs in or comes back.",
+            toggle = "Use friend greetings for starred friends", switch = "Use for friends",
+            empty = "No Friends greetings yet. Friends get your Login and Welcome back greetings until you add one.",
+            off = "Switched off: friends get your Login and Welcome back greetings. These are kept, but not used." },
     },
     -- Every placeholder and what it's filled with. Case doesn't matter.
     PLACEHOLDERS = {
@@ -199,6 +207,27 @@ function GreetingLibrary.Fill(text, names)
         return nil
     end)
     return filled
+end
+
+-- Deletes what's saved for the retired Long absence category in Guild
+-- Greet's saved state `state`: its greetings, last-used greeting and on/off
+-- switch. Run at every load; once they're gone it changes nothing. A
+-- deliberate exception to keeping saved data: the category no longer
+-- exists. True when something was deleted.
+function GreetingLibrary.RemoveLongAbsence(state)
+    if type(state) ~= "table" then
+        return false
+    end
+    local removed = false
+    local field
+    for _, field in ipairs({ "greetings", "lastUsed", "categories" }) do
+        local entries = state[field]
+        if type(entries) == "table" and entries.longAbsence ~= nil then
+            entries.longAbsence = nil
+            removed = true
+        end
+    end
+    return removed
 end
 
 -- Fills in a greeting's placeholders (Fill), cut to one chat message.

@@ -76,7 +76,7 @@ test.test("greetings editor: the categories come in the library's order", functi
     test.assertEqual("join", view.categories[1].id)
     test.assertEqual("Login", view.categories[2].label)
     test.assertEqual("Welcome back", view.categories[3].label)
-    test.assertEqual("Long absence", view.categories[4].label)
+    test.assertEqual("Friends", view.categories[4].label)
 end)
 
 test.test("greetings editor: Welcome back's line names the current minutes", function()
@@ -100,8 +100,8 @@ test.test("greetings editor: a grey dot marks a category that's switched off or 
     test.assertFalse(shown.join)
     test.assertTrue(shown.login)
     test.assertTrue(shown.welcomeBack)
-    -- Long absence gets its starters on first use, and is on.
-    test.assertFalse(shown.longAbsence)
+    -- Friends gets its starters on first use, and is on.
+    test.assertFalse(shown.friends)
 
     world.off.welcomeBack = false
     test.assertFalse(dots(editor:View()).welcomeBack)
@@ -410,4 +410,23 @@ test.test("greetings editor: an empty category says it won't prompt until a gree
     editor:SetDraft("WB {name}!")
     test.assertTrue(editor:Save())
     test.assertEqual(nil, editor:View().empty)
+end)
+
+test.test("greetings editor: Friends reads Use for friends, and its empty and off texts mention the fallback", function()
+    local editor, addon, world = newEditor({ greetings = { friends = { "Hi friend" } } }, { now = 100 })
+    editor:Select("friends")
+
+    local view = editor:View()
+    test.assertEqual("Use for friends", view.switchLabel)
+    test.assertEqual("greetCategory:friends", view.switchId)
+    test.assertEqual("A starred friend logs in or comes back.", view.description)
+    -- Its last greeting has no last-one warning: friends still get greeted.
+    editor:Delete(1)
+    test.assertEqual(addon.GreetingsEditor.DELETE, editor:View().rows[1].confirm)
+    editor:Delete(1)
+    test.assertEqual("No Friends greetings yet. Friends get your Login and Welcome back greetings until you add one.",
+        editor:View().empty)
+
+    world.off.friends = true
+    test.assertContains(editor:View().offNote, "friends get your Login and Welcome back greetings")
 end)

@@ -306,7 +306,7 @@ function Editor:View()
         switchId = "greetCategory:" .. selected.id,
         switchLabel = selected.switch,
         enabled = enabled,
-        offNote = not enabled and GreetingsEditor.OFF_NOTE or nil,
+        offNote = not enabled and (selected.off or GreetingsEditor.OFF_NOTE) or nil,
         rows = rows,
         empty = #rows == 0 and selected.empty or nil,
         dimmed = self.options.promptsOn ~= nil and self.options.promptsOn() == false,

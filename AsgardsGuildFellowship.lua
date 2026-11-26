@@ -874,7 +874,7 @@ if clientProfile.supported then
     settings:Add("guildGreet", {
         id = "greetCap",
         kind = "number",
-        label = "Greetings (login, welcome back, long absence)",
+        label = "Greetings (login, welcome back)",
         min = addon.FellowshipStore.GREET_CAP_MIN,
         max = addon.FellowshipStore.GREET_CAP_MAX,
         get = function()
@@ -5276,6 +5276,11 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     -- In case the region wasn't known yet when saved data loaded.
     persistence:MoveToHomeRealm()
     rosterController:OnSavedDataReady()
+    -- Long absence is gone: its saved greetings and switch go too.
+    local store = rosterController:Store()
+    if store ~= nil then
+        addon.GreetingLibrary.RemoveLongAbsence(store:GetGreetState())
+    end
     if lfgButton ~= nil then
         lfgButton:Refresh()
     end

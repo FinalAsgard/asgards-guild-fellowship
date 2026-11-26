@@ -454,7 +454,7 @@ test.test("greetings are posted to guild chat on either client", function()
     test.assertFalse(forever:SendGuildMessage(""))
 end)
 
--- Joins and long absences ----------------------------------------------------
+-- Logins after a long time away, and joins ------------------------------------
 
 local function firstWord(name)
     return string.match(name, "^[^%-]+")
@@ -464,23 +464,14 @@ local joinIndex
 for joinIndex = 1, #fixtures.PROFILES do
     local profile = fixtures.PROFILES[joinIndex]
 
-    test.test(profile .. ": a player away 30+ days gets a long-absence prompt and greeting", function()
+    test.test(profile .. ": a player away 30+ days gets an ordinary Login prompt and greeting", function()
         local world = setup(profile)
 
         world.greet:OnPresence("online", world.names.rust)
 
-        test.assertEqual("longAbsence", world.shown[1].category)
-        world.handlers.greet(world.shown[1].player)
-        test.assertEqual(firstWord(world.names.rust) .. "! Long time no see, welcome back!", world.sent[1])
-    end)
-
-    test.test(profile .. ": a long absence counts the latest login on any of the player's characters", function()
-        local world = setup(profile)
-
-        -- Tongs was away 45 days, but its main Anvil logged in 2 days ago.
-        world.greet:OnPresence("online", world.names.tongs)
-
         test.assertEqual("login", world.shown[1].category)
+        world.handlers.greet(world.shown[1].player)
+        test.assertEqual("Hey " .. firstWord(world.names.rust) .. "!", world.sent[1])
     end)
 
     test.test(profile .. ": someone joining gets a join prompt, and their login no separate one", function()
@@ -534,7 +525,7 @@ test.test("guild greet: prompts wait out combat and appear afterward if still cu
 
     -- Bolt's prompt expired during the fight; Rust's is still current.
     test.assertEqual(1, #world.shown)
-    test.assertEqual("longAbsence", world.shown[1].category)
+    test.assertEqual(firstWord(world.names.rust), world.shown[1].label)
 end)
 
 local combatIndex
@@ -1025,14 +1016,17 @@ test.test("guild greet: turning a category off stops its prompts only, and close
     local world = setup("Retail")
     world.greet:OnPresence("online", world.names.bolt)
     world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(2, #world.shown)
 
     world.store:SetGreetCategoryEnabled("login", false)
     world.greet:OnCategoryChanged("login", false)
 
-    test.assertEqual(1, #world.shown)
-    test.assertEqual("longAbsence", world.shown[1].category)
+    test.assertEqual(0, #world.shown)
     world.greet:OnPresence("online", world.names.bishop)
-    test.assertEqual(1, #world.shown)
+    test.assertEqual(0, #world.shown)
+    -- Joins still prompt.
+    world.greet:OnPresence("join", world.names.newt)
+    test.assertEqual("join", world.shown[1].category)
 end)
 
 test.test("guild greet: a welcome-back time saved before the new default is kept and used", function()
@@ -2169,4 +2163,68 @@ test.test("guild greet: a test prompt is drawn in the tier it's given, not the p
     world.store:SetGreetHighlightFriends(false)
     world.greet:Refresh()
     test.assertEqual(nil, shownFor(world, "bolt").friendTier)
+end)
+
+-- Friends greetings -------------------------------------------------------------
+
+test.test("guild greet: which greetings a prompt uses, Friends or its own", function()
+    local addon = load()
+    local choose = addon.GuildGreet.GreetingsCategory
+
+    -- A starred friend's login or welcome back, Friends on with greetings.
+    test.assertEqual("friends", choose("login", true, true, 3))
+    test.assertEqual("friends", choose("welcomeBack", true, true, 1))
+    -- Friends off or empty, or not a friend: the occasion's own.
+    test.assertEqual("login", choose("login", true, false, 3))
+    test.assertEqual("login", choose("login", true, true, 0))
+    test.assertEqual("welcomeBack", choose("welcomeBack", false, true, 3))
+    -- A join is always a join.
+    test.assertEqual("join", choose("join", true, true, 3))
+end)
+
+test.test("guild greet: a starred friend's login and welcome back use the Friends greetings, with the usual prompt", function()
+    local world = withFriends({ bolt = "friend", bishop = "top5", anvil = "frequent" })
+    local library = world.greet:Library()
+    while #library:Greetings("friends") > 0 do
+        library:Remove("friends", 1)
+    end
+    library:Add("friends", "Hey friend {name}!")
+    local function greetLatest()
+        world.handlers.greet(world.shown[#world.shown].player)
+        advance(world, 5 * MINUTE)
+        return world.sent[#world.sent]
+    end
+
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual("login", world.shown[1].category)
+    test.assertEqual("Hey friend " .. firstWord(world.names.bolt) .. "!", greetLatest())
+
+    -- Top 5 counts too; Frequent isn't starred, so it gets a Login greeting.
+    world.greet:OnPresence("online", world.names.bishop)
+    test.assertContains(greetLatest(), "Hey friend ")
+    world.greet:OnPresence("online", world.names.anvil)
+    test.assertFalse(string.find(greetLatest(), "Hey friend", 1, true) ~= nil)
+
+    -- Coming back: still a Welcome back prompt, with the Friends words.
+    world.greet:OnPresence("offline", world.names.bolt)
+    advance(world, 2 * world.store:GreetNumber("welcomeBackMinutes") * MINUTE)
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual("welcomeBack", world.shown[#world.shown].category)
+    test.assertEqual("Hey friend " .. firstWord(world.names.bolt) .. "!", greetLatest())
+end)
+
+test.test("guild greet: with Friends off, friends get the Login greetings, and Login's switch still decides", function()
+    local world = withFriends({ bolt = "friend", rust = "friend" })
+    world.store:SetGreetCategoryEnabled("friends", false)
+    world.greet:Library():Add("friends", "Hey friend {name}!")
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.handlers.greet(world.shown[1].player)
+    test.assertFalse(string.find(world.sent[1], "Hey friend", 1, true) ~= nil)
+
+    -- Friends on doesn't bring back a prompt Login's switch turned off.
+    world.store:SetGreetCategoryEnabled("friends", true)
+    world.store:SetGreetCategoryEnabled("login", false)
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(0, #world.shown)
 end)

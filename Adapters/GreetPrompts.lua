@@ -49,7 +49,6 @@ local GreetPrompts = {
         join = "Welcome to the Guild",
         login = "Greet",
         welcomeBack = "Welcome Back",
-        longAbsence = "Long Time No See!",
     },
     DEFAULT_LABEL = "Greet",
     -- The widest countdown a locked button adds to its label: a held

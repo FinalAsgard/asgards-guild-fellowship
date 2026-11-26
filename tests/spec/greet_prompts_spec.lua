@@ -211,12 +211,14 @@ test.test("greet prompts: each button is named for its kind of greeting", functi
     local world = newPrompts(nil)
 
     world.prompts:Show({ prompt(1, "join"), prompt(2, "login"), prompt(3, "welcomeBack"),
-        prompt(4, "longAbsence"), prompt(5, "unknown") }, {})
+        prompt(4, "friends"), prompt(5, "unknown") }, {})
 
     test.assertEqual("Welcome to the Guild", world.prompts.rows[1].greet.text)
     test.assertEqual("Greet", world.prompts.rows[2].greet.text)
     test.assertEqual("Welcome Back", world.prompts.rows[3].greet.text)
-    test.assertEqual("Long Time No See!", world.prompts.rows[4].greet.text)
+    -- There's no long-absence prompt any more, or a Friends one: an
+    -- unknown kind is a plain Greet.
+    test.assertEqual("Greet", world.prompts.rows[4].greet.text)
     test.assertEqual("Greet", world.prompts.rows[5].greet.text)
 end)
 

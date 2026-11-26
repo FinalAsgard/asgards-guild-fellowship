@@ -147,8 +147,8 @@ test.test("greet policy: a failing lookup never raises", function()
     test.assertEqual(nil, prompt)
 end)
 
--- A policy whose `absences` table gives each key's seconds away.
-local function withAbsences(absences)
+-- A policy over the usual guild, with the user's character seen.
+local function seeded()
     local world = guild()
     local addon = test.newAddon("Core/GreetPolicy.lua")
     local policy = addon.GreetPolicy.Create({
@@ -161,25 +161,22 @@ local function withAbsences(absences)
         isOwn = function(key)
             return world.own[key] == true
         end,
-        absenceOf = function(key)
-            return absences[key]
-        end,
     })
     policy:Seed({ "me" })
     return policy, world
 end
 
-local DAY = 24 * 60 * MINUTE
+test.test("greet policy: a first login seen this session is always a Login, however long they were away", function()
+    local addon = test.newAddon("Core/GreetPolicy.lua")
+    local policy = seeded()
 
-test.test("greet policy: a first login after 30 days away is a long absence", function()
-    local policy = withAbsences({ anvil = 30 * DAY, bolt = 30 * DAY - 1 })
-
-    test.assertEqual("longAbsence", category(policy:CameOnline("anvil", START)))
-    test.assertEqual("login", category(policy:CameOnline("bolt", START)))
+    test.assertEqual("login", category(policy:CameOnline("anvil", START)))
+    test.assertEqual(nil, addon.GreetPolicy.LONG_ABSENCE)
+    test.assertEqual(nil, addon.GreetPolicy.LONG_ABSENCE_SECONDS)
 end)
 
-test.test("greet policy: a long absence only applies to the first login of the session", function()
-    local policy = withAbsences({ anvil = 60 * DAY })
+test.test("greet policy: after the first login, coming back is a welcome back", function()
+    local policy = seeded()
     policy:CameOnline("anvil", START)
 
     policy:WentOffline("anvil", START + MINUTE)
@@ -187,17 +184,15 @@ test.test("greet policy: a long absence only applies to the first login of the s
 end)
 
 test.test("greet policy: someone joining the guild gets a join prompt and no login prompt", function()
-    local policy = withAbsences({})
+    local policy = seeded()
 
     local prompt = policy:Joined("newt", START)
 
     test.assertEqual("join", prompt.category)
     test.assertEqual("character:newt", prompt.player)
     test.assertEqual(nil, policy:CameOnline("newt", START + 1))
-    -- A join beats a long absence: a returning member who rejoins is greeted
-    -- as new to the guild.
-    local rejoin = withAbsences({ anvil = 90 * DAY })
-    test.assertEqual("join", category(rejoin:Joined("anvil", START)))
+    -- A returning member who rejoins is greeted as new to the guild.
+    test.assertEqual("join", category(seeded():Joined("anvil", START)))
 end)
 
 test.test("greet policy: joins are ignored before the roster loads, for the user, or with Greet off", function()
@@ -211,23 +206,9 @@ test.test("greet policy: joins are ignored before the roster loads, for the user
     test.assertEqual(nil, policy:Joined("newt", START))
 end)
 
-test.test("greet policy: an absence lookup that fails counts as a plain login", function()
-    local addon = test.newAddon("Core/GreetPolicy.lua")
-    local policy = addon.GreetPolicy.Create({
-        playerOf = function() return nil end,
-        isMember = function() return true end,
-        isOwn = function() return false end,
-        absenceOf = function() error("boom") end,
-    })
-    policy:Seed({})
-
-    test.assertEqual("login", category(policy:CameOnline("bolt", START)))
-end)
-
 -- A policy with settings: `settings.off` lists categories turned off, and
--- `settings.welcomeBack` and `settings.longAbsence` are thresholds in
--- seconds.
-local function withSettings(settings, absences)
+-- `settings.welcomeBack` is the threshold in seconds.
+local function withSettings(settings)
     local world = guild()
     local addon = test.newAddon("Core/GreetPolicy.lua")
     local policy = addon.GreetPolicy.Create({
@@ -240,17 +221,11 @@ local function withSettings(settings, absences)
         isOwn = function(key)
             return world.own[key] == true
         end,
-        absenceOf = function(key)
-            return (absences or {})[key]
-        end,
         categoryEnabled = function(name)
             return not (settings.off or {})[name]
         end,
         welcomeBackSeconds = settings.welcomeBack and function()
             return settings.welcomeBack
-        end,
-        longAbsenceSeconds = settings.longAbsence and function()
-            return settings.longAbsence
         end,
     })
     policy:Seed({ "me", "anvil" })
@@ -259,10 +234,9 @@ end
 
 test.test("greet policy: a category turned off gives no prompt, and the others still do", function()
     local settings = { off = { login = true } }
-    local policy = withSettings(settings, { stranger = 40 * DAY })
+    local policy = withSettings(settings)
 
     test.assertEqual(nil, policy:CameOnline("bolt", START))
-    test.assertEqual("longAbsence", category(policy:CameOnline("stranger", START)))
     test.assertEqual("join", category(policy:Joined("newt", START)))
 
     -- Turning it back on takes effect for the next arrival.
@@ -272,17 +246,14 @@ test.test("greet policy: a category turned off gives no prompt, and the others s
     test.assertEqual(nil, policy:CameOnline("anvil", START + 20 * MINUTE))
 end)
 
-test.test("greet policy: custom thresholds move the relog and long-absence boundaries", function()
-    local policy = withSettings({ welcomeBack = 5 * MINUTE, longAbsence = 7 * DAY },
-        { bolt = 7 * DAY, stranger = 7 * DAY - 1 })
+test.test("greet policy: a custom threshold moves the relog boundary", function()
+    local policy = withSettings({ welcomeBack = 5 * MINUTE })
 
     policy:WentOffline("anvil", START)
     test.assertEqual("welcomeBack", category(policy:CameOnline("anvil", START + 5 * MINUTE)))
     policy:WentOffline("anvil", START + 10 * MINUTE)
     test.assertEqual(nil, policy:CameOnline("anvil", START + 15 * MINUTE - 1))
-
-    test.assertEqual("longAbsence", category(policy:CameOnline("bolt", START)))
-    test.assertEqual("login", category(policy:CameOnline("stranger", START)))
+    test.assertEqual("login", category(policy:CameOnline("bolt", START)))
 end)
 
 test.test("greet policy: a failing setting falls back to the defaults", function()

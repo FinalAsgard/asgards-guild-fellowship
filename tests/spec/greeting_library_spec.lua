@@ -17,7 +17,7 @@ test.test("greeting library: every category starts with the starter greetings", 
     test.assertEqual("Hey {name}!", library:Greetings("login")[1])
 
     local category
-    for _, category in ipairs({ "join", "login", "welcomeBack", "longAbsence" }) do
+    for _, category in ipairs({ "join", "login", "welcomeBack", "friends" }) do
         test.assertEqual(3, #state.greetings[category], category)
     end
     -- The saved copy is the user's own; the starters stay untouched.
@@ -156,8 +156,12 @@ test.test("greeting library: every category and placeholder is described for the
     local addon = load()
     local library = addon.GreetingLibrary
 
-    test.assertEqual(4, #library.CATEGORIES)
+    local ids = {}
     local index
+    for index = 1, #library.CATEGORIES do
+        ids[index] = library.CATEGORIES[index].id
+    end
+    test.assertEqual("join,login,welcomeBack,friends", table.concat(ids, ","))
     for index = 1, #library.CATEGORIES do
         test.assertTrue(library.STARTERS[library.CATEGORIES[index].id] ~= nil)
     end
@@ -199,4 +203,47 @@ test.test("greeting library: the placeholders come in two groups, the chips and 
     -- Every placeholder is in one group or the other.
     test.assertEqual(#addon.GreetingLibrary.PLACEHOLDERS, #groups.chips + #groups.more)
     test.assertContains(addon.GreetingLibrary.MORE_NOTE, "WoW Forever")
+end)
+
+test.test("greeting library: Friends replaces Long absence, with its own starters and copy", function()
+    local addon = load()
+    local library = addon.GreetingLibrary
+    local state = {}
+
+    test.assertEqual(nil, library.STARTERS.longAbsence)
+    test.assertEqual("There you are, {name}!,{name}! Good to see you, friend!,Hey {name}, ready for another run?",
+        table.concat(library.Create(state, lowest):Greetings("friends"), ","))
+    local friends = library.CATEGORIES[4]
+    test.assertEqual("Use for friends", friends.switch)
+    test.assertEqual("Use friend greetings for starred friends", friends.toggle)
+    test.assertContains(friends.empty, "Friends get your Login and Welcome back greetings")
+    test.assertContains(friends.off, "friends get your Login and Welcome back greetings")
+    test.assertEqual(nil, friends.lastOne)
+    test.assertTrue(library.CATEGORIES[1].lastOne)
+end)
+
+test.test("greeting library: the Long absence cleanup deletes its greetings, last used and switch, and is safe to rerun", function()
+    local addon = load()
+    local state = {
+        greetings = { login = { "Hi" }, longAbsence = { "Ages!" } },
+        lastUsed = { login = "Hi", longAbsence = "Ages!" },
+        categories = { login = false, longAbsence = false },
+    }
+
+    test.assertTrue(addon.GreetingLibrary.RemoveLongAbsence(state))
+    test.assertEqual(nil, state.greetings.longAbsence)
+    test.assertEqual(nil, state.lastUsed.longAbsence)
+    test.assertEqual(nil, state.categories.longAbsence)
+    -- Everything else stays.
+    test.assertEqual("Hi", state.greetings.login[1])
+    test.assertEqual("Hi", state.lastUsed.login)
+    test.assertFalse(state.categories.login)
+
+    test.assertFalse(addon.GreetingLibrary.RemoveLongAbsence(state))
+    test.assertEqual("Hi", state.greetings.login[1])
+    -- Missing or unusable saved data is left alone.
+    test.assertFalse(addon.GreetingLibrary.RemoveLongAbsence(nil))
+    local odd = { greetings = "corrupt", categories = { longAbsence = true } }
+    test.assertTrue(addon.GreetingLibrary.RemoveLongAbsence(odd))
+    test.assertEqual("corrupt", odd.greetings)
 end)
