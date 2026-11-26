@@ -28,9 +28,6 @@ local LfgDrawerModel = {
     GATE = "gate",
     -- Someone left the player's full party: fill the empty slot?
     SLOT = "slot",
-    -- The leader of a questing party moved to another zone: update the
-    -- listing's zone?
-    ZONE = "zone",
 }
 addon.LfgDrawerModel = LfgDrawerModel
 
@@ -63,14 +60,12 @@ end
 --   ask       the leader is being asked what their party is for
 --   gate      the player is being asked whether to list a party with
 --             players outside the guild
---   zoneMove  the zone the leader of a questing listing moved to, while
---             they're being asked whether to move the listing there
 --   requests  the Ask to join requests to the player's listing (LfgRequests)
 --   requestOf function(id) -> the player's own request to join leader
 --             `id`'s listing (LfgBoard:Request), or nil
 -- Returns { count, glow = nil | "gold" | "orange", fresh = the relevant
 -- listings new since the last Update that may pulse, top = { kind,
--- listing?, request?, party?, zone? }, requests = the requests to the
+-- listing?, request?, party? }, requests = the requests to the
 -- player }.
 function Model:Update(facts)
     local relevant = facts.groups and facts.groups.relevant or {}
@@ -123,8 +118,6 @@ function Model:Update(facts)
         top = { kind = LfgDrawerModel.ASK, party = facts.party }
     elseif facts.slotOpen and facts.party ~= nil then
         top = { kind = LfgDrawerModel.SLOT, party = facts.party }
-    elseif facts.zoneMove ~= nil then
-        top = { kind = LfgDrawerModel.ZONE, party = facts.party, zone = facts.zoneMove }
     elseif facts.party ~= nil then
         top = { kind = LfgDrawerModel.PARTY, party = facts.party }
     elseif relevant[1] ~= nil then

@@ -568,7 +568,7 @@ Click the button to slide a small drawer out to its left; click again, or its **
 
 - **Not in a party:** the newest group you could join, with **Ask to join**, and **Start a group** under it (or "No groups for you right now").
 - **In a party:** your party's purpose, size, the roles it needs, and its note, with its slots as on your listing's card: a dungeon's Tank, Healer and DPS tiles with their icons (open ones in color, filled ones grey), a person tile per player otherwise.
-- **While you're being asked something** (what your party is for, whether to list a party with players outside the guild, whether to fill an empty slot, or, when you lead a questing party into another zone, whether to move the listing there), the question and its answers. Saying No to a zone means you're not asked about that zone again.
+- **While you're being asked something** (what your party is for, whether to list a party with players outside the guild, or whether to fill an empty slot), the question and its answers. A questing listing stays in its zone when you move; **Edit** it to change the zone.
 
 Long names wrap onto more lines at the spaces between words, and the drawer grows to fit.
 

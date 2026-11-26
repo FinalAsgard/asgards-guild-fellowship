@@ -27,15 +27,13 @@ local LfgButton = {
     DRAWER_GAP = 6,
     -- How far the drawer slides in from.
     SLIDE = 24,
-    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 146, ask = 178, gate = 146, slot = 164, zone = 146 },
+    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 146, ask = 178, gate = 146, slot = 164 },
     -- The party's role tiles, as on the Your listing card.
     TILE_SIZE = 22,
     NONE_TEXT = "No groups for you right now",
     ASK_TEXT = "You're leading a party. List it on the Guild LFG Board?",
     GATE_TEXT = "Your party has players from outside the guild. List it on the Guild LFG Board?",
     SLOT_TEXT = "Someone left \226\128\148 fill the empty slot?",
-    -- %s: the zone the leader moved to.
-    ZONE_TEXT = "You're in %s now. Move your questing listing here?",
     -- Show Nearby: the names it lists (more are counted), each row's
     -- height, and the levels' column.
     NEARBY_ROWS = 25,
@@ -92,8 +90,6 @@ end
 --   onSnooze        function(): "don't ask for 30 minutes"
 --   onFillSlot      function(yes): the answer to "Someone left — fill the
 --                   empty slot?"
---   onMoveZone      function(yes): the answer to moving a questing listing
---                   to the zone its leader went to
 --   nearby          function() -> { zone, people = { { name, whisper,
 --                   level?, classToken? } } } of guildmates in the player's
 --                   zone, or nil; the menu's Show Nearby lists them
@@ -227,15 +223,12 @@ function Button:buildDrawer()
     drawer.question = ui:Text(drawer, LfgButton.ASK_TEXT, "regular", "body", "text")
     drawer.question:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
     wrapAtWords(drawer.question, LfgButton.DRAWER_WIDTH - 2 * pad)
-    -- The same Yes and No answer "fill the empty slot?" and "move your
-    -- questing listing here?".
+    -- The same Yes and No answer "fill the empty slot?".
     self.listButton = ui:Button(drawer, "Choose what it's for", "primary", function()
         local kind = drawer.kind
         owner:CloseDrawer(true)
         if kind == addon.LfgDrawerModel.SLOT then
             owner.options.onFillSlot(true)
-        elseif kind == addon.LfgDrawerModel.ZONE then
-            owner.options.onMoveZone(true)
         else
             owner.options.onListParty()
         end
@@ -247,8 +240,6 @@ function Button:buildDrawer()
         owner:CloseDrawer(true)
         if kind == addon.LfgDrawerModel.SLOT then
             owner.options.onFillSlot(false)
-        elseif kind == addon.LfgDrawerModel.ZONE then
-            owner.options.onMoveZone(false)
         else
             owner.options.onNotLooking()
         end
@@ -515,18 +506,15 @@ function Button:refreshDrawer()
     local kind = top.kind
     drawer.kind = kind
     local slot = kind == addon.LfgDrawerModel.SLOT
-    local zone = kind == addon.LfgDrawerModel.ZONE
-    local gate = kind == addon.LfgDrawerModel.GATE or slot or zone
+    local gate = kind == addon.LfgDrawerModel.GATE or slot
     local asking = kind == addon.LfgDrawerModel.ASK or gate
     local headings = { [addon.LfgDrawerModel.PARTY] = top.party ~= nil and top.party.solo and "Your listing"
         or "Your party", [addon.LfgDrawerModel.ASK] = "List your party?",
-        [addon.LfgDrawerModel.GATE] = "List your party?", [addon.LfgDrawerModel.SLOT] = "Your party",
-        [addon.LfgDrawerModel.ZONE] = "Your party" }
+        [addon.LfgDrawerModel.GATE] = "List your party?", [addon.LfgDrawerModel.SLOT] = "Your party" }
     drawer.heading:SetText(Theme.Label(headings[kind] or "New for you"))
-    -- Asking whether to list a party with outsiders, to fill an empty slot,
-    -- or to move a questing listing is a plain yes or no.
-    drawer.question:SetText(zone and string.format(LfgButton.ZONE_TEXT, tostring(top.zone))
-        or slot and LfgButton.SLOT_TEXT or kind == addon.LfgDrawerModel.GATE and LfgButton.GATE_TEXT
+    -- Asking whether to list a party with outsiders, or to fill an empty
+    -- slot, is a plain yes or no.
+    drawer.question:SetText(slot and LfgButton.SLOT_TEXT or kind == addon.LfgDrawerModel.GATE and LfgButton.GATE_TEXT
         or LfgButton.ASK_TEXT)
     self.listButton:SetLabel(gate and "Yes" or "Choose what it's for")
     self.notLookingButton:SetLabel(gate and "No" or "Not looking")
@@ -624,8 +612,6 @@ function Button:refreshDrawer()
         self.askButton:SetPoint("RIGHT", drawer, "RIGHT", -Theme.SPACING.m, 0)
     elseif party then
         extra = extraHeight(drawer.party, 1) + extraHeight(drawer.partyDetails, 1) + extraHeight(drawer.note, 1)
-    elseif zone then
-        extra = extraHeight(drawer.question, 2)
     end
     if party and asksGuild then
         extra = extra + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.s

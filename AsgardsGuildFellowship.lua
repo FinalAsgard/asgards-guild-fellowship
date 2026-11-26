@@ -118,13 +118,6 @@ local lfgJoin = {
     stats = { sent = 0, refused = 0, heard = 0, ignored = {} },
     -- /agfdev lfgtest's stand-in "fill the empty slot?" is showing.
     standInSlot = false,
-    -- A questing listing's leader moved: the zone they're asked to move it
-    -- to (false when not asking), the zones they said No to (a set), looking
-    -- at the zone, and the answer.
-    zoneMove = false,
-    zoneDeclined = {},
-    checkZone = function() end,
-    moveZone = function() end,
     -- The guildmates in the player's zone, for the button's Show Nearby.
     nearby = function() return nil end,
 }
@@ -1538,9 +1531,6 @@ if clientProfile.supported then
         onFillSlot = function(yes)
             lfgJoin.fillSlot(yes)
         end,
-        onMoveZone = function(yes)
-            lfgJoin.moveZone(yes)
-        end,
         nearby = function()
             return lfgJoin.nearby()
         end,
@@ -1994,8 +1984,6 @@ if clientProfile.supported then
             ask = lfgTrigger:Asking(),
             gate = lfgTrigger:Gating(),
             slotOpen = lfgTrigger:SlotOpen() or lfgJoin.standInSlot,
-            zoneMove = lfgJoin.zoneMove ~= false and lfgListing:IsActive()
-                and lfgListing:Purpose().kind == "questing" and lfgJoin.zoneMove or nil,
             requests = lfgJoin.sweep(),
             requestOf = function(id)
                 return lfgBoard:Request(id, client:Timestamp())
@@ -2096,45 +2084,6 @@ if clientProfile.supported then
     lfgOnZone = function()
         if lfgListing:IsActive() and lfgListing:EnteredDungeon(lfgCurrentDungeon()) then
             announceListing()
-        end
-        lfgJoin.checkZone()
-        lfgRefresh()
-    end
-    -- The leader of a questing listing moved to another zone, outside an
-    -- instance: the drawer asks whether to move the listing there. A zone
-    -- they said No to isn't asked about again; back in the listing's zone,
-    -- nothing's asked. With the button hidden, nothing is.
-    lfgJoin.checkZone = function()
-        local purpose = lfgListing:IsActive() and lfgListing:Purpose() or nil
-        local zone = client:GetZone()
-        local name = zone and zone.name or nil
-        if purpose == nil or purpose.kind ~= "questing" or not lfgLister() or client:IsInInstance()
-            or name == nil or name == purpose.zone or lfgJoin.zoneDeclined[name]
-            or settings:Get("lfgButton") ~= true
-        then
-            lfgJoin.zoneMove = false
-            return
-        end
-        if lfgJoin.zoneMove ~= name then
-            lfgJoin.zoneMove = name
-            if lfgButton ~= nil and lfgButton:IsShowing() and not lfgButton:DrawerOpen() then
-                lfgRefresh()
-                lfgButton:OpenDrawer()
-            end
-        end
-    end
-    -- Yes moves the questing listing to the zone, with its levels, and the
-    -- guild hears it; No leaves it where it is.
-    lfgJoin.moveZone = function(yes)
-        local zone = lfgJoin.zoneMove
-        lfgJoin.zoneMove = false
-        if zone and yes then
-            local saved, reason = saveListing({ kind = "questing", zone = zone }, lfgListing:Note())
-            if not saved then
-                rosterController:Print("Couldn't move your listing: " .. tostring(reason) .. ".")
-            end
-        elseif zone then
-            lfgJoin.zoneDeclined[zone] = true
         end
         lfgRefresh()
     end
