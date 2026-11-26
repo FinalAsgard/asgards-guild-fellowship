@@ -65,11 +65,40 @@ local GreetingLibrary = {
         { "{characterFirst}", "the first part of that character's name" },
         { "{characterLast}", "the last part of that character's name" },
     },
+    -- The Greetings page's Insert chips, and the rarer ones under More.
+    CHIPS = { "{name}", "{main}", "{character}" },
+    MORE = { "{mainFirst}", "{mainLast}", "{characterFirst}", "{characterLast}" },
+    MORE_NOTE = "These differ only on WoW Forever's two-part names.",
 }
 addon.GreetingLibrary = GreetingLibrary
 
 local Library = {}
 Library.__index = Library
+
+-- What `placeholder` (as PLACEHOLDERS writes it) is filled with, or nil.
+function GreetingLibrary.Fills(placeholder)
+    local index
+    for index = 1, #GreetingLibrary.PLACEHOLDERS do
+        if GreetingLibrary.PLACEHOLDERS[index][1] == placeholder then
+            return GreetingLibrary.PLACEHOLDERS[index][2]
+        end
+    end
+    return nil
+end
+
+-- The placeholders in two groups, each a list of { text, fills }: the
+-- chips, and the rarer ones offered under More.
+function GreetingLibrary.PlaceholderGroups()
+    local function group(list)
+        local result = {}
+        local index
+        for index = 1, #list do
+            result[index] = { text = list[index], fills = GreetingLibrary.Fills(list[index]) }
+        end
+        return result
+    end
+    return { chips = group(GreetingLibrary.CHIPS), more = group(GreetingLibrary.MORE) }
+end
 
 local function copy(list)
     local result = {}

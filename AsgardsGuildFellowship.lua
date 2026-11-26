@@ -1363,6 +1363,15 @@ if clientProfile.supported then
                             promptsOn = function()
                                 return settings:Get("guildGreet") == true
                             end,
+                            -- The preview fills in the user's own names.
+                            names = function()
+                                local fullName = client:GetPlayerFullName()
+                                local _, _, normalizer = rosterController:QuietContext()
+                                if fullName == nil then
+                                    return {}
+                                end
+                                return guildGreet:Names(normalizer and normalizer:Key(fullName) or fullName, fullName)
+                            end,
                         }),
                         settings = settings,
                         onError = function(text)

@@ -199,3 +199,20 @@ test.test("greeting library: a long greeting is never cut in the middle of a let
     test.assertEqual(255, #render(string.rep("a", 253) .. "{name}", { name = "éa" }))
     test.assertEqual(254, #addon.GreetingLibrary.Clean(string.rep("b", 254) .. "é"))
 end)
+
+test.test("greeting library: the placeholders come in two groups, the chips and the rarer ones", function()
+    local addon = load()
+
+    local groups = addon.GreetingLibrary.PlaceholderGroups()
+    test.assertEqual(3, #groups.chips)
+    test.assertEqual("{name}", groups.chips[1].text)
+    test.assertEqual("their alias, else their main's name", groups.chips[1].fills)
+    test.assertEqual("{main}", groups.chips[2].text)
+    test.assertEqual("{character}", groups.chips[3].text)
+    test.assertEqual("{mainFirst},{mainLast},{characterFirst},{characterLast}",
+        table.concat({ groups.more[1].text, groups.more[2].text, groups.more[3].text, groups.more[4].text }, ","))
+    test.assertEqual("the last part of that character's name", groups.more[4].fills)
+    -- Every placeholder is in one group or the other.
+    test.assertEqual(#addon.GreetingLibrary.PLACEHOLDERS, #groups.chips + #groups.more)
+    test.assertContains(addon.GreetingLibrary.MORE_NOTE, "WoW Forever")
+end)

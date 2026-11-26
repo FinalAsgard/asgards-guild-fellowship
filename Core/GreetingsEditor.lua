@@ -43,6 +43,8 @@ end
 --   enabled     function(category) -> whether that category prompts
 --   minutes     function() -> the welcome-back minutes
 --   promptsOn   function() -> whether greet prompts are on at all
+--   names       function() -> the user's own names for the preview, keyed
+--               like GuildGreet:Names (name, main, character, ...)
 function GreetingsEditor.Create(options)
     return setmetatable({
         options = options or {},
@@ -99,6 +101,46 @@ function Editor:SetDraft(text)
     end
     self.draft = type(text) == "string" and text or ""
     self.error = nil
+end
+
+-- Inserts `placeholder` into the draft at byte `cursor` (0 is the start;
+-- nil or out of range is the end, and a cursor inside a letter like é
+-- moves to its start). Returns the new draft and the cursor after the
+-- placeholder, or nil when nothing is open or it wouldn't fit in one chat
+-- message.
+function Editor:Insert(placeholder, cursor)
+    if self.open == nil or type(placeholder) ~= "string" then
+        return nil
+    end
+    local draft = self.draft or ""
+    if type(cursor) ~= "number" or cursor < 0 or cursor > #draft then
+        cursor = #draft
+    end
+    cursor = math.floor(cursor)
+    while cursor > 0 and cursor < #draft do
+        local byte = string.byte(draft, cursor + 1)
+        if byte < 0x80 or byte >= 0xC0 then
+            break
+        end
+        cursor = cursor - 1
+    end
+    local result = string.sub(draft, 1, cursor) .. placeholder .. string.sub(draft, cursor + 1)
+    if #result > addon.GreetingLibrary.MAX_LENGTH then
+        return nil
+    end
+    self:SetDraft(result)
+    return result, cursor + #placeholder
+end
+
+-- The draft as a greeting would read for the user themself, or nil while
+-- nothing's open or the draft is empty. Placeholders ignore case.
+function Editor:preview()
+    local tidied = self.open ~= nil and addon.GreetingLibrary.Tidy(self.draft) or nil
+    if tidied == nil then
+        return nil
+    end
+    local names = self.options.names and self.options.names() or {}
+    return addon.GreetingLibrary.Render(tidied, names)
 end
 
 -- Forgets the last save error, keeping the draft.
@@ -175,6 +217,7 @@ end
 --   draft        the open box's text
 --   saveLabel    Add or Save; saveEnabled whether it can be clicked
 --   error        why the last save failed, or nil
+--   preview      the draft filled in with the user's own names, or nil
 function Editor:View()
     local categories = {}
     local list = addon.GreetingLibrary.CATEGORIES
@@ -210,5 +253,6 @@ function Editor:View()
         saveLabel = self.open == GreetingsEditor.NEW and GreetingsEditor.ADD or GreetingsEditor.SAVE,
         saveEnabled = self:canSave(),
         error = self.error,
+        preview = self:preview(),
     }
 end

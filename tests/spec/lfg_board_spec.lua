@@ -1169,6 +1169,72 @@ test.test("greetings: ✎ edits a greeting in place, + Add a greeting adds one a
     test.assertEqual("Hey {name}!", library:Greetings("login")[1])
 end)
 
+test.test("greetings: Insert chips and More put placeholders in, and the preview uses the user's names", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local tooltip = { lines = {} }
+    function tooltip.SetOwner() end
+    function tooltip.SetText(_, text)
+        tooltip.lines = { text }
+    end
+    function tooltip.AddLine(_, text)
+        table.insert(tooltip.lines, text)
+    end
+    function tooltip.Show()
+        tooltip.shown = true
+    end
+    function tooltip.Hide()
+        tooltip.shown = false
+    end
+    world.environment.GameTooltip = tooltip
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    local edit = page.edit
+
+    -- The chips are part of the edit box, hidden until it's open.
+    test.assertFalse(edit.shown)
+    click(page.add)
+    test.assertTrue(edit.shown)
+    test.assertEqual("{name}", edit.chips[1].label.text)
+    test.assertEqual("{character}", edit.chips[3].label.text)
+    edit.chips[2].hooks.OnEnter(edit.chips[2])
+    test.assertEqual("{main}", tooltip.lines[1])
+    test.assertEqual("their main's name, even when they have an alias", tooltip.lines[2])
+    edit.chips[2].hooks.OnLeave(edit.chips[2])
+    test.assertFalse(tooltip.shown)
+
+    -- A chip goes in at the cursor.
+    local box = edit.input.box
+    box:SetText("Hi !")
+    box.scripts.OnTextChanged(box, true)
+    rawset(box, "GetCursorPosition", function()
+        return 3
+    end)
+    click(edit.chips[1])
+    test.assertEqual("Hi {name}!", box:GetText())
+    test.assertEqual(9, rawget(box, "cursor"))
+    -- The preview fills it in with the user's own name.
+    local _, _, normalizer = addon.rosterController:QuietContext()
+    local names = addon.guildGreet:Names(normalizer:Key(addon.client:GetPlayerFullName()),
+        addon.client:GetPlayerFullName())
+    test.assertEqual("Preview: Hi " .. names.name .. "!", edit.preview.text)
+
+    -- More offers the rare four and the note.
+    click(edit.more)
+    local menu = edit.moreMenu
+    test.assertTrue(menu.open)
+    test.assertContains(menu.rows[1].label.text, "{mainFirst}")
+    test.assertContains(menu.rows[4].label.text, "{characterLast}")
+    test.assertContains(menu.rows[5].label.text, "WoW Forever's two-part names")
+    rawset(box, "GetCursorPosition", function()
+        return 0
+    end)
+    click(menu.rows[3])
+    test.assertEqual("{characterFirst}Hi {name}!", box:GetText())
+    test.assertEqual("Preview: " .. names.characterfirst .. "Hi " .. names.name .. "!", edit.preview.text)
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the window opens on Friends, the page is built on show, and a pinned Friend is starred", function()

@@ -23,6 +23,9 @@ local function newEditor(state, world)
         promptsOn = function()
             return world.promptsOn ~= false
         end,
+        names = function()
+            return world.names
+        end,
     })
     return editor, addon, world
 end
@@ -239,4 +242,46 @@ test.test("greetings editor: a refused save keeps the box open with the reason, 
     editor:SetDraft("Hi")
     test.assertFalse(editor:Save())
     test.assertEqual("Can't save: saved data is unavailable.", editor:View().error)
+end)
+
+test.test("greetings editor: a placeholder goes in at the cursor, never inside a letter", function()
+    local editor, addon = newEditor({ greetings = { login = { "Hi !" } } })
+    editor:Select("login")
+
+    -- Nothing open: nothing to insert into.
+    test.assertEqual(nil, editor:Insert("{name}", 0))
+    editor:StartEdit(1)
+    local draft, cursor = editor:Insert("{name}", 3)
+    test.assertEqual("Hi {name}!", draft)
+    test.assertEqual(9, cursor)
+    test.assertEqual("Hi {name}!", editor:View().draft)
+    test.assertTrue(editor:View().saveEnabled)
+    -- No cursor, or one past the end: at the end.
+    test.assertEqual("Hi {name}!{main}", (editor:Insert("{main}", nil)))
+    test.assertEqual("Hi {name}!{main}{character}", (editor:Insert("{character}", 99)))
+    test.assertEqual("{main}Hi {name}!{main}{character}", (editor:Insert("{main}", 0)))
+
+    -- A cursor inside é (two bytes) moves to its start.
+    editor:SetDraft("é")
+    test.assertEqual("{name}é", (editor:Insert("{name}", 1)))
+    -- Past one chat message: refused, the draft kept.
+    editor:SetDraft(string.rep("a", addon.GreetingLibrary.MAX_LENGTH - 3))
+    test.assertEqual(nil, editor:Insert("{name}", 0))
+    test.assertEqual(addon.GreetingLibrary.MAX_LENGTH - 3, #editor:View().draft)
+end)
+
+test.test("greetings editor: the preview fills the draft with the user's own names, in any case", function()
+    local editor, _, world = newEditor({ greetings = { login = { "Hi" } } })
+    world.names = { name = "Rip", main = "Bishop", character = "Ripley" }
+    editor:Select("login")
+
+    test.assertEqual(nil, editor:View().preview)
+    editor:StartEdit(1)
+    editor:SetDraft("Hey {NAME}, on {character}? ({Main}) {other}")
+    test.assertEqual("Hey Rip, on Ripley? (Bishop) {other}", editor:View().preview)
+    -- An empty draft has no preview.
+    editor:SetDraft("   ")
+    test.assertEqual(nil, editor:View().preview)
+    editor:Cancel()
+    test.assertEqual(nil, editor:View().preview)
 end)

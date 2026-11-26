@@ -12,7 +12,9 @@ local _, addon = ...
 -- ✎ turns a row into an edit box in place, and + Add a greeting opens an
 -- empty one at the bottom: one at a time, growing to four lines, with Add
 -- or Save (Enter) and Cancel (Escape), and a short error under it when a
--- save is refused. Switching category or tab, opening another row, or the
+-- save is refused. Under the box, Insert chips put {name}, {main} or
+-- {character} at the cursor (More ▼ has the rarer ones), and a preview
+-- fills the draft in with the user's own names. Switching category or tab, opening another row, or the
 -- page hiding (another module, the window closing) drops the draft.
 --
 -- Everything it shows comes from GreetingsEditor and the SettingsModel;
@@ -33,6 +35,9 @@ local AgfGreetingsPage = {
     BUTTON_WIDTH = 80,
     ADD_WIDTH = 150,
     ADD_GREETING = "+ Add a greeting",
+    CHIP_WIDTH = 92,
+    MORE = "More ▼",
+    MORE_MENU_WIDTH = 300,
     -- How long a save error shows under the box.
     ERROR_SECONDS = 5,
 }
@@ -167,8 +172,89 @@ function Page:buildEditBox()
     edit.error = ui:Text(edit, "", "regular", "small", "red")
     edit.error:SetPoint("TOPLEFT", edit.input, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
     edit.error:SetJustifyH("LEFT")
+
+    -- Under it: Insert and the chips, then More, then the preview.
+    local groups = addon.GreetingLibrary.PlaceholderGroups()
+    edit.chipRow = ui:frame("Frame", edit)
+    edit.chipRow:SetHeight(addon.Widgets.BUTTON_HEIGHT)
+    edit.chipRow:SetPoint("LEFT", edit, "LEFT", 0, 0)
+    edit.chipRow:SetPoint("RIGHT", edit, "RIGHT", 0, 0)
+    edit.insertLabel = ui:Text(edit.chipRow, "Insert", "semibold", "small", "muted")
+    edit.insertLabel:SetPoint("LEFT", edit.chipRow, "LEFT", 0, 0)
+    edit.chips = {}
+    local previous = edit.insertLabel
+    local index
+    for index = 1, #groups.chips do
+        local placeholder = groups.chips[index]
+        local chip = ui:Button(edit.chipRow, placeholder.text, "secondary", function()
+            page:Insert(placeholder.text)
+        end)
+        chip:SetWidth(AgfGreetingsPage.CHIP_WIDTH)
+        chip:SetPoint("LEFT", previous, "RIGHT", Theme.SPACING.s, 0)
+        chip.placeholder = placeholder
+        self:tooltip(chip, placeholder.text, placeholder.fills)
+        edit.chips[index] = chip
+        previous = chip
+    end
+    edit.moreMenu = ui:ContextMenu(edit)
+    edit.moreMenu:SetWidth(AgfGreetingsPage.MORE_MENU_WIDTH)
+    edit.more = ui:Button(edit.chipRow, AgfGreetingsPage.MORE, "secondary", function()
+        local items = {}
+        local position
+        for position = 1, #groups.more do
+            local placeholder = groups.more[position]
+            items[position] = { label = placeholder.text .. "  |cff9d9d9d" .. placeholder.fills .. "|r",
+                onClick = function()
+                    page:Insert(placeholder.text)
+                end }
+        end
+        -- The note, as a line that can't be picked.
+        items[#items + 1] = { label = "|cff9d9d9d" .. addon.GreetingLibrary.MORE_NOTE .. "|r", disabled = true }
+        edit.moreMenu:Open(edit.more, items)
+    end)
+    edit.more:SetWidth(AgfGreetingsPage.CHIP_WIDTH)
+    edit.more:SetPoint("LEFT", previous, "RIGHT", Theme.SPACING.s, 0)
+    edit.preview = ui:Text(edit, "", "regular", "small", "muted")
+    edit.preview:SetPoint("TOPLEFT", edit.chipRow, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    edit.preview:SetPoint("RIGHT", edit, "RIGHT", 0, 0)
+    edit.preview:SetJustifyH("LEFT")
+    edit.preview:SetWordWrap(true)
     edit:Hide()
     self.edit = edit
+end
+
+-- A tooltip over `frame` while hovered: `title`, then `text`.
+function Page:tooltip(frame, title, text)
+    local environment = self.ui.environment
+    frame:HookScript("OnEnter", function(self)
+        local tooltip = environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:SetOwner(self, "ANCHOR_TOP")
+            tooltip:SetText(title, 1, 1, 1)
+            tooltip:AddLine(text, nil, nil, nil, true)
+            tooltip:Show()
+        end
+    end)
+    frame:HookScript("OnLeave", function()
+        local tooltip = environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:Hide()
+        end
+    end)
+end
+
+-- Inserts `placeholder` at the box's cursor, and puts the cursor after it.
+function Page:Insert(placeholder)
+    local box = self.edit.input.box
+    local draft, cursor = self.options.editor:Insert(placeholder, box:GetCursorPosition())
+    if draft == nil then
+        return false
+    end
+    self.edit.input:SetValue(draft)
+    box:SetFocus()
+    box:SetCursorPosition(cursor)
+    self:refreshEditButtons()
+    return true
 end
 
 function Page:focus()
@@ -183,6 +269,15 @@ function Page:refreshEditButtons()
     self.edit.save:SetLabel(view.saveLabel)
     self.edit.save:SetActive(view.saveEnabled)
     self.edit.error:SetText(view.error or "")
+    self.edit.preview:SetText(view.preview and ("Preview: " .. view.preview) or "")
+    -- The chips and the preview go under the box, below the error if any.
+    self.edit.chipRow:ClearAllPoints()
+    self.edit.chipRow:SetPoint("TOPLEFT", view.error and self.edit.error or self.edit.input, "BOTTOMLEFT", 0,
+        -Theme.SPACING.xs)
+    self.edit.chipRow:SetPoint("RIGHT", self.edit, "RIGHT", 0, 0)
+    if view.open == nil then
+        self.edit.moreMenu:Close()
+    end
     self:layout()
 end
 
@@ -222,6 +317,13 @@ function Page:editHeight()
     end
     if (self.edit.error:GetText() or "") ~= "" then
         height = height + 18
+    end
+    -- The chips, and the preview's line (two when it's long).
+    height = height + Theme.SPACING.xs + addon.Widgets.BUTTON_HEIGHT
+    local preview = self.edit.preview:GetText() or ""
+    if preview ~= "" then
+        local previewHeight = self.edit.preview:GetStringHeight()
+        height = height + Theme.SPACING.xs + (type(previewHeight) == "number" and previewHeight or 14)
     end
     return height + Theme.SPACING.s
 end
