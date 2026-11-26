@@ -1015,6 +1015,84 @@ test.test("Forever questing is listed in the zone's levels, and the probe says w
     test.assertContains(tool.messages[#tool.messages - 2], "Zone levels in Ironforge: 25-35, from the game.")
 end)
 
+-- Greetings ---------------------------------------------------------------------
+
+test.test("greetings: the module sits after LFG, with the Greet prompts switch and the category list", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local window = addon.agfWindow
+
+    test.assertTrue(window:Open("greetings"))
+    local order = {}
+    local index
+    for index = 1, #window.moduleButtons do
+        order[index] = window.moduleButtons[index].id
+    end
+    test.assertEqual("friends,lfg,greetings,settings", table.concat(order, ","))
+    test.assertEqual("Greetings", window.pages.greetings.title.text)
+    test.assertTrue(window.gear.shown)
+
+    -- The header switch is Show greet prompts.
+    local header = window:HeaderSwitch("greetings")
+    test.assertTrue(header.frame.shown)
+    test.assertEqual("Greet prompts on", header.label.text)
+    local page = addon.greetingsPage
+    test.assertEqual("greetings", page:Tab())
+    test.assertFalse(page.dimmed)
+    click(header.switch)
+    test.assertFalse(addon.settings:Get("guildGreet"))
+    test.assertEqual("Greet prompts off", header.label.text)
+    -- Off: the Greetings tab is dimmed, and still there on Settings.
+    test.assertTrue(page.dimmed)
+    click(page.tabs.tabs[2])
+    test.assertEqual("settings", page:Tab())
+    test.assertFalse(page.greetingsTab.shown)
+    test.assertTrue(header.frame.shown)
+    click(page.tabs.tabs[1])
+    addon.settings:Set("guildGreet", true)
+    test.assertFalse(page.dimmed)
+
+    -- Join first, with the starters; Login's switch is the AddOns option.
+    test.assertEqual("join", page.categories:Selected())
+    test.assertEqual("Welcome to the guild, {name}!", page.rows[1].text.text)
+    click(page.categories.buttons[2])
+    test.assertEqual("Someone's first login you see this session.", page.description.text)
+    test.assertEqual("Prompt me", page.switchLabel.text)
+    test.assertTrue(page.switch:IsOn())
+    click(page.switch)
+    test.assertFalse(addon.settings:Get("greetCategory:login"))
+    test.assertTrue(page.offNote.shown)
+    test.assertEqual(addon.GreetingsEditor.OFF_NOTE, page.offNote.text)
+    test.assertTrue(page.categories.buttons[2].dotShown)
+    addon.settings:Set("greetCategory:login", true)
+    test.assertFalse(page.categories.buttons[2].dotShown)
+    test.assertFalse(page.offNote.shown)
+
+    -- Welcome back's line has the minutes, and follows them.
+    click(page.categories.buttons[3])
+    test.assertContains(page.description.text, "more than " .. addon.settings:Get("welcomeBackMinutes") .. " minutes")
+    addon.settings:Set("welcomeBackMinutes", 20)
+    test.assertEqual("Someone you saw log off comes back after more than 20 minutes away.", page.description.text)
+
+    -- A row shows ✎ and 🗑 and its full text while hovered.
+    local row = page.rows[1]
+    test.assertFalse(row.edit.shown)
+    row.scripts.OnEnter(row)
+    test.assertTrue(row.edit.shown)
+    test.assertTrue(row.delete.shown)
+    row.scripts.OnLeave(row)
+    test.assertFalse(row.delete.shown)
+
+    -- Saved greetings changed while it was away show when it's shown again.
+    local greetings = addon.guildGreet:Library():Greetings("welcomeBack")
+    addon.guildGreet:Library():Add("welcomeBack", "Back again, {name}?")
+    window:ShowPage("lfg")
+    window:ShowPage("greetings")
+    test.assertEqual("Back again, {name}?", page.rows[#greetings + 1].text.text)
+    test.assertTrue(page.rows[#greetings + 1].shown)
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the window opens on Friends, the page is built on show, and a pinned Friend is starred", function()

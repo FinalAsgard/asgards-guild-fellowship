@@ -2,14 +2,15 @@ local _, addon = ...
 
 -- The add-on's new window, drawn with the Theme and Widgets rather than the
 -- Details! Framework. Features move into it one at a time, each as a module
--- with a button in the sidebar; for now that's only the Guild LFG Board.
+-- with a button in the sidebar: Friends, the Guild LFG Board and Greetings.
 --
 -- One fixed size (960x600), movable, with its position saved per character.
 -- The left sidebar card holds the tree and the add-on's name, a button per
 -- module, Settings pinned at the bottom, and the character and version. At
 -- the top right are an X that closes the window and a gear that toggles the
 -- current module's settings popup, pinned under the gear and titled with
--- the module's name. A click anywhere else in the window closes the popup,
+-- the module's name; a module may add a switch beside the gear for its
+-- main setting. A click anywhere else in the window closes the popup,
 -- and switching modules keeps it open, retitled. The Settings page holds
 -- settings that belong to no module, in tabs across the top; each switch
 -- there is a SettingsModel toggle, so it always agrees with the old window
@@ -42,10 +43,13 @@ Window.__index = Window
 -- options:
 --   frameName     the window's global name, so Escape closes it
 --   modules       a list of { id, label, title, draw(content, ui),
---                 settingsRows, onShow }: label names the sidebar button
---                 and the gear popup, title heads the page; draw is
---                 optional, settingsRows ({ id, label, info } toggles in
---                 `settings`) are the gear popup's switches, and
+--                 settingsRows, headerSwitch, onShow }: label names the
+--                 sidebar button and the gear popup, title heads the page;
+--                 draw is optional, settingsRows ({ id, label, info }
+--                 toggles in `settings`) are the gear popup's switches,
+--                 headerSwitch (optional, { id, label, on, off }: a toggle
+--                 in `settings`, and its text while on and off) is a
+--                 switch beside the gear while the module shows, and
 --                 onShow(argument) (optional) runs each time the page is
 --                 shown, with what Open or ShowPage was given for it (e.g.
 --                 the player Friends shows), or nil
@@ -64,6 +68,7 @@ function AgfWindow.Create(client, options)
         modules = options.modules or {},
         switches = {},
         colorRows = {},
+        headers = {},
         pages = {},
         moduleButtons = {},
     }, Window)
@@ -345,6 +350,12 @@ function Window:refreshSwitch(id)
     for index = 1, #switches do
         switches[index]:SetOn(self.options.settings:Get(id) == true)
     end
+    local headerId, header
+    for headerId, header in pairs(self.headers) do
+        if header.setting.id == id then
+            header.label:SetText(self.options.settings:Get(id) == true and header.setting.on or header.setting.off)
+        end
+    end
     local cards = self.colorRows[id] or {}
     for index = 1, #cards do
         local card = cards[index]
@@ -378,6 +389,35 @@ function Window:showSettingsTab(id)
             content:Hide()
         end
     end
+end
+
+-- Each module's header switch, left of the gear: its text ("Greet prompts
+-- on") and the switch, shown while that module's page is.
+function Window:buildHeaderSwitches(frame)
+    local ui = self.ui
+    local index
+    for index = 1, #self.modules do
+        local module = self.modules[index]
+        local setting = module.headerSwitch
+        if setting ~= nil then
+            local holder = ui:frame("Frame", frame)
+            holder:SetSize(220, AgfWindow.ICON_SIZE)
+            holder:SetPoint("RIGHT", self.gear, "LEFT", -Theme.SPACING.l, 0)
+            local header = { frame = holder, setting = setting }
+            header.label = ui:Text(holder, "", "semibold", "title", "text")
+            header.label:SetJustifyH("RIGHT")
+            self.headers[module.id] = header
+            header.switch = self:newSwitch(holder, setting)
+            header.switch:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
+            header.label:SetPoint("RIGHT", header.switch, "LEFT", -Theme.SPACING.s, 0)
+            holder:Hide()
+        end
+    end
+end
+
+-- Module `id`'s header switch ({ frame, label, switch, setting }), or nil.
+function Window:HeaderSwitch(id)
+    return self.headers[id]
 end
 
 -- The gear popup, pinned under the gear: the current module's name and its
@@ -468,6 +508,7 @@ function Window:build()
     end)
     gear:SetPoint("RIGHT", close, "LEFT", -Theme.SPACING.xs, 0)
     self.gear = gear
+    self:buildHeaderSwitches(frame)
 
     local index
     for index = 1, #self.modules do
@@ -553,7 +594,7 @@ function Window:Open(id, argument)
                 self.frame:Hide()
             end
             self.frame = nil
-            self.pages, self.moduleButtons, self.switches, self.colorRows = {}, {}, {}, {}
+            self.pages, self.moduleButtons, self.switches, self.colorRows, self.headers = {}, {}, {}, {}, {}
             return false, failure
         end
     end
@@ -623,6 +664,14 @@ function Window:ShowPage(id, argument)
         local on = button.id == id
         button.panel:SetFill(on and "green" or "surface")
         button.label:SetTextColor(Theme.Color(on and "text" or "muted"))
+    end
+    local headerId, header
+    for headerId, header in pairs(self.headers) do
+        if headerId == id then
+            header.frame:Show()
+        else
+            header.frame:Hide()
+        end
     end
     -- The gear belongs to modules; Settings has its own page.
     if id == AgfWindow.SETTINGS then

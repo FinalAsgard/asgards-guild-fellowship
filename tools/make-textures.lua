@@ -271,3 +271,25 @@ write("Sword.tga", 32, 32, function(x, y)
     local px, py = x - 6, y - 26
     return 1, 1, 1, inside(blade or guard or grip or px * px + py * py <= 2.8 * 2.8)
 end)
+
+-- A white pencil, for editing: a diagonal body with a pointed tip at the
+-- bottom left.
+write("Pencil.tga", 32, 32, function(x, y)
+    local body = nearSegment(x, y, 24, 8, 11, 21, 3.2)
+    -- The tip: a triangle from the body's end to the point.
+    local along = ((x - 11) * -1 + (y - 21)) / math.sqrt(2)
+    local across = math.abs(((x - 11) + (y - 21)) / math.sqrt(2))
+    local tip = along >= 0 and along <= 5.5 and across <= 3.2 * (1 - along / 5.5)
+    return 1, 1, 1, inside(body or tip)
+end)
+
+-- A white bin, for deleting: a lid with a handle over a tapered can with
+-- two slits.
+write("Trash.tga", 32, 32, function(x, y)
+    local lid = x >= 6 and x <= 26 and y >= 7 and y <= 9.5
+    local handle = x >= 13 and x <= 19 and y >= 4 and y <= 7
+    local inset = (y - 11) / 17 * 2
+    local can = y >= 11 and y <= 28 and x >= 8 + inset and x <= 24 - inset
+    local slit = y >= 14 and y <= 25 and (math.abs(x - 13.5) <= 0.9 or math.abs(x - 18.5) <= 0.9)
+    return 1, 1, 1, inside(lid or handle or (can and not slit))
+end)

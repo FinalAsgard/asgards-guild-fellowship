@@ -598,23 +598,9 @@ end
 -- list frame inside a scroll frame, scrolled with the mouse wheel.
 function Page:buildList()
     local ui, content = self.ui, self.content
-    local area = ui:frame("ScrollFrame", content)
+    local area, list = ui:ScrollList(content, LfgBoardPage.SCROLL_STEP, LfgBoardPage.LIST_WIDTH)
     area:SetPoint("TOPLEFT", self.tabs, "BOTTOMLEFT", 0, -Theme.SPACING.m)
     area:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
-    local list = ui:frame("Frame", area)
-    list:SetSize(LfgBoardPage.LIST_WIDTH, 1)
-    area:SetScrollChild(list)
-    area:EnableMouseWheel(true)
-    area:SetScript("OnMouseWheel", function(self, delta)
-        local most = self:GetVerticalScrollRange() or 0
-        local scroll = (self:GetVerticalScroll() or 0) - delta * LfgBoardPage.SCROLL_STEP
-        self:SetVerticalScroll(math.max(0, math.min(most, scroll)))
-    end)
-    area:SetScript("OnSizeChanged", function(_, width)
-        if type(width) == "number" and width > 0 then
-            list:SetWidth(width)
-        end
-    end)
     self.area, self.list = area, list
     self.emptyText = ui:Text(list, "", "regular", "body", "muted")
     self.altsLabel = ui:SectionLabel(list, "Your alts could join")

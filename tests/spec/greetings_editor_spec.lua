@@ -1,0 +1,136 @@
+local test = require("tests.test_helper")
+
+-- An editor over a real GreetingLibrary on saved state `state`, with the
+-- switches, minutes and greet prompts in `world`.
+local function newEditor(state, world)
+    local addon = test.newAddon("Core/GreetingLibrary.lua", "Core/GreetingsEditor.lua")
+    world = world or {}
+    world.off = world.off or {}
+    local library = addon.GreetingLibrary.Create(state)
+    local editor = addon.GreetingsEditor.Create({
+        library = function()
+            if world.unavailable then
+                return nil
+            end
+            return library
+        end,
+        enabled = function(category)
+            return not world.off[category]
+        end,
+        minutes = function()
+            return world.minutes
+        end,
+        promptsOn = function()
+            return world.promptsOn ~= false
+        end,
+    })
+    return editor, addon, world
+end
+
+local function dots(view)
+    local result = {}
+    local index
+    for index = 1, #view.categories do
+        result[view.categories[index].id] = view.categories[index].dot
+    end
+    return result
+end
+
+test.test("greetings editor: Join is selected first, and each category shows its greetings and switch", function()
+    local editor = newEditor({ greetings = { join = { "Welcome, {name}!" }, login = { "Hi", "Hey {name}" } } })
+
+    local view = editor:View()
+    test.assertEqual("join", view.category)
+    test.assertEqual("Someone joins the guild.", view.description)
+    test.assertEqual("greetCategory:join", view.switchId)
+    test.assertEqual("Prompt me", view.switchLabel)
+    test.assertTrue(view.enabled)
+    test.assertEqual(nil, view.offNote)
+    test.assertEqual(1, #view.rows)
+    test.assertEqual("Welcome, {name}!", view.rows[1].text)
+
+    test.assertTrue(editor:Select("login"))
+    view = editor:View()
+    test.assertEqual("login", editor:Selected())
+    test.assertEqual("greetCategory:login", view.switchId)
+    test.assertEqual(2, #view.rows)
+    test.assertEqual(2, view.rows[2].index)
+    test.assertEqual("Hey {name}", view.rows[2].text)
+
+    -- An unknown category changes nothing.
+    test.assertFalse(editor:Select("nope"))
+    test.assertEqual("login", editor:Selected())
+end)
+
+test.test("greetings editor: the categories come in the library's order", function()
+    local editor = newEditor({})
+
+    local view = editor:View()
+    test.assertEqual(4, #view.categories)
+    test.assertEqual("join", view.categories[1].id)
+    test.assertEqual("Login", view.categories[2].label)
+    test.assertEqual("Welcome back", view.categories[3].label)
+    test.assertEqual("Long absence", view.categories[4].label)
+end)
+
+test.test("greetings editor: Welcome back's line names the current minutes", function()
+    local editor, _, world = newEditor({}, { minutes = 15 })
+    editor:Select("welcomeBack")
+
+    test.assertEqual("Someone you saw log off comes back after more than 15 minutes away.",
+        editor:View().description)
+    world.minutes = 1
+    test.assertEqual("Someone you saw log off comes back after more than 1 minute away.", editor:View().description)
+    -- Unknown minutes: the plain line.
+    world.minutes = nil
+    test.assertEqual("Someone you saw log off comes back after a break.", editor:View().description)
+end)
+
+test.test("greetings editor: a grey dot marks a category that's switched off or empty", function()
+    local editor, _, world = newEditor({ greetings = { join = { "Hi" }, login = {}, welcomeBack = { "WB" } } })
+    world.off.welcomeBack = true
+
+    local shown = dots(editor:View())
+    test.assertFalse(shown.join)
+    test.assertTrue(shown.login)
+    test.assertTrue(shown.welcomeBack)
+    -- Long absence gets its starters on first use, and is on.
+    test.assertFalse(shown.longAbsence)
+
+    world.off.welcomeBack = false
+    test.assertFalse(dots(editor:View()).welcomeBack)
+end)
+
+test.test("greetings editor: a switched-off category keeps its greetings under a short note", function()
+    local editor, addon, world = newEditor({ greetings = { login = { "Hi", "Hey" } } })
+    editor:Select("login")
+    world.off.login = true
+
+    local view = editor:View()
+    test.assertFalse(view.enabled)
+    test.assertEqual(addon.GreetingsEditor.OFF_NOTE, view.offNote)
+    test.assertEqual(2, #view.rows)
+end)
+
+test.test("greetings editor: the page is dimmed while greet prompts are off", function()
+    local editor, _, world = newEditor({})
+
+    test.assertFalse(editor:View().dimmed)
+    world.promptsOn = false
+    test.assertTrue(editor:View().dimmed)
+end)
+
+test.test("greetings editor: each view reloads what's saved, and no saved data shows no greetings", function()
+    local state = { greetings = { join = { "One" } } }
+    local editor, _, world = newEditor(state)
+
+    test.assertEqual(1, #editor:View().rows)
+    -- Changed elsewhere (the old window's editor): the next view has it.
+    table.insert(state.greetings.join, "Two")
+    test.assertEqual("Two", editor:View().rows[2].text)
+
+    world.unavailable = true
+    local view = editor:View()
+    test.assertEqual(0, #view.rows)
+    test.assertTrue(dots(view).join)
+end)

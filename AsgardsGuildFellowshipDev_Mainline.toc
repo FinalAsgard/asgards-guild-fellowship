@@ -29,6 +29,7 @@ Adapters/PlayerCards.lua
 Adapters/PlayerDetailPanel.lua
 Adapters/FriendsPage.lua
 Adapters/GameMenu.lua
+Adapters/AgfGreetingsPage.lua
 Adapters/LfgButton.lua
 Adapters/LfgBoardPage.lua
 Adapters/PromotionLines.lua
@@ -78,6 +79,7 @@ Core/SettingsLayout.lua
 Core/SettingsModel.lua
 Core/GreetPolicy.lua
 Core/GreetingLibrary.lua
+Core/GreetingsEditor.lua
 Core/GreetPromptQueue.lua
 Core/GreetTally.lua
 Core/GreetWeight.lua

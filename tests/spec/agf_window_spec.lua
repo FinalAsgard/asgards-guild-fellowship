@@ -477,3 +477,48 @@ local index
 for index = 1, #fixtures.PROFILES do
     registerProfileTests(fixtures.PROFILES[index])
 end
+
+test.test("agf window: a module's header switch agrees with its setting, and shows only on that module", function()
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/Theme.lua", "Adapters/Widgets.lua",
+        "Adapters/AgfWindow.lua")
+    local environment = fakeFrames.install({})
+    local state = { on = true }
+    local settings = addon.SettingsModel.Create()
+    settings:AddSection("guildGreet", "Guild Greet")
+    settings:Add("guildGreet", { id = "guildGreet", kind = "toggle", label = "Show greet prompts",
+        get = function() return state.on end,
+        set = function(enabled)
+            state.on = enabled
+            return true
+        end })
+    local window = addon.AgfWindow.Create({ environment = environment }, {
+        modules = { { id = "lfg", label = "LFG", title = "Guild LFG Board" },
+            { id = "greetings", label = "Greetings", title = "Greetings",
+                headerSwitch = { id = "guildGreet", label = "Greet prompts", on = "Greet prompts on",
+                    off = "Greet prompts off" } } },
+        settings = settings,
+        settingsTabs = {},
+    })
+    window:Open("lfg")
+    local header = window:HeaderSwitch("greetings")
+
+    test.assertEqual(nil, window:HeaderSwitch("lfg"))
+    test.assertFalse(header.frame.shown)
+    window:ShowPage("greetings")
+    test.assertTrue(header.frame.shown)
+    test.assertTrue(header.switch:IsOn())
+    test.assertEqual("Greet prompts on", header.label.text)
+
+    header.switch.scripts.OnClick(header.switch)
+    test.assertFalse(state.on)
+    test.assertFalse(header.switch:IsOn())
+    test.assertEqual("Greet prompts off", header.label.text)
+
+    -- Changed elsewhere (the AddOns options or a slash command): it follows.
+    settings:Set("guildGreet", true)
+    test.assertTrue(header.switch:IsOn())
+    test.assertEqual("Greet prompts on", header.label.text)
+
+    window:ShowPage("settings")
+    test.assertFalse(header.frame.shown)
+end)

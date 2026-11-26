@@ -125,6 +125,10 @@ local friendsUi = {
     page = nil,
     draw = function() end,
 }
+-- The Greetings page in the new window, once it's drawn.
+local greetingsUi = {
+    page = nil,
+}
 -- The key the new UI saves this character's layout under: its GUID, the
 -- same in every guild (or with none), else its full name.
 local function layoutKey()
@@ -1338,6 +1342,38 @@ if clientProfile.supported then
                 onShow = function()
                     if lfgPage ~= nil then
                         lfgPage:Refresh()
+                    end
+                end },
+            -- Guild Greet's greetings, from saved data each time it's shown.
+            { id = "greetings", label = "Greetings", title = "Greetings",
+                headerSwitch = { id = "guildGreet", label = "Greet prompts", on = "Greet prompts on",
+                    off = "Greet prompts off" },
+                draw = function(content, ui)
+                    greetingsUi.page = addon.AgfGreetingsPage.Create(content, ui, {
+                        editor = addon.GreetingsEditor.Create({
+                            library = function()
+                                return guildGreet:Library()
+                            end,
+                            enabled = function(category)
+                                return settings:Get("greetCategory:" .. category) == true
+                            end,
+                            minutes = function()
+                                return settings:Get("welcomeBackMinutes")
+                            end,
+                            promptsOn = function()
+                                return settings:Get("guildGreet") == true
+                            end,
+                        }),
+                        settings = settings,
+                        onError = function(text)
+                            rosterController:Print(text)
+                        end,
+                    })
+                    addon.greetingsPage = greetingsUi.page
+                end,
+                onShow = function()
+                    if greetingsUi.page ~= nil then
+                        greetingsUi.page:Refresh()
                     end
                 end },
         },
@@ -4682,6 +4718,12 @@ if clientProfile.supported then
             guildGreet:Refresh()
         elseif entry ~= nil and entry.category ~= nil then
             guildGreet:OnCategoryChanged(entry.category, value)
+        end
+        -- The Greetings page shows these; changed elsewhere, it follows.
+        if greetingsUi.page ~= nil and (id == "guildGreet" or id == "welcomeBackMinutes"
+            or (entry ~= nil and entry.category ~= nil))
+        then
+            greetingsUi.page:Refresh()
         end
     end)
     -- What follows a roster update, run once per burst of them (see below).

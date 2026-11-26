@@ -17,6 +17,7 @@ local Widgets = {
     TOGGLE_WIDTH = 34,
     TOGGLE_HEIGHT = 18,
     INPUT_HEIGHT = 26,
+    DOT_SIZE = 6,
     ROLE_LABELS = { tank = "Tank", healer = "Healer", dps = "DPS" },
     -- Each role's icon (a Theme.TEXTURES name); "any" is a person.
     ROLE_ICONS = { tank = "shield", healer = "cross", dps = "sword", any = "person" },
@@ -332,6 +333,12 @@ function UI:Segmented(parent, items, width, onSelect)
         button.id = item.id
         button.label = ui:Text(button, item.label, "semibold", "body", "muted")
         button.label:SetPoint("CENTER", button, "CENTER", 0, 0)
+        button.dot = button:CreateTexture(nil, "OVERLAY")
+        button.dot:SetTexture(Theme.TEXTURES.rounded)
+        button.dot:SetVertexColor(Theme.Color("disabled"))
+        button.dot:SetSize(Widgets.DOT_SIZE, Widgets.DOT_SIZE)
+        button.dot:SetPoint("LEFT", button.label, "RIGHT", Theme.SPACING.xs, 0)
+        button.dot:Hide()
         button:SetScript("OnClick", function(self)
             strip:Select(self.id)
             if onSelect ~= nil then
@@ -352,6 +359,21 @@ function UI:Segmented(parent, items, width, onSelect)
     end
     function strip.Selected()
         return strip.selected
+    end
+    -- A small grey dot beside one's label, e.g. for a choice that's off.
+    function strip.SetDot(_, id, shown)
+        local position
+        for position = 1, #strip.buttons do
+            local button = strip.buttons[position]
+            if button.id == id then
+                button.dotShown = shown == true
+                if button.dotShown then
+                    button.dot:Show()
+                else
+                    button.dot:Hide()
+                end
+            end
+        end
     end
     if items[1] ~= nil then
         strip:Select(items[1].id)
@@ -471,6 +493,30 @@ function UI:Toggle(parent, onChange)
     end)
     switch:SetOn(false)
     return switch
+end
+
+-- Scrolling -----------------------------------------------------------------
+
+-- A list that scrolls with the mouse wheel, `step` pixels a notch: a scroll
+-- frame on `parent` and, inside it, the list frame to lay rows out on, top
+-- to bottom, `width` wide until the scroll frame is sized. Returns both.
+function UI:ScrollList(parent, step, width)
+    local area = self:frame("ScrollFrame", parent)
+    local list = self:frame("Frame", area)
+    list:SetSize(width or 400, 1)
+    area:SetScrollChild(list)
+    area:EnableMouseWheel(true)
+    area:SetScript("OnMouseWheel", function(self, delta)
+        local most = self:GetVerticalScrollRange() or 0
+        local scroll = (self:GetVerticalScroll() or 0) - delta * step
+        self:SetVerticalScroll(math.max(0, math.min(most, scroll)))
+    end)
+    area:SetScript("OnSizeChanged", function(_, areaWidth)
+        if type(areaWidth) == "number" and areaWidth > 0 then
+            list:SetWidth(areaWidth)
+        end
+    end)
+    return area, list
 end
 
 -- Text entry ----------------------------------------------------------------
