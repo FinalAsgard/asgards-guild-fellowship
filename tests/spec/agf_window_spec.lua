@@ -652,3 +652,93 @@ test.test("agf window: popup rows draw a toggle with info, an action button and 
     test.assertFalse(state.moving)
     test.assertEqual("Move greeting pop-ups", move.label.text)
 end)
+
+test.test("agf window: a stepper steps to the next multiple, clamps, repeats while held, and takes a typed value", function()
+    local addon = loadUi()
+    local environment = fakeFrames.install({})
+    local ui = addon.Widgets.Create(environment)
+    local changes = {}
+    local stepper = ui:Stepper(environment.UIParent or ui:frame("Frame", nil), { min = 1, max = 120, step = 5,
+        onChange = function(value)
+            table.insert(changes, value)
+        end })
+    stepper:SetValue(1)
+
+    -- In 5s from 1: 5, 10; down to 5, then the minimum.
+    stepper.plus.scripts.OnMouseDown(stepper.plus)
+    stepper.plus.scripts.OnMouseUp(stepper.plus)
+    test.assertEqual(5, stepper:GetValue())
+    stepper.plus.scripts.OnMouseDown(stepper.plus)
+    stepper.plus.scripts.OnMouseUp(stepper.plus)
+    test.assertEqual(10, stepper:GetValue())
+    stepper.minus.scripts.OnMouseDown(stepper.minus)
+    stepper.minus.scripts.OnMouseUp(stepper.minus)
+    stepper.minus.scripts.OnMouseDown(stepper.minus)
+    stepper.minus.scripts.OnMouseUp(stepper.minus)
+    test.assertEqual(1, stepper:GetValue())
+    test.assertEqual("5,10,5,1", table.concat(changes, ","))
+    -- At the minimum, − does nothing.
+    stepper.minus.scripts.OnMouseDown(stepper.minus)
+    stepper.minus.scripts.OnMouseUp(stepper.minus)
+    test.assertEqual(4, #changes)
+
+    -- Held: one step at once, then more after the delay, until let go.
+    stepper.plus.scripts.OnMouseDown(stepper.plus)
+    test.assertEqual(5, stepper:GetValue())
+    stepper.scripts.OnUpdate(stepper, 0.3)
+    test.assertEqual(5, stepper:GetValue())
+    -- Past the delay, then two and a half repeats: three more steps.
+    stepper.scripts.OnUpdate(stepper, 0.1 + 2.5 * addon.Widgets.HOLD_REPEAT)
+    test.assertEqual(20, stepper:GetValue())
+    stepper.plus.scripts.OnMouseUp(stepper.plus)
+    test.assertEqual(nil, stepper.scripts.OnUpdate)
+    test.assertEqual("20", stepper.field.box:GetText())
+
+    -- Typed: any value in range; out of range is kept to it; junk goes back.
+    local box = stepper.field.box
+    box:SetText("37")
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(37, stepper:GetValue())
+    box:SetText("500")
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(120, stepper:GetValue())
+    test.assertEqual("120", box:GetText())
+    box:SetText("soon")
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(120, stepper:GetValue())
+    test.assertEqual("120", box:GetText())
+end)
+
+test.test("agf window: stepping and typed values are pure, and a slider shows its formatted value", function()
+    local addon = loadUi()
+    local step, typed = addon.Widgets.StepValue, addon.Widgets.TypedValue
+    test.assertEqual(5, step(1, 1, 5, 1, 120))
+    test.assertEqual(10, step(7, 1, 5, 1, 120))
+    test.assertEqual(5, step(7, -1, 5, 1, 120))
+    test.assertEqual(120, step(120, 1, 5, 1, 120))
+    test.assertEqual(3, step(2, 1, nil, 1, 10))
+    test.assertEqual(4, typed(" 4 ", 1, 10))
+    test.assertEqual(1, typed("-3", 1, 10))
+    test.assertEqual(3, typed("2.6", 1, 10))
+    test.assertEqual(nil, typed("", 1, 10))
+
+    local environment = fakeFrames.install({})
+    local ui = addon.Widgets.Create(environment)
+    local changes = {}
+    local slider = ui:Slider(ui:frame("Frame", nil), 300, { min = 0, max = 15,
+        format = function(minutes)
+            return minutes == 0 and "Off" or (minutes .. " min")
+        end,
+        onChange = function(value)
+            table.insert(changes, value)
+        end })
+    slider:SetValue(0)
+    test.assertEqual("Off", slider.text.text)
+    test.assertEqual(0, #changes)
+    slider.slider.scripts.OnValueChanged(slider.slider, 5.2, true)
+    test.assertEqual("5 min", slider.text.text)
+    test.assertEqual(5, changes[1])
+    slider:SetValue(9)
+    test.assertEqual("9 min", slider.text.text)
+    test.assertEqual(1, #changes)
+end)

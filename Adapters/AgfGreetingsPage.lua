@@ -24,6 +24,11 @@ local _, addon = ...
 -- While prompts are off on this character, a banner across the top says so,
 -- with Turn on.
 --
+-- The Settings tab writes Guild Greet's numbers as sentences with − n +
+-- steppers in them: the welcome-back minutes, and a Close my prompt card
+-- with the two caps. Officers get a tinted card with the guild's Slow mode
+-- slider; everyone else one line saying what it is.
+--
 -- Everything it shows comes from GreetingsEditor and the SettingsModel;
 -- Refresh redraws it from them (and so from saved data).
 local Theme = addon.Theme
@@ -53,6 +58,21 @@ local AgfGreetingsPage = {
     BANNER_HEIGHT = 40,
     -- The setting the banner's Turn on changes.
     CHARACTER_SETTING = "greetCharacter",
+    -- The Settings tab: each number's SettingsModel entry and sentence
+    -- (the words before and after its stepper), and the note under it.
+    NUMBERS = {
+        { id = "welcomeBackMinutes", before = "Count a login as a welcome back after", after = "minutes away",
+            step = 5, note = "Coming back sooner is a relog, and gets no prompt." },
+        { id = "greetCap", before = "Once they've had", after = "greetings",
+            note = "For a login or welcome back: your prompt closes once guildmates have greeted them this often." },
+        { id = "welcomeCap", before = "Once a new member has had", after = "welcomes",
+            note = "For someone who just joined: your prompt closes once they've been welcomed this often." },
+    },
+    CLOSE_TITLE = "Close my prompt",
+    OFFICER_TITLE = "Officer · applies to the whole guild",
+    SLOW_MODE_LABEL = "Slow mode: minutes between each greeter's greetings",
+    SLOW_MODE_SETTING = "greetSlowMode",
+    SLIDER_WIDTH = 320,
 }
 addon.AgfGreetingsPage = AgfGreetingsPage
 
@@ -95,6 +115,7 @@ function Page:build()
     end
     self.greetingsTab = tab()
     self.settingsTab = tab()
+    self:buildSettings(self.settingsTab)
 
     local body = self.greetingsTab
     local items = {}
@@ -145,6 +166,109 @@ function Page:build()
         page:focus()
     end)
     self.add:SetWidth(AgfGreetingsPage.ADD_WIDTH)
+end
+
+-- One number on the Settings tab, `number` (see NUMBERS), at `top` in
+-- `card`: its sentence with the stepper in it, and the note under it.
+-- Returns the height it takes.
+function Page:numberRow(card, number, top)
+    local ui, page = self.ui, self
+    local settings = self.options.settings
+    local entry = settings:Entry(number.id) or { min = 1, max = 1 }
+    local pad = Theme.SPACING.l
+    local before = ui:Text(card, number.before, "regular", "body", "text")
+    before:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -top - 5)
+    local stepper = ui:Stepper(card, { min = entry.min, max = entry.max, step = number.step,
+        onChange = function(value)
+            local changed, reason = settings:Set(number.id, value)
+            if not changed and page.options.onError ~= nil then
+                page.options.onError("That can't be changed: " .. tostring(reason) .. ".")
+            end
+            page:RefreshSettings()
+        end })
+    stepper:SetPoint("LEFT", before, "RIGHT", Theme.SPACING.s, 0)
+    local after = ui:Text(card, number.after, "regular", "body", "text")
+    after:SetPoint("LEFT", stepper, "RIGHT", Theme.SPACING.s, 0)
+    local note = ui:Text(card, number.note, "regular", "small", "muted")
+    note:SetPoint("TOPLEFT", card, "TOPLEFT", pad, -top - addon.Widgets.STEPPER_BUTTON - Theme.SPACING.s)
+    note:SetPoint("RIGHT", card, "RIGHT", -pad, 0)
+    note:SetJustifyH("LEFT")
+    note:SetWordWrap(true)
+    self.steppers[number.id] = stepper
+    return addon.Widgets.STEPPER_BUTTON + Theme.SPACING.s + 16 + Theme.SPACING.m
+end
+
+-- The Settings tab: the welcome-back card, Close my prompt, and Slow mode
+-- (the officer card, or the line for everyone else).
+function Page:buildSettings(body)
+    local ui, page = self.ui, self
+    local pad = Theme.SPACING.l
+    self.steppers = {}
+    local numbers = AgfGreetingsPage.NUMBERS
+    local function card(top, height, options)
+        local panel = ui:Panel(body, options or { fill = "surface" })
+        panel:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top)
+        panel:SetPoint("RIGHT", body, "RIGHT", 0, 0)
+        panel:SetHeight(height)
+        return panel
+    end
+    local rowHeight = addon.Widgets.STEPPER_BUTTON + Theme.SPACING.s + 16 + Theme.SPACING.m
+    local top = 0
+    local timing = card(top, pad + rowHeight)
+    self:numberRow(timing, numbers[1], pad)
+    top = top + pad + rowHeight + Theme.SPACING.m
+
+    local close = card(top, pad + 24 + 2 * rowHeight)
+    close.title = ui:Text(close, AgfGreetingsPage.CLOSE_TITLE, "semibold", "title", "text")
+    close.title:SetPoint("TOPLEFT", close, "TOPLEFT", pad, -pad)
+    self:numberRow(close, numbers[2], pad + 24)
+    self:numberRow(close, numbers[3], pad + 24 + rowHeight)
+    top = top + pad + 24 + 2 * rowHeight + Theme.SPACING.m
+
+    local officer = card(top, pad + 24 + 40, { fill = "raised", border = "gold" })
+    officer.title = ui:Text(officer, AgfGreetingsPage.OFFICER_TITLE, "semibold", "body", "gold")
+    officer.title:SetPoint("TOPLEFT", officer, "TOPLEFT", pad, -pad)
+    officer.label = ui:Text(officer, AgfGreetingsPage.SLOW_MODE_LABEL, "regular", "body", "text")
+    officer.label:SetPoint("TOPLEFT", officer.title, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+    local slowMode = self.options.settings:Entry(AgfGreetingsPage.SLOW_MODE_SETTING) or { min = 0, max = 0 }
+    officer.slider = ui:Slider(officer, AgfGreetingsPage.SLIDER_WIDTH, { min = slowMode.min, max = slowMode.max,
+        format = slowMode.format, onChange = function(value)
+            local changed, reason = page.options.settings:Set(AgfGreetingsPage.SLOW_MODE_SETTING, value)
+            if not changed and page.options.onError ~= nil then
+                page.options.onError("Slow mode can't be changed: " .. tostring(reason) .. ".")
+            end
+            page:RefreshSettings()
+        end })
+    officer.slider:SetPoint("LEFT", officer.label, "RIGHT", Theme.SPACING.m, 0)
+    self.officerCard = officer
+    self.slowModeLine = ui:Text(body, "", "regular", "body", "muted")
+    self.slowModeLine:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top - Theme.SPACING.s)
+    self.slowModeLine:SetPoint("RIGHT", body, "RIGHT", 0, 0)
+    self.slowModeLine:SetJustifyH("LEFT")
+    self:RefreshSettings()
+end
+
+-- Redraws the Settings tab from the SettingsModel: each stepper's value,
+-- and the officer card or the read-only Slow mode line.
+function Page:RefreshSettings()
+    local settings = self.options.settings
+    local id, stepper
+    for id, stepper in pairs(self.steppers or {}) do
+        local value = settings:Get(id)
+        if type(value) == "number" then
+            stepper:SetValue(value)
+        end
+    end
+    local minutes = settings:Get(AgfGreetingsPage.SLOW_MODE_SETTING)
+    if settings:IsEnabled(AgfGreetingsPage.SLOW_MODE_SETTING) then
+        self.officerCard.slider:SetValue(type(minutes) == "number" and minutes or 0)
+        self.officerCard:Show()
+        self.slowModeLine:Hide()
+    else
+        self.officerCard:Hide()
+        self.slowModeLine:SetText(addon.GreetingsEditor.SlowModeLine(minutes))
+        self.slowModeLine:Show()
+    end
 end
 
 -- The banner while prompts are off on this character: its line and Turn on.
@@ -580,6 +704,7 @@ function Page:Refresh()
     self.greetingsTab:SetAlpha(view.dimmed and AgfGreetingsPage.DIMMED_ALPHA or 1)
     self.dimmed = view.dimmed
     self:refreshEditButtons()
+    self:RefreshSettings()
 end
 
 -- Lays the list out top to bottom: the rows (or, with none, why the
@@ -645,6 +770,7 @@ function Page:ShowTab(id)
     self.tab = id
     self.tabs:Select(id)
     if id == "settings" then
+        self:RefreshSettings()
         self.greetingsTab:Hide()
         self.settingsTab:Show()
     else

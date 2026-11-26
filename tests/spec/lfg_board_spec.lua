@@ -1457,3 +1457,49 @@ test.test("greetings: the gear popup holds the greeting settings, and a banner s
     test.assertTrue(addon.settings:Get("greetCharacter"))
     test.assertFalse(page.banner.shown)
 end)
+
+test.test("greetings: the Settings tab's steppers and Slow mode are the AddOns options' settings", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    click(page.tabs.tabs[2])
+    test.assertEqual("settings", page:Tab())
+
+    local minutes = page.steppers.welcomeBackMinutes
+    test.assertEqual(addon.settings:Get("welcomeBackMinutes"), minutes:GetValue())
+    local before = minutes:GetValue()
+    minutes.plus.scripts.OnMouseDown(minutes.plus)
+    minutes.plus.scripts.OnMouseUp(minutes.plus)
+    test.assertEqual(addon.Widgets.StepValue(before, 1, 5, 1, 120), addon.settings:Get("welcomeBackMinutes"))
+    -- Changed elsewhere: the stepper follows.
+    addon.settings:Set("greetCap", 7)
+    test.assertEqual(7, page.steppers.greetCap:GetValue())
+    local box = page.steppers.welcomeCap.field.box
+    box:SetText("4")
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(4, addon.settings:Get("welcomeCap"))
+
+    -- Tool Box is an officer: the Slow mode card, not the line.
+    test.assertTrue(addon.settings:IsEnabled("greetSlowMode"))
+    test.assertTrue(page.officerCard.shown)
+    test.assertFalse(page.slowModeLine.shown)
+    page.officerCard.slider.slider.scripts.OnValueChanged(page.officerCard.slider.slider, 3, true)
+    test.assertEqual(3, addon.settings:Get("greetSlowMode"))
+    test.assertEqual("3 min", page.officerCard.slider.text.text)
+end)
+
+test.test("greetings: a member who isn't an officer sees one line about the guild's Slow mode", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    click(page.tabs.tabs[2])
+
+    test.assertFalse(addon.settings:IsEnabled("greetSlowMode"))
+    test.assertFalse(page.officerCard.shown)
+    test.assertTrue(page.slowModeLine.shown)
+    test.assertEqual(addon.GreetingsEditor.SlowModeLine(addon.settings:Get("greetSlowMode")), page.slowModeLine.text)
+end)

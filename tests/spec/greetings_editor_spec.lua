@@ -448,3 +448,12 @@ test.test("greetings editor: a banner says when prompts are off on this characte
     test.assertEqual("Greet prompts are off on this character. Your other characters still get them.",
         editor:View().banner)
 end)
+
+test.test("greetings editor: the read-only Slow mode line says the guild's minutes, or that it's off", function()
+    local _, addon = newEditor({})
+    local line = addon.GreetingsEditor.SlowModeLine
+
+    test.assertEqual("Your guild's Slow mode: 5 min between each greeter's greetings (set by officers).", line(5))
+    test.assertEqual("Your guild's Slow mode is off (set by officers).", line(0))
+    test.assertEqual("Your guild's Slow mode is off (set by officers).", line(nil))
+end)

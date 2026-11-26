@@ -19,6 +19,13 @@ local Widgets = {
     INPUT_HEIGHT = 26,
     DOT_SIZE = 6,
     INFO_SIZE = 16,
+    -- A stepper's buttons and number, and how holding a button repeats:
+    -- the wait before the first repeat, then between repeats, in seconds.
+    STEPPER_BUTTON = 24,
+    STEPPER_FIELD = 44,
+    HOLD_DELAY = 0.4,
+    HOLD_REPEAT = 0.08,
+    SLIDER_HEIGHT = 16,
     ROLE_LABELS = { tank = "Tank", healer = "Healer", dps = "DPS" },
     -- Each role's icon (a Theme.TEXTURES name); "any" is a person.
     ROLE_ICONS = { tank = "shield", healer = "cross", dps = "sword", any = "person" },
@@ -369,6 +376,199 @@ function UI:InfoIcon(parent, title, text)
         end
     end)
     return icon
+end
+
+-- Numbers -------------------------------------------------------------------
+
+local function clampWhole(value, min, max)
+    return math.max(min, math.min(max, math.floor(value + 0.5)))
+end
+
+-- The value one step from `value` in `direction` (1 up, -1 down): the next
+-- multiple of `step` that way, so 1 steps up to 5, then 10, in 5s, kept
+-- from `min` to `max`.
+function Widgets.StepValue(value, direction, step, min, max)
+    step = step or 1
+    local stepped
+    if direction > 0 then
+        stepped = (math.floor(value / step) + 1) * step
+    else
+        stepped = (math.ceil(value / step) - 1) * step
+    end
+    return clampWhole(stepped, min, max)
+end
+
+-- A number typed as `text`, rounded and kept from `min` to `max`, or nil
+-- when it isn't a number.
+function Widgets.TypedValue(text, min, max)
+    local value = tonumber(string.match(text or "", "^%s*(.-)%s*$"))
+    if value == nil or value ~= value then
+        return nil
+    end
+    return clampWhole(value, min, max)
+end
+
+-- A − value + stepper. options: min, max, step (default 1), onChange(value)
+-- when the player changes it. − and + step (StepValue), and holding one
+-- repeats; the number can be clicked and typed over, kept in range on
+-- Enter or leaving it. SetValue(value) shows a value without onChange;
+-- GetValue() is what it shows.
+function UI:Stepper(parent, options)
+    local ui = self
+    local stepper = self:frame("Frame", parent)
+    local size = Widgets.STEPPER_BUTTON
+    stepper:SetSize(2 * size + Widgets.STEPPER_FIELD + 2 * Theme.SPACING.xs, size)
+    stepper.value = options.min
+    local function change(value)
+        if value ~= stepper.value then
+            stepper:SetValue(value)
+            if options.onChange ~= nil then
+                options.onChange(value)
+            end
+        end
+    end
+    function stepper.Step(_, direction)
+        change(Widgets.StepValue(stepper.value, direction, options.step, options.min, options.max))
+    end
+    local held
+    local function stop()
+        held = nil
+        stepper:SetScript("OnUpdate", nil)
+    end
+    local function button(text, direction)
+        local result = ui:frame("Button", stepper)
+        result:SetSize(size, size)
+        round(result, Theme.RADIUS.small, "raised", "border")
+        result.label = ui:Text(result, text, "semibold", "body", "text")
+        result.label:SetPoint("CENTER", result, "CENTER", 0, 0)
+        result:SetScript("OnMouseDown", function()
+            stepper:Step(direction)
+            held = { direction = direction, wait = Widgets.HOLD_DELAY }
+            stepper:SetScript("OnUpdate", function(_, elapsed)
+                if held == nil then
+                    return
+                end
+                held.wait = held.wait - (elapsed or 0)
+                while held ~= nil and held.wait <= 0 do
+                    stepper:Step(held.direction)
+                    held.wait = held.wait + Widgets.HOLD_REPEAT
+                end
+            end)
+        end)
+        result:SetScript("OnMouseUp", stop)
+        result:SetScript("OnHide", stop)
+        result:SetScript("OnEnter", function(self)
+            self:SetFill("hover")
+        end)
+        result:SetScript("OnLeave", function(self)
+            self:SetFill("raised")
+            stop()
+        end)
+        return result
+    end
+    stepper.minus = button("−", -1)
+    stepper.minus:SetPoint("LEFT", stepper, "LEFT", 0, 0)
+    stepper.field = self:field(stepper, Widgets.STEPPER_FIELD)
+    stepper.field:SetPoint("LEFT", stepper.minus, "RIGHT", Theme.SPACING.xs, 0)
+    stepper.field:SetHeight(size)
+    local box = stepper.field.box
+    box:SetJustifyH("CENTER")
+    local function commit()
+        local typed = Widgets.TypedValue(box:GetText(), options.min, options.max)
+        if typed == nil then
+            stepper:SetValue(stepper.value)
+        else
+            -- Shown kept in range even when it's the same value.
+            box:SetText(tostring(typed))
+            change(typed)
+        end
+    end
+    box:SetScript("OnEnterPressed", function(self)
+        commit()
+        self:ClearFocus()
+    end)
+    box:HookScript("OnEditFocusLost", commit)
+    stepper.plus = button("+", 1)
+    stepper.plus:SetPoint("LEFT", stepper.field, "RIGHT", Theme.SPACING.xs, 0)
+    stepper:SetScript("OnHide", stop)
+    function stepper.SetValue(_, value)
+        stepper.value = value
+        box:SetText(tostring(value))
+    end
+    function stepper.GetValue()
+        return stepper.value
+    end
+    stepper:SetValue(options.min)
+    return stepper
+end
+
+-- A horizontal slider `width` wide from options.min to options.max in
+-- whole steps, its value shown beside it through options.format(value)
+-- (the number itself without one). onChange(value) runs when the player
+-- drags it. SetValue(value) moves it without onChange.
+function UI:Slider(parent, width, options)
+    local holder = self:frame("Frame", parent)
+    holder:SetSize(width, Widgets.SLIDER_HEIGHT)
+    local track = self:Panel(holder, { radius = Theme.RADIUS.small, fill = "surface" })
+    track:SetPoint("LEFT", holder, "LEFT", 0, 0)
+    track:SetSize(width - 70, 6)
+    local slider = self:frame("Slider", holder)
+    slider:SetOrientation("HORIZONTAL")
+    slider:SetPoint("LEFT", holder, "LEFT", 0, 0)
+    slider:SetSize(width - 70, Widgets.SLIDER_HEIGHT)
+    slider:SetMinMaxValues(options.min, options.max)
+    slider:SetValueStep(1)
+    if type(slider.SetObeyStepOnDrag) == "function" then
+        slider:SetObeyStepOnDrag(true)
+    end
+    local thumb = slider:CreateTexture(nil, "OVERLAY")
+    thumb:SetTexture(Theme.TEXTURES.rounded)
+    thumb:SetVertexColor(Theme.Color("green"))
+    thumb:SetSize(Widgets.SLIDER_HEIGHT, Widgets.SLIDER_HEIGHT)
+    slider:SetThumbTexture(thumb)
+    holder.slider = slider
+    holder.text = self:Text(holder, "", "semibold", "body", "text")
+    holder.text:SetPoint("LEFT", slider, "RIGHT", Theme.SPACING.m, 0)
+    local function show(value)
+        holder.value = value
+        holder.text:SetText(options.format and options.format(value) or tostring(value))
+    end
+    function holder.Format(_, value)
+        return options.format and options.format(value) or tostring(value)
+    end
+    slider:SetScript("OnValueChanged", function(_, value, userInput)
+        if type(value) ~= "number" then
+            return
+        end
+        value = clampWhole(value, options.min, options.max)
+        if holder.setting then
+            return
+        end
+        if value ~= holder.value then
+            show(value)
+            if userInput ~= false and options.onChange ~= nil then
+                options.onChange(value)
+            end
+        end
+    end)
+    function holder.SetValue(_, value)
+        holder.setting = true
+        slider:SetValue(value)
+        holder.setting = false
+        show(value)
+    end
+    function holder.GetValue()
+        return holder.value
+    end
+    function holder.SetEnabled(_, enabled)
+        if enabled then
+            slider:Enable()
+        else
+            slider:Disable()
+        end
+    end
+    show(options.min)
+    return holder
 end
 
 -- Choices -------------------------------------------------------------------

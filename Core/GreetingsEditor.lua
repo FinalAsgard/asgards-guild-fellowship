@@ -260,6 +260,15 @@ function Editor:banner()
     return string.format(GreetingsEditor.BANNER, name)
 end
 
+-- The Settings tab's line about the guild's Slow mode, for members who
+-- can't change it (`minutes`: 0 is off; nil when unknown).
+function GreetingsEditor.SlowModeLine(minutes)
+    if type(minutes) ~= "number" or minutes <= 0 then
+        return "Your guild's Slow mode is off (set by officers)."
+    end
+    return "Your guild's Slow mode: " .. minutes .. " min between each greeter's greetings (set by officers)."
+end
+
 function Editor:Selected()
     return self.selected
 end

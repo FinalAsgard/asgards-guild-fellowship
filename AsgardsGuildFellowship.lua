@@ -4760,6 +4760,11 @@ if clientProfile.supported then
         then
             greetingsUi.page:Refresh()
         end
+        if greetingsUi.page ~= nil and (id == "welcomeBackMinutes" or id == "greetCap" or id == "welcomeCap"
+            or id == "greetSlowMode")
+        then
+            greetingsUi.page:RefreshSettings()
+        end
     end)
     -- What follows a roster update, run once per burst of them (see below).
     local function afterRosterUpdates()
