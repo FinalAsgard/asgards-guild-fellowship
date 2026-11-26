@@ -26,7 +26,12 @@ local AgfWindow = {
     SIDEBAR_WIDTH = 200,
     MARGIN = 12,
     ICON_SIZE = 28,
-    POPUP_WIDTH = 260,
+    POPUP_WIDTH = 300,
+    -- Gear popup rows: a switch's, an action button's, and a choice's
+    -- (its label, then the segmented control under it).
+    POPUP_ROW_HEIGHT = 30,
+    POPUP_ACTION_HEIGHT = 34,
+    POPUP_CHOICE_HEIGHT = 58,
     MODULE_ROW_HEIGHT = 32,
     SETTINGS_ROW_HEIGHT = 44,
     -- A color setting's swatches, and its Custom... button.
@@ -46,7 +51,13 @@ Window.__index = Window
 --                 settingsRows, headerSwitch, onShow }: label names the
 --                 sidebar button and the gear popup, title heads the page;
 --                 draw is optional, settingsRows ({ id, label, info }
---                 toggles in `settings`) are the gear popup's switches,
+--                 entries in `settings`) are the gear popup's rows, drawn
+--                 by the entry's kind: a toggle as a switch, an action as
+--                 a button reading Label() (its activeLabel while active;
+--                 one marked offOnClose is ended when the window hides),
+--                 and a choice as a segmented control under its label.
+--                 label defaults to the entry's; info (text, or true for
+--                 the entry's own info) puts an info icon by the label,
 --                 headerSwitch (optional, { id, label, on, off }: a toggle
 --                 in `settings`, and its text while on and off) is a
 --                 switch beside the gear while the module shows, and
@@ -68,6 +79,9 @@ function AgfWindow.Create(client, options)
         modules = options.modules or {},
         switches = {},
         colorRows = {},
+        choiceRows = {},
+        actionRows = {},
+        infoIcons = {},
         headers = {},
         pages = {},
         moduleButtons = {},
@@ -356,6 +370,14 @@ function Window:refreshSwitch(id)
             header.label:SetText(self.options.settings:Get(id) == true and header.setting.on or header.setting.off)
         end
     end
+    local strips = self.choiceRows[id] or {}
+    for index = 1, #strips do
+        strips[index]:Select(self.options.settings:Get(id))
+    end
+    local buttons = self.actionRows[id] or {}
+    for index = 1, #buttons do
+        buttons[index]:SetLabel(self.options.settings:Label(id) or buttons[index].setting.label)
+    end
     local cards = self.colorRows[id] or {}
     for index = 1, #cards do
         local card = cards[index]
@@ -453,13 +475,12 @@ function Window:buildPopup(frame)
         body:SetPoint("TOPLEFT", popup, "TOPLEFT", Theme.SPACING.l, -40)
         body:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -Theme.SPACING.l, Theme.SPACING.m)
         local rows = module.settingsRows or {}
+        local top = 0
         local position
         for position = 1, #rows do
-            local label = ui:Text(body, rows[position].label, "regular", "body", "text")
-            label:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -(position - 1) * 30 - 4)
-            local switch = self:newSwitch(body, rows[position])
-            switch:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -(position - 1) * 30)
+            top = top + self:buildPopupRow(body, rows[position], top)
         end
+        body.height = top
         body:Hide()
         popup.bodies[module.id] = body
     end
@@ -491,6 +512,7 @@ function Window:build()
     end)
     frame:SetScript("OnHide", function()
         window:CloseSettingsPopup()
+        window:endModes()
     end)
     -- Hidden until it's all built.
     frame:Hide()
@@ -616,6 +638,7 @@ function Window:Close()
         self.frame:Hide()
     end
     self:CloseSettingsPopup()
+    self:endModes()
     self.open = false
 end
 
@@ -692,6 +715,93 @@ end
 
 -- The gear popup -----------------------------------------------------------
 
+-- One row of a gear popup's `body` at `top`, for settingsRows entry `row`
+-- (see Create). Returns its height.
+function Window:buildPopupRow(body, row, top)
+    local ui, window = self.ui, self
+    local settings = self.options.settings
+    local entry = settings:Entry(row.id) or {}
+    local text = row.label or entry.label or row.id
+    local function info(anchor)
+        if row.info == nil then
+            return
+        end
+        local icon = ui:InfoIcon(body, text, function()
+            if row.info == true then
+                return settings:Info(row.id)
+            end
+            return row.info
+        end)
+        icon:SetPoint("LEFT", anchor, "RIGHT", Theme.SPACING.xs, 0)
+        window.infoIcons[row.id] = icon
+        return icon
+    end
+    if entry.kind == "action" then
+        local button = ui:Button(body, settings:Label(row.id) or text, "secondary", function()
+            local ran, reason = settings:Run(row.id)
+            if not ran and reason ~= nil then
+                window.client:Print(addon.Identity.chatPrefix .. " " .. text .. ": " .. tostring(reason) .. ".")
+            end
+            window:refreshSwitch(row.id)
+        end)
+        button:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top)
+        button:SetPoint("RIGHT", body, "RIGHT", 0, 0)
+        button.setting = row
+        self.actionRows[row.id] = self.actionRows[row.id] or {}
+        table.insert(self.actionRows[row.id], button)
+        return AgfWindow.POPUP_ACTION_HEIGHT
+    end
+    local label = ui:Text(body, text, "regular", "body", "text")
+    label:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top - 4)
+    info(label)
+    if entry.kind == "choice" then
+        local items = {}
+        local index
+        for index = 1, #(entry.choices or {}) do
+            items[index] = { id = entry.choices[index].id, label = entry.choices[index].label }
+        end
+        local strip = ui:Segmented(body, items, AgfWindow.POPUP_WIDTH - 2 * Theme.SPACING.l, function(id)
+            local changed, reason = settings:Set(row.id, id)
+            if not changed then
+                window.client:Print(addon.Identity.chatPrefix .. " " .. text .. " can't be changed: " ..
+                    tostring(reason) .. ".")
+            end
+            window:refreshSwitch(row.id)
+        end)
+        strip:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top - 24)
+        self.choiceRows[row.id] = self.choiceRows[row.id] or {}
+        table.insert(self.choiceRows[row.id], strip)
+        self:refreshSwitch(row.id)
+        return AgfWindow.POPUP_CHOICE_HEIGHT
+    end
+    local switch = self:newSwitch(body, { id = row.id, label = text })
+    switch:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -top)
+    return AgfWindow.POPUP_ROW_HEIGHT
+end
+
+-- Ends every mode a popup action row turned on that lasts only while the
+-- window is open (an offOnClose action, e.g. Move greeting pop-ups).
+function Window:endModes()
+    local settings = self.options.settings
+    if settings == nil then
+        return
+    end
+    local id
+    for id in pairs(self.actionRows) do
+        local entry = settings:Entry(id)
+        if entry ~= nil and entry.offOnClose and settings:IsActive(id) then
+            settings:Run(id)
+            self:refreshSwitch(id)
+        end
+    end
+end
+
+-- The popup rows drawn for setting `id`: its action buttons and its
+-- choices' segmented controls, in the order they were made.
+function Window:PopupRows(id)
+    return self.actionRows[id] or {}, self.choiceRows[id] or {}
+end
+
 function Window:showPopupFor(id)
     local module = self:module(id)
     if module == nil then
@@ -701,6 +811,7 @@ function Window:showPopupFor(id)
     local bodyId, body
     for bodyId, body in pairs(self.popup.bodies) do
         if bodyId == id then
+            self.popup:SetHeight(40 + math.max(body.height or 0, AgfWindow.POPUP_ROW_HEIGHT) + Theme.SPACING.m)
             body:Show()
         else
             body:Hide()

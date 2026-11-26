@@ -21,6 +21,8 @@ local _, addon = ...
 -- 🗑 turns into a red Delete? (Delete? (last one) on the last greeting)
 -- that deletes on a second click within 5 seconds. An empty category says
 -- it won't prompt until a greeting is added, above + Add a greeting.
+-- While prompts are off on this character, a banner across the top says so,
+-- with Turn on.
 --
 -- Everything it shows comes from GreetingsEditor and the SettingsModel;
 -- Refresh redraws it from them (and so from saved data).
@@ -48,6 +50,9 @@ local AgfGreetingsPage = {
     MORE_MENU_WIDTH = 300,
     -- How long a save error shows under the box.
     ERROR_SECONDS = 5,
+    BANNER_HEIGHT = 40,
+    -- The setting the banner's Turn on changes.
+    CHARACTER_SETTING = "greetCharacter",
 }
 addon.AgfGreetingsPage = AgfGreetingsPage
 
@@ -98,12 +103,12 @@ function Page:build()
     for index = 1, #categories do
         items[index] = { id = categories[index].id, label = categories[index].label }
     end
+    self:buildBanner(body)
     self.categories = ui:Segmented(body, items, AgfGreetingsPage.SEGMENT_WIDTH, function(id)
         page.options.editor:Select(id)
         page:Refresh()
         page.area:SetVerticalScroll(0)
     end)
-    self.categories:SetPoint("TOPLEFT", body, "TOPLEFT", 0, 0)
 
     self.switch = ui:Toggle(body, function(wanted)
         local view = page.view
@@ -116,7 +121,6 @@ function Page:build()
         end
         page:Refresh()
     end)
-    self.switch:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -AgfGreetingsPage.ROW_GAP - 32)
     self.switchLabel = ui:Text(body, "", "semibold", "body", "text")
     self.switchLabel:SetPoint("RIGHT", self.switch, "LEFT", -Theme.SPACING.s, 0)
     self.description = ui:Text(body, "", "regular", "body", "muted")
@@ -129,8 +133,7 @@ function Page:build()
     self.offNote:SetJustifyH("LEFT")
 
     self.area, self.list = ui:ScrollList(body, AgfGreetingsPage.SCROLL_STEP)
-    self.area:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -110)
-    self.area:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, 0)
+    self:place(0)
     self:buildEditBox()
     self.empty = ui:Text(self.list, "", "regular", "body", "muted")
     self.empty:SetJustifyH("LEFT")
@@ -142,6 +145,43 @@ function Page:build()
         page:focus()
     end)
     self.add:SetWidth(AgfGreetingsPage.ADD_WIDTH)
+end
+
+-- The banner while prompts are off on this character: its line and Turn on.
+function Page:buildBanner(body)
+    local ui, page = self.ui, self
+    local banner = ui:Panel(body, { fill = "raised", border = "gold" })
+    banner:SetHeight(AgfGreetingsPage.BANNER_HEIGHT)
+    banner:SetPoint("TOPLEFT", body, "TOPLEFT", 0, 0)
+    banner:SetPoint("RIGHT", body, "RIGHT", 0, 0)
+    banner.turnOn = ui:Button(banner, addon.GreetingsEditor.TURN_ON, "primary", function()
+        local changed, reason = page.options.settings:Set(AgfGreetingsPage.CHARACTER_SETTING, true)
+        if not changed and page.options.onError ~= nil then
+            page.options.onError("Greet prompts can't be turned on here: " .. tostring(reason) .. ".")
+        end
+        page:Refresh()
+    end)
+    banner.turnOn:SetWidth(AgfGreetingsPage.BUTTON_WIDTH)
+    banner.turnOn:SetPoint("RIGHT", banner, "RIGHT", -Theme.SPACING.s, 0)
+    banner.text = ui:Text(banner, "", "regular", "body", "text")
+    banner.text:SetPoint("LEFT", banner, "LEFT", Theme.SPACING.m, 0)
+    banner.text:SetPoint("RIGHT", banner.turnOn, "LEFT", -Theme.SPACING.s, 0)
+    banner.text:SetJustifyH("LEFT")
+    banner:Hide()
+    self.banner = banner
+end
+
+-- Places the categories, the switch and the list `offset` lower, under the
+-- banner while it shows.
+function Page:place(offset)
+    local body = self.greetingsTab
+    self.categories:ClearAllPoints()
+    self.categories:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -offset)
+    self.switch:ClearAllPoints()
+    self.switch:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -offset - AgfGreetingsPage.ROW_GAP - 32)
+    self.area:ClearAllPoints()
+    self.area:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -offset - 110)
+    self.area:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, 0)
 end
 
 -- The one edit box, moved to the open row (or the bottom for a new
@@ -499,6 +539,14 @@ function Page:Refresh()
         self.categories:SetDot(view.categories[index].id, view.categories[index].dot)
     end
     self.categories:Select(view.category)
+    self.banner.text:SetText(view.banner or "")
+    if view.banner ~= nil then
+        self.banner:Show()
+        self:place(AgfGreetingsPage.BANNER_HEIGHT + Theme.SPACING.s)
+    else
+        self.banner:Hide()
+        self:place(0)
+    end
     self.description:SetText(view.description)
     self.switchLabel:SetText(view.switchLabel or "")
     self.switch:SetOn(view.enabled)

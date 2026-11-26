@@ -18,6 +18,10 @@ local _, addon = ...
 -- CONFIRM_SECONDS deletes it. An empty category says so, and that it won't
 -- prompt until a greeting is added.
 --
+-- While prompts are off on the character being played (Greet from this
+-- character), a banner says so, and that the user's other characters
+-- still get them.
+--
 -- Greetings are read from the library each time View is asked, so a page
 -- showing it reloads what's saved.
 local GreetingsEditor = {
@@ -28,6 +32,8 @@ local GreetingsEditor = {
     DELETE = "Delete?",
     DELETE_LAST = "Delete? (last one)",
     CONFIRM_SECONDS = 5,
+    BANNER = "Greet prompts are off on %s. Your other characters still get them.",
+    TURN_ON = "Turn on",
 }
 addon.GreetingsEditor = GreetingsEditor
 
@@ -54,6 +60,8 @@ end
 --   names       function() -> the user's own names for the preview, keyed
 --               like GuildGreet:Names (name, main, character, ...)
 --   now         function() -> the time in seconds, for the delete confirm
+--   characterOn function() -> false while prompts are off on this character
+--   character   function() -> this character's name, as shown
 function GreetingsEditor.Create(options)
     return setmetatable({
         options = options or {},
@@ -240,6 +248,18 @@ function Editor:Delete(index)
     return "deleted"
 end
 
+-- The banner while prompts are off on this character, or nil.
+function Editor:banner()
+    if self.options.characterOn == nil or self.options.characterOn() ~= false then
+        return nil
+    end
+    local name = self.options.character and self.options.character() or nil
+    if type(name) ~= "string" or name == "" then
+        name = "this character"
+    end
+    return string.format(GreetingsEditor.BANNER, name)
+end
+
 function Editor:Selected()
     return self.selected
 end
@@ -275,6 +295,7 @@ end
 --   saveLabel    Add or Save; saveEnabled whether it can be clicked
 --   error        why the last save failed, or nil
 --   preview      the draft filled in with the user's own names, or nil
+--   banner       the off-on-this-character line, or nil while it's on
 function Editor:View()
     local categories = {}
     local list = addon.GreetingLibrary.CATEGORIES
@@ -316,5 +337,6 @@ function Editor:View()
         saveEnabled = self:canSave(),
         error = self.error,
         preview = self:preview(),
+        banner = self:banner(),
     }
 end

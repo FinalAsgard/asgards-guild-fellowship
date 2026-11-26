@@ -18,6 +18,7 @@ local Widgets = {
     TOGGLE_HEIGHT = 18,
     INPUT_HEIGHT = 26,
     DOT_SIZE = 6,
+    INFO_SIZE = 16,
     ROLE_LABELS = { tank = "Tank", healer = "Healer", dps = "DPS" },
     -- Each role's icon (a Theme.TEXTURES name); "any" is a person.
     ROLE_ICONS = { tank = "shield", healer = "cross", dps = "sword", any = "person" },
@@ -337,6 +338,37 @@ function UI:TextButton(parent, label, width, onClick)
         end
     end)
     return button
+end
+
+-- A small round "i" that shows `text()` (a function, read on each
+-- mouseover; nothing shows while it gives nil) in the game's tooltip,
+-- headed `title`.
+function UI:InfoIcon(parent, title, text)
+    local icon = self:frame("Button", parent)
+    icon:SetSize(Widgets.INFO_SIZE, Widgets.INFO_SIZE)
+    round(icon, Widgets.INFO_SIZE / 2, "hover", false)
+    icon.label = self:Text(icon, "i", "semibold", "small", "muted")
+    icon.label:SetPoint("CENTER", icon, "CENTER", 0, 0)
+    local environment = self.environment
+    icon:SetScript("OnEnter", function(self)
+        self.label:SetTextColor(Theme.Color("text"))
+        local tooltip = environment.GameTooltip
+        local ok, body = pcall(text)
+        if type(tooltip) == "table" and ok and type(body) == "string" then
+            tooltip:SetOwner(self, "ANCHOR_RIGHT")
+            tooltip:SetText(title, 1, 1, 1)
+            tooltip:AddLine(body, nil, nil, nil, true)
+            tooltip:Show()
+        end
+    end)
+    icon:SetScript("OnLeave", function(self)
+        self.label:SetTextColor(Theme.Color("muted"))
+        local tooltip = environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:Hide()
+        end
+    end)
+    return icon
 end
 
 -- Choices -------------------------------------------------------------------

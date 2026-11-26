@@ -29,6 +29,12 @@ local function newEditor(state, world)
         now = function()
             return world.now or 0
         end,
+        characterOn = function()
+            return world.characterOn ~= false
+        end,
+        character = function()
+            return world.character
+        end,
     })
     return editor, addon, world
 end
@@ -429,4 +435,16 @@ test.test("greetings editor: Friends reads Use for friends, and its empty and of
 
     world.off.friends = true
     test.assertContains(editor:View().offNote, "friends get your Login and Welcome back greetings")
+end)
+
+test.test("greetings editor: a banner says when prompts are off on this character", function()
+    local editor, _, world = newEditor({}, { character = "Toolbox" })
+
+    test.assertEqual(nil, editor:View().banner)
+    world.characterOn = false
+    test.assertEqual("Greet prompts are off on Toolbox. Your other characters still get them.", editor:View().banner)
+    -- Without a name: still clear.
+    world.character = nil
+    test.assertEqual("Greet prompts are off on this character. Your other characters still get them.",
+        editor:View().banner)
 end)

@@ -569,3 +569,86 @@ test.test("agf window: a multiline input folds line breaks, caps bytes at a whol
     test.assertEqual(4, addon.Widgets.LinesFor(200, 16, 4))
     test.assertEqual("ab", addon.Widgets.CutBytes("abé", 3))
 end)
+
+test.test("agf window: popup rows draw a toggle with info, an action button and a choice, all from SettingsModel", function()
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/Theme.lua", "Adapters/Widgets.lua",
+        "Adapters/AgfWindow.lua")
+    local environment = fakeFrames.install({})
+    local tooltip = { lines = {} }
+    function tooltip.SetOwner() end
+    function tooltip.SetText(_, text)
+        tooltip.lines = { text }
+    end
+    function tooltip.AddLine(_, text)
+        table.insert(tooltip.lines, text)
+    end
+    function tooltip.Show() end
+    function tooltip.Hide() end
+    environment.GameTooltip = tooltip
+    local state = { here = true, moving = false, who = "everyone" }
+    local settings = addon.SettingsModel.Create()
+    settings:AddSection("guildGreet", "Guild Greet")
+    settings:Add("guildGreet", { id = "greetCharacter", kind = "toggle", label = "Greet from this character",
+        info = function() return "Only this character." end,
+        get = function() return state.here end,
+        set = function(enabled)
+            state.here = enabled
+            return true
+        end })
+    settings:Add("guildGreet", { id = "greetMove", kind = "action", offOnClose = true,
+        label = "Move greeting pop-ups", activeLabel = "Done moving",
+        active = function() return state.moving end,
+        run = function()
+            state.moving = not state.moving
+            return true
+        end })
+    settings:Add("guildGreet", { id = "greetFor", kind = "choice", label = "Greet prompts for",
+        choices = { { id = "everyone", label = "Everyone" }, { id = "grouped", label = "Grouped with" },
+            { id = "friends", label = "My Friends" } },
+        get = function() return state.who end,
+        set = function(choice)
+            state.who = choice
+            return true
+        end })
+    local window = addon.AgfWindow.Create({ environment = environment, Print = function() end }, {
+        modules = { { id = "greetings", label = "Greetings", title = "Greetings", settingsRows = {
+            { id = "greetCharacter", info = true }, { id = "greetFor" }, { id = "greetMove" } } } },
+        settings = settings,
+        settingsTabs = {},
+    })
+    window:Open("greetings")
+    window.gear.scripts.OnClick(window.gear)
+    test.assertEqual("Greetings", window:SettingsPopupTitle())
+
+    -- The toggle's switch, and its info icon showing the entry's own info.
+    local switch = window:Switches("greetCharacter")[1]
+    switch.scripts.OnClick(switch)
+    test.assertFalse(state.here)
+    local icon = window.infoIcons.greetCharacter
+    test.assertEqual("i", icon.label.text)
+    icon.scripts.OnEnter(icon)
+    test.assertEqual("Greet from this character", tooltip.lines[1])
+    test.assertEqual("Only this character.", tooltip.lines[2])
+
+    -- The action reads its active label while on.
+    local actions, choices = window:PopupRows("greetMove")
+    local move = actions[1]
+    test.assertEqual("Move greeting pop-ups", move.label.text)
+    move.scripts.OnClick(move)
+    test.assertTrue(state.moving)
+    test.assertEqual("Done moving", move.label.text)
+
+    -- The choice: a segmented control, kept in step with the setting.
+    _, choices = window:PopupRows("greetFor")
+    local strip = choices[1]
+    test.assertEqual("everyone", strip:Selected())
+    strip.buttons[3].scripts.OnClick(strip.buttons[3])
+    test.assertEqual("friends", state.who)
+    settings:Set("greetFor", "grouped")
+    test.assertEqual("grouped", strip:Selected())
+
+    -- Closing the window ends the move.
+    window:Close()
+    test.assertFalse(state.moving)
+    test.assertEqual("Move greeting pop-ups", move.label.text)
+end)

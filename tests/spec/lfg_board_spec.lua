@@ -1420,3 +1420,40 @@ test.test("greetings: loading deletes saved Long absence greetings and its switc
     test.assertEqual("Use for friends", page.switchLabel.text)
     test.assertEqual("There you are, {name}!", page.rows[1].text.text)
 end)
+
+test.test("greetings: the gear popup holds the greeting settings, and a banner shows when this character is off", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local window = addon.agfWindow
+    test.assertTrue(window:Open("greetings"))
+    local page = addon.greetingsPage
+
+    window.gear.scripts.OnClick(window.gear)
+    test.assertEqual("Greetings", window:SettingsPopupTitle())
+    test.assertTrue(window.infoIcons.greetCharacter ~= nil)
+    test.assertTrue(window.infoIcons.greetInInstances ~= nil)
+    test.assertTrue(window:Switches("greetHighlightFriends")[1] ~= nil)
+    local _, choices = window:PopupRows("greetFor")
+    test.assertEqual("My Friends", choices[1].buttons[3].label.text)
+    -- The same setting as the AddOns options.
+    click(choices[1].buttons[2])
+    test.assertEqual(addon.FellowshipStore.GREET_FOR.grouped, addon.settings:Get("greetFor"))
+    local actions = window:PopupRows("greetMove")
+    click(actions[1])
+    test.assertEqual("Done moving", actions[1].label.text)
+    window:Close()
+    test.assertFalse(addon.settings:IsActive("greetMove"))
+
+    -- Off on this character: the banner, and Turn on.
+    test.assertTrue(window:Open("greetings"))
+    test.assertFalse(page.banner.shown)
+    local switch = window:Switches("greetCharacter")[1]
+    click(switch)
+    test.assertFalse(addon.settings:Get("greetCharacter"))
+    test.assertTrue(page.banner.shown)
+    test.assertEqual("Greet prompts are off on Tool Box. Your other characters still get them.", page.banner.text.text)
+    click(page.banner.turnOn)
+    test.assertTrue(addon.settings:Get("greetCharacter"))
+    test.assertFalse(page.banner.shown)
+end)

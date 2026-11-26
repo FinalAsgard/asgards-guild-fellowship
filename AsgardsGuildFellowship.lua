@@ -1348,6 +1348,14 @@ if clientProfile.supported then
             { id = "greetings", label = "Greetings", title = "Greetings",
                 headerSwitch = { id = "guildGreet", label = "Greet prompts", on = "Greet prompts on",
                     off = "Greet prompts off" },
+                -- The same entries as the AddOns options' Guild Greet settings.
+                settingsRows = {
+                    { id = "greetCharacter", info = true },
+                    { id = "greetInInstances", label = "Greet in dungeons and raids", info = true },
+                    { id = "greetHighlightFriends" },
+                    { id = "greetFor" },
+                    { id = "greetMove" },
+                },
                 draw = function(content, ui)
                     greetingsUi.page = addon.AgfGreetingsPage.Create(content, ui, {
                         editor = addon.GreetingsEditor.Create({
@@ -1374,6 +1382,18 @@ if clientProfile.supported then
                             end,
                             now = function()
                                 return client:Timestamp()
+                            end,
+                            characterOn = function()
+                                return settings:Get("greetCharacter") ~= false
+                            end,
+                            -- As the roster spells it: Forever's game reports only
+                            -- the first name.
+                            character = function()
+                                local _, partition, normalizer = rosterController:QuietContext()
+                                local key = rosterController:SelfKey()
+                                local stored = partition and key and partition:GetCharacter(key)
+                                local name = stored and stored.name or client:GetPlayerFullName()
+                                return name and normalizer and normalizer:Display(name) or name
                             end,
                         }),
                         settings = settings,
@@ -4735,7 +4755,7 @@ if clientProfile.supported then
             guildGreet:OnCategoryChanged(entry.category, value)
         end
         -- The Greetings page shows these; changed elsewhere, it follows.
-        if greetingsUi.page ~= nil and (id == "guildGreet" or id == "welcomeBackMinutes"
+        if greetingsUi.page ~= nil and (id == "guildGreet" or id == "welcomeBackMinutes" or id == "greetCharacter"
             or (entry ~= nil and entry.category ~= nil))
         then
             greetingsUi.page:Refresh()
