@@ -598,7 +598,7 @@ if clientProfile.supported then
     settings:Add("chatTags", {
         id = "chatTags",
         kind = "toggle",
-        label = "Tag guild chat speakers with their alias or main",
+        label = "Tag guild and party chat speakers with their alias or main",
         get = function()
             local store = rosterController:Store()
             return store == nil or store:ChatTagsEnabled()
@@ -1404,7 +1404,7 @@ if clientProfile.supported then
                 label = "Chat",
                 rows = {
                     { id = "chatTags", label = "Chat tags",
-                        info = "Tag guild chat speakers with their alias or main." },
+                        info = "Tag guild and party chat speakers with their alias or main." },
                     { id = "chatTagColor:alias", label = "Alias tag color",
                         info = "The color of a speaker's alias tag." },
                     { id = "chatTagColor:main", label = "Main's name tag color",

@@ -234,7 +234,7 @@ Any add-on user can pass officers' edits on, so the add-on checks what it receiv
 
 ## Chat tags
 
-In guild chat, officer chat, and guild achievement announcements, a tag after the speaker's name shows who the player is:
+In guild chat, officer chat, party chat, and guild achievement announcements, a tag after the speaker's name shows who the player is (in party chat, only for guildmates: anyone from outside the guild gets no tag):
 
 - If the player has an alias, the tag shows it: Hammer (an alt of Toolbox, alias TheTool) saying hi reads `[Hammer] [TheTool]: hi`.
 - If they have no alias and are on an alt, the tag shows their main's name: `[Wrench] [Toolbox]: hi`. If the main has left the guild, it's the acting main.
