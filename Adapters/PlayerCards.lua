@@ -7,8 +7,8 @@ local _, addon = ...
 local Theme = addon.Theme
 
 local PlayerCards = {
-    SMALL_HEIGHT = 56,
-    INITIAL_SIZE = 36,
+    SMALL_HEIGHT = 44,
+    INITIAL_SIZE = 30,
     DOT_SIZE = 8,
     STAR_SIZE = 12,
     REMOVE_SIZE = 20,
@@ -40,7 +40,7 @@ end
 --   onRemove      the hover X; without it there's no X
 -- ShowPlayer(fields) fills and shows it: name, initial?, sub (may carry
 -- color codes), color (the initial's class color, "ffrrggbb"), star,
--- online, greyed. ShowEmpty
+-- online, count (text shown in the online dot's place), greyed. ShowEmpty
 -- (text) makes it an empty slot that only shows `text`. SetSelected(on)
 -- borders it green.
 function PlayerCards.Small(ui, parent, callbacks)
@@ -76,6 +76,8 @@ function PlayerCards.Small(ui, parent, callbacks)
     card.dot:SetTexture(Theme.TEXTURES.rounded)
     card.dot:SetSize(PlayerCards.DOT_SIZE, PlayerCards.DOT_SIZE)
     card.dot:SetPoint("TOPRIGHT", card, "TOPRIGHT", -pad - 2, -pad - 2)
+    card.count = ui:Text(card, "", "semibold", "small", "muted")
+    card.count:SetPoint("TOPRIGHT", card, "TOPRIGHT", -pad, -pad)
 
     -- An empty slot's one line.
     card.emptyText = ui:Text(card, "", "semibold", "body", "muted")
@@ -153,7 +155,8 @@ function PlayerCards.Small(ui, parent, callbacks)
             card.star:Hide()
         end
         card.dot:SetVertexColor(Theme.Color(fields.online and "green" or "disabled"))
-        if fields.greyed then
+        card.count:SetText(fields.count or "")
+        if fields.greyed or fields.count ~= nil then
             card.dot:Hide()
         else
             card.dot:Show()
@@ -168,6 +171,7 @@ function PlayerCards.Small(ui, parent, callbacks)
         showParts(false)
         card.star:Hide()
         card.dot:Hide()
+        card.count:SetText("")
         if card.remove ~= nil then
             card.remove:Hide()
         end

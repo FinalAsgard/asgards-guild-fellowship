@@ -193,3 +193,25 @@ test.test("friends view model: the picker searches the alias and every character
     -- Nobody left in the guild can be picked.
     test.assertEqual("", names(world.picker("elm")))
 end)
+
+test.test("friends view model: Most grouped cards come in the given order with counts; the first is the default", function()
+    local world = setup()
+    local view = world.build({ mostGrouped = {
+        { player = world.playerOf("Cog"), count = 12 },
+        { player = world.playerOf("Hammer"), count = 3 },
+    } })
+
+    test.assertEqual("Cog, TheTool", names(view.mostGrouped))
+    test.assertEqual("12×", view.mostGrouped[1].countText)
+    test.assertEqual(world.keys.Toolbox, view.mostGrouped[2].key)
+    -- No Friends: the first Most grouped is selected.
+    test.assertEqual(world.playerOf("Cog"), view.default)
+    test.assertEqual(world.playerOf("Hammer"),
+        world.build({ selected = world.playerOf("Hammer"), mostGrouped = { { player = world.playerOf("Hammer"),
+            count = 3 } } }).selected)
+
+    -- A Friend comes first.
+    world.partition:AddFriend(world.keys.Elm)
+    test.assertEqual(world.playerOf("Elm"), world.build({ mostGrouped = { { player = world.playerOf("Cog"),
+        count = 12 } } }).default)
+end)

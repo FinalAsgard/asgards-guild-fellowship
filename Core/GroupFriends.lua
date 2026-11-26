@@ -6,11 +6,12 @@ local _, addon = ...
 -- does.
 --   Grouped   grouped with at least once
 --   Frequent  grouped with FREQUENT_PARTIES times or more
---   Top 5     the TOP_SIZE players grouped with most, whatever their counts.
---             Ties go to the most recent party, then to the player key, so
---             the list is always the same. Top 5 wins over Frequent.
+--   Top 5     the TOP_SIZE players grouped with most, whatever their counts,
+--             skipping pinned Friends. Ties go to the most recent party,
+--             then to the player key, so the list is always the same. Top 5
+--             wins over Frequent.
 --   Friend    a player the user pinned in a Friend slot (any of their
---             characters), grouped with or not. Friend wins over the rest.
+--             characters), grouped with or not; never Top 5 or Frequent.
 -- Frequent, Top 5 and Friend get Guild Greet's perks (HasPerks).
 --
 -- The tiers are worked out once and kept until the history changes (a new
@@ -124,10 +125,18 @@ function Friends:rank()
             end
         end
     end
+    -- Pinned Friends are FRIEND, and the ranking for Top 5 skips them.
+    local tiers = {}
+    local pinned = self:pinned()
+    for index = 1, #pinned do
+        tiers[self:player(pinned[index])] = GroupFriends.FRIEND
+    end
     local ranked = {}
     local _, stat
     for _, stat in pairs(stats) do
-        table.insert(ranked, stat)
+        if tiers[stat.player] == nil then
+            table.insert(ranked, stat)
+        end
     end
     table.sort(ranked, function(a, b)
         if a.count ~= b.count then
@@ -138,20 +147,19 @@ function Friends:rank()
         end
         return tostring(a.player) < tostring(b.player)
     end)
-    local tiers = {}
+    local top = {}
     for index = 1, #ranked do
         local tier = GroupFriends.GROUPED
         if index <= GroupFriends.TOP_SIZE then
             tier = GroupFriends.TOP
+            table.insert(top, { player = ranked[index].player, count = ranked[index].count,
+                last = ranked[index].last })
         elseif ranked[index].count >= GroupFriends.FREQUENT_PARTIES then
             tier = GroupFriends.FREQUENT
         end
         tiers[ranked[index].player] = tier
     end
-    local pinned = self:pinned()
-    for index = 1, #pinned do
-        tiers[self:player(pinned[index])] = GroupFriends.FRIEND
-    end
+    self.top = top
     self.tiers = tiers
     self.stats = stats
 end
@@ -172,6 +180,21 @@ function Friends:TierOf(key)
     end
     self:refresh()
     return self.tiers[self:player(key)]
+end
+
+-- The Top 5 in order (Most grouped with on the Friends page): { { player,
+-- count, last } }, the players grouped with most who aren't pinned Friends.
+-- `player` is what playerOf gives (or the key, for a character with no
+-- player).
+function Friends:MostGrouped()
+    self:refresh()
+    local list = {}
+    local index
+    for index = 1, #self.top do
+        local entry = self.top[index]
+        list[index] = { player = entry.player, count = entry.count, last = entry.last }
+    end
+    return list
 end
 
 -- How many parties the user was in with the player character `key`

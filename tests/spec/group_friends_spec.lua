@@ -265,3 +265,42 @@ test.test("group friends: a player's party count and last party, across their ch
     test.assertEqual(0, count)
     test.assertEqual(nil, last)
 end)
+
+test.test("group friends: Top 5 skips pinned Friends, so the 6th-ranked player moves up", function()
+    local world, GroupFriends = newFriends()
+    fillTop(world)
+    party(world, { "frank" }, 9)
+    party(world, { "gus" }, 4)
+    test.assertEqual(GroupFriends.FREQUENT, world.friends:TierOf("frank"))
+
+    world.pinned = { "ace" }
+
+    test.assertEqual(GroupFriends.FRIEND, world.friends:TierOf("ace"))
+    test.assertEqual(GroupFriends.TOP, world.friends:TierOf("frank"))
+    test.assertEqual(GroupFriends.FREQUENT, world.friends:TierOf("gus"))
+end)
+
+test.test("group friends: Most grouped is the Top 5 in order with counts, and refills when one is pinned", function()
+    local world = newFriends()
+    party(world, { "ace" }, 6)
+    party(world, { "bard" }, 5)
+    party(world, { "cleric" }, 4)
+    party(world, { "druid" }, 3)
+    party(world, { "elf" }, 2)
+    party(world, { "frank" }, 1)
+
+    local most = world.friends:MostGrouped()
+    test.assertEqual(5, #most)
+    test.assertEqual("ace", most[1].player)
+    test.assertEqual(6, most[1].count)
+    test.assertEqual("elf", most[5].player)
+
+    world.pinned = { "bard" }
+    most = world.friends:MostGrouped()
+    test.assertEqual(5, #most)
+    test.assertEqual("cleric", most[2].player)
+    test.assertEqual("frank", most[5].player)
+    test.assertEqual(1, most[5].count)
+    -- No history, no list.
+    test.assertEqual(0, #newFriends().friends:MostGrouped())
+end)

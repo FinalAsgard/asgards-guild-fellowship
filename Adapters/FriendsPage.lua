@@ -4,6 +4,9 @@ local _, addon = ...
 -- slots (FriendsViewModel): the pinned players as small player cards, then
 -- "+ Add a friend" for each open slot. Hovering a Friend shows an X that
 -- removes them; right-clicking one offers Replace... and Remove friend.
+-- Under them, Most grouped with shows the players grouped with most who
+-- aren't Friends, each with their party count; right-clicking one offers
+-- Add as friend, greyed out while every slot is taken.
 --
 -- The right side shows the selected player, or how to add friends when
 -- there are none. + Add a friend (or Replace...) swaps it for Choose a
@@ -26,6 +29,7 @@ local FriendsPage = {
     NO_MATCHES = "No guildmates match.",
     EMPTY = "Pin up to 5 guildmates as Friends with + Add a friend. Friends get the star in greet prompts"
         .. " and on the LFG page.",
+    NO_HISTORY = "The guildmates you group with most will show here.",
     SELECTED_HINT = "More about this player is coming to this side of the page.",
 }
 addon.FriendsPage = FriendsPage
@@ -105,6 +109,7 @@ function Page:build()
     self.friendsLabel = ui:SectionLabel(column, "Friends")
     self.friendsLabel:SetPoint("TOPLEFT", column, "TOPLEFT", 0, 0)
     local slots = addon.FellowshipStore.FRIEND_SLOTS
+    local step = addon.PlayerCards.SMALL_HEIGHT + Theme.SPACING.xs
     local index
     for index = 1, slots do
         local card = addon.PlayerCards.Small(ui, column, {
@@ -118,11 +123,33 @@ function Page:build()
                 owner:remove(clicked.playerId)
             end,
         })
-        card:SetPoint("TOPLEFT", column, "TOPLEFT", 0,
-            -20 - (index - 1) * (addon.PlayerCards.SMALL_HEIGHT + Theme.SPACING.s))
+        card:SetPoint("TOPLEFT", column, "TOPLEFT", 0, -20 - (index - 1) * step)
         card:SetPoint("RIGHT", column, "RIGHT", 0, 0)
         card:Hide()
         self.cards[index] = card
+    end
+    local mostTop = 20 + slots * step + Theme.SPACING.s
+    self.mostLabel = ui:SectionLabel(column, "Most grouped with")
+    self.mostLabel:SetPoint("TOPLEFT", column, "TOPLEFT", 0, -mostTop)
+    self.noHistory = ui:Text(column, FriendsPage.NO_HISTORY, "regular", "body", "muted")
+    self.noHistory:SetPoint("TOPLEFT", column, "TOPLEFT", 0, -mostTop - 20)
+    self.noHistory:SetPoint("RIGHT", column, "RIGHT", 0, 0)
+    self.noHistory:SetJustifyH("LEFT")
+    self.noHistory:SetWordWrap(true)
+    self.mostCards = {}
+    for index = 1, addon.GroupFriends.TOP_SIZE do
+        local card = addon.PlayerCards.Small(ui, column, {
+            onClick = function(clicked)
+                owner:clickCard(clicked)
+            end,
+            onRightClick = function(clicked)
+                owner:mostGroupedMenu(clicked)
+            end,
+        })
+        card:SetPoint("TOPLEFT", column, "TOPLEFT", 0, -mostTop - 20 - (index - 1) * step)
+        card:SetPoint("RIGHT", column, "RIGHT", 0, 0)
+        card:Hide()
+        self.mostCards[index] = card
     end
     self.menu = ui:ContextMenu(content)
 
@@ -237,8 +264,9 @@ function Page:Refresh()
     self.menu:Close()
     self.view = self.options.model(self.selected)
     if self.view == nil then
-        self.view = { friends = {}, empty = 0, full = true }
+        self.view = { friends = {}, empty = 0, full = true, mostGrouped = {} }
     end
+    self.view.mostGrouped = self.view.mostGrouped or {}
     self.selected = self.view.selected or self.view.default
     local index
     for index = 1, #self.cards do
@@ -262,16 +290,40 @@ function Page:Refresh()
             card:Hide()
         end
     end
+    for index = 1, #self.mostCards do
+        local card, entry = self.mostCards[index], self.view.mostGrouped[index]
+        if entry ~= nil then
+            card.playerId = entry.playerId
+            card.friend = entry
+            card:ShowPlayer({
+                name = entry.name,
+                sub = subLine(entry),
+                color = entry.color,
+                star = true,
+                count = entry.countText,
+                greyed = entry.left,
+            })
+            card:SetSelected(entry.playerId == self.selected)
+        else
+            card.playerId, card.friend = nil, nil
+            card:Hide()
+        end
+    end
+    setShown(self.noHistory, self.view.mostGrouped[1] == nil)
     self:showPicker(false)
     self:showDetail()
 end
 
--- The selected Friend's card fields, or nil.
+-- The selected player's card fields (a Friend's or a Most grouped
+-- player's), or nil.
 function Page:selectedFriend()
-    local index
-    for index = 1, #self.view.friends do
-        if self.view.friends[index].playerId == self.selected then
-            return self.view.friends[index]
+    local _, list
+    for _, list in ipairs({ self.view.friends, self.view.mostGrouped }) do
+        local index
+        for index = 1, #list do
+            if list[index].playerId == self.selected then
+                return list[index]
+            end
         end
     end
     return nil
@@ -357,10 +409,13 @@ function Page:clickCard(card)
         return
     end
     self.selected = card.playerId
-    local index
-    for index = 1, #self.cards do
-        local other = self.cards[index]
-        other:SetSelected(not other.empty and other.playerId == self.selected)
+    local _, cards
+    for _, cards in ipairs({ self.cards, self.mostCards }) do
+        local index
+        for index = 1, #cards do
+            local other = cards[index]
+            other:SetSelected(not other.empty and other.playerId == self.selected)
+        end
     end
     self:showPicker(false)
     self:showDetail()
@@ -378,6 +433,15 @@ function Page:friendMenu(card)
     }, card.friend and card.friend.name or nil)
 end
 
+function Page:mostGroupedMenu(card)
+    local owner, entry = self, card.friend
+    self.menu:Open(card, {
+        { label = "Add as friend", disabled = self.view.full, onClick = function()
+            owner:pick(entry)
+        end },
+    }, entry and entry.name or nil)
+end
+
 function Page:remove(playerId)
     if playerId == nil then
         return
@@ -389,8 +453,8 @@ function Page:remove(playerId)
     self:Refresh()
 end
 
--- Pins the picked row's player, in the slot being replaced or an open one,
--- and selects them.
+-- Pins the picked row's (or Most grouped card's) player, in the slot being
+-- replaced or an open one, and selects them.
 function Page:pick(entry)
     if entry == nil then
         return

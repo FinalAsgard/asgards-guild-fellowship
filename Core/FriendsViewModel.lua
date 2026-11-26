@@ -6,7 +6,9 @@ local _, addon = ...
 -- slot after them. Each pinned key is read as its player on every build, so
 -- merges, re-links and alias changes follow along, and two keys of one
 -- player show one card. A Friend with no character left in the guild keeps
--- their card, as "Left the guild".
+-- their card, as "Left the guild". Under them, Most grouped with holds the
+-- players grouped with most who aren't Friends (GroupFriends' Top 5), in
+-- that order, each with their party count.
 --
 -- The picker (Choose a friend) lists every player with a character in the
 -- guild, except the user and the pinned Friends, sorted by how often the
@@ -134,27 +136,45 @@ end
 --   normalizer   a NameNormalizer, for how names show
 --   classColor   function(classToken) -> "ffrrggbb" or nil
 --   className    function(classToken) -> the class as the game names it
+--   mostGrouped  GroupFriends:MostGrouped(): { { player, count } } in order
 --   selected     the player id the page has selected, or nil
--- Returns { friends = { card }, empty (open slots), full, selected (the
--- selected player id when it has a card, else nil), default (the player to
--- select when the page opens: the first Friend, else nil) }.
+-- Returns { friends = { card }, empty (open slots), full, mostGrouped =
+-- { card with count and countText ("12×") }, selected (the selected player
+-- id when it has a card, else nil), default (the player to select when the
+-- page opens: the first Friend, else the first Most grouped, else nil) }.
 function FriendsViewModel.Build(inputs)
+    local partition = inputs.partition
     local friends = pinned(inputs)
     table.sort(friends, byOnlineThenName)
+    local mostGrouped = {}
+    local entries = inputs.mostGrouped or {}
+    local index
+    for index = 1, #entries do
+        local player = entries[index].player
+        local record = player ~= nil and partition:GetPlayer(player) or nil
+        local card = record and describe(inputs, player, record.main) or describe(inputs, nil, player)
+        card.count = entries[index].count or 0
+        card.countText = card.count .. "×"
+        table.insert(mostGrouped, card)
+    end
     local slots = addon.FellowshipStore.FRIEND_SLOTS
     local selected
-    local index
-    for index = 1, #friends do
-        if friends[index].playerId == inputs.selected then
-            selected = inputs.selected
+    local _, list
+    for _, list in ipairs({ friends, mostGrouped }) do
+        for index = 1, #list do
+            if list[index].playerId == inputs.selected then
+                selected = inputs.selected
+            end
         end
     end
+    local first = friends[1] or mostGrouped[1]
     return {
         friends = friends,
         empty = math.max(0, slots - #friends),
         full = #friends >= slots,
+        mostGrouped = mostGrouped,
         selected = selected,
-        default = friends[1] and friends[1].playerId or nil,
+        default = first and first.playerId or nil,
     }
 end
 

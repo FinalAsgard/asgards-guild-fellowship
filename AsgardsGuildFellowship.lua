@@ -4279,7 +4279,8 @@ if clientProfile.supported then
         end
         friendsUi.page = addon.FriendsPage.Create(content, ui, {
             model = function(selected)
-                local fields = inputs({ selected = selected })
+                local friends = currentFriends()
+                local fields = inputs({ selected = selected, mostGrouped = friends and friends:MostGrouped() or {} })
                 return fields and addon.FriendsViewModel.Build(fields) or nil
             end,
             picker = function(query)

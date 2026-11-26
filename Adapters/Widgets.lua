@@ -709,8 +709,9 @@ function Widgets.ShowRoles(tiles, members, openRoles)
 end
 
 -- A small menu of text items. Open(anchor, items, title?) shows it under
--- `anchor` with one row per item ({ label, onClick }); picking one closes
--- it and runs its onClick, and a click anywhere outside it closes it.
+-- `anchor` with one row per item ({ label, onClick, disabled? }); picking
+-- one closes it and runs its onClick, and a click anywhere outside it
+-- closes it. A disabled item is greyed out and does nothing.
 -- Close() hides it.
 function UI:ContextMenu(parent)
     local menu = self:Panel(parent, { radius = Theme.RADIUS.button, fill = "raised" })
@@ -772,12 +773,17 @@ function UI:ContextMenu(parent)
                 row.label = ui:Text(row, "", "regular", "body", "text")
                 row.label:SetPoint("LEFT", row, "LEFT", Theme.SPACING.s, 0)
                 row:SetScript("OnEnter", function(self)
-                    self:SetFill("hover")
+                    if not self.disabled then
+                        self:SetFill("hover")
+                    end
                 end)
                 row:SetScript("OnLeave", function(self)
                     self:SetFill("raised")
                 end)
                 row:SetScript("OnClick", function(self)
+                    if self.disabled then
+                        return
+                    end
                     menu:Close()
                     if self.onClick ~= nil then
                         self.onClick()
@@ -792,6 +798,8 @@ function UI:ContextMenu(parent)
                 if item ~= nil then
                     row.label:SetText(item.label)
                     row.onClick = item.onClick
+                    row.disabled = item.disabled == true
+                    row.label:SetTextColor(Theme.Color(row.disabled and "disabled" or "text"))
                     row:Show()
                 else
                     row:Hide()

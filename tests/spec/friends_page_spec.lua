@@ -6,7 +6,7 @@ local contains = fakeFrames.contains
 -- The Friends page on fake frames, over a list of pinned players held here.
 -- Each player is { playerId, key, name }; `pinned` lists those pinned.
 local function setup(pinnedNames)
-    local addon = test.newAddon("Core/FellowshipStore.lua", "Adapters/Theme.lua", "Adapters/Widgets.lua",
+    local addon = test.newAddon("Core/FellowshipStore.lua", "Core/GroupFriends.lua", "Adapters/Theme.lua", "Adapters/Widgets.lua",
         "Adapters/PlayerCards.lua", "Adapters/FriendsPage.lua")
     local environment = fakeFrames.install({})
     local ui = addon.Widgets.Create(environment)
@@ -31,7 +31,22 @@ local function setup(pinnedNames)
     end
     world.page = addon.FriendsPage.Create(content, ui, {
         model = function(selected)
-            local view = { friends = {}, empty = 5 - #world.pinned, full = #world.pinned >= 5 }
+            local view = { friends = {}, empty = 5 - #world.pinned, full = #world.pinned >= 5, mostGrouped = {} }
+            local _, entry
+            for _, entry in ipairs(world.most or {}) do
+                if find(entry.playerId) == nil then
+                    local card = {}
+                    local field, value
+                    for field, value in pairs(entry) do
+                        card[field] = value
+                    end
+                    card.countText = "7×"
+                    table.insert(view.mostGrouped, card)
+                    if entry.playerId == selected then
+                        view.selected = selected
+                    end
+                end
+            end
             local index
             for index = 1, #world.pinned do
                 view.friends[index] = world.pinned[index]
@@ -213,4 +228,54 @@ test.test("friends page: a Friend who left the guild is greyed out, with no star
     local card = world.page.cards[1]
     test.assertEqual("Left the guild", card.sub.text)
     test.assertFalse(card.star.shown)
+end)
+
+test.test("friends page: Most grouped shows its cards with counts, or a hint with no history", function()
+    local world = setup({ "Anvil" })
+    test.assertTrue(world.page.noHistory.shown)
+    test.assertFalse(world.page.mostCards[1].shown)
+
+    world.most = { world.players.Cog }
+    world.page:Refresh()
+    local card = world.page.mostCards[1]
+    test.assertFalse(world.page.noHistory.shown)
+    test.assertEqual("Cog", card.name.text)
+    test.assertEqual("7×", card.count.text)
+    test.assertTrue(card.star.shown)
+    test.assertEqual(nil, rawget(card, "remove"))
+
+    click(card)
+    test.assertEqual(world.players.Cog.playerId, world.page:Selected())
+    test.assertEqual("Cog", world.page.detail.name.text)
+end)
+
+test.test("friends page: right-clicking a Most grouped card offers Add as friend, greyed out when the slots are full", function()
+    local world = setup({ "Anvil" })
+    world.most = { world.players.Cog }
+    world.page:Refresh()
+    local menu = world.page.menu
+
+    click(world.page.mostCards[1], "RightButton")
+    test.assertEqual("Add as friend", menu.rows[1].label.text)
+    test.assertFalse(menu.rows[1].disabled)
+    click(menu.rows[1])
+    test.assertEqual("add cog", world.calls[1])
+    test.assertEqual(world.players.Cog.playerId, world.page:Selected())
+    -- Cog is a Friend now, so Most grouped is empty again.
+    test.assertTrue(world.page.noHistory.shown)
+
+    -- With every slot taken, the entry is greyed out and does nothing.
+    local full = setup({ "Anvil", "Bolt" })
+    local _, name
+    for _, name in ipairs({ "X1", "X2", "X3" }) do
+        table.insert(full.pinned, { playerId = name, key = name, name = name, mainName = name, left = false,
+            status = "", online = false })
+    end
+    full.most = { full.players.Cog }
+    full.page:Refresh()
+    click(full.page.mostCards[1], "RightButton")
+    test.assertTrue(full.page.menu.rows[1].disabled)
+    click(full.page.menu.rows[1])
+    test.assertEqual(0, #full.calls)
+    test.assertTrue(full.page.menu:IsOpen())
 end)
