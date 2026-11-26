@@ -36,6 +36,10 @@ local LfgProtocol = {
     -- guildmate in the sender's party answered "Someone left — fill the
     -- empty slot?". The others stop being asked.
     TYPE_SLOT = "lfg-slot",
+    -- { v, t, r = a role }: whispered to the party's lister by a member
+    -- choosing their own role in the party (on the board, not the game's
+    -- party menu). The lister's listing then shows it.
+    TYPE_ROLE = "lfg-role",
     HEARTBEAT_SECONDS = 60,
     -- The most characters a note or a free-text purpose holds.
     TEXT_LETTERS = 60,
@@ -153,6 +157,9 @@ local CHECKS = {
     [LfgProtocol.TYPE_SLOT] = function(message)
         return type(message.y) == "boolean"
     end,
+    [LfgProtocol.TYPE_ROLE] = function(message)
+        return ROLES[message.r] == true
+    end,
 }
 
 -- Every Guild LFG Board message type, for routing.
@@ -238,6 +245,11 @@ function LfgProtocol.Problem(message)
         end
     end
     return "bad fields"
+end
+
+-- A party member's own role, `role`, for the lister.
+function LfgProtocol.Role(role)
+    return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_ROLE, r = role }
 end
 
 -- Whether `message` is a Guild LFG Board message this version understands.

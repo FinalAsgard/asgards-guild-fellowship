@@ -114,7 +114,14 @@ Page.__index = Page
 --   party         function() -> { inParty, isLeader, listing? (the party's
 --                 listing on the board, when someone else leads it) }
 --   partyRoles    function() -> the members for Roles in your party, each
---                 { key, name, classToken?, role }
+--                 { key, name, classToken?, role, isPlayer? }
+--   roleChoices   function(member) -> the roles `member` can be set to
+--                 (their class's), or nil
+--   canSetRole    function(member) -> whether the player may set it: the
+--                 party's lister sets anyone's, a member only their own
+--   onSetRole     function(member, role): sets a member's role in the party
+--   myRole        function() -> the player's role in the party they're a
+--                 member of, as { role, classToken }, or nil
 --   onSave        function(purpose, note) -> true, or false and why not
 --   onAskInGuild  function(line): types `line` into guild chat, unsent
 --   onNotLooking  function()
@@ -234,6 +241,17 @@ function Page:buildView(card)
     end)
     self.askGuildButton:SetWidth(100)
     self.askGuildButton:SetPoint("RIGHT", self.editButton, "LEFT", -Theme.SPACING.s, 0)
+    -- In someone else's dungeon party: the player's own role in it.
+    self.myRoleButton = ui:Button(view, "My role", "secondary", function(button)
+        local mine = owner.options.myRole and owner.options.myRole() or nil
+        if mine ~= nil then
+            owner:pickRole(button, { isPlayer = true, key = "player", name = "My role", role = mine.role,
+                classToken = mine.classToken })
+        end
+    end)
+    self.myRoleButton:SetWidth(130)
+    self.myRoleButton:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -pad, pad)
+    self.myRoleButton:Hide()
     view.tiles = self:roleTiles(view, 22)
     view.tiles[1]:SetPoint("TOPRIGHT", view, "TOPRIGHT", -pad - 4 * 26, -pad)
     self.view = view
@@ -340,14 +358,17 @@ function Page:buildEditor(card)
     self.errorText:SetPoint("TOPLEFT", self.note, "BOTTOMLEFT", 0, -Theme.SPACING.s)
 
     -- Roles in your party (dungeons): each member's role icon left of their
-    -- name in class color. Roles are set in the game's party menu, not
-    -- here, so the names aren't clicked.
+    -- name in class color. Clicking a name picks their role from those
+    -- their class plays: the lister sets anyone's, a member their own.
+    -- That wins over the game's party menu.
     editor.rolesLabel = ui:SectionLabel(editor, "Roles in your party")
     editor.rolesLabel:SetPoint("TOPLEFT", self.note, "BOTTOMLEFT", 0, -28)
     self.roleRows = {}
     local row
     for row = 1, LfgBoardPage.ROLE_ROWS do
-        local line = self:nameButton(editor, LfgBoardPage.ROLE_ROW_HEIGHT, function() end)
+        local line = self:nameButton(editor, LfgBoardPage.ROLE_ROW_HEIGHT, function(clicked)
+            owner:pickRole(clicked, clicked.member)
+        end)
         line:SetWidth(LfgBoardPage.FIELD_WIDTH)
         line:SetPoint("TOPLEFT", editor.rolesLabel, "BOTTOMLEFT", 0,
             -Theme.SPACING.xs - (row - 1) * LfgBoardPage.ROLE_ROW_HEIGHT)
@@ -490,6 +511,7 @@ function Page:refreshView()
     self.editButton:Show()
     self.notLookingButton:Show()
     self.askGuildButton:Show()
+    self.myRoleButton:Hide()
     self.askGuildButton:SetActive(addon.LfgListing.GuildLine(fields) ~= nil)
 end
 
@@ -510,6 +532,14 @@ function Page:refreshMemberView()
     self.editButton:Hide()
     self.notLookingButton:Hide()
     self.askGuildButton:Hide()
+    -- A dungeon member picks their own role here.
+    local mine = listing.kind == "dungeon" and self.options.myRole and self.options.myRole() or nil
+    if mine ~= nil then
+        self.myRoleButton:SetLabel("My role: " .. (Widgets.ROLE_LABELS[mine.role] or "pick"))
+        self.myRoleButton:Show()
+    else
+        self.myRoleButton:Hide()
+    end
 end
 
 -- Roles in your party: each member's role icon by their name.
@@ -521,14 +551,44 @@ function Page:refreshRoles()
         local line, member = self.roleRows[index], members[index]
         if member == nil then
             line.key = false
+            line.member = false
             line:Hide()
         else
             line.key = member.key
+            line.member = member
             line.memberName = member.name
             self:showName(line, { text = colored(member.name, self.options.classColor
                 and self.options.classColor(member.classToken)), role = member.role })
         end
     end
+end
+
+-- Opens the role menu on name `anchor` for party member `member`: the roles
+-- their class plays, when the player may set theirs.
+function Page:pickRole(anchor, member)
+    local options, owner = self.options, self
+    if not member or options.canSetRole == nil or not options.canSetRole(member) then
+        return
+    end
+    local roles = options.roleChoices and options.roleChoices(member) or nil
+    if roles == nil or roles[1] == nil then
+        return
+    end
+    local items = {}
+    local index
+    for index = 1, #roles do
+        local role = roles[index]
+        items[index] = { label = (Widgets.ROLE_LABELS[role] or role) .. (role == member.role and " (current)" or ""),
+            onClick = function()
+                if options.onSetRole ~= nil then
+                    options.onSetRole(member, role)
+                end
+                owner:Refresh()
+            end }
+    end
+    self.roleMenu = self.roleMenu or self.ui:ContextMenu(self.content)
+    self.roleMenuFor = nil
+    self.roleMenu:Open(anchor, items, member.name)
 end
 
 function Page:refreshEditor()

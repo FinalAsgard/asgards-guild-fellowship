@@ -1743,6 +1743,124 @@ test.test("Forever hiding the button while a slot is open keeps it off the board
     test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
 end)
 
+-- Roles chosen on the board -------------------------------------------------------------
+
+test.test("lfg listing: a role chosen on the board wins over the game's, the player's and the class's", function()
+    local LfgListing = newListing().LfgListing
+    local function rolesFor()
+        return { "tank", "dps" }
+    end
+    local filled = LfgListing.FillRoles({
+        { key = "a", classToken = "WARRIOR", chosen = "dps", assignedRole = "tank" },
+        { key = "b", classToken = "WARRIOR", assignedRole = "tank", role = "dps" },
+        { key = "c", classToken = "WARRIOR", role = "dps" },
+        { key = "d", classToken = "WARRIOR" },
+    }, rolesFor)
+    test.assertEqual("dps,tank,dps,tank", filled[1].role .. "," .. filled[2].role .. "," .. filled[3].role .. ","
+        .. filled[4].role)
+end)
+
+test.test("lfg protocol: a member's own role is understood, and nothing else in its place", function()
+    local addon = test.newAddon("Core/LfgProtocol.lua")
+    local protocol = addon.LfgProtocol
+    test.assertTrue(protocol.IsValid(protocol.Role("healer")))
+    test.assertFalse(protocol.IsValid(protocol.Role("bard")))
+    test.assertFalse(protocol.IsValid({ v = 1, t = protocol.TYPE_ROLE }))
+end)
+
+-- Tool leads Tool and Hammer, listed for Stratholme by hand; Hammer's add-on
+-- sees the same party. Zap is in the guild, watching the board.
+local function partyStrat(channel)
+    local tool, toolAddon = login(channel, "Tool Box")
+    local hammer, addon = login(channel, "Hammer Smith")
+    local zap, zapAddon = login(channel, "Zap Arcane")
+    local members = { "Tool Box", "Hammer Smith" }
+    partyUp(tool, members, "Tool Box")
+    partyUp(hammer, members, "Tool Box")
+    test.assertTrue(toolAddon.agfWindow:Open("lfg"))
+    toolAddon.lfgPage:StartEditing()
+    toolAddon.lfgPage.draft.dungeon = toolAddon.DungeonCatalog.For("forever", nil):Get("strat")
+    test.assertTrue(toolAddon.lfgPage:Save())
+    fixtures.deliver(channel)
+    return tool, toolAddon, hammer, addon, zap, zapAddon
+end
+
+local function heardRole(world, addon, name)
+    local listing = addon.lfgBoard:Listings(world.time)[1]
+    local index
+    for index = 1, #listing.members do
+        if listing.members[index].name == name then
+            return listing.members[index].role
+        end
+    end
+    return nil
+end
+
+test.test("Forever the leader sets any member's role in the editor, over the game's party menu", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon, zap, zapAddon = partyStrat(channel)
+    -- The game's party menu says DPS; nobody uses it.
+    setGameRole(tool, "Hammer", "DAMAGER")
+
+    local page = toolAddon.lfgPage
+    page:StartEditing()
+    local row = roleRow(page, "Hammer")
+    click(row)
+    test.assertTrue(page.roleMenu:IsOpen())
+    -- A paladin: tank, healer or DPS.
+    local labels = {}
+    local index
+    for index = 1, #page.roleMenu.items do
+        labels[index] = page.roleMenu.items[index].label
+    end
+    test.assertContains(table.concat(labels, ","), "Healer")
+    test.assertContains(table.concat(labels, ","), "DPS (current)")
+    local healer
+    for index = 1, #page.roleMenu.items do
+        if page.roleMenu.items[index].label == "Healer" then
+            healer = page.roleMenu.rows[index]
+        end
+    end
+    click(healer)
+    fixtures.deliver(channel)
+    test.assertEqual("healer", heardRole(zap, zapAddon, "Hammer"))
+    test.assertEqual("healer", roleRow(page, "Hammer").role)
+
+    -- Hammer leaves and comes back: the choice went with him, so the
+    -- game's role shows again.
+    partyUp(tool, { "Tool Box", "Zap Arcane" }, "Tool Box")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+    test.assertEqual("dps", heardRole(zap, zapAddon, "Hammer"))
+end)
+
+test.test("Forever a member sets their own role from the party's listing, and the leader's listing shows it", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon, zap, zapAddon = partyStrat(channel)
+    test.assertTrue(addon.agfWindow:Open("lfg"))
+    local page = addon.lfgPage
+    test.assertEqual("member", page:Mode())
+    test.assertTrue(page.myRoleButton.shown)
+    test.assertContains(page.myRoleButton.label.text, "My role: ")
+
+    click(page.myRoleButton)
+    local healer
+    local index
+    for index = 1, #page.roleMenu.items do
+        if page.roleMenu.items[index].label == "Healer" then
+            healer = page.roleMenu.rows[index]
+        end
+    end
+    click(healer)
+    test.assertEqual("My role: Healer", page.myRoleButton.label.text)
+    fixtures.deliver(channel)
+    fixtures.deliver(channel)
+    test.assertEqual("healer", heardRole(zap, zapAddon, "Hammer"))
+
+    -- A member can't set anyone else's: the leader's row does nothing.
+    test.assertFalse(page.options.canSetRole({ name = "Tool", isPlayer = false }))
+end)
+
 -- Ask in guild --------------------------------------------------------------------------
 
 test.test("lfg listing: the Ask in guild line names a dungeon's open roles, else the players needed", function()

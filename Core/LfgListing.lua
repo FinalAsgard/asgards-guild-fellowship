@@ -214,10 +214,11 @@ function Listing:Post(role)
     self.openRole = role
 end
 
--- `members` (each { key, classToken, assignedRole?, role?, ... }) with each
--- one's dungeon role: the game's (set in the game's party menu), else the
--- one they have (the player's own preference), else the first
--- `rolesFor(classToken)` gives.
+-- `members` (each { key, classToken, chosen?, assignedRole?, role?, ... })
+-- with each one's dungeon role: the one chosen on the board (by the party's
+-- lister, or the member for themself), else the game's (set in the game's
+-- party menu), else the one they have (the player's own preference), else
+-- the first `rolesFor(classToken)` gives.
 function LfgListing.FillRoles(members, rolesFor)
     local filled = {}
     local index
@@ -229,7 +230,7 @@ function LfgListing.FillRoles(members, rolesFor)
             copy[name] = value
         end
         local playable = rolesFor(member.classToken) or {}
-        copy.role = member.assignedRole or member.role or playable[1]
+        copy.role = member.chosen or member.assignedRole or member.role or playable[1]
         filled[index] = copy
     end
     return filled

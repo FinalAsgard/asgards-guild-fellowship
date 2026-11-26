@@ -106,6 +106,13 @@ local lfgJoin = {
     -- Ends the player's listing (the drawer's End listing); set once the
     -- board's wiring is.
     endListing = function() end,
+    -- Roles chosen on the board for the party's members, by member key: set
+    -- by the lister for anyone, or heard from a member for themself. They
+    -- win over the game's party menu, and go when the member leaves.
+    roleChoices = {},
+    -- The role the player chose for themself in someone else's party, until
+    -- the lister's listing shows it.
+    myRole = nil,
     -- For /agf probe lfg: board messages sent (and refused by the add-on
     -- channel), heard, and ignored, by reason, since login.
     stats = { sent = 0, refused = 0, heard = 0, ignored = {} },
@@ -1680,6 +1687,7 @@ if clientProfile.supported then
                 end
                 table.insert(members, {
                     key = member.key,
+                    chosen = lfgJoin.roleChoices[member.key],
                     name = string.match(member.name, "^[^%-]+") or member.name,
                     fullName = member.name,
                     guid = member.guid,
@@ -1704,6 +1712,7 @@ if clientProfile.supported then
             local fullName = client:GetPlayerFullName()
             members[1] = {
                 key = "player",
+                chosen = lfgJoin.roleChoices.player,
                 name = fullName and string.match(fullName, "^[^%-]+") or fullName or "?",
                 classToken = classToken,
                 level = client:GetPlayerLevel(),
@@ -2166,6 +2175,22 @@ if clientProfile.supported then
                 return tostring(a) < tostring(b)
             end)
         end
+        -- Chosen roles go with their members (all of them with the party).
+        local still = {}
+        local current = inGroup and lfgMembers() or {}
+        local memberIndex
+        for memberIndex = 1, #current do
+            still[current[memberIndex].key] = true
+        end
+        local chosenKey
+        for chosenKey in pairs(lfgJoin.roleChoices) do
+            if not still[chosenKey] then
+                lfgJoin.roleChoices[chosenKey] = nil
+            end
+        end
+        if not inGroup then
+            lfgJoin.myRole = nil
+        end
         local actions = lfgTrigger:Observe({
             inGroup = inGroup,
             isLeader = inGroup and client:IsGroupLeader(),
@@ -2511,9 +2536,51 @@ if clientProfile.supported then
                         name = member.name,
                         classToken = member.classToken,
                         role = member.role,
+                        isPlayer = member.isPlayer,
                     }
                 end
                 return rows
+            end,
+            roleChoices = function(member)
+                return roleCatalog:RolesFor(member.classToken)
+            end,
+            -- The lister sets anyone's role; a member only their own.
+            canSetRole = function(member)
+                return lfgLister() or member.isPlayer == true
+            end,
+            onSetRole = function(member, role)
+                if lfgLister() then
+                    lfgJoin.roleChoices[member.key] = role
+                    if lfgListing:IsActive() then
+                        announceListing()
+                    end
+                else
+                    -- The lister's listing shows it once they hear it.
+                    local listing = lfgJoin.partyListing()
+                    lfgJoin.myRole = role
+                    if listing ~= nil then
+                        comm:Whisper(addon.LfgProtocol.Role(role), listing.sender, true)
+                    end
+                end
+                lfgRefresh()
+            end,
+            -- In someone else's party: the player's role as its listing shows
+            -- it (or as they just chose it).
+            myRole = function()
+                local listing = lfgJoin.partyListing()
+                if listing == nil then
+                    return nil
+                end
+                local role = lfgJoin.myRole
+                local fullName = client:GetPlayerFullName()
+                local name = fullName and string.match(fullName, "^[^%-]+") or fullName
+                local index
+                for index = 1, #(listing.members or {}) do
+                    if role == nil and listing.members[index].name == name then
+                        role = listing.members[index].role
+                    end
+                end
+                return { role = role, classToken = client:GetPlayerClass() }
             end,
             onSave = saveListing,
             onAskInGuild = function(line)
@@ -2591,6 +2658,28 @@ if clientProfile.supported then
                 lfgButton:OpenDrawer()
             end
             return
+        elseif message.t == addon.LfgProtocol.TYPE_ROLE then
+            -- A member of the player's listed party chose their own role.
+            if not lfgListing:IsActive() or not lfgLister() then
+                return
+            end
+            local members = lfgMembers()
+            local index
+            for index = 1, #members do
+                local member = members[index]
+                if not member.isPlayer and lfgKeyOf(member) == senderKey then
+                    local playable = roleCatalog:RolesFor(member.classToken) or {}
+                    local allowed = member.classToken == nil
+                    local position
+                    for position = 1, #playable do
+                        allowed = allowed or playable[position] == message.r
+                    end
+                    if allowed then
+                        lfgJoin.roleChoices[member.key] = message.r
+                        announceListing()
+                    end
+                end
+            end
         elseif message.t == addon.LfgProtocol.TYPE_ANSWER then
             lfgBoard:OnAnswer(senderKey, message.a)
         else
@@ -5400,9 +5489,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         elseif addon.SlowModeConfig.TYPES[message.t] ~= nil then
             slowModeConfig:OnMessage(message, sender)
         elseif addon.LfgProtocol.TYPES[message.t] ~= nil and message.t ~= addon.LfgProtocol.TYPE_ASK
-            and message.t ~= addon.LfgProtocol.TYPE_ANSWER
+            and message.t ~= addon.LfgProtocol.TYPE_ANSWER and message.t ~= addon.LfgProtocol.TYPE_ROLE
         then
-            -- Asks and answers are only ever whispered.
+            -- Asks, answers and roles are only ever whispered.
             onLfgMessage(message, sender)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
@@ -5419,7 +5508,9 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         -- channel, guild log messages are whispered.
         if addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
-        elseif message.t == addon.LfgProtocol.TYPE_ASK or message.t == addon.LfgProtocol.TYPE_ANSWER then
+        elseif message.t == addon.LfgProtocol.TYPE_ASK or message.t == addon.LfgProtocol.TYPE_ANSWER
+            or message.t == addon.LfgProtocol.TYPE_ROLE
+        then
             onLfgMessage(message, sender)
         elseif addon.GuildLogSync.TYPES[message.t] ~= nil then
             guildLogSync:Receive(message, sender)
