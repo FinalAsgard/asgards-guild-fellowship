@@ -283,7 +283,7 @@ function Page:buildEditor(card)
         + Widgets.INPUT_HEIGHT + Theme.SPACING.xs)
     editor.fields = fields
 
-    self.search = ui:SearchBox(fields, LfgBoardPage.FIELD_WIDTH, "Search dungeons", function(text)
+    self.search = ui:SearchBox(fields, LfgBoardPage.FIELD_WIDTH, "Search all dungeons", function(text)
         owner.draft.search = text
         owner.draft.offset = 0
         owner:refreshDungeons()
