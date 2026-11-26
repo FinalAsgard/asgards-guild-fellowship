@@ -137,7 +137,7 @@ test.test("greetings editor: each view reloads what's saved, and no saved data s
     local editor, _, world = newEditor(state)
 
     test.assertEqual(1, #editor:View().rows)
-    -- Changed elsewhere (the old window's editor): the next view has it.
+    -- Changed elsewhere (another character's session): the next view has it.
     table.insert(state.greetings.join, "Two")
     test.assertEqual("Two", editor:View().rows[2].text)
 

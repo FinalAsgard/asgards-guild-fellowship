@@ -25,7 +25,6 @@ local MANIFEST_FILES = {
     "Adapters/SettingsPanel.lua",
     "Adapters/GreetPrompts.lua",
     "Adapters/RecruitPrompts.lua",
-    "Adapters/GreetingsPage.lua",
     "Adapters/ProfilePage.lua",
     "Adapters/MapPins.lua",
     "Adapters/GuildMailWindow.lua",

@@ -160,7 +160,6 @@ if clientProfile.supported then
     pages:Add("profile", "My Profile", addon.MasterFrame.ICONS.profile)
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
-    pages:Add("greetings", "Greetings", addon.MasterFrame.ICONS.greetings)
     -- Officers only: they come and go with the character's rank.
     pages:Add("promotions", "Promotion Requirements", addon.MasterFrame.ICONS.promotions, function()
         return guildLogOf() ~= nil
@@ -334,24 +333,6 @@ if clientProfile.supported then
                             addon.RosterWindow.LEADERBOARD_HEIGHT)
                         frameSettings:Refresh()
                         return below
-                    end,
-                    -- Guild Greet's settings, with the greetings editor below
-                    -- them on the same scrolling page.
-                    greetings = function(content, framework)
-                        local _, footer = frameSettings:Draw(content, settings:SectionsOn("greetings"), 28,
-                            addon.GreetingsPage.HEIGHT)
-                        frameSettings:Refresh()
-                        local editor, reason = addon.GreetingsPage.Create(framework, footer, {
-                            library = function()
-                                return guildGreet:Library()
-                            end,
-                            after = function(seconds, callback)
-                                return client:After(seconds, callback)
-                            end,
-                        })
-                        if editor == nil then
-                            rosterController:Print("The greetings editor can't be shown: " .. tostring(reason) .. ".")
-                        end
                     end,
                 },
                 -- Modes that last only while the frame is open end with it.
@@ -893,10 +874,14 @@ if clientProfile.supported then
         end,
     })
     greetNumber("welcomeCap", "Guild join welcomes")
-    -- The greetings are edited below these settings on the master frame's
-    -- Greetings tab; the AddOns options get a button to go there.
+    -- The greetings are edited on the AGF window's Greetings page; the
+    -- AddOns options get a button to go there, as /agf greet does.
     local function openGreetings()
-        rosterController:Open("greetings")
+        local opened, failure = agfWindow:Open("greetings")
+        if not opened then
+            rosterController:Print("The Greetings page can't open on this client: " .. tostring(failure))
+        end
+        return true
     end
     settings:Add("guildGreet", {
         id = "editGreetings",
