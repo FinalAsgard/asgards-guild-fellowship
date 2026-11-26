@@ -200,6 +200,46 @@ function LfgProtocol.Slot(yes)
     return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_SLOT, y = yes == true }
 end
 
+-- Why `message` isn't understood ("version 2", "unknown type", or for a
+-- listing the first field that's wrong), or nil when it is. For /agf probe
+-- lfg, so a listing that never shows can be traced.
+function LfgProtocol.Problem(message)
+    if type(message) ~= "table" then
+        return "not a table"
+    end
+    if message.v ~= LfgProtocol.VERSION then
+        return "version " .. tostring(message.v)
+    end
+    local check = CHECKS[message.t]
+    if check == nil then
+        return "unknown type " .. tostring(message.t)
+    end
+    if check(message) == true then
+        return nil
+    end
+    if message.t ~= LfgProtocol.TYPE_LISTING then
+        return "bad fields"
+    end
+    local checks = {
+        { "kind", LfgProtocol.KINDS[message.k] == true },
+        { "levels", isRange(message) },
+        { "purpose", message.k == "raid" and (message.p == nil or isShortText(message.p)) or isShortText(message.p) },
+        { "roles", message.k == "dungeon" and isOpenRoles(message.r) or message.k ~= "dungeon" and message.r == nil },
+        { "size", isCount(message.x, 1, LfgProtocol.MOST_PLAYERS) and isCount(message.s, 1, message.x) },
+        { "members", isMembers(message.mb, message.s) },
+        { "note", message.no == nil or isShortText(message.no) },
+        { "asks", type(message.aj) == "boolean" },
+        { "contact", message.ct == nil or message.ct == true },
+    }
+    local index
+    for index = 1, #checks do
+        if not checks[index][2] then
+            return "bad " .. checks[index][1]
+        end
+    end
+    return "bad fields"
+end
+
 -- Whether `message` is a Guild LFG Board message this version understands.
 function LfgProtocol.IsValid(message)
     if type(message) ~= "table" or message.v ~= LfgProtocol.VERSION then

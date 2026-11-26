@@ -48,6 +48,22 @@ test.test("lfg protocol: a listing and its end are understood", function()
     test.assertTrue(protocol.IsValid(listingMessage(addon, { r = {} })))
 end)
 
+test.test("lfg protocol: Problem names why a message is ignored, for the probe", function()
+    local addon = load()
+    local problem = addon.LfgProtocol.Problem
+
+    test.assertEqual(nil, problem(listingMessage(addon)))
+    test.assertEqual("version 2", problem(listingMessage(addon, { v = 2 })))
+    test.assertEqual("unknown type lfg-new", problem({ v = 1, t = "lfg-new" }))
+    test.assertEqual("not a table", problem("lfg-listing"))
+    test.assertEqual("bad levels", problem(listingMessage(addon, { lo = 61 })))
+    test.assertEqual("bad members", problem(listingMessage(addon, { s = 2 })))
+    test.assertEqual("bad members", problem(listingMessage(addon, { mb = { { n = "Tool", l = 0 } } })))
+    test.assertEqual("bad note", problem(listingMessage(addon, { no = string.rep("a", 61) })))
+    test.assertEqual("bad asks", problem(listingMessage(addon, { aj = "nil" })))
+    test.assertEqual("bad fields", problem({ v = 1, t = "lfg-end", lf = false }))
+end)
+
 test.test("lfg protocol: unknown versions and types, and malformed fields, are ignored", function()
     local addon = load()
     local protocol = addon.LfgProtocol
@@ -1001,18 +1017,25 @@ test.test("Forever questing is listed in the zone's levels, and the probe says w
     local printed = table.concat(tool.messages, "\n")
     test.assertContains(printed, "Zone levels in Ironforge: 55-65, the fallback")
     test.assertContains(printed, "Your listing: Questing in Ironforge.")
+    -- What went out: valid as sent, and listed by Tool.
+    test.assertContains(printed, "As sent: valid; you list it.")
+    test.assertContains(printed, "  Sent: 1, last 0s ago (lfg-listing).")
 
     fixtures.slash(zap, "probe lfg")
     printed = table.concat(zap.messages, "\n")
     test.assertContains(printed, "On the board: 0 relevant, 0 for your alts, 1 other.")
     test.assertContains(printed, "Other, Questing in Ironforge, by Tool Box, 1/5, levels 55-65")
+    -- What came in: Tool's listing, none ignored.
+    test.assertContains(printed, "Heard: 1, last from Tool Box")
+    test.assertFalse(string.find(printed, "ignored", 1, true) ~= nil)
 
     -- Where the game knows the zone's levels, they're used.
     tool.environment.C_Map.GetMapLevels = function()
         return 25, 35
     end
+    tool.messages = {}
     fixtures.slash(tool, "probe lfg")
-    test.assertContains(tool.messages[#tool.messages - 2], "Zone levels in Ironforge: 25-35, from the game.")
+    test.assertContains(table.concat(tool.messages, "\n"), "Zone levels in Ironforge: 25-35, from the game.")
 end)
 
 -- Greetings ---------------------------------------------------------------------

@@ -106,6 +106,9 @@ local lfgJoin = {
     -- Ends the player's listing (the drawer's End listing); set once the
     -- board's wiring is.
     endListing = function() end,
+    -- For /agf probe lfg: board messages sent (and refused by the add-on
+    -- channel), heard, and ignored, by reason, since login.
+    stats = { sent = 0, refused = 0, heard = 0, ignored = {} },
     -- /agfdev lfgtest's stand-in "fill the empty slot?" is showing.
     standInSlot = false,
     -- A questing listing's leader moved: the zone they're asked to move it
@@ -1612,7 +1615,14 @@ if clientProfile.supported then
         end
         local message = lfgWaiting
         lfgWaiting = nil
-        comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL)
+        local stats = lfgJoin.stats
+        if comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL) then
+            stats.sent = stats.sent + 1
+            stats.sentAt = client:Timestamp()
+            stats.sentType = message.t
+        else
+            stats.refused = stats.refused + 1
+        end
     end
     local function sendLfg(message)
         lfgWaiting = message
@@ -1830,8 +1840,33 @@ if clientProfile.supported then
             client:Print(zoneLine .. levels.minLevel .. "-" .. levels.maxLevel .. ", the fallback (your party's" ..
                 " levels, " .. addon.ZoneLevels.MARGIN .. " either way); the game gives none here.")
         end
-        local own = lfgListing:Announcement(lfgMembers())
+        local own = lfgListing:Announcement(lfgMembers(), settings:Get("lfgButton") == true)
         client:Print("  Your listing: " .. (own and addon.LfgListing.Label(own.k, own.p) or "none") .. ".")
+        if own ~= nil then
+            local problem = addon.LfgProtocol.Problem(addon.LfgProtocol.Listing(own))
+            client:Print("    As sent: " .. (problem and ("guildmates would ignore it (" .. problem .. ")")
+                or "valid") .. "; you " .. (lfgLister() and "list it" or "don't list it (not the leader or contact)")
+                .. ".")
+        end
+        -- What went out and came in since login.
+        local stats = lfgJoin.stats
+        local now = client:Timestamp()
+        local function ago(at)
+            return (type(at) == "number" and type(now) == "number") and (" " .. (now - at) .. "s ago") or ""
+        end
+        client:Print("  Sent: " .. stats.sent .. (stats.sentAt and (", last" .. ago(stats.sentAt) .. " (" ..
+            tostring(stats.sentType) .. ")") or "") .. (stats.refused > 0 and (", " .. stats.refused ..
+            " refused by the add-on channel") or "") .. (comm:IsBusy() and "; waiting: in combat or an encounter"
+            or "") .. ".")
+        local ignored = {}
+        local reason, count
+        for reason, count in pairs(stats.ignored) do
+            table.insert(ignored, count .. " " .. reason)
+        end
+        table.sort(ignored)
+        client:Print("  Heard: " .. stats.heard .. (stats.heardFrom and (", last from " .. stats.heardFrom ..
+            ago(stats.heardAt) .. " (" .. tostring(stats.heardType) .. ")") or "") ..
+            (ignored[1] and ("; ignored: " .. table.concat(ignored, ", ")) or "") .. ".")
         local current, alts = lfgCharacters()
         local groups = lfgBoard:Groups(client:Timestamp(), current, alts)
         client:Print("  On the board: " .. #groups.relevant .. " relevant, " .. #groups.alts .. " for your alts, " ..
@@ -2481,9 +2516,15 @@ if clientProfile.supported then
     -- ignored.
     onLfgMessage = function(message, sender)
         local senderKey = keyOfSender(sender)
-        if not addon.LfgProtocol.IsValid(message) or senderKey == nil
-            or senderKey == rosterController:SelfKey()
-        then
+        local stats = lfgJoin.stats
+        stats.heard = stats.heard + 1
+        stats.heardFrom, stats.heardAt, stats.heardType = sender, client:Timestamp(), message and message.t
+        local problem = addon.LfgProtocol.Problem(message)
+            or senderKey == nil and "no guild or sender name"
+            or senderKey == rosterController:SelfKey() and "your own"
+            or nil
+        if problem ~= nil then
+            stats.ignored[problem] = (stats.ignored[problem] or 0) + 1
             return
         end
         if message.t == addon.LfgProtocol.TYPE_LISTING then

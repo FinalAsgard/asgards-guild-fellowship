@@ -35,6 +35,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** and **Promote to match** flags reach the game's guild roster (officers only). |
 | `/agf probe timer` | Shows the clock icon the roster uses for characters whose time requirements are met, whether this client loaded it (if not, the roster shows **[T]** instead), and how many characters show it (officers only). |
 | `/agf probe greet` | Shows your greet weight, how many guildmates with the add-on count as online, and how much longer your greet prompts wait because of it. |
+| `/agf probe lfg` | Shows the Guild LFG Board as your add-on sees it: your zone's levels and where they came from, your listing and whether guildmates' add-ons can read it as sent, the listings on your board by tab, and since login how many board messages went out, how many came in and from whom, and how many were ignored and why (anyone). |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
