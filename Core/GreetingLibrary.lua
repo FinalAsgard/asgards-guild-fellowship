@@ -124,6 +124,12 @@ local function tidy(text)
     return text
 end
 
+-- A greeting as it would be saved: trimmed, with line breaks folded to
+-- spaces. Nil when nothing is left.
+function GreetingLibrary.Tidy(text)
+    return tidy(text)
+end
+
 -- A greeting cleaned for chat: trimmed, with line breaks folded to spaces,
 -- and cut to one message. Nil when nothing is left.
 function GreetingLibrary.Clean(text)

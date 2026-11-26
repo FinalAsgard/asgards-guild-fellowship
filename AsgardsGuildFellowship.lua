@@ -1368,6 +1368,9 @@ if clientProfile.supported then
                         onError = function(text)
                             rosterController:Print(text)
                         end,
+                        after = function(seconds, callback)
+                            return client:After(seconds, callback)
+                        end,
                     })
                     addon.greetingsPage = greetingsUi.page
                 end,

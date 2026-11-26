@@ -1093,6 +1093,82 @@ test.test("greetings: the module sits after LFG, with the Greet prompts switch a
     test.assertTrue(page.rows[#greetings + 1].shown)
 end)
 
+test.test("greetings: ✎ edits a greeting in place, + Add a greeting adds one at the bottom", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local window = addon.agfWindow
+    test.assertTrue(window:Open("greetings"))
+    local page = addon.greetingsPage
+    local library = addon.guildGreet:Library()
+    local box = page.edit.input.box
+    local function typeText(text)
+        box:SetText(text)
+        box.scripts.OnTextChanged(box, true)
+    end
+
+    -- ✎ on the second Join greeting: the box takes its row's place.
+    local row = page.rows[2]
+    click(row.edit)
+    test.assertTrue(page.edit.shown)
+    test.assertFalse(row.shown)
+    test.assertEqual("Welcome aboard, {name}! Glad to have you.", box:GetText())
+    test.assertEqual("Save", page.edit.save.label.text)
+    test.assertFalse(page.edit.save.active)
+    typeText("Welcome aboard, {name}!")
+    test.assertTrue(page.edit.save.active)
+    -- Enter saves.
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual("Welcome aboard, {name}!", library:Greetings("join")[2])
+    test.assertFalse(page.edit.shown)
+    test.assertEqual("Welcome aboard, {name}!", page.rows[2].text.text)
+
+    -- + Add a greeting: an empty box at the bottom, Add.
+    click(page.add)
+    test.assertFalse(page.add.shown)
+    test.assertEqual("", box:GetText())
+    test.assertEqual("Add", page.edit.save.label.text)
+    typeText("Hi {name}, make yourself at home!")
+    click(page.edit.save)
+    local join = library:Greetings("join")
+    test.assertEqual("Hi {name}, make yourself at home!", join[#join])
+    test.assertTrue(page.add.shown)
+
+    -- Escape cancels: nothing saved.
+    click(page.rows[1].edit)
+    typeText("Not this")
+    box.scripts.OnEscapePressed(box)
+    test.assertFalse(page.edit.shown)
+    test.assertEqual("Welcome to the guild, {name}!", library:Greetings("join")[1])
+
+    -- A refused save shows why under the box, for a few seconds.
+    click(page.add)
+    typeText("Hello {name}")
+    local saved = library.state.greetings.join
+    library.state.greetings.join = "unreadable"
+    click(page.edit.save)
+    library.state.greetings.join = saved
+    test.assertEqual("Can't save: the saved greetings are unreadable.", page.edit.error.text)
+    fixtures.runTimers(world, 1)
+    test.assertTrue(page.edit.error.text ~= "")
+    fixtures.runTimers(world, 5)
+    test.assertEqual("", page.edit.error.text)
+    test.assertTrue(page.edit.shown)
+
+    -- A draft is dropped on another tab, another category, or the window closing.
+    click(page.tabs.tabs[2])
+    click(page.tabs.tabs[1])
+    test.assertFalse(page.edit.shown)
+    click(page.rows[1].edit)
+    click(page.categories.buttons[2])
+    test.assertFalse(page.edit.shown)
+    click(page.rows[1].edit)
+    test.assertTrue(page.edit.shown)
+    page.content.scripts.OnHide(page.content)
+    test.assertFalse(page.edit.shown)
+    test.assertEqual("Hey {name}!", library:Greetings("login")[1])
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the window opens on Friends, the page is built on show, and a pinned Friend is starred", function()

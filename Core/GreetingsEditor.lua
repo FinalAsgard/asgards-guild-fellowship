@@ -6,10 +6,20 @@ local _, addon = ...
 -- current minutes), its switch, its greetings, and a short note while its
 -- switch is off. The page is dimmed while greet prompts are off.
 --
+-- One greeting at a time is open for editing (a row's position, or NEW for
+-- + Add a greeting), with its draft. Save goes through the library: Add
+-- for a new one (at the bottom), Save for an edit, greyed out while the
+-- draft is empty or unchanged. A refused save keeps the draft and says why.
+-- Selecting a category, or Cancel (another tab, another row, the window
+-- closing), drops the draft quietly.
+--
 -- Greetings are read from the library each time View is asked, so a page
 -- showing it reloads what's saved.
 local GreetingsEditor = {
     OFF_NOTE = "Switched off: these greetings are kept, but not used.",
+    NEW = "new",
+    ADD = "Add",
+    SAVE = "Save",
 }
 addon.GreetingsEditor = GreetingsEditor
 
@@ -53,12 +63,83 @@ function GreetingsEditor.Description(id, minutes)
     return found.when
 end
 
--- Selects category `id`. False for an unknown one, which changes nothing.
+-- Selects category `id`, dropping any draft. False for an unknown one,
+-- which changes nothing.
 function Editor:Select(id)
     if category(id) == nil then
         return false
     end
+    if id ~= self.selected then
+        self:Cancel()
+    end
     self.selected = id
+    return true
+end
+
+-- Opens the greeting at `index` for editing, dropping any other draft.
+-- False when there's no such greeting.
+function Editor:StartEdit(index)
+    local text = self:greetings(self.selected)[index]
+    if text == nil then
+        return false
+    end
+    self.open, self.original, self.draft, self.error = index, text, text, nil
+    return true
+end
+
+-- Opens an empty box for a new greeting, dropping any other draft.
+function Editor:StartAdd()
+    self.open, self.original, self.draft, self.error = GreetingsEditor.NEW, "", "", nil
+end
+
+-- What's typed in the open box. A new draft clears the last error.
+function Editor:SetDraft(text)
+    if self.open == nil then
+        return
+    end
+    self.draft = type(text) == "string" and text or ""
+    self.error = nil
+end
+
+-- Forgets the last save error, keeping the draft.
+function Editor:ClearError()
+    self.error = nil
+end
+
+-- Closes the open box, dropping its draft.
+function Editor:Cancel()
+    self.open, self.original, self.draft, self.error = nil, nil, nil, nil
+end
+
+-- Whether the draft can be saved: something in it, and changed.
+function Editor:canSave()
+    if self.open == nil then
+        return false
+    end
+    local tidied = addon.GreetingLibrary.Tidy(self.draft)
+    return tidied ~= nil and tidied ~= addon.GreetingLibrary.Tidy(self.original)
+end
+
+-- Saves the draft through the library and closes the box. False when it
+-- can't be saved; a refused save keeps the box open with the reason.
+function Editor:Save()
+    if not self:canSave() then
+        return false
+    end
+    local library = self.options.library and self.options.library() or nil
+    local saved, reason
+    if library == nil then
+        saved, reason = nil, "saved data is unavailable"
+    elseif self.open == GreetingsEditor.NEW then
+        saved, reason = library:Add(self.selected, self.draft)
+    else
+        saved, reason = library:Edit(self.selected, self.open, self.draft)
+    end
+    if not saved then
+        self.error = "Can't save: " .. tostring(reason) .. "."
+        return false
+    end
+    self:Cancel()
     return true
 end
 
@@ -90,6 +171,10 @@ end
 --   offNote      the note shown over its greetings while it's off, or nil
 --   rows         its greetings, { index, text }, in saved order
 --   dimmed       whether greet prompts are off, so the page is dimmed
+--   open         the open greeting's position, NEW, or nil
+--   draft        the open box's text
+--   saveLabel    Add or Save; saveEnabled whether it can be clicked
+--   error        why the last save failed, or nil
 function Editor:View()
     local categories = {}
     local list = addon.GreetingLibrary.CATEGORIES
@@ -120,5 +205,10 @@ function Editor:View()
         offNote = not enabled and GreetingsEditor.OFF_NOTE or nil,
         rows = rows,
         dimmed = self.options.promptsOn ~= nil and self.options.promptsOn() == false,
+        open = self.open,
+        draft = self.draft,
+        saveLabel = self.open == GreetingsEditor.NEW and GreetingsEditor.ADD or GreetingsEditor.SAVE,
+        saveEnabled = self:canSave(),
+        error = self.error,
     }
 end

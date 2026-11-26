@@ -134,3 +134,109 @@ test.test("greetings editor: each view reloads what's saved, and no saved data s
     test.assertEqual(0, #view.rows)
     test.assertTrue(dots(view).join)
 end)
+
+test.test("greetings editor: ✎ opens a greeting with its text; Save is greyed out until it's changed", function()
+    local state = { greetings = { login = { "Hi", "Hey {name}" } } }
+    local editor = newEditor(state)
+    editor:Select("login")
+
+    test.assertFalse(editor:StartEdit(3))
+    test.assertTrue(editor:StartEdit(2))
+    local view = editor:View()
+    test.assertEqual(2, view.open)
+    test.assertEqual("Hey {name}", view.draft)
+    test.assertEqual("Save", view.saveLabel)
+    test.assertFalse(view.saveEnabled)
+    -- Only spaces changed: still nothing to save.
+    editor:SetDraft("  Hey {name} ")
+    test.assertFalse(editor:View().saveEnabled)
+    test.assertFalse(editor:Save())
+    editor:SetDraft("")
+    test.assertFalse(editor:View().saveEnabled)
+
+    editor:SetDraft("Hey there, {name}!")
+    test.assertTrue(editor:View().saveEnabled)
+    test.assertTrue(editor:Save())
+    test.assertEqual("Hey there, {name}!", state.greetings.login[2])
+    test.assertEqual(nil, editor:View().open)
+end)
+
+test.test("greetings editor: + Add a greeting opens an empty box, and Add puts it at the bottom", function()
+    local state = { greetings = { join = { "Welcome!" } } }
+    local editor, addon = newEditor(state)
+
+    editor:StartAdd()
+    local view = editor:View()
+    test.assertEqual(addon.GreetingsEditor.NEW, view.open)
+    test.assertEqual("", view.draft)
+    test.assertEqual("Add", view.saveLabel)
+    test.assertFalse(view.saveEnabled)
+
+    editor:SetDraft("Glad you're here,\n{name}!")
+    test.assertTrue(editor:Save())
+    test.assertEqual("Glad you're here, {name}!", state.greetings.join[2])
+    test.assertEqual("Glad you're here, {name}!", editor:View().rows[2].text)
+end)
+
+test.test("greetings editor: only one greeting is open, and Cancel drops the draft", function()
+    local state = { greetings = { login = { "One", "Two" } } }
+    local editor = newEditor(state)
+    editor:Select("login")
+
+    editor:StartEdit(1)
+    editor:SetDraft("Changed")
+    editor:StartEdit(2)
+    local view = editor:View()
+    test.assertEqual(2, view.open)
+    test.assertEqual("Two", view.draft)
+    editor:StartAdd()
+    test.assertEqual("", editor:View().draft)
+    editor:Cancel()
+    test.assertEqual(nil, editor:View().open)
+    test.assertEqual("One", state.greetings.login[1])
+end)
+
+test.test("greetings editor: switching category drops the draft quietly", function()
+    local state = { greetings = { login = { "One" } } }
+    local editor = newEditor(state)
+    editor:Select("login")
+    editor:StartEdit(1)
+    editor:SetDraft("Not saved")
+
+    -- The same category again keeps it.
+    editor:Select("login")
+    test.assertEqual("Not saved", editor:View().draft)
+    editor:Select("join")
+    test.assertEqual(nil, editor:View().open)
+    test.assertEqual("One", state.greetings.login[1])
+end)
+
+test.test("greetings editor: a refused save keeps the box open with the reason, until it's typed in", function()
+    local state = { greetings = { login = { "One" } } }
+    local editor, _, world = newEditor(state)
+    editor:Select("login")
+
+    editor:StartAdd()
+    editor:SetDraft(string.rep("a", 256))
+    test.assertFalse(editor:Save())
+    local view = editor:View()
+    test.assertContains(view.error, "Can't save: it's longer than one guild chat message")
+    test.assertEqual(string.rep("a", 256), view.draft)
+    editor:SetDraft("Short")
+    test.assertEqual(nil, editor:View().error)
+
+    -- Gone elsewhere while open.
+    editor:StartEdit(1)
+    editor:SetDraft("Edited")
+    state.greetings.login = {}
+    test.assertFalse(editor:Save())
+    test.assertEqual("Can't save: that greeting is gone.", editor:View().error)
+    editor:ClearError()
+    test.assertEqual(nil, editor:View().error)
+
+    world.unavailable = true
+    editor:StartAdd()
+    editor:SetDraft("Hi")
+    test.assertFalse(editor:Save())
+    test.assertEqual("Can't save: saved data is unavailable.", editor:View().error)
+end)

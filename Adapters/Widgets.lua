@@ -582,18 +582,121 @@ function Widgets.Length(text)
     return count
 end
 
+-- The first `limit` bytes of `text`, backed off to the start of a whole
+-- UTF-8 character so a letter like é is never cut in half.
+function Widgets.CutBytes(text, limit)
+    if #text <= limit then
+        return text
+    end
+    local length = limit
+    -- Bytes 0x80-0xBF continue a character started earlier.
+    while length > 0 do
+        local nextByte = string.byte(text, length + 1)
+        if nextByte < 0x80 or nextByte >= 0xC0 then
+            break
+        end
+        length = length - 1
+    end
+    return string.sub(text, 1, length)
+end
+
+-- How many lines a multiline input shows for text `stringHeight` tall, at
+-- `lineHeight` a line: at least one, at most `maxLines`.
+function Widgets.LinesFor(stringHeight, lineHeight, maxLines)
+    if type(stringHeight) ~= "number" or type(lineHeight) ~= "number" or lineHeight <= 0 then
+        return 1
+    end
+    return math.max(1, math.min(maxLines, math.ceil(stringHeight / lineHeight - 0.01)))
+end
+
 -- A text input holding at most `maxLetters` characters, with an "n/max"
 -- counter on its right. onChange(text) runs as the player types.
-function UI:TextInput(parent, width, maxLetters, onChange)
+--
+-- options (optional), for a multiline input:
+--   multiline  true: the text wraps, and the field grows from one line to
+--              `maxLines` (default 4) as it's typed, calling onResize(height)
+--   maxBytes   the most bytes it holds, cut at a whole character (a chat
+--              message's limit counts bytes, so é takes two)
+--   onEnter    function(): Enter (it never adds a line break)
+--   onEscape   function(): Escape
+-- Line breaks, typed or pasted, fold into spaces.
+function UI:TextInput(parent, width, maxLetters, onChange, options)
+    options = options or {}
     local field = self:field(parent, width, onChange)
-    field.box:SetMaxLetters(maxLetters)
-    field.box:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", -48, 2)
+    local box = field.box
+    box:SetMaxLetters(maxLetters)
     field.counter = self:Text(field, "", "regular", "small", "label")
-    field.counter:SetPoint("RIGHT", field, "RIGHT", -Theme.SPACING.s, 0)
-    field.onText = function(text)
-        field.counter:SetText(Widgets.Length(text) .. "/" .. maxLetters)
+    if not options.multiline then
+        box:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", -48, 2)
+        field.counter:SetPoint("RIGHT", field, "RIGHT", -Theme.SPACING.s, 0)
+        field.onText = function(text)
+            field.counter:SetText(Widgets.Length(text) .. "/" .. maxLetters)
+        end
+        field.onText("")
+        return field
     end
-    field.onText("")
+
+    local maxLines = options.maxLines or 4
+    local lineHeight = Theme.FONT_SIZE.body + 4
+    field.lines = 1
+    box:SetMultiLine(true)
+    if options.maxBytes ~= nil then
+        -- The game's cap counts the terminating zero.
+        box:SetMaxBytes(options.maxBytes + 1)
+    end
+    box:ClearAllPoints()
+    box:SetPoint("TOPLEFT", field, "TOPLEFT", Theme.SPACING.s, -5)
+    box:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", -56, 5)
+    field.counter:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", -Theme.SPACING.s, 6)
+    -- Measures the text at the box's width, to know how many lines it takes.
+    field.measure = self:Text(field, "", "regular", "body", "text")
+    field.measure:SetWordWrap(true)
+    field.measure:Hide()
+    local function resize(text)
+        local boxWidth = box:GetWidth()
+        if type(boxWidth) == "number" and boxWidth > 0 then
+            field.measure:SetWidth(boxWidth)
+        end
+        field.measure:SetText(text)
+        local lines = Widgets.LinesFor(field.measure:GetStringHeight(), lineHeight, maxLines)
+        local height = lines * lineHeight + 10
+        field:SetHeight(math.max(Widgets.INPUT_HEIGHT, height))
+        if lines ~= field.lines then
+            field.lines = lines
+            if options.onResize ~= nil then
+                options.onResize(height)
+            end
+        end
+    end
+    box:SetScript("OnTextChanged", function(self, userInput)
+        local text = self:GetText() or ""
+        local tidied = string.gsub(text, "[\r\n]+", " ")
+        if options.maxBytes ~= nil then
+            tidied = Widgets.CutBytes(tidied, options.maxBytes)
+        end
+        if tidied ~= text then
+            -- The game runs this again for the new text, not as typing.
+            self:SetText(tidied)
+            text = tidied
+        end
+        field.counter:SetText(Widgets.Length(text) .. "/" .. maxLetters)
+        resize(text)
+        if userInput and onChange ~= nil then
+            onChange(text)
+        end
+    end)
+    box:SetScript("OnEnterPressed", function()
+        if options.onEnter ~= nil then
+            options.onEnter()
+        end
+    end)
+    box:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+        if options.onEscape ~= nil then
+            options.onEscape()
+        end
+    end)
+    field.counter:SetText("0/" .. maxLetters)
     return field
 end
 

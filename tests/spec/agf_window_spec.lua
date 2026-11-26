@@ -522,3 +522,50 @@ test.test("agf window: a module's header switch agrees with its setting, and sho
     window:ShowPage("settings")
     test.assertFalse(header.frame.shown)
 end)
+
+test.test("agf window: a multiline input folds line breaks, caps bytes at a whole letter, and grows to its most lines", function()
+    local addon = loadUi()
+    local environment = fakeFrames.install({})
+    local ui = addon.Widgets.Create(environment)
+    local page = environment.CreateFrame("Frame")
+    local typed, entered, escaped = {}, 0, 0
+    local input = ui:TextInput(page, 300, 255, function(text)
+        table.insert(typed, text)
+    end, { multiline = true, maxBytes = 10, onEnter = function()
+        entered = entered + 1
+    end, onEscape = function()
+        escaped = escaped + 1
+    end })
+    local box = input.box
+    local function typeText(text)
+        box:SetText(text)
+        box.scripts.OnTextChanged(box, true)
+        -- A real box runs OnTextChanged again after the add-on's SetText.
+        if box:GetText() ~= text then
+            box.scripts.OnTextChanged(box, false)
+        end
+    end
+
+    test.assertTrue(rawget(box, "multiLine"))
+    test.assertEqual("0/255", input.counter.text)
+    typeText("Hi\nthere")
+    test.assertEqual("Hi there", box:GetText())
+    -- What's handed on is the folded text.
+    test.assertEqual("Hi there", typed[#typed])
+    test.assertEqual("8/255", input.counter.text)
+    -- é is two bytes: the cap stops before a letter that won't fit whole.
+    typeText("Héllo wörld")
+    test.assertEqual("Héllo wö", box:GetText())
+    test.assertEqual("8/255", input.counter.text)
+
+    box.scripts.OnEnterPressed(box)
+    box.scripts.OnEscapePressed(box)
+    test.assertEqual(1, entered)
+    test.assertEqual(1, escaped)
+
+    test.assertEqual(1, addon.Widgets.LinesFor(nil, 16, 4))
+    test.assertEqual(1, addon.Widgets.LinesFor(15, 16, 4))
+    test.assertEqual(2, addon.Widgets.LinesFor(32, 16, 4))
+    test.assertEqual(4, addon.Widgets.LinesFor(200, 16, 4))
+    test.assertEqual("ab", addon.Widgets.CutBytes("abé", 3))
+end)
