@@ -103,6 +103,9 @@ local lfgJoin = {
     fillSlot = function() end,
     postSlot = function() end,
     partyListing = function() return nil end,
+    -- Ends the player's listing (the drawer's End listing); set once the
+    -- board's wiring is.
+    endListing = function() end,
     -- /agfdev lfgtest's stand-in "fill the empty slot?" is showing.
     standInSlot = false,
     -- A questing listing's leader moved: the zone they're asked to move it
@@ -1448,6 +1451,18 @@ if clientProfile.supported then
         onAskInGuild = function(line)
             client:OpenGuildChat(line)
         end,
+        -- The drawer's Edit and End listing on the player's own listing, as
+        -- the board's Your listing card has them.
+        onEditListing = function()
+            openBoard()
+            if lfgPage ~= nil and lfgListing:IsActive() then
+                lfgPage:StartEditing()
+            end
+        end,
+        onEndListing = function()
+            lfgTrigger:NotLooking()
+            lfgJoin.endListing()
+        end,
         onDrawerOpened = function()
             lfgDrawer:Seen()
             lfgRefresh()
@@ -1679,6 +1694,7 @@ if clientProfile.supported then
         lfgJoin.requests:Clear()
         refreshLfg()
     end
+    lfgJoin.endListing = endListing
     -- Whether the player speaks for their listing: solo, leading the
     -- party, or its contact.
     local function lfgLister()
@@ -1843,18 +1859,25 @@ if clientProfile.supported then
         end
     end
     -- The player's party for the drawer, or nil when they're not in one:
-    -- its listing when they lead one, else just its size.
+    -- its listing when they lead one, else just its size. A player with a
+    -- live listing and no party gets one too, marked solo, so the drawer
+    -- shows their listing.
     local function lfgParty()
-        if not client:IsInGroup() then
+        local grouped = client:IsInGroup()
+        if not grouped and not lfgListing:IsActive() then
             return nil
         end
-        local raid = client:IsInRaid() == true
+        local raid = grouped and client:IsInRaid() == true
         -- A raid's every subgroup, not just the player's own.
-        local size = #((raid and client:GetGroupMembers() or client:GetPartyMembers()) or {})
+        local size = grouped and #((raid and client:GetGroupMembers() or client:GetPartyMembers()) or {}) or 1
         local party = { kind = raid and "raid" or "other", size = math.max(size, 1),
-            maxSize = raid and addon.LfgListing.RAID_SIZE or addon.LfgListing.PARTY_SIZE }
+            maxSize = raid and addon.LfgListing.RAID_SIZE or addon.LfgListing.PARTY_SIZE, solo = not grouped or nil }
         local fields = lfgListing:IsActive() and lfgListing:Announcement(lfgMembers()) or nil
         if fields ~= nil then
+            party.own = true
+            if not grouped then
+                party.maxSize = fields.x or party.maxSize
+            end
             party.kind, party.label, party.note = fields.k, addon.LfgListing.Label(fields.k, fields.p), fields.no
             party.openRoles = fields.r
             -- What the drawer's Ask in guild types, while slots are open.

@@ -101,6 +101,9 @@ end
 --                   character can ask to join a dungeon listing as
 --   onAsk           function(listing, role?): Ask to join
 --   onWhisper       function(name): whispers someone
+--   onEditListing   function(): the drawer's Edit on the player's own
+--                   listing (the party's `own`)
+--   onEndListing    function(): its End listing
 --   onAskInGuild    function(line): types `line` into guild chat, unsent;
 --                   the drawer's Ask in guild for the player's listed
 --                   party with open slots (the party's `guildLine`)
@@ -296,6 +299,25 @@ function Button:buildDrawer()
     self.askGuildButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad + LfgButton.TILE_SIZE + Theme.SPACING.s)
     self.askGuildButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
     self.askGuildButton:Hide()
+    -- Edit and End listing, side by side, on the player's own listing.
+    local half = (LfgButton.DRAWER_WIDTH - 2 * pad - Theme.SPACING.xs) / 2
+    self.editListingButton = ui:Button(drawer, "Edit", "secondary", function()
+        owner:CloseDrawer()
+        if owner.options.onEditListing ~= nil then
+            owner.options.onEditListing()
+        end
+    end)
+    self.editListingButton:SetWidth(half)
+    self.endListingButton = ui:Button(drawer, "End listing", "secondary", function()
+        owner:CloseDrawer()
+        if owner.options.onEndListing ~= nil then
+            owner.options.onEndListing()
+        end
+    end)
+    self.endListingButton:SetWidth(half)
+    self.endListingButton:SetPoint("LEFT", self.editListingButton, "RIGHT", Theme.SPACING.xs, 0)
+    self.editListingButton:Hide()
+    self.endListingButton:Hide()
 
     -- Show Nearby (the button's menu): the guildmates in the player's zone,
     -- as the board's Nearby tab lists them, each name opening a menu to
@@ -496,7 +518,8 @@ function Button:refreshDrawer()
     local zone = kind == addon.LfgDrawerModel.ZONE
     local gate = kind == addon.LfgDrawerModel.GATE or slot or zone
     local asking = kind == addon.LfgDrawerModel.ASK or gate
-    local headings = { [addon.LfgDrawerModel.PARTY] = "Your party", [addon.LfgDrawerModel.ASK] = "List your party?",
+    local headings = { [addon.LfgDrawerModel.PARTY] = top.party ~= nil and top.party.solo and "Your listing"
+        or "Your party", [addon.LfgDrawerModel.ASK] = "List your party?",
         [addon.LfgDrawerModel.GATE] = "List your party?", [addon.LfgDrawerModel.SLOT] = "Your party",
         [addon.LfgDrawerModel.ZONE] = "Your party" }
     drawer.heading:SetText(Theme.Label(headings[kind] or "New for you"))
@@ -534,7 +557,19 @@ function Button:refreshDrawer()
     setShown(drawer.note, party)
     local guildLine = party and top.party ~= nil and top.party.guildLine or nil
     self.askGuildButton.line = guildLine
-    setShown(self.askGuildButton, guildLine ~= nil and self.options.onAskInGuild ~= nil)
+    local asksGuild = guildLine ~= nil and self.options.onAskInGuild ~= nil
+    setShown(self.askGuildButton, asksGuild)
+    -- Edit and End listing go over Ask in guild, or over the tiles.
+    local own = party and top.party ~= nil and top.party.own == true
+    setShown(self.editListingButton, own)
+    setShown(self.endListingButton, own)
+    local pad = Theme.SPACING.m
+    local above = pad + LfgButton.TILE_SIZE + Theme.SPACING.s
+    if asksGuild then
+        above = above + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.xs
+    end
+    self.editListingButton:ClearAllPoints()
+    self.editListingButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, above)
     local index
     for index = 1, 5 do
         drawer.roleTiles[index]:Hide()
@@ -592,8 +627,11 @@ function Button:refreshDrawer()
     elseif zone then
         extra = extraHeight(drawer.question, 2)
     end
-    if party and self.askGuildButton.line ~= nil and self.options.onAskInGuild ~= nil then
+    if party and asksGuild then
         extra = extra + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.s
+    end
+    if own then
+        extra = extra + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.xs
     end
     drawer:SetHeight((LfgButton.DRAWER_HEIGHTS[kind] or LfgButton.DRAWER_HEIGHTS.none) + extra)
     self:refreshToasts()
@@ -621,7 +659,8 @@ function Button:refreshNearby()
     drawer.kind = "nearby"
     local hidden = { drawer.icon, drawer.purpose, drawer.details, drawer.empty, drawer.question, drawer.slotDetails,
         drawer.party, drawer.partyDetails, drawer.note, drawer.raidTile, self.askButton, self.startButton,
-        self.listButton, self.notLookingButton, self.snoozeButton }
+        self.listButton, self.notLookingButton, self.snoozeButton, self.askGuildButton, self.editListingButton,
+        self.endListingButton }
     local index
     for index = 1, #hidden do
         hidden[index]:Hide()

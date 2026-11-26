@@ -49,9 +49,13 @@ end
 -- What to show now. facts:
 --   groups    LfgBoard:Groups for the current character ({ relevant, ... })
 --   party     nil when not in a party, else { label?, kind?, size, maxSize,
---             openRoles?, note?, slotRole?, guildLine? }: the party and its
---             listing (guildLine: what Ask in guild would type), if
---             any; slotRole is the role an open slot would be posted as
+--             openRoles?, note?, slotRole?, guildLine?, solo?, own? }: the
+--             party and its listing (guildLine: what Ask in guild would
+--             type), if any; slotRole is the role an open slot would be
+--             posted as. A player with a live listing and no party has a
+--             party too, with `solo` set, so the drawer shows their
+--             listing; it doesn't hide the glow as a real party does.
+--             `own` marks the player's own listing (Edit and End listing)
 --   combat    in combat, a boss encounter or a keystone run
 --   instance  in an instance
 --   dnd       Do Not Disturb is on
@@ -70,10 +74,12 @@ end
 -- player }.
 function Model:Update(facts)
     local relevant = facts.groups and facts.groups.relevant or {}
-    local hidden = facts.party ~= nil or facts.combat == true or facts.instance == true or facts.dnd == true
+    -- A solo lister isn't in a party: groups still glow and pulse for them.
+    local inParty = facts.party ~= nil and facts.party.solo ~= true
+    local hidden = inParty or facts.combat == true or facts.instance == true or facts.dnd == true
     -- A party or Do Not Disturb means "not now": what appears then never
     -- glows.
-    local ignored = facts.party ~= nil or facts.dnd == true
+    local ignored = inParty or facts.dnd == true
     local current, fresh = {}, {}
     local index
     for index = 1, #relevant do
