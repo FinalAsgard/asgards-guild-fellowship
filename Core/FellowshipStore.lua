@@ -25,6 +25,8 @@ local FellowshipStore = {
     RECRUIT_AD_MAX = 255,
     -- How many players the user can pin as Friends.
     FRIEND_SLOTS = 5,
+    -- Who Guild Greet prompts for (Store:GreetFor).
+    GREET_FOR = { everyone = "everyone", grouped = "grouped", friends = "friends" },
 }
 -- Player profile text fields (schema 4), each with its longest value. A
 -- character's own: stored on the character that wrote it, as `<field>`,
@@ -704,26 +706,50 @@ function Store:SetGreetHighlightFriends(enabled)
     return true
 end
 
--- Whether Guild Greet only prompts for players the user has grouped with
--- (any GroupFriends tier). Off unless turned on; unusable saved data counts
--- as off.
-function Store:GreetOnlyGrouped()
+-- Who Guild Greet prompts for (GREET_FOR): everyone, players the user has
+-- grouped with (any GroupFriends tier, Friends included), or only their
+-- Friends and Top 5. Everyone unless set. Saved data from before the choice
+-- had a check box, `onlyGrouped`, read as grouped when it was on; anything
+-- unusable reads as everyone.
+function Store:GreetFor()
     local state = type(self.database) == "table" and self.database.greet or nil
-    return type(state) == "table" and state.onlyGrouped == true
+    if type(state) ~= "table" then
+        return FellowshipStore.GREET_FOR.everyone
+    end
+    if FellowshipStore.GREET_FOR[state.greetFor] ~= nil then
+        return state.greetFor
+    end
+    if state.greetFor == nil and state.onlyGrouped == true then
+        return FellowshipStore.GREET_FOR.grouped
+    end
+    return FellowshipStore.GREET_FOR.everyone
 end
 
--- Turns "only greet players I've grouped with" on or off. An unusable
+-- Sets who Guild Greet prompts for (a GREET_FOR value). An unusable
 -- existing value is left alone.
+function Store:SetGreetFor(choice)
+    if FellowshipStore.GREET_FOR[choice] == nil then
+        return false
+    end
+    local state = self:GetGreetState()
+    if state == nil or (state.greetFor ~= nil and FellowshipStore.GREET_FOR[state.greetFor] == nil) then
+        return false
+    end
+    state.greetFor = choice
+    return true
+end
+
+-- The old check box, over GreetFor: whether prompts are only for players
+-- the user has grouped with.
+function Store:GreetOnlyGrouped()
+    return self:GreetFor() == FellowshipStore.GREET_FOR.grouped
+end
+
 function Store:SetGreetOnlyGrouped(enabled)
     if type(enabled) ~= "boolean" then
         return false
     end
-    local state = self:GetGreetState()
-    if state == nil or (state.onlyGrouped ~= nil and type(state.onlyGrouped) ~= "boolean") then
-        return false
-    end
-    state.onlyGrouped = enabled
-    return true
+    return self:SetGreetFor(enabled and FellowshipStore.GREET_FOR.grouped or FellowshipStore.GREET_FOR.everyone)
 end
 
 local function isGreetCap(value)

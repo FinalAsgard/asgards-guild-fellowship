@@ -1857,23 +1857,95 @@ end)
 
 -- Only greet players I've grouped with ------------------------------------------
 
-test.test("guild greet: only greeting grouped-with players is off by default, saved, and an unusable value is left alone", function()
+test.test("guild greet: who to greet is everyone by default, saved as one value, and an unusable value is left alone", function()
     local world = setup("Retail")
 
-    test.assertFalse(world.store:GreetOnlyGrouped())
+    test.assertEqual("everyone", world.store:GreetFor())
     test.assertFalse(world.greet:OnlyGrouped())
-    test.assertTrue(world.store:SetGreetOnlyGrouped(true))
-    test.assertTrue(world.database.greet.onlyGrouped)
-    test.assertTrue(world.addon.FellowshipStore.Create(world.database):GreetOnlyGrouped())
+    test.assertTrue(world.store:SetGreetFor("friends"))
+    test.assertEqual("friends", world.database.greet.greetFor)
+    test.assertEqual("friends", world.addon.FellowshipStore.Create(world.database):GreetFor())
     test.assertTrue(world.greet:OnlyGrouped())
-    test.assertTrue(world.store:SetGreetOnlyGrouped(false))
+    test.assertTrue(world.store:SetGreetFor("grouped"))
+    test.assertEqual("grouped", world.store:GreetFor())
+    test.assertTrue(world.store:SetGreetFor("everyone"))
+    test.assertFalse(world.greet:OnlyGrouped())
+
+    test.assertFalse(world.store:SetGreetFor("some"))
+    world.database.greet.greetFor = "yes"
+    test.assertEqual("everyone", world.store:GreetFor())
+    test.assertFalse(world.store:SetGreetFor("grouped"))
+    test.assertEqual("yes", world.database.greet.greetFor)
+end)
+
+test.test("guild greet: the old only-grouped check box migrates on read, and its accessors work over the choice", function()
+    local world = setup("Retail")
+    world.database.greet = { onlyGrouped = true }
+    test.assertEqual("grouped", world.store:GreetFor())
+    test.assertTrue(world.store:GreetOnlyGrouped())
+    world.database.greet = { onlyGrouped = false }
+    test.assertEqual("everyone", world.store:GreetFor())
+    world.database.greet = { onlyGrouped = "yes" }
+    test.assertEqual("everyone", world.store:GreetFor())
+    -- A saved choice wins over the old check box.
+    world.database.greet = { onlyGrouped = true, greetFor = "friends" }
+    test.assertEqual("friends", world.store:GreetFor())
     test.assertFalse(world.store:GreetOnlyGrouped())
 
+    world.database.greet = {}
+    test.assertTrue(world.store:SetGreetOnlyGrouped(true))
+    test.assertEqual("grouped", world.database.greet.greetFor)
+    test.assertTrue(world.store:SetGreetOnlyGrouped(false))
+    test.assertEqual("everyone", world.store:GreetFor())
     test.assertFalse(world.store:SetGreetOnlyGrouped("on"))
-    world.database.greet.onlyGrouped = "yes"
-    test.assertFalse(world.store:GreetOnlyGrouped())
-    test.assertFalse(world.store:SetGreetOnlyGrouped(true))
-    test.assertEqual("yes", world.database.greet.onlyGrouped)
+end)
+
+test.test("guild greet: Grouped with passes any tier, Friends included", function()
+    local world = withFriends({ bolt = "friend", anvil = "grouped" })
+    world.store:SetGreetFor("grouped")
+
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnPresence("online", world.names.rust)
+
+    test.assertEqual("Bolt,Anvil", shownLabels(world))
+end)
+
+test.test("guild greet: My Friends passes only Friends and Top 5, welcomes included, highlighting on or off", function()
+    local world = withFriends({ bolt = "friend", anvil = "grouped", bishop = "top5", newt = "frequent" })
+    world.store:SetGreetFor("friends")
+
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnPresence("join", world.names.newt)
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual("", shownLabels(world))
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.bishop)
+    -- Bishop's prompt shows their alias, Rip.
+    test.assertEqual("Bolt,Rip", shownLabels(world))
+
+    world = withFriends({ bolt = "friend", anvil = "grouped" })
+    world.store:SetGreetHighlightFriends(false)
+    world.store:SetGreetFor("friends")
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnPresence("online", world.names.bolt)
+    test.assertEqual("Bolt", shownLabels(world))
+    test.assertEqual(nil, world.shown[1].friendTier)
+end)
+
+test.test("guild greet: choosing My Friends closes waiting prompts that no longer pass", function()
+    local world = withFriends({ bolt = "friend", anvil = "grouped" })
+    world.greet:OnPresence("online", world.names.bolt)
+    world.greet:OnPresence("online", world.names.anvil)
+    world.greet:OnPresence("online", world.names.rust)
+    test.assertEqual(3, #world.shown)
+
+    world.store:SetGreetFor("grouped")
+    world.greet:Refresh()
+    test.assertEqual("Bolt,Anvil", shownLabels(world))
+    world.store:SetGreetFor("friends")
+    world.greet:Refresh()
+    test.assertEqual("Bolt", shownLabels(world))
 end)
 
 test.test("guild greet: off, never-grouped players are prompted as before", function()

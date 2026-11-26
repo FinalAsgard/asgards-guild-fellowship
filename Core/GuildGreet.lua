@@ -563,17 +563,33 @@ function Greet:groupedTier(key)
     return ok and tier or nil
 end
 
--- Whether the user only greets players they've grouped with: off without
--- saved data.
-function Greet:OnlyGrouped()
+-- Who the user greets (FellowshipStore.GREET_FOR): everyone without saved
+-- data.
+function Greet:GreetFor()
     local store = self.store()
-    return store ~= nil and store:GreetOnlyGrouped()
+    return store ~= nil and store:GreetFor() or addon.FellowshipStore.GREET_FOR.everyone
 end
 
--- True when the user only greets players they've grouped with and never
--- grouped with the player character `key` belongs to.
+-- Whether the user only greets players they've grouped with (or only their
+-- Friends): a prompt then needs the player to pass (Passes).
+function Greet:OnlyGrouped()
+    return self:GreetFor() ~= addon.FellowshipStore.GREET_FOR.everyone
+end
+
+-- True when the user's choice of who to greet leaves out the player
+-- character `key` belongs to: Grouped with needs any group friend tier
+-- (Friend included), My Friends a Friend or Top 5. Highlighting on or off
+-- doesn't matter.
 function Greet:NeverGrouped(key)
-    return self:OnlyGrouped() and self:groupedTier(key) == nil
+    local choice = self:GreetFor()
+    if choice == addon.FellowshipStore.GREET_FOR.everyone then
+        return false
+    end
+    local tier = self:groupedTier(key)
+    if choice == addon.FellowshipStore.GREET_FOR.friends then
+        return not addon.GroupFriends.IsStarred(tier)
+    end
+    return tier == nil
 end
 
 -- Closes the prompts whose player has had their current cap of greetings,
@@ -592,8 +608,8 @@ function Greet:dropCapped(now)
     return removed
 end
 
--- Closes the prompts, shown or waiting to show, for players the user never
--- grouped with while they only greet those they have. Returns true when any
+-- Closes the prompts, shown or waiting to show, for players the user's
+-- choice of who to greet leaves out (NeverGrouped). Returns true when any
 -- closed.
 function Greet:dropUngrouped(now)
     if not self:OnlyGrouped() then

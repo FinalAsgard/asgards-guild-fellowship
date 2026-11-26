@@ -23,6 +23,8 @@ local SettingsPanel = {
     TOP = -16,
     INDENT = 8,
     BUTTON_WIDTH = 140,
+    -- Each choice's check box and label, side by side.
+    CHOICE_WIDTH = 130,
     INPUT_WIDTH = 520,
     SLIDER_WIDTH = 260,
     -- A color swatch's width and height.
@@ -203,6 +205,12 @@ function Panel:Refresh()
                 end
                 -- Putting the saved value in isn't a change by the player.
                 widget.pending = nil
+            elseif widget.kind == "choice" then
+                local value = self.model:Get(widget.id)
+                local optionIndex
+                for optionIndex = 1, #widget.options do
+                    widget.options[optionIndex]:SetChecked(widget.options[optionIndex].choice == value)
+                end
             elseif widget.kind == "text" then
                 widget.frame:SetText(tostring(self.model:Get(widget.id) or ""))
             elseif widget.kind == "action" then
@@ -494,6 +502,38 @@ function Panel:addNumber(frame, entry)
     }
 end
 
+-- A choice: its label, then a check box for each choice side by side,
+-- the saved one checked.
+function Panel:addChoice(frame, entry)
+    local createFrame = self.environment.CreateFrame
+    local label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    label:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT + 4, -6)
+    label:SetText(entry.label)
+    local widget = { kind = "choice", id = entry.id, entry = entry, label = label, options = {}, controls = {} }
+    local x = SettingsPanel.LEFT + SettingsPanel.INDENT
+    local index
+    for index = 1, #entry.choices do
+        local choice = entry.choices[index]
+        local check = createFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+        check:SetPoint("TOPLEFT", x, -addon.SettingsLayout.ROW)
+        check.choice = choice.id
+        check:SetScript("OnClick", function()
+            self:report(entry.id, self.model:Set(entry.id, choice.id))
+            -- Only the saved choice stays checked.
+            self:Refresh()
+        end)
+        local text = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        text:SetPoint("LEFT", check, "RIGHT", 2, 0)
+        text:SetText(choice.label)
+        check.text = text
+        x = x + SettingsPanel.CHOICE_WIDTH
+        table.insert(widget.options, check)
+        table.insert(widget.controls, check)
+    end
+    self:addInfo(frame, entry, label, widget)
+    return widget
+end
+
 function Panel:addAction(frame, entry)
     local button = self.environment.CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     button:SetPoint("TOPLEFT", SettingsPanel.LEFT + SettingsPanel.INDENT, 0)
@@ -666,6 +706,8 @@ function Panel:addEntry(content, entry)
         widget = self:addHeading(row, entry)
     elseif entry.kind == "color" then
         widget = self:addColor(row, entry)
+    elseif entry.kind == "choice" then
+        widget = self:addChoice(row, entry)
     else
         widget = self:addText(row, entry)
     end

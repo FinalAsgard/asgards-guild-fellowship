@@ -759,25 +759,31 @@ if clientProfile.supported then
         end,
     })
     settings:Add("guildGreet", {
-        id = "greetOnlyGrouped",
-        kind = "toggle",
-        label = "Only greet players I've grouped with",
+        id = "greetFor",
+        kind = "choice",
+        label = "Greet prompts for",
+        choices = {
+            { id = addon.FellowshipStore.GREET_FOR.everyone, label = "Everyone" },
+            { id = addon.FellowshipStore.GREET_FOR.grouped, label = "Grouped with" },
+            { id = addon.FellowshipStore.GREET_FOR.friends, label = "My Friends" },
+        },
         info = function()
-            return "Off by default. When on, you only get greet prompts, welcomes to the guild included, for " ..
-                "players you've grouped with at least once. Turning it on closes waiting prompts for everyone " ..
-                "else. It works whether or not \"Highlight group friends\" is on."
+            return "Everyone by default. Grouped with: you only get greet prompts, welcomes to the guild " ..
+                "included, for players you've grouped with at least once, and your Friends. My Friends: only " ..
+                "for your Friends and your 5 most grouped-with players. Changing it closes waiting prompts " ..
+                "that no longer fit. It works whether or not \"Highlight group friends\" is on."
         end,
         get = function()
             local store = rosterController:Store()
-            return store ~= nil and store:GreetOnlyGrouped()
+            return store ~= nil and store:GreetFor() or addon.FellowshipStore.GREET_FOR.everyone
         end,
-        set = function(enabled)
+        set = function(choice)
             local store = rosterController:Store()
             if store == nil then
                 return nil, "saved data is unavailable"
             end
-            if not store:SetGreetOnlyGrouped(enabled) then
-                return nil, "the saved setting is unreadable, so it stays off"
+            if not store:SetGreetFor(choice) then
+                return nil, "the saved setting is unreadable, so it stays as it is"
             end
             return true
         end,
@@ -4635,7 +4641,7 @@ if clientProfile.supported then
             guildGreet:OnEnabledChanged(guildGreet:IsEnabled())
         elseif id == "greetInInstances" then
             guildGreet:OnZoneChanged()
-        elseif id == "greetHighlightFriends" or id == "greetOnlyGrouped" then
+        elseif id == "greetHighlightFriends" or id == "greetFor" then
             guildGreet:Refresh()
         elseif entry ~= nil and entry.category ~= nil then
             guildGreet:OnCategoryChanged(entry.category, value)

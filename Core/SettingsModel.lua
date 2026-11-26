@@ -24,6 +24,8 @@ local _, addon = ...
 --            (e.g. officer-only settings); it holds no value. With
 --            `style = "officer"` it's drawn as a tinted block, so an area of
 --            settings that apply to the whole guild stands out
+--   choice   get() -> the id of one of `choices` ({ id, label } each, in
+--            the order shown); set(id) -> true, or nil and a reason
 --   color    get() -> a color as "rrggbb"; set(color) -> true, or nil and a
 --            reason. `swatches` lists the colors offered to click, each
 --            { label, color }; `sample` is text shown in the chosen color;
@@ -42,7 +44,8 @@ local _, addon = ...
 -- frame page it belongs on. An entry with `host` set is drawn only in that
 -- host (e.g. a button that opens the frame, which the frame doesn't need).
 local SettingsModel = {
-    KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true, color = true },
+    KINDS = { toggle = true, action = true, text = true, number = true, input = true, heading = true, color = true,
+        choice = true },
     HOSTS = { frame = true, options = true },
     PAGES = { settings = true, greetings = true, recruitment = true },
     HEADING_STYLES = { officer = true },
@@ -139,13 +142,25 @@ local function entryProblem(entry)
     if type(entry.get) ~= "function" then
         return "entry has no get function"
     end
-    if (entry.kind == "toggle" or entry.kind == "number" or entry.kind == "input" or entry.kind == "color")
-        and type(entry.set) ~= "function"
+    if (entry.kind == "toggle" or entry.kind == "number" or entry.kind == "input" or entry.kind == "color"
+        or entry.kind == "choice") and type(entry.set) ~= "function"
     then
         return "entry has no set function"
     end
     if entry.kind == "color" and (type(entry.swatches) ~= "table" or entry.swatches[1] == nil) then
         return "color has no swatches"
+    end
+    if entry.kind == "choice" then
+        if type(entry.choices) ~= "table" or entry.choices[1] == nil then
+            return "choice has no choices"
+        end
+        local index
+        for index = 1, #entry.choices do
+            local choice = entry.choices[index]
+            if type(choice) ~= "table" or not isText(choice.id) or not isText(choice.label) then
+                return "choice needs an id and a label for each choice"
+            end
+        end
     end
     if entry.kind == "input" and (type(entry.maxLength) ~= "number" or entry.maxLength < 1) then
         return "input has no length limit"
@@ -310,6 +325,18 @@ function Model:Set(id, value)
             return nil, "it must be a color, six hex digits like 4a90ff"
         end
         value = string.lower(value)
+    elseif entry.kind == "choice" then
+        local labels, found = {}, false
+        local index
+        for index = 1, #entry.choices do
+            table.insert(labels, entry.choices[index].id)
+            if entry.choices[index].id == value then
+                found = true
+            end
+        end
+        if not found then
+            return nil, "it must be one of " .. table.concat(labels, ", ")
+        end
     elseif entry.kind ~= "toggle" then
         return nil, "it can't be changed"
     elseif type(value) ~= "boolean" then
