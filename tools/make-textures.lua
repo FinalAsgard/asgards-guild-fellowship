@@ -103,8 +103,8 @@ end)
 -- The window's diagonal sweep: dark green at the top-left corner, fading to
 -- nothing by three quarters of the way across, laid over the window's gray.
 -- The window is one fixed size, so the texture is drawn in window pixels
--- (960x600) and its rounded corners stay round once stretched over it.
-local WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_RADIUS = 960, 600, 12
+-- (1100x680) and its rounded corners stay round once stretched over it.
+local WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_RADIUS = 1100, 680, 12
 local SWEEP_SIZE = 512
 write("Sweep.tga", SWEEP_SIZE, SWEEP_SIZE, function(x, y)
     local wx, wy = x / SWEEP_SIZE * WINDOW_WIDTH, y / SWEEP_SIZE * WINDOW_HEIGHT

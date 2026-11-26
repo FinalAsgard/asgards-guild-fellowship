@@ -4,7 +4,7 @@ local _, addon = ...
 -- Details! Framework. Features move into it one at a time, each as a module
 -- with a button in the sidebar: Friends, the Guild LFG Board and Greetings.
 --
--- One fixed size (960x600), movable, with its position saved per character.
+-- One fixed size (1100x680), movable, with its position saved per character.
 -- The left sidebar card holds the tree and the add-on's name, a button per
 -- module, Settings pinned at the bottom, and the character and version. At
 -- the top right are an X that closes the window and a gear that toggles the
@@ -21,8 +21,8 @@ local _, addon = ...
 local Theme = addon.Theme
 
 local AgfWindow = {
-    WIDTH = 960,
-    HEIGHT = 600,
+    WIDTH = 1100,
+    HEIGHT = 680,
     SIDEBAR_WIDTH = 200,
     MARGIN = 12,
     ICON_SIZE = 28,
