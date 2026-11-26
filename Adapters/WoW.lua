@@ -826,6 +826,29 @@ function Client:GetZoneMapIds()
     return zones
 end
 
+-- The zones a questing listing can be in, for the listing editor: each {
+-- mapId, name, minLevel?, maxLevel? }, the levels as GetMapLevels reports
+-- them. A best guess, still to be checked in game on each client: the zone
+-- maps under the top of the map tree (as GetZoneMapIds finds them, every
+-- continent's), with GetMapLevels for each. Empty where the client's maps
+-- don't say; the editor then offers only the current zone.
+function Client:GetZoneList()
+    local maps = self.environment.C_Map
+    local list = {}
+    local name, mapId
+    for name, mapId in pairs(self:GetZoneMapIds()) do
+        local zone = { mapId = mapId, name = name }
+        local ok, minLevel, maxLevel = callFunction(maps.GetMapLevels, mapId)
+        if ok and type(minLevel) == "number" and type(maxLevel) == "number" and minLevel >= 1
+            and minLevel <= maxLevel
+        then
+            zone.minLevel, zone.maxLevel = minLevel, maxLevel
+        end
+        table.insert(list, zone)
+    end
+    return list
+end
+
 -- The logged-in character's class token ("WARRIOR"), or nil.
 function Client:GetPlayerClass()
     local ok, _, classToken = callFunction(self.environment.UnitClass, "player")

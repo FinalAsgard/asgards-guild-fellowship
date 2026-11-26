@@ -56,8 +56,8 @@ local LfgBoardPage = {
     -- The tab list's width until the window lays it out.
     LIST_WIDTH = 688,
     SCROLL_STEP = 40,
-    -- The most rows the dungeon list shows, its "Other levels" line
-    -- included.
+    -- The most rows the dungeon (or questing zone) list shows, its "Other
+    -- levels" line included.
     DUNGEON_ROWS = 7,
     DUNGEON_ROW_HEIGHT = 20,
     -- Roles in your party: one row per member.
@@ -76,6 +76,7 @@ local LfgBoardPage = {
         other = "No other groups right now.",
         history = "No parties in your history yet.",
     },
+    SEARCH_PLACEHOLDERS = { dungeon = "Search all dungeons", questing = "Search all zones" },
     RAID_EXPLANATION = "A raid is listed as a big party: anyone can ask to join, with no role rules.",
 }
 addon.LfgBoardPage = LfgBoardPage
@@ -89,6 +90,8 @@ Page.__index = Page
 --   level         function() -> the player's level
 --   zone          function() -> the player's zone name, or nil
 --   catalog       function() -> the DungeonCatalog to search
+--   zones         function() -> the ZoneCatalog Questing searches (the
+--                 player's zone in it), or nil for the player's zone alone
 --   groups        function() -> the board's listings sorted for the player
 --                 (LfgBoard:Groups: relevant, alts, other)
 --   nearby        function() -> { zone, people = { { name, whisper, level?,
@@ -289,6 +292,12 @@ function Page:buildEditor(card)
     editor.kindLabel = ui:SectionLabel(editor, "What's it for?")
     editor.kindLabel:SetPoint("TOPLEFT", editor, "TOPLEFT", pad, -pad)
     self.kindSelector = ui:Segmented(editor, LfgBoardPage.KINDS, LfgBoardPage.FIELD_WIDTH, function(id)
+        if owner.draft.kind ~= id then
+            -- Each list starts unsearched.
+            owner.draft.search = ""
+            owner.draft.offset = 0
+            owner.search:SetValue("")
+        end
         owner.draft.kind = id
         owner:refreshEditor()
     end)
@@ -301,15 +310,17 @@ function Page:buildEditor(card)
         + Widgets.INPUT_HEIGHT + Theme.SPACING.xs)
     editor.fields = fields
 
-    self.search = ui:SearchBox(fields, LfgBoardPage.FIELD_WIDTH, "Search all dungeons", function(text)
+    -- Dungeon and Questing share the search and the list: dungeons, or
+    -- the zones a questing listing can be in.
+    self.search = ui:SearchBox(fields, LfgBoardPage.FIELD_WIDTH, LfgBoardPage.SEARCH_PLACEHOLDERS.dungeon, function(text)
         owner.draft.search = text
         owner.draft.offset = 0
         owner:refreshDungeons()
     end)
-    -- The mouse wheel scrolls the dungeon list past its first rows.
+    -- The mouse wheel scrolls the list past its first rows.
     fields:EnableMouseWheel(true)
     fields:SetScript("OnMouseWheel", function(_, delta)
-        if owner.draft ~= nil and owner.draft.kind == "dungeon" then
+        if owner.draft ~= nil and owner:listed() then
             owner.draft.offset = (owner.draft.offset or 0) - delta
             owner:refreshDungeons()
         end
@@ -329,8 +340,11 @@ function Page:buildEditor(card)
         row.range = ui:Text(row, "", "regular", "small", "muted")
         row.range:SetPoint("RIGHT", row, "RIGHT", -Theme.SPACING.s, 0)
         row:SetScript("OnClick", function(self)
-            if self.dungeon ~= nil then
+            if type(self.dungeon) == "table" then
                 owner.draft.dungeon = self.dungeon
+                owner:refreshDungeons()
+            elseif type(self.zone) == "table" then
+                owner.draft.zone = self.zone
                 owner:refreshDungeons()
             end
         end)
@@ -398,6 +412,7 @@ function Page:StartEditing()
     self.draft = {
         kind = purpose and purpose.kind or "dungeon",
         dungeon = purpose and purpose.dungeon or nil,
+        zone = self:startingZone(purpose),
         text = purpose and purpose.text or "",
         note = listing:IsActive() and listing:Note() or "",
         search = "",
@@ -411,13 +426,41 @@ function Page:StartEditing()
     self:Refresh()
 end
 
--- The draft as a purpose to save.
+-- The zones Questing offers: the ZoneCatalog, else the player's zone alone.
+function Page:zones()
+    local zones = self.options.zones and self.options.zones() or nil
+    if zones == nil then
+        zones = addon.ZoneCatalog.Create({}, { name = self.options.zone() })
+    end
+    return zones
+end
+
+-- The zone a questing draft starts with: the listing's when it's questing,
+-- else the player's current zone. Nil when neither is known.
+function Page:startingZone(purpose)
+    local zones = self:zones()
+    if purpose ~= nil and purpose.kind == "questing" then
+        return zones:Named(purpose.zone) or { id = purpose.zone, name = purpose.zone }
+    end
+    local current = self.options.zone()
+    return current and zones:Named(current) or nil
+end
+
+-- Whether the draft's kind picks from the list: Dungeon and Questing.
+function Page:listed()
+    return self.draft.kind == "dungeon" or self.draft.kind == "questing"
+end
+
+-- The draft as a purpose to save. Questing carries the chosen zone's game
+-- range (`game`), when it has one, for the listing's levels.
 function Page:draftPurpose()
     local draft = self.draft
     if draft.kind == "dungeon" then
         return { kind = "dungeon", dungeon = draft.dungeon }
     elseif draft.kind == "questing" then
-        return { kind = "questing", zone = self.options.zone() }
+        local zone = draft.zone
+        return { kind = "questing", zone = zone and zone.name or nil,
+            game = zone and zone.minLevel and { minLevel = zone.minLevel, maxLevel = zone.maxLevel } or nil }
     elseif draft.kind == "other" then
         return { kind = "other", text = draft.text }
     end
@@ -594,25 +637,29 @@ end
 function Page:refreshEditor()
     local draft, editor = self.draft, self.editor
     self.kindSelector:Select(draft.kind)
-    local dungeon = draft.kind == "dungeon"
-    setShown(self.search, dungeon)
-    if dungeon then
+    -- Questing with no zone known says so in place of the list.
+    local unknown = draft.kind == "questing" and #self:zones().zones == 0
+    local listed = self:listed() and not unknown
+    setShown(self.search, listed)
+    if listed then
+        self.search.placeholder:SetText(LfgBoardPage.SEARCH_PLACEHOLDERS[draft.kind])
         self:refreshDungeons()
     else
         hideAll(self.dungeonRows)
     end
-    local zone = self.options.zone()
-    editor.questing:SetText(zone and ("Questing in " .. zone) or "Your zone isn't known yet.")
-    setShown(editor.questing, draft.kind == "questing")
+    editor.questing:SetText("Your zone isn't known yet.")
+    setShown(editor.questing, unknown)
     setShown(editor.raid, draft.kind == "raid")
     setShown(self.otherText, draft.kind == "other")
     self:refreshRoles()
 end
 
--- The dungeon list: what the search finds, those that fit the player's
--- level first, then the rest under "Other levels".
+-- The dungeon list, or Questing's zone list: what the search finds, those
+-- that fit the player's level first, then the rest under "Other levels".
 function Page:refreshDungeons()
-    local fitting, others = self.options.catalog():Search(self.draft.search, self.options.level())
+    local questing = self.draft.kind == "questing"
+    local catalog = questing and self:zones() or self.options.catalog()
+    local fitting, others = catalog:Search(self.draft.search, self.options.level())
     local entries = {}
     local index
     for index = 1, #fitting do
@@ -628,24 +675,27 @@ function Page:refreshDungeons()
     -- Scrolled by the wheel, never past the last full view.
     local offset = math.max(0, math.min(self.draft.offset or 0, #entries - #self.dungeonRows))
     self.draft.offset = offset
-    local chosen = self.draft.dungeon
+    local chosen = questing and self.draft.zone or self.draft.dungeon
     for index = 1, #self.dungeonRows do
         local row, entry = self.dungeonRows[index], entries[index + offset]
+        row.dungeon, row.zone = false, false
         if entry == nil then
-            row.dungeon = nil
             row:Hide()
         elseif entry.header ~= nil then
-            row.dungeon = nil
             row.label:SetText(Theme.Label(entry.header))
             row.label:SetTextColor(Theme.Color("label"))
             row.range:SetText("")
             row:SetFill("surface")
             row:Show()
         else
-            row.dungeon = entry
+            if questing then
+                row.zone = entry
+            else
+                row.dungeon = entry
+            end
             row.label:SetText(entry.name)
             row.label:SetTextColor(Theme.Color("text"))
-            row.range:SetText(range(entry.minLevel, entry.maxLevel))
+            row.range:SetText(range(entry.minLevel, entry.maxLevel) or "")
             row:SetFill(chosen ~= nil and chosen.id == entry.id and "green" or "surface")
             row:Show()
         end

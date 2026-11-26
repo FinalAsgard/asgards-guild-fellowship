@@ -572,8 +572,11 @@ test.test("lfg page: the editor shows each kind's fields, and Cancel goes back",
     test.assertEqual("11/60", page.note.counter.text)
 
     click(page.kindSelector.buttons[2])
-    test.assertFalse(page.search.shown)
-    test.assertTrue(page.editor.questing.shown)
+    -- Questing searches zones, the current one chosen.
+    test.assertTrue(page.search.shown)
+    test.assertEqual("Search all zones", page.search.placeholder.text)
+    test.assertFalse(page.editor.questing.shown)
+    test.assertEqual("Ironforge", page.draft.zone.name)
     click(page.kindSelector.buttons[3])
     test.assertTrue(page.editor.raid.shown)
     click(page.kindSelector.buttons[4])
@@ -631,6 +634,103 @@ test.test("lfg page: Save without a dungeon says why, and Edit changes the listi
     click(page.saveButton)
     test.assertEqual("Raid", page.view.purpose.text)
     test.assertEqual(2, lfgQueued(channel))
+end)
+
+-- The page's zone row for `name`, or nil.
+local function zoneRow(page, name)
+    local index
+    for index = 1, #page.dungeonRows do
+        local row = page.dungeonRows[index]
+        if row.shown and type(row.zone) == "table" and row.zone.name == name then
+            return row
+        end
+    end
+    return nil
+end
+
+-- Gives `world`'s client a map tree of zones, with the game's levels for
+-- some.
+local function zoneTree(world)
+    local maps = world.environment.C_Map
+    maps.GetMapChildrenInfo = function()
+        return {
+            { mapID = 1431, name = "Duskwood", mapType = 3 },
+            { mapID = 1452, name = "Winterspring", mapType = 3 },
+            { mapID = 1455, name = "Ironforge", mapType = 3 },
+            { mapID = 1453, name = "Stormwind City", mapType = 3 },
+        }
+    end
+    maps.GetMapLevels = function(mapId)
+        if mapId == 1431 then
+            return 18, 30
+        elseif mapId == 1452 then
+            return 55, 60
+        end
+        return nil
+    end
+end
+
+test.test("Forever Questing picks a zone from the list, and the listing takes its levels", function()
+    local channel = fixtures.newChannel()
+    local tool = login("Forever", channel, "Tool Box")
+    local zap = login("Forever", channel, "Zap Arcane", 30)
+    zoneTree(tool)
+    local page = openBoard(tool)
+    click(page.startButton)
+    click(page.kindSelector.buttons[2])
+
+    -- Your level's zones first, the rest (and zones with no levels) under
+    -- Other levels; the current zone is chosen.
+    test.assertEqual("Ironforge", page.draft.zone.name)
+    test.assertEqual("Winterspring", page.dungeonRows[1].zone.name)
+    test.assertEqual("OTHER LEVELS", page.dungeonRows[2].label.text)
+    test.assertEqual("green", page.dungeonRows[4].fillColor)
+    test.assertEqual("Ironforge", page.dungeonRows[4].zone.name)
+    type_(page.search, "dusk")
+    test.assertEqual(nil, zoneRow(page, "Winterspring"))
+    test.assertEqual("18" .. "\226\128\147" .. "30", zoneRow(page, "Duskwood").range.text)
+    click(zoneRow(page, "Duskwood"))
+    test.assertEqual("Duskwood", page.draft.zone.name)
+    click(page.saveButton)
+    fixtures.deliver(channel)
+
+    local listing = zap.addon.lfgBoard:Listings(zap.time)[1]
+    test.assertEqual("Duskwood", listing.purpose)
+    test.assertEqual(18, listing.minLevel)
+    test.assertEqual(30, listing.maxLevel)
+
+    -- Edit starts on the listing's zone; one with no levels takes the
+    -- party's, 5 either way.
+    click(page.editButton)
+    test.assertEqual("Duskwood", page.draft.zone.name)
+    type_(page.search, "storm")
+    click(zoneRow(page, "Stormwind City"))
+    click(page.saveButton)
+    fixtures.deliver(channel)
+    listing = zap.addon.lfgBoard:Listings(zap.time)[1]
+    test.assertEqual("Stormwind City", listing.purpose)
+    test.assertEqual(55, listing.minLevel)
+    test.assertEqual(65, listing.maxLevel)
+
+    fixtures.slash(tool, "probe lfg")
+    test.assertContains(table.concat(tool.messages, "\n"),
+        "Questing zones: 4 from the game's map tree, 2 with levels from the game.")
+end)
+
+test.test("Forever with no zone list, Questing offers the current zone alone", function()
+    local channel = fixtures.newChannel()
+    local tool = login("Forever", channel, "Tool Box")
+    local page = openBoard(tool)
+    click(page.startButton)
+    click(page.kindSelector.buttons[2])
+
+    test.assertEqual("Ironforge", page.draft.zone.name)
+    test.assertEqual("OTHER LEVELS", page.dungeonRows[1].label.text)
+    test.assertEqual("Ironforge", page.dungeonRows[2].zone.name)
+    test.assertFalse(page.dungeonRows[3].shown)
+    fixtures.slash(tool, "probe lfg")
+    test.assertContains(table.concat(tool.messages, "\n"),
+        "Questing zones: none read from the game's map tree; Questing offers your zone only.")
 end)
 
 -- LfgRelevance ---------------------------------------------------------------------
@@ -747,7 +847,7 @@ end)
 -- A page over fake frames showing `groups`, with `overrides` on its options.
 local function pageWith(groups, overrides)
     local addon = test.newAddon("Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/LfgBoardPage.lua",
-        "Core/DungeonCatalog.lua", "Core/LfgProtocol.lua", "Core/LfgListing.lua", "Core/LfgRelevance.lua",
+        "Core/DungeonCatalog.lua", "Core/ZoneCatalog.lua", "Core/LfgProtocol.lua", "Core/LfgListing.lua", "Core/LfgRelevance.lua",
         "Core/GroupFriends.lua", "Core/LfgHistoryView.lua")
     local environment = fakeFrames.install({})
     local whispered = {}

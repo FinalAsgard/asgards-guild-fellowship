@@ -574,6 +574,41 @@ test.test("the adapter names the zones in the client's map tree", function()
     test.assertEqual(nil, next(newClient({ C_Map = maps }):GetZoneMapIds()))
 end)
 
+test.test("the adapter lists the questing zones with the game's levels, or none", function()
+    local maps = treeMaps()
+    maps.GetBestMapForUnit = function()
+        return 1429
+    end
+    maps.GetMapChildrenInfo = zoneChildren
+    maps.GetMapLevels = function(mapId)
+        if mapId == 1429 then
+            return 1, 10
+        elseif mapId == 1455 then
+            error("no levels here")
+        end
+        return 0, 0
+    end
+    local byName = {}
+    local list = newClient({ C_Map = maps }):GetZoneList()
+    local index
+    for index = 1, #list do
+        byName[list[index].name] = list[index]
+    end
+
+    test.assertEqual(3, #list)
+    test.assertEqual(1429, byName["Elwynn Forest"].mapId)
+    test.assertEqual(1, byName["Elwynn Forest"].minLevel)
+    test.assertEqual(10, byName["Elwynn Forest"].maxLevel)
+    -- Where the game gives no usable levels, the zone has none.
+    test.assertEqual(nil, byName["Ironforge"].minLevel)
+    test.assertEqual(nil, byName["Dalaran"].minLevel)
+
+    -- No map tree: an empty list, with no error.
+    test.assertEqual(0, #newClient({}):GetZoneList())
+    maps.GetMapLevels = nil
+    test.assertEqual(nil, newClient({ C_Map = maps }):GetZoneList()[1].minLevel)
+end)
+
 test.test("without a position or class the adapter returns nil instead of raising", function()
     local function raises()
         error("client API failed")

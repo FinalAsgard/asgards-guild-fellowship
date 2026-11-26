@@ -75,6 +75,7 @@ local MANIFEST_FILES = {
     "Core/RecruitStats.lua",
     "Core/GuildRecruit.lua",
     "Core/DungeonCatalog.lua",
+    "Core/ZoneCatalog.lua",
     "Core/LfgProtocol.lua",
     "Core/LfgListing.lua",
     "Core/ZoneLevels.lua",

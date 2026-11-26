@@ -1772,9 +1772,10 @@ if clientProfile.supported then
         announceListing()
         lfgHeartbeat = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, lfgTick)
     end
-    -- The player's zone's level range (ZoneLevels): the game's, else the
-    -- party's levels ± ZoneLevels.MARGIN.
-    local function lfgZoneLevels()
+    -- A zone's level range (ZoneLevels): the game's (`game`, else the
+    -- player's zone's), else the party's levels ± ZoneLevels.MARGIN. `game`
+    -- false skips the game's.
+    local function lfgZoneLevels(game)
         local levels = {}
         local members = lfgMembers()
         local index
@@ -1784,7 +1785,26 @@ if clientProfile.supported then
                 table.insert(levels, members[index].level)
             end
         end
-        return addon.ZoneLevels.For(client:GetZoneLevels(), levels)
+        if game == nil then
+            game = client:GetZoneLevels()
+        end
+        return addon.ZoneLevels.For(game or nil, levels)
+    end
+    -- The zones a questing listing can be in (a ZoneCatalog): the client's
+    -- zone list, read once it has one, and the player's zone with the
+    -- game's range for it.
+    lfgJoin.zones = function()
+        if lfgJoin.zoneList == nil or #lfgJoin.zoneList == 0 then
+            lfgJoin.zoneList = client:GetZoneList()
+        end
+        local zone = client:GetZone()
+        local current = zone and { name = zone.name } or nil
+        if current ~= nil then
+            local game = client:GetZoneLevels()
+            current.minLevel = game and game.minLevel or nil
+            current.maxLevel = game and game.maxLevel or nil
+        end
+        return addon.ZoneCatalog.Create(lfgJoin.zoneList, current)
     end
     -- Who the board is sorted for: the logged-in character ({ level, roles
     -- }), and its player's other characters in the guild as alts ({ name,
@@ -1866,7 +1886,23 @@ if clientProfile.supported then
             client:Print(zoneLine .. levels.minLevel .. "-" .. levels.maxLevel .. ", the fallback (your party's" ..
                 " levels, " .. addon.ZoneLevels.MARGIN .. " either way); the game gives none here.")
         end
-        local own = lfgListing:Announcement(lfgMembers(), settings:Get("lfgButton") == true)
+        -- Questing's zone list: how many zones the map tree gave, and how
+        -- many came with levels.
+        local list = client:GetZoneList()
+        local ranged = 0
+        local index
+        for index = 1, #list do
+            if list[index].minLevel ~= nil then
+                ranged = ranged + 1
+            end
+        end
+        if #list == 0 then
+            client:Print("  Questing zones: none read from the game's map tree; Questing offers your zone only.")
+        else
+            client:Print("  Questing zones: " .. #list .. " from the game's map tree, " .. ranged ..
+                " with levels from the game.")
+        end
+        local own =lfgListing:Announcement(lfgMembers(), settings:Get("lfgButton") == true)
         client:Print("  Your listing: " .. (own and addon.LfgListing.Label(own.k, own.p) or "none") .. ".")
         if own ~= nil then
             local problem = addon.LfgProtocol.Problem(addon.LfgProtocol.Listing(own))
@@ -2005,8 +2041,10 @@ if clientProfile.supported then
     -- Start a group (or Edit) saved: the listing starts or changes, and the
     -- guild hears it now. Questing is in the zone's level range.
     local function saveListing(purpose, note)
+        -- The chosen zone's game range (`game`), else the party's levels.
         if type(purpose) == "table" and purpose.kind == "questing" then
-            local levels = lfgZoneLevels()
+            local levels = lfgZoneLevels(purpose.game or false)
+            purpose.game = nil
             purpose.minLevel = levels and levels.minLevel or nil
             purpose.maxLevel = levels and levels.maxLevel or nil
         end
@@ -2412,6 +2450,9 @@ if clientProfile.supported then
             end,
             catalog = function()
                 return addon.DungeonCatalog.For(clientProfile.id, client:GetDungeonList())
+            end,
+            zones = function()
+                return lfgJoin.zones()
             end,
             groups = function()
                 local current, alts = lfgCharacters()
