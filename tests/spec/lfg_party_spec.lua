@@ -1678,6 +1678,30 @@ test.test("Forever the drawer has no Ask in guild for a party that isn't listed"
     test.assertFalse(button.askGuildButton.shown)
 end)
 
+test.test("Forever a high-level guildmate sees a low-level party's dungeon under Other Parties", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local zap, zapAddon = login(channel, "Zap Arcane")
+    tool.playerLevel = 20
+    tool.environment.UnitLevel = function() return 20 end
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    tool.environment.UnitLevel = function() return 20 end
+    click(addon.lfgButton.listButton)
+    local page = addon.lfgPage
+    page.draft.dungeon = addon.DungeonCatalog.For("forever", nil):Get("dm")
+    local saved, reason = page:Save()
+    test.assertTrue(saved, reason)
+    fixtures.deliver(channel)
+
+    local groups = zapAddon.lfgBoard:Groups(zap.time, { level = 60, roles = { "dps" } }, {})
+    test.assertEqual(0, #groups.relevant)
+    test.assertEqual(1, #groups.other)
+    test.assertEqual("The Deadmines", groups.other[1].purpose)
+    test.assertTrue(zapAddon.agfWindow:Open("lfg"))
+    zapAddon.lfgPage:ShowTab("other")
+    test.assertContains(zapAddon.lfgPage.tabs.tabs[3].label.text, "1")
+end)
+
 -- History -------------------------------------------------------------------------------
 
 test.test("lfg history view: newest first, 20 at a time, guildmates with their friend tier", function()
