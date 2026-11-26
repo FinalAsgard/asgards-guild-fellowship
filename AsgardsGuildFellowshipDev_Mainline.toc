@@ -25,6 +25,8 @@ Adapters/MasterFrame.lua
 Adapters/Theme.lua
 Adapters/Widgets.lua
 Adapters/AgfWindow.lua
+Adapters/PlayerCards.lua
+Adapters/FriendsPage.lua
 Adapters/LfgButton.lua
 Adapters/LfgBoardPage.lua
 Adapters/PromotionLines.lua
@@ -52,6 +54,7 @@ Core/RosterViewModel.lua
 Core/ConflictViewModel.lua
 Core/BundleReviewViewModel.lua
 Core/PlayerPanelViewModel.lua
+Core/FriendsViewModel.lua
 Core/ProfileViewModel.lua
 Core/ChatAnnotator.lua
 Core/OfficerAuthority.lua

@@ -119,6 +119,12 @@ local LFG_HAND_OFF_SECONDS = 5
 -- A guildmate's group-friend tier by character key (set up with the group
 -- friends below).
 local lfgFriendTier = function() return nil end
+-- The Friends page in the new window, and drawing it, set up with the group
+-- friends below. (One table: the main chunk is near Lua's 200-local limit.)
+local friendsUi = {
+    page = nil,
+    draw = function() end,
+}
 -- The key the new UI saves this character's layout under: its GUID, the
 -- same in every guild (or with none), else its full name.
 local function layoutKey()
@@ -1303,6 +1309,16 @@ if clientProfile.supported then
     agfWindow = addon.AgfWindow.Create(client, {
         frameName = addon.Identity.addonName .. "Window",
         modules = {
+            -- First, so it's the window's default page.
+            { id = "friends", label = "Friends", title = "Friends",
+                draw = function(content, ui)
+                    friendsUi.draw(content, ui)
+                end,
+                onShow = function()
+                    if friendsUi.page ~= nil then
+                        friendsUi.page:Refresh()
+                    end
+                end },
             { id = "lfg", label = "LFG", title = "Guild LFG Board",
                 settingsRows = {
                     { id = "lfgButton", label = "Show LFG button" },
@@ -4220,10 +4236,78 @@ if clientProfile.supported then
                 version = function()
                     return rosterController.dataRevision
                 end,
+                friends = function()
+                    return groupFriends.partition:GetFriends()
+                end,
             })
         end
         groupFriends.partition = partition
         return groupFriends
+    end
+    -- The Friends page: the Friend slots and the picker, built from saved
+    -- data and the live roster each time it's shown.
+    friendsUi.draw = function(content, ui)
+        local function inputs(extra)
+            local guild, partition, normalizer = rosterController:QuietContext()
+            if guild == nil then
+                return nil
+            end
+            local fields = {
+                partition = partition,
+                friendKeys = partition:GetFriends(),
+                members = rosterController:LiveMembers(normalizer),
+                normalizer = normalizer,
+                classColor = function(classToken)
+                    return client:GetClassColor(classToken)
+                end,
+                className = function(classToken)
+                    return client:GetClassName(classToken)
+                end,
+            }
+            local name, value
+            for name, value in pairs(extra) do
+                fields[name] = value
+            end
+            return fields, partition
+        end
+        local function change(operation, ...)
+            local _, partition = rosterController:QuietContext()
+            if partition == nil then
+                return false, "you're not in a guild"
+            end
+            return partition[operation](partition, ...)
+        end
+        friendsUi.page = addon.FriendsPage.Create(content, ui, {
+            model = function(selected)
+                local fields = inputs({ selected = selected })
+                return fields and addon.FriendsViewModel.Build(fields) or nil
+            end,
+            picker = function(query)
+                local friends = currentFriends()
+                local fields = inputs({
+                    query = query,
+                    selfKey = rosterController:SelfKey(),
+                    statsOf = function(key)
+                        return friends and friends:StatsOf(key) or 0
+                    end,
+                })
+                return fields and addon.FriendsViewModel.Picker(fields) or {}
+            end,
+            onAdd = function(key)
+                return change("AddFriend", key)
+            end,
+            onRemove = function(playerId)
+                return change("RemoveFriend", playerId)
+            end,
+            onReplace = function(playerId, key)
+                return change("ReplaceFriend", playerId, key)
+            end,
+            onError = function(text)
+                rosterController:Print(text)
+            end,
+        })
+        -- Drawn on the window's first open; specs reach it here.
+        addon.friendsPage = friendsUi.page
     end
     local function friendTier(key)
         local friends = currentFriends()
@@ -4283,6 +4367,7 @@ if clientProfile.supported then
             { tier = addon.GroupFriends.GROUPED, name = "Grouped" },
             { tier = addon.GroupFriends.FREQUENT, name = "Frequent" },
             { tier = addon.GroupFriends.TOP, name = "Top 5" },
+            { tier = addon.GroupFriends.FRIEND, name = "Friend" },
         }
         router:Register("greettest",
             "show a test greet prompt in each group friend tier's look; Greet on them posts nothing" ..

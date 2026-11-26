@@ -1014,3 +1014,45 @@ test.test("Forever questing is listed in the zone's levels, and the probe says w
     fixtures.slash(tool, "probe lfg")
     test.assertContains(tool.messages[#tool.messages - 2], "Zone levels in Ironforge: 25-35, from the game.")
 end)
+
+-- Friends -----------------------------------------------------------------------
+
+test.test("friends: the window opens on Friends, the page is built on show, and a pinned Friend is starred", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+
+    test.assertTrue(addon.agfWindow:Open())
+    test.assertEqual("friends", addon.agfWindow:Page())
+    local page = addon.friendsPage
+    test.assertTrue(page ~= nil)
+    test.assertTrue(page.cards[1].empty)
+
+    -- Pinning Hammer Smith through the picker: the user isn't offered.
+    click(page.cards[1])
+    test.assertTrue(page:PickerOpen())
+    local hammer, tool
+    local index
+    for index = 1, #page.picker.rows do
+        local row = page.picker.rows[index]
+        if row.shown and row.entry.name == "Hammer Smith" then
+            hammer = row
+        elseif row.shown and row.entry.name == "Tool Box" then
+            tool = row
+        end
+    end
+    test.assertEqual(nil, tool)
+    click(hammer)
+    test.assertEqual("Hammer Smith", page.cards[1].name.text)
+
+    -- Hammer's alt Bolt shares the Friend tier, with Guild Greet's perks.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertEqual(1, #partition:GetFriends())
+    test.assertTrue(addon.guildGreet:HasPerks(normalizer:Key("Bolt Smith")))
+    test.assertFalse(addon.guildGreet:HasPerks(normalizer:Key("Zap Arcane")))
+
+    -- Shown again, the page is built again.
+    addon.agfWindow:ShowPage("lfg")
+    addon.agfWindow:ShowPage("friends")
+    test.assertEqual("Hammer Smith", page.cards[1].name.text)
+end)

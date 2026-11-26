@@ -1695,9 +1695,9 @@ local function withFriends(tiers)
     return world
 end
 
-test.test("guild greet: a Frequent or Top 5 friend's prompt stays open up to twice the greet cap", function()
+test.test("guild greet: a Frequent, Top 5 or pinned Friend's prompt stays open up to twice the greet cap", function()
     local _, tier
-    for _, tier in ipairs({ "frequent", "top5" }) do
+    for _, tier in ipairs({ "frequent", "top5", "friend" }) do
         local world = withFriends({ bolt = tier })
         world.greet:OnPresence("online", world.names.bolt)
 
@@ -1741,7 +1741,7 @@ test.test("guild greet: Greet on a friend's prompt still posts while they're und
 end)
 
 test.test("guild greet: with highlighting off, a friend's prompt uses the normal cap", function()
-    local world = withFriends({ bolt = "top5", newt = "top5" })
+    local world = withFriends({ bolt = "top5", newt = "friend" })
     world.store:SetGreetHighlightFriends(false)
     world.store:SetGreetNumber("welcomeCap", 1)
     world.greet:OnPresence("online", world.names.bolt)

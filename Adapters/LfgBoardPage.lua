@@ -668,7 +668,8 @@ function Page:showNearby(nearby)
             end
             local person = nearby.people[index]
             self:showName(row, { text = colored(person.name, options.classColor(person.classToken)),
-                whisper = person.whisper, level = person.level or "" })
+                whisper = person.whisper, level = person.level or "",
+                top = addon.GroupFriends.IsStarred(options.friendTier(person.whisper or person.name)) })
         else
             row:Hide()
         end
@@ -703,8 +704,8 @@ end
 
 -- A name that opens the name menu when clicked (or calls `onClick(line)`
 -- instead), `height` tall, with room for a level column and a role icon on
--- its left, and a crown (the leader) and star (a top group friend) after
--- it. Shown with showName; placed by its owner.
+-- its left, and a crown (the leader) and star (a Top 5 group friend or a
+-- Friend) after it. Shown with showName; placed by its owner.
 function Page:nameButton(parent, height, onClick)
     local ui, owner = self.ui, self
     local line = ui:frame("Button", parent)
@@ -947,7 +948,7 @@ function Page:showLarge(card, listing)
                 whisper = leader and not listing.contact and listing.sender or member.name,
                 role = listing.kind == "dungeon" and member.role or nil,
                 leader = leader,
-                top = options.friendTier(member.name) == addon.GroupFriends.TOP,
+                top = addon.GroupFriends.IsStarred(options.friendTier(member.name)),
             })
         end
     end
@@ -1169,7 +1170,7 @@ function Page:historyList(top, empty)
                 member:Hide()
             else
                 self:showName(member, { text = colored(entry.name, options.classColor(entry.classToken)),
-                    whisper = entry.whisper, top = entry.tier == addon.GroupFriends.TOP })
+                    whisper = entry.whisper, top = addon.GroupFriends.IsStarred(entry.tier) })
             end
         end
         local shown = math.min(#party.members, #row.members)

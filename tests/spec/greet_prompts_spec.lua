@@ -344,6 +344,8 @@ test.test("greet prompts: group friends' names are marked by tier, everyone else
     test.assertEqual("|cff4da6ffBolt|r", GreetPrompts.NameText("Bolt", "grouped"))
     test.assertEqual(star .. "|cff4da6ffBolt|r", GreetPrompts.NameText("Bolt", "frequent"))
     test.assertEqual(star .. "|cffa335eeBolt|r", GreetPrompts.NameText("Bolt", "top5"))
+    -- A pinned Friend is marked as the Top 5 are.
+    test.assertEqual(star .. "|cffa335eeBolt|r", GreetPrompts.NameText("Bolt", "friend"))
     test.assertContains(star, "UI-RaidTargetingIcon_1")
 
     local plain, top = prompt(1, "login"), prompt(2, "login")

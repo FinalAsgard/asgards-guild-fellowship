@@ -1496,6 +1496,16 @@ function Client:GetClassColor(classToken)
     return nil
 end
 
+-- The class as the game names it ("Warrior") for `classToken`, or nil.
+function Client:GetClassName(classToken)
+    local names = self.environment.LOCALIZED_CLASS_NAMES_MALE
+    local name = type(names) == "table" and type(classToken) == "string" and names[classToken] or nil
+    if type(name) ~= "string" or name == "" then
+        return nil
+    end
+    return name
+end
+
 -- The guild's rank names, a list where entry 1 is rank 0 (the guild
 -- master's), the same numbering as the roster's rank index. Nil when the
 -- client can't say.
