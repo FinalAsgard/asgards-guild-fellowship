@@ -6,8 +6,9 @@ local contains = fakeFrames.contains
 -- The Friends page on fake frames, over a list of pinned players held here.
 -- Each player is { playerId, key, name }; `pinned` lists those pinned.
 local function setup(pinnedNames)
-    local addon = test.newAddon("Core/FellowshipStore.lua", "Core/GroupFriends.lua", "Adapters/Theme.lua", "Adapters/Widgets.lua",
-        "Adapters/PlayerCards.lua", "Adapters/FriendsPage.lua")
+    local addon = test.newAddon("Core/FellowshipStore.lua", "Core/GroupFriends.lua", "Core/PlayerDetailViewModel.lua",
+        "Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/PlayerCards.lua", "Adapters/PlayerDetailPanel.lua",
+        "Adapters/FriendsPage.lua")
     local environment = fakeFrames.install({})
     local ui = addon.Widgets.Create(environment)
     local content = environment.CreateFrame("Frame")
@@ -87,6 +88,44 @@ local function setup(pinnedNames)
         onRemove = function(playerId)
             table.insert(world.calls, "remove " .. playerId)
             table.remove(world.pinned, find(playerId))
+        end,
+        -- The detail view, as PlayerDetailViewModel builds it.
+        detail = function(playerId)
+            local _, player
+            for _, player in pairs(world.players) do
+                if player.playerId == playerId and not world.gone then
+                    local isFriend = find(playerId) ~= nil
+                    local full = #world.pinned >= 5
+                    return {
+                        playerId = playerId,
+                        header = {
+                            name = player.name,
+                            mainName = player.name,
+                            facts = "Level 60 Warrior",
+                            status = player.online and "Online, Ironforge" or "Last online 2 days ago",
+                            target = player.online and (player.name .. "-Area52") or nil,
+                            key = player.key,
+                            badge = isFriend and { kind = "friend" } or nil,
+                            isFriend = isFriend,
+                            full = full,
+                            canToggle = isFriend or not full,
+                        },
+                        tiles = {
+                            { label = "Discord", value = "Not set", notSet = true },
+                            { label = "Grouped", value = "3 times", notSet = false },
+                            { label = "Last grouped", value = "2026-11-01", notSet = false },
+                            { label = "Joined guild", value = "Not set", notSet = true },
+                        },
+                    }
+                end
+            end
+            return nil
+        end,
+        onWhisper = function(target)
+            table.insert(world.calls, "whisper " .. target)
+        end,
+        onInvite = function(target)
+            table.insert(world.calls, "invite " .. target)
         end,
         onReplace = function(playerId, key)
             table.insert(world.calls, "replace " .. playerId .. " " .. key)
@@ -278,4 +317,82 @@ test.test("friends page: right-clicking a Most grouped card offers Add as friend
     click(full.page.menu.rows[1])
     test.assertEqual(0, #full.calls)
     test.assertTrue(full.page.menu:IsOpen())
+end)
+
+test.test("friends page: the detail panel shows the header, badge and tiles; Whisper and Invite reach the online character", function()
+    local world = setup({ "Anvil", "Bolt" })
+    local detail = world.page.detail
+
+    test.assertEqual("Anvil", detail.name.text)
+    test.assertEqual("Friend", detail.badge.text)
+    test.assertTrue(detail.badge.shown)
+    test.assertTrue(string.find(detail.sub.text, "Last online 2 days ago", 1, true) ~= nil)
+    test.assertFalse(detail.whisper.active)
+    test.assertFalse(detail.invite.active)
+    click(detail.whisper)
+    test.assertEqual(0, #world.calls)
+    test.assertEqual("DISCORD", detail.tiles[1].label.text)
+    test.assertEqual("Not set", detail.tiles[1].value.text)
+    test.assertTrue(detail.tiles[1].notSet)
+    test.assertEqual("3 times", detail.tiles[2].value.text)
+    test.assertFalse(detail.tiles[2].notSet)
+
+    click(world.page.cards[2])
+    test.assertEqual("Bolt", detail.name.text)
+    test.assertTrue(world.page.cards[2].selected)
+    test.assertFalse(world.page.cards[1].selected)
+    test.assertTrue(detail.whisper.active)
+    click(detail.whisper)
+    click(detail.invite)
+    test.assertEqual("whisper Bolt-Area52", world.calls[1])
+    test.assertEqual("invite Bolt-Area52", world.calls[2])
+end)
+
+test.test("friends page: the star button removes a Friend, or adds a Most grouped player, who stays selected", function()
+    local world = setup({ "Anvil" })
+    world.most = { world.players.Cog }
+    world.page:Refresh()
+
+    click(world.page.mostCards[1])
+    test.assertFalse(world.page.detail.badge.shown)
+    click(world.page.detail.star)
+    test.assertEqual("add cog", world.calls[1])
+    test.assertEqual(world.players.Cog.playerId, world.page:Selected())
+    test.assertEqual("Friend", world.page.detail.badge.text)
+
+    click(world.page.detail.star)
+    test.assertEqual("remove " .. world.players.Cog.playerId, world.calls[2])
+    -- Cog is back in Most grouped, still selected.
+    test.assertEqual(world.players.Cog.playerId, world.page:Selected())
+    test.assertEqual("Cog", world.page.mostCards[1].name.text)
+end)
+
+test.test("friends page: the star button does nothing when every slot is taken and the player isn't a Friend", function()
+    local world = setup({ "Anvil", "Bolt" })
+    local _, name
+    for _, name in ipairs({ "X1", "X2", "X3" }) do
+        table.insert(world.pinned, { playerId = name, key = name, name = name, mainName = name, left = false,
+            status = "", online = false })
+    end
+    world.most = { world.players.Cog }
+    world.page:Refresh()
+
+    click(world.page.mostCards[1])
+    test.assertEqual("Cog", world.page.detail.name.text)
+    click(world.page.detail.star)
+    test.assertEqual(0, #world.calls)
+end)
+
+test.test("friends page: a Friend whose player is gone still shows their name, with the star to remove them", function()
+    local world = setup({ "Anvil" })
+    world.gone = true
+    world.players.Anvil.left = true
+    world.players.Anvil.status = "Left the guild"
+    world.page:Refresh()
+
+    test.assertEqual("Anvil", world.page.detail.name.text)
+    test.assertTrue(string.find(world.page.detail.sub.text, "Left the guild", 1, true) ~= nil)
+    test.assertFalse(world.page.detail.tiles[1].shown)
+    click(world.page.detail.star)
+    test.assertEqual("remove " .. world.players.Anvil.playerId, world.calls[1])
 end)

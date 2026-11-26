@@ -4306,6 +4306,30 @@ if clientProfile.supported then
             onError = function(text)
                 rosterController:Print(text)
             end,
+            detail = function(playerId)
+                local friends = currentFriends()
+                local fields = inputs({
+                    playerId = playerId,
+                    mostGrouped = friends and friends:MostGrouped() or {},
+                    formatDate = function(timestamp)
+                        return client:FormatDate(timestamp)
+                    end,
+                    grouped = function(keys)
+                        local _, partition = rosterController:QuietContext()
+                        return addon.GroupHistory.Create(partition):Stats(keys)
+                    end,
+                    joined = function(keys)
+                        return earliestJoin(keys)
+                    end,
+                })
+                return fields and addon.PlayerDetailViewModel.Build(fields) or nil
+            end,
+            onWhisper = function(target)
+                client:OpenWhisper(target)
+            end,
+            onInvite = function(target)
+                client:InviteToParty(target)
+            end,
         })
         -- Drawn on the window's first open; specs reach it here.
         addon.friendsPage = friendsUi.page

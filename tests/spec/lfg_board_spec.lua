@@ -1044,6 +1044,11 @@ test.test("friends: the window opens on Friends, the page is built on show, and 
     test.assertEqual(nil, tool)
     click(hammer)
     test.assertEqual("Hammer Smith", page.cards[1].name.text)
+    -- The detail panel shows Hammer from saved data and the roster.
+    test.assertEqual("Hammer Smith", page.detail.name.text)
+    test.assertEqual("Friend", page.detail.badge.text)
+    test.assertTrue(page.detail.tiles[1].shown)
+    test.assertEqual("Discord", page.detail.view.tiles[1].label)
 
     -- Hammer's alt Bolt shares the Friend tier, with Guild Greet's perks.
     local _, partition, normalizer = addon.rosterController:QuietContext()

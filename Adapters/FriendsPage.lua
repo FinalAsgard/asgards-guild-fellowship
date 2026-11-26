@@ -8,8 +8,8 @@ local _, addon = ...
 -- aren't Friends, each with their party count; right-clicking one offers
 -- Add as friend, greyed out while every slot is taken.
 --
--- The right side shows the selected player, or how to add friends when
--- there are none. + Add a friend (or Replace...) swaps it for Choose a
+-- The right side shows the selected player in the shared player detail
+-- panel (PlayerDetailPanel), or how to add friends when there are none. + Add a friend (or Replace...) swaps it for Choose a
 -- friend: a search box over the guildmates who could be pinned, a list of
 -- them, and Cancel. Picking one fills the slot.
 --
@@ -30,7 +30,6 @@ local FriendsPage = {
     EMPTY = "Pin up to 5 guildmates as Friends with + Add a friend. Friends get the star in greet prompts"
         .. " and on the LFG page.",
     NO_HISTORY = "The guildmates you group with most will show here.",
-    SELECTED_HINT = "More about this player is coming to this side of the page.",
 }
 addon.FriendsPage = FriendsPage
 
@@ -45,6 +44,10 @@ Page.__index = Page
 --   onRemove  function(playerId)
 --   onReplace function(playerId, key) -> true, or false and why not
 --   onError   function(text): tells the user why something didn't happen
+--   detail    function(playerId) -> PlayerDetailViewModel.Build's view, or
+--             nil when the player is gone
+--   onWhisper function(target): whispers that character
+--   onInvite  function(target): invites that character
 function FriendsPage.Create(content, ui, options)
     local page = setmetatable({ content = content, ui = ui, options = options, cards = {} }, Page)
     page:build()
@@ -161,22 +164,25 @@ function Page:build()
     self:buildPicker(side)
 end
 
--- The right side until the player detail panel lands: the selected
--- player's name, or how to add friends.
+-- The right side: the selected player's detail panel, or how to add
+-- friends.
 function Page:buildDetail(side)
-    local ui, pad = self.ui, Theme.SPACING.l
-    local detail = ui:frame("Frame", side)
-    detail:SetAllPoints(side)
-    detail.name = ui:Text(detail, "", "semibold", "heading", "text")
-    detail.name:SetPoint("TOPLEFT", detail, "TOPLEFT", pad, -pad)
-    detail.sub = ui:Text(detail, "", "regular", "body", "muted")
-    detail.sub:SetPoint("TOPLEFT", detail.name, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
-    detail.hint = ui:Text(detail, "", "regular", "body", "muted")
-    detail.hint:SetPoint("TOPLEFT", detail, "TOPLEFT", pad, -pad - 60)
-    detail.hint:SetPoint("RIGHT", detail, "RIGHT", -pad, 0)
-    detail.hint:SetJustifyH("LEFT")
-    detail.hint:SetWordWrap(true)
-    self.detail = detail
+    local owner = self
+    self.detail = addon.PlayerDetailPanel.Create(self.ui, side, {
+        onWhisper = function(target)
+            if owner.options.onWhisper ~= nil then
+                owner.options.onWhisper(target)
+            end
+        end,
+        onInvite = function(target)
+            if owner.options.onInvite ~= nil then
+                owner.options.onInvite(target)
+            end
+        end,
+        onToggleFriend = function(view)
+            owner:toggleFriend(view)
+        end,
+    })
 end
 
 -- Choose a friend: a title, the search box, a scrolling list and Cancel.
@@ -329,17 +335,44 @@ function Page:selectedFriend()
     return nil
 end
 
+-- What the detail panel shows for a card whose player is gone (a Friend
+-- purged from the guild): the card's name and status, and the star button
+-- to remove them.
+local function fallbackView(friend, isFriend)
+    return {
+        playerId = friend.playerId,
+        header = {
+            name = friend.name,
+            status = friend.status,
+            left = friend.left,
+            key = friend.key,
+            badge = isFriend and { kind = addon.PlayerDetailViewModel.FRIEND } or nil,
+            isFriend = isFriend,
+            canToggle = isFriend,
+        },
+        tiles = {},
+    }
+end
+
 function Page:showDetail()
-    local detail, friend = self.detail, self:selectedFriend()
-    if friend ~= nil then
-        detail.name:SetText(friend.name)
-        detail.sub:SetText(subLine(friend))
-        detail.hint:SetText(FriendsPage.SELECTED_HINT)
-    else
-        detail.name:SetText("")
-        detail.sub:SetText("")
-        detail.hint:SetText(FriendsPage.EMPTY)
+    local friend = self:selectedFriend()
+    if friend == nil then
+        self.detail:ShowEmpty(FriendsPage.EMPTY)
+        return
     end
+    local view = self.options.detail ~= nil and self.options.detail(friend.playerId) or nil
+    self.detail:ShowPlayer(view or fallbackView(friend, self:isFriend(friend.playerId)))
+end
+
+-- Whether `playerId` is one of the pinned Friends.
+function Page:isFriend(playerId)
+    local index
+    for index = 1, #self.view.friends do
+        if self.view.friends[index].playerId == playerId then
+            return true
+        end
+    end
+    return false
 end
 
 function Page:showPicker(shown)
@@ -451,6 +484,19 @@ function Page:remove(playerId)
         self.selected = nil
     end
     self:Refresh()
+end
+
+-- The detail panel's star button: removes a Friend, or pins the player in
+-- an open slot. They stay selected.
+function Page:toggleFriend(view)
+    local header = view.header
+    if header.isFriend then
+        self.options.onRemove(view.playerId)
+        self:Refresh()
+        return
+    end
+    self.replacing = nil
+    self:pick({ playerId = view.playerId, key = header.key })
 end
 
 -- Pins the picked row's (or Most grouped card's) player, in the slot being
