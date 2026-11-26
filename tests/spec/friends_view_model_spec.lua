@@ -194,6 +194,21 @@ test.test("friends view model: the picker searches the alias and every character
     test.assertEqual("", names(world.picker("elm")))
 end)
 
+test.test("friends view model: a search that finds only an alt names it; alias or main matches don't", function()
+    local world = setup()
+
+    local found = world.picker("hamm")
+    test.assertEqual("Hammer", table.concat(found[1].matchedAlts, ","))
+    -- By the alias or the main: no alt line.
+    test.assertEqual(nil, world.picker("thetool")[1].matchedAlts)
+    test.assertEqual(nil, world.picker("toolb")[1].matchedAlts)
+    -- Matching the main and an alt both: the main is enough.
+    world.partition:RecordCharacter(world.keys.Toolbox, { name = "Toolhammer-Area52", classToken = "WARRIOR" })
+    test.assertEqual(nil, world.picker("hammer")[1].matchedAlts)
+    -- With nothing typed, nothing to name.
+    test.assertEqual(nil, world.picker("")[1].matchedAlts)
+end)
+
 test.test("friends view model: Most grouped cards come in the given order with counts; the first is the default", function()
     local world = setup()
     local view = world.build({ mostGrouped = {

@@ -5,11 +5,11 @@ local _, addon = ...
 -- a segmented control (each with a grey dot while it's off or empty), a
 -- line saying when the selected one is used beside its switch, and its
 -- greetings: spacious rows of at most two lines, the full text on
--- mouseover, ✎ and 🗑 on hover, scrolled with the mouse wheel. While the
+-- mouseover, Edit and 🗑 on hover, scrolled with the mouse wheel. While the
 -- category's switch is off its greetings are dimmed under a short note;
 -- while greet prompts are off the whole tab is dimmed but still usable.
 --
--- ✎ turns a row into an edit box in place, and + Add a greeting opens an
+-- Edit turns a row into an edit box in place, and + Add a greeting opens an
 -- empty one at the bottom: one at a time, growing to four lines, with Add
 -- or Save (Enter) and Cancel (Escape), and a short error under it when a
 -- save is refused. Under the box, Insert chips put {name}, {main} or
@@ -36,6 +36,8 @@ local AgfGreetingsPage = {
     ROW_GAP = 6,
     SCROLL_STEP = 58,
     ICON_SIZE = 22,
+    EDIT = "Edit",
+    EDIT_WIDTH = 40,
     DIMMED_ALPHA = 0.5,
     BUTTON_WIDTH = 80,
     ADD_WIDTH = 150,
@@ -338,7 +340,7 @@ function Page:editHeight()
 end
 
 -- Row `index` of the list, made on first use: the greeting on a card, its
--- full text on mouseover, ✎ and 🗑 while hovered.
+-- full text on mouseover, Edit and 🗑 while hovered.
 function Page:row(index)
     local row = self.rows[index]
     if row ~= nil then
@@ -368,7 +370,7 @@ function Page:row(index)
     row.confirm:SetWidth(AgfGreetingsPage.CONFIRM_WIDTH)
     row.confirm:SetPoint("RIGHT", row, "RIGHT", -pad, 0)
     row.confirm:Hide()
-    row.edit = ui:IconButton(row, Theme.TEXTURES.pencil, AgfGreetingsPage.ICON_SIZE, function()
+    row.edit = ui:TextButton(row, AgfGreetingsPage.EDIT, AgfGreetingsPage.EDIT_WIDTH, function()
         if row.greeting ~= nil then
             page.options.editor:StartEdit(row.greeting.index)
             page:Refresh()
@@ -406,7 +408,7 @@ function Page:row(index)
         hovered(true)
     end)
     row:SetScript("OnLeave", function()
-        -- Moving onto ✎ or 🗑 leaves the row but keeps them.
+        -- Moving onto Edit or 🗑 leaves the row but keeps them.
         if not inside(row) then
             hovered(false)
         end
@@ -428,7 +430,7 @@ function Page:row(index)
 end
 
 -- Shows row's Delete? labelled `confirm` in place of 🗑, or hides it (nil).
--- ✎ and the text make room for it.
+-- Edit and the text make room for it.
 function Page:arm(row, confirm)
     local pad = Theme.SPACING.m
     row.confirm.armed = confirm ~= nil
@@ -448,7 +450,7 @@ function Page:arm(row, confirm)
     row.edit:SetPoint("RIGHT", row, "RIGHT", -pad - rightOf - Theme.SPACING.xs, 0)
     row.text:ClearAllPoints()
     row.text:SetPoint("LEFT", row, "LEFT", pad, 0)
-    row.text:SetPoint("RIGHT", row, "RIGHT", -pad - rightOf - AgfGreetingsPage.ICON_SIZE - Theme.SPACING.s, 0)
+    row.text:SetPoint("RIGHT", row, "RIGHT", -pad - rightOf - AgfGreetingsPage.EDIT_WIDTH - Theme.SPACING.s, 0)
 end
 
 -- 🗑 or Delete? on the row at `index`: arms the confirm, or deletes. A

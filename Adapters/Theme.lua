@@ -90,8 +90,7 @@ local Theme = {
         sword = MEDIA .. "Textures\\Sword",
         -- For a dungeon the game gives no icon for.
         dungeon = MEDIA .. "Textures\\Dungeon",
-        -- Edit and delete, e.g. on a greeting's row.
-        pencil = MEDIA .. "Textures\\Pencil",
+        -- Delete, e.g. on a greeting's row.
         trash = MEDIA .. "Textures\\Trash",
         -- A plain white square for flat, tinted fills; on every client.
         white = "Interface\\Buttons\\WHITE8X8",

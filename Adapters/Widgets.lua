@@ -311,6 +311,34 @@ function UI:IconButton(parent, texture, size, onClick)
     return button
 end
 
+-- A small text-only button, `label` in grey that turns white with a
+-- rounded backdrop on mouseover, like IconButton, `width` wide.
+function UI:TextButton(parent, label, width, onClick)
+    local button = self:frame("Button", parent)
+    button:SetSize(width, Widgets.BUTTON_HEIGHT - 4)
+    round(button, Theme.RADIUS.small, "hover", false)
+    button.fillShape:SetShown(false)
+    button.edgeShape:SetShown(false)
+    button.label = self:Text(button, label, "semibold", "small", "muted")
+    button.label:SetPoint("CENTER", button, "CENTER", 0, 0)
+    button:SetScript("OnEnter", function(self)
+        self.hovered = true
+        self.label:SetTextColor(Theme.Color("text"))
+        self.fillShape:SetShown(true)
+    end)
+    button:SetScript("OnLeave", function(self)
+        self.hovered = false
+        self.label:SetTextColor(Theme.Color("muted"))
+        self.fillShape:SetShown(false)
+    end)
+    button:SetScript("OnClick", function(self)
+        if onClick ~= nil then
+            onClick(self)
+        end
+    end)
+    return button
+end
+
 -- Choices -------------------------------------------------------------------
 
 -- Buttons side by side in one rounded strip, one selected (green). `items`

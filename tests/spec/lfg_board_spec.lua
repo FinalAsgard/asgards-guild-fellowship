@@ -1075,11 +1075,17 @@ test.test("greetings: the module sits after LFG, with the Greet prompts switch a
     addon.settings:Set("welcomeBackMinutes", 20)
     test.assertEqual("Someone you saw log off comes back after more than 20 minutes away.", page.description.text)
 
-    -- A row shows ✎ and 🗑 and its full text while hovered.
+    -- A row shows Edit and 🗑 and its full text while hovered.
     local row = page.rows[1]
     test.assertFalse(row.edit.shown)
     row.scripts.OnEnter(row)
     test.assertTrue(row.edit.shown)
+    -- Edit is a word, not an icon, and lights up on mouseover.
+    test.assertEqual("Edit", row.edit.label.text)
+    row.edit.scripts.OnEnter(row.edit)
+    test.assertTrue(row.edit.hovered)
+    row.edit.scripts.OnLeave(row.edit)
+    test.assertFalse(row.edit.hovered)
     test.assertTrue(row.delete.shown)
     row.scripts.OnLeave(row)
     test.assertFalse(row.delete.shown)

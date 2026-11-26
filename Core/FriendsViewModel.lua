@@ -179,19 +179,34 @@ function FriendsViewModel.Build(inputs)
 end
 
 -- Whether `query` (lowercase, not empty) is in the player's alias or any of
--- their characters' names.
-local function matches(row, query, partition)
-    if string.find(lower(row.alias), query, 1, true) ~= nil then
+-- their characters' names. When only alts match (not the alias or the
+-- main), also returns their names, as shown, so the picker can say which
+-- alt was found.
+local function matches(row, query, inputs)
+    local partition, normalizer = inputs.partition, inputs.normalizer
+    if string.find(lower(row.alias), query, 1, true) ~= nil
+        or string.find(lower(row.mainName), query, 1, true) ~= nil
+    then
         return true
     end
+    local mainKey = (partition:GetPlayer(row.playerId) or {}).main
+    local alts = {}
     local index
     for index = 1, #row.keys do
-        local character = partition:GetCharacter(row.keys[index]) or {}
-        if string.find(lower(character.name or row.keys[index]), query, 1, true) ~= nil then
-            return true
+        local key = row.keys[index]
+        local raw = (partition:GetCharacter(key) or {}).name or key
+        local name = normalizer and normalizer:Display(raw) or raw
+        if string.find(lower(name), query, 1, true) ~= nil then
+            if key == mainKey then
+                return true
+            end
+            table.insert(alts, name)
         end
     end
-    return false
+    if alts[1] == nil then
+        return false
+    end
+    return true, alts
 end
 
 -- The picker's rows: the inputs as for Build, plus
@@ -201,8 +216,9 @@ end
 --   query     what the user typed (matched, ignoring case, against the
 --             alias and every character name)
 -- Each row is a card (see Build) plus key (the character to pin: the main
--- when it's in the guild, else the first one that is), alts, count and
--- grouped ("12× grouped" or "Never grouped").
+-- when it's in the guild, else the first one that is), alts, count,
+-- grouped ("12× grouped" or "Never grouped"), and matchedAlts: the names
+-- of the alts the query found, when it matched only alts (else nil).
 function FriendsViewModel.Picker(inputs)
     local partition = inputs.partition
     local excluded = {}
@@ -234,8 +250,12 @@ function FriendsViewModel.Picker(inputs)
             return
         end
         local row = describe(inputs, playerId, inGuild[1])
-        if query ~= "" and not matches(row, query, partition) then
-            return
+        if query ~= "" then
+            local found, alts = matches(row, query, inputs)
+            if not found then
+                return
+            end
+            row.matchedAlts = alts
         end
         row.alts = #inGuild - 1
         row.count = ask(inputs.statsOf, inGuild[1])

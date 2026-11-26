@@ -21,6 +21,8 @@ local DOT = " · "
 local FriendsPage = {
     COLUMN_WIDTH = 260,
     PICKER_ROW_HEIGHT = 44,
+    -- A picker row's third line, naming the alts a search found.
+    ALT_LINE_HEIGHT = 16,
     SCROLL_STEP = 44,
     SEARCH_WIDTH = 300,
     ADD_FRIEND = "+ Add a friend",
@@ -240,7 +242,8 @@ function Page:buildPicker(side)
 end
 
 -- A picker row: the player's name and main, class, alts and online status,
--- and how often the user grouped with them on the right.
+-- and how often the user grouped with them on the right. A search that
+-- found them by an alt's name adds a third line naming it.
 function Page:pickerRow(index)
     local picker = self.picker
     local row = picker.rows[index]
@@ -249,14 +252,16 @@ function Page:pickerRow(index)
     end
     local ui, owner = self.ui, self
     row = ui:frame("Button", picker.list)
-    row:SetHeight(FriendsPage.PICKER_ROW_HEIGHT - 4)
     ui:Round(row, Theme.RADIUS.button, "raised", false)
-    row:SetPoint("TOPLEFT", picker.list, "TOPLEFT", 0, -(index - 1) * FriendsPage.PICKER_ROW_HEIGHT)
-    row:SetPoint("RIGHT", picker.list, "RIGHT", 0, 0)
     row.name = ui:Text(row, "", "semibold", "body", "text")
     row.name:SetPoint("TOPLEFT", row, "TOPLEFT", Theme.SPACING.s, -5)
     row.sub = ui:Text(row, "", "regular", "small", "muted")
     row.sub:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -3)
+    row.alt = ui:Text(row, "", "regular", "small", "text")
+    row.alt:SetPoint("TOPLEFT", row.sub, "BOTTOMLEFT", 0, -3)
+    row.alt:SetPoint("RIGHT", row, "RIGHT", -Theme.SPACING.s, 0)
+    row.alt:SetJustifyH("LEFT")
+    row.alt:SetWordWrap(false)
     row.grouped = ui:Text(row, "", "regular", "small", "muted")
     row.grouped:SetPoint("RIGHT", row, "RIGHT", -Theme.SPACING.s, 0)
     row:SetScript("OnEnter", function(self)
@@ -406,13 +411,15 @@ function Page:showPicker(shown)
     setShown(self.detail, not shown)
 end
 
--- Lays out the picker's rows for what's typed, from the top: a list
+-- Lays out the picker's rows for what's typed, top to bottom, each as tall
+-- as its lines, from the top of the list: a list
 -- scrolled down before a search would otherwise hide its few matches
 -- above the visible part.
 function Page:showRows()
     local picker = self.picker
     local rows = self.options.picker(self.query or "") or {}
     picker.area:SetVerticalScroll(0)
+    local top = 0
     local index
     for index = 1, math.max(#rows, #picker.rows) do
         local entry = rows[index]
@@ -431,12 +438,27 @@ function Page:showRows()
             table.insert(parts, entry.online and "Online" or "Offline")
             row.sub:SetText(table.concat(parts, DOT))
             row.grouped:SetText(entry.grouped)
+            local height = FriendsPage.PICKER_ROW_HEIGHT
+            if entry.matchedAlts ~= nil then
+                row.alt:SetText("|cff9d9d9d" .. (#entry.matchedAlts == 1 and "Alt: " or "Alts: ") .. "|r"
+                    .. table.concat(entry.matchedAlts, ", "))
+                row.alt:Show()
+                height = height + FriendsPage.ALT_LINE_HEIGHT
+            else
+                row.alt:SetText("")
+                row.alt:Hide()
+            end
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", picker.list, "TOPLEFT", 0, -top)
+            row:SetPoint("RIGHT", picker.list, "RIGHT", 0, 0)
+            row:SetHeight(height - 4)
+            top = top + height
             row:Show()
         elseif picker.rows[index] ~= nil then
             picker.rows[index]:Hide()
         end
     end
-    picker.list:SetHeight(math.max(1, #rows * FriendsPage.PICKER_ROW_HEIGHT))
+    picker.list:SetHeight(math.max(1, top))
     setShown(picker.empty, rows[1] == nil)
     self.pickerRows = rows
 end

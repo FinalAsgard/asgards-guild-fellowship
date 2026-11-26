@@ -255,6 +255,30 @@ test.test("friends page: a search shows its matches from the top, even after scr
     test.assertEqual(0, rawget(area, "scrolled"))
 end)
 
+test.test("friends page: a picker card found by an alt names it on a third line, and is taller", function()
+    local world = setup({ "Anvil" })
+    local rows = world.page.options.picker
+    world.page.options.picker = function(query)
+        -- "alt" finds everyone, the first by an alt.
+        local result = rows(query == "alt" and "" or query)
+        if query == "alt" then
+            result[1].matchedAlts = { "Altiron" }
+        end
+        return result
+    end
+    click(world.page.cards[2])
+    local first = world.page.picker.rows[1]
+    test.assertFalse(first.alt.shown)
+    local short = rawget(first, "height")
+
+    world.page.picker.search.box:SetText("alt")
+    world.page.picker.search.box.scripts.OnTextChanged(world.page.picker.search.box, true)
+    test.assertTrue(first.alt.shown)
+    test.assertContains(first.alt.text, "Alt: ")
+    test.assertContains(first.alt.text, "Altiron")
+    test.assertEqual(short + world.addon.FriendsPage.ALT_LINE_HEIGHT, rawget(first, "height"))
+end)
+
 test.test("friends page: Cancel backs out of Choose a friend without changing anything", function()
     local world = setup({ "Anvil" })
     click(world.page.cards[2])
