@@ -83,6 +83,7 @@ local LfgBoardPage = {
     FILL_EMPTY = "No guildmates online could fill a slot right now.",
     CHANGE_ZONE = "Change",
     CHOOSE_ZONE = "Choose",
+    CANCEL_ZONE = "Cancel",
     SEARCH_PLACEHOLDERS = { dungeon = "Search all dungeons", questing = "Search all zones" },
     RAID_EXPLANATION = "A raid is listed as a big party: anyone can ask to join, with no role rules.",
 }
@@ -419,6 +420,14 @@ function Page:buildEditor(card)
     self.changeZoneButton:SetWidth(80)
     self.changeZoneButton:SetPoint("TOPRIGHT", fields, "TOPRIGHT", 0, 0)
     self.changeZoneButton:Hide()
+    -- Beside the zone search: closes the list, the zone as it was.
+    self.cancelZoneButton = ui:Button(fields, LfgBoardPage.CANCEL_ZONE, "secondary", function()
+        owner.draft.pickingZone = false
+        owner:refreshEditor()
+    end)
+    self.cancelZoneButton:SetWidth(80)
+    self.cancelZoneButton:SetPoint("LEFT", self.search, "RIGHT", Theme.SPACING.s, 0)
+    self.cancelZoneButton:Hide()
     editor.raid = ui:Text(fields, LfgBoardPage.RAID_EXPLANATION, "regular", "body", "muted")
     editor.raid:SetPoint("TOPLEFT", fields, "TOPLEFT", 0, 0)
     editor.raid:SetWidth(LfgBoardPage.FIELD_WIDTH)
@@ -732,6 +741,7 @@ function Page:refreshEditor()
             zone.maxLevel) .. ")") or "")) or "Choose a zone.")
     setShown(editor.questing, questing and not listed)
     setShown(self.changeZoneButton, questing and not listed and not unknown)
+    setShown(self.cancelZoneButton, questing and listed)
     self.changeZoneButton:SetLabel(zone ~= nil and LfgBoardPage.CHANGE_ZONE or LfgBoardPage.CHOOSE_ZONE)
     setShown(editor.raid, draft.kind == "raid")
     setShown(self.otherText, draft.kind == "other")
