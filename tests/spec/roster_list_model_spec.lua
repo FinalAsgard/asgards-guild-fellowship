@@ -444,3 +444,29 @@ test.test("roster list model: Departed is empty when nobody left", function()
 
     test.assertEqual(0, #world.addon.RosterListModel.Departed({ partition = world.partition, now = 1000 }))
 end)
+
+-- Review ------------------------------------------------------------------------
+
+test.test("roster list model: Review has one row per member's suggestion, without note conflicts", function()
+    local world = setup()
+    local rows = world.addon.RosterListModel.Suggestions({
+        { kind = "bundle", group = "player:7", name = "TheTool", suggestedBy = "Hammer (TheTool)", items = {
+            { character = "hammer", kind = "suggested main", name = "Hammer", suggests = "Alt of Nail",
+                current = "Alt of Toolbox" },
+            { character = "toolbox", kind = "suggested discord", name = "Toolbox", suggests = "Discord \"tool#1\"",
+                current = "No Discord" },
+        } },
+        { section = "notes", kind = "main", character = "bolt", name = "Bolt", suggests = "Alt of Cog" },
+    })
+
+    test.assertEqual(2, #rows)
+    test.assertEqual("TheTool", rows[1].player)
+    test.assertEqual("Hammer", rows[1].name)
+    test.assertEqual("Alt of Nail", rows[1].suggests)
+    test.assertEqual("Alt of Toolbox", rows[1].current)
+    test.assertEqual("Hammer (TheTool)", rows[1].suggestedBy)
+    test.assertEqual("player:7", rows[1].group)
+    test.assertTrue(rows[1].reviewable)
+    test.assertEqual("suggested discord", rows[2].kind)
+    test.assertFalse(rows[2].reviewable)
+end)

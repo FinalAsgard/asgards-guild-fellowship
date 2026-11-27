@@ -448,6 +448,37 @@ function Controller:DecideSuggestions(approved, character, kind)
     return decided, reason, #entries - decided
 end
 
+-- How many members' suggestions wait for an officer in the current guild
+-- (each suggestion, not each player's bundle), or 0 without one.
+function Controller:SuggestionCount()
+    local guild, partition = self:QuietContext()
+    if guild == nil then
+        return 0
+    end
+    local count = 0
+    local conflicts = partition:GetConflicts() or {}
+    local index
+    for index = 1, #conflicts do
+        if type(conflicts[index]) == "table" and conflicts[index].from ~= nil then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- The new window's Approve all and Deny all: decides every member's
+-- suggestion, and no guild note conflict. Returns how many were decided.
+function Controller:DecideAllSuggestions(approved)
+    if self.current == nil or not self:IsOfficerUser() then
+        return 0
+    end
+    local decided, reason, refused = self:DecideSuggestions(approved)
+    self:Print((approved and "Approved " or "Denied ") .. plural(decided, "suggestion") .. ".")
+    self:PrintUndecided(refused, reason)
+    self:Refresh()
+    return decided
+end
+
 -- After deciding everything: says how many members' suggestions are still
 -- waiting, and why.
 function Controller:PrintUndecided(refused, reason)

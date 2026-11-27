@@ -64,7 +64,10 @@ Window.__index = Window
 --                 switch beside the gear while the module shows, and
 --                 onShow(argument) (optional) runs each time the page is
 --                 shown, with what Open or ShowPage was given for it (e.g.
---                 the player Friends shows), or nil
+--                 the player Friends shows), or nil, and badge (optional,
+--                 function() -> a number) puts that count in gold on the
+--                 sidebar button, hidden at 0 or nil (RefreshBadges reads
+--                 it again)
 --   settings      the SettingsModel the Settings page's switches use
 --   settingsTabs  a list of { id, label, rows = { { id, label, info } } },
 --                 each row a toggle in `settings`
@@ -88,6 +91,7 @@ function AgfWindow.Create(client, options)
         headers = {},
         pages = {},
         moduleButtons = {},
+        badges = {},
     }, Window)
     window.current = window.modules[1] and window.modules[1].id or AgfWindow.SETTINGS
     window.gearModule = window.modules[1] and window.modules[1].id or nil
@@ -173,8 +177,14 @@ function Window:buildSidebar(frame)
     local top = -margin - 30 - Theme.SPACING.l
     local index
     for index = 1, #self.modules do
-        local button = moduleButton(self.modules[index].id, self.modules[index].label)
+        local module = self.modules[index]
+        local button = moduleButton(module.id, module.label)
         button:SetPoint("TOP", sidebar, "TOP", 0, top - (index - 1) * (AgfWindow.MODULE_ROW_HEIGHT + 4))
+        if module.badge ~= nil then
+            local badge = ui:CountBadge(button)
+            badge:SetPoint("RIGHT", button, "RIGHT", -Theme.SPACING.m, 0)
+            self.badges[module.id] = { badge = badge, count = module.badge }
+        end
     end
 
     -- At the bottom: the version, above it the character, and above that
@@ -620,6 +630,7 @@ function Window:Open(id, argument)
             end
             self.frame = nil
             self.pages, self.moduleButtons, self.switches, self.colorRows, self.headers = {}, {}, {}, {}, {}
+            self.badges = {}
             self.choiceRows, self.actionRows, self.infoIcons = {}, {}, {}
             return false, failure
         end
@@ -664,6 +675,21 @@ end
 -- The page showing (or that will show on the next open).
 function Window:Page()
     return self.current
+end
+
+-- Reads each module's badge count again and shows it on its button.
+function Window:RefreshBadges()
+    local _, entry
+    for _, entry in pairs(self.badges) do
+        local ok, count = pcall(entry.count)
+        entry.badge:SetCount(ok and type(count) == "number" and count or 0)
+    end
+end
+
+-- Module `id`'s count badge, or nil (none, or the window isn't built).
+function Window:Badge(id)
+    local entry = self.badges[id]
+    return entry and entry.badge or nil
 end
 
 -- Shows page `id`: a module's or "settings", handing `argument` to the
@@ -715,6 +741,7 @@ function Window:ShowPage(id, argument)
             module.onShow(argument)
         end
     end
+    self:RefreshBadges()
 end
 
 -- The gear popup -----------------------------------------------------------

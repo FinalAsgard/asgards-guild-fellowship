@@ -21,7 +21,10 @@ local _, addon = ...
 --
 -- Officers get tabs across the top: Members (all of the above), Departed
 -- (a table of the characters that left the guild, each with Purge, and
--- Purge all departed, which asks first) and Review. Members get no tabs.
+-- Purge all departed, which asks first) and Review (members' suggestions,
+-- each with Approve and Deny, Approve all and Deny all, and Review for a
+-- change to a main or its alts, which shows the player before and after).
+-- Members get no tabs.
 --
 -- It's built when the page is shown (Refresh). When the roster changes on
 -- its own (Update), the cards show what's new but keep their order and the
@@ -67,7 +70,12 @@ local RosterPage = {
     PURGE_ALL_WIDTH = 160,
     NO_DEPARTED = "Nobody has left the guild.",
     WHOLE_PLAYER_LEFT = "The whole player left",
-    REVIEW_EMPTY = "Members' suggestions will show here.",
+    REVIEW_EMPTY = "No suggestions are waiting.",
+    REVIEW_ROW_HEIGHT = 54,
+    REVIEW_LINE_HEIGHT = 18,
+    DECIDE_WIDTH = 76,
+    -- The review's before side; the after side starts here.
+    REVIEW_SIDE_WIDTH = 320,
 }
 addon.RosterPage = RosterPage
 
@@ -93,6 +101,11 @@ Page.__index = Page
 --   departed  function() -> RosterListModel.Departed's rows
 --   onPurge   function(key): purges one departed character
 --   onPurgeAll function(): purges every departed character
+--   suggestions function() -> RosterListModel.Suggestions' rows
+--   onApprove, onDeny function(character, kind): decides one suggestion
+--   onApproveAll, onDenyAll function(): decides every suggestion
+--   reviewOf  function(group) -> { title, suggestedBy, lines = { { before,
+--             after } } }: a bundle's before and after, or nil
 --   onError   function(text): tells the user why something didn't happen
 -- and, for organizing players (RosterController's calls, by character key):
 --   menuFor   function(target) -> { { text, action, key } }: the right-click
@@ -282,8 +295,189 @@ function Page:buildTabs()
     self.departedBody = ui:frame("Frame", content)
     self:buildDeparted(self.departedBody)
     self.reviewBody = ui:frame("Frame", content)
-    self.reviewEmpty = ui:Text(self.reviewBody, RosterPage.REVIEW_EMPTY, "regular", "body", "muted")
-    self.reviewEmpty:SetPoint("TOPLEFT", self.reviewBody, "TOPLEFT", 0, 0)
+    self:buildReview(self.reviewBody)
+end
+
+-- The Review tab: how many wait, Approve all and Deny all, over a
+-- full-width list; Review swaps the list for one bundle's before and after.
+function Page:buildReview(body)
+    local ui, owner = self.ui, self
+    self.reviewSummary = ui:Text(body, "", "regular", "body", "muted")
+    self.reviewSummary:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -6)
+    self.denyAll = ui:Button(body, "Deny all", "danger", function()
+        owner:call("onDenyAll")
+        owner:refreshReview()
+    end)
+    self.denyAll:SetWidth(100)
+    self.denyAll:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, 0)
+    self.approveAll = ui:Button(body, "Approve all", "primary", function()
+        owner:call("onApproveAll")
+        owner:refreshReview()
+    end)
+    self.approveAll:SetWidth(110)
+    self.approveAll:SetPoint("RIGHT", self.denyAll, "LEFT", -Theme.SPACING.s, 0)
+    self.reviewList = ui:PooledList(body, {
+        height = RosterPage.REVIEW_ROW_HEIGHT,
+        gap = Theme.SPACING.xs,
+        step = RosterPage.SCROLL_STEP,
+        viewport = RosterPage.VIEWPORT,
+        build = function(_, parent)
+            return owner:buildReviewRow(parent)
+        end,
+        fill = function(frame, row)
+            owner:fillReviewRow(frame, row)
+        end,
+    })
+    self.reviewList:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -RosterPage.HEADER_HEIGHT - Theme.SPACING.m)
+    self.reviewList:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, 0)
+    self.reviewEmpty = ui:Text(body, RosterPage.REVIEW_EMPTY, "regular", "body", "muted")
+    self.reviewEmpty:SetPoint("TOPLEFT", self.reviewList, "TOPLEFT", 0, 0)
+
+    -- One bundle's before and after, over the list.
+    local view = ui:Panel(body)
+    view:SetPoint("TOPLEFT", body, "TOPLEFT", 0, 0)
+    view:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, 0)
+    local pad = Theme.SPACING.l
+    view.title = ui:Text(view, "", "semibold", "title", "text")
+    view.title:SetPoint("TOPLEFT", view, "TOPLEFT", pad, -pad)
+    view.suggestedBy = ui:Text(view, "", "regular", "body", "muted")
+    view.suggestedBy:SetPoint("TOPLEFT", view.title, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    view.beforeLabel = ui:SectionLabel(view, "Before")
+    view.beforeLabel:SetPoint("TOPLEFT", view.suggestedBy, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+    view.afterLabel = ui:SectionLabel(view, "After")
+    view.back = ui:Button(view, "Back", "secondary", function()
+        owner:CloseReview()
+    end)
+    view.back:SetWidth(90)
+    view.back:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -pad, pad)
+    view.area, view.list = ui:ScrollList(view, RosterPage.REVIEW_LINE_HEIGHT * 3)
+    view.area:SetPoint("TOPLEFT", view.beforeLabel, "BOTTOMLEFT", 0, -Theme.SPACING.s)
+    view.area:SetPoint("BOTTOMRIGHT", view.back, "TOPRIGHT", 0, Theme.SPACING.m)
+    view.afterLabel:SetPoint("BOTTOMLEFT", view.area, "TOPLEFT", RosterPage.REVIEW_SIDE_WIDTH, Theme.SPACING.s)
+    view.lines = {}
+    view:Hide()
+    self.reviewView = view
+end
+
+-- A suggestion's row: the player and character, what's suggested, what it
+-- is now and who suggested it, then Approve, Deny and (for a change to a
+-- main or its alts) Review.
+function Page:buildReviewRow(parent)
+    local ui, owner = self.ui, self
+    local row = ui:Panel(parent)
+    row.name = ui:Text(row, "", "semibold", "body", "text")
+    row.name:SetPoint("TOPLEFT", row, "TOPLEFT", Theme.SPACING.m, -Theme.SPACING.s)
+    row.sub = ui:Text(row, "", "regular", "small", "muted")
+    row.sub:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    row.sub:SetPoint("RIGHT", row, "RIGHT", -3 * RosterPage.DECIDE_WIDTH - 4 * Theme.SPACING.s, 0)
+    row.sub:SetJustifyH("LEFT")
+    row.sub:SetWordWrap(false)
+    local function decide(option)
+        return function()
+            if row.entry ~= nil then
+                owner:call(option, row.entry.character, row.entry.kind)
+                owner:refreshReview()
+            end
+        end
+    end
+    row.deny = ui:Button(row, "Deny", "secondary", decide("onDeny"))
+    row.deny:SetWidth(RosterPage.DECIDE_WIDTH)
+    row.deny:SetPoint("RIGHT", row, "RIGHT", -Theme.SPACING.m, 0)
+    row.approve = ui:Button(row, "Approve", "primary", decide("onApprove"))
+    row.approve:SetWidth(RosterPage.DECIDE_WIDTH)
+    row.approve:SetPoint("RIGHT", row.deny, "LEFT", -Theme.SPACING.s, 0)
+    row.review = ui:Button(row, "Review", "secondary", function()
+        if row.entry ~= nil then
+            owner:OpenReview(row.entry.group)
+        end
+    end)
+    row.review:SetWidth(RosterPage.DECIDE_WIDTH)
+    row.review:SetPoint("RIGHT", row.approve, "LEFT", -Theme.SPACING.s, 0)
+    return row
+end
+
+function Page:fillReviewRow(frame, entry)
+    frame.entry = entry
+    frame.name:SetText(tostring(entry.player) .. DOT .. tostring(entry.name))
+    frame.sub:SetText(tostring(entry.suggests) .. DOT .. "now " .. tostring(entry.current) .. DOT
+        .. "Suggested by " .. tostring(entry.suggestedBy))
+    setShown(frame.review, entry.reviewable == true)
+end
+
+-- The Review tab again, from the suggestion queue, with its count in the
+-- tab. A review open on a bundle that's all decided closes.
+function Page:refreshReview()
+    local rows = self:call("suggestions") or {}
+    self.reviewRows = rows
+    self.reviewList:SetRows(rows)
+    self.tabs:SetLabel("review", rows[1] ~= nil and ("Review" .. DOT .. #rows) or "Review")
+    self.reviewSummary:SetText(#rows == 1 and "1 suggestion is waiting."
+        or (#rows .. " suggestions are waiting."))
+    setShown(self.reviewEmpty, rows[1] == nil)
+    self.approveAll:SetActive(rows[1] ~= nil)
+    self.denyAll:SetActive(rows[1] ~= nil)
+    if self.reviewing ~= nil then
+        self:OpenReview(self.reviewing)
+    end
+end
+
+-- Line `index` of the review's list: the before side and the after side.
+function Page:reviewLine(index)
+    local view = self.reviewView
+    local line = view.lines[index]
+    if line == nil then
+        local ui = self.ui
+        line = ui:frame("Frame", view.list)
+        line:SetHeight(RosterPage.REVIEW_LINE_HEIGHT)
+        line:SetPoint("TOPLEFT", view.list, "TOPLEFT", 0, -(index - 1) * RosterPage.REVIEW_LINE_HEIGHT)
+        line:SetPoint("RIGHT", view.list, "RIGHT", 0, 0)
+        line.before = ui:Text(line, "", "regular", "body", "text")
+        line.before:SetPoint("LEFT", line, "LEFT", 0, 0)
+        line.before:SetWidth(RosterPage.REVIEW_SIDE_WIDTH - Theme.SPACING.m)
+        line.before:SetJustifyH("LEFT")
+        line.before:SetWordWrap(false)
+        line.after = ui:Text(line, "", "regular", "body", "text")
+        line.after:SetPoint("LEFT", line, "LEFT", RosterPage.REVIEW_SIDE_WIDTH, 0)
+        line.after:SetPoint("RIGHT", line, "RIGHT", 0, 0)
+        line.after:SetJustifyH("LEFT")
+        line.after:SetWordWrap(false)
+        view.lines[index] = line
+    end
+    return line
+end
+
+-- Review on bundle `group`: its player before and after the change, as the
+-- old window's review shows it. Closes when the bundle is gone.
+function Page:OpenReview(group)
+    local model = self:call("reviewOf", group)
+    if model == nil then
+        self:CloseReview()
+        return
+    end
+    self.reviewing = group
+    local view = self.reviewView
+    view.title:SetText("Review: " .. tostring(model.title))
+    view.suggestedBy:SetText(model.suggestedBy or "")
+    local lines = model.lines or {}
+    local index
+    for index = 1, math.max(#lines, #view.lines) do
+        local entry = lines[index]
+        if entry ~= nil then
+            local line = self:reviewLine(index)
+            line.before:SetText(entry.before or "")
+            line.after:SetText(entry.after or "")
+            line:Show()
+        elseif view.lines[index] ~= nil then
+            view.lines[index]:Hide()
+        end
+    end
+    view.list:SetHeight(math.max(1, #lines * RosterPage.REVIEW_LINE_HEIGHT))
+    view:Show()
+end
+
+function Page:CloseReview()
+    self.reviewing = nil
+    self.reviewView:Hide()
 end
 
 -- The Departed tab: a line saying how many left and Purge all departed
@@ -412,6 +606,8 @@ function Page:ShowTab(id)
     setShown(self.reviewBody, id == "review")
     if id == "departed" then
         self:refreshDeparted()
+    elseif id == "review" then
+        self:refreshReview()
     end
 end
 
@@ -429,6 +625,7 @@ function Page:layoutTabs()
     setShown(self.tabs, officer)
     if officer then
         self:refreshDeparted()
+        self:refreshReview()
     end
     self:ShowTab(officer and self.tab or "members")
 end
@@ -756,6 +953,10 @@ function Page:Update()
     self:showDetail()
     if self.tab == "departed" then
         self:refreshDeparted()
+    end
+    -- The Review tab's count stays current wherever the officer is.
+    if self:call("isOfficer") == true then
+        self:refreshReview()
     end
 end
 

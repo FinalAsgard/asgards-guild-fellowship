@@ -1849,6 +1849,62 @@ test.test("roster: an officer purges departed characters from the Departed tab; 
     test.assertFalse(memberAddon.rosterPage.tabs.shown)
 end)
 
+test.test("roster: an officer reviews members' suggestions, not note conflicts, with the count on the Roster button", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local zap, hammer = normalizer:Key("Zap Arcane"), normalizer:Key("Hammer Smith")
+    partition:SetConflicts({
+        { character = zap, kind = "suggested main", suggestion = { main = hammer }, from = zap, at = 1 },
+        { character = zap, kind = "main", suggestion = { main = hammer } },
+    })
+    test.assertTrue(addon.agfWindow:Open())
+    local page = addon.rosterPage
+
+    test.assertEqual("1", addon.agfWindow:Badge("roster").text.text)
+    test.assertEqual("Review · 1", page.tabs.tabs[3].label.text)
+    page.tabs.tabs[3].scripts.OnClick(page.tabs.tabs[3])
+    -- The guild note conflict stays out of Review.
+    test.assertEqual(1, #page.reviewRows)
+    local row
+    local _, frame
+    for _, frame in ipairs(page.reviewList:Shown()) do
+        if frame.shown then
+            row = frame
+        end
+    end
+    test.assertContains(row.name.text, "Zap Arcane")
+    test.assertContains(row.sub.text, "Alt of Hammer Smith")
+    test.assertTrue(row.review.shown)
+    row.review.scripts.OnClick(row.review)
+    test.assertTrue(page.reviewView.shown)
+    test.assertContains(page.reviewView.title.text, "Zap Arcane")
+
+    -- Approve all decides the suggestion and leaves the note conflict.
+    page.approveAll.scripts.OnClick(page.approveAll)
+    local left = partition:GetConflicts()
+    test.assertEqual(1, #left)
+    test.assertEqual("main", left[1].kind)
+    test.assertEqual(partition:GetCharacter(hammer).player, partition:GetCharacter(zap).player)
+    test.assertFalse(addon.agfWindow:Badge("roster").shown)
+    test.assertFalse(page.reviewView.shown)
+end)
+
+test.test("roster: a member's window has no suggestion count", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(world.environment)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local zap = normalizer:Key("Zap Arcane")
+    partition:SetConflicts({
+        { character = zap, kind = "suggested main", suggestion = { main = zap }, from = zap, at = 1 },
+    })
+    test.assertTrue(addon.agfWindow:Open())
+
+    test.assertFalse(addon.agfWindow:Badge("roster").shown)
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the page is built on show, and a pinned Friend is starred", function()

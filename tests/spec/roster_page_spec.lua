@@ -115,6 +115,33 @@ local function setup(count, online)
             table.insert(world.calls, "purge all")
             world.gone = {}
         end,
+        -- `world.waiting` are the Review rows; `world.reviews` the reviews by
+        -- group.
+        suggestions = function()
+            return world.waiting or {}
+        end,
+        onApprove = function(character, kind)
+            table.insert(world.calls, "approve " .. character .. " " .. kind)
+            table.remove(world.waiting, 1)
+        end,
+        onDeny = function(character, kind)
+            table.insert(world.calls, "deny " .. character .. " " .. kind)
+            table.remove(world.waiting, 1)
+        end,
+        onApproveAll = function()
+            table.insert(world.calls, "approve all")
+            world.waiting = {}
+        end,
+        onDenyAll = function()
+            table.insert(world.calls, "deny all")
+            world.waiting = {}
+        end,
+        reviewOf = function(group)
+            if world.waiting == nil or world.waiting[1] == nil then
+                return nil
+            end
+            return (world.reviews or {})[group]
+        end,
         countsTooltip = function()
             return { "Guild size", "3 players, all known", "5 of 9 characters online" }
         end,
@@ -749,4 +776,107 @@ test.test("roster page: an officer demoted to member loses the tabs", function()
     test.assertFalse(world.page.tabs.shown)
     test.assertTrue(world.page.membersBody.shown)
     test.assertFalse(world.page.departedBody.shown)
+end)
+
+-- Review -----------------------------------------------------------------------
+
+local function waitingRows()
+    return {
+        { character = "hammer", kind = "suggested main", group = "g1", player = "TheTool", name = "Hammer",
+            suggests = "Alt of Nail", current = "Alt of Toolbox", suggestedBy = "Hammer (TheTool)", reviewable = true },
+        { character = "bolt", kind = "suggested discord", group = "g2", player = "Bolt", name = "Bolt",
+            suggests = "Discord \"bolt#1\"", current = "No Discord", suggestedBy = "Bolt", reviewable = false },
+    }
+end
+
+local function reviewShown(world)
+    local rows = {}
+    local _, frame
+    for _, frame in ipairs(world.page.reviewList:Shown()) do
+        if frame.shown then
+            table.insert(rows, frame)
+        end
+    end
+    table.sort(rows, function(a, b)
+        return a.entry.character > b.entry.character
+    end)
+    return rows
+end
+
+local function openReviewTab(world)
+    world.officer = true
+    world.waiting = waitingRows()
+    world.page:Refresh()
+    click(world.page.tabs.tabs[3])
+end
+
+test.test("roster page: Review lists each suggestion with the player, the change and who suggested it", function()
+    local world = setup(3, 1)
+    openReviewTab(world)
+
+    test.assertEqual("Review · 2", world.page.tabs.tabs[3].label.text)
+    test.assertEqual("2 suggestions are waiting.", world.page.reviewSummary.text)
+    local rows = reviewShown(world)
+    test.assertEqual("TheTool · Hammer", rows[1].name.text)
+    test.assertEqual("Alt of Nail · now Alt of Toolbox · Suggested by Hammer (TheTool)", rows[1].sub.text)
+    -- Only a change to a main or its alts offers Review.
+    test.assertTrue(rows[1].review.shown)
+    test.assertFalse(rows[2].review.shown)
+end)
+
+test.test("roster page: Approve and Deny decide one suggestion each", function()
+    local world = setup(3, 1)
+    openReviewTab(world)
+    click(reviewShown(world)[1].approve)
+
+    test.assertEqual("approve hammer suggested main", world.calls[1])
+    test.assertEqual("Review · 1", world.page.tabs.tabs[3].label.text)
+    click(reviewShown(world)[1].deny)
+    test.assertEqual("deny bolt suggested discord", world.calls[2])
+    test.assertEqual("Review", world.page.tabs.tabs[3].label.text)
+    test.assertTrue(world.page.reviewEmpty.shown)
+    test.assertFalse(world.page.approveAll.active)
+end)
+
+test.test("roster page: Approve all and Deny all decide the whole list", function()
+    local world = setup(3, 1)
+    openReviewTab(world)
+    click(world.page.approveAll)
+
+    test.assertEqual("approve all", world.calls[1])
+    test.assertEqual(0, #reviewShown(world))
+
+    world.waiting = waitingRows()
+    world.page:Refresh()
+    click(world.page.denyAll)
+    test.assertEqual("deny all", world.calls[2])
+end)
+
+test.test("roster page: Review shows the player before and after, and Back returns to the list", function()
+    local world = setup(3, 1)
+    world.reviews = { g1 = { title = "TheTool", suggestedBy = "Suggested by Hammer (TheTool)", lines = {
+        { before = "Main: Toolbox", after = "Main: Toolbox" },
+        { before = "Alt: Hammer", after = "" },
+    } } }
+    openReviewTab(world)
+    click(reviewShown(world)[1].review)
+    local view = world.page.reviewView
+
+    test.assertTrue(view.shown)
+    test.assertEqual("Review: TheTool", view.title.text)
+    test.assertEqual("Suggested by Hammer (TheTool)", view.suggestedBy.text)
+    test.assertEqual("Alt: Hammer", view.lines[2].before.text)
+    test.assertEqual("", view.lines[2].after.text)
+    click(view.back)
+    test.assertFalse(view.shown)
+end)
+
+test.test("roster page: a review closes once its suggestions are all decided", function()
+    local world = setup(3, 1)
+    world.reviews = { g1 = { title = "TheTool", lines = {} } }
+    openReviewTab(world)
+    click(reviewShown(world)[1].review)
+    click(world.page.approveAll)
+
+    test.assertFalse(world.page.reviewView.shown)
 end)

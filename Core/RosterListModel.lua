@@ -427,3 +427,37 @@ function RosterListModel.Departed(inputs)
     end)
     return rows
 end
+
+-- The officers' Review tab, from ConflictViewModel.Build's rows: one row per
+-- member's suggestion, guild note conflicts left out (they stay with the
+-- old window until notes stop being read for links). Each row is
+-- { character, kind, group (its bundle, for Review), player (the
+-- suggesting member's player, whose characters a member may only suggest
+-- changes to), name (the character), suggests, current, suggestedBy,
+-- reviewable (a change to a main or its alts, which Review shows before
+-- and after) }.
+function RosterListModel.Suggestions(rows)
+    local suggestions = {}
+    local index
+    for index = 1, #(rows or {}) do
+        local bundle = rows[index]
+        if bundle.kind == "bundle" then
+            local itemIndex
+            for itemIndex = 1, #(bundle.items or {}) do
+                local item = bundle.items[itemIndex]
+                table.insert(suggestions, {
+                    character = item.character,
+                    kind = item.kind,
+                    group = bundle.group,
+                    player = bundle.name,
+                    name = item.name,
+                    suggests = item.suggests,
+                    current = item.current,
+                    suggestedBy = bundle.suggestedBy,
+                    reviewable = item.kind == "suggested main",
+                })
+            end
+        end
+    end
+    return suggestions
+end

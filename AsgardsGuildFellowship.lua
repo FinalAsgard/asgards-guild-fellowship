@@ -260,10 +260,13 @@ if clientProfile.supported then
             if guildNoteOverlay ~= nil then
                 guildNoteOverlay:Refresh()
             end
-            -- The new window's Roster follows along while it shows.
-            if friendsUi.roster ~= nil and agfWindow ~= nil and agfWindow:IsOpen() and agfWindow:Page() == "roster"
-            then
-                friendsUi.roster:Update()
+            -- The new window's Roster follows along while it shows, and its
+            -- badge while the window does.
+            if agfWindow ~= nil and agfWindow:IsOpen() then
+                agfWindow:RefreshBadges()
+                if friendsUi.roster ~= nil and agfWindow:Page() == "roster" then
+                    friendsUi.roster:Update()
+                end
             end
         end,
         onDecideSuggestion = function(character, kind, approved)
@@ -1350,6 +1353,13 @@ if clientProfile.supported then
             { id = "roster", label = "Roster", title = "Guild Roster",
                 draw = function(content, ui)
                     friendsUi.drawRoster(content, ui)
+                end,
+                -- Members' suggestions waiting for an officer.
+                badge = function()
+                    if not rosterController:IsOfficerUser() then
+                        return 0
+                    end
+                    return rosterController:SuggestionCount()
                 end,
                 -- Given a player id, shows them.
                 onShow = function(playerId)
@@ -4796,6 +4806,16 @@ if clientProfile.supported then
     -- The Roster page: a card per player and the selected one in the player
     -- panel, built from saved data and the live roster when it's shown and
     -- whenever the roster changes while it is.
+    -- The conflict queue's rows (ConflictViewModel), for the Roster's Review
+    -- tab; none without a guild.
+    friendsUi.queue = function()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return {}
+        end
+        return addon.ConflictViewModel.Build({ partition = partition, normalizer = normalizer,
+            members = rosterController:LiveMembers(normalizer) })
+    end
     friendsUi.drawRoster = function(content, ui)
         -- Runs RosterController method `method` for the current guild, which
         -- the old window may never have opened; nil without a guild.
@@ -4868,6 +4888,41 @@ if clientProfile.supported then
             end,
             onPurgeAll = function()
                 organize("PurgeAllDeparted")
+            end,
+            suggestions = function()
+                return addon.RosterListModel.Suggestions(friendsUi.queue())
+            end,
+            onApprove = function(character, kind)
+                organize("AcceptConflict", character, kind)
+            end,
+            onDeny = function(character, kind)
+                organize("RejectConflict", character, kind)
+            end,
+            onApproveAll = function()
+                organize("DecideAllSuggestions", true)
+            end,
+            onDenyAll = function()
+                organize("DecideAllSuggestions", false)
+            end,
+            -- The old window's review of a member's bundle: the player before
+            -- and after.
+            reviewOf = function(group)
+                local guild, partition, normalizer = rosterController:QuietContext()
+                if guild == nil then
+                    return nil
+                end
+                local rows = friendsUi.queue()
+                local index
+                for index = 1, #rows do
+                    if rows[index].kind == "bundle" and rows[index].group == group then
+                        local model = addon.BundleReviewViewModel.Build({ partition = partition,
+                            normalizer = normalizer, bundle = rows[index],
+                            members = rosterController:LiveMembers(normalizer) })
+                        return { title = model.title, suggestedBy = model.suggestedBy,
+                            lines = addon.RosterWindow.ReviewLines(model) }
+                    end
+                end
+                return nil
             end,
             -- The old roster's organizing actions and permission rules.
             menuFor = function(target)
