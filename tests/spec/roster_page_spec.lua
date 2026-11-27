@@ -3,9 +3,12 @@ local fakeFrames = require("tests.fake_frames")
 
 -- The Roster page on fake frames, over `count` players held here (default
 -- 3): "Player001" and on, the first `online` of them online. Friends are
--- the player ids in `world.friends`.
+-- the player ids in `world.friends`. The model keeps the filters it was
+-- last given in `world.filters`, and honors the search (on names) and
+-- Online only.
 local function setup(count, online)
-    local addon = test.newAddon("Core/ListWindow.lua", "Core/LfgHistoryView.lua", "Core/PlayerDetailViewModel.lua",
+    local addon = test.newAddon("Core/ListWindow.lua", "Core/RosterViewModel.lua", "Core/RosterListModel.lua",
+        "Core/LfgHistoryView.lua", "Core/PlayerDetailViewModel.lua",
         "Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/PlayerCards.lua", "Adapters/PlayerDetailPanel.lua",
         "Adapters/RosterPage.lua")
     local environment = fakeFrames.install({})
@@ -18,14 +21,19 @@ local function setup(count, online)
             online = index <= (online or 1) })
     end
     world.page = addon.RosterPage.Create(content, ui, {
-        model = function(selected)
-            local view = { rows = {}, cards = {} }
+        model = function(selected, filters)
+            world.filters = filters
+            local view = { rows = {}, cards = {}, ranks = { { index = 0, name = "Guild Master" },
+                { index = 2, name = "Member" } } }
             local _, section
             for _, section in ipairs({ { text = "Online", on = true }, { text = "Offline", on = false } }) do
                 local cards = {}
                 local _, player
                 for _, player in ipairs(world.players) do
-                    if player.online == section.on then
+                    if player.online == section.on
+                        and string.find(string.lower(player.name), string.lower(filters.search or ""), 1, true)
+                        and (player.online or not filters.onlineOnly)
+                    then
                         table.insert(cards, { kind = "player", playerId = player.playerId, name = player.name,
                             sub = "2 characters", online = player.online, star = world.friends[player.playerId] })
                     end
@@ -207,4 +215,86 @@ test.test("roster page: with nobody to show, the panel says so", function()
     test.assertEqual(nil, world.page:Selected())
     test.assertEqual(world.addon.RosterPage.EMPTY, world.page.detail.hint.text)
     test.assertEqual(0, #shownCards(world))
+end)
+
+test.test("roster page: the column starts with no search, Online first, any rank and everyone", function()
+    local world = setup(3, 1)
+
+    test.assertEqual("", world.filters.search)
+    test.assertEqual("online", world.filters.sort)
+    test.assertEqual(nil, world.filters.rank)
+    test.assertFalse(world.filters.onlineOnly)
+    test.assertEqual("Sort: Online first", world.page.sortButton.label.text)
+    test.assertEqual("Any rank", world.page.rankButton.label.text)
+    test.assertFalse(world.page.onlineSwitch:IsOn())
+end)
+
+test.test("roster page: typing a search narrows the list", function()
+    local world = setup(3, 1)
+    local box = world.page.search.box
+    box:SetText("player002")
+    box.scripts.OnTextChanged(box, true)
+
+    test.assertEqual("player002", world.filters.search)
+    local cards = shownCards(world)
+    test.assertEqual(1, #cards)
+    test.assertEqual("Player002", cards[1].name.text)
+end)
+
+test.test("roster page: Sort opens its choices and picking one re-sorts", function()
+    local world = setup(3, 1)
+    click(world.page.sortButton)
+    local menu = world.page.menu
+
+    test.assertTrue(menu:IsOpen())
+    test.assertEqual("Online first", menu.rows[1].label.text)
+    test.assertEqual("Rank", menu.rows[4].label.text)
+    click(menu.rows[4])
+    test.assertEqual("rank", world.filters.sort)
+    test.assertEqual("Sort: Rank", world.page.sortButton.label.text)
+end)
+
+test.test("roster page: Rank offers Any rank and each rank, and filters by the one picked", function()
+    local world = setup(3, 1)
+    click(world.page.rankButton)
+    local menu = world.page.menu
+
+    test.assertEqual("Any rank", menu.rows[1].label.text)
+    test.assertEqual("Guild Master", menu.rows[2].label.text)
+    test.assertEqual("Member", menu.rows[3].label.text)
+    click(menu.rows[3])
+    test.assertEqual(2, world.filters.rank)
+    test.assertEqual("Rank: Member", world.page.rankButton.label.text)
+
+    click(world.page.rankButton)
+    click(menu.rows[1])
+    test.assertEqual(nil, world.filters.rank)
+    test.assertEqual("Any rank", world.page.rankButton.label.text)
+end)
+
+test.test("roster page: Online only hides offline players, and a hidden selection moves to the first shown", function()
+    local world = setup(3, 1)
+    click(cardNamed(world, "Player003"))
+    click(world.page.onlineSwitch)
+
+    test.assertTrue(world.filters.onlineOnly)
+    test.assertTrue(world.page.onlineSwitch:IsOn())
+    test.assertEqual(1, #shownCards(world))
+    test.assertEqual(1, world.page:Selected())
+    test.assertEqual("Player001", world.page.detail.name.text)
+end)
+
+test.test("roster page: the selection stays while its player is still shown", function()
+    local world = setup(3, 1)
+    click(cardNamed(world, "Player003"))
+    local box = world.page.search.box
+    box:SetText("3")
+    box.scripts.OnTextChanged(box, true)
+
+    test.assertEqual(3, world.page:Selected())
+    test.assertTrue(cardNamed(world, "Player003").selected)
+    -- Refreshed with the filters still on, it keeps them.
+    world.page:Refresh()
+    test.assertEqual("3", world.filters.search)
+    test.assertEqual(3, world.page:Selected())
 end)

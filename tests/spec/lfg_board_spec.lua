@@ -1646,6 +1646,13 @@ test.test("roster: the window opens on the Roster, a card per player with the pl
     local _, partition = addon.rosterController:QuietContext()
     test.assertEqual(1, #partition:GetFriends())
     test.assertTrue(rosterCard(page, "Hammer Smith").star.shown)
+
+    -- Searching for the alt finds Hammer's card, saying it matched Bolt.
+    local box = page.search.box
+    box:SetText("bolt")
+    box.scripts.OnTextChanged(box, true)
+    test.assertEqual("matches Bolt Smith", rosterCard(page, "Hammer Smith").sub.text)
+    test.assertEqual(1, #page.view.cards)
 end)
 
 -- Friends -----------------------------------------------------------------------

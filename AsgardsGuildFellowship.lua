@@ -4798,8 +4798,10 @@ if clientProfile.supported then
     -- whenever the roster changes while it is.
     friendsUi.drawRoster = function(content, ui)
         friendsUi.roster = addon.RosterPage.Create(content, ui, {
-            model = function(selected)
-                local fields, partition = friendsUi.inputs({ selected = selected, now = client:Timestamp() })
+            model = function(selected, filters)
+                local fields, partition = friendsUi.inputs({ selected = selected, now = client:Timestamp(),
+                    search = filters.search, sort = filters.sort, rank = filters.rank,
+                    onlineOnly = filters.onlineOnly })
                 if fields == nil then
                     return nil
                 end

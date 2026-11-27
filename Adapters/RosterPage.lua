@@ -2,8 +2,9 @@ local _, addon = ...
 
 -- The Roster page in the AGF window. Across the top, the guild's player
 -- and online counts and when it last synced, with Rescan on the right.
--- Under that, the left column lists one player card per player
--- (RosterListModel), in Online and Offline sections, in a pooled list:
+-- Under that, the left column has a search box, Sort and Rank buttons that
+-- open menus of their choices, and an Online only switch; under them it
+-- lists one player card per player (RosterListModel), in a pooled list:
 -- only the cards in view have frames, so hundreds of players scroll
 -- smoothly. The cards are the Friends page's (PlayerCards).
 --
@@ -23,6 +24,9 @@ local RosterPage = {
     -- A card and the gap under it.
     CARD_HEIGHT = addon.PlayerCards.SMALL_HEIGHT + Theme.SPACING.xs,
     SCROLL_STEP = 48,
+    SEARCH_PLACEHOLDER = "Search players",
+    ANY_RANK = "Any rank",
+    ONLINE_ONLY = "Online only",
     -- The column's height to lay out for until the frame can say.
     VIEWPORT = 560,
     EMPTY = "No guildmates to show yet. The roster fills in once it's scanned.",
@@ -33,8 +37,9 @@ local Page = {}
 Page.__index = Page
 
 -- Draws the page into `content` with widget factory `ui`. options:
---   model     function(selected) -> RosterListModel.Build's view, or nil
---             outside a guild
+--   model     function(selected, filters) -> RosterListModel.Build's view,
+--             or nil outside a guild; filters is { search, sort, rank,
+--             onlineOnly }, as Build takes them
 --   detail    function(playerId, groupedShown) -> PlayerDetailViewModel
 --             .Build's view (showing `groupedShown` Grouped parties, nil for
 --             the first page), or nil when the player is gone
@@ -46,7 +51,8 @@ Page.__index = Page
 --   onRescan  function(): rescans the guild roster
 --   onError   function(text): tells the user why something didn't happen
 function RosterPage.Create(content, ui, options)
-    local page = setmetatable({ content = content, ui = ui, options = options }, Page)
+    local page = setmetatable({ content = content, ui = ui, options = options, query = "",
+        sort = addon.RosterListModel.SORTS[1].id, onlineOnly = false }, Page)
     page:build()
     return page
 end
@@ -71,6 +77,7 @@ function Page:build()
     column:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", 0, 0)
     column:SetWidth(RosterPage.COLUMN_WIDTH)
     self.column = column
+    local bottom = self:buildControls(column)
     self.list = ui:PooledList(column, {
         height = function(row)
             return row.kind == "section" and RosterPage.SECTION_HEIGHT or RosterPage.CARD_HEIGHT
@@ -85,7 +92,9 @@ function Page:build()
             owner:fillRow(frame, row)
         end,
     })
-    self.list:SetAllPoints(column)
+    self.list:SetPoint("TOPLEFT", bottom, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+    self.list:SetPoint("BOTTOMRIGHT", column, "BOTTOMRIGHT", 0, 0)
+    self.menu = ui:ContextMenu(content)
 
     local side = ui:Panel(content)
     side:SetPoint("TOPLEFT", column, "TOPRIGHT", Theme.SPACING.l, 0)
@@ -114,6 +123,88 @@ function Page:build()
             return owner.options.formatDate and owner.options.formatDate(at) or nil
         end,
     })
+end
+
+-- The column's controls, top to bottom: the search box, Sort and Rank side
+-- by side, and Online only. Returns the lowest, for the list to sit under.
+function Page:buildControls(column)
+    local ui, owner = self.ui, self
+    local gap = Theme.SPACING.s
+    self.search = ui:SearchBox(column, RosterPage.COLUMN_WIDTH, RosterPage.SEARCH_PLACEHOLDER, function(text)
+        owner.query = text
+        owner:applyFilters()
+    end)
+    self.search:SetPoint("TOPLEFT", column, "TOPLEFT", 0, 0)
+    local half = (RosterPage.COLUMN_WIDTH - gap) / 2
+    self.sortButton = ui:Button(column, "", "secondary", function(button)
+        owner:sortMenu(button)
+    end)
+    self.sortButton:SetWidth(half)
+    self.sortButton:SetPoint("TOPLEFT", self.search, "BOTTOMLEFT", 0, -gap)
+    self.rankButton = ui:Button(column, "", "secondary", function(button)
+        owner:rankMenu(button)
+    end)
+    self.rankButton:SetWidth(half)
+    self.rankButton:SetPoint("LEFT", self.sortButton, "RIGHT", gap, 0)
+    self.onlineSwitch = ui:Toggle(column, function(wanted)
+        owner.onlineOnly = wanted
+        owner.onlineSwitch:SetOn(wanted)
+        owner:applyFilters()
+    end)
+    self.onlineSwitch:SetPoint("TOPLEFT", self.sortButton, "BOTTOMLEFT", 0, -gap)
+    self.onlineLabel = ui:Text(column, RosterPage.ONLINE_ONLY, "regular", "body", "text")
+    self.onlineLabel:SetPoint("LEFT", self.onlineSwitch, "RIGHT", gap, 0)
+    self:labelControls()
+    return self.onlineSwitch
+end
+
+-- The sort's label, by its id.
+local function sortLabel(id)
+    local _, sort
+    for _, sort in ipairs(addon.RosterListModel.SORTS) do
+        if sort.id == id then
+            return sort.label
+        end
+    end
+    return id
+end
+
+-- Sort and Rank name what they're set to.
+function Page:labelControls()
+    self.sortButton:SetLabel("Sort: " .. sortLabel(self.sort))
+    self.rankButton:SetLabel(self.rank == nil and RosterPage.ANY_RANK or ("Rank: " .. tostring(self.rankName)))
+end
+
+-- Sort's menu: each sort, picking one re-sorts the list.
+function Page:sortMenu(anchor)
+    local owner, items = self, {}
+    local _, sort
+    for _, sort in ipairs(addon.RosterListModel.SORTS) do
+        local id = sort.id
+        table.insert(items, { label = sort.label, onClick = function()
+            owner.sort = id
+            owner:applyFilters()
+        end })
+    end
+    self.menu:Open(anchor, items)
+end
+
+-- Rank's menu: Any rank, then each rank a player holds, highest first.
+function Page:rankMenu(anchor)
+    local owner = self
+    local items = { { label = RosterPage.ANY_RANK, onClick = function()
+        owner.rank, owner.rankName = nil, nil
+        owner:applyFilters()
+    end } }
+    local _, rank
+    for _, rank in ipairs(self.view and self.view.ranks or {}) do
+        local index, name = rank.index, rank.name
+        table.insert(items, { label = name, onClick = function()
+            owner.rank, owner.rankName = index, name
+            owner:applyFilters()
+        end })
+    end
+    self.menu:Open(anchor, items)
 end
 
 -- A new frame for the list: a section's label, or a player card.
@@ -162,16 +253,22 @@ local function rowOf(view, playerId)
     return nil
 end
 
--- Builds the page again from saved data and the roster, keeping the
--- selection where that player still has a card, else selecting the first.
--- Given `focus` (a player id), selects that player instead. The selected
--- card is kept in view.
-function Page:Refresh(focus)
-    self.view = self.options.model(focus or self.selected)
+-- The list's rows again for the search and filters, keeping the selection
+-- where that player still has a card, else selecting the first. Given
+-- `focus` (a player id), selects that player instead. The selected card is
+-- kept in view.
+function Page:rebuild(focus)
+    self.view = self.options.model(focus or self.selected, {
+        search = self.query,
+        sort = self.sort,
+        rank = self.rank,
+        onlineOnly = self.onlineOnly,
+    })
     if self.view == nil then
-        self.view = { rows = {}, cards = {}, header = "", sync = "" }
+        self.view = { rows = {}, cards = {}, ranks = {}, header = "", sync = "" }
     end
     self.selected = focus or self.view.selected or self.view.default
+    self:labelControls()
     local parts = {}
     if self.view.header ~= "" then
         table.insert(parts, self.view.header)
@@ -181,7 +278,24 @@ function Page:Refresh(focus)
     end
     self.counts:SetText(table.concat(parts, DOT))
     self.list:SetRows(self.view.rows, rowOf(self.view, self.selected))
+end
+
+-- Builds the page again from saved data and the roster (see rebuild), and
+-- the selected player's panel.
+function Page:Refresh(focus)
+    self.menu:Close()
+    self:rebuild(focus)
     self:showDetail()
+end
+
+-- The search or a filter changed: the list again, and the panel only when
+-- the selected player changed with it.
+function Page:applyFilters()
+    local before = self.selected
+    self:rebuild()
+    if self.selected ~= before then
+        self:showDetail()
+    end
 end
 
 function Page:showDetail()
