@@ -301,13 +301,14 @@ RosterViewModel.ACTIVE_DAYS = { 7, 30, 90 }
 
 -- Hours since a character was last online, from the roster's { years,
 -- months, days, hours } (a month taken as 30 days), or nil when unknown.
-local function hoursAway(lastOnline)
+function RosterViewModel.HoursAway(lastOnline)
     if type(lastOnline) ~= "table" then
         return nil
     end
     local months = (lastOnline.years or 0) * 12 + (lastOnline.months or 0)
     return (months * 30 + (lastOnline.days or 0)) * 24 + (lastOnline.hours or 0)
 end
+local hoursAway = RosterViewModel.HoursAway
 
 -- How big the guild is, from every player's current characters (departed
 -- ones never count), whatever the roster's search and filters:

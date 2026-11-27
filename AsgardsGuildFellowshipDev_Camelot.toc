@@ -54,6 +54,7 @@ Core/NoteAudit.lua
 Core/PlayerService.lua
 Core/ListWindow.lua
 Core/RosterViewModel.lua
+Core/RosterListModel.lua
 Core/ConflictViewModel.lua
 Core/BundleReviewViewModel.lua
 Core/PlayerPanelViewModel.lua
