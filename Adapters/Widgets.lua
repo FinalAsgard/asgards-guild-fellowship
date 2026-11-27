@@ -19,6 +19,9 @@ local Widgets = {
     TOGGLE_WIDTH = 34,
     TOGGLE_HEIGHT = 18,
     INPUT_HEIGHT = 26,
+    -- A pooled list's scroll bar, and its thumb at its shortest.
+    SCROLLBAR_WIDTH = 6,
+    SCROLLBAR_MIN_THUMB = 24,
     -- A text prompt, and its multiline field.
     PROMPT_WIDTH = 360,
     PROMPT_MULTILINE_HEIGHT = 96,
@@ -796,6 +799,8 @@ end
 -- A scroll list for long lists (the roster's hundreds of players): it
 -- builds only enough row frames to fill its height, never one per row,
 -- places them where ListWindow says, and fills them again as it scrolls.
+-- While the rows don't all fit, a slim scroll bar runs down its right edge:
+-- drag its thumb, or click the track, to jump through the list.
 -- options:
 --   height    each row's height: a number, or function(row) -> height
 --   gap       space left under each row's frame, counted in its height
@@ -807,12 +812,37 @@ end
 --   viewport  the height to lay out for while the frame can't say
 -- SetRows(rows, keep) shows `rows`, keeping row index `keep` (optional) in
 -- view; ScrollTo(offset) scrolls; Offset() and Rows() read them back, and
--- Built(kind) counts the frames made for `kind`.
+-- Built(kind) counts the frames made for `kind`. `list.bar` is the scroll
+-- bar.
 function UI:PooledList(parent, options)
     local list = self:frame("Frame", parent)
     list:SetClipsChildren(true)
     list:EnableMouseWheel(true)
     local state = { rows = {}, offset = 0, pools = {} }
+    local bar = self:frame("Slider", list)
+    bar:SetOrientation("VERTICAL")
+    bar:SetWidth(Widgets.SCROLLBAR_WIDTH)
+    bar:SetPoint("TOPRIGHT", list, "TOPRIGHT", 0, 0)
+    bar:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", 0, 0)
+    bar:SetMinMaxValues(0, 1)
+    bar:SetValueStep(1)
+    bar.track = bar:CreateTexture(nil, "BACKGROUND")
+    bar.track:SetTexture(Theme.TEXTURES.white)
+    bar.track:SetVertexColor(Theme.Color("raised"))
+    bar.track:SetAllPoints(bar)
+    bar.thumb = bar:CreateTexture(nil, "ARTWORK")
+    bar.thumb:SetTexture(Theme.TEXTURES.white)
+    bar.thumb:SetVertexColor(Theme.Color("muted"))
+    bar.thumb:SetSize(Widgets.SCROLLBAR_WIDTH, Widgets.SCROLLBAR_MIN_THUMB)
+    bar:SetThumbTexture(bar.thumb)
+    bar:SetScript("OnEnter", function(self)
+        self.thumb:SetVertexColor(Theme.Color("text"))
+    end)
+    bar:SetScript("OnLeave", function(self)
+        self.thumb:SetVertexColor(Theme.Color("muted"))
+    end)
+    bar:Hide()
+    list.bar = bar
     local function rowHeight(row)
         if type(options.height) == "function" then
             return options.height(row)
@@ -849,8 +879,24 @@ function UI:PooledList(parent, options)
         return frame
     end
     function list.Layout()
-        local window = addon.ListWindow.Visible(#state.rows, height(), viewport(), state.offset)
+        local shownHeight = viewport()
+        local window = addon.ListWindow.Visible(#state.rows, height(), shownHeight, state.offset)
         state.offset = window.offset
+        -- The bar, while there's more than fits; the rows stop short of it.
+        local most = math.max(0, window.total - shownHeight)
+        local inset = 0
+        if most > 0 and shownHeight > 0 then
+            inset = Widgets.SCROLLBAR_WIDTH + Theme.SPACING.xs
+            -- Setting the bar runs its OnValueChanged, which mustn't scroll.
+            state.syncing = true
+            bar:SetMinMaxValues(0, most)
+            bar:SetValue(state.offset)
+            state.syncing = false
+            bar.thumb:SetHeight(math.max(Widgets.SCROLLBAR_MIN_THUMB, shownHeight * shownHeight / window.total))
+            bar:Show()
+        else
+            bar:Hide()
+        end
         local kind, pool
         for kind, pool in pairs(state.pools) do
             pool.used = 0
@@ -863,7 +909,7 @@ function UI:PooledList(parent, options)
                 options.fill(frame, row, index)
                 frame:ClearAllPoints()
                 frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -window.tops[index])
-                frame:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+                frame:SetPoint("RIGHT", list, "RIGHT", -inset, 0)
                 frame:SetHeight(rowHeight(row) - (options.gap or 0))
                 frame:Show()
             end
@@ -910,6 +956,11 @@ function UI:PooledList(parent, options)
     end
     list:SetScript("OnMouseWheel", function(_, delta)
         list:ScrollTo(state.offset - delta * (options.step or 48))
+    end)
+    bar:SetScript("OnValueChanged", function(_, value)
+        if not state.syncing and type(value) == "number" then
+            list:ScrollTo(value)
+        end
     end)
     list:SetScript("OnSizeChanged", function()
         list.Layout()

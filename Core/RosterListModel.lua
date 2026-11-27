@@ -1,11 +1,13 @@
 local _, addon = ...
 
 -- The rows of the new window's Roster column: one player card per player
--- (a lone character is a player of its own). Sorted Online first (the
--- default), they're split into Online and Offline sections, each headed by
--- a label with its count; sorted by Name, Last online or Rank, they're one
--- Players section. Alts don't get rows of their own; the player panel lists
--- them. A player with no character left in the guild has no card.
+-- (a lone character is a player of its own), under a Players label with
+-- their count, sorted by Name (the default), Last online, Rank or how often
+-- the user grouped with them. Alts don't get rows of their own; the player
+-- panel lists them. A player with no character left in the guild has no
+-- card. Sorted by anything but Name, a card carries a quiet tag after its
+-- name with what it's sorted by: when they were last online, their rank,
+-- or the party count ("12×").
 --
 -- A card's big name is the player's alias, else their main's name. Its sub
 -- line names the character that's online (or the main, while offline) when
@@ -21,14 +23,13 @@ local _, addon = ...
 -- last-online, sync and plural texts are RosterViewModel's.
 local RosterListModel = {
     ONLINE = "Online",
-    OFFLINE = "Offline",
     PLAYERS = "Players",
-    -- The sorts, in the order Sort offers them.
+    -- The sorts, in the order Sort offers them; the first is the default.
     SORTS = {
-        { id = "online", label = "Online first" },
         { id = "name", label = "Name" },
         { id = "lastOnline", label = "Last online" },
         { id = "rank", label = "Rank" },
+        { id = "grouped", label = "Grouped with" },
     },
     -- How many matched characters a card names before "and N more".
     MATCH_NAMES = 2,
@@ -160,6 +161,8 @@ local function card(inputs, playerId, player, friends)
         online = onlineKey ~= nil,
         -- Hours since the latest login: 0 while online, nil when unknown.
         away = onlineKey ~= nil and 0 or latest,
+        lastOnline = onlineKey ~= nil and RosterListModel.ONLINE
+            or addon.RosterViewModel.FormatLastOnline((members[latestKey or leadKey] or {}).lastOnline),
         rankIndex = rankIndex,
         rankName = rankName,
         characters = #inGuild,
@@ -229,11 +232,32 @@ local function byField(field)
     end
 end
 
+-- Most parties first, then by name; never grouped with, last.
+local function byGrouped(a, b)
+    if (a.grouped or 0) ~= (b.grouped or 0) then
+        return (a.grouped or 0) > (b.grouped or 0)
+    end
+    return byName(a, b)
+end
+
 local ORDERS = {
     name = byName,
     lastOnline = byField("away"),
     rank = byField("rankIndex"),
+    grouped = byGrouped,
 }
+
+-- The tag a card carries for `sort`, or nil.
+local function tagFor(entry, sort)
+    if sort == "lastOnline" then
+        return entry.lastOnline
+    elseif sort == "rank" then
+        return entry.rankName
+    elseif sort == "grouped" and (entry.grouped or 0) > 0 then
+        return entry.grouped .. "×"
+    end
+    return nil
+end
 
 -- inputs:
 --   partition   the guild partition
@@ -247,14 +271,19 @@ local ORDERS = {
 --   now         the current timestamp
 --   search      text to find in aliases, character names and Discord
 --               names, ignoring case
---   sort        a SORTS id (default "online")
+--   sort        a SORTS id (default "name")
 --   rank        a rank index: only players at that rank show
 --   onlineOnly  true to show only players with a character online
+--   groupedOf   function(key) -> how many parties the user was in with
+--               that character's player (GroupFriends:StatsOf)
+--   selfKey     the user's own character key; their own player has no
+--               party count
 -- Returns {
 --   rows      the column's rows, in order: { kind = "section", text, count }
 --             then that section's cards, { kind = "player", playerId, key,
 --             keys, name, alias, mainName, classToken, className, color,
---             online, away, rankIndex, rankName, characters, star, sub }
+--             online, away, lastOnline, rankIndex, rankName, grouped,
+--             characters, star, sub, tag }
 --   cards     the cards alone, in the same order
 --   ranks     the Rank filter's choices: { index, name } for every rank a
 --             player has, highest first
@@ -273,6 +302,9 @@ function RosterListModel.Build(inputs)
     local shown = {}
     local players, playersOnline = 0, 0
     local ranks, rankList = {}, {}
+    local sort = ORDERS[inputs.sort] ~= nil and inputs.sort or RosterListModel.SORTS[1].id
+    local selfCharacter = inputs.selfKey and partition:GetCharacter(inputs.selfKey) or nil
+    local selfPlayer = selfCharacter and selfCharacter.player or nil
     partition:EachPlayer(function(playerId, player)
         local entry = card(inputs, playerId, player, friends)
         if entry == nil then
@@ -300,29 +332,18 @@ function RosterListModel.Build(inputs)
             end
         end
         entry.nameOf = nil
+        if playerId ~= selfPlayer then
+            local count = ask(inputs.groupedOf, entry.key)
+            entry.grouped = type(count) == "number" and count or 0
+        end
+        entry.tag = tagFor(entry, sort)
         table.insert(shown, entry)
     end)
     table.sort(rankList, function(a, b)
         return a.index < b.index
     end)
-    local sections
-    local order = ORDERS[inputs.sort]
-    if order ~= nil then
-        table.sort(shown, order)
-        sections = { { text = RosterListModel.PLAYERS, cards = shown } }
-    else
-        local online, offline = {}, {}
-        local index
-        for index = 1, #shown do
-            table.insert(shown[index].online and online or offline, shown[index])
-        end
-        table.sort(online, byName)
-        table.sort(offline, byName)
-        sections = {
-            { text = RosterListModel.ONLINE, cards = online },
-            { text = RosterListModel.OFFLINE, cards = offline },
-        }
-    end
+    table.sort(shown, ORDERS[sort])
+    local sections = { { text = RosterListModel.PLAYERS, cards = shown } }
     local view = { rows = {}, cards = {}, ranks = rankList, players = players, online = playersOnline }
     local _, section
     for _, section in ipairs(sections) do

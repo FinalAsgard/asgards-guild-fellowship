@@ -4807,9 +4807,13 @@ if clientProfile.supported then
         end
         friendsUi.roster = addon.RosterPage.Create(content, ui, {
             model = function(selected, filters)
+                local friends = currentFriends()
                 local fields, partition = friendsUi.inputs({ selected = selected, now = client:Timestamp(),
                     search = filters.search, sort = filters.sort, rank = filters.rank,
-                    onlineOnly = filters.onlineOnly })
+                    onlineOnly = filters.onlineOnly, selfKey = rosterController:SelfKey(),
+                    groupedOf = function(key)
+                        return friends and friends:StatsOf(key) or 0
+                    end })
                 if fields == nil then
                     return nil
                 end

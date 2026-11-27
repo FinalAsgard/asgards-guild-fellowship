@@ -41,7 +41,8 @@ end
 --   onRemove      the hover X; without it there's no X
 -- ShowPlayer(fields) fills and shows it: name, initial?, sub (may carry
 -- color codes), color (the initial's class color, "ffrrggbb"), star,
--- online, count (text shown in the online dot's place), greyed. ShowEmpty
+-- online, count (text shown in the online dot's place), greyed, tag (quiet
+-- text after the name and star). ShowEmpty
 -- (text) makes it an empty slot that only shows `text`. SetSelected(on)
 -- borders it green.
 function PlayerCards.Small(ui, parent, callbacks)
@@ -73,6 +74,9 @@ function PlayerCards.Small(ui, parent, callbacks)
     card.star:SetVertexColor(Theme.Color("gold"))
     card.star:SetSize(PlayerCards.STAR_SIZE, PlayerCards.STAR_SIZE)
     card.star:SetPoint("LEFT", card.name, "RIGHT", 4, 0)
+    card.tag = ui:Text(card, "", "regular", "small", "label")
+    card.tag:SetJustifyH("LEFT")
+    card.tag:SetWordWrap(false)
     card.dot = card:CreateTexture(nil, "ARTWORK")
     card.dot:SetTexture(Theme.TEXTURES.rounded)
     card.dot:SetSize(PlayerCards.DOT_SIZE, PlayerCards.DOT_SIZE)
@@ -150,11 +154,17 @@ function PlayerCards.Small(ui, parent, callbacks)
         card.name:SetText(fields.name or "")
         card.name:SetTextColor(Theme.Color(fields.greyed and "disabled" or "text"))
         card.sub:SetText(fields.sub or "")
-        if fields.star and not fields.greyed then
+        local starred = fields.star and not fields.greyed
+        if starred then
             card.star:Show()
         else
             card.star:Hide()
         end
+        card.tag:SetText(fields.tag or "")
+        card.tag:ClearAllPoints()
+        card.tag:SetPoint("LEFT", starred and card.star or card.name, "RIGHT", Theme.SPACING.xs + 2, 0)
+        -- Clear of the online dot; a long tag is cut short.
+        card.tag:SetPoint("RIGHT", card, "RIGHT", -pad - PlayerCards.DOT_SIZE - 6, 0)
         card.dot:SetVertexColor(Theme.Color(fields.online and "green" or "disabled"))
         card.count:SetText(fields.count or "")
         if fields.greyed or fields.count ~= nil then
@@ -175,6 +185,7 @@ function PlayerCards.Small(ui, parent, callbacks)
         showParts(false)
         card.star:Hide()
         card.dot:Hide()
+        card.tag:SetText("")
         card.count:SetText("")
         if card.remove ~= nil then
             card.remove:Hide()

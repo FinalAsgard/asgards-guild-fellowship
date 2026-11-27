@@ -332,6 +332,7 @@ function Page:fillRow(frame, row)
         color = row.color,
         star = row.star,
         online = row.online,
+        tag = row.tag,
     })
     frame:SetSelected(row.playerId == self.selected)
 end

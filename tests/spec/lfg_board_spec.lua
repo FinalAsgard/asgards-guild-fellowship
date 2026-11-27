@@ -1653,6 +1653,18 @@ test.test("roster: the window opens on the Roster, a card per player with the pl
     box.scripts.OnTextChanged(box, true)
     test.assertEqual("matches Bolt Smith", rosterCard(page, "Hammer Smith").sub.text)
     test.assertEqual(1, #page.view.cards)
+
+    -- Sorted by Rank, the card says Hammer's rank after the name.
+    box:SetText("")
+    box.scripts.OnTextChanged(box, true)
+    page.sortButton.scripts.OnClick(page.sortButton)
+    page.menu.rows[3].scripts.OnClick(page.menu.rows[3])
+    test.assertEqual("Member", rosterCard(page, "Hammer Smith").tag.text)
+    -- Sorted by Grouped with, nobody's been grouped with yet: no counts.
+    page.sortButton.scripts.OnClick(page.sortButton)
+    page.menu.rows[4].scripts.OnClick(page.menu.rows[4])
+    test.assertEqual("grouped", page.sort)
+    test.assertEqual("", rosterCard(page, "Hammer Smith").tag.text)
 end)
 
 -- The labels of the page's open context menu, in order.

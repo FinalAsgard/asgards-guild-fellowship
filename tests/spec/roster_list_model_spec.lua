@@ -91,28 +91,29 @@ test.test("roster list model: one card per player, alts folded into their player
     local world = setup()
     local view = world.build()
 
-    test.assertEqual("[Offline 4], Anvil, Bolt, Cog, TheTool", outline(view))
+    test.assertEqual("[Players 4], Anvil, Bolt, Cog, TheTool", outline(view))
     test.assertEqual(4, view.players)
     test.assertEqual(3, cardOf(view, "TheTool").characters)
     test.assertEqual(1, cardOf(view, "Anvil").characters)
 end)
 
-test.test("roster list model: online players come first, each section with its count", function()
+test.test("roster list model: online and offline players share one list, by name", function()
     local world = setup({ Cog = "Ironforge", Hammer = "Stormwind" })
     local view = world.build()
 
-    test.assertEqual("[Online 2], Cog, TheTool, [Offline 2], Anvil, Bolt", outline(view))
+    test.assertEqual("[Players 4], Anvil, Bolt, Cog, TheTool", outline(view))
     test.assertEqual(2, view.online)
     test.assertEqual("4 players · 2 online", view.header)
     test.assertTrue(cardOf(view, "Cog").online)
     test.assertFalse(cardOf(view, "Anvil").online)
 end)
 
-test.test("roster list model: an empty section is left out", function()
+test.test("roster list model: sorted by Name, cards carry no tag", function()
     local world = setup({ Toolbox = "Orgrimmar", Anvil = "Orgrimmar", Bolt = "Orgrimmar", Cog = "Orgrimmar" })
     local view = world.build()
 
-    test.assertEqual("[Online 4], Anvil, Bolt, Cog, TheTool", outline(view))
+    test.assertEqual("[Players 4], Anvil, Bolt, Cog, TheTool", outline(view))
+    test.assertEqual(nil, view.cards[1].tag)
     test.assertEqual("4 players · 4 online", view.header)
 end)
 
@@ -157,7 +158,7 @@ test.test("roster list model: departed characters don't count, and a player with
     world.partition:MarkDeparted(world.keys.Bolt, 900)
     local view = world.build()
 
-    test.assertEqual("[Offline 3], Anvil, Cog, TheTool", outline(view))
+    test.assertEqual("[Players 3], Anvil, Cog, TheTool", outline(view))
     test.assertEqual(2, cardOf(view, "TheTool").characters)
     test.assertEqual("3 players · 0 online", view.header)
 end)
@@ -184,7 +185,7 @@ test.test("roster list model: the selection is kept while it has a card, with it
 
     test.assertEqual(world.playerOf("Bolt"), view.selected)
     test.assertEqual("Bolt", view.rows[view.selectedIndex].name)
-    test.assertEqual(world.playerOf("Cog"), view.default)
+    test.assertEqual(world.playerOf("Anvil"), view.default)
 
     world.partition:MarkDeparted(world.keys.Bolt, 900)
     view = world.build({ selected = world.playerOf("Bolt") })
@@ -217,7 +218,7 @@ test.test("roster list model: search finds an alias, ignoring case, with the usu
     local world = setup()
     local view = world.build({ search = "  THETOOL " })
 
-    test.assertEqual("[Offline 1], TheTool", outline(view))
+    test.assertEqual("[Players 1], TheTool", outline(view))
     test.assertEqual("|cffwarrioToolbox|r · 3 characters · 1 day ago", view.cards[1].sub)
     -- The header still counts the whole guild.
     test.assertEqual("4 players · 0 online", view.header)
@@ -235,7 +236,7 @@ test.test("roster list model: search that finds only alts says which characters 
     local world = setup()
     local view = world.build({ search = "hamm" })
 
-    test.assertEqual("[Offline 1], TheTool", outline(view))
+    test.assertEqual("[Players 1], TheTool", outline(view))
     test.assertEqual("matches Hammer", view.cards[1].sub)
 
     -- "a" is in Hammer and Nail, and in Anvil's own name.
@@ -249,7 +250,7 @@ test.test("roster list model: search finds a player's Discord name", function()
     world.partition:SetProfileText(world.keys.Bolt, "discord", "BoltyMcBolt", 900, world.keys.Bolt)
     local view = world.build({ search = "mcbolt" })
 
-    test.assertEqual("[Offline 1], Bolt", outline(view))
+    test.assertEqual("[Players 1], Bolt", outline(view))
     test.assertEqual("9 days ago", view.cards[1].sub)
 end)
 
@@ -298,11 +299,12 @@ test.test("roster list model: sorting by Rank uses each player's highest-ranked 
     test.assertEqual(1, cardOf(view, "TheTool").rankIndex)
 end)
 
-test.test("roster list model: an unknown sort is Online first", function()
+test.test("roster list model: an unknown sort is by Name", function()
     local world = setup({ Cog = "Ironforge" })
+    local view = world.build({ sort = "bogus" })
 
-    test.assertEqual("[Online 1], Cog, [Offline 3], Anvil, Bolt, TheTool", outline(world.build({ sort = "online" })))
-    test.assertEqual("[Online 1], Cog, [Offline 3], Anvil, Bolt, TheTool", outline(world.build({ sort = "bogus" })))
+    test.assertEqual("[Players 4], Anvil, Bolt, Cog, TheTool", outline(view))
+    test.assertEqual(nil, view.cards[1].tag)
 end)
 
 test.test("roster list model: the Rank filter shows only players at that rank, by their highest character", function()
@@ -310,8 +312,8 @@ test.test("roster list model: the Rank filter shows only players at that rank, b
     local view = world.build({ rank = 2 })
 
     -- Toolbox is a Member, but TheTool's highest rank is Officer.
-    test.assertEqual("[Offline 2], Anvil, Bolt", outline(view))
-    test.assertEqual("[Offline 1], TheTool", outline(world.build({ rank = 1 })))
+    test.assertEqual("[Players 2], Anvil, Bolt", outline(view))
+    test.assertEqual("[Players 1], TheTool", outline(world.build({ rank = 1 })))
 end)
 
 test.test("roster list model: the Rank filter offers each rank a player holds, highest first", function()
@@ -331,7 +333,7 @@ test.test("roster list model: Online only hides offline players", function()
     local world = setup({ Cog = "Ironforge", Nail = "Dalaran" })
     local view = world.build({ onlineOnly = true })
 
-    test.assertEqual("[Online 2], Cog, TheTool", outline(view))
+    test.assertEqual("[Players 2], Cog, TheTool", outline(view))
     test.assertEqual("4 players · 2 online", view.header)
 end)
 
@@ -351,4 +353,47 @@ test.test("roster list model: the selection stays while its player is shown, and
     local view = world.build({ selected = bolt, onlineOnly = true })
     test.assertEqual(nil, view.selected)
     test.assertEqual(world.playerOf("Cog"), view.default)
+end)
+
+test.test("roster list model: sorted by Last online, each card is tagged with when", function()
+    local world = setup({ Cog = "Ironforge" })
+    local view = world.build({ sort = "lastOnline" })
+
+    test.assertEqual("Online", cardOf(view, "Cog").tag)
+    test.assertEqual("1 day ago", cardOf(view, "TheTool").tag)
+    test.assertEqual("9 days ago", cardOf(view, "Bolt").tag)
+end)
+
+test.test("roster list model: sorted by Rank, each card is tagged with the player's rank", function()
+    local world = setup()
+    local view = world.build({ sort = "rank" })
+
+    test.assertEqual("Guild Master", cardOf(view, "Cog").tag)
+    test.assertEqual("Officer", cardOf(view, "TheTool").tag)
+    test.assertEqual("Member", cardOf(view, "Anvil").tag)
+end)
+
+test.test("roster list model: sorting by Grouped with puts the most parties first, tagged with the count", function()
+    local world = setup()
+    local counts = { [world.keys.Toolbox] = 12, [world.keys.Bolt] = 3, [world.keys.Anvil] = 3 }
+    local view = world.build({ sort = "grouped", groupedOf = function(key)
+        return counts[key] or 0
+    end })
+
+    test.assertEqual("[Players 4], TheTool, Anvil, Bolt, Cog", outline(view))
+    test.assertEqual("12×", cardOf(view, "TheTool").tag)
+    test.assertEqual("3×", cardOf(view, "Bolt").tag)
+    -- Never grouped with: no tag.
+    test.assertEqual(nil, cardOf(view, "Cog").tag)
+end)
+
+test.test("roster list model: the user's own player has no party count", function()
+    local world = setup()
+    local view = world.build({ sort = "grouped", selfKey = world.keys.Nail, groupedOf = function()
+        return 40
+    end })
+
+    test.assertEqual(nil, cardOf(view, "TheTool").tag)
+    test.assertEqual("40×", cardOf(view, "Anvil").tag)
+    test.assertEqual("TheTool", view.cards[#view.cards].name)
 end)

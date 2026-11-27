@@ -35,7 +35,8 @@ local function setup(count, online)
                         and (player.online or not filters.onlineOnly)
                     then
                         table.insert(cards, { kind = "player", playerId = player.playerId, name = player.name,
-                            sub = "2 characters", online = player.online, star = world.friends[player.playerId] })
+                            sub = "2 characters", online = player.online, star = world.friends[player.playerId],
+                            tag = world.tag })
                     end
                 end
                 if cards[1] ~= nil then
@@ -147,7 +148,7 @@ local function click(button, which)
     button.scripts.OnClick(button, which)
 end
 
-test.test("roster page: players show as cards under Online and Offline labels", function()
+test.test("roster page: players show as cards under their section labels", function()
     local world = setup(3, 1)
     local cards = shownCards(world)
 
@@ -249,14 +250,14 @@ test.test("roster page: with nobody to show, the panel says so", function()
     test.assertEqual(0, #shownCards(world))
 end)
 
-test.test("roster page: the column starts with no search, Online first, any rank and everyone", function()
+test.test("roster page: the column starts with no search, by Name, any rank and everyone", function()
     local world = setup(3, 1)
 
     test.assertEqual("", world.filters.search)
-    test.assertEqual("online", world.filters.sort)
+    test.assertEqual("name", world.filters.sort)
     test.assertEqual(nil, world.filters.rank)
     test.assertFalse(world.filters.onlineOnly)
-    test.assertEqual("Sort: Online first", world.page.sortButton.label.text)
+    test.assertEqual("Sort: Name", world.page.sortButton.label.text)
     test.assertEqual("Any rank", world.page.rankButton.label.text)
     test.assertFalse(world.page.onlineSwitch:IsOn())
 end)
@@ -279,9 +280,9 @@ test.test("roster page: Sort opens its choices and picking one re-sorts", functi
     local menu = world.page.menu
 
     test.assertTrue(menu:IsOpen())
-    test.assertEqual("Online first", menu.rows[1].label.text)
-    test.assertEqual("Rank", menu.rows[4].label.text)
-    click(menu.rows[4])
+    test.assertEqual("Name", menu.rows[1].label.text)
+    test.assertEqual("Grouped with", menu.rows[4].label.text)
+    click(menu.rows[3])
     test.assertEqual("rank", world.filters.sort)
     test.assertEqual("Sort: Rank", world.page.sortButton.label.text)
 end)
@@ -432,4 +433,34 @@ test.test("roster page: someone else's player has no ⋯ and no Edit for a membe
 
     world.page:Refresh(1)
     test.assertTrue(world.page.detail.actions.shown)
+end)
+
+test.test("roster page: a card shows its tag after the name", function()
+    local world = setup(3, 1)
+    world.tag = "Officer"
+    world.page:Refresh()
+
+    test.assertEqual("Officer", cardNamed(world, "Player002").tag.text)
+    world.tag = nil
+    world.page:Refresh()
+    test.assertEqual("", cardNamed(world, "Player002").tag.text)
+end)
+
+test.test("roster page: a short list has no scroll bar", function()
+    local world = setup(3, 1)
+
+    test.assertFalse(world.page.list.bar.shown)
+end)
+
+test.test("roster page: a long list has a scroll bar that jumps through it", function()
+    local world = setup(550, 40)
+    local bar = world.page.list.bar
+
+    test.assertTrue(bar.shown)
+    bar.scripts.OnValueChanged(bar, 999999)
+    local cards = shownCards(world)
+    test.assertEqual("Player550", cards[#cards].name.text)
+    bar.scripts.OnValueChanged(bar, 0)
+    test.assertEqual(0, world.page.list:Offset())
+    test.assertEqual("Player001", shownCards(world)[1].name.text)
 end)
