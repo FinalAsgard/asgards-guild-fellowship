@@ -135,6 +135,8 @@ Page.__index = Page
 --   fillCandidates function() -> the Find guildmates rows
 --                 (LfgFillCandidates.List, each with classToken? too)
 --   onInvite      function(row): invites a Find guildmates row's character
+--   onLogOver     function(row): opens a whisper to an alt row's online
+--                 character, pre-filled with row.message
 --   onNotLooking  function()
 function LfgBoardPage.Create(content, ui, options)
     local page = setmetatable({ content = content, ui = ui, options = options, tab = "relevant" }, Page)
@@ -1480,9 +1482,16 @@ function Page:fillRow(index)
     row.name:SetPoint("LEFT", row, "LEFT", 0, 0)
     row.details = ui:Text(row, "", "regular", "small", "muted")
     row.details:SetPoint("LEFT", row.name, "RIGHT", Theme.SPACING.s, 0)
+    -- An alt's Whisper asks its player, on the character online now, to
+    -- log over.
     row.whisper = ui:Button(row, "Whisper", "secondary", function()
-        if owner.options.onWhisper ~= nil then
-            owner.options.onWhisper(row.candidate.whisper)
+        local candidate = row.candidate
+        if candidate.kind == addon.LfgFillCandidates.ALT then
+            if owner.options.onLogOver ~= nil then
+                owner.options.onLogOver(candidate)
+            end
+        elseif owner.options.onWhisper ~= nil then
+            owner.options.onWhisper(candidate.whisper)
         end
     end)
     row.whisper:SetWidth(80)
@@ -1514,10 +1523,21 @@ function Page:OpenFill()
     for index = 1, #candidates do
         local candidate, row = candidates[index], self:fillRow(index)
         row.candidate = candidate
-        row.name:SetText(colored(candidate.name, options.classColor and options.classColor(candidate.classToken
-            or candidate.class)))
-        row.details:SetText(join({ candidate.level and ("Level " .. candidate.level) or nil, candidate.label ~= candidate.name
-            and candidate.label or nil, candidate.inGroup and "In a group" or nil }))
+        local color = options.classColor and options.classColor(candidate.classToken or candidate.class)
+        if candidate.kind == addon.LfgFillCandidates.ALT then
+            -- "Bobalt (22 Priest) · alt of Bob, online as Bobmain": Whisper
+            -- only.
+            local about = tostring(candidate.level or "?") .. (candidate.className and (" " .. candidate.className) or "")
+            row.name:SetText(colored(candidate.name, color) .. " (" .. about .. ")")
+            row.details:SetText(string.gsub(DOT, "^ ", "") .. join({ "alt of " .. tostring(candidate.label) ..
+                ", online as " .. tostring(candidate.onlineName), candidate.inGroup and "In a group" or nil }))
+            row.invite:Hide()
+        else
+            row.name:SetText(colored(candidate.name, color))
+            row.details:SetText(join({ candidate.level and ("Level " .. candidate.level) or nil,
+                candidate.label ~= candidate.name and candidate.label or nil, candidate.inGroup and "In a group" or nil }))
+            row.invite:Show()
+        end
         row:Show()
     end
     setShown(fill.empty, #candidates == 0)

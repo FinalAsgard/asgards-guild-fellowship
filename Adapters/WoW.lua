@@ -591,10 +591,20 @@ end
 -- Opens the game's chat box on a whisper to the character `name`, for the
 -- player to type and send. The game's own "send tell" call is used where
 -- there is one (it copes with names that have spaces); otherwise the chat
--- box opens with "/w name ". Returns true when it opened.
-function Client:OpenWhisper(name)
+-- box opens with "/w name ". With `text`, the box opens with
+-- "/w name text" instead, the text typed in and unsent. Returns true when
+-- it opened.
+function Client:OpenWhisper(name, text)
     if type(name) ~= "string" or name == "" then
         return false
+    end
+    if type(text) == "string" and text ~= "" then
+        local line = "/w " .. name .. " " .. text
+        local util = self.environment.ChatFrameUtil
+        if type(util) == "table" and type(util.OpenChat) == "function" then
+            return (callFunction(util.OpenChat, line))
+        end
+        return (callFunction(self.environment.ChatFrame_OpenChat, line))
     end
     local util = self.environment.ChatFrameUtil
     if type(util) == "table" and type(util.SendTell) == "function" then

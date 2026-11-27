@@ -681,14 +681,26 @@ test.test("Forever Find guildmates lists online guildmates who fit, marking thos
     test.assertTrue(page.listingFindButton.active)
     click(page.listingFindButton)
 
-    -- Hammer fits Stratholme; Zap (30) doesn't, Bolt is offline, and Tool
-    -- is the player.
+    -- Hammer fits Stratholme, and so does Bolt, Hammer's offline alt; Zap
+    -- (30) doesn't, and Tool is the player.
     test.assertTrue(page.fill.shown)
-    test.assertEqual(1, #page.fillCandidates)
+    test.assertEqual(2, #page.fillCandidates)
     test.assertContains(page.fill.rows[1].name.text, "Hammer")
     test.assertFalse(string.find(page.fill.rows[1].details.text, "In a group", 1, true) ~= nil)
     click(page.fill.rows[1].invite)
     test.assertContains(invited, "Hammer")
+    -- The alt: Whisper only, to Hammer, asking to log over.
+    local alt = page.fill.rows[2]
+    test.assertContains(alt.name.text, "Bolt Smith")
+    test.assertContains(alt.name.text, "(59)")
+    test.assertContains(alt.details.text, "alt of ")
+    test.assertContains(alt.details.text, ", online as Hammer Smith")
+    test.assertFalse(alt.invite.shown)
+    local opened
+    tool.environment.ChatFrame_OpenChat = function(line) opened = line end
+    click(alt.whisper)
+    test.assertContains(opened, "/w Hammer")
+    test.assertContains(opened, "Could you log over to Bolt Smith? We have a spot for them in Stratholme.")
     click(page.backButton)
 
     -- Hammer lists his own group: still there, marked In a group.
@@ -876,6 +888,7 @@ end)
 local function pageWith(groups, overrides)
     local addon = test.newAddon("Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/LfgBoardPage.lua",
         "Core/DungeonCatalog.lua", "Core/ZoneCatalog.lua", "Core/LfgProtocol.lua", "Core/LfgListing.lua", "Core/LfgRelevance.lua",
+        "Core/LfgFillCandidates.lua",
         "Core/GroupFriends.lua", "Core/LfgHistoryView.lua")
     local environment = fakeFrames.install({})
     local whispered = {}

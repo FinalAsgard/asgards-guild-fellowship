@@ -1880,7 +1880,7 @@ if clientProfile.supported then
             return {}
         end
         local listing = { kind = fields.k, minLevel = fields.lo, maxLevel = fields.hi, openRoles = fields.r,
-            size = fields.s, maxSize = fields.x }
+            size = fields.s, maxSize = fields.x, label = addon.LfgListing.Label(fields.k, fields.p) }
         local partyKeys = {}
         local members = lfgMembers()
         local index, position
@@ -1908,6 +1908,9 @@ if clientProfile.supported then
             grouped = grouped,
             display = function(name)
                 return normalizer:Display(name)
+            end,
+            className = function(classToken)
+                return client:GetClassName(classToken)
             end,
         })
         if lfgJoin.standInCandidates then
@@ -2633,6 +2636,13 @@ if clientProfile.supported then
                     rosterController:Print(row.name .. " is a stand-in; no invite was sent.")
                 else
                     client:InviteToParty(row.whisper)
+                end
+            end,
+            onLogOver = function(row)
+                if row.standIn then
+                    rosterController:Print(row.onlineName .. " is a stand-in; no whisper was opened.")
+                else
+                    client:OpenWhisper(row.whisper, row.message)
                 end
             end,
             onNotLooking = function()

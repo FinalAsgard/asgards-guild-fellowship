@@ -134,8 +134,9 @@ function LfgStandIns.Listings(facts)
 end
 
 -- Stand-in Find guildmates rows for the player's `listing` ({ minLevel?,
--- maxLevel? }), as LfgFillCandidates.List gives them: two who could fill a
--- slot, then one already in a listed group. Never invited.
+-- maxLevel?, label? }), as LfgFillCandidates.List gives them: two who
+-- could fill a slot, an alt whose player is online, then one already in a
+-- listed group. Never invited or whispered.
 function LfgStandIns.Candidates(listing)
     local level = type(listing.minLevel) == "number" and listing.minLevel or 1
     local rows = {}
@@ -144,8 +145,13 @@ function LfgStandIns.Candidates(listing)
         local slot = index + 4
         table.insert(rows, { key = LfgStandIns.PREFIX .. "fill" .. index, name = NAMES[slot],
             whisper = NAMES[slot] .. "-StandIn", level = level, class = CLASSES[slot], classToken = CLASSES[slot],
-            label = NAMES[slot], inGroup = index == 3, standIn = true })
+            label = NAMES[slot], inGroup = index == 3, standIn = true, kind = addon.LfgFillCandidates.ONLINE })
     end
+    table.insert(rows, 3, { key = LfgStandIns.PREFIX .. "fillalt", kind = addon.LfgFillCandidates.ALT,
+        name = NAMES[8] .. "alt", whisper = NAMES[8] .. "-StandIn", level = level, class = CLASSES[2],
+        classToken = CLASSES[2], label = NAMES[8], onlineKey = LfgStandIns.PREFIX .. "fill4",
+        onlineName = NAMES[8], inGroup = false, standIn = true,
+        message = addon.LfgFillCandidates.LogOver(listing.label, NAMES[8] .. "alt") })
     return rows
 end
 
