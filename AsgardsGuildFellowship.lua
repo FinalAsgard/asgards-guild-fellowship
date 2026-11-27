@@ -1347,7 +1347,7 @@ if clientProfile.supported then
         frameName = addon.Identity.addonName .. "Window",
         modules = {
             -- First, so it's the window's default page.
-            { id = "roster", label = "Roster", title = "Roster",
+            { id = "roster", label = "Roster", title = "Guild Roster",
                 draw = function(content, ui)
                     friendsUi.drawRoster(content, ui)
                 end,

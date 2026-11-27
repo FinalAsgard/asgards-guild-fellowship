@@ -1624,7 +1624,7 @@ test.test("roster: the window opens on the Roster, a card per player with the pl
 
     test.assertTrue(addon.agfWindow:Open())
     test.assertEqual("roster", addon.agfWindow:Page())
-    test.assertEqual("Roster", addon.agfWindow.pages.roster.title.text)
+    test.assertEqual("Guild Roster", addon.agfWindow.pages.roster.title.text)
     local page = addon.rosterPage
     test.assertTrue(page ~= nil)
     -- Hammer Smith and the alt Bolt Smith are one card.
