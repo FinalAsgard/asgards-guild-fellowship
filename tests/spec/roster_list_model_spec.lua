@@ -1,6 +1,7 @@
 local test = require("tests.test_helper")
 
 local RULES = { twoPartNames = false, homeRealm = "Area52" }
+local RANKS = { [0] = "Guild Master", [1] = "Officer", [2] = "Member", [3] = "Initiate" }
 
 -- A guild partition with these players, by main: Toolbox (alias "TheTool",
 -- with alts Hammer and Nail), Anvil, Bolt and Cog. `online` names the
@@ -15,16 +16,19 @@ local function setup(online, noAlias)
     local members = {}
     local world = { addon = addon, partition = partition, normalizer = normalizer, members = members, keys = {} }
     local _, entry
+    -- Name, class, days since last online, rank index.
     for _, entry in ipairs({
-        { "Toolbox", "WARRIOR", 3 }, { "Hammer", "PALADIN", 1 }, { "Nail", "MAGE", 5 }, { "Anvil", "MAGE", 2 },
-        { "Bolt", "ROGUE", 9 }, { "Cog", "PRIEST", 4 },
+        { "Toolbox", "WARRIOR", 3, 2 }, { "Hammer", "PALADIN", 1, 1 }, { "Nail", "MAGE", 5, 3 },
+        { "Anvil", "MAGE", 2, 2 }, { "Bolt", "ROGUE", 9, 2 }, { "Cog", "PRIEST", 4, 0 },
     }) do
-        local name = entry[1]
+        local name, rank = entry[1], entry[4]
         local key = normalizer:Key(name .. "-Area52")
-        partition:RecordCharacter(key, { name = name .. "-Area52", classToken = entry[2], level = 60 })
+        partition:RecordCharacter(key, { name = name .. "-Area52", classToken = entry[2], level = 60,
+            rankIndex = entry[4] })
         local zone = online ~= nil and online[name] or nil
         members[key] = { name = name .. "-Area52", classToken = entry[2], level = 60, online = zone ~= nil,
-            zone = zone, lastOnline = zone == nil and { days = entry[3] } or nil }
+            zone = zone, lastOnline = zone == nil and { days = entry[3] } or nil, rankIndex = entry[4],
+            rankName = RANKS[rank] }
         world.keys[name] = key
     end
     partition:JoinPlayerOf(world.keys.Hammer, world.keys.Toolbox, "manual")
@@ -205,4 +209,146 @@ test.test("roster list model: an empty guild has no rows and no default", functi
     test.assertEqual(0, #view.rows)
     test.assertEqual(nil, view.default)
     test.assertEqual("0 players · 0 online", view.header)
+end)
+
+-- Search, sort and filters ----------------------------------------------------
+
+test.test("roster list model: search finds an alias, ignoring case, with the usual sub line", function()
+    local world = setup()
+    local view = world.build({ search = "  THETOOL " })
+
+    test.assertEqual("[Offline 1], TheTool", outline(view))
+    test.assertEqual("|cffwarrioToolbox|r · 3 characters · 1 day ago", view.cards[1].sub)
+    -- The header still counts the whole guild.
+    test.assertEqual("4 players · 0 online", view.header)
+end)
+
+test.test("roster list model: search finds the main's name without naming it", function()
+    local world = setup()
+    local view = world.build({ search = "toolb" })
+
+    test.assertEqual("TheTool", view.cards[1].name)
+    test.assertEqual("|cffwarrioToolbox|r · 3 characters · 1 day ago", view.cards[1].sub)
+end)
+
+test.test("roster list model: search that finds only alts says which characters matched", function()
+    local world = setup()
+    local view = world.build({ search = "hamm" })
+
+    test.assertEqual("[Offline 1], TheTool", outline(view))
+    test.assertEqual("matches Hammer", view.cards[1].sub)
+
+    -- "a" is in Hammer and Nail, and in Anvil's own name.
+    view = world.build({ search = "a" })
+    test.assertEqual("matches Hammer and Nail", cardOf(view, "TheTool").sub)
+    test.assertEqual("2 days ago", cardOf(view, "Anvil").sub)
+end)
+
+test.test("roster list model: search finds a player's Discord name", function()
+    local world = setup()
+    world.partition:SetProfileText(world.keys.Bolt, "discord", "BoltyMcBolt", 900, world.keys.Bolt)
+    local view = world.build({ search = "mcbolt" })
+
+    test.assertEqual("[Offline 1], Bolt", outline(view))
+    test.assertEqual("9 days ago", view.cards[1].sub)
+end)
+
+test.test("roster list model: search that finds nobody leaves no rows", function()
+    local world = setup()
+    local view = world.build({ search = "zzz" })
+
+    test.assertEqual(0, #view.rows)
+    test.assertEqual(nil, view.default)
+end)
+
+test.test("roster list model: the match text names two characters, then how many more", function()
+    local world = setup()
+    local MatchText = world.addon.RosterListModel.MatchText
+
+    test.assertEqual("matches Vexadin", MatchText({ "Vexadin" }))
+    test.assertEqual("matches Vexadin and Vexhunt", MatchText({ "Vexadin", "Vexhunt" }))
+    test.assertEqual("matches Vexadin, Vexhunt and Vexmage", MatchText({ "Vexadin", "Vexhunt", "Vexmage" }))
+    test.assertEqual("matches Vexadin, Vexhunt and 3 more",
+        MatchText({ "Vexadin", "Vexhunt", "Vexmage", "Vexlock", "Vexdruid" }))
+end)
+
+test.test("roster list model: sorting by Name is one Players section, online or not", function()
+    local world = setup({ Cog = "Ironforge" })
+    local view = world.build({ sort = "name" })
+
+    test.assertEqual("[Players 4], Anvil, Bolt, Cog, TheTool", outline(view))
+end)
+
+test.test("roster list model: sorting by Last online puts the most recent first", function()
+    local world = setup({ Cog = "Ironforge" })
+    local view = world.build({ sort = "lastOnline" })
+
+    -- Cog is online; Hammer was on 1 day ago, Anvil 2, Bolt 9.
+    test.assertEqual("[Players 4], Cog, TheTool, Anvil, Bolt", outline(view))
+end)
+
+test.test("roster list model: sorting by Rank uses each player's highest-ranked character, then the name", function()
+    local world = setup()
+    local view = world.build({ sort = "rank" })
+
+    -- TheTool is an Officer through Hammer, though Toolbox is a Member;
+    -- Anvil and Bolt are both Members.
+    test.assertEqual("[Players 4], Cog, TheTool, Anvil, Bolt", outline(view))
+    test.assertEqual("Officer", cardOf(view, "TheTool").rankName)
+    test.assertEqual(1, cardOf(view, "TheTool").rankIndex)
+end)
+
+test.test("roster list model: an unknown sort is Online first", function()
+    local world = setup({ Cog = "Ironforge" })
+
+    test.assertEqual("[Online 1], Cog, [Offline 3], Anvil, Bolt, TheTool", outline(world.build({ sort = "online" })))
+    test.assertEqual("[Online 1], Cog, [Offline 3], Anvil, Bolt, TheTool", outline(world.build({ sort = "bogus" })))
+end)
+
+test.test("roster list model: the Rank filter shows only players at that rank, by their highest character", function()
+    local world = setup()
+    local view = world.build({ rank = 2 })
+
+    -- Toolbox is a Member, but TheTool's highest rank is Officer.
+    test.assertEqual("[Offline 2], Anvil, Bolt", outline(view))
+    test.assertEqual("[Offline 1], TheTool", outline(world.build({ rank = 1 })))
+end)
+
+test.test("roster list model: the Rank filter offers each rank a player holds, highest first", function()
+    local world = setup()
+    local ranks = world.build().ranks
+    local names = {}
+    local index
+    for index = 1, #ranks do
+        names[index] = ranks[index].index .. " " .. ranks[index].name
+    end
+
+    -- Nail is the only Initiate, and TheTool counts as an Officer.
+    test.assertEqual("0 Guild Master, 1 Officer, 2 Member", table.concat(names, ", "))
+end)
+
+test.test("roster list model: Online only hides offline players", function()
+    local world = setup({ Cog = "Ironforge", Nail = "Dalaran" })
+    local view = world.build({ onlineOnly = true })
+
+    test.assertEqual("[Online 2], Cog, TheTool", outline(view))
+    test.assertEqual("4 players · 2 online", view.header)
+end)
+
+test.test("roster list model: filters combine", function()
+    local world = setup({ Cog = "Ironforge", Bolt = "Gadgetzan" })
+    local view = world.build({ onlineOnly = true, rank = 2, search = "o", sort = "name" })
+
+    test.assertEqual("[Players 1], Bolt", outline(view))
+end)
+
+test.test("roster list model: the selection stays while its player is shown, and goes when filtered out", function()
+    local world = setup({ Cog = "Ironforge" })
+    local bolt = world.playerOf("Bolt")
+
+    test.assertEqual(bolt, world.build({ selected = bolt, sort = "rank" }).selected)
+    test.assertEqual(bolt, world.build({ selected = bolt, search = "bo" }).selected)
+    local view = world.build({ selected = bolt, onlineOnly = true })
+    test.assertEqual(nil, view.selected)
+    test.assertEqual(world.playerOf("Cog"), view.default)
 end)

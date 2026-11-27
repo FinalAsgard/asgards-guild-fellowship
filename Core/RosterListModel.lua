@@ -1,21 +1,37 @@
 local _, addon = ...
 
 -- The rows of the new window's Roster column: one player card per player
--- (a lone character is a player of its own), split into Online and Offline
--- sections, each headed by a label with its count. Alts don't get rows of
--- their own; the player panel lists them. A player with no character left
--- in the guild has no card.
+-- (a lone character is a player of its own). Sorted Online first (the
+-- default), they're split into Online and Offline sections, each headed by
+-- a label with its count; sorted by Name, Last online or Rank, they're one
+-- Players section. Alts don't get rows of their own; the player panel lists
+-- them. A player with no character left in the guild has no card.
 --
 -- A card's big name is the player's alias, else their main's name. Its sub
 -- line names the character that's online (or the main, while offline) when
 -- that isn't the big name, how many characters they have, and where they
--- are: the online character's zone, or when they were last online.
+-- are: the online character's zone, or when they were last online. A
+-- search that found the player only by alts says which instead ("matches
+-- Vexadin, Vexhunt and 3 more").
+--
+-- A player's rank is their highest-ranked character's, for sorting and the
+-- Rank filter alike.
 --
 -- Pure: the partition, live roster facts and lookups are handed in. The
 -- last-online, sync and plural texts are RosterViewModel's.
 local RosterListModel = {
     ONLINE = "Online",
     OFFLINE = "Offline",
+    PLAYERS = "Players",
+    -- The sorts, in the order Sort offers them.
+    SORTS = {
+        { id = "online", label = "Online first" },
+        { id = "name", label = "Name" },
+        { id = "lastOnline", label = "Last online" },
+        { id = "rank", label = "Rank" },
+    },
+    -- How many matched characters a card names before "and N more".
+    MATCH_NAMES = 2,
 }
 addon.RosterListModel = RosterListModel
 
@@ -68,10 +84,13 @@ local function card(inputs, playerId, player, friends)
     local keys = partition:CharactersOf(playerId)
     local inGuild = {}
     local onlineKey, latestKey, latest
+    -- The highest rank (the lowest rank index) and its name.
+    local rankIndex, rankName
     local index
     for index = 1, #keys do
         local key = keys[index]
-        if partition:GetCharacter(key) ~= nil and partition:IsInGuild(key) then
+        local character = partition:GetCharacter(key)
+        if character ~= nil and partition:IsInGuild(key) then
             table.insert(inGuild, key)
             local live = members[key] or {}
             if live.online == true and onlineKey == nil then
@@ -80,6 +99,11 @@ local function card(inputs, playerId, player, friends)
             local away = addon.RosterViewModel.HoursAway(live.lastOnline)
             if away ~= nil and (latest == nil or away < latest) then
                 latest, latestKey = away, key
+            end
+            local rank = live.rankIndex or character.rank
+            if type(rank) == "number" and (rankIndex == nil or rank < rankIndex) then
+                rankIndex = rank
+                rankName = live.rankName or ("Rank " .. rank)
             end
         end
     end
@@ -134,10 +158,54 @@ local function card(inputs, playerId, player, friends)
         -- The initial's class color ("ffrrggbb"), the lead character's.
         color = ask(inputs.classColor, classToken),
         online = onlineKey ~= nil,
+        -- Hours since the latest login: 0 while online, nil when unknown.
+        away = onlineKey ~= nil and 0 or latest,
+        rankIndex = rankIndex,
+        rankName = rankName,
         characters = #inGuild,
         star = friends[playerId] == true,
         sub = table.concat(parts, DOT),
+        nameOf = nameOf,
     }
+end
+
+-- "matches Vexadin", "matches Vexadin and Vexhunt", or "matches Vexadin,
+-- Vexhunt and 3 more".
+function RosterListModel.MatchText(names)
+    local shown = RosterListModel.MATCH_NAMES
+    if #names <= shown + 1 then
+        if #names == 1 then
+            return "matches " .. names[1]
+        end
+        return "matches " .. table.concat(names, ", ", 1, #names - 1) .. " and " .. names[#names]
+    end
+    return "matches " .. table.concat(names, ", ", 1, shown) .. " and " .. (#names - shown) .. " more"
+end
+
+-- Whether `needle` (lowercase, not empty) is in the card's alias, its
+-- player's Discord name or any of its characters' names. When only
+-- characters other than the lead match, also returns their names.
+local function matches(inputs, entry, needle)
+    local function has(text)
+        return type(text) == "string" and string.find(lower(text), needle, 1, true) ~= nil
+    end
+    if has(entry.alias) or has(entry.mainName)
+        or has((inputs.partition:PlayerProfileText(entry.playerId, "discord")))
+    then
+        return true
+    end
+    local names = {}
+    local index
+    for index = 2, #entry.keys do
+        local name = entry.nameOf(entry.keys[index])
+        if has(name) then
+            table.insert(names, name)
+        end
+    end
+    if names[1] == nil then
+        return false
+    end
+    return true, names
 end
 
 -- By name, then by player id so the order never changes.
@@ -147,6 +215,25 @@ local function byName(a, b)
     end
     return tostring(a.playerId) < tostring(b.playerId)
 end
+
+-- By `field` (smallest first, unknown last), then by name.
+local function byField(field)
+    return function(a, b)
+        if a[field] ~= b[field] then
+            if a[field] == nil or b[field] == nil then
+                return b[field] == nil
+            end
+            return a[field] < b[field]
+        end
+        return byName(a, b)
+    end
+end
+
+local ORDERS = {
+    name = byName,
+    lastOnline = byField("away"),
+    rank = byField("rankIndex"),
+}
 
 -- inputs:
 --   partition   the guild partition
@@ -158,14 +245,21 @@ end
 --   selected    the player id the page has selected, or nil
 --   lastSync    when guild sync last finished, or nil
 --   now         the current timestamp
+--   search      text to find in aliases, character names and Discord
+--               names, ignoring case
+--   sort        a SORTS id (default "online")
+--   rank        a rank index: only players at that rank show
+--   onlineOnly  true to show only players with a character online
 -- Returns {
 --   rows      the column's rows, in order: { kind = "section", text, count }
 --             then that section's cards, { kind = "player", playerId, key,
 --             keys, name, alias, mainName, classToken, className, color,
---             online, characters, star, sub }
+--             online, away, rankIndex, rankName, characters, star, sub }
 --   cards     the cards alone, in the same order
+--   ranks     the Rank filter's choices: { index, name } for every rank a
+--             player has, highest first
 --   players, online   how many players have a card, and how many of them
---             are online
+--             are online, whatever the search and filters
 --   header    "550 players · 42 online"
 --   sync      "Synced 5 minutes ago", or "Not synced yet"
 --   selected  `selected` when it has a card, else nil
@@ -175,21 +269,63 @@ end
 function RosterListModel.Build(inputs)
     local partition = inputs.partition
     local friends = friendPlayers(partition, inputs.friendKeys)
-    local online, offline = {}, {}
+    local needle = string.match(lower(inputs.search), "^%s*(.-)%s*$")
+    local shown = {}
+    local players, playersOnline = 0, 0
+    local ranks, rankList = {}, {}
     partition:EachPlayer(function(playerId, player)
         local entry = card(inputs, playerId, player, friends)
-        if entry ~= nil then
-            table.insert(entry.online and online or offline, entry)
+        if entry == nil then
+            return
         end
+        players = players + 1
+        playersOnline = playersOnline + (entry.online and 1 or 0)
+        if entry.rankIndex ~= nil and ranks[entry.rankIndex] == nil then
+            ranks[entry.rankIndex] = true
+            table.insert(rankList, { index = entry.rankIndex, name = entry.rankName })
+        end
+        if inputs.onlineOnly and not entry.online then
+            return
+        end
+        if inputs.rank ~= nil and entry.rankIndex ~= inputs.rank then
+            return
+        end
+        if needle ~= "" then
+            local found, names = matches(inputs, entry, needle)
+            if not found then
+                return
+            end
+            if names ~= nil then
+                entry.sub = RosterListModel.MatchText(names)
+            end
+        end
+        entry.nameOf = nil
+        table.insert(shown, entry)
     end)
-    table.sort(online, byName)
-    table.sort(offline, byName)
-    local view = { rows = {}, cards = {}, players = #online + #offline, online = #online }
+    table.sort(rankList, function(a, b)
+        return a.index < b.index
+    end)
+    local sections
+    local order = ORDERS[inputs.sort]
+    if order ~= nil then
+        table.sort(shown, order)
+        sections = { { text = RosterListModel.PLAYERS, cards = shown } }
+    else
+        local online, offline = {}, {}
+        local index
+        for index = 1, #shown do
+            table.insert(shown[index].online and online or offline, shown[index])
+        end
+        table.sort(online, byName)
+        table.sort(offline, byName)
+        sections = {
+            { text = RosterListModel.ONLINE, cards = online },
+            { text = RosterListModel.OFFLINE, cards = offline },
+        }
+    end
+    local view = { rows = {}, cards = {}, ranks = rankList, players = players, online = playersOnline }
     local _, section
-    for _, section in ipairs({
-        { text = RosterListModel.ONLINE, cards = online },
-        { text = RosterListModel.OFFLINE, cards = offline },
-    }) do
+    for _, section in ipairs(sections) do
         if section.cards[1] ~= nil then
             table.insert(view.rows, { kind = "section", text = section.text, count = #section.cards })
             local index
