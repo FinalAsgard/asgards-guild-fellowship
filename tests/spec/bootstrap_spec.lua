@@ -100,6 +100,7 @@ local MANIFEST_FILES = {
     "Core/RankRequirements.lua",
     "Core/PromotionChecks.lua",
     "Core/PromotionPolicy.lua",
+    "Core/RankUpViewModel.lua",
     "Core/PromotionsViewModel.lua",
     "Core/LocationProtocol.lua",
     "Core/LocationScheduler.lua",
