@@ -217,6 +217,45 @@ test.test("live messages go under the live prefix at NORMAL, with a copy under t
     test.assertEqual(1, #whispered)
 end)
 
+test.test("Guild LFG Board messages go under the LFG prefix at NORMAL, with a copy under the sync prefix", function()
+    local world = fixtures.newEnvironment("Retail")
+    local addon = test.newAddon("Adapters/ClientProfile.lua", "Adapters/WoW.lua", "Adapters/Comm.lua")
+    local comm = addon.Comm.Create(addon.Compatibility.Create(world.environment), "AGFSync", "AGFLive", "AGFLfg")
+    local guild, whispered = {}, {}
+    test.assertTrue(comm:Start(function(message)
+        table.insert(guild, message)
+    end, function(message)
+        table.insert(whispered, message)
+    end))
+    local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
+
+    test.assertTrue(comm:BroadcastLfg({ v = 1, t = "lfg-listing" }))
+    test.assertEqual(2, #world.sentMessages)
+    test.assertEqual("AGFLfg", world.sentMessages[1].prefix)
+    test.assertEqual("NORMAL", world.sentMessages[1].priority)
+    test.assertEqual("GUILD", world.sentMessages[1].distribution)
+    test.assertEqual("AGFSync", world.sentMessages[2].prefix, "older add-ons still hear it")
+    test.assertTrue(comm:WhisperLfg({ v = 1, t = "lfg-ask" }, "Anvil-Area52"))
+    test.assertEqual("AGFLfg", world.sentMessages[3].prefix)
+    test.assertEqual("WHISPER", world.sentMessages[3].distribution)
+    test.assertEqual("Anvil-Area52", world.sentMessages[3].recipient)
+    test.assertTrue(comm:WhisperedRecently("Anvil-Area52"))
+    -- Live messages keep the live prefix.
+    test.assertTrue(comm:BroadcastLive({ v = 1, t = "greeted" }))
+    test.assertEqual("AGFLive", world.sentMessages[5].prefix)
+
+    world.commHandlers.AGFLfg("AGFLfg", serializer:Serialize({ v = 1, t = "lfg-listing" }), "GUILD", "Hammer-Area52")
+    world.commHandlers.AGFLfg("AGFLfg", serializer:Serialize({ v = 1, t = "lfg-ask" }), "WHISPER", "Hammer-Area52")
+    test.assertEqual(1, #guild)
+    test.assertEqual(1, #whispered)
+
+    -- Without the LFG prefix, they go live.
+    local fallback = addon.Comm.Create(addon.Compatibility.Create(world.environment), "AGFSync", "AGFLive")
+    fallback:Start(function() end)
+    test.assertTrue(fallback:BroadcastLfg({ v = 1 }))
+    test.assertEqual("AGFLive", world.sentMessages[#world.sentMessages - 1].prefix)
+end)
+
 test.test("without a live prefix, live messages go under the sync prefix at NORMAL", function()
     local world, comm = build()
     comm:Start(function() end)

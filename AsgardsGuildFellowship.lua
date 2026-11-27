@@ -158,7 +158,8 @@ if clientProfile.supported then
             return client:RealmIsRegion() and client:GetRegionName() or nil
         end,
     })
-    comm = addon.Comm.Create(client, addon.Identity.commPrefix, addon.Identity.liveCommPrefix)
+    comm = addon.Comm.Create(client, addon.Identity.commPrefix, addon.Identity.liveCommPrefix,
+        addon.Identity.lfgCommPrefix)
     -- The master frame's tabs, in order. The first is where the general
     -- entry points open it.
     pages = addon.PageNavigator.Create()
@@ -1640,9 +1641,9 @@ if clientProfile.supported then
         local message = lfgWaiting
         lfgWaiting = nil
         local stats = lfgJoin.stats
-        -- Live, as Ask to join is: under the sync prefix, a guild sync's
-        -- backlog holds it back.
-        if comm:BroadcastLive(message) then
+        -- Under the board's own prefix: under the sync prefix, a guild
+        -- sync's backlog held it back.
+        if comm:BroadcastLfg(message) then
             stats.sent = stats.sent + 1
             stats.sentAt = client:Timestamp()
             stats.sentType = message.t
@@ -2343,7 +2344,7 @@ if clientProfile.supported then
             lfgJoin.standInSlot = false
             rosterController:Print("Stand-in slot answered " .. (yes and "Yes" or "No") .. "; nothing was sent.")
         elseif lfgTrigger:SlotAnswered(yes) then
-            comm:BroadcastLive(addon.LfgProtocol.Slot(yes))
+            comm:BroadcastLfg(addon.LfgProtocol.Slot(yes))
             if yes then
                 lfgJoin.postSlot()
             end
@@ -2356,7 +2357,7 @@ if clientProfile.supported then
         lfgTrigger:Claim(rosterController:SelfKey())
         local leader = lfgMembers()[1]
         if client:IsInGroup() and leader ~= nil and leader.isPlayer == false then
-            comm:BroadcastLive(addon.LfgProtocol.Contact(leader.fullName or leader.name))
+            comm:BroadcastLfg(addon.LfgProtocol.Contact(leader.fullName or leader.name))
         end
         lfgRefresh()
     end
@@ -2406,7 +2407,7 @@ if clientProfile.supported then
             return
         end
         local message = addon.LfgProtocol.Ask(role, client:GetPlayerLevel(), client:GetPlayerClass())
-        if comm:Whisper(message, listing.sender, true) then
+        if comm:WhisperLfg(message, listing.sender) then
             lfgBoard:Ask(listing.id, role, client:Timestamp() or 0)
         else
             rosterController:Print("Couldn't ask to join " .. listing.leader .. "'s group. Try whispering them.")
@@ -2423,7 +2424,7 @@ if clientProfile.supported then
         if request.standIn then
             rosterController:Print("Stand-in request " .. answer .. "; nothing was sent.")
         else
-            comm:Whisper(addon.LfgProtocol.Answer(answer), request.sender, true)
+            comm:WhisperLfg(addon.LfgProtocol.Answer(answer), request.sender)
         end
         lfgRefresh()
     end
@@ -2452,7 +2453,7 @@ if clientProfile.supported then
             local index
             for index = 1, #dropped do
                 if not dropped[index].standIn then
-                    comm:Whisper(addon.LfgProtocol.Answer(answer), dropped[index].sender, true)
+                    comm:WhisperLfg(addon.LfgProtocol.Answer(answer), dropped[index].sender)
                 end
             end
         end
@@ -2602,7 +2603,7 @@ if clientProfile.supported then
                     local listing = lfgJoin.partyListing()
                     lfgJoin.myRole = role
                     if listing ~= nil then
-                        comm:Whisper(addon.LfgProtocol.Role(role), listing.sender, true)
+                        comm:WhisperLfg(addon.LfgProtocol.Role(role), listing.sender)
                     end
                 end
                 lfgRefresh()
@@ -2722,7 +2723,7 @@ if clientProfile.supported then
             end
             -- Do Not Disturb declines them without a word to the player.
             if settings:Get("dnd") == true then
-                comm:Whisper(addon.LfgProtocol.Answer("declined"), sender, true)
+                comm:WhisperLfg(addon.LfgProtocol.Answer("declined"), sender)
                 return
             end
             local added = lfgJoin.requests:Add({ key = senderKey, sender = sender,

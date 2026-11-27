@@ -398,9 +398,9 @@ local function startDungeon(world, note)
     return page
 end
 
--- How many Guild LFG Board messages wait on `channel`. Each goes out live
--- and again under the sync prefix for older add-ons; only the live one
--- counts.
+-- How many Guild LFG Board messages wait on `channel`. Each goes out under
+-- the board's own prefix and again under the sync prefix for older
+-- add-ons; only the first counts.
 local function lfgQueued(channel)
     local count = 0
     local index
@@ -408,7 +408,7 @@ local function lfgQueued(channel)
         local queued = channel.queue[index]
         local serializer = queued.from.environment.LibStub.libs["AceSerializer-3.0"]
         local ok, message = serializer:Deserialize(queued.text)
-        if string.sub(queued.prefix, 1, 7) == "AGFLive" and ok and type(message) == "table"
+        if string.sub(queued.prefix, 1, 6) == "AGFLfg" and ok and type(message) == "table"
             and string.sub(tostring(message.t), 1, 4) == "lfg-"
         then
             count = count + 1
@@ -686,15 +686,16 @@ local function keepPrefix(channel, prefix)
     channel.queue = kept
 end
 
-test.test("Forever a listing goes out live, so a sync backlog can't hold it back; older add-ons get a copy", function()
+test.test("Forever a listing goes out under the board's own prefix, clear of sync; older add-ons get a copy", function()
     local channel = fixtures.newChannel()
     local tool = login("Forever", channel, "Tool Box")
     local hammer = login("Forever", channel, "Hammer Smith")
     fixtures.deliver(channel)
 
-    -- Everything under the sync prefix stuck: the live copy still arrives.
+    -- Everything under the sync prefix stuck: the board's copy still
+    -- arrives.
     startDungeon(tool)
-    keepPrefix(channel, "AGFLive")
+    keepPrefix(channel, "AGFLfg")
     fixtures.deliver(channel)
     test.assertEqual(1, #hammer.addon.lfgBoard:Listings(hammer.time))
 

@@ -18,6 +18,9 @@ local _, addon = ...
 -- every guildmate's add-on listens on the live prefix, each live message
 -- is also sent under the sync prefix for older versions; both prefixes
 -- reach the same receivers, which already ignore a message heard twice.
+-- The Guild LFG Board has a prefix of its own (the "LFG" prefix), so its
+-- listings and asks never wait on sync's limit or the live messages';
+-- they too are copied under the sync prefix for older versions.
 local Comm = {
     DISTRIBUTION = "GUILD",
     WHISPER = "WHISPER",
@@ -41,9 +44,11 @@ local Endpoint = {}
 Endpoint.__index = Endpoint
 
 -- `client` is the WoW adapter; `prefix` the build's add-on message prefix,
--- and `livePrefix`, when given, its prefix for live messages.
-function Comm.Create(client, prefix, livePrefix)
-    return setmetatable({ client = client, prefix = prefix, livePrefix = livePrefix }, Endpoint)
+-- `livePrefix`, when given, its prefix for live messages, and `lfgPrefix`,
+-- when given, its prefix for the Guild LFG Board's.
+function Comm.Create(client, prefix, livePrefix, lfgPrefix)
+    return setmetatable({ client = client, prefix = prefix, livePrefix = livePrefix, lfgPrefix = lfgPrefix },
+        Endpoint)
 end
 
 -- Starts listening: onMessage(message, sender) runs for every guild message
@@ -90,6 +95,10 @@ function Endpoint:Start(onMessage, onWhisper, onOfficer)
     if self.livePrefix ~= nil and not pcall(endpoint.RegisterComm, endpoint, self.livePrefix, heard) then
         self.livePrefix = nil
     end
+    -- Without the LFG prefix, the board's messages go out live instead.
+    if self.lfgPrefix ~= nil and not pcall(endpoint.RegisterComm, endpoint, self.lfgPrefix, heard) then
+        self.lfgPrefix = nil
+    end
     self.endpoint = endpoint
     self.serializer = serializer
     return true
@@ -103,10 +112,11 @@ function Endpoint:OnHeard(onHeard)
 end
 
 -- Serializes `message` and sends it on `distribution` (to `target` for a
--- whisper) at `priority`. A live message goes under the live prefix, with
--- a copy under the sync prefix for older add-ons. `onProgress(sent,
--- total)`, when given, hears the bytes sent so far after each piece goes
--- out. Returns false when it couldn't be sent.
+-- whisper) at `priority`. A live message goes under the live prefix (or,
+-- with `live` "lfg", the LFG prefix, else the live one), with a copy under
+-- the sync prefix for older add-ons. `onProgress(sent, total)`, when given,
+-- hears the bytes sent so far after each piece goes out. Returns false when
+-- it couldn't be sent.
 function Endpoint:send(message, distribution, target, priority, live, onProgress)
     if self.endpoint == nil or type(message) ~= "table" then
         return false
@@ -126,10 +136,11 @@ function Endpoint:send(message, distribution, target, priority, live, onProgress
             sendPriority, progress)
         return ok
     end
-    if not live or self.livePrefix == nil then
+    local fast = live == "lfg" and self.lfgPrefix or self.livePrefix
+    if not live or fast == nil then
         return sendUnder(self.prefix, live and Comm.PRIORITY_NORMAL or priority)
     end
-    local ok = sendUnder(self.livePrefix, Comm.PRIORITY_NORMAL)
+    local ok = sendUnder(fast, Comm.PRIORITY_NORMAL)
     sendUnder(self.prefix, Comm.PRIORITY_NORMAL)
     return ok
 end
@@ -144,6 +155,19 @@ end
 -- sync traffic is waiting. Returns false when it couldn't be sent.
 function Endpoint:BroadcastLive(message)
     return self:send(message, Comm.DISTRIBUTION, nil, Comm.PRIORITY_NORMAL, true)
+end
+
+-- Sends Guild LFG Board `message` to the guild under the LFG prefix (live
+-- without one), with the copy for older add-ons. Returns false when it
+-- couldn't be sent.
+function Endpoint:BroadcastLfg(message)
+    return self:send(message, Comm.DISTRIBUTION, nil, Comm.PRIORITY_NORMAL, "lfg")
+end
+
+-- Whispers Guild LFG Board `message` to the character named `target`, as
+-- BroadcastLfg sends. Returns false when it couldn't be sent.
+function Endpoint:WhisperLfg(message, target)
+    return self:Whisper(message, target, "lfg")
 end
 
 -- Sends `message` to the guild's officer channel (at BULK priority, or
@@ -163,8 +187,9 @@ function Endpoint:Whisper(message, target, live, options)
         return false
     end
     options = type(options) == "table" and options or {}
-    local sent = self:send(message, Comm.WHISPER, target, options.priority or Comm.PRIORITY, live == true,
-        options.onProgress)
+    -- `live` "lfg": under the LFG prefix (WhisperLfg).
+    local sent = self:send(message, Comm.WHISPER, target, options.priority or Comm.PRIORITY,
+        live == "lfg" and "lfg" or live == true, options.onProgress)
     if sent then
         self.whispered = self.whispered or {}
         self.whispered[string.lower(target)] = self.client:Timestamp()
