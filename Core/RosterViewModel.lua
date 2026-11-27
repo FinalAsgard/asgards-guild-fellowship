@@ -91,7 +91,7 @@ local function coloredName(name, color)
 end
 
 -- "Left 3 days ago" for a departed character, from its departure date.
-local function leftText(departed, now)
+function RosterViewModel.LeftText(departed, now)
     local elapsed = math.max(0, (now or departed) - departed)
     local days = math.floor(elapsed / 86400)
     if days < 1 then
@@ -99,6 +99,7 @@ local function leftText(departed, now)
     end
     return "Left " .. plural(days, "day") .. " ago"
 end
+local leftText = RosterViewModel.LeftText
 
 local function characterRow(inputs, key, character, playerId, isMain)
     local live = inputs.members[key] or {}

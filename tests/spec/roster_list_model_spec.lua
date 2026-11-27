@@ -407,3 +407,40 @@ test.test("roster list model: Last online puts those online now before those on 
     test.assertEqual("[Players 4], Bolt, Cog, Anvil, TheTool", outline(view))
     test.assertEqual("less than an hour ago", cardOf(view, "Anvil").tag)
 end)
+
+-- Departed --------------------------------------------------------------------
+
+test.test("roster list model: Departed lists characters that left, newest first, with their player", function()
+    local world = setup()
+    world.partition:MarkDeparted(world.keys.Nail, 1000 - 3 * 86400)
+    world.partition:MarkDeparted(world.keys.Bolt, 1000 - 86400)
+    local rows = world.addon.RosterListModel.Departed({ partition = world.partition, normalizer = world.normalizer,
+        now = 1000,
+        classColor = function(classToken)
+            return "ff" .. string.lower(string.sub(classToken, 1, 6))
+        end,
+        className = function(classToken)
+            return string.upper(string.sub(classToken, 1, 1)) .. string.lower(string.sub(classToken, 2))
+        end })
+
+    test.assertEqual(2, #rows)
+    test.assertEqual("Bolt", rows[1].name)
+    test.assertEqual("Left 1 day ago", rows[1].left)
+    test.assertEqual("Bolt", rows[1].player)
+    -- Bolt was a player of one: the whole player left.
+    test.assertEqual(0, #rows[1].remaining)
+
+    test.assertEqual("Nail", rows[2].name)
+    test.assertEqual("Left 3 days ago", rows[2].left)
+    test.assertEqual("Mage", rows[2].className)
+    test.assertEqual("ffmage", rows[2].color)
+    test.assertEqual(60, rows[2].level)
+    test.assertEqual("TheTool", rows[2].player)
+    test.assertEqual("Toolbox, Hammer", table.concat(rows[2].remaining, ", "))
+end)
+
+test.test("roster list model: Departed is empty when nobody left", function()
+    local world = setup()
+
+    test.assertEqual(0, #world.addon.RosterListModel.Departed({ partition = world.partition, now = 1000 }))
+end)

@@ -19,12 +19,24 @@ local _, addon = ...
 -- with a search box, as the Friends page's is. Set alias..., Set Discord...
 -- and the Bio tab's Edit ask for the text in a small prompt.
 --
+-- Officers get tabs across the top: Members (all of the above), Departed
+-- (a table of the characters that left the guild, each with Purge, and
+-- Purge all departed, which asks first) and Review. Members get no tabs.
+--
 -- It's built when the page is shown (Refresh). When the roster changes on
 -- its own (Update), the cards show what's new but keep their order and the
 -- list its place, so it doesn't jump while it's being scrolled; a sort,
 -- filter or search change sorts it again.
 local Theme = addon.Theme
 local DOT = " · "
+
+local function setShown(frame, shown)
+    if shown then
+        frame:Show()
+    else
+        frame:Hide()
+    end
+end
 
 local RosterPage = {
     COLUMN_WIDTH = 260,
@@ -44,6 +56,18 @@ local RosterPage = {
     PICKER_SEARCH = "Search by alias or character name",
     NO_MATCHES = "No players match.",
     ALIAS_LETTERS = 48,
+    TABS = {
+        { id = "members", label = "Members" },
+        { id = "departed", label = "Departed" },
+        { id = "review", label = "Review" },
+    },
+    TABS_HEIGHT = 28,
+    DEPARTED_ROW_HEIGHT = 54,
+    PURGE_WIDTH = 80,
+    PURGE_ALL_WIDTH = 160,
+    NO_DEPARTED = "Nobody has left the guild.",
+    WHOLE_PLAYER_LEFT = "The whole player left",
+    REVIEW_EMPTY = "Members' suggestions will show here.",
 }
 addon.RosterPage = RosterPage
 
@@ -65,6 +89,10 @@ Page.__index = Page
 --   onRescan  function(): rescans the guild roster
 --   countsTooltip function() -> lines: what hovering the counts shows (the
 --             guild's size, as RosterViewModel.CountsTooltip words it)
+--   isOfficer function() -> whether the user is an officer, who gets the tabs
+--   departed  function() -> RosterListModel.Departed's rows
+--   onPurge   function(key): purges one departed character
+--   onPurgeAll function(): purges every departed character
 --   onError   function(text): tells the user why something didn't happen
 -- and, for organizing players (RosterController's calls, by character key):
 --   menuFor   function(target) -> { { text, action, key } }: the right-click
@@ -88,8 +116,12 @@ end
 -- Building ------------------------------------------------------------------
 
 function Page:build()
-    local ui, content = self.ui, self.content
+    local ui = self.ui
     local owner = self
+    self:buildTabs()
+    -- The Members tab: everything but the officers' other tabs.
+    local content = ui:frame("Frame", self.content)
+    self.membersBody = content
     self.counts = ui:Text(content, "", "regular", "body", "muted")
     self.counts:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -6)
     -- Hovering the counts shows the guild's size in full: characters,
@@ -235,6 +267,170 @@ function Page:pickerRow(index)
     end)
     picker.rows[index] = row
     return row
+end
+
+-- The officers' tabs, and the Departed and Review tabs' bodies.
+function Page:buildTabs()
+    local ui, owner, content = self.ui, self, self.content
+    self.tab = RosterPage.TABS[1].id
+    self.tabs = ui:Tabs(content, RosterPage.TABS, function(id)
+        owner:ShowTab(id)
+    end)
+    self.tabs:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+    self.tabs:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+    self.tabs:Hide()
+    self.departedBody = ui:frame("Frame", content)
+    self:buildDeparted(self.departedBody)
+    self.reviewBody = ui:frame("Frame", content)
+    self.reviewEmpty = ui:Text(self.reviewBody, RosterPage.REVIEW_EMPTY, "regular", "body", "muted")
+    self.reviewEmpty:SetPoint("TOPLEFT", self.reviewBody, "TOPLEFT", 0, 0)
+end
+
+-- The Departed tab: a line saying how many left and Purge all departed
+-- (a second click confirms, Cancel backs out), over a full-width list.
+function Page:buildDeparted(body)
+    local ui, owner = self.ui, self
+    self.departedSummary = ui:Text(body, "", "regular", "body", "muted")
+    self.departedSummary:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -6)
+    self.purgeAll = ui:Button(body, "Purge all departed", "danger", function()
+        owner:confirmPurgeAll()
+    end)
+    self.purgeAll:SetWidth(RosterPage.PURGE_ALL_WIDTH)
+    self.purgeAll:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, 0)
+    self.purgeCancel = ui:Button(body, "Cancel", "secondary", function()
+        owner:cancelPurgeAll()
+    end)
+    self.purgeCancel:SetWidth(90)
+    self.purgeCancel:SetPoint("RIGHT", self.purgeAll, "LEFT", -Theme.SPACING.s, 0)
+    self.purgeCancel:Hide()
+    self.departedList = ui:PooledList(body, {
+        height = RosterPage.DEPARTED_ROW_HEIGHT,
+        gap = Theme.SPACING.xs,
+        step = RosterPage.SCROLL_STEP,
+        viewport = RosterPage.VIEWPORT,
+        build = function(_, parent)
+            return owner:buildDepartedRow(parent)
+        end,
+        fill = function(frame, row)
+            owner:fillDepartedRow(frame, row)
+        end,
+    })
+    self.departedList:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -RosterPage.HEADER_HEIGHT - Theme.SPACING.m)
+    self.departedList:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, 0)
+    self.noDeparted = ui:Text(body, RosterPage.NO_DEPARTED, "regular", "body", "muted")
+    self.noDeparted:SetPoint("TOPLEFT", self.departedList, "TOPLEFT", 0, 0)
+end
+
+-- A departed character's row: the name in class color with level and
+-- class, then the player, when they left and who's still in the guild,
+-- and Purge on the right.
+function Page:buildDepartedRow(parent)
+    local ui, owner = self.ui, self
+    local row = ui:Panel(parent)
+    row.name = ui:Text(row, "", "semibold", "body", "text")
+    row.name:SetPoint("TOPLEFT", row, "TOPLEFT", Theme.SPACING.m, -Theme.SPACING.s)
+    row.sub = ui:Text(row, "", "regular", "small", "muted")
+    row.sub:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    row.sub:SetPoint("RIGHT", row, "RIGHT", -RosterPage.PURGE_WIDTH - 2 * Theme.SPACING.m, 0)
+    row.sub:SetJustifyH("LEFT")
+    row.sub:SetWordWrap(false)
+    row.purge = ui:Button(row, "Purge", "secondary", function()
+        if row.entry ~= nil then
+            owner:call("onPurge", row.entry.key)
+            owner:refreshDeparted()
+        end
+    end)
+    row.purge:SetWidth(RosterPage.PURGE_WIDTH)
+    row.purge:SetPoint("RIGHT", row, "RIGHT", -Theme.SPACING.m, 0)
+    return row
+end
+
+function Page:fillDepartedRow(frame, entry)
+    frame.entry = entry
+    local facts = {}
+    if type(entry.level) == "number" then
+        table.insert(facts, "Level " .. entry.level)
+    end
+    if type(entry.className) == "string" then
+        table.insert(facts, entry.className)
+    end
+    local name = type(entry.color) == "string" and ("|c" .. entry.color .. entry.name .. "|r") or entry.name
+    if facts[1] ~= nil then
+        name = name .. "  |cff9d9d9d" .. table.concat(facts, " ") .. "|r"
+    end
+    frame.name:SetText(name)
+    local still = RosterPage.WHOLE_PLAYER_LEFT
+    if entry.remaining[1] ~= nil then
+        still = "Still in the guild: " .. table.concat(entry.remaining, ", ")
+    end
+    frame.sub:SetText(table.concat({ entry.player, entry.left, still }, DOT))
+end
+
+-- The Departed tab again, from saved data, with its count in the tab.
+function Page:refreshDeparted()
+    local rows = self:call("departed") or {}
+    self.departedRows = rows
+    self.departedList:SetRows(rows)
+    self.tabs:SetLabel("departed", "Departed" .. DOT .. #rows)
+    self.departedSummary:SetText(#rows == 1 and "1 character has left the guild."
+        or (#rows .. " characters have left the guild."))
+    if rows[1] == nil then
+        self.noDeparted:Show()
+        self.purgeAll:SetActive(false)
+    else
+        self.noDeparted:Hide()
+        self.purgeAll:SetActive(true)
+    end
+    self:cancelPurgeAll()
+end
+
+-- Purge all departed: the first click asks, the second purges.
+function Page:confirmPurgeAll()
+    if not self.confirmingPurge then
+        self.confirmingPurge = true
+        self.purgeAll:SetLabel("Purge all " .. #(self.departedRows or {}) .. "?")
+        self.purgeCancel:Show()
+        return
+    end
+    self:call("onPurgeAll")
+    self:refreshDeparted()
+end
+
+function Page:cancelPurgeAll()
+    self.confirmingPurge = false
+    self.purgeAll:SetLabel("Purge all departed")
+    self.purgeCancel:Hide()
+end
+
+-- Shows tab `id` ("members", "departed" or "review").
+function Page:ShowTab(id)
+    self.tab = id
+    self.tabs:Select(id)
+    self.menu:Close()
+    setShown(self.membersBody, id == "members")
+    setShown(self.departedBody, id == "departed")
+    setShown(self.reviewBody, id == "review")
+    if id == "departed" then
+        self:refreshDeparted()
+    end
+end
+
+-- The tabs for an officer, with each tab's body under them; none for a
+-- member, whose Members body fills the page.
+function Page:layoutTabs()
+    local officer = self:call("isOfficer") == true
+    local top = officer and -(RosterPage.TABS_HEIGHT + Theme.SPACING.m) or 0
+    local _, body
+    for _, body in ipairs({ self.membersBody, self.departedBody, self.reviewBody }) do
+        body:ClearAllPoints()
+        body:SetPoint("TOPLEFT", self.content, "TOPLEFT", 0, top)
+        body:SetPoint("BOTTOMRIGHT", self.content, "BOTTOMRIGHT", 0, 0)
+    end
+    setShown(self.tabs, officer)
+    if officer then
+        self:refreshDeparted()
+    end
+    self:ShowTab(officer and self.tab or "members")
 end
 
 -- The column's controls, top to bottom: the search box, Sort and Rank side
@@ -548,6 +744,7 @@ end
 -- the selected player's panel.
 function Page:Refresh(focus)
     self.menu:Close()
+    self:layoutTabs()
     self:rebuild(focus)
     self:showDetail()
 end
@@ -557,6 +754,9 @@ end
 function Page:Update()
     self:rebuild(nil, true)
     self:showDetail()
+    if self.tab == "departed" then
+        self:refreshDeparted()
+    end
 end
 
 -- Shows the selected player again, and the page, after an organizing

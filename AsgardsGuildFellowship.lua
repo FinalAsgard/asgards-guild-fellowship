@@ -4855,6 +4855,20 @@ if clientProfile.supported then
             onError = function(text)
                 rosterController:Print(text)
             end,
+            -- The officers' tabs.
+            isOfficer = function()
+                return rosterController:IsOfficerUser()
+            end,
+            departed = function()
+                local fields = friendsUi.inputs({ now = client:Timestamp() })
+                return fields and addon.RosterListModel.Departed(fields) or {}
+            end,
+            onPurge = function(key)
+                organize("Purge", key)
+            end,
+            onPurgeAll = function()
+                organize("PurgeAllDeparted")
+            end,
             -- The old roster's organizing actions and permission rules.
             menuFor = function(target)
                 return organize("MenuFor", target) or {}

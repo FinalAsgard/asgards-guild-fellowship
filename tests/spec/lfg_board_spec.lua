@@ -1818,6 +1818,37 @@ test.test("roster: a member is offered only what they may do to their own player
     test.assertEqual("Heals.\nAlso fishes.", (partition:PlayerProfileText(player, "bio")))
 end)
 
+test.test("roster: an officer purges departed characters from the Departed tab; a member has no tabs", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    partition:MarkDeparted(normalizer:Key("Bolt Smith"), (world.environment.time and world.environment.time()) or 0)
+    test.assertTrue(addon.agfWindow:Open())
+    local page = addon.rosterPage
+
+    test.assertTrue(page.tabs.shown)
+    test.assertEqual("Departed · 1", page.tabs.tabs[2].label.text)
+    page.tabs.tabs[2].scripts.OnClick(page.tabs.tabs[2])
+    local row
+    local _, frame
+    for _, frame in ipairs(page.departedList:Shown()) do
+        if frame.shown then
+            row = frame
+        end
+    end
+    test.assertContains(row.name.text, "Bolt Smith")
+    test.assertContains(row.sub.text, "Still in the guild: Hammer Smith")
+    row.purge.scripts.OnClick(row.purge)
+    test.assertEqual(nil, partition:GetCharacter(normalizer:Key("Bolt Smith")))
+    test.assertEqual("Departed · 0", page.tabs.tabs[2].label.text)
+
+    local memberWorld, memberAddon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(memberWorld.environment)
+    test.assertTrue(memberAddon.agfWindow:Open())
+    test.assertFalse(memberAddon.rosterPage.tabs.shown)
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the page is built on show, and a pinned Friend is starred", function()

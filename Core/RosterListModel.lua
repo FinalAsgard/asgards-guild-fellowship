@@ -375,3 +375,55 @@ function RosterListModel.Build(inputs)
     view.default = view.cards[1] and view.cards[1].playerId or nil
     return view
 end
+
+-- The officers' Departed tab: every character that left the guild, most
+-- recent first. inputs: partition, normalizer, classColor, className, now.
+-- Returns rows { key, name, color, level, className, playerId, player (the
+-- player's alias, else its main's name), left ("Left 3 days ago"),
+-- remaining (the names of the player's characters still in the guild, in
+-- the roster's order; empty when the whole player left), departed (when) }.
+function RosterListModel.Departed(inputs)
+    local partition, normalizer = inputs.partition, inputs.normalizer
+    local function nameOf(key)
+        local raw = (partition:GetCharacter(key) or {}).name or key
+        return normalizer and normalizer:Display(raw) or raw
+    end
+    local rows = {}
+    partition:EachCharacter(function(key, character)
+        if character.departed == nil then
+            return
+        end
+        local player = character.player and partition:GetPlayer(character.player) or nil
+        local alias = player and player.alias or nil
+        if type(alias) ~= "string" or alias == "" then
+            alias = nil
+        end
+        local remaining = {}
+        local keys = character.player and partition:CharactersOf(character.player) or {}
+        local index
+        for index = 1, #keys do
+            if partition:IsInGuild(keys[index]) then
+                table.insert(remaining, nameOf(keys[index]))
+            end
+        end
+        table.insert(rows, {
+            key = key,
+            name = nameOf(key),
+            color = ask(inputs.classColor, character.class),
+            level = character.level,
+            className = ask(inputs.className, character.class),
+            playerId = character.player,
+            player = alias or (player and nameOf(player.main)) or nameOf(key),
+            left = addon.RosterViewModel.LeftText(character.departed, inputs.now),
+            remaining = remaining,
+            departed = character.departed,
+        })
+    end)
+    table.sort(rows, function(a, b)
+        if a.departed ~= b.departed then
+            return a.departed > b.departed
+        end
+        return a.key < b.key
+    end)
+    return rows
+end

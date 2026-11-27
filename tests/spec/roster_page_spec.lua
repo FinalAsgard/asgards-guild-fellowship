@@ -95,6 +95,26 @@ local function setup(count, online)
         onRescan = function()
             table.insert(world.calls, "rescan")
         end,
+        -- `world.officer` gets the tabs; `world.gone` are the departed rows.
+        isOfficer = function()
+            return world.officer == true
+        end,
+        departed = function()
+            return world.gone or {}
+        end,
+        onPurge = function(key)
+            table.insert(world.calls, "purge " .. key)
+            local index
+            for index = #(world.gone or {}), 1, -1 do
+                if world.gone[index].key == key then
+                    table.remove(world.gone, index)
+                end
+            end
+        end,
+        onPurgeAll = function()
+            table.insert(world.calls, "purge all")
+            world.gone = {}
+        end,
         countsTooltip = function()
             return { "Guild size", "3 players, all known", "5 of 9 characters online" }
         end,
@@ -606,4 +626,127 @@ test.test("roster page: hovering the counts shows the guild's size, characters i
     test.assertEqual("Guild size | 3 players, all known | 5 of 9 characters online", table.concat(shown, " | "))
     hover.scripts.OnLeave(hover)
     test.assertFalse(world.environment.GameTooltip.open)
+end)
+
+-- Officers' tabs ---------------------------------------------------------------
+
+-- Two departed characters: Oldalt, whose player still has Player001 in the
+-- guild, and Gonzo, whose whole player left.
+local function departedRows()
+    return {
+        { key = "oldalt", name = "Oldalt", level = 30, className = "Mage", color = "ff3fc7eb", player = "Player001",
+            left = "Left 2 days ago", remaining = { "Player001" } },
+        { key = "gonzo", name = "Gonzo", level = 60, className = "Rogue", player = "Gonzo",
+            left = "Left 9 days ago", remaining = {} },
+    }
+end
+
+-- The shown departed rows, top to bottom.
+local function departedShown(world)
+    local rows = {}
+    local _, frame
+    for _, frame in ipairs(world.page.departedList:Shown()) do
+        if frame.shown then
+            table.insert(rows, frame)
+        end
+    end
+    table.sort(rows, function(a, b)
+        return a.entry.key > b.entry.key
+    end)
+    return rows
+end
+
+test.test("roster page: a member gets the roster with no tabs", function()
+    local world = setup(3, 1)
+
+    test.assertFalse(world.page.tabs.shown)
+    test.assertTrue(world.page.membersBody.shown)
+    test.assertFalse(world.page.departedBody.shown)
+    test.assertFalse(world.page.reviewBody.shown)
+end)
+
+test.test("roster page: an officer gets Members, Departed and Review tabs, on Members", function()
+    local world = setup(3, 1)
+    world.officer = true
+    world.gone = departedRows()
+    world.page:Refresh()
+    local tabs = world.page.tabs
+
+    test.assertTrue(tabs.shown)
+    test.assertEqual("Members", tabs.tabs[1].label.text)
+    test.assertEqual("Departed · 2", tabs.tabs[2].label.text)
+    test.assertEqual("Review", tabs.tabs[3].label.text)
+    test.assertEqual("members", tabs:Selected())
+    test.assertTrue(world.page.membersBody.shown)
+
+    click(tabs.tabs[3])
+    test.assertTrue(world.page.reviewBody.shown)
+    test.assertFalse(world.page.membersBody.shown)
+end)
+
+test.test("roster page: Departed lists each character with its player, when it left and who's still in", function()
+    local world = setup(3, 1)
+    world.officer = true
+    world.gone = departedRows()
+    world.page:Refresh()
+    click(world.page.tabs.tabs[2])
+
+    test.assertTrue(world.page.departedBody.shown)
+    test.assertFalse(world.page.membersBody.shown)
+    test.assertEqual("2 characters have left the guild.", world.page.departedSummary.text)
+    local rows = departedShown(world)
+    test.assertEqual(2, #rows)
+    test.assertEqual("|cff3fc7ebOldalt|r  |cff9d9d9dLevel 30 Mage|r", rows[1].name.text)
+    test.assertEqual("Player001 · Left 2 days ago · Still in the guild: Player001", rows[1].sub.text)
+    test.assertEqual("Gonzo · Left 9 days ago · The whole player left", rows[2].sub.text)
+end)
+
+test.test("roster page: Purge purges one departed character and the count follows", function()
+    local world = setup(3, 1)
+    world.officer = true
+    world.gone = departedRows()
+    world.page:Refresh()
+    click(world.page.tabs.tabs[2])
+    click(departedShown(world)[2].purge)
+
+    test.assertEqual("purge gonzo", world.calls[1])
+    test.assertEqual(1, #departedShown(world))
+    test.assertEqual("Departed · 1", world.page.tabs.tabs[2].label.text)
+end)
+
+test.test("roster page: Purge all departed asks first, and Cancel backs out", function()
+    local world = setup(3, 1)
+    world.officer = true
+    world.gone = departedRows()
+    world.page:Refresh()
+    click(world.page.tabs.tabs[2])
+    local purgeAll = world.page.purgeAll
+
+    click(purgeAll)
+    test.assertEqual(0, #world.calls)
+    test.assertEqual("Purge all 2?", purgeAll.label.text)
+    test.assertTrue(world.page.purgeCancel.shown)
+    click(world.page.purgeCancel)
+    test.assertEqual("Purge all departed", purgeAll.label.text)
+    test.assertEqual(0, #world.calls)
+
+    click(purgeAll)
+    click(purgeAll)
+    test.assertEqual("purge all", world.calls[1])
+    test.assertEqual("Departed · 0", world.page.tabs.tabs[2].label.text)
+    test.assertTrue(world.page.noDeparted.shown)
+    test.assertFalse(purgeAll.active)
+end)
+
+test.test("roster page: an officer demoted to member loses the tabs", function()
+    local world = setup(3, 1)
+    world.officer = true
+    world.page:Refresh()
+    click(world.page.tabs.tabs[2])
+    world.officer = false
+    world.page:Refresh()
+
+    test.assertFalse(world.page.tabs.shown)
+    test.assertTrue(world.page.membersBody.shown)
+    test.assertFalse(world.page.departedBody.shown)
 end)
