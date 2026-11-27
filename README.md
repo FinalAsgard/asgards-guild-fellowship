@@ -50,6 +50,8 @@ Everything the add-on does is in one window, with picture tabs down its right ed
 - **Guild Log** (officers only): the guild's long-term record of joins, invites, leaves, kicks, promotions and demotions (see [Guild Log](#guild-log)).
 - **Settings**: everything else (General, Chat Tags, Guild Map, and Do Not Disturb), and the version you're running.
 
+The [Friends](#friends), [Guild LFG Board](#guild-lfg-board) and [Greetings](#editing-greetings) pages live in the add-on's new window, which the rest of these tabs will move to later.
+
 The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf profile`, `/agf recruit` and `/agf options` open their own tabs; `/agf greet` opens the new window on [Greetings](#editing-greetings). Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
 
 ## Settings
@@ -247,6 +249,17 @@ An alias tag is medium blue and a main's-name tag is light blue, so you can tell
 Tags are on by default. `/agf tags` or the **Chat Tags** settings turn them off, and doing it again turns them back on. The choice is saved for every character on this game install and applies from the next chat line.
 
 On Retail, the game hides chat from add-ons during encounters and keystone runs. Those lines appear without tags, and tags return once the restriction lifts.
+
+## Friends
+
+The **Friends** page of the add-on's new window is the people you play with. Pin up to 5 guildmates as your **Friends**: they get the star in greet prompts, on the LFG page and in **Find guildmates**, and can have [friend greetings](#editing-greetings) of their own. Friends are kept on this game install, per guild, and aren't shared with anyone.
+
+- **Your Friends** are on the left as small player cards, then **+ Add a friend** for each open slot. Hover a Friend for an **X** that removes them, or right-click one for **Replace...** and **Remove friend**.
+- **+ Add a friend** (or **Replace...**) opens **Choose a friend**: search by alias or any character's name, and pick from the list. When the search matched only an alt, the row says which (**Alt: ...**). **Cancel** goes back.
+- **Most grouped with**, under your Friends, lists the guildmates you've grouped with most who aren't Friends, with their party count. Right-click one for **Add as friend** (greyed out while all 5 slots are taken).
+- Click a player to see them on the right: their name with a gold **Friend** or **Most grouped** badge, their main's level, class and rank, where they are and when they were last online, the star (click it to pin or unpin them), **Whisper** and **Invite**, and tiles for their Discord, how often and when you last grouped, and when they joined the guild. Under them, the **Characters**, **Bio**, **Grouped** (your parties together, with **Show more**) and **Log** tabs.
+
+The page is built when you open it, and doesn't change while it's open. **Open in Guild Fellowship**, in the game's right-click menu on a guildmate's name, opens the window on that player.
 
 ## Guild Greet
 
@@ -574,7 +587,7 @@ Long names wrap onto more lines at the spaces between words, and the drawer grow
 
 ### The window
 
-`/agf lfg` and **Open Guild LFG Board** open the add-on's new window on the board. It has one size and can be dragged. The sidebar has the add-on's name, an **LFG** button, and **Settings** at the bottom, with your character and the add-on's version under it. The **gear** at the top right opens the LFG settings (**Show LFG button**, and the chat line for new groups); the **X** closes the window. The Settings page has a **Chat** tab with the chat tags switch, the same setting as `/agf tags`, and the **Alias tag color** and **Main's name tag color**: click a swatch, or **Custom...** for any color from the game's color picker, and the sample shows the tag in that color. They're the same colors as in the old window's options.
+`/agf lfg` and **Open Guild LFG Board** open the add-on's new window on the board. It has one size and can be dragged. The sidebar has the add-on's name, then **Friends** (see [Friends](#friends)), **LFG** and **Greetings** (see [Editing greetings](#editing-greetings)), and **Settings** at the bottom, with your character and the add-on's version under it. The **gear** at the top right opens the LFG settings (**Show LFG button**, and the chat line for new groups); the **X** closes the window. The Settings page has a **Chat** tab with the chat tags switch, the same setting as `/agf tags`, and the **Alias tag color** and **Main's name tag color**: click a swatch, or **Custom...** for any color from the game's color picker, and the sample shows the tag in that color. They're the same colors as in the old window's options.
 
 ### The board
 
