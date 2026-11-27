@@ -14,6 +14,8 @@ local Theme = addon.Theme
 
 local Widgets = {
     BUTTON_HEIGHT = 26,
+    -- An open context menu's frame level (its catcher just under it).
+    MENU_LEVEL = 100,
     TOGGLE_WIDTH = 34,
     TOGGLE_HEIGHT = 18,
     INPUT_HEIGHT = 26,
@@ -1132,8 +1134,12 @@ end
 -- closes it. A disabled item is greyed out and does nothing.
 -- Close() hides it.
 function UI:ContextMenu(parent)
-    local menu = self:Panel(parent, { radius = Theme.RADIUS.button, fill = "raised" })
-    menu:SetFrameStrata("DIALOG")
+    -- It lives on the screen itself, over everything, rather than inside
+    -- `parent`: inside the window it showed but couldn't be clicked in some
+    -- places (the listing editor). It closes when `parent` hides.
+    local screen = self.environment.UIParent or parent
+    local menu = self:Panel(screen, { radius = Theme.RADIUS.button, fill = "raised" })
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
     menu:SetWidth(180)
     menu:Hide()
     menu.rows = {}
@@ -1149,10 +1155,10 @@ function UI:ContextMenu(parent)
     menu.divider:SetPoint("RIGHT", menu, "RIGHT", -Theme.SPACING.s, 0)
     -- A click anywhere outside the open menu closes it: a catcher covering
     -- the screen sits just under it.
-    local host = self.environment.UIParent or parent
+    local host = screen
     local catcher = self:frame("Button", host)
     catcher:SetAllPoints(host)
-    catcher:SetFrameStrata("DIALOG")
+    catcher:SetFrameStrata("FULLSCREEN_DIALOG")
     catcher:RegisterForClicks("AnyDown")
     catcher:SetScript("OnClick", function()
         menu:Close()
@@ -1165,6 +1171,11 @@ function UI:ContextMenu(parent)
         menu.open = false
         catcher:Hide()
     end)
+    if parent ~= screen and type(parent.HookScript) == "function" then
+        parent:HookScript("OnHide", function()
+            menu:Hide()
+        end)
+    end
     local ui = self
     -- The width it was made, read on first open.
     local baseWidth
@@ -1245,10 +1256,14 @@ function UI:ContextMenu(parent)
         menu:ClearAllPoints()
         menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
         menu.open = true
-        local level = type(menu.GetFrameLevel) == "function" and menu:GetFrameLevel() or nil
-        catcher:SetFrameLevel(math.max((tonumber(level) or 2) - 1, 1))
+        -- The catcher just under the menu, the menu (and its rows) on top.
+        catcher:SetFrameLevel(Widgets.MENU_LEVEL - 1)
+        menu:SetFrameLevel(Widgets.MENU_LEVEL)
         catcher:Show()
         menu:Show()
+        if type(menu.Raise) == "function" then
+            menu:Raise()
+        end
     end
     function menu.Close()
         menu.open = false

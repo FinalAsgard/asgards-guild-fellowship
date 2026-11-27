@@ -588,8 +588,10 @@ test.test("lfg page: the editor shows each kind's fields, and Cancel goes back",
     test.assertEqual("Search all zones", page.search.placeholder.text)
     test.assertFalse(page.editor.questing.shown)
     test.assertFalse(page.changeZoneButton.shown)
-    -- Cancel closes the list, the zone as it was.
+    -- Cancel closes the list, the zone as it was; the search leaves room
+    -- for it.
     test.assertTrue(page.cancelZoneButton.shown)
+    test.assertEqual(page.search.width + 80 + 8, 320)
     type_(page.search, "dusk")
     click(page.cancelZoneButton)
     test.assertFalse(page.search.shown)
@@ -603,6 +605,9 @@ test.test("lfg page: the editor shows each kind's fields, and Cancel goes back",
     test.assertTrue(page.editor.raid.shown)
     click(page.kindSelector.buttons[4])
     test.assertTrue(page.otherText.shown)
+    -- Back on Dungeon, the search is full width again.
+    click(page.kindSelector.buttons[1])
+    test.assertEqual(320, page.search.width)
 
     click(page.cancelButton)
     test.assertEqual("solo", page:Mode())
