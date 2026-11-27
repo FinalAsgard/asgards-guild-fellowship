@@ -37,6 +37,7 @@ local MANIFEST_FILES = {
     "Core/ReconcileEngine.lua",
     "Core/NoteAudit.lua",
     "Core/PlayerService.lua",
+    "Core/ListWindow.lua",
     "Core/RosterViewModel.lua",
     "Core/ConflictViewModel.lua",
     "Core/BundleReviewViewModel.lua",
