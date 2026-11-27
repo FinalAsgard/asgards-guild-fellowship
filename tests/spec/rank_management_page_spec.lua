@@ -8,10 +8,12 @@ local function setup()
     local environment = fakeFrames.install({})
     local ui = addon.Widgets.Create(environment)
     local content = environment.CreateFrame("Frame")
-    local world = { addon = addon, searches = {} }
+    local world = { addon = addon, searches = {}, snoozed = {} }
     world.rows = {
-        { playerId = 1, name = "TheTool", status = "Ready", rankText = "→ Member", promoteText = "Toolbox, Hammer" },
-        { playerId = 2, name = "Bolt", status = "Due", rankText = "→ Veteran", waitingText = "Discord name · Interview" },
+        { playerId = 1, key = "toolbox", name = "TheTool", status = "Ready", rankText = "→ Member",
+            promoteText = "Toolbox, Hammer" },
+        { playerId = 2, key = "bolt", name = "Bolt", status = "Due", rankText = "→ Veteran",
+            waitingText = "Discord name · Interview" },
     }
     world.page = addon.RankManagementPage.Create(content, ui, {
         model = function(search)
@@ -24,6 +26,19 @@ local function setup()
                 end
             end
             return { rows = rows, count = #world.rows, footer = "1 Ready · 1 Due · Promotion happens on the guild roster." }
+        end,
+        onSnooze = function(key)
+            table.insert(world.snoozed, key)
+            local index
+            for index = #world.rows, 1, -1 do
+                if world.rows[index].key == key then
+                    table.remove(world.rows, index)
+                end
+            end
+            return world.refuse == nil, world.refuse
+        end,
+        onError = function(text)
+            world.error = text
         end,
     })
     world.page:Refresh()
@@ -85,4 +100,38 @@ test.test("rank management page: with nobody due, it says so", function()
 
     test.assertTrue(world.page.empty.shown)
     test.assertEqual(world.addon.RankManagementPage.EMPTY, world.page.empty.text)
+end)
+
+test.test("rank management page: Snooze shows only on Due rows, and one click snoozes the player", function()
+    local world = setup()
+    local rows = shown(world)
+
+    test.assertFalse(rows[1].snooze.shown)
+    test.assertTrue(rows[2].snooze.shown)
+    rows[2].snooze.scripts.OnClick(rows[2].snooze)
+    test.assertEqual("bolt", world.snoozed[1])
+    -- The list is built again without them.
+    test.assertEqual(1, #shown(world))
+end)
+
+test.test("rank management page: a refused snooze says why", function()
+    local world = setup()
+    world.refuse = "only officers can snooze a promotion check"
+    local row = shown(world)[2]
+    row.snooze.scripts.OnClick(row.snooze)
+
+    test.assertEqual("Bolt wasn't snoozed: only officers can snooze a promotion check.", world.error)
+end)
+
+test.test("rank management page: a Match row lists the characters to bring up, with no Snooze", function()
+    local world = setup()
+    world.rows = { { playerId = 3, key = "boss", name = "Boss", status = "Match", rankText = "→ Veteran",
+        promoteText = "Grunt, Peon" } }
+    world.page:Refresh()
+    local row = shown(world)[1]
+
+    test.assertEqual("Match", row.status.text)
+    test.assertEqual("Boss  |cff9d9d9d→ Veteran|r", row.name.text)
+    test.assertEqual("Promote: Grunt, Peon", row.sub.text)
+    test.assertFalse(row.snooze.shown)
 end)

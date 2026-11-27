@@ -1487,6 +1487,12 @@ if clientProfile.supported then
                         model = function(search)
                             return promotions.due(search)
                         end,
+                        onSnooze = function(key)
+                            return promotions.snooze(key)
+                        end,
+                        onError = function(text)
+                            rosterController:Print(text)
+                        end,
                     })
                     -- Drawn on the window's first open; specs reach it here.
                     addon.rankPage = friendsUi.rankPage

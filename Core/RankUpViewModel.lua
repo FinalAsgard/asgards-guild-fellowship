@@ -11,13 +11,19 @@ local _, addon = ...
 --          the rank promoted to)
 --   Due    the time is up but something else isn't; the row says what it's
 --          waiting on ("Discord name · Interview"). A snoozed player isn't
---          due until the snooze ends; Ready ignores snoozes.
--- Ready rows come first, then Due, each by name.
+--          due until the snooze ends, and is counted in the footer
+--          instead; Ready ignores snoozes.
+--   Match  the player's alts below their highest rank, on a rank set to
+--          "Alts should match this rank" (PromotionPolicy.MatchSet): the row
+--          lists the characters to bring up. A Ready player's row already
+--          promotes them, and a snooze hides Match as it hides Due.
+-- Ready rows come first, then Match, then Due, each by name.
 --
 -- Pure: PromotionPolicy's inputs are handed in, plus how names show.
 local RankUpViewModel = {
     READY = "Ready",
     DUE = "Due",
+    MATCH = "Match",
     ARROW = "→ ",
     FOOTER = "Promotion happens on the guild roster, where the Ready arrow shows.",
 }
@@ -51,7 +57,7 @@ end
 
 -- Whether `needle` (lowercase, not empty) is in the alias or any of the
 -- names.
-local function matches(needle, alias, names)
+local function found(needle, alias, names)
     if string.find(lower(alias), needle, 1, true) ~= nil then
         return true
     end
@@ -71,14 +77,16 @@ end
 --   search      text to find in aliases and character names, ignoring case
 -- Returns {
 --   rows    { playerId, key (the profile character), name (the alias, else
---           the main's name), status (READY or DUE), rank, rankName (the
---           rank promoted to), rankText ("→ Member"), waiting (the unmet
---           items' labels, for Due), waitingText ("Discord name ·
---           Interview"), promote (the characters to promote, for Ready),
---           promoteText ("Toolbox, Hammer") }, Ready first
---   ready, due   how many of each, whatever the search
---   count   ready + due
---   footer  "2 Ready · 5 Due · Promotion happens on the guild roster, ..."
+--           the main's name), status (READY, MATCH or DUE), rank, rankName
+--           (the rank promoted to), rankText ("→ Member"), waiting (the
+--           unmet items' labels, for Due), waitingText ("Discord name ·
+--           Interview"), promote (the characters to promote, for Ready and
+--           Match), promoteText ("Toolbox, Hammer") }, Ready first
+--   ready, match, due, snoozed   how many of each, whatever the search
+--   count   ready + match + due
+--   footer  "2 Ready · 1 Match · 5 Due · 4 snoozed · Promotion happens on
+--           the guild roster, ..." (Match and snoozed only when there are
+--           any)
 -- }
 function RankUpViewModel.Due(inputs)
     local partition = inputs.partition
@@ -90,39 +98,87 @@ function RankUpViewModel.Due(inputs)
         end
         return itemsByRank[rank]
     end
-    local view = { rows = {}, ready = 0, due = 0 }
+    local view = { rows = {}, ready = 0, match = 0, due = 0, snoozed = 0 }
+    local matches = addon.PromotionPolicy.MatchSet(inputs)
+    local names = inputs.rankNames or {}
+    local function rankName(rank)
+        return names[rank + 1] or ("Rank " .. rank)
+    end
     partition:EachPlayer(function(playerId, player)
         local key = addon.PromotionPolicy.HighestCharacter(partition, playerId)
         local status = key and addon.PromotionPolicy.Evaluate(inputs, key, itemsOf) or nil
-        if status == nil then
-            return
+        local snoozed = key ~= nil and inputs.checks:IsSnoozed(key, inputs.now)
+        local ready = status ~= nil and status.ready
+        local due = status ~= nil and not ready and status.timeMet
+        if due and snoozed then
+            view.snoozed = view.snoozed + 1
+            due = false
         end
-        local ready = status.ready
-        if not ready and not (status.timeMet and not inputs.checks:IsSnoozed(key, inputs.now)) then
+        local keys = inGuild(partition, playerId)
+        -- Alts to bring up to the player's rank, and the highest rank any of
+        -- them goes to.
+        local matched, target = {}, nil
+        if not ready and not snoozed then
+            local index
+            for index = 1, #keys do
+                local alt = keys[index]
+                local rank = matches[alt]
+                if rank ~= nil then
+                    table.insert(matched, keys[index])
+                    if target == nil or rank < target then
+                        target = rank
+                    end
+                end
+            end
+        end
+        if not ready and not due and matched[1] == nil then
             return
         end
         if ready then
             view.ready = view.ready + 1
-        else
+        elseif due then
             view.due = view.due + 1
         end
-        local keys = inGuild(partition, playerId)
-        local names = {}
+        if matched[1] ~= nil then
+            view.match = view.match + 1
+        end
+        local characterNames = {}
         local index
         for index = 1, #keys do
-            names[index] = nameOf(inputs, keys[index])
+            characterNames[index] = nameOf(inputs, keys[index])
         end
         local alias = player and player.alias or nil
         if type(alias) ~= "string" or alias == "" then
             alias = nil
         end
-        if needle ~= "" and not matches(needle, alias, names) then
+        if needle ~= "" and not found(needle, alias, characterNames) then
+            return
+        end
+        local name = alias or (player and player.main and nameOf(inputs, player.main)) or characterNames[1]
+        if matched[1] ~= nil then
+            local promote = {}
+            for index = 1, #matched do
+                table.insert(promote, nameOf(inputs, matched[index]))
+            end
+            table.insert(view.rows, {
+                playerId = playerId,
+                key = key,
+                name = name,
+                status = RankUpViewModel.MATCH,
+                rank = target,
+                rankName = rankName(target),
+                rankText = RankUpViewModel.ARROW .. rankName(target),
+                promote = promote,
+                promoteText = table.concat(promote, ", "),
+            })
+        end
+        if not ready and not due then
             return
         end
         local row = {
             playerId = playerId,
             key = key,
-            name = alias or (player and player.main and nameOf(inputs, player.main)) or names[1],
+            name = name,
             status = ready and RankUpViewModel.READY or RankUpViewModel.DUE,
             rank = status.nextRank,
             rankName = status.nextRankName,
@@ -133,7 +189,7 @@ function RankUpViewModel.Due(inputs)
             for index = 1, #keys do
                 local rank = (partition:GetCharacter(keys[index]) or {}).rank
                 if type(rank) == "number" and rank > status.nextRank then
-                    table.insert(row.promote, names[index])
+                    table.insert(row.promote, characterNames[index])
                 end
             end
             row.promoteText = table.concat(row.promote, ", ")
@@ -148,17 +204,26 @@ function RankUpViewModel.Due(inputs)
         end
         table.insert(view.rows, row)
     end)
+    local order = { [RankUpViewModel.READY] = 1, [RankUpViewModel.MATCH] = 2, [RankUpViewModel.DUE] = 3 }
     table.sort(view.rows, function(a, b)
         if a.status ~= b.status then
-            return a.status == RankUpViewModel.READY
+            return order[a.status] < order[b.status]
         end
         if lower(a.name) ~= lower(b.name) then
             return lower(a.name) < lower(b.name)
         end
         return tostring(a.playerId) < tostring(b.playerId)
     end)
-    view.count = view.ready + view.due
-    view.footer = view.ready .. " " .. RankUpViewModel.READY .. DOT .. view.due .. " " .. RankUpViewModel.DUE
-        .. DOT .. RankUpViewModel.FOOTER
+    view.count = view.ready + view.match + view.due
+    local parts = { view.ready .. " " .. RankUpViewModel.READY }
+    if view.match > 0 then
+        table.insert(parts, view.match .. " " .. RankUpViewModel.MATCH)
+    end
+    table.insert(parts, view.due .. " " .. RankUpViewModel.DUE)
+    if view.snoozed > 0 then
+        table.insert(parts, view.snoozed .. " snoozed")
+    end
+    table.insert(parts, RankUpViewModel.FOOTER)
+    view.footer = table.concat(parts, DOT)
     return view
 end

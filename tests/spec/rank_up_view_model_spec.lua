@@ -140,8 +140,12 @@ test.test("rank up view model: an alt already at the rank promoted to isn't list
 
     local veteran = newGuild({ high = { 3, 30 }, vet = { 2, 1 } })
     veteran.inputs.partition:JoinPlayerOf("high", "vet", "manual")
-    -- Judged on the Veteran, whose rank has no requirements: not listed.
-    test.assertEqual(0, #veteran.due().rows)
+    -- Judged on the Veteran, whose rank has no requirements: no Ready or Due
+    -- row, but High is brought up to match.
+    local view = veteran.due()
+    test.assertEqual(1, #view.rows)
+    test.assertEqual("Match", view.rows[1].status)
+    test.assertEqual("high", view.rows[1].promoteText)
 end)
 
 test.test("rank up view model: a snoozed player isn't due, but a ready one still shows", function()
@@ -153,6 +157,7 @@ test.test("rank up view model: a snoozed player isn't due, but a ready one still
 
     test.assertEqual("ready Ready", names(view))
     test.assertEqual(0, view.due)
+    test.assertEqual(1, view.snoozed)
 end)
 
 test.test("rank up view model: search narrows the list by alias or character name, keeping the counts", function()
@@ -183,4 +188,74 @@ test.test("rank up view model: nobody up for a rank leaves an empty list", funct
     test.assertEqual(0, #view.rows)
     test.assertEqual("0 Ready · 0 Due · Promotion happens on the guild roster, where the Ready arrow shows.",
         view.footer)
+end)
+
+-- Snoozes and Match -------------------------------------------------------------
+
+test.test("rank up view model: the footer counts snoozed players", function()
+    local world = newGuild({ a = { 4, 30 }, b = { 4, 30 }, c = { 4, 30 } })
+    world.inputs.checks:Snooze("a", 4, NOW + 7 * DAY, OFFICER, NOW)
+    world.inputs.checks:Snooze("b", 4, NOW + 7 * DAY, OFFICER, NOW)
+    local view = world.due()
+
+    test.assertEqual("c Due", names(view))
+    test.assertEqual(2, view.snoozed)
+    test.assertEqual("0 Ready · 1 Due · 2 snoozed · Promotion happens on the guild roster, where the Ready arrow shows.",
+        view.footer)
+end)
+
+test.test("rank up view model: a snooze that ended puts the player back on Due", function()
+    local world = newGuild({ a = { 4, 30 } })
+    world.inputs.checks:Snooze("a", 4, NOW - 1, OFFICER, NOW - 8 * DAY)
+
+    test.assertEqual("a Due", names(world.due()))
+    test.assertEqual(0, world.due().snoozed)
+end)
+
+test.test("rank up view model: alts below their player's rank show as Match with the characters to bring up", function()
+    -- Boss is a Veteran (no requirements at rank 2); Grunt and Peon, its
+    -- alts, are a Member and an Initiate.
+    local world = newGuild({ boss = { 2, 30 }, grunt = { 3, 1 }, peon = { 4, 1 } })
+    world.inputs.partition:JoinPlayerOf("grunt", "boss", "manual")
+    world.inputs.partition:JoinPlayerOf("peon", "boss", "manual")
+    local view = world.due()
+
+    test.assertEqual("boss Match", names(view))
+    local row = view.rows[1]
+    test.assertEqual("→ Veteran", row.rankText)
+    test.assertEqual("grunt, peon", row.promoteText)
+    test.assertEqual(1, view.match)
+    test.assertEqual(1, view.count)
+    test.assertEqual("0 Ready · 1 Match · 0 Due · Promotion happens on the guild roster, where the Ready arrow shows.",
+        view.footer)
+end)
+
+test.test("rank up view model: no Match for a rank whose alts needn't match", function()
+    local world = newGuild({ boss = { 2, 30 }, grunt = { 3, 1 } })
+    world.inputs.partition:JoinPlayerOf("grunt", "boss", "manual")
+    world.inputs.requirements:SetMatchesAlts(2, false, OFFICER, NOW)
+
+    test.assertEqual(0, #world.due().rows)
+end)
+
+test.test("rank up view model: Match comes after Ready and before Due, and a snooze hides it", function()
+    local world = newGuild({ ready = { 4, 30 }, waiting = { 4, 30 }, boss = { 2, 30 }, grunt = { 3, 1 } })
+    world.inputs.partition:JoinPlayerOf("grunt", "boss", "manual")
+    world.inputs.checks:Set("ready", world.rules, true, nil, OFFICER, NOW)
+
+    test.assertEqual("ready Ready, boss Match, waiting Due", names(world.due()))
+    world.inputs.checks:Snooze("boss", 2, NOW + 7 * DAY, OFFICER, NOW)
+    test.assertEqual("ready Ready, waiting Due", names(world.due()))
+end)
+
+test.test("rank up view model: a player not yet due still gets a Match row for alts behind", function()
+    -- Lead is a Member a day in, with an Initiate alt: not due Veteran, but
+    -- the alt is brought up to Member.
+    local world = newGuild({ lead = { 3, 1 }, alt = { 4, 1 } })
+    world.inputs.partition:JoinPlayerOf("alt", "lead", "manual")
+    local view = world.due()
+
+    test.assertEqual("lead Match", names(view))
+    test.assertEqual("→ Member", view.rows[1].rankText)
+    test.assertEqual("alt", view.rows[1].promoteText)
 end)
