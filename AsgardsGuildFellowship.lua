@@ -1391,14 +1391,20 @@ if clientProfile.supported then
                             promptsOn = function()
                                 return settings:Get("guildGreet") == true
                             end,
-                            -- The preview fills in the user's own names.
+                            -- The preview fills in the user's own names: their
+                            -- alias and main, found by the roster's key for this
+                            -- character (Forever's game reports only the first
+                            -- name, which names no one in the roster).
                             names = function()
+                                local _, partition, normalizer = rosterController:QuietContext()
                                 local fullName = client:GetPlayerFullName()
-                                local _, _, normalizer = rosterController:QuietContext()
-                                if fullName == nil then
+                                local key = rosterController:SelfKey()
+                                local stored = partition and key and partition:GetCharacter(key)
+                                local name = stored and stored.name or fullName
+                                if name == nil then
                                     return {}
                                 end
-                                return guildGreet:Names(normalizer and normalizer:Key(fullName) or fullName, fullName)
+                                return guildGreet:Names(key or (normalizer and normalizer:Key(name)) or name, name)
                             end,
                             now = function()
                                 return client:Timestamp()
