@@ -14,6 +14,7 @@ local MANIFEST_FILES = {
     "Adapters/PlayerDetailPanel.lua",
     "Adapters/FriendsPage.lua",
     "Adapters/RosterPage.lua",
+    "Adapters/RankManagementPage.lua",
     "Adapters/GameMenu.lua",
     "Adapters/AgfGreetingsPage.lua",
     "Adapters/LfgButton.lua",

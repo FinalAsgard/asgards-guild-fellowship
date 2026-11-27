@@ -133,7 +133,20 @@ local friendsUi = {
     -- The Roster page, which shares the Friends page's player panel.
     roster = nil,
     drawRoster = function() end,
+    -- The officers' Rank management page.
+    rankPage = nil,
 }
+-- Rank management and the window's badges follow a change while the window
+-- is open.
+function friendsUi.followRank()
+    if agfWindow == nil or not agfWindow:IsOpen() then
+        return
+    end
+    agfWindow:RefreshBadges()
+    if friendsUi.rankPage ~= nil and agfWindow:Page() == "rank" then
+        friendsUi.rankPage:Update()
+    end
+end
 -- The Greetings page in the new window, once it's drawn.
 local greetingsUi = {
     page = nil,
@@ -260,13 +273,13 @@ if clientProfile.supported then
             if guildNoteOverlay ~= nil then
                 guildNoteOverlay:Refresh()
             end
-            -- The new window's Roster follows along while it shows, and its
-            -- badge while the window does.
+            -- The new window's Roster and Rank management follow along while
+            -- they show, and their badges while the window does.
             if agfWindow ~= nil and agfWindow:IsOpen() then
-                agfWindow:RefreshBadges()
                 if friendsUi.roster ~= nil and agfWindow:Page() == "roster" then
                     friendsUi.roster:Update()
                 end
+                friendsUi.followRank()
             end
         end,
         onDecideSuggestion = function(character, kind, approved)
@@ -1457,6 +1470,30 @@ if clientProfile.supported then
                 onShow = function()
                     if greetingsUi.page ~= nil then
                         greetingsUi.page:Refresh()
+                    end
+                end },
+            -- Officers only, under the Officer label at the bottom.
+            { id = "rank", label = "Rank management", title = "Rank management", group = "Officer",
+                visible = function()
+                    return rosterController:IsOfficerUser()
+                end,
+                -- The players due a rank.
+                badge = function()
+                    local due = promotions.due()
+                    return due and due.count or 0
+                end,
+                draw = function(content, ui)
+                    friendsUi.rankPage = addon.RankManagementPage.Create(content, ui, {
+                        model = function(search)
+                            return promotions.due(search)
+                        end,
+                    })
+                    -- Drawn on the window's first open; specs reach it here.
+                    addon.rankPage = friendsUi.rankPage
+                end,
+                onShow = function()
+                    if friendsUi.rankPage ~= nil then
+                        friendsUi.rankPage:Refresh()
                     end
                 end },
         },
@@ -3364,6 +3401,7 @@ if clientProfile.supported then
         if guildNoteOverlay ~= nil then
             guildNoteOverlay:Refresh()
         end
+        friendsUi.followRank()
     end
     -- The Promotions page (the requirements editor) opened: redraw it.
     promotions.shown = function()
@@ -3384,6 +3422,20 @@ if clientProfile.supported then
             now = client:Timestamp(),
             rankNames = client:GetGuildRankNames() or {},
         }
+    end
+    promotions.inputs = promotionInputs
+    -- The Rank management page's Due list (RankUpViewModel.Due) for what's
+    -- typed in its search, or nil for a member or without a guild.
+    promotions.due = function(search)
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        local _, _, normalizer = rosterController:QuietContext()
+        inputs.normalizer = normalizer
+        inputs.members = rosterController:LiveMembers(normalizer)
+        inputs.search = search
+        return addon.RankUpViewModel.Due(inputs)
     end
     -- The characters ready for promotion, as a set, for the roster's marker:
     -- officers only.

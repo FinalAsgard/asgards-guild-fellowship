@@ -1392,7 +1392,7 @@ test.test("greetings: the module sits after LFG, with the Greet prompts switch a
     for index = 1, #window.moduleButtons do
         order[index] = window.moduleButtons[index].id
     end
-    test.assertEqual("roster,friends,lfg,greetings,settings", table.concat(order, ","))
+    test.assertEqual("roster,friends,lfg,greetings,rank,settings", table.concat(order, ","))
     test.assertEqual("Greetings", window.pages.greetings.title.text)
     test.assertTrue(window.gear.shown)
 
@@ -1903,6 +1903,31 @@ test.test("roster: a member's window has no suggestion count", function()
     test.assertTrue(addon.agfWindow:Open())
 
     test.assertFalse(addon.agfWindow:Badge("roster").shown)
+end)
+
+-- Rank management ---------------------------------------------------------------
+
+test.test("rank management: officers get it under Officer with a count of players due; members don't", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open())
+
+    test.assertTrue(addon.agfWindow:ModuleShown("rank"))
+    test.assertTrue(addon.agfWindow.groupLabels.Officer.shown)
+    addon.agfWindow:ShowPage("rank")
+    test.assertEqual("rank", addon.agfWindow:Page())
+    local page = addon.rankPage
+    test.assertTrue(page ~= nil)
+    test.assertEqual("due", page.tabs:Selected())
+    test.assertContains(page.footer.text, "Promotion happens on the guild roster")
+
+    local memberWorld, memberAddon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(memberWorld.environment)
+    test.assertTrue(memberAddon.agfWindow:Open())
+    test.assertFalse(memberAddon.agfWindow:ModuleShown("rank"))
+    memberAddon.agfWindow:ShowPage("rank")
+    test.assertEqual("roster", memberAddon.agfWindow:Page())
 end)
 
 -- Friends -----------------------------------------------------------------------

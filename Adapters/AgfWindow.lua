@@ -34,6 +34,7 @@ local AgfWindow = {
     POPUP_ACTION_HEIGHT = 34,
     POPUP_CHOICE_HEIGHT = 58,
     MODULE_ROW_HEIGHT = 32,
+    GROUP_LABEL_HEIGHT = 24,
     SETTINGS_ROW_HEIGHT = 44,
     -- A color setting's swatches, and its Custom... button.
     SWATCH_SIZE = 20,
@@ -67,7 +68,11 @@ Window.__index = Window
 --                 the player Friends shows), or nil, and badge (optional,
 --                 function() -> a number) puts that count in gold on the
 --                 sidebar button, hidden at 0 or nil (RefreshBadges reads
---                 it again)
+--                 it again); visible (optional, function() -> whether the
+--                 module shows, e.g. officers only) is read again on each
+--                 page shown; group (optional) puts the module under that
+--                 label in the sidebar ("Officer"), after the modules
+--                 before it
 --   settings      the SettingsModel the Settings page's switches use
 --   settingsTabs  a list of { id, label, rows = { { id, label, info } } },
 --                 each row a toggle in `settings`
@@ -174,12 +179,16 @@ function Window:buildSidebar(frame)
         self.moduleButtons[#self.moduleButtons + 1] = button
         return button
     end
-    local top = -margin - 30 - Theme.SPACING.l
+    self.sidebarTop = -margin - 30 - Theme.SPACING.l
+    self.buttonFor, self.groupLabels = {}, {}
     local index
     for index = 1, #self.modules do
         local module = self.modules[index]
         local button = moduleButton(module.id, module.label)
-        button:SetPoint("TOP", sidebar, "TOP", 0, top - (index - 1) * (AgfWindow.MODULE_ROW_HEIGHT + 4))
+        self.buttonFor[module.id] = button
+        if module.group ~= nil and self.groupLabels[module.group] == nil then
+            self.groupLabels[module.group] = ui:SectionLabel(sidebar, module.group)
+        end
         if module.badge ~= nil then
             local badge = ui:CountBadge(button)
             badge:SetPoint("RIGHT", button, "RIGHT", -Theme.SPACING.m, 0)
@@ -203,6 +212,58 @@ function Window:buildSidebar(frame)
     settingsButton:SetPoint("BOTTOM", character, "TOP", 0, Theme.SPACING.m)
     settingsButton:SetPoint("LEFT", sidebar, "LEFT", Theme.SPACING.s, 0)
     settingsButton:SetPoint("RIGHT", sidebar, "RIGHT", -Theme.SPACING.s, 0)
+end
+
+-- Whether module `module` shows now (see Create's `visible`).
+local function visible(module)
+    if module.visible == nil then
+        return true
+    end
+    local ok, shown = pcall(module.visible)
+    return ok and shown == true
+end
+
+-- Lays the sidebar's module buttons out top to bottom, leaving out the
+-- hidden ones, with each group's label over its first shown module.
+function Window:layoutSidebar()
+    if self.sidebar == nil then
+        return
+    end
+    local top = self.sidebarTop
+    local labeled = {}
+    local group, label
+    for group, label in pairs(self.groupLabels) do
+        label:Hide()
+    end
+    local index
+    for index = 1, #self.modules do
+        local module = self.modules[index]
+        local button = self.buttonFor[module.id]
+        if visible(module) then
+            if module.group ~= nil and not labeled[module.group] then
+                labeled[module.group] = true
+                local groupLabel = self.groupLabels[module.group]
+                groupLabel:ClearAllPoints()
+                groupLabel:SetPoint("TOPLEFT", self.sidebar, "TOPLEFT", Theme.SPACING.m, top - Theme.SPACING.s)
+                groupLabel:Show()
+                top = top - AgfWindow.GROUP_LABEL_HEIGHT
+            end
+            button:ClearAllPoints()
+            button:SetPoint("LEFT", self.sidebar, "LEFT", Theme.SPACING.s, 0)
+            button:SetPoint("RIGHT", self.sidebar, "RIGHT", -Theme.SPACING.s, 0)
+            button:SetPoint("TOP", self.sidebar, "TOP", 0, top)
+            button:Show()
+            top = top - AgfWindow.MODULE_ROW_HEIGHT - 4
+        else
+            button:Hide()
+        end
+    end
+end
+
+-- Whether module `id` shows in the sidebar now.
+function Window:ModuleShown(id)
+    local module = self:module(id)
+    return module ~= nil and visible(module)
 end
 
 -- The area right of the sidebar a page draws into, with its title.
@@ -699,6 +760,19 @@ function Window:ShowPage(id, argument)
     if id ~= AgfWindow.SETTINGS and self:module(id) == nil then
         id, argument = self.current, nil
     end
+    -- A module that's hidden now (the user was demoted) gives way to the
+    -- first one that shows.
+    if id ~= AgfWindow.SETTINGS and not visible(self:module(id)) then
+        id, argument = AgfWindow.SETTINGS, nil
+        local index
+        for index = 1, #self.modules do
+            if visible(self.modules[index]) then
+                id = self.modules[index].id
+                break
+            end
+        end
+    end
+    self:layoutSidebar()
     self.current = id
     if self.frame == nil then
         return
