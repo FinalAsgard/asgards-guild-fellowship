@@ -1392,7 +1392,7 @@ test.test("greetings: the module sits after LFG, with the Greet prompts switch a
     for index = 1, #window.moduleButtons do
         order[index] = window.moduleButtons[index].id
     end
-    test.assertEqual("friends,lfg,greetings,settings", table.concat(order, ","))
+    test.assertEqual("roster,friends,lfg,greetings,settings", table.concat(order, ","))
     test.assertEqual("Greetings", window.pages.greetings.title.text)
     test.assertTrue(window.gear.shown)
 
@@ -1604,14 +1604,58 @@ test.test("greetings: Insert chips and More put placeholders in, and the preview
     test.assertEqual("Preview: " .. names.characterfirst .. "Hi " .. names.name .. "!", edit.preview.text)
 end)
 
--- Friends -----------------------------------------------------------------------
+-- Roster ------------------------------------------------------------------------
 
-test.test("friends: the window opens on Friends, the page is built on show, and a pinned Friend is starred", function()
+-- The Roster page's shown card for `name`, or nil.
+local function rosterCard(page, name)
+    local _, frame
+    for _, frame in ipairs(page.list:Shown()) do
+        if rawget(frame, "entry") ~= nil and frame.shown and frame.entry.name == name then
+            return frame
+        end
+    end
+    return nil
+end
+
+test.test("roster: the window opens on the Roster, a card per player with the player panel beside it", function()
     local profile = fixtures.PROFILES[1]
     local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
     fakeFrames.install(world.environment)
 
     test.assertTrue(addon.agfWindow:Open())
+    test.assertEqual("roster", addon.agfWindow:Page())
+    test.assertEqual("Roster", addon.agfWindow.pages.roster.title.text)
+    local page = addon.rosterPage
+    test.assertTrue(page ~= nil)
+    -- Hammer Smith and the alt Bolt Smith are one card.
+    local hammer = rosterCard(page, "Hammer Smith")
+    test.assertTrue(hammer ~= nil)
+    test.assertEqual(nil, rosterCard(page, "Bolt Smith"))
+    test.assertContains(hammer.sub.text, "2 characters")
+    test.assertContains(page.counts.text, "players")
+    test.assertContains(page.counts.text, "online")
+
+    -- Clicking the card shows Hammer in the player panel, with both
+    -- characters in its Characters tab.
+    hammer.scripts.OnClick(hammer, "LeftButton")
+    test.assertEqual("Hammer Smith", page.detail.name.text)
+    test.assertEqual("Characters · 2", page.detail.tabs.tabs[1].label.text)
+
+    -- The star pins Hammer as a Friend, and the card gets the star.
+    page.detail.star.scripts.OnClick(page.detail.star, "LeftButton")
+    local _, partition = addon.rosterController:QuietContext()
+    test.assertEqual(1, #partition:GetFriends())
+    test.assertTrue(rosterCard(page, "Hammer Smith").star.shown)
+end)
+
+-- Friends -----------------------------------------------------------------------
+
+test.test("friends: the page is built on show, and a pinned Friend is starred", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+
+    test.assertTrue(addon.agfWindow:Open("friends"))
     test.assertEqual("friends", addon.agfWindow:Page())
     local page = addon.friendsPage
     test.assertTrue(page ~= nil)

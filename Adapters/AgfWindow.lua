@@ -2,7 +2,8 @@ local _, addon = ...
 
 -- The add-on's new window, drawn with the Theme and Widgets rather than the
 -- Details! Framework. Features move into it one at a time, each as a module
--- with a button in the sidebar: Friends, the Guild LFG Board and Greetings.
+-- with a button in the sidebar: the Roster, Friends, the Guild LFG Board and
+-- Greetings.
 --
 -- One fixed size (1100x680), movable, with its position saved per character.
 -- The left sidebar card holds the tree and the add-on's name, a button per

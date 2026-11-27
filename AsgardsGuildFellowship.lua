@@ -130,6 +130,9 @@ local lfgFriendTier = function() return nil end
 local friendsUi = {
     page = nil,
     draw = function() end,
+    -- The Roster page, which shares the Friends page's player panel.
+    roster = nil,
+    drawRoster = function() end,
 }
 -- The Greetings page in the new window, once it's drawn.
 local greetingsUi = {
@@ -256,6 +259,11 @@ if clientProfile.supported then
         onChanged = function()
             if guildNoteOverlay ~= nil then
                 guildNoteOverlay:Refresh()
+            end
+            -- The new window's Roster follows along while it shows.
+            if friendsUi.roster ~= nil and agfWindow ~= nil and agfWindow:IsOpen() and agfWindow:Page() == "roster"
+            then
+                friendsUi.roster:Refresh()
             end
         end,
         onDecideSuggestion = function(character, kind, approved)
@@ -1330,8 +1338,8 @@ if clientProfile.supported then
             rosterController:Print("Chat tags off.")
         end
     end)
-    -- The add-on's new window, which features move into one at a time; for
-    -- now it has the Guild LFG Board. Its fonts are shared through
+    -- The add-on's new window, which features move into one at a time,
+    -- opening on the Roster. Its fonts are shared through
     -- LibSharedMedia. It's made on first open, and its place is saved per
     -- character.
     addon.Theme.Register(client:GetLibrary("LibSharedMedia-3.0"))
@@ -1339,6 +1347,16 @@ if clientProfile.supported then
         frameName = addon.Identity.addonName .. "Window",
         modules = {
             -- First, so it's the window's default page.
+            { id = "roster", label = "Roster", title = "Roster",
+                draw = function(content, ui)
+                    friendsUi.drawRoster(content, ui)
+                end,
+                -- Given a player id, shows them.
+                onShow = function(playerId)
+                    if friendsUi.roster ~= nil then
+                        friendsUi.roster:Refresh(playerId)
+                    end
+                end },
             { id = "friends", label = "Friends", title = "Friends",
                 draw = function(content, ui)
                     friendsUi.draw(content, ui)
@@ -4616,60 +4634,114 @@ if clientProfile.supported then
         groupFriends.partition = partition
         return groupFriends
     end
+    -- What the Friends and Roster pages build from: the partition, its
+    -- Friends, the live roster and the class lookups, plus `extra`. Nil
+    -- without a guild.
+    friendsUi.inputs = function(extra)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        local fields = {
+            partition = partition,
+            friendKeys = partition:GetFriends(),
+            members = rosterController:LiveMembers(normalizer),
+            normalizer = normalizer,
+            classColor = function(classToken)
+                return client:GetClassColor(classToken)
+            end,
+            className = function(classToken)
+                return client:GetClassName(classToken)
+            end,
+        }
+        local name, value
+        for name, value in pairs(extra) do
+            fields[name] = value
+        end
+        return fields, partition
+    end
+    -- Runs partition method `operation` (AddFriend and the like): its
+    -- answer, or false and why without a guild.
+    friendsUi.change = function(operation, ...)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return false, "you're not in a guild"
+        end
+        return partition[operation](partition, ...)
+    end
+    -- A character to pin for `key`'s player: `key` itself while it's in the
+    -- guild, else one of their characters that is. Nil and why when the
+    -- player has none left.
+    friendsUi.pinnable = function(key)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return nil, "you're not in a guild"
+        end
+        if partition:IsInGuild(key) then
+            return key
+        end
+        local character = partition:GetCharacter(key)
+        local keys = character and partition:CharactersOf(character.player) or {}
+        local index
+        for index = 1, #keys do
+            if partition:IsInGuild(keys[index]) then
+                return keys[index]
+            end
+        end
+        return nil, "they've left the guild"
+    end
+    -- Player `playerId` as the shared player detail panel shows them
+    -- (PlayerDetailViewModel), with `groupedShown` Grouped parties, or nil.
+    friendsUi.detail = function(playerId, groupedShown)
+        local friends = currentFriends()
+        local fields = friendsUi.inputs({
+            playerId = playerId,
+            groupedShown = groupedShown,
+            rolesOf = function(key)
+                local roles = rolesOf(key)
+                return roles and addon.RoleCatalog.Describe(roles) or nil
+            end,
+            adStats = function(keys)
+                return guildRecruit:StatsLine(keys)
+            end,
+            membership = function(keys)
+                return membershipLines(keys)
+            end,
+            history = function()
+                local _, partition = rosterController:QuietContext()
+                return partition:GetGroupHistory()
+            end,
+            historyMember = function(key)
+                local _, partition, normalizer = rosterController:QuietContext()
+                local character = partition:GetCharacter(key)
+                if not character then
+                    return nil
+                end
+                local name = character.name or key
+                return { name = normalizer:Display(name) or name, whisper = name,
+                    classToken = character.class }
+            end,
+            tierOf = function(key)
+                return lfgFriendTier(key)
+            end,
+            mostGrouped = friends and friends:MostGrouped() or {},
+            formatDate = function(timestamp)
+                return client:FormatDate(timestamp)
+            end,
+            grouped = function(keys)
+                local _, partition = rosterController:QuietContext()
+                return addon.GroupHistory.Create(partition):Stats(keys)
+            end,
+            joined = function(keys)
+                return earliestJoin(keys)
+            end,
+        })
+        return fields and addon.PlayerDetailViewModel.Build(fields) or nil
+    end
     -- The Friends page: the Friend slots and the picker, built from saved
     -- data and the live roster each time it's shown.
     friendsUi.draw = function(content, ui)
-        local function inputs(extra)
-            local guild, partition, normalizer = rosterController:QuietContext()
-            if guild == nil then
-                return nil
-            end
-            local fields = {
-                partition = partition,
-                friendKeys = partition:GetFriends(),
-                members = rosterController:LiveMembers(normalizer),
-                normalizer = normalizer,
-                classColor = function(classToken)
-                    return client:GetClassColor(classToken)
-                end,
-                className = function(classToken)
-                    return client:GetClassName(classToken)
-                end,
-            }
-            local name, value
-            for name, value in pairs(extra) do
-                fields[name] = value
-            end
-            return fields, partition
-        end
-        local function change(operation, ...)
-            local guild, partition = rosterController:QuietContext()
-            if guild == nil then
-                return false, "you're not in a guild"
-            end
-            return partition[operation](partition, ...)
-        end
-        -- A character to pin for `key`'s player: `key` itself while it's in
-        -- the guild, else one of their characters that is. Nil and why when
-        -- the player has none left.
-        local function pinnable(key)
-            local guild, partition = rosterController:QuietContext()
-            if guild == nil then
-                return nil, "you're not in a guild"
-            end
-            if partition:IsInGuild(key) then
-                return key
-            end
-            local character = partition:GetCharacter(key)
-            local keys = character and partition:CharactersOf(character.player) or {}
-            local index
-            for index = 1, #keys do
-                if partition:IsInGuild(keys[index]) then
-                    return keys[index]
-                end
-            end
-            return nil, "they've left the guild"
-        end
+        local inputs, change, pinnable = friendsUi.inputs, friendsUi.change, friendsUi.pinnable
         friendsUi.page = addon.FriendsPage.Create(content, ui, {
             model = function(selected)
                 local friends = currentFriends()
@@ -4707,52 +4779,7 @@ if clientProfile.supported then
             onError = function(text)
                 rosterController:Print(text)
             end,
-            detail = function(playerId, groupedShown)
-                local friends = currentFriends()
-                local fields = inputs({
-                    playerId = playerId,
-                    groupedShown = groupedShown,
-                    rolesOf = function(key)
-                        local roles = rolesOf(key)
-                        return roles and addon.RoleCatalog.Describe(roles) or nil
-                    end,
-                    adStats = function(keys)
-                        return guildRecruit:StatsLine(keys)
-                    end,
-                    membership = function(keys)
-                        return membershipLines(keys)
-                    end,
-                    history = function()
-                        local _, partition = rosterController:QuietContext()
-                        return partition:GetGroupHistory()
-                    end,
-                    historyMember = function(key)
-                        local _, partition, normalizer = rosterController:QuietContext()
-                        local character = partition:GetCharacter(key)
-                        if not character then
-                            return nil
-                        end
-                        local name = character.name or key
-                        return { name = normalizer:Display(name) or name, whisper = name,
-                            classToken = character.class }
-                    end,
-                    tierOf = function(key)
-                        return lfgFriendTier(key)
-                    end,
-                    mostGrouped = friends and friends:MostGrouped() or {},
-                    formatDate = function(timestamp)
-                        return client:FormatDate(timestamp)
-                    end,
-                    grouped = function(keys)
-                        local _, partition = rosterController:QuietContext()
-                        return addon.GroupHistory.Create(partition):Stats(keys)
-                    end,
-                    joined = function(keys)
-                        return earliestJoin(keys)
-                    end,
-                })
-                return fields and addon.PlayerDetailViewModel.Build(fields) or nil
-            end,
+            detail = friendsUi.detail,
             formatDate = function(at)
                 return client:FormatDate(at)
             end,
@@ -4765,6 +4792,50 @@ if clientProfile.supported then
         })
         -- Drawn on the window's first open; specs reach it here.
         addon.friendsPage = friendsUi.page
+    end
+    -- The Roster page: a card per player and the selected one in the player
+    -- panel, built from saved data and the live roster when it's shown and
+    -- whenever the roster changes while it is.
+    friendsUi.drawRoster = function(content, ui)
+        friendsUi.roster = addon.RosterPage.Create(content, ui, {
+            model = function(selected)
+                local fields, partition = friendsUi.inputs({ selected = selected, now = client:Timestamp() })
+                if fields == nil then
+                    return nil
+                end
+                fields.lastSync = partition:GetLastSync()
+                return addon.RosterListModel.Build(fields)
+            end,
+            detail = friendsUi.detail,
+            formatDate = function(at)
+                return client:FormatDate(at)
+            end,
+            onWhisper = function(target)
+                client:OpenWhisper(target)
+            end,
+            onInvite = function(target)
+                client:InviteToParty(target)
+            end,
+            -- The star pins the player in an open Friend slot, or unpins them.
+            onToggleFriend = function(view)
+                if view.header.isFriend then
+                    return friendsUi.change("RemoveFriend", view.playerId)
+                end
+                local pinned, why = friendsUi.pinnable(view.header.key)
+                if pinned == nil then
+                    return false, why
+                end
+                return friendsUi.change("AddFriend", pinned)
+            end,
+            onRescan = function()
+                rosterController:Rescan()
+            end,
+            onError = function(text)
+                rosterController:Print(text)
+            end,
+        })
+        -- Drawn on the window's first open; specs reach it here.
+        addon.rosterPage = friendsUi.roster
     end
     -- Open in Guild Fellowship, on the game's right-click menus for a
     -- guildmate: the new window on Friends, showing their player.
