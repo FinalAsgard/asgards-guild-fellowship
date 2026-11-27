@@ -790,6 +790,130 @@ function UI:ScrollList(parent, step, width)
     return area, list
 end
 
+-- A scroll list for long lists (the roster's hundreds of players): it
+-- builds only enough row frames to fill its height, never one per row,
+-- places them where ListWindow says, and fills them again as it scrolls.
+-- options:
+--   height    each row's height: a number, or function(row) -> height
+--   gap       space left under each row's frame, counted in its height
+--             (default 0)
+--   build     function(kind, parent) -> a new frame for a row of `kind`
+--             (the row's `kind` field, "row" without one)
+--   fill      function(frame, row, index): shows `row` on `frame`
+--   step      pixels a mouse wheel notch scrolls (default 48)
+--   viewport  the height to lay out for while the frame can't say
+-- SetRows(rows, keep) shows `rows`, keeping row index `keep` (optional) in
+-- view; ScrollTo(offset) scrolls; Offset() and Rows() read them back, and
+-- Built(kind) counts the frames made for `kind`.
+function UI:PooledList(parent, options)
+    local list = self:frame("Frame", parent)
+    list:SetClipsChildren(true)
+    list:EnableMouseWheel(true)
+    local state = { rows = {}, offset = 0, pools = {} }
+    local function rowHeight(row)
+        if type(options.height) == "function" then
+            return options.height(row)
+        end
+        return options.height
+    end
+    local function height()
+        if type(options.height) ~= "function" then
+            return options.height
+        end
+        return function(index)
+            return rowHeight(state.rows[index])
+        end
+    end
+    local function viewport()
+        local ok, shown = pcall(list.GetHeight, list)
+        if ok and type(shown) == "number" and shown > 0 then
+            return shown
+        end
+        return options.viewport or 0
+    end
+    local function take(kind)
+        local pool = state.pools[kind]
+        if pool == nil then
+            pool = { frames = {}, used = 0 }
+            state.pools[kind] = pool
+        end
+        pool.used = pool.used + 1
+        local frame = pool.frames[pool.used]
+        if frame == nil then
+            frame = options.build(kind, list)
+            pool.frames[pool.used] = frame
+        end
+        return frame
+    end
+    function list.Layout()
+        local window = addon.ListWindow.Visible(#state.rows, height(), viewport(), state.offset)
+        state.offset = window.offset
+        local kind, pool
+        for kind, pool in pairs(state.pools) do
+            pool.used = 0
+        end
+        if window.first ~= nil then
+            local index
+            for index = window.first, window.last do
+                local row = state.rows[index]
+                local frame = take(row.kind or "row")
+                options.fill(frame, row, index)
+                frame:ClearAllPoints()
+                frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -window.tops[index])
+                frame:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+                frame:SetHeight(rowHeight(row) - (options.gap or 0))
+                frame:Show()
+            end
+        end
+        for kind, pool in pairs(state.pools) do
+            local index
+            for index = pool.used + 1, #pool.frames do
+                pool.frames[index]:Hide()
+            end
+        end
+    end
+    function list.SetRows(_, rows, keep)
+        state.rows = rows or {}
+        if keep ~= nil then
+            state.offset = addon.ListWindow.KeepInView(keep, #state.rows, height(), viewport(), state.offset)
+        end
+        list.Layout()
+    end
+    function list.ScrollTo(_, offset)
+        state.offset = offset or 0
+        list.Layout()
+    end
+    function list.Offset()
+        return state.offset
+    end
+    function list.Rows()
+        return state.rows
+    end
+    function list.Built(_, kind)
+        local pool = state.pools[kind or "row"]
+        return pool and #pool.frames or 0
+    end
+    -- The frames showing rows now.
+    function list.Shown()
+        local shown = {}
+        local _, pool
+        for _, pool in pairs(state.pools) do
+            local index
+            for index = 1, pool.used do
+                table.insert(shown, pool.frames[index])
+            end
+        end
+        return shown
+    end
+    list:SetScript("OnMouseWheel", function(_, delta)
+        list:ScrollTo(state.offset - delta * (options.step or 48))
+    end)
+    list:SetScript("OnSizeChanged", function()
+        list.Layout()
+    end)
+    return list
+end
+
 -- Text entry ----------------------------------------------------------------
 
 -- A text box in a rounded field. Shared by SearchBox and TextInput.
