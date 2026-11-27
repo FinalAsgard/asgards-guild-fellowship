@@ -11,6 +11,14 @@ local _, addon = ...
 -- The right side shows the selected player in the shared player detail
 -- panel (PlayerDetailPanel), with Whisper, Invite and the Friend star.
 --
+-- Right-clicking a player card, or a character card in the panel's
+-- Characters tab, opens the old roster's organizing actions for it
+-- (RosterController's entries, so a member only gets what they may do to
+-- their own player); the panel's ⋯ button has the player-wide ones. Link as
+-- alt of... and Merge into player... swap the panel for a player picker
+-- with a search box, as the Friends page's is. Set alias..., Set Discord...
+-- and the Bio tab's Edit ask for the text in a small prompt.
+--
 -- It's built when the page is shown (Refresh), and again when the owner
 -- says the roster changed.
 local Theme = addon.Theme
@@ -30,6 +38,10 @@ local RosterPage = {
     -- The column's height to lay out for until the frame can say.
     VIEWPORT = 560,
     EMPTY = "No guildmates to show yet. The roster fills in once it's scanned.",
+    PICKER_ROW_HEIGHT = 44,
+    PICKER_SEARCH = "Search by alias or character name",
+    NO_MATCHES = "No players match.",
+    ALIAS_LETTERS = 48,
 }
 addon.RosterPage = RosterPage
 
@@ -50,6 +62,18 @@ Page.__index = Page
 --             button, pinning or unpinning the panel's player
 --   onRescan  function(): rescans the guild roster
 --   onError   function(text): tells the user why something didn't happen
+-- and, for organizing players (RosterController's calls, by character key):
+--   menuFor   function(target) -> { { text, action, key } }: the right-click
+--             entries for { kind = "player", id } or { kind = "character",
+--             key }; action is "alias", "view", "setMain", "makeMain" or
+--             "detach"
+--   canEdit   function(key) -> whether the user may change key's player
+--   playerOf  function(key) -> key's player id
+--   aliasOf   function(key) -> the alias to start Set alias... with
+--   searchPlayers function(key, query) -> { { id, label, matched } }: the
+--             players `key` may be linked to
+--   onSetAlias, onSetDiscord, onSetMain(key, playerId), onMakeMain(key),
+--   onDetach(key), onSetProfileText(key, field, text)
 function RosterPage.Create(content, ui, options)
     local page = setmetatable({ content = content, ui = ui, options = options, query = "",
         sort = addon.RosterListModel.SORTS[1].id, onlineOnly = false }, Page)
@@ -95,6 +119,7 @@ function Page:build()
     self.list:SetPoint("TOPLEFT", bottom, "BOTTOMLEFT", 0, -Theme.SPACING.m)
     self.list:SetPoint("BOTTOMRIGHT", column, "BOTTOMRIGHT", 0, 0)
     self.menu = ui:ContextMenu(content)
+    self.prompt = ui:TextPrompt(content)
 
     local side = ui:Panel(content)
     side:SetPoint("TOPLEFT", column, "TOPRIGHT", Theme.SPACING.l, 0)
@@ -122,7 +147,75 @@ function Page:build()
         formatDate = function(at)
             return owner.options.formatDate and owner.options.formatDate(at) or nil
         end,
+        onCharacterMenu = function(card, character)
+            owner:openMenu(card, { kind = "character", key = character.key }, character.name)
+        end,
+        onActions = function(button, view)
+            owner:actionsMenu(button, view)
+        end,
+        onEditProfile = function(field, view)
+            owner:editProfile(field, view)
+        end,
     })
+    self:buildPicker(side)
+end
+
+-- The player picker for Link as alt of... and Merge into player...: a
+-- title, what's being linked, the search box, a scrolling list and Cancel.
+function Page:buildPicker(side)
+    local ui, pad = self.ui, Theme.SPACING.l
+    local owner = self
+    local picker = ui:frame("Frame", side)
+    picker:SetAllPoints(side)
+    picker.title = ui:Text(picker, "", "semibold", "title", "text")
+    picker.title:SetPoint("TOPLEFT", picker, "TOPLEFT", pad, -pad)
+    picker.prompt = ui:Text(picker, "", "regular", "body", "muted")
+    picker.prompt:SetPoint("TOPLEFT", picker.title, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    picker.search = ui:SearchBox(picker, 300, RosterPage.PICKER_SEARCH, function(text)
+        owner:showPickerRows(text)
+    end)
+    picker.search:SetPoint("TOPLEFT", picker.prompt, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+    picker.cancel = ui:Button(picker, "Cancel", "secondary", function()
+        owner:ClosePicker()
+    end)
+    picker.cancel:SetWidth(90)
+    picker.cancel:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -pad, pad)
+    picker.area, picker.list = ui:ScrollList(picker, RosterPage.PICKER_ROW_HEIGHT)
+    picker.area:SetPoint("TOPLEFT", picker.search, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+    picker.area:SetPoint("BOTTOMRIGHT", picker.cancel, "TOPRIGHT", 0, Theme.SPACING.m)
+    picker.empty = ui:Text(picker.list, RosterPage.NO_MATCHES, "regular", "body", "muted")
+    picker.empty:SetPoint("TOPLEFT", picker.list, "TOPLEFT", 0, 0)
+    picker.rows = {}
+    picker:Hide()
+    self.picker = picker
+end
+
+-- A picker row: the player's name, and the character a search found them
+-- by.
+function Page:pickerRow(index)
+    local picker = self.picker
+    local row = picker.rows[index]
+    if row ~= nil then
+        return row
+    end
+    local ui, owner = self.ui, self
+    row = ui:frame("Button", picker.list)
+    ui:Round(row, Theme.RADIUS.button, "raised", false)
+    row.name = ui:Text(row, "", "semibold", "body", "text")
+    row.name:SetPoint("TOPLEFT", row, "TOPLEFT", Theme.SPACING.s, -6)
+    row.sub = ui:Text(row, "", "regular", "small", "muted")
+    row.sub:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -3)
+    row:SetScript("OnEnter", function(self)
+        self:SetFill("hover")
+    end)
+    row:SetScript("OnLeave", function(self)
+        self:SetFill("raised")
+    end)
+    row:SetScript("OnClick", function(self)
+        owner:pick(self.entry)
+    end)
+    picker.rows[index] = row
+    return row
 end
 
 -- The column's controls, top to bottom: the search box, Sort and Rank side
@@ -220,6 +313,9 @@ function Page:buildRow(kind, parent)
         onClick = function(card)
             owner:select(card.playerId)
         end,
+        onRightClick = function(card)
+            owner:openMenu(card, { kind = "player", id = card.playerId }, card.entry and card.entry.name)
+        end,
     })
 end
 
@@ -241,6 +337,70 @@ function Page:fillRow(frame, row)
 end
 
 -- Showing ---------------------------------------------------------------------
+
+-- The picker's rows for what's typed, from the top.
+function Page:showPickerRows(query)
+    local picker = self.picker
+    local rows = {}
+    if self.options.searchPlayers ~= nil and self.linking ~= nil then
+        rows = self.options.searchPlayers(self.linking.key, query or "") or {}
+    end
+    picker.area:SetVerticalScroll(0)
+    local index
+    for index = 1, math.max(#rows, #picker.rows) do
+        local entry = rows[index]
+        if entry ~= nil then
+            local row = self:pickerRow(index)
+            row.entry = entry
+            row.name:SetText(entry.label or "")
+            row.sub:SetText(entry.matched ~= nil and ("matches " .. entry.matched) or "")
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", picker.list, "TOPLEFT", 0, -(index - 1) * RosterPage.PICKER_ROW_HEIGHT)
+            row:SetPoint("RIGHT", picker.list, "RIGHT", 0, 0)
+            row:SetHeight(RosterPage.PICKER_ROW_HEIGHT - 4)
+            row:Show()
+        elseif picker.rows[index] ~= nil then
+            picker.rows[index]:Hide()
+        end
+    end
+    picker.list:SetHeight(math.max(1, #rows * RosterPage.PICKER_ROW_HEIGHT))
+    if rows[1] == nil then
+        picker.empty:Show()
+    else
+        picker.empty:Hide()
+    end
+end
+
+-- Opens the picker to link character `key` (named `name`) to another
+-- player: as an alt (Link as alt of...), or, with `merge`, its whole
+-- player (Merge into player..., for the main).
+function Page:OpenPicker(key, name, merge)
+    self.menu:Close()
+    self.linking = { key = key }
+    local picker = self.picker
+    if merge then
+        picker.title:SetText("Merge into player")
+        picker.prompt:SetText("Merge " .. tostring(name) .. " into player:")
+    else
+        picker.title:SetText("Link as alt of")
+        picker.prompt:SetText("Link " .. tostring(name) .. " as an alt of:")
+    end
+    picker.search:SetValue("")
+    self:showPickerRows("")
+    picker:Show()
+    self.detail:Hide()
+end
+
+function Page:ClosePicker()
+    self.linking = nil
+    self.picker:Hide()
+    self.detail:Show()
+end
+
+-- Whether the player picker is showing.
+function Page:PickerOpen()
+    return self.linking ~= nil
+end
 
 -- The row index of player `playerId`'s card in the view, or nil.
 local function rowOf(view, playerId)
@@ -288,6 +448,15 @@ function Page:Refresh(focus)
     self:showDetail()
 end
 
+-- Shows the selected player again, and the page, after an organizing
+-- change.
+function Page:changed()
+    if self.linking ~= nil then
+        self:ClosePicker()
+    end
+    self:Refresh()
+end
+
 -- The search or a filter changed: the list again, and the panel only when
 -- the selected player changed with it.
 function Page:applyFilters()
@@ -312,7 +481,14 @@ function Page:showDetail()
         self.detail:ShowEmpty(RosterPage.EMPTY)
         return
     end
+    -- The ⋯ button and the Bio tab's Edit, for a player the user may change.
+    local main = view.panel and view.panel.main or nil
+    view.canEdit = main ~= nil and self.options.canEdit ~= nil and self.options.canEdit(main) == true
     self.detail:ShowPlayer(view)
+    -- The roster changing while the picker is open doesn't cover it.
+    if self.linking ~= nil then
+        self.detail:Hide()
+    end
 end
 
 -- Interactions ----------------------------------------------------------------
@@ -338,6 +514,129 @@ function Page:toggleFriend(view)
         self.options.onError("That friend wasn't changed: " .. tostring(why) .. ".")
     end
     self:Refresh(view.playerId)
+end
+
+-- Organizing ----------------------------------------------------------------
+
+-- The right-click menu for `target` (see menuFor), under `anchor`, titled
+-- `title`.
+function Page:openMenu(anchor, target, title)
+    local entries = self.options.menuFor ~= nil and self.options.menuFor(target) or {}
+    if entries[1] == nil then
+        return
+    end
+    local owner, items = self, {}
+    local index
+    for index = 1, #entries do
+        local entry = entries[index]
+        table.insert(items, { label = entry.text, onClick = function()
+            owner:run(entry, title)
+        end })
+    end
+    self.menu:Open(anchor, items, title)
+end
+
+-- The ⋯ menu: Set alias..., Set Discord... and Merge into player..., for a
+-- player the user may change (Merge only while it's just the main).
+function Page:actionsMenu(anchor, view)
+    local panel = view.panel or {}
+    local main, name = panel.main, view.header and view.header.name
+    if not view.canEdit then
+        return
+    end
+    local owner = self
+    local items = {
+        { label = "Set alias...", onClick = function()
+            owner:run({ action = "alias", key = main }, name)
+        end },
+        { label = "Set Discord...", onClick = function()
+            owner:run({ action = "discord", key = main, current = panel.discord }, name)
+        end },
+    }
+    if panel.canMerge then
+        table.insert(items, { label = "Merge into player...", onClick = function()
+            owner:run({ action = "merge", key = main }, name)
+        end })
+    end
+    self.menu:Open(anchor, items, name)
+end
+
+-- Calls option `name` with the arguments, when it's there.
+function Page:call(name, ...)
+    local callback = self.options[name]
+    if callback == nil then
+        return nil
+    end
+    return callback(...)
+end
+
+-- Runs a menu entry ({ action, key }) for the player or character `title`
+-- names.
+function Page:run(entry, title)
+    local owner, key = self, entry.key
+    local action = entry.action
+    if action == "view" then
+        local playerId = self:call("playerOf", key)
+        if playerId ~= nil then
+            self:Refresh(playerId)
+        end
+    elseif action == "setMain" or action == "merge" then
+        self:OpenPicker(key, title, action == "merge")
+    elseif action == "makeMain" then
+        self:call("onMakeMain", key)
+        self:changed()
+    elseif action == "detach" then
+        self:call("onDetach", key)
+        self:changed()
+    elseif action == "alias" then
+        self.prompt:Open({
+            title = "Alias for " .. tostring(title) .. " (leave empty to clear)",
+            text = self:call("aliasOf", key) or "",
+            maxLetters = RosterPage.ALIAS_LETTERS,
+            onSave = function(text)
+                owner:call("onSetAlias", key, text)
+                owner:changed()
+            end,
+        })
+    elseif action == "discord" then
+        self.prompt:Open({
+            title = "Discord username for " .. tostring(title) .. " (leave empty to clear)",
+            text = entry.current or "",
+            maxLetters = addon.FellowshipStore.PROFILE_FIELDS.discord,
+            onSave = function(text)
+                owner:call("onSetDiscord", key, text)
+                owner:changed()
+            end,
+        })
+    end
+end
+
+-- The Bio tab's Edit: asks for the player's new location or bio.
+function Page:editProfile(field, view)
+    local panel = view.panel or {}
+    local owner, key = self, panel.main
+    local limit = addon.FellowshipStore.PROFILE_FIELDS[field]
+    self.prompt:Open({
+        title = (field == "bio" and "Bio" or "Location") .. " for " .. tostring(view.header and view.header.name)
+            .. " (leave empty to clear)",
+        text = panel[field] or "",
+        maxLetters = limit,
+        maxBytes = field == "bio" and limit or nil,
+        multiline = field == "bio",
+        onSave = function(text)
+            owner:call("onSetProfileText", key, field, text)
+            owner:changed()
+        end,
+    })
+end
+
+-- Links the character being linked to the picked player.
+function Page:pick(entry)
+    if entry == nil or self.linking == nil then
+        return
+    end
+    self:call("onSetMain", self.linking.key, entry.id)
+    self:changed()
 end
 
 -- The selected player's id, or nil.

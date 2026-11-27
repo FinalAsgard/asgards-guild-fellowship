@@ -598,6 +598,20 @@ function Controller:Service()
     })
 end
 
+-- Makes the current guild the one menus and organizing changes apply to,
+-- for the new window's Roster, which works without the old window having
+-- opened. False without a guild.
+function Controller:UseCurrentGuild()
+    local guild, partition = self:QuietContext()
+    if guild == nil then
+        return false
+    end
+    if self.current == nil or self.current.partition ~= partition then
+        self.current = { guild = guild, partition = partition }
+    end
+    return true
+end
+
 -- The right-click menu for a roster row: a list of { text, action }.
 -- Character rows offer every organizing action that applies; player
 -- headers offer the alias. A member is offered the alias only on their

@@ -4797,6 +4797,14 @@ if clientProfile.supported then
     -- panel, built from saved data and the live roster when it's shown and
     -- whenever the roster changes while it is.
     friendsUi.drawRoster = function(content, ui)
+        -- Runs RosterController method `method` for the current guild, which
+        -- the old window may never have opened; nil without a guild.
+        local function organize(method, ...)
+            if not rosterController:UseCurrentGuild() then
+                return nil
+            end
+            return rosterController[method](rosterController, ...)
+        end
         friendsUi.roster = addon.RosterPage.Create(content, ui, {
             model = function(selected, filters)
                 local fields, partition = friendsUi.inputs({ selected = selected, now = client:Timestamp(),
@@ -4834,6 +4842,42 @@ if clientProfile.supported then
             end,
             onError = function(text)
                 rosterController:Print(text)
+            end,
+            -- The old roster's organizing actions and permission rules.
+            menuFor = function(target)
+                return organize("MenuFor", target) or {}
+            end,
+            canEdit = function(key)
+                return organize("CanEditPlayer", key) == true
+            end,
+            playerOf = function(key)
+                local _, partition = rosterController:QuietContext()
+                local character = partition and partition:GetCharacter(key)
+                return character and character.player or nil
+            end,
+            aliasOf = function(key)
+                return organize("AliasOf", key)
+            end,
+            searchPlayers = function(key, query)
+                return organize("SearchPlayers", key, query) or {}
+            end,
+            onSetAlias = function(key, text)
+                organize("SetAlias", key, text)
+            end,
+            onSetDiscord = function(key, text)
+                organize("SetDiscord", key, text)
+            end,
+            onSetMain = function(key, playerId)
+                organize("SetMainPlayer", key, playerId)
+            end,
+            onMakeMain = function(key)
+                organize("MakeMain", key)
+            end,
+            onDetach = function(key)
+                organize("Detach", key)
+            end,
+            onSetProfileText = function(key, field, text)
+                organize("SetProfileText", key, field, text)
             end,
         })
         -- Drawn on the window's first open; specs reach it here.

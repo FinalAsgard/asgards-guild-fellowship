@@ -7,7 +7,7 @@ local fakeFrames = require("tests.fake_frames")
 -- last given in `world.filters`, and honors the search (on names) and
 -- Online only.
 local function setup(count, online)
-    local addon = test.newAddon("Core/ListWindow.lua", "Core/RosterViewModel.lua", "Core/RosterListModel.lua",
+    local addon = test.newAddon("Core/FellowshipStore.lua", "Core/ListWindow.lua", "Core/RosterViewModel.lua", "Core/RosterListModel.lua",
         "Core/LfgHistoryView.lua", "Core/PlayerDetailViewModel.lua",
         "Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/PlayerCards.lua", "Adapters/PlayerDetailPanel.lua",
         "Adapters/RosterPage.lua")
@@ -66,7 +66,8 @@ local function setup(count, online)
                 header = { name = player.name, mainName = player.name, key = "key" .. playerId,
                     target = player.online and player.name or nil, isFriend = isFriend, canToggle = true,
                     badge = isFriend and { kind = "friend" } or nil },
-                characters = {},
+                characters = { { key = "key" .. playerId, name = player.name, isMain = true } },
+                panel = { main = "key" .. playerId, canMerge = true },
                 tiles = {},
             }
         end,
@@ -80,6 +81,37 @@ local function setup(count, online)
         end,
         onRescan = function()
             table.insert(world.calls, "rescan")
+        end,
+        -- Officers' entries; `world.member` makes the user player 1's.
+        menuFor = function(target)
+            if target.kind == "player" then
+                return { { text = "Set alias...", action = "alias", key = "key" .. target.id },
+                    { text = "View player...", action = "view", key = "key" .. target.id } }
+            end
+            return { { text = "Link as alt of...", action = "setMain", key = target.key },
+                { text = "Split off as own player", action = "detach", key = target.key } }
+        end,
+        canEdit = function(key)
+            return not world.member or key == "key1"
+        end,
+        playerOf = function(key)
+            return tonumber(string.match(key, "%d+"))
+        end,
+        aliasOf = function()
+            return "Old"
+        end,
+        searchPlayers = function(key, query)
+            table.insert(world.calls, "search " .. key .. " " .. query)
+            return { { id = 2, label = "Player002", matched = "Alty" } }
+        end,
+        onSetAlias = function(key, text)
+            table.insert(world.calls, "alias " .. key .. " " .. text)
+        end,
+        onSetMain = function(key, playerId)
+            table.insert(world.calls, "link " .. key .. " " .. playerId)
+        end,
+        onDetach = function(key)
+            table.insert(world.calls, "detach " .. key)
         end,
     })
     world.page:Refresh()
@@ -297,4 +329,107 @@ test.test("roster page: the selection stays while its player is still shown", fu
     world.page:Refresh()
     test.assertEqual("3", world.filters.search)
     test.assertEqual(3, world.page:Selected())
+end)
+
+-- The labels of the page's open context menu, in order.
+local function menuLabels(world)
+    local labels = {}
+    local _, item
+    for _, item in ipairs(world.page.menu.items or {}) do
+        table.insert(labels, item.label)
+    end
+    return table.concat(labels, ", ")
+end
+
+test.test("roster page: right-clicking a card lists its actions, and View player... shows that player", function()
+    local world = setup(3, 1)
+    local card = cardNamed(world, "Player003")
+    click(card, "RightButton")
+
+    test.assertEqual("Set alias..., View player...", menuLabels(world))
+    test.assertEqual("Player003", world.page.menu.titleText)
+    click(world.page.menu.rows[2])
+    test.assertEqual(3, world.page:Selected())
+    test.assertEqual("Player003", world.page.detail.name.text)
+end)
+
+test.test("roster page: Set alias... asks for the alias, starting with the current one", function()
+    local world = setup(3, 1)
+    click(cardNamed(world, "Player002"), "RightButton")
+    click(world.page.menu.rows[1])
+    local prompt = world.page.prompt
+
+    test.assertTrue(prompt:IsOpen())
+    test.assertEqual("Old", prompt.single:GetValue())
+    prompt.single:SetValue("Newname")
+    click(prompt.save)
+    test.assertFalse(prompt:IsOpen())
+    test.assertEqual("alias key2 Newname", world.calls[1])
+end)
+
+test.test("roster page: Cancel closes the prompt without saving", function()
+    local world = setup(3, 1)
+    click(cardNamed(world, "Player002"), "RightButton")
+    click(world.page.menu.rows[1])
+    click(world.page.prompt.cancel)
+
+    test.assertFalse(world.page.prompt:IsOpen())
+    test.assertEqual(0, #world.calls)
+end)
+
+test.test("roster page: a character card's Link as alt of... picks the player from a search", function()
+    local world = setup(3, 1)
+    local card = world.page.detail.characterCards[1]
+    click(card, "RightButton")
+
+    test.assertEqual("Link as alt of..., Split off as own player", menuLabels(world))
+    click(world.page.menu.rows[1])
+    test.assertTrue(world.page:PickerOpen())
+    test.assertFalse(world.page.detail.shown)
+    test.assertEqual("Link Player001 as an alt of:", world.page.picker.prompt.text)
+    test.assertEqual("search key1 ", world.calls[1])
+    local row = world.page.picker.rows[1]
+    test.assertEqual("Player002", row.name.text)
+    test.assertEqual("matches Alty", row.sub.text)
+    click(row)
+    test.assertEqual("link key1 2", world.calls[2])
+    test.assertFalse(world.page:PickerOpen())
+    test.assertTrue(world.page.detail.shown)
+end)
+
+test.test("roster page: the picker stays over the panel when the roster changes", function()
+    local world = setup(3, 1)
+    click(world.page.detail.characterCards[1], "RightButton")
+    click(world.page.menu.rows[1])
+    world.page:Refresh()
+
+    test.assertTrue(world.page:PickerOpen())
+    test.assertFalse(world.page.detail.shown)
+    click(world.page.picker.cancel)
+    test.assertFalse(world.page:PickerOpen())
+    test.assertTrue(world.page.detail.shown)
+end)
+
+test.test("roster page: the ⋯ menu offers Set alias..., Set Discord... and Merge into player...", function()
+    local world = setup(3, 1)
+    local actions = world.page.detail.actions
+
+    test.assertTrue(actions.shown)
+    click(actions)
+    test.assertEqual("Set alias..., Set Discord..., Merge into player...", menuLabels(world))
+    click(world.page.menu.rows[3])
+    test.assertEqual("Merge into player", world.page.picker.title.text)
+end)
+
+test.test("roster page: someone else's player has no ⋯ and no Edit for a member", function()
+    local world = setup(3, 1)
+    world.member = true
+    world.page:Refresh(2)
+
+    test.assertFalse(world.page.detail.actions.shown)
+    world.page.detail:ShowTab("bio")
+    test.assertEqual(0, #world.page.detail.edits)
+
+    world.page:Refresh(1)
+    test.assertTrue(world.page.detail.actions.shown)
 end)

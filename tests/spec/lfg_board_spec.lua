@@ -1655,6 +1655,155 @@ test.test("roster: the window opens on the Roster, a card per player with the pl
     test.assertEqual(1, #page.view.cards)
 end)
 
+-- The labels of the page's open context menu, in order.
+local function menuLabels(page)
+    local labels = {}
+    local index
+    for index = 1, #(page.menu.items or {}) do
+        labels[index] = page.menu.items[index].label
+    end
+    return table.concat(labels, ", ")
+end
+
+-- The panel's character card for `name`, or nil.
+local function characterCard(page, name)
+    local _, card
+    for _, card in ipairs(page.detail.characterCards) do
+        if card.shown and card.fields ~= nil and card.fields.name == name then
+            return card
+        end
+    end
+    return nil
+end
+
+-- Opens the Roster on `name`'s player. Returns the page.
+local function openRosterOn(addon, name)
+    test.assertTrue(addon.agfWindow:Open())
+    local page = addon.rosterPage
+    local card = rosterCard(page, name)
+    card.scripts.OnClick(card, "LeftButton")
+    return page
+end
+
+test.test("roster: an officer's menus offer every organizing action", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local page = openRosterOn(addon, "Hammer Smith")
+
+    -- The player card: Set alias... and View player...
+    local hammer = rosterCard(page, "Hammer Smith")
+    hammer.scripts.OnClick(hammer, "RightButton")
+    test.assertEqual("Set alias..., View player...", menuLabels(page))
+
+    -- The alt in the Characters tab: every action that applies.
+    local bolt = characterCard(page, "Bolt Smith")
+    bolt.scripts.OnClick(bolt, "RightButton")
+    test.assertEqual("Link as alt of..., Make this the main, Set alias..., View player..., Split off as own player",
+        menuLabels(page))
+    -- The main, with an alt, can't join another player.
+    local main = characterCard(page, "Hammer Smith")
+    main.scripts.OnClick(main, "RightButton")
+    test.assertEqual("Set alias..., View player..., Split off as own player", menuLabels(page))
+
+    -- The ⋯ menu: Merge is offered only to a player that's just its main.
+    test.assertTrue(page.detail.actions.shown)
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    test.assertEqual("Set alias..., Set Discord...", menuLabels(page))
+    page.menu:Close()
+    local zap = rosterCard(page, "Zap Arcane")
+    zap.scripts.OnClick(zap, "LeftButton")
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    test.assertEqual("Set alias..., Set Discord..., Merge into player...", menuLabels(page))
+
+    -- Set alias... asks in a prompt, and the card takes the alias.
+    page.menu.rows[1].scripts.OnClick(page.menu.rows[1])
+    test.assertTrue(page.prompt:IsOpen())
+    page.prompt.single:SetValue("Sparky")
+    page.prompt.save.scripts.OnClick(page.prompt.save)
+    test.assertTrue(rosterCard(page, "Sparky") ~= nil)
+
+    -- Merge into player... picks from a searchable list.
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    page.menu.rows[3].scripts.OnClick(page.menu.rows[3])
+    test.assertTrue(page:PickerOpen())
+    test.assertEqual("Merge into player", page.picker.title.text)
+    local box = page.picker.search.box
+    box:SetText("hammer")
+    box.scripts.OnTextChanged(box, true)
+    local row = page.picker.rows[1]
+    test.assertTrue(row.shown)
+    test.assertEqual("Hammer Smith", row.name.text)
+    row.scripts.OnClick(row)
+    test.assertFalse(page:PickerOpen())
+    -- Zap is one of Hammer's characters now.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertEqual(partition:GetCharacter(normalizer:Key("Hammer Smith")).player,
+        partition:GetCharacter(normalizer:Key("Zap Arcane")).player)
+    test.assertEqual(nil, rosterCard(page, "Sparky"))
+end)
+
+test.test("roster: a member is offered only what they may do to their own player", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(world.environment)
+    local page = openRosterOn(addon, "Zap Arcane")
+
+    -- Someone else's player: only View player..., and no ⋯ or Edit.
+    local zap = rosterCard(page, "Zap Arcane")
+    zap.scripts.OnClick(zap, "RightButton")
+    test.assertEqual("View player...", menuLabels(page))
+    page.menu:Close()
+    local zapCharacter = characterCard(page, "Zap Arcane")
+    zapCharacter.scripts.OnClick(zapCharacter, "RightButton")
+    test.assertEqual("View player...", menuLabels(page))
+    page.menu:Close()
+    test.assertFalse(page.detail.actions.shown)
+    page.detail:ShowTab("bio")
+    test.assertFalse(page.detail.edits[1] ~= nil and page.detail.edits[1].shown)
+
+    -- Their own player: the organizing actions on their own characters.
+    local hammer = rosterCard(page, "Hammer Smith")
+    hammer.scripts.OnClick(hammer, "LeftButton")
+    hammer.scripts.OnClick(hammer, "RightButton")
+    test.assertEqual("Set alias..., View player...", menuLabels(page))
+    page.detail:ShowTab("characters")
+    local bolt = characterCard(page, "Bolt Smith")
+    bolt.scripts.OnClick(bolt, "RightButton")
+    test.assertEqual("Link as alt of..., Make this the main, Set alias..., View player..., Split off as own player",
+        menuLabels(page))
+    page.menu:Close()
+
+    -- Set Discord... on their own player sends a suggestion to the officers.
+    test.assertTrue(page.detail.actions.shown)
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    test.assertEqual("Set alias..., Set Discord...", menuLabels(page))
+    page.menu.rows[2].scripts.OnClick(page.menu.rows[2])
+    page.prompt.single:SetValue("hammer#1")
+    page.prompt.save.scripts.OnClick(page.prompt.save)
+    test.assertEqual(1, addon.syncSession:Status().pending)
+
+    -- And they edit their own location and bio from the Bio tab.
+    page.detail:ShowTab("bio")
+    local edit = page.detail.edits[1]
+    test.assertTrue(edit.shown)
+    test.assertEqual("location", edit.field)
+    edit.scripts.OnClick(edit)
+    test.assertTrue(page.prompt:IsOpen())
+    page.prompt.single:SetValue("Lakeshire")
+    page.prompt.save.scripts.OnClick(page.prompt.save)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local player = partition:GetCharacter(normalizer:Key("Hammer Smith")).player
+    test.assertEqual("Lakeshire", (partition:PlayerProfileText(player, "location")))
+    local bioEdit = page.detail.edits[2]
+    test.assertEqual("bio", bioEdit.field)
+    bioEdit.scripts.OnClick(bioEdit)
+    test.assertTrue(page.prompt.multi.shown)
+    page.prompt.multi:SetValue("Heals.\nAlso fishes.")
+    page.prompt.save.scripts.OnClick(page.prompt.save)
+    test.assertEqual("Heals.\nAlso fishes.", (partition:PlayerProfileText(player, "bio")))
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the page is built on show, and a pinned Friend is starred", function()
