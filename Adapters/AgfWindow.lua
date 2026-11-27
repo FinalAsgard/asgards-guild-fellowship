@@ -2,14 +2,15 @@ local _, addon = ...
 
 -- The add-on's new window, drawn with the Theme and Widgets rather than the
 -- Details! Framework. Features move into it one at a time, each as a module
--- with a button in the sidebar; for now that's only the Guild LFG Board.
+-- with a button in the sidebar: Friends, the Guild LFG Board and Greetings.
 --
--- One fixed size (960x600), movable, with its position saved per character.
+-- One fixed size (1100x680), movable, with its position saved per character.
 -- The left sidebar card holds the tree and the add-on's name, a button per
 -- module, Settings pinned at the bottom, and the character and version. At
 -- the top right are an X that closes the window and a gear that toggles the
 -- current module's settings popup, pinned under the gear and titled with
--- the module's name. A click anywhere else in the window closes the popup,
+-- the module's name; a module may add a switch beside the gear for its
+-- main setting. A click anywhere else in the window closes the popup,
 -- and switching modules keeps it open, retitled. The Settings page holds
 -- settings that belong to no module, in tabs across the top; each switch
 -- there is a SettingsModel toggle, so it always agrees with the old window
@@ -20,12 +21,17 @@ local _, addon = ...
 local Theme = addon.Theme
 
 local AgfWindow = {
-    WIDTH = 960,
-    HEIGHT = 600,
+    WIDTH = 1100,
+    HEIGHT = 680,
     SIDEBAR_WIDTH = 200,
     MARGIN = 12,
     ICON_SIZE = 28,
-    POPUP_WIDTH = 260,
+    POPUP_WIDTH = 300,
+    -- Gear popup rows: a switch's, an action button's, and a choice's
+    -- (its label, then the segmented control under it).
+    POPUP_ROW_HEIGHT = 30,
+    POPUP_ACTION_HEIGHT = 34,
+    POPUP_CHOICE_HEIGHT = 58,
     MODULE_ROW_HEIGHT = 32,
     SETTINGS_ROW_HEIGHT = 44,
     -- A color setting's swatches, and its Custom... button.
@@ -42,11 +48,22 @@ Window.__index = Window
 -- options:
 --   frameName     the window's global name, so Escape closes it
 --   modules       a list of { id, label, title, draw(content, ui),
---                 settingsRows, onShow }: label names the sidebar button
---                 and the gear popup, title heads the page; draw is
---                 optional, settingsRows ({ id, label, info } toggles in
---                 `settings`) are the gear popup's switches, and onShow()
---                 (optional) runs each time the page is shown
+--                 settingsRows, headerSwitch, onShow }: label names the
+--                 sidebar button and the gear popup, title heads the page;
+--                 draw is optional, settingsRows ({ id, label, info }
+--                 entries in `settings`) are the gear popup's rows, drawn
+--                 by the entry's kind: a toggle as a switch, an action as
+--                 a button reading Label() (its activeLabel while active;
+--                 one marked offOnClose is ended when the window hides),
+--                 and a choice as a segmented control under its label.
+--                 label defaults to the entry's; info (text, or true for
+--                 the entry's own info) puts an info icon by the label,
+--                 headerSwitch (optional, { id, label, on, off }: a toggle
+--                 in `settings`, and its text while on and off) is a
+--                 switch beside the gear while the module shows, and
+--                 onShow(argument) (optional) runs each time the page is
+--                 shown, with what Open or ShowPage was given for it (e.g.
+--                 the player Friends shows), or nil
 --   settings      the SettingsModel the Settings page's switches use
 --   settingsTabs  a list of { id, label, rows = { { id, label, info } } },
 --                 each row a toggle in `settings`
@@ -54,6 +71,8 @@ Window.__index = Window
 --   version       the add-on's version text
 --   loadPosition  function() -> saved { point, relativePoint, x, y } or nil
 --   savePosition  function(position)
+--   onError       optional function(text): tells the player why something
+--                 (ending a mode as the window closes) didn't happen
 function AgfWindow.Create(client, options)
     local window = setmetatable({
         client = client,
@@ -62,6 +81,10 @@ function AgfWindow.Create(client, options)
         modules = options.modules or {},
         switches = {},
         colorRows = {},
+        choiceRows = {},
+        actionRows = {},
+        infoIcons = {},
+        headers = {},
         pages = {},
         moduleButtons = {},
     }, Window)
@@ -343,6 +366,20 @@ function Window:refreshSwitch(id)
     for index = 1, #switches do
         switches[index]:SetOn(self.options.settings:Get(id) == true)
     end
+    local headerId, header
+    for headerId, header in pairs(self.headers) do
+        if header.setting.id == id then
+            header.label:SetText(self.options.settings:Get(id) == true and header.setting.on or header.setting.off)
+        end
+    end
+    local strips = self.choiceRows[id] or {}
+    for index = 1, #strips do
+        strips[index]:Select(self.options.settings:Get(id))
+    end
+    local buttons = self.actionRows[id] or {}
+    for index = 1, #buttons do
+        buttons[index]:SetLabel(self.options.settings:Label(id) or buttons[index].setting.label)
+    end
     local cards = self.colorRows[id] or {}
     for index = 1, #cards do
         local card = cards[index]
@@ -378,6 +415,35 @@ function Window:showSettingsTab(id)
     end
 end
 
+-- Each module's header switch, left of the gear: its text ("Greet prompts
+-- on") and the switch, shown while that module's page is.
+function Window:buildHeaderSwitches(frame)
+    local ui = self.ui
+    local index
+    for index = 1, #self.modules do
+        local module = self.modules[index]
+        local setting = module.headerSwitch
+        if setting ~= nil then
+            local holder = ui:frame("Frame", frame)
+            holder:SetSize(220, AgfWindow.ICON_SIZE)
+            holder:SetPoint("RIGHT", self.gear, "LEFT", -Theme.SPACING.l, 0)
+            local header = { frame = holder, setting = setting }
+            header.label = ui:Text(holder, "", "semibold", "title", "text")
+            header.label:SetJustifyH("RIGHT")
+            self.headers[module.id] = header
+            header.switch = self:newSwitch(holder, setting)
+            header.switch:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
+            header.label:SetPoint("RIGHT", header.switch, "LEFT", -Theme.SPACING.s, 0)
+            holder:Hide()
+        end
+    end
+end
+
+-- Module `id`'s header switch ({ frame, label, switch, setting }), or nil.
+function Window:HeaderSwitch(id)
+    return self.headers[id]
+end
+
 -- The gear popup, pinned under the gear: the current module's name and its
 -- settings. Above it in the window, a catcher covering the rest closes it
 -- on any click there.
@@ -411,13 +477,12 @@ function Window:buildPopup(frame)
         body:SetPoint("TOPLEFT", popup, "TOPLEFT", Theme.SPACING.l, -40)
         body:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -Theme.SPACING.l, Theme.SPACING.m)
         local rows = module.settingsRows or {}
+        local top = 0
         local position
         for position = 1, #rows do
-            local label = ui:Text(body, rows[position].label, "regular", "body", "text")
-            label:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -(position - 1) * 30 - 4)
-            local switch = self:newSwitch(body, rows[position])
-            switch:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -(position - 1) * 30)
+            top = top + self:buildPopupRow(body, rows[position], top)
         end
+        body.height = top
         body:Hide()
         popup.bodies[module.id] = body
     end
@@ -449,6 +514,7 @@ function Window:build()
     end)
     frame:SetScript("OnHide", function()
         window:CloseSettingsPopup()
+        window:endModes()
     end)
     -- Hidden until it's all built.
     frame:Hide()
@@ -466,6 +532,7 @@ function Window:build()
     end)
     gear:SetPoint("RIGHT", close, "LEFT", -Theme.SPACING.xs, 0)
     self.gear = gear
+    self:buildHeaderSwitches(frame)
 
     local index
     for index = 1, #self.modules do
@@ -540,8 +607,9 @@ function Window:refreshCharacter()
 end
 
 -- Opens the window on page `id` (a module's id or "settings"; nil keeps
--- the page it showed last). True, or false and why it couldn't open.
-function Window:Open(id)
+-- the page it showed last), handing `argument` to the module's onShow.
+-- True, or false and why it couldn't open.
+function Window:Open(id, argument)
     if self.frame == nil then
         local ok, failure = pcall(self.build, self)
         if not ok then
@@ -550,13 +618,14 @@ function Window:Open(id)
                 self.frame:Hide()
             end
             self.frame = nil
-            self.pages, self.moduleButtons, self.switches, self.colorRows = {}, {}, {}, {}
+            self.pages, self.moduleButtons, self.switches, self.colorRows, self.headers = {}, {}, {}, {}, {}
+            self.choiceRows, self.actionRows, self.infoIcons = {}, {}, {}
             return false, failure
         end
     end
     local ok, failure = pcall(function()
         self:refreshCharacter()
-        self:ShowPage(id or self.current)
+        self:ShowPage(id or self.current, argument)
     end)
     if not ok then
         self:Close()
@@ -572,6 +641,7 @@ function Window:Close()
         self.frame:Hide()
     end
     self:CloseSettingsPopup()
+    self:endModes()
     self.open = false
 end
 
@@ -595,11 +665,12 @@ function Window:Page()
     return self.current
 end
 
--- Shows page `id`: a module's or "settings". An unknown id keeps the
--- current page.
-function Window:ShowPage(id)
+-- Shows page `id`: a module's or "settings", handing `argument` to the
+-- module's onShow. An unknown id keeps the current page, without the
+-- argument.
+function Window:ShowPage(id, argument)
     if id ~= AgfWindow.SETTINGS and self:module(id) == nil then
-        id = self.current
+        id, argument = self.current, nil
     end
     self.current = id
     if self.frame == nil then
@@ -620,6 +691,14 @@ function Window:ShowPage(id)
         button.panel:SetFill(on and "green" or "surface")
         button.label:SetTextColor(Theme.Color(on and "text" or "muted"))
     end
+    local headerId, header
+    for headerId, header in pairs(self.headers) do
+        if headerId == id then
+            header.frame:Show()
+        else
+            header.frame:Hide()
+        end
+    end
     -- The gear belongs to modules; Settings has its own page.
     if id == AgfWindow.SETTINGS then
         self:CloseSettingsPopup()
@@ -632,12 +711,105 @@ function Window:ShowPage(id)
         end
         local module = self:module(id)
         if module.onShow ~= nil then
-            module.onShow()
+            module.onShow(argument)
         end
     end
 end
 
 -- The gear popup -----------------------------------------------------------
+
+-- One row of a gear popup's `body` at `top`, for settingsRows entry `row`
+-- (see Create). Returns its height.
+function Window:buildPopupRow(body, row, top)
+    local ui, window = self.ui, self
+    local settings = self.options.settings
+    local entry = settings:Entry(row.id) or {}
+    local text = row.label or entry.label or row.id
+    local function info(anchor)
+        if row.info == nil then
+            return
+        end
+        local icon = ui:InfoIcon(body, text, function()
+            if row.info == true then
+                return settings:Info(row.id)
+            end
+            return row.info
+        end)
+        icon:SetPoint("LEFT", anchor, "RIGHT", Theme.SPACING.xs, 0)
+        window.infoIcons[row.id] = icon
+        return icon
+    end
+    if entry.kind == "action" then
+        local button = ui:Button(body, settings:Label(row.id) or text, "secondary", function()
+            local ran, reason = settings:Run(row.id)
+            if not ran and reason ~= nil then
+                window.client:Print(addon.Identity.chatPrefix .. " " .. text .. ": " .. tostring(reason) .. ".")
+            end
+            window:refreshSwitch(row.id)
+        end)
+        button:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top)
+        button:SetPoint("RIGHT", body, "RIGHT", 0, 0)
+        button.setting = row
+        self.actionRows[row.id] = self.actionRows[row.id] or {}
+        table.insert(self.actionRows[row.id], button)
+        return AgfWindow.POPUP_ACTION_HEIGHT
+    end
+    local label = ui:Text(body, text, "regular", "body", "text")
+    label:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top - 4)
+    info(label)
+    if entry.kind == "choice" then
+        local items = {}
+        local index
+        for index = 1, #(entry.choices or {}) do
+            items[index] = { id = entry.choices[index].id, label = entry.choices[index].label }
+        end
+        local strip = ui:Segmented(body, items, AgfWindow.POPUP_WIDTH - 2 * Theme.SPACING.l, function(id)
+            local changed, reason = settings:Set(row.id, id)
+            if not changed then
+                window.client:Print(addon.Identity.chatPrefix .. " " .. text .. " can't be changed: " ..
+                    tostring(reason) .. ".")
+            end
+            window:refreshSwitch(row.id)
+        end)
+        strip:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top - 24)
+        self.choiceRows[row.id] = self.choiceRows[row.id] or {}
+        table.insert(self.choiceRows[row.id], strip)
+        self:refreshSwitch(row.id)
+        return AgfWindow.POPUP_CHOICE_HEIGHT
+    end
+    local switch = self:newSwitch(body, { id = row.id, label = text })
+    switch:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, -top)
+    return AgfWindow.POPUP_ROW_HEIGHT
+end
+
+-- Ends every mode a popup action row turned on that lasts only while the
+-- window is open (an offOnClose action, e.g. Move greeting pop-ups).
+function Window:endModes()
+    local settings = self.options.settings
+    if settings == nil then
+        return
+    end
+    local id
+    for id in pairs(self.actionRows) do
+        local entry = settings:Entry(id)
+        if entry ~= nil and entry.offOnClose and settings:IsActive(id) then
+            -- A mode that won't end says why, rather than staying on
+            -- unnoticed.
+            local ended, reason = settings:Run(id)
+            if not ended and self.options.onError ~= nil then
+                self.options.onError("Couldn't end " .. tostring(settings:Label(id)) .. ": "
+                    .. tostring(reason or "it refused") .. ".")
+            end
+            self:refreshSwitch(id)
+        end
+    end
+end
+
+-- The popup rows drawn for setting `id`: its action buttons and its
+-- choices' segmented controls, in the order they were made.
+function Window:PopupRows(id)
+    return self.actionRows[id] or {}, self.choiceRows[id] or {}
+end
 
 function Window:showPopupFor(id)
     local module = self:module(id)
@@ -648,6 +820,7 @@ function Window:showPopupFor(id)
     local bodyId, body
     for bodyId, body in pairs(self.popup.bodies) do
         if bodyId == id then
+            self.popup:SetHeight(40 + math.max(body.height or 0, AgfWindow.POPUP_ROW_HEIGHT) + Theme.SPACING.m)
             body:Show()
         else
             body:Hide()

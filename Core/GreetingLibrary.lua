@@ -28,10 +28,10 @@ local GreetingLibrary = {
             "WB {name}!",
             "Look who's back, {name}!",
         },
-        longAbsence = {
-            "{name}! Long time no see, welcome back!",
-            "Look who it is! Good to have you back, {name}!",
-            "{name}! It's been ages, welcome back!",
+        friends = {
+            "There you are, {name}!",
+            "{name}! Good to see you, friend!",
+            "Hey {name}, ready for another run?",
         },
     },
     -- Starters that were replaced, and what replaces them in saved
@@ -40,16 +40,34 @@ local GreetingLibrary = {
         ["Evening, {name}!"] = "Hello, {name}!",
     },
     -- The categories in the order the Greetings window and the settings
-    -- panel list them, with the panel's on/off label for each.
+    -- panel list them, with the panel's on/off label for each, and the
+    -- switch's label beside them on the new window's Greetings page.
+    -- whenMinutes (a format given the minutes and "minute"/"minutes") is
+    -- the "when" line once the minutes are known. empty is what the page
+    -- says while the category has no greetings, and lastOne marks one
+    -- whose last greeting's delete warns that it will stop prompting. off
+    -- is the note while it's switched off, when it differs from the
+    -- page's usual one.
+    --
+    -- Friends isn't an occasion: a starred friend's login or welcome back
+    -- picks its words from it (GuildGreet.GreetingsCategory), so its
+    -- switch only changes the words, and without it they get the usual
+    -- ones.
     CATEGORIES = {
         { id = "join", label = "Join", when = "Someone joins the guild.",
-            toggle = "Prompt when someone joins the guild" },
+            toggle = "Prompt when someone joins the guild", switch = "Prompt me", lastOne = true,
+            empty = "No Join greetings yet. You won't get join prompts until you add one." },
         { id = "login", label = "Login", when = "Someone's first login you see this session.",
-            toggle = "Prompt for first logins" },
+            toggle = "Prompt for first logins", switch = "Prompt me", lastOne = true,
+            empty = "No Login greetings yet. You won't get login prompts until you add one." },
         { id = "welcomeBack", label = "Welcome back", when = "Someone you saw log off comes back after a break.",
-            toggle = "Prompt for welcome backs" },
-        { id = "longAbsence", label = "Long absence", when = "Someone logs in after a long time away.",
-            toggle = "Prompt after a long absence" },
+            whenMinutes = "Someone you saw log off comes back after more than %d %s away.",
+            toggle = "Prompt for welcome backs", switch = "Prompt me", lastOne = true,
+            empty = "No Welcome back greetings yet. You won't get welcome back prompts until you add one." },
+        { id = "friends", label = "Friends", when = "A starred friend logs in or comes back.",
+            toggle = "Use friend greetings for starred friends", switch = "Use for friends",
+            empty = "No Friends greetings yet. Friends get your Login and Welcome back greetings until you add one.",
+            off = "Switched off: friends get your Login and Welcome back greetings. These are kept, but not used." },
     },
     -- Every placeholder and what it's filled with. Case doesn't matter.
     PLACEHOLDERS = {
@@ -61,11 +79,40 @@ local GreetingLibrary = {
         { "{characterFirst}", "the first part of that character's name" },
         { "{characterLast}", "the last part of that character's name" },
     },
+    -- The Greetings page's Insert chips, and the rarer ones under More.
+    CHIPS = { "{name}", "{main}", "{character}" },
+    MORE = { "{mainFirst}", "{mainLast}", "{characterFirst}", "{characterLast}" },
+    MORE_NOTE = "These differ only on WoW Forever's two-part names.",
 }
 addon.GreetingLibrary = GreetingLibrary
 
 local Library = {}
 Library.__index = Library
+
+-- What `placeholder` (as PLACEHOLDERS writes it) is filled with, or nil.
+function GreetingLibrary.Fills(placeholder)
+    local index
+    for index = 1, #GreetingLibrary.PLACEHOLDERS do
+        if GreetingLibrary.PLACEHOLDERS[index][1] == placeholder then
+            return GreetingLibrary.PLACEHOLDERS[index][2]
+        end
+    end
+    return nil
+end
+
+-- The placeholders in two groups, each a list of { text, fills }: the
+-- chips, and the rarer ones offered under More.
+function GreetingLibrary.PlaceholderGroups()
+    local function group(list)
+        local result = {}
+        local index
+        for index = 1, #list do
+            result[index] = { text = list[index], fills = GreetingLibrary.Fills(list[index]) }
+        end
+        return result
+    end
+    return { chips = group(GreetingLibrary.CHIPS), more = group(GreetingLibrary.MORE) }
+end
 
 local function copy(list)
     local result = {}
@@ -120,6 +167,12 @@ local function tidy(text)
     return text
 end
 
+-- A greeting as it would be saved: trimmed, with line breaks folded to
+-- spaces. Nil when nothing is left.
+function GreetingLibrary.Tidy(text)
+    return tidy(text)
+end
+
 -- A greeting cleaned for chat: trimmed, with line breaks folded to spaces,
 -- and cut to one message. Nil when nothing is left.
 function GreetingLibrary.Clean(text)
@@ -154,6 +207,27 @@ function GreetingLibrary.Fill(text, names)
         return nil
     end)
     return filled
+end
+
+-- Deletes what's saved for the retired Long absence category in Guild
+-- Greet's saved state `state`: its greetings, last-used greeting and on/off
+-- switch. Run at every load; once they're gone it changes nothing. A
+-- deliberate exception to keeping saved data: the category no longer
+-- exists. True when something was deleted.
+function GreetingLibrary.RemoveLongAbsence(state)
+    if type(state) ~= "table" then
+        return false
+    end
+    local removed = false
+    local field
+    for _, field in ipairs({ "greetings", "lastUsed", "categories" }) do
+        local entries = state[field]
+        if type(entries) == "table" and entries.longAbsence ~= nil then
+            entries.longAbsence = nil
+            removed = true
+        end
+    end
+    return removed
 end
 
 -- Fills in a greeting's placeholders (Fill), cut to one chat message.
@@ -315,24 +389,5 @@ function Library:Remove(category, index)
         return nil, "that greeting is gone"
     end
     table.remove(list, index)
-    return true
-end
-
--- Puts back the starter greetings in `category`, or in every category when
--- it's nil, replacing what's there. Returns true, or nil and the reason.
-function Library:Restore(category)
-    if category ~= nil and GreetingLibrary.STARTERS[category] == nil then
-        return nil, "there is no such category"
-    end
-    local greetings = self:stored()
-    if greetings == nil then
-        return nil, "saved data is unavailable"
-    end
-    local id, starters
-    for id, starters in pairs(GreetingLibrary.STARTERS) do
-        if category == nil or category == id then
-            greetings[id] = copy(starters)
-        end
-    end
     return true
 end

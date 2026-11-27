@@ -9,22 +9,19 @@ local _, addon = ...
 --     it gets nothing more
 --   * players already online when the session's roster first loads are seen,
 --     and never get a login prompt
---   * the first login seen from a player this session is a "longAbsence"
---     when their latest login on any character was at least `longAbsence`
---     seconds before, and otherwise a "login"
+--   * the first login seen from a player this session is a "login", however
+--     long they were away
 --   * a player seen going offline who comes back at least `welcomeBack`
 --     seconds later is a "welcomeBack"; sooner is a relog and gets nothing
 --   * the user's own characters never get a prompt
--- So the order is join, long absence, welcome back, login.
+-- So the order is join, welcome back, login.
 -- Events before the roster first loads are ignored, since nobody is known
 -- to be seen yet.
 local GreetPolicy = {
     JOIN = "join",
     LOGIN = "login",
     WELCOME_BACK = "welcomeBack",
-    LONG_ABSENCE = "longAbsence",
     WELCOME_BACK_SECONDS = 60 * 60,
-    LONG_ABSENCE_SECONDS = 30 * 24 * 60 * 60,
 }
 addon.GreetPolicy = GreetPolicy
 
@@ -37,23 +34,17 @@ Policy.__index = Policy
 -- options.isMember: function(key) -> true for a current guild member, so
 --   friends' online messages are ignored.
 -- options.isOwn: function(key) -> true for the user's own characters.
--- options.absenceOf: function(key) -> seconds between the player's latest
---   login on any character and the start of this session, or nil when
---   unknown. Optional; without it nobody is on a long absence.
 -- options.enabled: function() -> false when Guild Greet is off, or off on
 --   this character. Optional.
 -- options.categoryEnabled: function(category) -> false when that category's
 --   prompts are turned off. Optional.
--- options.welcomeBackSeconds, options.longAbsenceSeconds: function() -> the
---   thresholds in seconds. Optional; the defaults above otherwise.
+-- options.welcomeBackSeconds: function() -> the welcome-back threshold in
+--   seconds. Optional; WELCOME_BACK_SECONDS otherwise.
 function GreetPolicy.Create(options)
     return setmetatable({
         playerOf = options.playerOf,
         isMember = options.isMember,
         isOwn = options.isOwn,
-        absenceOf = options.absenceOf or function()
-            return nil
-        end,
         enabled = options.enabled or function()
             return true
         end,
@@ -62,9 +53,6 @@ function GreetPolicy.Create(options)
         end,
         welcomeBack = options.welcomeBackSeconds or function()
             return GreetPolicy.WELCOME_BACK_SECONDS
-        end,
-        longAbsence = options.longAbsenceSeconds or function()
-            return GreetPolicy.LONG_ABSENCE_SECONDS
         end,
         ready = false,
         seen = {},
@@ -169,14 +157,7 @@ function Policy:CameOnline(key, now)
 
     local category
     if not wasSeen then
-        local ok, absence = pcall(self.absenceOf, key)
-        if ok and type(absence) == "number"
-            and absence >= seconds(self.longAbsence, GreetPolicy.LONG_ABSENCE_SECONDS)
-        then
-            category = GreetPolicy.LONG_ABSENCE
-        else
-            category = GreetPolicy.LOGIN
-        end
+        category = GreetPolicy.LOGIN
     elseif offlineAt ~= nil and now - offlineAt >= self:WelcomeBackSeconds() then
         category = GreetPolicy.WELCOME_BACK
     else

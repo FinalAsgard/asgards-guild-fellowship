@@ -591,10 +591,20 @@ end
 -- Opens the game's chat box on a whisper to the character `name`, for the
 -- player to type and send. The game's own "send tell" call is used where
 -- there is one (it copes with names that have spaces); otherwise the chat
--- box opens with "/w name ". Returns true when it opened.
-function Client:OpenWhisper(name)
+-- box opens with "/w name ". With `text`, the box opens with
+-- "/w name text" instead, the text typed in and unsent. Returns true when
+-- it opened.
+function Client:OpenWhisper(name, text)
     if type(name) ~= "string" or name == "" then
         return false
+    end
+    if type(text) == "string" and text ~= "" then
+        local line = "/w " .. name .. " " .. text
+        local util = self.environment.ChatFrameUtil
+        if type(util) == "table" and type(util.OpenChat) == "function" then
+            return (callFunction(util.OpenChat, line))
+        end
+        return (callFunction(self.environment.ChatFrame_OpenChat, line))
     end
     local util = self.environment.ChatFrameUtil
     if type(util) == "table" and type(util.SendTell) == "function" then
@@ -824,6 +834,29 @@ function Client:GetZoneMapIds()
         end
     end
     return zones
+end
+
+-- The zones a questing listing can be in, for the listing editor: each {
+-- mapId, name, minLevel?, maxLevel? }, the levels as GetMapLevels reports
+-- them. A best guess, still to be checked in game on each client: the zone
+-- maps under the top of the map tree (as GetZoneMapIds finds them, every
+-- continent's), with GetMapLevels for each. Empty where the client's maps
+-- don't say; the editor then offers only the current zone.
+function Client:GetZoneList()
+    local maps = self.environment.C_Map
+    local list = {}
+    local name, mapId
+    for name, mapId in pairs(self:GetZoneMapIds()) do
+        local zone = { mapId = mapId, name = name }
+        local ok, minLevel, maxLevel = callFunction(maps.GetMapLevels, mapId)
+        if ok and type(minLevel) == "number" and type(maxLevel) == "number" and minLevel >= 1
+            and minLevel <= maxLevel
+        then
+            zone.minLevel, zone.maxLevel = minLevel, maxLevel
+        end
+        table.insert(list, zone)
+    end
+    return list
 end
 
 -- The logged-in character's class token ("WARRIOR"), or nil.
@@ -1494,6 +1527,16 @@ function Client:GetClassColor(classToken)
         return string.format("ff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
     end
     return nil
+end
+
+-- The class as the game names it ("Warrior") for `classToken`, or nil.
+function Client:GetClassName(classToken)
+    local names = self.environment.LOCALIZED_CLASS_NAMES_MALE
+    local name = type(names) == "table" and type(classToken) == "string" and names[classToken] or nil
+    if type(name) ~= "string" or name == "" then
+        return nil
+    end
+    return name
 end
 
 -- The guild's rank names, a list where entry 1 is rank 0 (the guild

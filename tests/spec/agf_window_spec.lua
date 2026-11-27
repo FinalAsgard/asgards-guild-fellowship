@@ -477,3 +477,305 @@ local index
 for index = 1, #fixtures.PROFILES do
     registerProfileTests(fixtures.PROFILES[index])
 end
+
+test.test("agf window: a module's header switch agrees with its setting, and shows only on that module", function()
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/Theme.lua", "Adapters/Widgets.lua",
+        "Adapters/AgfWindow.lua")
+    local environment = fakeFrames.install({})
+    local state = { on = true }
+    local settings = addon.SettingsModel.Create()
+    settings:AddSection("guildGreet", "Guild Greet")
+    settings:Add("guildGreet", { id = "guildGreet", kind = "toggle", label = "Show greet prompts",
+        get = function() return state.on end,
+        set = function(enabled)
+            state.on = enabled
+            return true
+        end })
+    local window = addon.AgfWindow.Create({ environment = environment }, {
+        modules = { { id = "lfg", label = "LFG", title = "Guild LFG Board" },
+            { id = "greetings", label = "Greetings", title = "Greetings",
+                headerSwitch = { id = "guildGreet", label = "Greet prompts", on = "Greet prompts on",
+                    off = "Greet prompts off" } } },
+        settings = settings,
+        settingsTabs = {},
+    })
+    window:Open("lfg")
+    local header = window:HeaderSwitch("greetings")
+
+    test.assertEqual(nil, window:HeaderSwitch("lfg"))
+    test.assertFalse(header.frame.shown)
+    window:ShowPage("greetings")
+    test.assertTrue(header.frame.shown)
+    test.assertTrue(header.switch:IsOn())
+    test.assertEqual("Greet prompts on", header.label.text)
+
+    header.switch.scripts.OnClick(header.switch)
+    test.assertFalse(state.on)
+    test.assertFalse(header.switch:IsOn())
+    test.assertEqual("Greet prompts off", header.label.text)
+
+    -- Changed elsewhere (the AddOns options or a slash command): it follows.
+    settings:Set("guildGreet", true)
+    test.assertTrue(header.switch:IsOn())
+    test.assertEqual("Greet prompts on", header.label.text)
+
+    window:ShowPage("settings")
+    test.assertFalse(header.frame.shown)
+end)
+
+test.test("agf window: a multiline input folds line breaks, caps bytes at a whole letter, and grows to its most lines", function()
+    local addon = loadUi()
+    local environment = fakeFrames.install({})
+    local ui = addon.Widgets.Create(environment)
+    local page = environment.CreateFrame("Frame")
+    local typed, entered, escaped = {}, 0, 0
+    local input = ui:TextInput(page, 300, 255, function(text)
+        table.insert(typed, text)
+    end, { multiline = true, maxBytes = 10, onEnter = function()
+        entered = entered + 1
+    end, onEscape = function()
+        escaped = escaped + 1
+    end })
+    local box = input.box
+    local function typeText(text)
+        box:SetText(text)
+        box.scripts.OnTextChanged(box, true)
+        -- A real box runs OnTextChanged again after the add-on's SetText.
+        if box:GetText() ~= text then
+            box.scripts.OnTextChanged(box, false)
+        end
+    end
+
+    test.assertTrue(rawget(box, "multiLine"))
+    test.assertEqual("0/255", input.counter.text)
+    typeText("Hi\nthere")
+    test.assertEqual("Hi there", box:GetText())
+    -- What's handed on is the folded text.
+    test.assertEqual("Hi there", typed[#typed])
+    test.assertEqual("8/255", input.counter.text)
+    -- é is two bytes: the cap stops before a letter that won't fit whole.
+    typeText("Héllo wörld")
+    test.assertEqual("Héllo wö", box:GetText())
+    test.assertEqual("8/255", input.counter.text)
+
+    box.scripts.OnEnterPressed(box)
+    box.scripts.OnEscapePressed(box)
+    test.assertEqual(1, entered)
+    test.assertEqual(1, escaped)
+
+    test.assertEqual(1, addon.Widgets.LinesFor(nil, 16, 4))
+    test.assertEqual(1, addon.Widgets.LinesFor(15, 16, 4))
+    test.assertEqual(2, addon.Widgets.LinesFor(32, 16, 4))
+    test.assertEqual(4, addon.Widgets.LinesFor(200, 16, 4))
+    test.assertEqual("ab", addon.Widgets.CutBytes("abé", 3))
+end)
+
+test.test("agf window: popup rows draw a toggle with info, an action button and a choice, all from SettingsModel", function()
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/Theme.lua", "Adapters/Widgets.lua",
+        "Adapters/AgfWindow.lua")
+    local environment = fakeFrames.install({})
+    local tooltip = { lines = {} }
+    function tooltip.SetOwner() end
+    function tooltip.SetText(_, text)
+        tooltip.lines = { text }
+    end
+    function tooltip.AddLine(_, text)
+        table.insert(tooltip.lines, text)
+    end
+    function tooltip.Show() end
+    function tooltip.Hide() end
+    environment.GameTooltip = tooltip
+    local state = { here = true, moving = false, who = "everyone" }
+    local settings = addon.SettingsModel.Create()
+    settings:AddSection("guildGreet", "Guild Greet")
+    settings:Add("guildGreet", { id = "greetCharacter", kind = "toggle", label = "Greet from this character",
+        info = function() return "Only this character." end,
+        get = function() return state.here end,
+        set = function(enabled)
+            state.here = enabled
+            return true
+        end })
+    settings:Add("guildGreet", { id = "greetMove", kind = "action", offOnClose = true,
+        label = "Move greeting pop-ups", activeLabel = "Done moving",
+        active = function() return state.moving end,
+        run = function()
+            state.moving = not state.moving
+            return true
+        end })
+    settings:Add("guildGreet", { id = "greetFor", kind = "choice", label = "Greet prompts for",
+        choices = { { id = "everyone", label = "Everyone" }, { id = "grouped", label = "Grouped with" },
+            { id = "friends", label = "My Friends" } },
+        get = function() return state.who end,
+        set = function(choice)
+            state.who = choice
+            return true
+        end })
+    local window = addon.AgfWindow.Create({ environment = environment, Print = function() end }, {
+        modules = { { id = "greetings", label = "Greetings", title = "Greetings", settingsRows = {
+            { id = "greetCharacter", info = true }, { id = "greetFor" }, { id = "greetMove" } } } },
+        settings = settings,
+        settingsTabs = {},
+    })
+    window:Open("greetings")
+    window.gear.scripts.OnClick(window.gear)
+    test.assertEqual("Greetings", window:SettingsPopupTitle())
+
+    -- The toggle's switch, and its info icon showing the entry's own info.
+    local switch = window:Switches("greetCharacter")[1]
+    switch.scripts.OnClick(switch)
+    test.assertFalse(state.here)
+    local icon = window.infoIcons.greetCharacter
+    test.assertEqual("i", icon.label.text)
+    icon.scripts.OnEnter(icon)
+    test.assertEqual("Greet from this character", tooltip.lines[1])
+    test.assertEqual("Only this character.", tooltip.lines[2])
+
+    -- The action reads its active label while on.
+    local actions, choices = window:PopupRows("greetMove")
+    local move = actions[1]
+    test.assertEqual("Move greeting pop-ups", move.label.text)
+    move.scripts.OnClick(move)
+    test.assertTrue(state.moving)
+    test.assertEqual("Done moving", move.label.text)
+
+    -- The choice: a segmented control, kept in step with the setting.
+    _, choices = window:PopupRows("greetFor")
+    local strip = choices[1]
+    test.assertEqual("everyone", strip:Selected())
+    strip.buttons[3].scripts.OnClick(strip.buttons[3])
+    test.assertEqual("friends", state.who)
+    settings:Set("greetFor", "grouped")
+    test.assertEqual("grouped", strip:Selected())
+
+    -- Closing the window ends the move.
+    window:Close()
+    test.assertFalse(state.moving)
+    test.assertEqual("Move greeting pop-ups", move.label.text)
+end)
+
+test.test("agf window: a stepper steps to the next multiple, clamps, repeats while held, and takes a typed value", function()
+    local addon = loadUi()
+    local environment = fakeFrames.install({})
+    local ui = addon.Widgets.Create(environment)
+    local changes = {}
+    local stepper = ui:Stepper(environment.UIParent or ui:frame("Frame", nil), { min = 1, max = 120, step = 5,
+        onChange = function(value)
+            table.insert(changes, value)
+        end })
+    stepper:SetValue(1)
+
+    -- In 5s from 1: 5, 10; down to 5, then the minimum.
+    stepper.plus.scripts.OnMouseDown(stepper.plus)
+    stepper.plus.scripts.OnMouseUp(stepper.plus)
+    test.assertEqual(5, stepper:GetValue())
+    stepper.plus.scripts.OnMouseDown(stepper.plus)
+    stepper.plus.scripts.OnMouseUp(stepper.plus)
+    test.assertEqual(10, stepper:GetValue())
+    stepper.minus.scripts.OnMouseDown(stepper.minus)
+    stepper.minus.scripts.OnMouseUp(stepper.minus)
+    stepper.minus.scripts.OnMouseDown(stepper.minus)
+    stepper.minus.scripts.OnMouseUp(stepper.minus)
+    test.assertEqual(1, stepper:GetValue())
+    test.assertEqual("5,10,5,1", table.concat(changes, ","))
+    -- At the minimum, − does nothing.
+    stepper.minus.scripts.OnMouseDown(stepper.minus)
+    stepper.minus.scripts.OnMouseUp(stepper.minus)
+    test.assertEqual(4, #changes)
+
+    -- Held: one step at once, then more after the delay, until let go.
+    stepper.plus.scripts.OnMouseDown(stepper.plus)
+    test.assertEqual(5, stepper:GetValue())
+    stepper.scripts.OnUpdate(stepper, 0.3)
+    test.assertEqual(5, stepper:GetValue())
+    -- Past the delay, then two and a half repeats: three more steps.
+    stepper.scripts.OnUpdate(stepper, 0.1 + 2.5 * addon.Widgets.HOLD_REPEAT)
+    test.assertEqual(20, stepper:GetValue())
+    stepper.plus.scripts.OnMouseUp(stepper.plus)
+    test.assertEqual(nil, stepper.scripts.OnUpdate)
+    test.assertEqual("20", stepper.field.box:GetText())
+
+    -- Typed: any value in range; out of range is kept to it; junk goes back.
+    local box = stepper.field.box
+    box:SetText("37")
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(37, stepper:GetValue())
+    box:SetText("500")
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(120, stepper:GetValue())
+    test.assertEqual("120", box:GetText())
+    box:SetText("soon")
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(120, stepper:GetValue())
+    test.assertEqual("120", box:GetText())
+
+    -- A refresh while a number is being typed leaves what's typed, and
+    -- Enter saves it.
+    rawset(box, "HasFocus", function() return true end)
+    box:SetText("45")
+    stepper:SetValue(120)
+    test.assertEqual("45", box:GetText())
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(45, stepper:GetValue())
+end)
+
+test.test("agf window: stepping and typed values are pure, and a slider shows its formatted value", function()
+    local addon = loadUi()
+    local step, typed = addon.Widgets.StepValue, addon.Widgets.TypedValue
+    test.assertEqual(5, step(1, 1, 5, 1, 120))
+    test.assertEqual(10, step(7, 1, 5, 1, 120))
+    test.assertEqual(5, step(7, -1, 5, 1, 120))
+    test.assertEqual(120, step(120, 1, 5, 1, 120))
+    test.assertEqual(3, step(2, 1, nil, 1, 10))
+    test.assertEqual(4, typed(" 4 ", 1, 10))
+    test.assertEqual(1, typed("-3", 1, 10))
+    test.assertEqual(3, typed("2.6", 1, 10))
+    test.assertEqual(nil, typed("", 1, 10))
+
+    local environment = fakeFrames.install({})
+    local ui = addon.Widgets.Create(environment)
+    local changes = {}
+    local slider = ui:Slider(ui:frame("Frame", nil), 300, { min = 0, max = 15,
+        format = function(minutes)
+            return minutes == 0 and "Off" or (minutes .. " min")
+        end,
+        onChange = function(value)
+            table.insert(changes, value)
+        end })
+    slider:SetValue(0)
+    test.assertEqual("Off", slider.text.text)
+    test.assertEqual(0, #changes)
+    slider.slider.scripts.OnValueChanged(slider.slider, 5.2, true)
+    test.assertEqual("5 min", slider.text.text)
+    test.assertEqual(5, changes[1])
+    slider:SetValue(9)
+    test.assertEqual("9 min", slider.text.text)
+    test.assertEqual(1, #changes)
+end)
+
+test.test("agf window: a menu widens to fit its longest line, and never narrows below its width", function()
+    local addon = loadUi()
+    local environment = fakeFrames.install({})
+    local ui = addon.Widgets.Create(environment)
+    local anchor = ui:frame("Frame", nil)
+    local menu = ui:ContextMenu(anchor)
+    rawset(menu, "GetWidth", function()
+        return 300
+    end)
+    local items = { { label = "{characterFirst}  the first part of that character's name" }, { label = "Short" } }
+    menu:Open(anchor, items)
+    test.assertEqual(300, rawget(menu, "width"))
+
+    rawset(menu.rows[1].label, "GetStringWidth", function()
+        return 361.4
+    end)
+    menu:Close()
+    menu:Open(anchor, items)
+    test.assertEqual(362 + 2 * (4 + addon.Theme.SPACING.s), rawget(menu, "width"))
+
+    -- Short items again: back to the width it was made.
+    rawset(menu.rows[1].label, "GetStringWidth", function()
+        return 40
+    end)
+    menu:Open(anchor, items)
+    test.assertEqual(300, rawget(menu, "width"))
+end)

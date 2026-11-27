@@ -26,7 +26,6 @@ local MasterFrame = {
         profile = "Interface\\Icons\\INV_Misc_GroupLooking",
         recruitment = "Interface\\Icons\\INV_Scroll_03",
         ads = "Interface\\Icons\\INV_Misc_PocketWatch_01",
-        greetings = "Interface\\Icons\\INV_Letter_15",
         guildlog = "Interface\\Icons\\INV_Misc_Note_01",
         promotions = "Interface\\Icons\\INV_Misc_Ribbon_01",
         settings = "Interface\\Icons\\INV_Misc_Gear_01",

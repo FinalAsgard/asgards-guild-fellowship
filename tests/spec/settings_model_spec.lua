@@ -638,8 +638,9 @@ test.test("the Guild Greet settings open with Show greet prompts, then headed gr
     test.assertEqual("greetInInstances", ids[4])
     test.assertEqual("greetHighlightFriends", ids[5])
     test.assertEqual("Highlight group friends", addon.settings:Entry("greetHighlightFriends").label)
-    test.assertEqual("greetOnlyGrouped", ids[6])
-    test.assertEqual("Only greet players I've grouped with", addon.settings:Entry("greetOnlyGrouped").label)
+    test.assertEqual("greetFor", ids[6])
+    test.assertEqual("Greet prompts for", addon.settings:Entry("greetFor").label)
+    test.assertEqual("choice", addon.settings:Entry("greetFor").kind)
     test.assertEqual("greetMove", ids[7])
     test.assertEqual("greetPromptsHeading", ids[8])
     test.assertEqual("greetCategory:join", ids[9])
@@ -727,4 +728,57 @@ test.test("a heading's style must be one the panel knows", function()
 
     test.assertTrue(model:Add("general", { id = "officer", kind = "heading", label = "Officers", style = "officer" }))
     test.assertFalse(model:Add("general", { id = "loud", kind = "heading", label = "Loud", style = "shouting" }))
+end)
+
+test.test("settings: a choice entry needs its choices, and only takes one of them", function()
+    local model = newModel()
+    local saved = { value = "a" }
+    model:AddSection("general", "General")
+    local function entry(extra)
+        local fields = { id = "pick", kind = "choice", label = "Pick",
+            get = function() return saved.value end,
+            set = function(value)
+                saved.value = value
+                return true
+            end }
+        local key, value
+        for key, value in pairs(extra or {}) do
+            fields[key] = value
+        end
+        return fields
+    end
+
+    test.assertFalse(model:Add("general", entry()))
+    test.assertFalse(model:Add("general", entry({ choices = {} })))
+    test.assertFalse(model:Add("general", entry({ choices = { { id = "a" } } })))
+    test.assertTrue(model:Add("general", entry({ choices = { { id = "a", label = "A" }, { id = "b", label = "B" } } })))
+
+    local changed
+    model:OnChange(function(id, value)
+        changed = id .. "=" .. tostring(value)
+    end)
+    test.assertEqual("a", model:Get("pick"))
+    test.assertTrue(model:Set("pick", "b"))
+    test.assertEqual("b", saved.value)
+    test.assertEqual("pick=b", changed)
+    local ok, reason = model:Set("pick", "c")
+    test.assertEqual(nil, ok)
+    test.assertEqual("it must be one of a, b", reason)
+    test.assertEqual("b", saved.value)
+    test.assertEqual(nil, model:Toggle("pick"))
+end)
+
+test.test("settings: Greet prompts for saves the choice and closes prompts that no longer pass", function()
+    local _, addon = loggedIn(fixtures.PROFILES[1])
+    local refreshed = 0
+    local refresh = addon.guildGreet.Refresh
+    addon.guildGreet.Refresh = function(self, ...)
+        refreshed = refreshed + 1
+        return refresh(self, ...)
+    end
+
+    test.assertEqual("everyone", addon.settings:Get("greetFor"))
+    test.assertTrue(addon.settings:Set("greetFor", "friends"))
+    test.assertEqual("friends", addon.rosterController:Store():GreetFor())
+    test.assertTrue(refreshed > 0)
 end)

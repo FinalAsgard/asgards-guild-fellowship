@@ -256,6 +256,15 @@ end)
 
 -- Officer chat and achievements ------------------------------------------------
 
+test.test("party chat tags guildmates like guild chat, the leader's lines too, and nobody else", function()
+    local world = retail()
+    test.assertEqual(alias("TheTool") .. "inc", world.annotator:Annotate("CHAT_MSG_PARTY", "inc", "Hammer-Area52"))
+    test.assertEqual(main("Anvil") .. "pull", world.annotator:Annotate("CHAT_MSG_PARTY_LEADER", "pull", "Tongs-Area52"))
+    test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_PARTY", "hi", "Anvil-Area52"))
+    -- Someone from outside the guild: no tag.
+    test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_PARTY", "hi", "Stranger-Area52"))
+end)
+
 local ACHIEVEMENT = "%s has earned the achievement |cffffff00|Hachievement:6:0|h[Level 10]|h|r!"
 
 test.test("officer chat is tagged like guild chat", function()
@@ -302,16 +311,17 @@ test.test("an achievement by a speaker with nothing new to show is left unchange
     test.assertEqual(nil, world.annotator:Annotate("CHAT_MSG_GUILD_ACHIEVEMENT", ACHIEVEMENT, "Anvil-Area52"))
 end)
 
-test.test("tags are added to guild, officer, and achievement events only", function()
+test.test("tags are added to guild, officer, achievement and party events only", function()
     local world = retail()
-    local expected = { CHAT_MSG_GUILD = true, CHAT_MSG_OFFICER = true, CHAT_MSG_GUILD_ACHIEVEMENT = true }
+    local expected = { CHAT_MSG_GUILD = true, CHAT_MSG_OFFICER = true, CHAT_MSG_GUILD_ACHIEVEMENT = true,
+        CHAT_MSG_PARTY = true, CHAT_MSG_PARTY_LEADER = true }
     local events = world.addon.ChatAnnotator.EVENTS
-    test.assertEqual(3, #events)
+    test.assertEqual(5, #events)
     local index
     for index = 1, #events do
         test.assertTrue(expected[events[index]], events[index] .. " is expected")
     end
-    local other = { "CHAT_MSG_SAY", "CHAT_MSG_PARTY", "CHAT_MSG_RAID", "CHAT_MSG_ACHIEVEMENT", "CHAT_MSG_CHANNEL" }
+    local other = { "CHAT_MSG_SAY", "CHAT_MSG_RAID", "CHAT_MSG_ACHIEVEMENT", "CHAT_MSG_CHANNEL" }
     for index = 1, #other do
         test.assertEqual(nil, world.annotator:Annotate(other[index], "%s hi", "Hammer-Area52"), other[index])
     end

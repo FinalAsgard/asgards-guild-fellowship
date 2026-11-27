@@ -1,6 +1,6 @@
 local _, addon = ...
 
--- Adds the speaker's player tag to guild and officer chat lines, so
+-- Adds the speaker's player tag to guild, officer and party chat lines, so
 -- "[Hammer]: hi" reads "[Hammer] [TheTool]: hi", and to guild achievement
 -- announcements: "[Hammer] [TheTool] has earned the achievement …".
 -- Pure: it reads the Fellowship database
@@ -11,8 +11,10 @@ local ChatAnnotator = {
     -- How many recent chat lines' results are kept, so a line shown in
     -- several chat tabs is worked out once.
     RECENT_LINES = 16,
-    -- The chat events that get tags.
-    EVENTS = { "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER", "CHAT_MSG_GUILD_ACHIEVEMENT" },
+    -- The chat events that get tags. In party chat only guildmates have
+    -- one: anyone the guild's saved data doesn't know is left untagged.
+    EVENTS = { "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER", "CHAT_MSG_GUILD_ACHIEVEMENT", "CHAT_MSG_PARTY",
+        "CHAT_MSG_PARTY_LEADER" },
     -- Default tag colors by kind, as "rrggbb": an alias is medium blue, a
     -- main's name light blue, so a nickname and a character name are told
     -- apart at a glance. A member can choose others (see `colorFor`).

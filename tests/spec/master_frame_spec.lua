@@ -174,24 +174,40 @@ local function registerProfileTests(profile)
         test.assertEqual("roster", frame:LastPage())
     end)
 
-    test.test(profile .. " /agf greet and the options' Edit Greetings button open the Greetings tab", function()
+    test.test(profile .. " /agf greet and the options' Edit Greetings button open the new window on Greetings", function()
         local world, addon, frame = loggedIn(profile)
+        fakeFrames.install(world.environment)
 
         fixtures.slash(world, "help")
         test.assertContains(table.concat(world.messages, "\n"), "/agf greet - edit your Guild Greet greetings")
 
         fixtures.slash(world, "greet")
-        test.assertTrue(frame.shown)
-        test.assertEqual("greetings", frame:LastPage())
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("greetings", addon.agfWindow:Page())
 
-        fixtures.slash(world, "")
-        test.assertEqual("roster", frame:LastPage())
+        addon.agfWindow:Close()
         test.assertTrue(addon.settings:Run("editGreetings"))
-        test.assertTrue(frame.shown)
-        test.assertEqual("greetings", frame:LastPage())
-        -- The button belongs to the options; the tab has the editor itself.
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("greetings", addon.agfWindow:Page())
+        -- The button belongs to the options; the window has the page itself.
         test.assertFalse(addon.settings:InHost("editGreetings", "frame"))
         test.assertTrue(addon.settings:InHost("editGreetings", "options"))
+    end)
+
+    test.test(profile .. " the old window has no Greetings tab; the rest of its tabs are unchanged", function()
+        local world, addon, frame = loggedIn(profile)
+
+        fixtures.slash(world, "")
+        test.assertTrue(frame.shown)
+        test.assertEqual("roster", frame:LastPage())
+        local ids = {}
+        local _, page
+        for _, page in ipairs(addon.pages:Pages()) do
+            table.insert(ids, page.id)
+        end
+        test.assertFalse(string.find(table.concat(ids, ","), "greetings", 1, true) ~= nil)
+        test.assertContains(table.concat(ids, ","), "roster,profile,recruitment,ads")
+        test.assertEqual(nil, addon.GreetingsPage)
     end)
 
     test.test(profile .. " unlocked greet prompts stay unlocked on any tab and lock when the frame closes", function()

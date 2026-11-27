@@ -25,6 +25,11 @@ Adapters/MasterFrame.lua
 Adapters/Theme.lua
 Adapters/Widgets.lua
 Adapters/AgfWindow.lua
+Adapters/PlayerCards.lua
+Adapters/PlayerDetailPanel.lua
+Adapters/FriendsPage.lua
+Adapters/GameMenu.lua
+Adapters/AgfGreetingsPage.lua
 Adapters/LfgButton.lua
 Adapters/LfgBoardPage.lua
 Adapters/PromotionLines.lua
@@ -35,7 +40,6 @@ Adapters/Comm.lua
 Adapters/SettingsPanel.lua
 Adapters/GreetPrompts.lua
 Adapters/RecruitPrompts.lua
-Adapters/GreetingsPage.lua
 Adapters/ProfilePage.lua
 Adapters/MapPins.lua
 Adapters/GuildMailWindow.lua
@@ -52,6 +56,8 @@ Core/RosterViewModel.lua
 Core/ConflictViewModel.lua
 Core/BundleReviewViewModel.lua
 Core/PlayerPanelViewModel.lua
+Core/FriendsViewModel.lua
+Core/PlayerDetailViewModel.lua
 Core/ProfileViewModel.lua
 Core/ChatAnnotator.lua
 Core/OfficerAuthority.lua
@@ -72,6 +78,7 @@ Core/SettingsLayout.lua
 Core/SettingsModel.lua
 Core/GreetPolicy.lua
 Core/GreetingLibrary.lua
+Core/GreetingsEditor.lua
 Core/GreetPromptQueue.lua
 Core/GreetTally.lua
 Core/GreetWeight.lua
@@ -83,6 +90,7 @@ Core/SlowModeConfig.lua
 Core/RecruitStats.lua
 Core/GuildRecruit.lua
 Core/DungeonCatalog.lua
+Core/ZoneCatalog.lua
 Core/LfgProtocol.lua
 Core/LfgListing.lua
 Core/ZoneLevels.lua
@@ -94,6 +102,7 @@ Core/LfgDrawerModel.lua
 Core/LfgTrigger.lua
 Core/RoleCatalog.lua
 Core/LfgNearby.lua
+Core/LfgFillCandidates.lua
 Core/LfgStandIns.lua
 Core/GroupHistory.lua
 Core/GroupFriends.lua

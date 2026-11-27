@@ -28,9 +28,6 @@ local LfgDrawerModel = {
     GATE = "gate",
     -- Someone left the player's full party: fill the empty slot?
     SLOT = "slot",
-    -- The leader of a questing party moved to another zone: update the
-    -- listing's zone?
-    ZONE = "zone",
 }
 addon.LfgDrawerModel = LfgDrawerModel
 
@@ -49,8 +46,13 @@ end
 -- What to show now. facts:
 --   groups    LfgBoard:Groups for the current character ({ relevant, ... })
 --   party     nil when not in a party, else { label?, kind?, size, maxSize,
---             openRoles?, note?, slotRole? }: the party and its listing, if
---             any; slotRole is the role an open slot would be posted as
+--             openRoles?, note?, slotRole?, guildLine?, solo?, own? }: the
+--             party and its listing (guildLine: what Ask in guild would
+--             type), if any; slotRole is the role an open slot would be
+--             posted as. A player with a live listing and no party has a
+--             party too, with `solo` set, so the drawer shows their
+--             listing; it doesn't hide the glow as a real party does.
+--             `own` marks the player's own listing (Edit and End listing)
 --   combat    in combat, a boss encounter or a keystone run
 --   instance  in an instance
 --   dnd       Do Not Disturb is on
@@ -58,21 +60,21 @@ end
 --   ask       the leader is being asked what their party is for
 --   gate      the player is being asked whether to list a party with
 --             players outside the guild
---   zoneMove  the zone the leader of a questing listing moved to, while
---             they're being asked whether to move the listing there
 --   requests  the Ask to join requests to the player's listing (LfgRequests)
 --   requestOf function(id) -> the player's own request to join leader
 --             `id`'s listing (LfgBoard:Request), or nil
 -- Returns { count, glow = nil | "gold" | "orange", fresh = the relevant
 -- listings new since the last Update that may pulse, top = { kind,
--- listing?, request?, party?, zone? }, requests = the requests to the
+-- listing?, request?, party? }, requests = the requests to the
 -- player }.
 function Model:Update(facts)
     local relevant = facts.groups and facts.groups.relevant or {}
-    local hidden = facts.party ~= nil or facts.combat == true or facts.instance == true or facts.dnd == true
+    -- A solo lister isn't in a party: groups still glow and pulse for them.
+    local inParty = facts.party ~= nil and facts.party.solo ~= true
+    local hidden = inParty or facts.combat == true or facts.instance == true or facts.dnd == true
     -- A party or Do Not Disturb means "not now": what appears then never
     -- glows.
-    local ignored = facts.party ~= nil or facts.dnd == true
+    local ignored = inParty or facts.dnd == true
     local current, fresh = {}, {}
     local index
     for index = 1, #relevant do
@@ -116,8 +118,6 @@ function Model:Update(facts)
         top = { kind = LfgDrawerModel.ASK, party = facts.party }
     elseif facts.slotOpen and facts.party ~= nil then
         top = { kind = LfgDrawerModel.SLOT, party = facts.party }
-    elseif facts.zoneMove ~= nil then
-        top = { kind = LfgDrawerModel.ZONE, party = facts.party, zone = facts.zoneMove }
     elseif facts.party ~= nil then
         top = { kind = LfgDrawerModel.PARTY, party = facts.party }
     elseif relevant[1] ~= nil then

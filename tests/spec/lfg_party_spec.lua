@@ -20,8 +20,11 @@ local function names(actions)
 end
 
 local SOLO = { inGroup = false }
+-- A party update. Auto-list is on, and the purpose can't be guessed, so the
+-- player would be asked what it's for, unless `fields` says otherwise.
 local function party(fields)
-    local facts = { inGroup = true, isLeader = false, isRaid = false, leaderKey = "tool", listed = false }
+    local facts = { inGroup = true, isLeader = false, isRaid = false, leaderKey = "tool", listed = false,
+        autoList = true, canGuess = false }
     local name, value
     for name, value in pairs(fields or {}) do
         facts[name] = value
@@ -39,6 +42,15 @@ test.test("lfg trigger: a party formed by my invite asks what it's for; a solo l
     trigger = newTrigger()
     trigger:Observe(SOLO, 0)
     test.assertEqual("joined", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", listed = true }), 0)))
+    test.assertFalse(trigger:Asking())
+end)
+
+test.test("lfg trigger: turning Auto-list off drops a waiting purpose question, so an outsider asks nothing", function()
+    local trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("ask", names(trigger:Observe(party({ isLeader = true, leaderKey = "me" }), 0)))
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", autoList = false,
+        outsiders = 1 }), 1)))
     test.assertFalse(trigger:Asking())
 end)
 
@@ -254,6 +266,17 @@ local function partyUp(world, names, leader)
     fixtures.fire(world, "GROUP_ROSTER_UPDATE")
 end
 
+-- Turns Auto-list my parties on for `addon`'s player.
+local function autoList(addon)
+    test.assertTrue(addon.settings:Set("lfgAutoList", true))
+end
+
+-- `world`'s zone can't be read, so the add-on can't guess what a party's for.
+local function noZone(world)
+    world.environment.GetRealZoneText = function() return "" end
+    world.environment.GetZoneText = function() return "" end
+end
+
 local function leaveParty(world)
     world.grouped = false
     world.environment.UnitExists = function(unit) return unit == "player" end
@@ -287,10 +310,50 @@ local function setGameRole(world, name, role)
     end
 end
 
-test.test("Forever forming a party opens the drawer to ask; listing it goes through the board with roles", function()
+test.test("Forever with Auto-list off, forming a party lists nothing and asks nothing", function()
     local channel = fixtures.newChannel()
     local tool, addon = login(channel, "Tool Box")
     local zap = login(channel, "Zap Arcane")
+    test.assertFalse(addon.settings:Get("lfgAutoList"))
+
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+
+    test.assertFalse(addon.lfgButton:DrawerOpen())
+    test.assertFalse(addon.lfgTrigger:Asking())
+    test.assertFalse(addon.lfgListing:IsActive())
+    test.assertEqual(nil, zap.addon.lfgBoard:Listings(zap.time)[1])
+    -- The drawer just shows the party, unlisted.
+    addon.lfgButton:OpenDrawer()
+    test.assertEqual("YOUR PARTY", addon.lfgButton.drawer.heading.text)
+    test.assertEqual("Not listed", addon.lfgButton.drawer.party.text)
+end)
+
+test.test("Forever with Auto-list on, forming a party lists it at once for what it looks like it's for", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local zap = login(channel, "Zap Arcane")
+    autoList(addon)
+
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+
+    test.assertFalse(addon.lfgButton:DrawerOpen())
+    test.assertTrue(addon.lfgListing:IsActive())
+    test.assertTrue(addon.lfgListing:Guessed())
+    local heard = zap.addon.lfgBoard:Listings(zap.time)[1]
+    test.assertEqual("questing", heard.kind)
+    test.assertEqual("Ironforge", heard.purpose)
+    test.assertEqual(2, heard.size)
+end)
+
+test.test("Forever with Auto-list on and nothing to guess, forming a party asks; listing it goes through the board",
+    function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local zap = login(channel, "Zap Arcane")
+    autoList(addon)
+    noZone(tool)
 
     partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
 
@@ -330,6 +393,8 @@ end)
 test.test("Forever closing the drawer on the question is Not looking; the snooze skips the next party", function()
     local channel = fixtures.newChannel()
     local tool, addon = login(channel, "Tool Box")
+    autoList(addon)
+    noZone(tool)
 
     partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
     click(addon.lfgButton.drawerClose)
@@ -424,58 +489,117 @@ test.test("Forever made leader of a listed party, I take its listing over quietl
     test.assertEqual("Stratholme", listings[1].purpose)
 end)
 
--- Quiet listings and the hidden button ------------------------------------------------
+-- Auto-list, filling up, and the hidden button -----------------------------------------
 
-test.test("lfg trigger: filling up with another guildmate lists it quietly; with none, nothing", function()
+test.test("lfg trigger: with Auto-list off, a new party, the lead, or one led from outside lists and asks nothing", function()
+    local off = { autoList = false, canGuess = true }
+    local function with(fields)
+        local facts = party(off)
+        local name, value
+        for name, value in pairs(fields) do
+            facts[name] = value
+        end
+        return facts
+    end
     local trigger = newTrigger()
     trigger:Observe(SOLO, 0)
-    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2, guildmates = 1 }), 0)
-    test.assertTrue(trigger:Asking())
-
-    test.assertEqual("listQuietly", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
-        guildmates = 1 }), 0)))
+    test.assertEqual("", names(trigger:Observe(with({ isLeader = true, leaderKey = "me", size = 2 }), 0)))
     test.assertFalse(trigger:Asking())
-    -- Still full: nothing more.
-    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
-        guildmates = 1, listed = true }), 0)))
 
-    -- The only guildmate: nothing happens.
+    -- Made leader of an unlisted party.
     trigger = newTrigger()
-    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 4, guildmates = 0 }), 0)
-    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
-        guildmates = 0 }), 0)))
+    trigger:Observe(with({ size = 3 }), 0)
+    test.assertEqual("", names(trigger:Observe(with({ isLeader = true, leaderKey = "me", size = 3,
+        listingOf = function() return nil end }), 0)))
 
-    -- Formed full at once: listed, not asked.
+    -- Outsiders, or led from outside the guild.
     trigger = newTrigger()
     trigger:Observe(SOLO, 0)
-    test.assertEqual("listQuietly", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
-        guildmates = 2 }), 0)))
-    test.assertFalse(trigger:Asking())
+    test.assertEqual("", names(trigger:Observe(with({ isLeader = true, leaderKey = "me", size = 2, outsiders = 1 }),
+        0)))
+    trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("", names(trigger:Observe(with({ leaderKey = "stranger", guildLed = false, size = 2 }), 0)))
+
+    -- The button hidden: no reminder either.
+    trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("", names(trigger:Observe(with({ isLeader = true, leaderKey = "me", hidden = true }), 0)))
+
+    -- Takeovers and the rest don't depend on it.
+    trigger = newTrigger()
+    trigger:Observe(with({}), 0)
+    local listed = { id = "tool", purpose = "Stratholme" }
+    test.assertEqual("takeOver", names(trigger:Observe(with({ isLeader = true, leaderKey = "me",
+        listingOf = function() return listed end }), 0)))
+    trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("joined", names(trigger:Observe(with({ isLeader = true, leaderKey = "me", listed = true }), 0)))
 end)
 
-test.test("lfg trigger: Not looking keeps a full party off the board; a member never lists it", function()
+test.test("lfg trigger: with Auto-list on, a party is listed at once for the guessed purpose, unless Not looking", function()
     local trigger = newTrigger()
     trigger:Observe(SOLO, 0)
-    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 3, guildmates = 2 }), 0)
+    test.assertEqual("autoList", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2,
+        canGuess = true }), 0)))
+    test.assertFalse(trigger:Asking())
+
+    -- Made leader of an unlisted party: listed too.
+    trigger = newTrigger()
+    trigger:Observe(party({ size = 3 }), 0)
+    test.assertEqual("autoList", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 3,
+        canGuess = true, listingOf = function() return nil end }), 0)))
+
+    -- Not looking (or ending its listing) holds it back for this party only.
+    trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2, canGuess = true }), 0)
     trigger:NotLooking()
-    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
-        guildmates = 2 }), 0)))
+    trigger:Observe(party({ size = 2 }), 10)
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2,
+        canGuess = true }), 20)))
+    trigger:Observe(SOLO, 30)
+    test.assertEqual("autoList", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2,
+        canGuess = true }), 40)))
 
+    -- "Don't ask for 30 minutes" holds back questions, not the listing itself.
+    trigger:Snooze(50)
+    trigger:Observe(SOLO, 60)
+    test.assertEqual("autoList", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2,
+        canGuess = true }), 70)))
+    trigger:Observe(SOLO, 80)
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2 }), 90)))
+
+    -- With outsiders it still asks whether to list it.
     trigger = newTrigger()
-    trigger:Observe(party({ size = 4, guildmates = 2 }), 0)
-    test.assertEqual("", names(trigger:Observe(party({ size = 5, guildmates = 2 }), 0)))
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("gate", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 2,
+        outsiders = 1, canGuess = true }), 0)))
 end)
 
-test.test("lfg trigger: with the button hidden, nothing is asked: listed quietly, with a reminder", function()
+test.test("lfg trigger: the party filling up lists and asks nothing, Auto-list on or off", function()
+    local _, on
+    for _, on in ipairs({ true, false }) do
+        local trigger = newTrigger()
+        trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 4, guildmates = 3, autoList = on }), 0)
+        test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", size = 5,
+            guildmates = 4, autoList = on, canGuess = true }), 0)))
+        trigger = newTrigger()
+        trigger:Observe(party({ size = 4, guildmates = 2, autoList = on }), 0)
+        test.assertEqual("", names(trigger:Observe(party({ size = 5, guildmates = 2, autoList = on }), 0)))
+    end
+end)
+
+test.test("lfg trigger: with the button hidden nothing is listed; Auto-list on gets a reminder", function()
     local trigger = newTrigger()
     trigger:Observe(SOLO, 0)
-    test.assertEqual("listQuietly,remind", names(trigger:Observe(party({ isLeader = true, leaderKey = "me",
-        size = 2, guildmates = 1, hidden = true }), 0)))
+    test.assertEqual("remind", names(trigger:Observe(party({ isLeader = true, leaderKey = "me",
+        size = 2, guildmates = 1, hidden = true, canGuess = true }), 0)))
     test.assertFalse(trigger:Asking())
 
     trigger = newTrigger()
     trigger:Observe(party({ size = 3, hidden = true }), 0)
-    test.assertEqual("listQuietly,remind", names(trigger:Observe(party({ isLeader = true, leaderKey = "me",
+    test.assertEqual("remind", names(trigger:Observe(party({ isLeader = true, leaderKey = "me",
         size = 3, hidden = true, listingOf = function() return nil end }), 0)))
 end)
 
@@ -509,12 +633,27 @@ CHARACTERS["Bolt Smith"] = { class = "PRIEST" }
 
 local FIVE = { "Tool Box", "Hammer Smith", "Zap Arcane", "Spark Arcane", "Bolt Smith" }
 
-test.test("Forever a full party with guildmates is listed quietly, guessed, and follows it into a dungeon", function()
+test.test("Forever a full party with guildmates isn't listed with Auto-list off", function()
     local channel = fixtures.newChannel()
     local tool, addon = login(channel, "Tool Box")
     local hammer = login(channel, "Hammer Smith")
     partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
-    test.assertTrue(addon.lfgTrigger:Asking())
+    partyUp(tool, FIVE, "Tool Box")
+    fixtures.deliver(channel)
+
+    test.assertFalse(addon.lfgTrigger:Asking())
+    test.assertFalse(addon.lfgListing:IsActive())
+    test.assertEqual(nil, hammer.addon.lfgBoard:Listings(hammer.time)[1])
+end)
+
+test.test("Forever an auto-listed party fills up with nothing more asked, and its guess follows it into a dungeon",
+    function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local hammer = login(channel, "Hammer Smith")
+    autoList(addon)
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    test.assertTrue(addon.lfgListing:Guessed())
 
     partyUp(tool, FIVE, "Tool Box")
     fixtures.deliver(channel)
@@ -552,7 +691,7 @@ test.test("Forever a purpose set by hand stays when the party enters a dungeon",
     test.assertEqual("raid", addon.lfgListing:Purpose().kind)
 end)
 
-test.test("Forever a questing leader who changes zones is asked whether to move the listing there", function()
+test.test("Forever a questing listing stays in its zone when the leader moves; nothing is asked", function()
     local channel = fixtures.newChannel()
     local tool, addon = login(channel, "Tool Box")
     local hammer = login(channel, "Hammer Smith")
@@ -561,62 +700,53 @@ test.test("Forever a questing leader who changes zones is asked whether to move 
     addon.lfgPage.draft.kind = "questing"
     test.assertTrue(addon.lfgPage:Save())
     addon.lfgButton:CloseDrawer(true)
-    local drawer = addon.lfgButton.drawer
-
-    -- Moving zones asks, in the drawer, which opens.
-    tool.zone = { name = "Dun Morogh", mapID = tool.zone.mapID }
-    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
-    test.assertTrue(addon.lfgButton:DrawerOpen())
-    test.assertEqual("zone", drawer.kind)
-    test.assertEqual("You're in Dun Morogh now. Move your questing listing here?", drawer.question.text)
-    test.assertEqual("Yes", addon.lfgButton.listButton.label.text)
-    -- No leaves it where it was, and that zone isn't asked about again.
-    click(addon.lfgButton.notLookingButton)
-    test.assertEqual("Ironforge", addon.lfgListing:Purpose().zone)
-    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
-    test.assertFalse(addon.lfgButton:DrawerOpen())
-    -- Every zone said No to stays that way, not just the last one.
-    tool.zone = { name = "Wetlands", mapID = tool.zone.mapID }
-    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
-    test.assertEqual("zone", drawer.kind)
-    click(addon.lfgButton.notLookingButton)
-    tool.zone = { name = "Dun Morogh", mapID = tool.zone.mapID }
-    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
-    test.assertFalse(addon.lfgButton:DrawerOpen())
-
-    -- Another zone asks again; Yes moves it, and guildmates hear.
-    tool.zone = { name = "Loch Modan", mapID = tool.zone.mapID }
-    fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
-    test.assertEqual("zone", drawer.kind)
-    click(addon.lfgButton.listButton)
-    test.assertEqual("Loch Modan", addon.lfgListing:Purpose().zone)
     fixtures.deliver(channel)
-    test.assertEqual("Loch Modan", hammer.addon.lfgBoard:Listings(hammer.time)[1].purpose)
-    test.assertFalse(addon.lfgButton:DrawerOpen())
 
-    -- A dungeon isn't a zone to quest in: nothing's asked inside one.
+    -- Another zone, a building, a dungeon: no question, no change.
+    local _, place
+    for _, place in ipairs({ "Dun Morogh", "Wetlands", "The Great Forge" }) do
+        tool.zone = { name = place, mapID = tool.zone.mapID }
+        fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
+        fixtures.fire(tool, "ZONE_CHANGED_INDOORS")
+        test.assertFalse(addon.lfgButton:DrawerOpen())
+        test.assertEqual("Ironforge", addon.lfgListing:Purpose().zone)
+    end
     tool.inInstance = "party"
     tool.zone = { name = "Stratholme", mapID = tool.zone.mapID }
     fixtures.fire(tool, "ZONE_CHANGED_NEW_AREA")
     test.assertFalse(addon.lfgButton:DrawerOpen())
+    fixtures.deliver(channel)
+    test.assertEqual("Ironforge", hammer.addon.lfgBoard:Listings(hammer.time)[1].purpose)
+    -- The drawer has no zone question to show.
+    test.assertEqual(nil, addon.LfgDrawerModel.ZONE)
+    test.assertEqual(nil, addon.LfgButton.ZONE_TEXT)
 end)
 
-test.test("Forever with the button hidden, a new party is listed quietly with a reminder", function()
+test.test("Forever with the button hidden, a new party is never listed; Auto-list on says why", function()
     local channel = fixtures.newChannel()
     local tool, addon = login(channel, "Tool Box")
     local hammer = login(channel, "Hammer Smith")
     addon.settings:Set("lfgButton", false)
     test.assertFalse(addon.lfgButton:IsShowing())
 
+    -- Auto-list off: nothing at all.
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+    test.assertFalse(addon.lfgListing:IsActive())
+    test.assertEqual(nil, tool.messages[1])
+    leaveParty(tool)
+
+    -- On: still nothing listed, but a line says why, and how to list it.
+    autoList(addon)
     partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
     fixtures.deliver(channel)
 
     test.assertFalse(addon.lfgButton:DrawerOpen())
     test.assertFalse(addon.lfgTrigger:Asking())
-    test.assertTrue(addon.lfgListing:Guessed())
+    test.assertFalse(addon.lfgListing:IsActive())
     test.assertContains(tool.messages[#tool.messages],
-        "Your party is listed on the Guild LFG Board as Questing in Ironforge. Type /agf lfg to take part.")
-    test.assertEqual(1, #hammer.addon.lfgBoard:Listings(hammer.time))
+        "Your party wasn't listed on the Guild LFG Board: your LFG button is hidden. Type /agf lfg to list it.")
+    test.assertEqual(0, #hammer.addon.lfgBoard:Listings(hammer.time))
 end)
 
 -- Parties led from outside the guild ----------------------------------------------------
@@ -803,6 +933,8 @@ test.test("Forever a party led from outside the guild: the first guildmate to sa
     local tool, toolAddon = login(channel, "Tool Box")
     local hammer, addon = login(channel, "Hammer Smith")
     local zap = login(channel, "Zap Arcane")
+    autoList(toolAddon)
+    autoList(addon)
     local members = { "Stranger Danger", "Tool Box", "Hammer Smith" }
     partyUp(tool, members, "Stranger Danger")
     partyUp(hammer, members, "Stranger Danger")
@@ -844,11 +976,24 @@ test.test("Forever a party led from outside the guild: the first guildmate to sa
     test.assertFalse(saved)
 end)
 
+test.test("Forever with Auto-list off, a party led from outside the guild asks its guildmates nothing", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = login(channel, "Tool Box")
+    local members = { "Stranger Danger", "Tool Box", "Hammer Smith" }
+    partyUp(tool, members, "Stranger Danger")
+
+    test.assertFalse(toolAddon.lfgButton:DrawerOpen())
+    test.assertFalse(toolAddon.lfgTrigger:Asking())
+    test.assertFalse(toolAddon.lfgListing:IsActive())
+end)
+
 test.test("Forever when the contact leaves, a guildmate still in the party takes the listing over", function()
     local channel = fixtures.newChannel()
     local tool, toolAddon = login(channel, "Tool Box")
     local hammer, addon = login(channel, "Hammer Smith")
     local zap = login(channel, "Zap Arcane")
+    autoList(toolAddon)
+    autoList(addon)
     local members = { "Stranger Danger", "Tool Box", "Hammer Smith" }
     partyUp(tool, members, "Stranger Danger")
     partyUp(hammer, members, "Stranger Danger")
@@ -882,6 +1027,8 @@ test.test("Forever when a listed guild leader logs off, a guildmate in the party
     local tool, toolAddon = login(channel, "Tool Box")
     local hammer, addon = login(channel, "Hammer Smith")
     local zap = login(channel, "Zap Arcane")
+    autoList(toolAddon)
+    autoList(addon)
     local members = { "Tool Box", "Hammer Smith", "Stranger Danger" }
     partyUp(tool, members, "Tool Box")
     partyUp(hammer, members, "Tool Box")
@@ -1095,9 +1242,9 @@ local function fullParty(fields)
     return party(fields and fields or { isLeader = true, leaderKey = "me", listed = true, size = 5, guildmates = 4 })
 end
 
-test.test("lfg trigger: someone leaving a full, listed party opens the slot; 60 seconds without an answer posts it",
+test.test("lfg trigger: someone leaving a full, listed party opens the slot, which waits for an answer",
     function()
-        local trigger, LfgTrigger = newTrigger()
+        local trigger = newTrigger()
         trigger:Observe(fullParty(), 0)
         test.assertFalse(trigger:SlotOpen())
 
@@ -1108,15 +1255,13 @@ test.test("lfg trigger: someone leaving a full, listed party opens the slot; 60 
         -- No popup: nothing is asked.
         test.assertFalse(trigger:Asking())
 
-        test.assertFalse(trigger:SlotDue(10 + LfgTrigger.SLOT_SECONDS - 1))
+        -- Unanswered, it stays open: nothing posts it on a timer.
+        test.assertEqual("", names(trigger:Observe(four, 10 + 60 * 60)))
         test.assertTrue(trigger:SlotOpen())
-        test.assertTrue(trigger:SlotDue(10 + LfgTrigger.SLOT_SECONDS))
-        test.assertFalse(trigger:SlotOpen())
-        -- Posted once.
-        test.assertFalse(trigger:SlotDue(10 + 2 * LfgTrigger.SLOT_SECONDS))
+        test.assertEqual(nil, trigger.SlotDue)
     end)
 
-test.test("lfg trigger: another leaving or the party disbanding within the 60 seconds keeps the slot off", function()
+test.test("lfg trigger: another leaving or the party disbanding while it's open keeps the slot off", function()
     local trigger = newTrigger()
     trigger:Observe(fullParty(), 0)
     local four = fullParty()
@@ -1126,14 +1271,12 @@ test.test("lfg trigger: another leaving or the party disbanding within the 60 se
     three.size = 3
     test.assertEqual("", names(trigger:Observe(three, 20)))
     test.assertFalse(trigger:SlotOpen())
-    test.assertFalse(trigger:SlotDue(100))
 
     trigger = newTrigger()
     trigger:Observe(fullParty(), 0)
     trigger:Observe(four, 0)
     test.assertEqual("end", names(trigger:Observe({ inGroup = false, listed = true }, 20)))
     test.assertFalse(trigger:SlotOpen())
-    test.assertFalse(trigger:SlotDue(100))
 end)
 
 test.test("lfg trigger: Yes posts the open slot, No keeps it off; filling up again closes the question", function()
@@ -1145,7 +1288,6 @@ test.test("lfg trigger: Yes posts the open slot, No keeps it off; filling up aga
     test.assertTrue(trigger:SlotAnswered(false))
     test.assertFalse(trigger:SlotOpen())
     test.assertFalse(trigger:SlotAnswered(true))
-    test.assertFalse(trigger:SlotDue(100))
 
     trigger = newTrigger()
     trigger:Observe(fullParty(), 0)
@@ -1187,7 +1329,6 @@ test.test("lfg trigger: with the button hidden, the leader gets a reminder and n
     hidden.size = 4
     test.assertEqual("slotRemind", names(trigger:Observe(hidden, 0)))
     test.assertFalse(trigger:SlotOpen())
-    test.assertFalse(trigger:SlotDue(100))
 
     -- A member who isn't the lister: not even a reminder.
     trigger = newTrigger()
@@ -1264,12 +1405,11 @@ test.test("lfg trigger: refilling while handing the lead on leaves no slot open"
     test.assertTrue(trigger:SlotOpen())
     test.assertEqual("handOff", names(trigger:Observe(party({ size = 5, guildmates = 4, listed = true }), 5)))
     test.assertFalse(trigger:SlotOpen())
-    test.assertFalse(trigger:SlotDue(100))
 end)
 
 test.test("lfg trigger: a slot waits while the button's hidden, and is asked about again when it's back",
     function()
-        local trigger, LfgTrigger = newTrigger()
+        local trigger = newTrigger()
         local hidden = fullParty()
         hidden.hidden = true
         trigger:Observe(hidden, 0)
@@ -1278,8 +1418,6 @@ test.test("lfg trigger: a slot waits while the button's hidden, and is asked abo
         test.assertFalse(trigger:SlotOpen())
         test.assertTrue(trigger:Resume(30))
         test.assertTrue(trigger:SlotOpen())
-        test.assertFalse(trigger:SlotDue(30 + LfgTrigger.SLOT_SECONDS - 1))
-        test.assertTrue(trigger:SlotDue(30 + LfgTrigger.SLOT_SECONDS))
 
         -- Hidden while it's open: it waits instead of posting.
         trigger = newTrigger()
@@ -1289,7 +1427,6 @@ test.test("lfg trigger: a slot waits while the button's hidden, and is asked abo
         trigger:Observe(four, 0)
         trigger:Pause()
         test.assertFalse(trigger:SlotOpen())
-        test.assertFalse(trigger:SlotDue(100))
         test.assertTrue(trigger:Resume(200))
         test.assertTrue(trigger:SlotOpen())
 
@@ -1416,10 +1553,11 @@ CHARACTERS["Flint Smith"] = { class = "WARRIOR" }
 local FULL = { "Tool Box", "Hammer Smith", "Spark Arcane", "Bolt Smith", "Flint Smith" }
 local BOLT_LEFT = { "Tool Box", "Hammer Smith", "Spark Arcane", "Flint Smith" }
 
--- Tool leads a full party in Stratholme, listed quietly; Hammer is in it.
+-- Tool leads a full party in Stratholme, auto-listed; Hammer is in it.
 local function fullStrat(channel)
     local tool, toolAddon = login(channel, "Tool Box")
     local hammer, addon = login(channel, "Hammer Smith")
+    autoList(toolAddon)
     tool.environment.GetInstanceInfo = function()
         return "Stratholme", "party"
     end
@@ -1430,6 +1568,9 @@ local function fullStrat(channel)
     return tool, toolAddon, hammer, addon
 end
 
+-- Long past any answer: nothing posts a slot on a timer.
+local LONG = 60 * 60
+
 local function boltLeaves(...)
     local worlds = { ... }
     local index
@@ -1438,7 +1579,7 @@ local function boltLeaves(...)
     end
 end
 
-test.test("Forever someone leaving a full party glows orange, asks to fill the slot, and posts it after 60 seconds",
+test.test("Forever someone leaving a full party glows orange and asks to fill the slot, which waits for a Yes",
     function()
         local channel = fixtures.newChannel()
         local tool, toolAddon, hammer, addon = fullStrat(channel)
@@ -1465,7 +1606,14 @@ test.test("Forever someone leaving a full party glows orange, asks to fill the s
         -- Still listed as it was.
         test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
 
-        fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+        -- Unanswered, it stays open and off the board.
+        fixtures.runTimers(tool, LONG)
+        fixtures.deliver(channel)
+        test.assertTrue(toolAddon.lfgTrigger:SlotOpen())
+        test.assertEqual("orange", toolAddon.lfgButton.view.glow)
+        test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
+        button:OpenDrawer()
+        click(button.listButton)
         fixtures.deliver(channel)
         local heard = addon.lfgBoard:Listings(hammer.time)[1]
         test.assertEqual(4, heard.size)
@@ -1473,13 +1621,13 @@ test.test("Forever someone leaving a full party glows orange, asks to fill the s
         test.assertEqual(nil, button.view.glow)
     end)
 
-test.test("Forever no slot is posted when another member leaves within the 60 seconds", function()
+test.test("Forever no slot is posted when another member leaves while it's open", function()
     local channel = fixtures.newChannel()
     local tool, toolAddon, hammer, addon = fullStrat(channel)
     boltLeaves(tool)
     partyUp(tool, { "Tool Box", "Hammer Smith", "Spark Arcane" }, "Tool Box")
     test.assertEqual(nil, toolAddon.lfgButton.view.glow)
-    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    fixtures.runTimers(tool, LONG)
     fixtures.deliver(channel)
     test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
 end)
@@ -1494,7 +1642,7 @@ test.test("Forever No keeps the slot off the board, and a guildmate's answer is 
     fixtures.deliver(channel)
     test.assertFalse(addon.lfgTrigger:SlotOpen())
     test.assertEqual(nil, addon.lfgButton.view.glow)
-    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    fixtures.runTimers(tool, LONG)
     fixtures.deliver(channel)
     test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
     -- Still listed.
@@ -1520,7 +1668,7 @@ test.test("Forever with the button hidden, someone leaving only reminds the lead
     test.assertContains(tool.messages[#tool.messages],
         "Someone left your party. Type /agf lfg to fill the empty slot on the Guild LFG Board.")
     test.assertEqual(nil, toolAddon.lfgButton.view.glow)
-    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    fixtures.runTimers(tool, LONG)
     fixtures.deliver(channel)
     test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
 end)
@@ -1551,7 +1699,11 @@ test.test("Forever a slot that opened while the button was hidden is offered whe
     test.assertTrue(toolAddon.lfgTrigger:SlotOpen())
     test.assertEqual("orange", toolAddon.lfgButton.view.glow)
     test.assertTrue(toolAddon.lfgButton:DrawerOpen())
-    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    -- Still waiting for an answer, however long: Yes posts it.
+    fixtures.runTimers(tool, LONG)
+    fixtures.deliver(channel)
+    test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
+    click(toolAddon.lfgButton.listButton)
     fixtures.deliver(channel)
     test.assertEqual(4, addon.lfgBoard:Listings(hammer.time)[1].size)
 end)
@@ -1577,9 +1729,127 @@ test.test("Forever hiding the button while a slot is open keeps it off the board
     boltLeaves(tool)
     test.assertTrue(toolAddon.lfgTrigger:SlotOpen())
     toolAddon.settings:Set("lfgButton", false)
-    fixtures.runTimers(tool, toolAddon.LfgTrigger.SLOT_SECONDS + 1)
+    fixtures.runTimers(tool, LONG)
     fixtures.deliver(channel)
     test.assertEqual(5, addon.lfgBoard:Listings(hammer.time)[1].size)
+end)
+
+-- Roles chosen on the board -------------------------------------------------------------
+
+test.test("lfg listing: a role chosen on the board wins over the game's, the player's and the class's", function()
+    local LfgListing = newListing().LfgListing
+    local function rolesFor()
+        return { "tank", "dps" }
+    end
+    local filled = LfgListing.FillRoles({
+        { key = "a", classToken = "WARRIOR", chosen = "dps", assignedRole = "tank" },
+        { key = "b", classToken = "WARRIOR", assignedRole = "tank", role = "dps" },
+        { key = "c", classToken = "WARRIOR", role = "dps" },
+        { key = "d", classToken = "WARRIOR" },
+    }, rolesFor)
+    test.assertEqual("dps,tank,dps,tank", filled[1].role .. "," .. filled[2].role .. "," .. filled[3].role .. ","
+        .. filled[4].role)
+end)
+
+test.test("lfg protocol: a member's own role is understood, and nothing else in its place", function()
+    local addon = test.newAddon("Core/LfgProtocol.lua")
+    local protocol = addon.LfgProtocol
+    test.assertTrue(protocol.IsValid(protocol.Role("healer")))
+    test.assertFalse(protocol.IsValid(protocol.Role("bard")))
+    test.assertFalse(protocol.IsValid({ v = 1, t = protocol.TYPE_ROLE }))
+end)
+
+-- Tool leads Tool and Hammer, listed for Stratholme by hand; Hammer's add-on
+-- sees the same party. Zap is in the guild, watching the board.
+local function partyStrat(channel)
+    local tool, toolAddon = login(channel, "Tool Box")
+    local hammer, addon = login(channel, "Hammer Smith")
+    local zap, zapAddon = login(channel, "Zap Arcane")
+    local members = { "Tool Box", "Hammer Smith" }
+    partyUp(tool, members, "Tool Box")
+    partyUp(hammer, members, "Tool Box")
+    test.assertTrue(toolAddon.agfWindow:Open("lfg"))
+    toolAddon.lfgPage:StartEditing()
+    toolAddon.lfgPage.draft.dungeon = toolAddon.DungeonCatalog.For("forever", nil):Get("strat")
+    test.assertTrue(toolAddon.lfgPage:Save())
+    fixtures.deliver(channel)
+    return tool, toolAddon, hammer, addon, zap, zapAddon
+end
+
+local function heardRole(world, addon, name)
+    local listing = addon.lfgBoard:Listings(world.time)[1]
+    local index
+    for index = 1, #listing.members do
+        if listing.members[index].name == name then
+            return listing.members[index].role
+        end
+    end
+    return nil
+end
+
+test.test("Forever the leader sets any member's role in the editor, over the game's party menu", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon, zap, zapAddon = partyStrat(channel)
+    -- The game's party menu says DPS; nobody uses it.
+    setGameRole(tool, "Hammer", "DAMAGER")
+
+    local page = toolAddon.lfgPage
+    page:StartEditing()
+    local row = roleRow(page, "Hammer")
+    click(row)
+    test.assertTrue(page.roleMenu:IsOpen())
+    -- A paladin: tank, healer or DPS.
+    local labels = {}
+    local index
+    for index = 1, #page.roleMenu.items do
+        labels[index] = page.roleMenu.items[index].label
+    end
+    test.assertContains(table.concat(labels, ","), "Healer")
+    test.assertContains(table.concat(labels, ","), "DPS (current)")
+    local healer
+    for index = 1, #page.roleMenu.items do
+        if page.roleMenu.items[index].label == "Healer" then
+            healer = page.roleMenu.rows[index]
+        end
+    end
+    click(healer)
+    fixtures.deliver(channel)
+    test.assertEqual("healer", heardRole(zap, zapAddon, "Hammer"))
+    test.assertEqual("healer", roleRow(page, "Hammer").role)
+
+    -- Hammer leaves and comes back: the choice went with him, so the
+    -- game's role shows again.
+    partyUp(tool, { "Tool Box", "Zap Arcane" }, "Tool Box")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+    test.assertEqual("dps", heardRole(zap, zapAddon, "Hammer"))
+end)
+
+test.test("Forever a member sets their own role from the party's listing, and the leader's listing shows it", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon, hammer, addon, zap, zapAddon = partyStrat(channel)
+    test.assertTrue(addon.agfWindow:Open("lfg"))
+    local page = addon.lfgPage
+    test.assertEqual("member", page:Mode())
+    test.assertTrue(page.myRoleButton.shown)
+    test.assertContains(page.myRoleButton.label.text, "My role: ")
+
+    click(page.myRoleButton)
+    local healer
+    local index
+    for index = 1, #page.roleMenu.items do
+        if page.roleMenu.items[index].label == "Healer" then
+            healer = page.roleMenu.rows[index]
+        end
+    end
+    click(healer)
+    test.assertEqual("My role: Healer", page.myRoleButton.label.text)
+    fixtures.deliver(channel)
+    fixtures.deliver(channel)
+    test.assertEqual("healer", heardRole(zap, zapAddon, "Hammer"))
+
+    -- A member can't set anyone else's: the leader's row does nothing.
+    test.assertFalse(page.options.canSetRole({ name = "Tool", isPlayer = false }))
 end)
 
 -- Ask in guild --------------------------------------------------------------------------
@@ -1619,6 +1889,89 @@ test.test("Forever Ask in guild types the line into guild chat and never sends i
     test.assertContains(opened, "/g LF healer and 3 DPS for Stratholme (")
     test.assertContains(opened, "), whisper me!")
     test.assertEqual(nil, sent)
+end)
+
+test.test("lfg listing: the Ask in guild line ends with the listing's note, shortened to fit one message", function()
+    local LfgListing = newListing().LfgListing
+    local fields = { k = "other", p = "Ony first", s = 4, x = 5, mb = {}, no = "  bring a key  " }
+    test.assertEqual("LF 1 more for Ony first, whisper me! Note: bring a key", LfgListing.GuildLine(fields))
+    fields.no = ""
+    test.assertEqual("LF 1 more for Ony first, whisper me!", LfgListing.GuildLine(fields))
+    -- Letters of several bytes each: the note is cut at a whole letter.
+    fields.no = string.rep("\226\130\172", 80)
+    local line = LfgListing.GuildLine(fields)
+    test.assertTrue(#line <= LfgListing.CHAT_BYTES)
+    -- Long enough that it was cut.
+    test.assertTrue(#line < #"LF 1 more for Ony first, whisper me! Note: " + 80 * 3)
+    test.assertContains(line, "whisper me! Note: \226\130\172")
+    test.assertEqual(0, (#line - #"LF 1 more for Ony first, whisper me! Note: ") % 3)
+    -- Nobody needed: still no line, note or not.
+    fields.s = 5
+    test.assertEqual(nil, LfgListing.GuildLine(fields))
+end)
+
+test.test("Forever the drawer's Ask in guild types my listed party's line, with its note, while slots are open", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local opened
+    tool.environment.ChatFrameUtil = nil
+    tool.environment.ChatFrame_OpenChat = function(line) opened = line end
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    local button = addon.lfgButton
+    click(button.listButton)
+    local page = addon.lfgPage
+    page.draft.dungeon = addon.DungeonCatalog.For("forever", nil):Get("strat")
+    page.draft.note = "Live side, have key"
+    test.assertTrue(page:Save())
+
+    button:OpenDrawer()
+    test.assertEqual("YOUR PARTY", button.drawer.heading.text)
+    test.assertTrue(button.askGuildButton.shown)
+    click(button.askGuildButton)
+    test.assertContains(opened, "/g LF ")
+    test.assertContains(opened, " for Stratholme (")
+    test.assertContains(opened, "whisper me! Note: Live side, have key")
+    test.assertFalse(button:DrawerOpen())
+    -- The board's Ask in guild says the same.
+    opened = nil
+    click(page.askGuildButton)
+    test.assertContains(opened, "whisper me! Note: Live side, have key")
+end)
+
+test.test("Forever the drawer has no Ask in guild for a party that isn't listed", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    local button = addon.lfgButton
+    click(button.notLookingButton)
+
+    button:OpenDrawer()
+    test.assertEqual("YOUR PARTY", button.drawer.heading.text)
+    test.assertFalse(button.askGuildButton.shown)
+end)
+
+test.test("Forever a high-level guildmate sees a low-level party's dungeon under Other Parties", function()
+    local channel = fixtures.newChannel()
+    local tool, addon = login(channel, "Tool Box")
+    local zap, zapAddon = login(channel, "Zap Arcane")
+    tool.playerLevel = 20
+    tool.environment.UnitLevel = function() return 20 end
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    tool.environment.UnitLevel = function() return 20 end
+    click(addon.lfgButton.listButton)
+    local page = addon.lfgPage
+    page.draft.dungeon = addon.DungeonCatalog.For("forever", nil):Get("dm")
+    local saved, reason = page:Save()
+    test.assertTrue(saved, reason)
+    fixtures.deliver(channel)
+
+    local groups = zapAddon.lfgBoard:Groups(zap.time, { level = 60, roles = { "dps" } }, {})
+    test.assertEqual(0, #groups.relevant)
+    test.assertEqual(1, #groups.other)
+    test.assertEqual("The Deadmines", groups.other[1].purpose)
+    test.assertTrue(zapAddon.agfWindow:Open("lfg"))
+    zapAddon.lfgPage:ShowTab("other")
+    test.assertContains(zapAddon.lfgPage.tabs.tabs[3].label.text, "1")
 end)
 
 -- History -------------------------------------------------------------------------------
@@ -1802,6 +2155,22 @@ test.test("Forever /agfdev lfgtest shows every look with stand-ins, and nothing 
     test.assertEqual(nil, button.view.glow)
     -- Not even once the stand-ins' requests would expire. (Guild sync
     -- goes on as usual.)
+    -- Find guildmates shows stand-in guildmates too, never invited.
+    addon.lfgListing:Start({ kind = "raid" }, nil, world.time)
+    addon.lfgPage:Refresh()
+    test.assertTrue(addon.lfgPage:OpenFill())
+    local candidates = addon.lfgPage.fillCandidates
+    local first = #candidates - 3
+    test.assertEqual("Oakheart", candidates[first].name)
+    test.assertEqual("alt", candidates[first + 2].kind)
+    test.assertTrue(candidates[#candidates].inGroup)
+    click(addon.lfgPage.fill.rows[first].invite)
+    click(addon.lfgPage.fill.rows[first + 2].whisper)
+    test.assertEqual(nil, invited)
+    local printed = table.concat(world.messages, "\n")
+    test.assertContains(printed, "Oakheart is a stand-in; no invite was sent.")
+    test.assertContains(printed, "Gloom is a stand-in; no whisper was opened.")
+    addon.lfgListing:End()
     fixtures.runTimers(world, 180)
     local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
     local index

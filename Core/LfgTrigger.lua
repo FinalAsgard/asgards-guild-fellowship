@@ -6,27 +6,25 @@ local _, addon = ...
 --
 --   a party forms with the player leading (their invite)
 --       listed solo already  -> JOINED: the solo listing becomes the party's
---       otherwise            -> ASK what it's for
+--       otherwise            -> list it (see below)
 --   the player joins someone else's party while listed solo -> END
 --   the player is made leader
 --       the old leader's party was listed -> TAKE_OVER that listing quietly
---       otherwise, not listed             -> ASK
+--       otherwise, not listed             -> list it
 --   the player hands the lead on while listed -> HAND_OFF (the new leader
 --       takes it over)
 --   the party becomes a raid with the player leading and listed -> RAID
 --   the party is gone (disbanded, or the player left) while listed -> END
---   the party fills up, with the player leading, unlisted, and at least
---       one other guildmate in it -> LIST_QUIETLY with a guessed purpose
---       (no other guildmate: nothing)
+--   the party fills up -> nothing
 --
--- With the LFG button hidden ("not participating"), nothing is ever asked:
--- where the player would be asked, the party is listed quietly instead,
--- with a REMIND chat line of how to take part.
---
--- A party with anyone outside the guild in it is only listed when someone
--- wants it: where the player would be asked what it's for, the GATE
--- question asks first whether to list it at all, and it's never listed
--- quietly (filling up, or with the button hidden).
+-- A party is never listed without a yes. With Auto-list my parties off
+-- (the default), "list it" does nothing: nothing is listed or asked. On,
+-- turning it on is the yes: the party is listed at once for the purpose
+-- the add-on guesses (AUTO_LIST), or, when it can't guess, the drawer asks
+-- what it's for (ASK). With anyone outside the guild in it, it asks first
+-- whether to list it at all (GATE). With the LFG button hidden
+-- ("not participating"), nothing is listed or asked; with Auto-list on, a
+-- REMIND chat line says so, and how to list it.
 --
 -- Contact selection, for a party whose leader isn't in the guild (or is
 -- logged off): its guildmates are asked (GATE), and the first to say yes
@@ -41,16 +39,19 @@ local _, addon = ...
 -- guildmates are asked (SLOT_OPEN, with an orange glow and no popup)
 -- whether to fill the empty slot, and the listing stays as it was until
 -- someone answers. Yes posts the open slot, No keeps it off the board.
--- With no answer it's posted after SLOT_SECONDS, unless another member
--- leaves within them (a party winding down), which keeps it off; the
--- party disbanding ends it all. With the button hidden nothing is asked
--- or posted: the lister gets a SLOT_REMIND chat line. The party filling
--- up again closes the question.
+-- Unanswered, it stays open (and off the board): nothing is posted on a
+-- timer. Another member leaving while it's open (a party winding down)
+-- keeps it off; the party disbanding, filling up again or becoming a raid
+-- closes it. With the button hidden nothing is asked or posted: the
+-- lister gets a SLOT_REMIND chat line. Auto-list doesn't change any of
+-- this: it's about a party that's already listed.
 --
--- Asking is snoozed for the rest of a party once the player says Not
--- looking (or ignores the question), and for every new party for
--- SNOOZE_SECONDS after "don't ask for 30 minutes". Snoozes live only in
--- this session. Pure: the facts and the time are handed in.
+-- Asking (ASK, GATE) is snoozed for the rest of a party once the player
+-- says Not looking (or ignores the question, or ends its listing), and for
+-- every new party for SNOOZE_SECONDS after "don't ask for 30 minutes".
+-- AUTO_LIST is held back only for the rest of a party the player said Not
+-- looking to. Snoozes live only in this session. Pure: the facts and the
+-- time are handed in.
 local LfgTrigger = {
     SNOOZE_SECONDS = 30 * 60,
     ASK = "ask",
@@ -59,7 +60,9 @@ local LfgTrigger = {
     HAND_OFF = "handOff",
     RAID = "raid",
     END = "end",
-    LIST_QUIETLY = "listQuietly",
+    -- Auto-list: list the party now for the guessed purpose.
+    AUTO_LIST = "autoList",
+    -- With the button hidden and Auto-list on: the party wasn't listed.
     REMIND = "remind",
     -- Ask whether to list a party with players outside the guild.
     GATE = "gate",
@@ -69,8 +72,6 @@ local LfgTrigger = {
     SLOT_OPEN = "slotOpen",
     -- Someone left, with the button hidden: a chat line, nothing posted.
     SLOT_REMIND = "slotRemind",
-    -- How long an open slot waits for an answer before it's posted.
-    SLOT_SECONDS = 60,
     -- A party this big, not a raid, is full.
     PARTY_SIZE = 5,
 }
@@ -105,6 +106,8 @@ end
 --   present    the keys of the party's guildmates who are logged in, the
 --              player's among them, sorted
 --   hidden     the LFG button is hidden
+--   autoList   Auto-list my parties is on
+--   canGuess   the add-on can guess what the party's for
 -- Returns a list of { action, listing? } to carry out, in order.
 function Trigger:Observe(facts, now)
     local before = self.state
@@ -125,24 +128,35 @@ function Trigger:Observe(facts, now)
     }
     local listed = facts.listed == true
     local gated = (facts.outsiders or 0) > 0
-    -- Where the player would be asked: asked, or with the button hidden,
-    -- listed quietly and reminded. With outsiders in the party (or `gate`),
-    -- asked whether to list it, and never listed quietly.
+    -- A party to list: only with Auto-list on. Listed at once for the
+    -- guessed purpose, else asked what it's for; with outsiders in it (or
+    -- `gate`), asked whether to list it. With the button hidden, nothing
+    -- but a reminder.
     local function ask(gate)
         gate = gate or gated
-        if self:snoozed(now) then
+        if facts.autoList ~= true then
             return
         end
         if facts.hidden then
-            if not gate then
-                listed = true
-                act(LfgTrigger.LIST_QUIETLY)
+            -- A party with outsiders would need a yes anyway: no reminder.
+            if not gate and self.partySnoozed ~= self.party then
                 act(LfgTrigger.REMIND)
             end
-        else
-            self.asking = gate and "gate" or "purpose"
-            act(gate and LfgTrigger.GATE or LfgTrigger.ASK)
+            return
         end
+        if not gate and facts.canGuess == true then
+            if self.partySnoozed ~= self.party then
+                listed = true
+                self.asking = false
+                act(LfgTrigger.AUTO_LIST)
+            end
+            return
+        end
+        if self:snoozed(now) then
+            return
+        end
+        self.asking = gate and "gate" or "purpose"
+        act(gate and LfgTrigger.GATE or LfgTrigger.ASK)
     end
     if not facts.inGroup then
         if before.inGroup and listed then
@@ -206,6 +220,11 @@ function Trigger:Observe(facts, now)
     elseif facts.guildLed == false and not facts.isLeader then
         self:succeed(facts, before, listed, act, ask)
     end
+    -- Auto-list turned off drops a question still waiting about what the
+    -- party's for.
+    if facts.autoList ~= true and self.asking == "purpose" then
+        self.asking = nil
+    end
     -- Someone outside the guild joined while the player was being asked
     -- what the party's for: they're asked whether to list it at all.
     if before.inGroup and gated and self.asking == "purpose" then
@@ -213,22 +232,6 @@ function Trigger:Observe(facts, now)
         act(LfgTrigger.GATE)
     end
     self:slotPath(facts, before, full, listed, now, act)
-    -- Filled up with another guildmate in it: listed quietly, unless the
-    -- player said Not looking for this party.
-    local filled = full and not (before.inGroup and before.full)
-    if filled and facts.isLeader and not listed and (facts.guildmates or 0) >= 1 and not gated
-        and self.partySnoozed ~= self.party
-    then
-        -- No question for a party that's being listed anyway.
-        local index
-        for index = #actions, 1, -1 do
-            if actions[index].action == LfgTrigger.ASK then
-                table.remove(actions, index)
-            end
-        end
-        self.asking = false
-        act(LfgTrigger.LIST_QUIETLY)
-    end
     return actions
 end
 
@@ -319,22 +322,12 @@ function Trigger:Pause()
 end
 
 -- The LFG button came back at `now`: a slot waiting for it is asked about
--- again, with SLOT_SECONDS to answer. True when it was.
+-- again. True when it was.
 function Trigger:Resume(now)
     if self.slot == nil or self.slot.state ~= "waiting" then
         return false
     end
     self.slot = { state = "open", at = type(now) == "number" and now or 0 }
-    return true
-end
-
--- The open slot went SLOT_SECONDS without an answer by `now`: it's posted.
--- True when that happened now.
-function Trigger:SlotDue(now)
-    if not self:SlotOpen() or type(now) ~= "number" or now - self.slot.at < LfgTrigger.SLOT_SECONDS then
-        return false
-    end
-    self.slot.state = "posted"
     return true
 end
 

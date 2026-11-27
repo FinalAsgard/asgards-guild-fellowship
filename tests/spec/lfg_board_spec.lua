@@ -48,6 +48,22 @@ test.test("lfg protocol: a listing and its end are understood", function()
     test.assertTrue(protocol.IsValid(listingMessage(addon, { r = {} })))
 end)
 
+test.test("lfg protocol: Problem names why a message is ignored, for the probe", function()
+    local addon = load()
+    local problem = addon.LfgProtocol.Problem
+
+    test.assertEqual(nil, problem(listingMessage(addon)))
+    test.assertEqual("version 2", problem(listingMessage(addon, { v = 2 })))
+    test.assertEqual("unknown type lfg-new", problem({ v = 1, t = "lfg-new" }))
+    test.assertEqual("not a table", problem("lfg-listing"))
+    test.assertEqual("bad levels", problem(listingMessage(addon, { lo = 61 })))
+    test.assertEqual("bad members", problem(listingMessage(addon, { s = 2 })))
+    test.assertEqual("bad members", problem(listingMessage(addon, { mb = { { n = "Tool", l = 0 } } })))
+    test.assertEqual("bad note", problem(listingMessage(addon, { no = string.rep("a", 61) })))
+    test.assertEqual("bad asks", problem(listingMessage(addon, { aj = "nil" })))
+    test.assertEqual("bad fields", problem({ v = 1, t = "lfg-end", lf = false }))
+end)
+
 test.test("lfg protocol: unknown versions and types, and malformed fields, are ignored", function()
     local addon = load()
     local protocol = addon.LfgProtocol
@@ -382,7 +398,9 @@ local function startDungeon(world, note)
     return page
 end
 
--- How many Guild LFG Board messages wait on `channel`.
+-- How many Guild LFG Board messages wait on `channel`. Each goes out under
+-- the board's own prefix and again under the sync prefix for older
+-- add-ons; only the first counts.
 local function lfgQueued(channel)
     local count = 0
     local index
@@ -390,7 +408,9 @@ local function lfgQueued(channel)
         local queued = channel.queue[index]
         local serializer = queued.from.environment.LibStub.libs["AceSerializer-3.0"]
         local ok, message = serializer:Deserialize(queued.text)
-        if ok and type(message) == "table" and string.sub(tostring(message.t), 1, 4) == "lfg-" then
+        if string.sub(queued.prefix, 1, 6) == "AGFLfg" and ok and type(message) == "table"
+            and string.sub(tostring(message.t), 1, 4) == "lfg-"
+        then
             count = count + 1
         end
     end
@@ -556,12 +576,38 @@ test.test("lfg page: the editor shows each kind's fields, and Cancel goes back",
     test.assertEqual("11/60", page.note.counter.text)
 
     click(page.kindSelector.buttons[2])
+    -- Questing starts on the current zone, with Change to search the
+    -- zones.
     test.assertFalse(page.search.shown)
     test.assertTrue(page.editor.questing.shown)
+    test.assertEqual("Questing in Ironforge", page.editor.questing.text)
+    test.assertTrue(page.changeZoneButton.shown)
+    test.assertEqual("Ironforge", page.draft.zone.name)
+    click(page.changeZoneButton)
+    test.assertTrue(page.search.shown)
+    test.assertEqual("Search all zones", page.search.placeholder.text)
+    test.assertFalse(page.editor.questing.shown)
+    test.assertFalse(page.changeZoneButton.shown)
+    -- Cancel closes the list, the zone as it was; the search leaves room
+    -- for it.
+    test.assertTrue(page.cancelZoneButton.shown)
+    test.assertEqual(page.search.width + 80 + 8, 320)
+    type_(page.search, "dusk")
+    click(page.cancelZoneButton)
+    test.assertFalse(page.search.shown)
+    test.assertFalse(page.cancelZoneButton.shown)
+    test.assertEqual("Questing in Ironforge", page.editor.questing.text)
+    test.assertEqual("Ironforge", page.draft.zone.name)
+    click(page.changeZoneButton)
+    test.assertEqual("", page.draft.search)
     click(page.kindSelector.buttons[3])
+    test.assertFalse(page.cancelZoneButton.shown)
     test.assertTrue(page.editor.raid.shown)
     click(page.kindSelector.buttons[4])
     test.assertTrue(page.otherText.shown)
+    -- Back on Dungeon, the search is full width again.
+    click(page.kindSelector.buttons[1])
+    test.assertEqual(320, page.search.width)
 
     click(page.cancelButton)
     test.assertEqual("solo", page:Mode())
@@ -615,6 +661,202 @@ test.test("lfg page: Save without a dungeon says why, and Edit changes the listi
     click(page.saveButton)
     test.assertEqual("Raid", page.view.purpose.text)
     test.assertEqual(2, lfgQueued(channel))
+end)
+
+-- The page's zone row for `name`, or nil.
+local function zoneRow(page, name)
+    local index
+    for index = 1, #page.dungeonRows do
+        local row = page.dungeonRows[index]
+        if row.shown and type(row.zone) == "table" and row.zone.name == name then
+            return row
+        end
+    end
+    return nil
+end
+
+-- Gives `world`'s client a map tree of zones, with the game's levels for
+-- some.
+local function zoneTree(world)
+    local maps = world.environment.C_Map
+    maps.GetMapChildrenInfo = function()
+        return {
+            { mapID = 1431, name = "Duskwood", mapType = 3 },
+            { mapID = 1452, name = "Winterspring", mapType = 3 },
+            { mapID = 1455, name = "Ironforge", mapType = 3 },
+            { mapID = 1453, name = "Stormwind City", mapType = 3 },
+        }
+    end
+    maps.GetMapLevels = function(mapId)
+        if mapId == 1431 then
+            return 18, 30
+        elseif mapId == 1452 then
+            return 55, 60
+        end
+        return nil
+    end
+end
+
+-- Keeps only the messages on `channel` whose prefix starts with `prefix`.
+local function keepPrefix(channel, prefix)
+    local kept = {}
+    local index
+    for index = 1, #channel.queue do
+        if string.sub(channel.queue[index].prefix, 1, #prefix) == prefix then
+            table.insert(kept, channel.queue[index])
+        end
+    end
+    channel.queue = kept
+end
+
+test.test("Forever a listing goes out under the board's own prefix, clear of sync; older add-ons get a copy", function()
+    local channel = fixtures.newChannel()
+    local tool = login("Forever", channel, "Tool Box")
+    local hammer = login("Forever", channel, "Hammer Smith")
+    fixtures.deliver(channel)
+
+    -- Everything under the sync prefix stuck: the board's copy still
+    -- arrives.
+    startDungeon(tool)
+    keepPrefix(channel, "AGFLfg")
+    fixtures.deliver(channel)
+    test.assertEqual(1, #hammer.addon.lfgBoard:Listings(hammer.time))
+
+    -- Only the copy under the sync prefix (all an older add-on hears)
+    -- arrives too, at the next heartbeat.
+    local zap = login("Forever", channel, "Zap Arcane", 30)
+    fixtures.deliver(channel)
+    fixtures.runTimers(tool, 60)
+    fixtures.runTimers(hammer, 60)
+    keepPrefix(channel, "AGFSync")
+    fixtures.deliver(channel)
+    test.assertEqual(1, #zap.addon.lfgBoard:Listings(zap.time))
+
+    -- Both copies of a heartbeat count once.
+    fixtures.runTimers(tool, 60)
+    fixtures.runTimers(hammer, 60)
+    fixtures.deliver(channel)
+    fixtures.slash(hammer, "probe lfg")
+    test.assertContains(table.concat(hammer.messages, "\n"), "Heard: 3, last from Tool Box")
+
+    -- Listed again at once, the same as before, after Not looking: it's
+    -- sent again, not a copy, and guildmates see it.
+    click(tool.addon.lfgPage.notLookingButton)
+    fixtures.deliver(channel)
+    test.assertEqual(0, #hammer.addon.lfgBoard:Listings(hammer.time))
+    startDungeon(tool)
+    fixtures.deliver(channel)
+    test.assertEqual(1, #hammer.addon.lfgBoard:Listings(hammer.time))
+end)
+
+test.test("Forever Find guildmates lists online guildmates who fit, marking those in a listed group", function()
+    local channel = fixtures.newChannel()
+    local tool = login("Forever", channel, "Tool Box")
+    local hammer = login("Forever", channel, "Hammer Smith")
+    login("Forever", channel, "Zap Arcane", 30)
+    local invited
+    tool.environment.C_PartyInfo = { InviteUnit = function(name) invited = name end }
+    local page = startDungeon(tool)
+    test.assertTrue(page.listingFindButton.active)
+    click(page.listingFindButton)
+
+    -- Hammer fits Stratholme, and so does Bolt, Hammer's offline alt; Zap
+    -- (30) doesn't, and Tool is the player.
+    test.assertTrue(page.fill.shown)
+    test.assertEqual(2, #page.fillCandidates)
+    test.assertContains(page.fill.rows[1].name.text, "Hammer")
+    test.assertFalse(string.find(page.fill.rows[1].details.text, "In a group", 1, true) ~= nil)
+    click(page.fill.rows[1].invite)
+    test.assertContains(invited, "Hammer")
+    -- The alt: Whisper only, to Hammer, asking to log over.
+    local alt = page.fill.rows[2]
+    test.assertContains(alt.name.text, "Bolt Smith")
+    test.assertContains(alt.name.text, "(59)")
+    test.assertContains(alt.details.text, "alt of ")
+    test.assertContains(alt.details.text, ", online as Hammer Smith")
+    test.assertFalse(alt.invite.shown)
+    local opened
+    tool.environment.ChatFrame_OpenChat = function(line) opened = line end
+    click(alt.whisper)
+    test.assertContains(opened, "/w Hammer")
+    test.assertContains(opened, "Could you log over to Bolt Smith? We have a spot for them in Stratholme.")
+    click(page.backButton)
+
+    -- Hammer lists his own group: still there, marked In a group.
+    startDungeon(hammer)
+    fixtures.deliver(channel)
+    click(page.listingFindButton)
+    test.assertContains(page.fill.rows[1].details.text, "In a group")
+end)
+
+test.test("Forever Questing picks a zone from the list, and the listing takes its levels", function()
+    local channel = fixtures.newChannel()
+    local tool = login("Forever", channel, "Tool Box")
+    local zap = login("Forever", channel, "Zap Arcane", 30)
+    zoneTree(tool)
+    local page = openBoard(tool)
+    click(page.startButton)
+    click(page.kindSelector.buttons[2])
+
+    -- The current zone is chosen; Change opens the list: your level's zones
+    -- first, the rest (and zones with no levels) under Other levels.
+    test.assertEqual("Ironforge", page.draft.zone.name)
+    test.assertFalse(page.dungeonRows[1].shown)
+    click(page.changeZoneButton)
+    test.assertEqual("Winterspring", page.dungeonRows[1].zone.name)
+    test.assertEqual("OTHER LEVELS", page.dungeonRows[2].label.text)
+    test.assertEqual("green", page.dungeonRows[4].fillColor)
+    test.assertEqual("Ironforge", page.dungeonRows[4].zone.name)
+    type_(page.search, "dusk")
+    test.assertEqual(nil, zoneRow(page, "Winterspring"))
+    test.assertEqual("18" .. "\226\128\147" .. "30", zoneRow(page, "Duskwood").range.text)
+    click(zoneRow(page, "Duskwood"))
+    -- Picking one closes the list on it.
+    test.assertEqual("Duskwood", page.draft.zone.name)
+    test.assertFalse(page.search.shown)
+    test.assertEqual("Questing in Duskwood (18" .. "\226\128\147" .. "30)", page.editor.questing.text)
+    click(page.saveButton)
+    fixtures.deliver(channel)
+
+    local listing = zap.addon.lfgBoard:Listings(zap.time)[1]
+    test.assertEqual("Duskwood", listing.purpose)
+    test.assertEqual(18, listing.minLevel)
+    test.assertEqual(30, listing.maxLevel)
+
+    -- Edit starts on the listing's zone; one with no levels takes the
+    -- party's, 5 either way.
+    click(page.editButton)
+    test.assertEqual("Duskwood", page.draft.zone.name)
+    click(page.changeZoneButton)
+    type_(page.search, "storm")
+    click(zoneRow(page, "Stormwind City"))
+    click(page.saveButton)
+    fixtures.deliver(channel)
+    listing = zap.addon.lfgBoard:Listings(zap.time)[1]
+    test.assertEqual("Stormwind City", listing.purpose)
+    test.assertEqual(55, listing.minLevel)
+    test.assertEqual(65, listing.maxLevel)
+
+    fixtures.slash(tool, "probe lfg")
+    test.assertContains(table.concat(tool.messages, "\n"),
+        "Questing zones: 4 from the game's map tree, 2 with levels from the game.")
+end)
+
+test.test("Forever with no zone list, Questing offers the current zone alone", function()
+    local channel = fixtures.newChannel()
+    local tool = login("Forever", channel, "Tool Box")
+    local page = openBoard(tool)
+    click(page.startButton)
+    click(page.kindSelector.buttons[2])
+
+    test.assertEqual("Ironforge", page.draft.zone.name)
+    click(page.changeZoneButton)
+    test.assertEqual("OTHER LEVELS", page.dungeonRows[1].label.text)
+    test.assertEqual("Ironforge", page.dungeonRows[2].zone.name)
+    test.assertFalse(page.dungeonRows[3].shown)
+    fixtures.slash(tool, "probe lfg")
+    test.assertContains(table.concat(tool.messages, "\n"),
+        "Questing zones: none read from the game's map tree; Questing offers your zone only.")
 end)
 
 -- LfgRelevance ---------------------------------------------------------------------
@@ -731,7 +973,8 @@ end)
 -- A page over fake frames showing `groups`, with `overrides` on its options.
 local function pageWith(groups, overrides)
     local addon = test.newAddon("Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/LfgBoardPage.lua",
-        "Core/DungeonCatalog.lua", "Core/LfgProtocol.lua", "Core/LfgListing.lua", "Core/LfgRelevance.lua",
+        "Core/DungeonCatalog.lua", "Core/ZoneCatalog.lua", "Core/LfgProtocol.lua", "Core/LfgListing.lua", "Core/LfgRelevance.lua",
+        "Core/LfgFillCandidates.lua",
         "Core/GroupFriends.lua", "Core/LfgHistoryView.lua")
     local environment = fakeFrames.install({})
     local whispered = {}
@@ -768,6 +1011,94 @@ local function listingOf(kind, fields)
     listing.sender = listing.sender or "Tool-Camelot"
     return listing
 end
+
+test.test("lfg page: Find guildmates shows to the lister, greyed out until the party's listed with room", function()
+    local inParty = { inParty = true, isLeader = true, members = {} }
+    local page = pageWith({ relevant = {}, alts = {}, other = {} }, {
+        party = function() return inParty end,
+        fillCandidates = function() return {} end,
+    })
+
+    -- Leading an unlisted party: greyed out, and the tooltip says why.
+    test.assertEqual("solo", page:Mode())
+    test.assertTrue(page.soloFindButton.shown)
+    test.assertFalse(page.soloFindButton.active)
+    test.assertEqual("List your party to find guildmates", page.soloFindButton.reason)
+    click(page.soloFindButton)
+    test.assertFalse(page.filling == true)
+    -- A member of someone else's party doesn't see it.
+    inParty.isLeader = false
+    page:Refresh()
+    test.assertFalse(page.soloFindButton.shown)
+
+    -- Listed with room: enabled. Full: greyed out.
+    inParty.isLeader = true
+    page.options.listing:Start({ kind = "raid" }, nil, 0)
+    page:Refresh()
+    test.assertTrue(page.listingFindButton.shown)
+    test.assertTrue(page.listingFindButton.active)
+    page.options.members = function()
+        local full = {}
+        local index
+        for index = 1, 40 do
+            full[index] = { name = "M" .. index, classToken = "MAGE", level = 60, role = "dps" }
+        end
+        return full
+    end
+    page:Refresh()
+    test.assertFalse(page.listingFindButton.active)
+
+    -- Without the option, no button at all.
+    local plain = pageWith({ relevant = {}, alts = {}, other = {} })
+    plain.options.listing:Start({ kind = "raid" }, nil, 0)
+    plain:Refresh()
+    test.assertFalse(plain.listingFindButton.shown)
+end)
+
+test.test("lfg page: the Find guildmates panel replaces the list, with Invite, Whisper and Back", function()
+    local invited, built = {}, 0
+    local page, whispered = pageWith({ relevant = {}, alts = {}, other = {} }, {
+        fillCandidates = function()
+            built = built + 1
+            return {
+                { key = "hammer", name = "Hammer", whisper = "Hammer-Camelot", level = 60, class = "PALADIN",
+                    label = "Thunderer" },
+                { key = "busy", name = "Busy", whisper = "Busy-Camelot", level = 58, class = "WARRIOR",
+                    label = "Busy", inGroup = true },
+            }
+        end,
+        onInvite = function(row) table.insert(invited, row.whisper) end,
+    })
+    page.options.listing:Start({ kind = "dungeon", dungeon = { name = "Stratholme", minLevel = 58, maxLevel = 60 } },
+        nil, 0)
+    page:Refresh()
+    click(page.listingFindButton)
+
+    test.assertTrue(page.filling)
+    test.assertTrue(page.fill.shown)
+    test.assertFalse(page.tabs.shown)
+    test.assertFalse(page.area.shown)
+    test.assertEqual("Stratholme" .. " \194\183 " .. "58" .. "\226\128\147" .. "60", page.fill.title.text)
+    test.assertEqual("Hammer", page.fill.rows[1].name.text)
+    test.assertEqual("Level 60" .. " \194\183 " .. "Thunderer", page.fill.rows[1].details.text)
+    test.assertContains(page.fill.rows[2].name.text, "Busy")
+    test.assertEqual("Level 58" .. " \194\183 " .. "In a group", page.fill.rows[2].details.text)
+    test.assertFalse(page.fill.empty.shown)
+    click(page.fill.rows[1].invite)
+    click(page.fill.rows[2].whisper)
+    test.assertEqual("Hammer-Camelot", invited[1])
+    test.assertEqual("Busy-Camelot", whispered[1])
+
+    -- Built on open only: a refresh leaves it as it was.
+    page:Refresh()
+    test.assertEqual(1, built)
+    test.assertTrue(page.fill.shown)
+
+    click(page.backButton)
+    test.assertFalse(page.fill.shown)
+    test.assertTrue(page.tabs.shown)
+    test.assertTrue(page.area.shown)
+end)
 
 test.test("lfg page: a large card marks the leader, top friends, members' roles and the game's icon", function()
     local listing = listingOf("dungeon", {
@@ -903,11 +1234,11 @@ end)
 
 
 test.test("lfg page: Roles in your party shows each role's icon by the name, read-only", function()
-    local page = pageWith({ relevant = {}, alts = {}, other = {} }, {
+    local page, whispered = pageWith({ relevant = {}, alts = {}, other = {} }, {
         partyRoles = function()
             return {
-                { key = "tool", name = "Tool", classToken = "WARRIOR", role = "tank" },
-                { key = "zap", name = "Zap", classToken = "MAGE", role = "dps" },
+                { key = "tool", name = "Tool", classToken = "WARRIOR", role = "tank", isPlayer = true },
+                { key = "zap", name = "Zap", classToken = "MAGE", role = "dps", whisper = "Zap-Camelot" },
             }
         end,
     })
@@ -918,9 +1249,34 @@ test.test("lfg page: Roles in your party shows each role's icon by the name, rea
     test.assertTrue(tool.roleIcon.shown)
     test.assertEqual("dps", zap.role)
     test.assertFalse(page.roleRows[3].shown)
-    -- Roles are set in the game's party menu: the names open nothing.
+    -- With no role to set here, a name opens the name menu.
+    click(zap)
+    test.assertTrue(page.namesMenu:IsOpen())
+    click(zap)
+    test.assertFalse(page.namesMenu:IsOpen())
+    test.assertEqual("ROLES IN YOUR PARTY", page.editor.rolesLabel.text)
+
+    -- Questing shows the party too, by name, with no role icons; a name
+    -- opens the name menu, as everywhere.
+    click(page.kindSelector.buttons[2])
+    test.assertTrue(page.editor.rolesLabel.shown)
+    test.assertEqual("YOUR PARTY", page.editor.rolesLabel.text)
+    test.assertTrue(tool.shown)
+    test.assertEqual("|cffc79c6eTool|r", tool.name.text)
+    test.assertFalse(tool.roleIcon.shown)
+    test.assertTrue(zap.shown)
+    click(zap)
+    test.assertTrue(page.namesMenu:IsOpen())
+    test.assertEqual("Whisper", page.namesMenu.rows[1].label.text)
+    click(page.namesMenu.rows[1])
+    test.assertEqual("Zap-Camelot", whispered[1])
+    -- The player's own name: Whisper greyed out.
     click(tool)
-    test.assertTrue(page.namesMenu == nil or not page.namesMenu:IsOpen())
+    test.assertTrue(page.namesMenu.rows[1].disabled)
+    -- Raid and Other don't.
+    click(page.kindSelector.buttons[3])
+    test.assertFalse(page.editor.rolesLabel.shown)
+    test.assertFalse(tool.shown)
 end)
 
 test.test("lfg page: the name menu closes on a second click, a click outside it, and when its name goes", function()
@@ -1001,16 +1357,512 @@ test.test("Forever questing is listed in the zone's levels, and the probe says w
     local printed = table.concat(tool.messages, "\n")
     test.assertContains(printed, "Zone levels in Ironforge: 55-65, the fallback")
     test.assertContains(printed, "Your listing: Questing in Ironforge.")
+    -- What went out: valid as sent, and listed by Tool.
+    test.assertContains(printed, "As sent: valid; you list it.")
+    test.assertContains(printed, "  Sent: 1, last 0s ago (lfg-listing).")
 
     fixtures.slash(zap, "probe lfg")
     printed = table.concat(zap.messages, "\n")
     test.assertContains(printed, "On the board: 0 relevant, 0 for your alts, 1 other.")
     test.assertContains(printed, "Other, Questing in Ironforge, by Tool Box, 1/5, levels 55-65")
+    -- What came in: Tool's listing, none ignored.
+    test.assertContains(printed, "Heard: 1, last from Tool Box")
+    test.assertFalse(string.find(printed, "ignored", 1, true) ~= nil)
 
     -- Where the game knows the zone's levels, they're used.
     tool.environment.C_Map.GetMapLevels = function()
         return 25, 35
     end
+    tool.messages = {}
     fixtures.slash(tool, "probe lfg")
-    test.assertContains(tool.messages[#tool.messages - 2], "Zone levels in Ironforge: 25-35, from the game.")
+    test.assertContains(table.concat(tool.messages, "\n"), "Zone levels in Ironforge: 25-35, from the game.")
+end)
+
+-- Greetings ---------------------------------------------------------------------
+
+test.test("greetings: the module sits after LFG, with the Greet prompts switch and the category list", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local window = addon.agfWindow
+
+    test.assertTrue(window:Open("greetings"))
+    local order = {}
+    local index
+    for index = 1, #window.moduleButtons do
+        order[index] = window.moduleButtons[index].id
+    end
+    test.assertEqual("friends,lfg,greetings,settings", table.concat(order, ","))
+    test.assertEqual("Greetings", window.pages.greetings.title.text)
+    test.assertTrue(window.gear.shown)
+
+    -- The header switch is Show greet prompts.
+    local header = window:HeaderSwitch("greetings")
+    test.assertTrue(header.frame.shown)
+    test.assertEqual("Greet prompts on", header.label.text)
+    local page = addon.greetingsPage
+    test.assertEqual("greetings", page:Tab())
+    test.assertFalse(page.dimmed)
+    click(header.switch)
+    test.assertFalse(addon.settings:Get("guildGreet"))
+    test.assertEqual("Greet prompts off", header.label.text)
+    -- Off: the Greetings tab is dimmed, and still there on Settings.
+    test.assertTrue(page.dimmed)
+    click(page.tabs.tabs[2])
+    test.assertEqual("settings", page:Tab())
+    test.assertFalse(page.greetingsTab.shown)
+    test.assertTrue(header.frame.shown)
+    click(page.tabs.tabs[1])
+    addon.settings:Set("guildGreet", true)
+    test.assertFalse(page.dimmed)
+
+    -- Join first, with the starters; Login's switch is the AddOns option.
+    test.assertEqual("join", page.categories:Selected())
+    test.assertEqual("Welcome to the guild, {name}!", page.rows[1].text.text)
+    click(page.categories.buttons[2])
+    test.assertEqual("Someone's first login you see this session.", page.description.text)
+    test.assertEqual("Prompt me", page.switchLabel.text)
+    test.assertTrue(page.switch:IsOn())
+    click(page.switch)
+    test.assertFalse(addon.settings:Get("greetCategory:login"))
+    test.assertTrue(page.offNote.shown)
+    test.assertEqual(addon.GreetingsEditor.OFF_NOTE, page.offNote.text)
+    test.assertTrue(page.categories.buttons[2].dotShown)
+    addon.settings:Set("greetCategory:login", true)
+    test.assertFalse(page.categories.buttons[2].dotShown)
+    test.assertFalse(page.offNote.shown)
+
+    -- Welcome back's line has the minutes, and follows them.
+    click(page.categories.buttons[3])
+    test.assertContains(page.description.text, "more than " .. addon.settings:Get("welcomeBackMinutes") .. " minutes")
+    addon.settings:Set("welcomeBackMinutes", 20)
+    test.assertEqual("Someone you saw log off comes back after more than 20 minutes away.", page.description.text)
+
+    -- A row shows Edit and 🗑 and its full text while hovered.
+    local row = page.rows[1]
+    test.assertFalse(row.edit.shown)
+    row.scripts.OnEnter(row)
+    test.assertTrue(row.edit.shown)
+    -- Edit is a word, not an icon, and lights up on mouseover.
+    test.assertEqual("Edit", row.edit.label.text)
+    row.edit.scripts.OnEnter(row.edit)
+    test.assertTrue(row.edit.hovered)
+    row.edit.scripts.OnLeave(row.edit)
+    test.assertFalse(row.edit.hovered)
+    test.assertTrue(row.delete.shown)
+    row.scripts.OnLeave(row)
+    test.assertFalse(row.delete.shown)
+
+    -- Saved greetings changed while it was away show when it's shown again.
+    local greetings = addon.guildGreet:Library():Greetings("welcomeBack")
+    addon.guildGreet:Library():Add("welcomeBack", "Back again, {name}?")
+    window:ShowPage("lfg")
+    window:ShowPage("greetings")
+    test.assertEqual("Back again, {name}?", page.rows[#greetings + 1].text.text)
+    test.assertTrue(page.rows[#greetings + 1].shown)
+end)
+
+test.test("greetings: ✎ edits a greeting in place, + Add a greeting adds one at the bottom", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local window = addon.agfWindow
+    test.assertTrue(window:Open("greetings"))
+    local page = addon.greetingsPage
+    local library = addon.guildGreet:Library()
+    local box = page.edit.input.box
+    local function typeText(text)
+        box:SetText(text)
+        box.scripts.OnTextChanged(box, true)
+    end
+
+    -- ✎ on the second Join greeting: the box takes its row's place.
+    local row = page.rows[2]
+    click(row.edit)
+    test.assertTrue(page.edit.shown)
+    test.assertFalse(row.shown)
+    test.assertEqual("Welcome aboard, {name}! Glad to have you.", box:GetText())
+    test.assertEqual("Save", page.edit.save.label.text)
+    test.assertFalse(page.edit.save.active)
+    typeText("Welcome aboard, {name}!")
+    test.assertTrue(page.edit.save.active)
+    -- Enter saves.
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual("Welcome aboard, {name}!", library:Greetings("join")[2])
+    test.assertFalse(page.edit.shown)
+    test.assertEqual("Welcome aboard, {name}!", page.rows[2].text.text)
+
+    -- + Add a greeting: an empty box at the bottom, Add.
+    click(page.add)
+    test.assertFalse(page.add.shown)
+    test.assertEqual("", box:GetText())
+    test.assertEqual("Add", page.edit.save.label.text)
+    typeText("Hi {name}, make yourself at home!")
+    click(page.edit.save)
+    local join = library:Greetings("join")
+    test.assertEqual("Hi {name}, make yourself at home!", join[#join])
+    test.assertTrue(page.add.shown)
+
+    -- Escape cancels: nothing saved.
+    click(page.rows[1].edit)
+    typeText("Not this")
+    box.scripts.OnEscapePressed(box)
+    test.assertFalse(page.edit.shown)
+    test.assertEqual("Welcome to the guild, {name}!", library:Greetings("join")[1])
+
+    -- A refused save shows why under the box, for a few seconds.
+    click(page.add)
+    typeText("Hello {name}")
+    local saved = library.state.greetings.join
+    library.state.greetings.join = "unreadable"
+    click(page.edit.save)
+    library.state.greetings.join = saved
+    test.assertEqual("Can't save: the saved greetings are unreadable.", page.edit.error.text)
+    fixtures.runTimers(world, 1)
+    test.assertTrue(page.edit.error.text ~= "")
+    fixtures.runTimers(world, 5)
+    test.assertEqual("", page.edit.error.text)
+    test.assertTrue(page.edit.shown)
+
+    -- A draft is dropped on another tab, another category, or the window closing.
+    click(page.tabs.tabs[2])
+    click(page.tabs.tabs[1])
+    test.assertFalse(page.edit.shown)
+    click(page.rows[1].edit)
+    click(page.categories.buttons[2])
+    test.assertFalse(page.edit.shown)
+    click(page.rows[1].edit)
+    test.assertTrue(page.edit.shown)
+    page.content.scripts.OnHide(page.content)
+    test.assertFalse(page.edit.shown)
+    test.assertEqual("Hey {name}!", library:Greetings("login")[1])
+end)
+
+test.test("greetings: Insert chips and More put placeholders in, and the preview uses the user's names", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local tooltip = { lines = {} }
+    function tooltip.SetOwner() end
+    function tooltip.SetText(_, text)
+        tooltip.lines = { text }
+    end
+    function tooltip.AddLine(_, text)
+        table.insert(tooltip.lines, text)
+    end
+    function tooltip.Show()
+        tooltip.shown = true
+    end
+    function tooltip.Hide()
+        tooltip.shown = false
+    end
+    world.environment.GameTooltip = tooltip
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    local edit = page.edit
+
+    -- The chips are part of the edit box, hidden until it's open.
+    test.assertFalse(edit.shown)
+    click(page.add)
+    test.assertTrue(edit.shown)
+    test.assertEqual("{name}", edit.chips[1].label.text)
+    test.assertEqual("{character}", edit.chips[3].label.text)
+    edit.chips[2].hooks.OnEnter(edit.chips[2])
+    test.assertEqual("{main}", tooltip.lines[1])
+    test.assertEqual("their main's name, even when they have an alias", tooltip.lines[2])
+    edit.chips[2].hooks.OnLeave(edit.chips[2])
+    test.assertFalse(tooltip.shown)
+
+    -- A chip goes in at the cursor.
+    local box = edit.input.box
+    box:SetText("Hi !")
+    box.scripts.OnTextChanged(box, true)
+    rawset(box, "GetCursorPosition", function()
+        return 3
+    end)
+    click(edit.chips[1])
+    test.assertEqual("Hi {name}!", box:GetText())
+    test.assertEqual(9, rawget(box, "cursor"))
+    -- The preview fills it in with the user's own name.
+    local _, _, normalizer = addon.rosterController:QuietContext()
+    local names = addon.guildGreet:Names(normalizer:Key(addon.client:GetPlayerFullName()),
+        addon.client:GetPlayerFullName())
+    test.assertEqual("Preview: Hi " .. names.name .. "!", edit.preview.text)
+
+    -- More offers the rare four and the note.
+    click(edit.more)
+    local menu = edit.moreMenu
+    test.assertTrue(menu.open)
+    test.assertContains(menu.rows[1].label.text, "{mainFirst}")
+    test.assertContains(menu.rows[4].label.text, "{characterLast}")
+    test.assertContains(menu.rows[5].label.text, "WoW Forever's two-part names")
+    rawset(box, "GetCursorPosition", function()
+        return 0
+    end)
+    click(menu.rows[3])
+    test.assertEqual("{characterFirst}Hi {name}!", box:GetText())
+    test.assertEqual("Preview: " .. names.characterfirst .. "Hi " .. names.name .. "!", edit.preview.text)
+end)
+
+-- Friends -----------------------------------------------------------------------
+
+test.test("friends: the window opens on Friends, the page is built on show, and a pinned Friend is starred", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+
+    test.assertTrue(addon.agfWindow:Open())
+    test.assertEqual("friends", addon.agfWindow:Page())
+    local page = addon.friendsPage
+    test.assertTrue(page ~= nil)
+    test.assertTrue(page.cards[1].empty)
+
+    -- Pinning Hammer Smith through the picker: the user isn't offered.
+    click(page.cards[1])
+    test.assertTrue(page:PickerOpen())
+    local hammer, tool
+    local index
+    for index = 1, #page.picker.rows do
+        local row = page.picker.rows[index]
+        if row.shown and row.entry.name == "Hammer Smith" then
+            hammer = row
+        elseif row.shown and row.entry.name == "Tool Box" then
+            tool = row
+        end
+    end
+    test.assertEqual(nil, tool)
+    click(hammer)
+    test.assertEqual("Hammer Smith", page.cards[1].name.text)
+    -- The detail panel shows Hammer from saved data and the roster.
+    test.assertEqual("Hammer Smith", page.detail.name.text)
+    test.assertEqual("Friend", page.detail.badge.text)
+    test.assertTrue(page.detail.tiles[1].shown)
+    test.assertEqual("Discord", page.detail.view.tiles[1].label)
+    -- Its tabs: Hammer and the alt Bolt, and the Log from the old panel.
+    test.assertEqual("Characters · 2", page.detail.tabs.tabs[1].label.text)
+    local cardName = string.gsub(string.gsub(page.detail.characterCards[1].name.text, "|c%x%x%x%x%x%x%x%x", ""), "|r", "")
+    test.assertEqual("Hammer Smith", cardName)
+    test.assertTrue(page.detail.view.logRows[1] ~= nil)
+
+    -- Hammer's alt Bolt shares the Friend tier, with Guild Greet's perks.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertEqual(1, #partition:GetFriends())
+    test.assertTrue(addon.guildGreet:HasPerks(normalizer:Key("Bolt Smith")))
+    test.assertFalse(addon.guildGreet:HasPerks(normalizer:Key("Zap Arcane")))
+
+    -- Shown again, the page is built again.
+    addon.agfWindow:ShowPage("lfg")
+    addon.agfWindow:ShowPage("friends")
+    test.assertEqual("Hammer Smith", page.cards[1].name.text)
+end)
+
+test.test("friends: Open in Guild Fellowship on a guildmate's menu opens the window on their player", function()
+    local profile = fixtures.PROFILES[1]
+    local world = fixtures.newEnvironment(profile, { guild = guild(profile), playerName = "Tool Box" })
+    world.playerLevel = TOP_LEVEL[profile]
+    local callbacks = {}
+    world.environment.Menu = {
+        ModifyMenu = function(tag, callback)
+            callbacks[tag] = callback
+        end,
+    }
+    fixtures.joinChannel(fixtures.newChannel(), world)
+    local addon = fixtures.loadAddon(world)
+    fixtures.fire(world, "ADDON_LOADED", world.addonName)
+    world.loggedIn = true
+    fixtures.fire(world, "PLAYER_LOGIN")
+    fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world)
+    fakeFrames.install(world.environment)
+    test.assertTrue(callbacks.MENU_UNIT_FRIEND ~= nil)
+
+    local root = { buttons = {} }
+    function root:CreateButton(text, onClick)
+        table.insert(self.buttons, { text = text, onClick = onClick })
+    end
+    -- Bolt Smith is Hammer Smith's alt; someone outside the guild gets nothing.
+    callbacks.MENU_UNIT_FRIEND(nil, root, { name = "Bolt Smith" })
+    callbacks.MENU_UNIT_FRIEND(nil, root, { name = "Nobody Here" })
+    test.assertEqual(1, #root.buttons)
+    root.buttons[1].onClick()
+
+    test.assertTrue(addon.agfWindow:IsOpen())
+    test.assertEqual("friends", addon.agfWindow:Page())
+    local page = addon.friendsPage
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertEqual(partition:GetCharacter(normalizer:Key("Bolt Smith")).player, page:Selected())
+    test.assertEqual("Hammer Smith", page.detail.name.text)
+    test.assertTrue(page.cards[1].empty)
+    test.assertTrue(page.detail.view.header.canToggle)
+    test.assertFalse(page.detail.view.header.isFriend)
+end)
+
+test.test("greetings: 🗑 asks Delete? first, and an empty category says it won't prompt", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    local library = addon.guildGreet:Library()
+    click(page.categories.buttons[2])
+    local count = #library:Greetings("login")
+
+    -- The first click turns 🗑 into a red Delete?; nothing is deleted.
+    local row = page.rows[1]
+    row.scripts.OnEnter(row)
+    click(row.delete)
+    test.assertTrue(row.confirm.shown)
+    test.assertFalse(row.delete.shown)
+    test.assertEqual("Delete?", row.confirm.label.text)
+    test.assertEqual(count, #library:Greetings("login"))
+    -- Left alone, it goes back to 🗑 after 5 seconds.
+    fixtures.runTimers(world, 6)
+    test.assertFalse(row.confirm.shown)
+    test.assertEqual(count, #library:Greetings("login"))
+
+    -- A second click deletes.
+    click(row.delete)
+    click(row.confirm)
+    test.assertEqual(count - 1, #library:Greetings("login"))
+    test.assertFalse(row.confirm.shown)
+
+    -- Down to the last one, then none.
+    while #library:Greetings("login") > 1 do
+        library:Remove("login", 1)
+    end
+    page:Refresh()
+    click(page.rows[1].delete)
+    test.assertEqual("Delete? (last one)", page.rows[1].confirm.label.text)
+    click(page.rows[1].confirm)
+    test.assertEqual(0, #library:Greetings("login"))
+    test.assertTrue(page.empty.shown)
+    test.assertEqual("No Login greetings yet. You won't get login prompts until you add one.", page.empty.text)
+    test.assertTrue(page.add.shown)
+    test.assertFalse(page.rows[1].shown)
+    test.assertTrue(page.categories.buttons[2].dotShown)
+
+    -- Join still has greetings: no empty text there.
+    click(page.categories.buttons[1])
+    test.assertFalse(page.empty.shown)
+end)
+
+test.test("greetings: loading deletes saved Long absence greetings and its switch, and the page shows Friends", function()
+    local profile = fixtures.PROFILES[1]
+    local database = {
+        schemaVersion = 4,
+        guilds = {},
+        greet = {
+            greetings = { login = { "Hi {name}" }, longAbsence = { "Ages, {name}!" } },
+            lastUsed = { longAbsence = "Ages, {name}!" },
+            categories = { longAbsence = false },
+        },
+    }
+    local world = fixtures.newEnvironment(profile, { guild = guild(profile), playerName = "Tool Box",
+        database = database })
+    world.playerLevel = TOP_LEVEL[profile]
+    fixtures.joinChannel(fixtures.newChannel(), world)
+    local addon = fixtures.loadAddon(world)
+    fixtures.fire(world, "ADDON_LOADED", world.addonName)
+    world.loggedIn = true
+    fixtures.fire(world, "PLAYER_LOGIN")
+    fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world)
+
+    local greet = world.database.greet
+    test.assertEqual(nil, greet.greetings.longAbsence)
+    test.assertEqual(nil, greet.lastUsed.longAbsence)
+    test.assertEqual(nil, greet.categories.longAbsence)
+    test.assertEqual("Hi {name}", greet.greetings.login[1])
+
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    click(page.categories.buttons[4])
+    test.assertEqual("Use for friends", page.switchLabel.text)
+    test.assertEqual("There you are, {name}!", page.rows[1].text.text)
+end)
+
+test.test("greetings: the gear popup holds the greeting settings, and a banner shows when this character is off", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local window = addon.agfWindow
+    test.assertTrue(window:Open("greetings"))
+    local page = addon.greetingsPage
+
+    window.gear.scripts.OnClick(window.gear)
+    test.assertEqual("Greetings", window:SettingsPopupTitle())
+    test.assertTrue(window.infoIcons.greetCharacter ~= nil)
+    test.assertTrue(window.infoIcons.greetInInstances ~= nil)
+    test.assertTrue(window:Switches("greetHighlightFriends")[1] ~= nil)
+    local _, choices = window:PopupRows("greetFor")
+    test.assertEqual("My Friends", choices[1].buttons[3].label.text)
+    -- The same setting as the AddOns options.
+    click(choices[1].buttons[2])
+    test.assertEqual(addon.FellowshipStore.GREET_FOR.grouped, addon.settings:Get("greetFor"))
+    local actions = window:PopupRows("greetMove")
+    click(actions[1])
+    test.assertEqual("Done moving", actions[1].label.text)
+    window:Close()
+    test.assertFalse(addon.settings:IsActive("greetMove"))
+
+    -- Off on this character: the banner, and Turn on.
+    test.assertTrue(window:Open("greetings"))
+    test.assertFalse(page.banner.shown)
+    local switch = window:Switches("greetCharacter")[1]
+    click(switch)
+    test.assertFalse(addon.settings:Get("greetCharacter"))
+    test.assertTrue(page.banner.shown)
+    test.assertEqual("Greet prompts are off on Tool Box. Your other characters still get them.", page.banner.text.text)
+    click(page.banner.turnOn)
+    test.assertTrue(addon.settings:Get("greetCharacter"))
+    test.assertFalse(page.banner.shown)
+end)
+
+test.test("greetings: the Settings tab's steppers and Slow mode are the AddOns options' settings", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    click(page.tabs.tabs[2])
+    test.assertEqual("settings", page:Tab())
+
+    local minutes = page.steppers.welcomeBackMinutes
+    test.assertEqual(addon.settings:Get("welcomeBackMinutes"), minutes:GetValue())
+    local before = minutes:GetValue()
+    minutes.plus.scripts.OnMouseDown(minutes.plus)
+    minutes.plus.scripts.OnMouseUp(minutes.plus)
+    test.assertEqual(addon.Widgets.StepValue(before, 1, 5, 1, 120), addon.settings:Get("welcomeBackMinutes"))
+    -- Changed elsewhere: the stepper follows.
+    addon.settings:Set("greetCap", 7)
+    test.assertEqual(7, page.steppers.greetCap:GetValue())
+    local box = page.steppers.welcomeCap.field.box
+    box:SetText("4")
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(4, addon.settings:Get("welcomeCap"))
+
+    -- Tool Box is an officer: the Slow mode card, not the line.
+    test.assertTrue(addon.settings:IsEnabled("greetSlowMode"))
+    test.assertTrue(page.officerCard.shown)
+    test.assertFalse(page.slowModeLine.shown)
+    page.officerCard.slider.slider.scripts.OnValueChanged(page.officerCard.slider.slider, 3, true)
+    test.assertEqual(3, addon.settings:Get("greetSlowMode"))
+    test.assertEqual("3 min", page.officerCard.slider.text.text)
+end)
+
+test.test("greetings: a member who isn't an officer sees one line about the guild's Slow mode", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open("greetings"))
+    local page = addon.greetingsPage
+    click(page.tabs.tabs[2])
+
+    test.assertFalse(addon.settings:IsEnabled("greetSlowMode"))
+    test.assertFalse(page.officerCard.shown)
+    test.assertTrue(page.slowModeLine.shown)
+    test.assertEqual(addon.GreetingsEditor.SlowModeLine(addon.settings:Get("greetSlowMode")), page.slowModeLine.text)
 end)

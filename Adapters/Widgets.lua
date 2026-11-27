@@ -14,9 +14,20 @@ local Theme = addon.Theme
 
 local Widgets = {
     BUTTON_HEIGHT = 26,
+    -- An open context menu's frame level (its catcher just under it).
+    MENU_LEVEL = 100,
     TOGGLE_WIDTH = 34,
     TOGGLE_HEIGHT = 18,
     INPUT_HEIGHT = 26,
+    DOT_SIZE = 6,
+    INFO_SIZE = 16,
+    -- A stepper's buttons and number, and how holding a button repeats:
+    -- the wait before the first repeat, then between repeats, in seconds.
+    STEPPER_BUTTON = 24,
+    STEPPER_FIELD = 44,
+    HOLD_DELAY = 0.4,
+    HOLD_REPEAT = 0.08,
+    SLIDER_HEIGHT = 16,
     ROLE_LABELS = { tank = "Tank", healer = "Healer", dps = "DPS" },
     -- Each role's icon (a Theme.TEXTURES name); "any" is a person.
     ROLE_ICONS = { tank = "shield", healer = "cross", dps = "sword", any = "person" },
@@ -236,11 +247,12 @@ end
 local BUTTON_COLORS = {
     primary = { fill = "green", hover = "greenHover", text = "text", border = false },
     secondary = { fill = "raised", hover = "hover", text = "text", border = "border" },
+    danger = { fill = "red", hover = "redHover", text = "text", border = false },
 }
 
--- A rounded text button. `kind`: "primary" (green) or "secondary"; `onClick`
--- runs on a left click while it's enabled. SetLabel renames it and
--- SetActive enables or greys it out.
+-- A rounded text button. `kind`: "primary" (green), "secondary" or "danger"
+-- (red); `onClick` runs on a left click while it's enabled. SetLabel
+-- renames it and SetActive enables or greys it out.
 function UI:Button(parent, label, kind, onClick)
     local button = self:frame("Button", parent)
     local colors = BUTTON_COLORS[kind] or BUTTON_COLORS.secondary
@@ -309,6 +321,266 @@ function UI:IconButton(parent, texture, size, onClick)
     return button
 end
 
+-- A small text-only button, `label` in grey that turns white with a
+-- rounded backdrop on mouseover, like IconButton, `width` wide.
+function UI:TextButton(parent, label, width, onClick)
+    local button = self:frame("Button", parent)
+    button:SetSize(width, Widgets.BUTTON_HEIGHT - 4)
+    round(button, Theme.RADIUS.small, "hover", false)
+    button.fillShape:SetShown(false)
+    button.edgeShape:SetShown(false)
+    button.label = self:Text(button, label, "semibold", "small", "muted")
+    button.label:SetPoint("CENTER", button, "CENTER", 0, 0)
+    button:SetScript("OnEnter", function(self)
+        self.hovered = true
+        self.label:SetTextColor(Theme.Color("text"))
+        self.fillShape:SetShown(true)
+    end)
+    button:SetScript("OnLeave", function(self)
+        self.hovered = false
+        self.label:SetTextColor(Theme.Color("muted"))
+        self.fillShape:SetShown(false)
+    end)
+    button:SetScript("OnClick", function(self)
+        if onClick ~= nil then
+            onClick(self)
+        end
+    end)
+    return button
+end
+
+-- A small round "i" that shows `text()` (a function, read on each
+-- mouseover; nothing shows while it gives nil) in the game's tooltip,
+-- headed `title`.
+function UI:InfoIcon(parent, title, text)
+    local icon = self:frame("Button", parent)
+    icon:SetSize(Widgets.INFO_SIZE, Widgets.INFO_SIZE)
+    round(icon, Widgets.INFO_SIZE / 2, "hover", false)
+    icon.label = self:Text(icon, "i", "semibold", "small", "muted")
+    icon.label:SetPoint("CENTER", icon, "CENTER", 0, 0)
+    local environment = self.environment
+    icon:SetScript("OnEnter", function(self)
+        self.label:SetTextColor(Theme.Color("text"))
+        local tooltip = environment.GameTooltip
+        local ok, body = pcall(text)
+        if type(tooltip) == "table" and ok and type(body) == "string" then
+            tooltip:SetOwner(self, "ANCHOR_RIGHT")
+            tooltip:SetText(title, 1, 1, 1)
+            tooltip:AddLine(body, nil, nil, nil, true)
+            tooltip:Show()
+        end
+    end)
+    icon:SetScript("OnLeave", function(self)
+        self.label:SetTextColor(Theme.Color("muted"))
+        local tooltip = environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:Hide()
+        end
+    end)
+    return icon
+end
+
+-- Numbers -------------------------------------------------------------------
+
+local function clampWhole(value, min, max)
+    return math.max(min, math.min(max, math.floor(value + 0.5)))
+end
+
+-- The value one step from `value` in `direction` (1 up, -1 down): the next
+-- multiple of `step` that way, so 1 steps up to 5, then 10, in 5s, kept
+-- from `min` to `max`.
+function Widgets.StepValue(value, direction, step, min, max)
+    step = step or 1
+    local stepped
+    if direction > 0 then
+        stepped = (math.floor(value / step) + 1) * step
+    else
+        stepped = (math.ceil(value / step) - 1) * step
+    end
+    return clampWhole(stepped, min, max)
+end
+
+-- A number typed as `text`, rounded and kept from `min` to `max`, or nil
+-- when it isn't a number.
+function Widgets.TypedValue(text, min, max)
+    local value = tonumber(string.match(text or "", "^%s*(.-)%s*$"))
+    if value == nil or value ~= value then
+        return nil
+    end
+    return clampWhole(value, min, max)
+end
+
+-- A − value + stepper. options: min, max, step (default 1), onChange(value)
+-- when the player changes it. − and + step (StepValue), and holding one
+-- repeats; the number can be clicked and typed over, kept in range on
+-- Enter or leaving it. SetValue(value) shows a value without onChange;
+-- GetValue() is what it shows.
+function UI:Stepper(parent, options)
+    local ui = self
+    local stepper = self:frame("Frame", parent)
+    local size = Widgets.STEPPER_BUTTON
+    stepper:SetSize(2 * size + Widgets.STEPPER_FIELD + 2 * Theme.SPACING.xs, size)
+    stepper.value = options.min
+    local function change(value)
+        if value ~= stepper.value then
+            stepper:SetValue(value)
+            if options.onChange ~= nil then
+                options.onChange(value)
+            end
+        end
+    end
+    function stepper.Step(_, direction)
+        change(Widgets.StepValue(stepper.value, direction, options.step, options.min, options.max))
+    end
+    local held
+    local function stop()
+        held = nil
+        stepper:SetScript("OnUpdate", nil)
+    end
+    local function button(text, direction)
+        local result = ui:frame("Button", stepper)
+        result:SetSize(size, size)
+        round(result, Theme.RADIUS.small, "raised", "border")
+        result.label = ui:Text(result, text, "semibold", "body", "text")
+        result.label:SetPoint("CENTER", result, "CENTER", 0, 0)
+        result:SetScript("OnMouseDown", function()
+            stepper:Step(direction)
+            held = { direction = direction, wait = Widgets.HOLD_DELAY }
+            stepper:SetScript("OnUpdate", function(_, elapsed)
+                if held == nil then
+                    return
+                end
+                held.wait = held.wait - (elapsed or 0)
+                while held ~= nil and held.wait <= 0 do
+                    stepper:Step(held.direction)
+                    -- Stepping can hide the stepper, which ends the hold.
+                    if held == nil then
+                        break
+                    end
+                    held.wait = held.wait + Widgets.HOLD_REPEAT
+                end
+            end)
+        end)
+        result:SetScript("OnMouseUp", stop)
+        result:SetScript("OnHide", stop)
+        result:SetScript("OnEnter", function(self)
+            self:SetFill("hover")
+        end)
+        result:SetScript("OnLeave", function(self)
+            self:SetFill("raised")
+            stop()
+        end)
+        return result
+    end
+    stepper.minus = button("−", -1)
+    stepper.minus:SetPoint("LEFT", stepper, "LEFT", 0, 0)
+    stepper.field = self:field(stepper, Widgets.STEPPER_FIELD)
+    stepper.field:SetPoint("LEFT", stepper.minus, "RIGHT", Theme.SPACING.xs, 0)
+    stepper.field:SetHeight(size)
+    local box = stepper.field.box
+    box:SetJustifyH("CENTER")
+    local function commit()
+        local typed = Widgets.TypedValue(box:GetText(), options.min, options.max)
+        if typed == nil then
+            box:SetText(tostring(stepper.value))
+        else
+            -- Shown kept in range even when it's the same value.
+            box:SetText(tostring(typed))
+            change(typed)
+        end
+    end
+    box:SetScript("OnEnterPressed", function(self)
+        commit()
+        self:ClearFocus()
+    end)
+    box:HookScript("OnEditFocusLost", commit)
+    stepper.plus = button("+", 1)
+    stepper.plus:SetPoint("LEFT", stepper.field, "RIGHT", Theme.SPACING.xs, 0)
+    stepper:SetScript("OnHide", stop)
+    -- A number being typed stays until the player finishes it.
+    function stepper.SetValue(_, value)
+        stepper.value = value
+        local ok, focused = pcall(box.HasFocus, box)
+        if not (ok and focused == true) then
+            box:SetText(tostring(value))
+        end
+    end
+    function stepper.GetValue()
+        return stepper.value
+    end
+    stepper:SetValue(options.min)
+    return stepper
+end
+
+-- A horizontal slider `width` wide from options.min to options.max in
+-- whole steps, its value shown beside it through options.format(value)
+-- (the number itself without one). onChange(value) runs when the player
+-- drags it. SetValue(value) moves it without onChange.
+function UI:Slider(parent, width, options)
+    local holder = self:frame("Frame", parent)
+    holder:SetSize(width, Widgets.SLIDER_HEIGHT)
+    local track = self:Panel(holder, { radius = Theme.RADIUS.small, fill = "surface" })
+    track:SetPoint("LEFT", holder, "LEFT", 0, 0)
+    track:SetSize(width - 70, 6)
+    local slider = self:frame("Slider", holder)
+    slider:SetOrientation("HORIZONTAL")
+    slider:SetPoint("LEFT", holder, "LEFT", 0, 0)
+    slider:SetSize(width - 70, Widgets.SLIDER_HEIGHT)
+    slider:SetMinMaxValues(options.min, options.max)
+    slider:SetValueStep(1)
+    if type(slider.SetObeyStepOnDrag) == "function" then
+        slider:SetObeyStepOnDrag(true)
+    end
+    local thumb = slider:CreateTexture(nil, "OVERLAY")
+    thumb:SetTexture(Theme.TEXTURES.rounded)
+    thumb:SetVertexColor(Theme.Color("green"))
+    thumb:SetSize(Widgets.SLIDER_HEIGHT, Widgets.SLIDER_HEIGHT)
+    slider:SetThumbTexture(thumb)
+    holder.slider = slider
+    holder.text = self:Text(holder, "", "semibold", "body", "text")
+    holder.text:SetPoint("LEFT", slider, "RIGHT", Theme.SPACING.m, 0)
+    local function show(value)
+        holder.value = value
+        holder.text:SetText(options.format and options.format(value) or tostring(value))
+    end
+    function holder.Format(_, value)
+        return options.format and options.format(value) or tostring(value)
+    end
+    slider:SetScript("OnValueChanged", function(_, value, userInput)
+        if type(value) ~= "number" then
+            return
+        end
+        value = clampWhole(value, options.min, options.max)
+        if holder.setting then
+            return
+        end
+        if value ~= holder.value then
+            show(value)
+            if userInput ~= false and options.onChange ~= nil then
+                options.onChange(value)
+            end
+        end
+    end)
+    function holder.SetValue(_, value)
+        holder.setting = true
+        slider:SetValue(value)
+        holder.setting = false
+        show(value)
+    end
+    function holder.GetValue()
+        return holder.value
+    end
+    function holder.SetEnabled(_, enabled)
+        if enabled then
+            slider:Enable()
+        else
+            slider:Disable()
+        end
+    end
+    show(options.min)
+    return holder
+end
+
 -- Choices -------------------------------------------------------------------
 
 -- Buttons side by side in one rounded strip, one selected (green). `items`
@@ -332,6 +604,12 @@ function UI:Segmented(parent, items, width, onSelect)
         button.id = item.id
         button.label = ui:Text(button, item.label, "semibold", "body", "muted")
         button.label:SetPoint("CENTER", button, "CENTER", 0, 0)
+        button.dot = button:CreateTexture(nil, "OVERLAY")
+        button.dot:SetTexture(Theme.TEXTURES.rounded)
+        button.dot:SetVertexColor(Theme.Color("disabled"))
+        button.dot:SetSize(Widgets.DOT_SIZE, Widgets.DOT_SIZE)
+        button.dot:SetPoint("LEFT", button.label, "RIGHT", Theme.SPACING.xs, 0)
+        button.dot:Hide()
         button:SetScript("OnClick", function(self)
             strip:Select(self.id)
             if onSelect ~= nil then
@@ -352,6 +630,21 @@ function UI:Segmented(parent, items, width, onSelect)
     end
     function strip.Selected()
         return strip.selected
+    end
+    -- A small grey dot beside one's label, e.g. for a choice that's off.
+    function strip.SetDot(_, id, shown)
+        local position
+        for position = 1, #strip.buttons do
+            local button = strip.buttons[position]
+            if button.id == id then
+                button.dotShown = shown == true
+                if button.dotShown then
+                    button.dot:Show()
+                else
+                    button.dot:Hide()
+                end
+            end
+        end
     end
     if items[1] ~= nil then
         strip:Select(items[1].id)
@@ -473,6 +766,30 @@ function UI:Toggle(parent, onChange)
     return switch
 end
 
+-- Scrolling -----------------------------------------------------------------
+
+-- A list that scrolls with the mouse wheel, `step` pixels a notch: a scroll
+-- frame on `parent` and, inside it, the list frame to lay rows out on, top
+-- to bottom, `width` wide until the scroll frame is sized. Returns both.
+function UI:ScrollList(parent, step, width)
+    local area = self:frame("ScrollFrame", parent)
+    local list = self:frame("Frame", area)
+    list:SetSize(width or 400, 1)
+    area:SetScrollChild(list)
+    area:EnableMouseWheel(true)
+    area:SetScript("OnMouseWheel", function(self, delta)
+        local most = self:GetVerticalScrollRange() or 0
+        local scroll = (self:GetVerticalScroll() or 0) - delta * step
+        self:SetVerticalScroll(math.max(0, math.min(most, scroll)))
+    end)
+    area:SetScript("OnSizeChanged", function(_, areaWidth)
+        if type(areaWidth) == "number" and areaWidth > 0 then
+            list:SetWidth(areaWidth)
+        end
+    end)
+    return area, list
+end
+
 -- Text entry ----------------------------------------------------------------
 
 -- A text box in a rounded field. Shared by SearchBox and TextInput.
@@ -536,18 +853,121 @@ function Widgets.Length(text)
     return count
 end
 
+-- The first `limit` bytes of `text`, backed off to the start of a whole
+-- UTF-8 character so a letter like é is never cut in half.
+function Widgets.CutBytes(text, limit)
+    if #text <= limit then
+        return text
+    end
+    local length = limit
+    -- Bytes 0x80-0xBF continue a character started earlier.
+    while length > 0 do
+        local nextByte = string.byte(text, length + 1)
+        if nextByte < 0x80 or nextByte >= 0xC0 then
+            break
+        end
+        length = length - 1
+    end
+    return string.sub(text, 1, length)
+end
+
+-- How many lines a multiline input shows for text `stringHeight` tall, at
+-- `lineHeight` a line: at least one, at most `maxLines`.
+function Widgets.LinesFor(stringHeight, lineHeight, maxLines)
+    if type(stringHeight) ~= "number" or type(lineHeight) ~= "number" or lineHeight <= 0 then
+        return 1
+    end
+    return math.max(1, math.min(maxLines, math.ceil(stringHeight / lineHeight - 0.01)))
+end
+
 -- A text input holding at most `maxLetters` characters, with an "n/max"
 -- counter on its right. onChange(text) runs as the player types.
-function UI:TextInput(parent, width, maxLetters, onChange)
+--
+-- options (optional), for a multiline input:
+--   multiline  true: the text wraps, and the field grows from one line to
+--              `maxLines` (default 4) as it's typed, calling onResize(height)
+--   maxBytes   the most bytes it holds, cut at a whole character (a chat
+--              message's limit counts bytes, so é takes two)
+--   onEnter    function(): Enter (it never adds a line break)
+--   onEscape   function(): Escape
+-- Line breaks, typed or pasted, fold into spaces.
+function UI:TextInput(parent, width, maxLetters, onChange, options)
+    options = options or {}
     local field = self:field(parent, width, onChange)
-    field.box:SetMaxLetters(maxLetters)
-    field.box:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", -48, 2)
+    local box = field.box
+    box:SetMaxLetters(maxLetters)
     field.counter = self:Text(field, "", "regular", "small", "label")
-    field.counter:SetPoint("RIGHT", field, "RIGHT", -Theme.SPACING.s, 0)
-    field.onText = function(text)
-        field.counter:SetText(Widgets.Length(text) .. "/" .. maxLetters)
+    if not options.multiline then
+        box:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", -48, 2)
+        field.counter:SetPoint("RIGHT", field, "RIGHT", -Theme.SPACING.s, 0)
+        field.onText = function(text)
+            field.counter:SetText(Widgets.Length(text) .. "/" .. maxLetters)
+        end
+        field.onText("")
+        return field
     end
-    field.onText("")
+
+    local maxLines = options.maxLines or 4
+    local lineHeight = Theme.FONT_SIZE.body + 4
+    field.lines = 1
+    box:SetMultiLine(true)
+    if options.maxBytes ~= nil then
+        -- The game's cap counts the terminating zero.
+        box:SetMaxBytes(options.maxBytes + 1)
+    end
+    box:ClearAllPoints()
+    box:SetPoint("TOPLEFT", field, "TOPLEFT", Theme.SPACING.s, -5)
+    box:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", -56, 5)
+    field.counter:SetPoint("BOTTOMRIGHT", field, "BOTTOMRIGHT", -Theme.SPACING.s, 6)
+    -- Measures the text at the box's width, to know how many lines it takes.
+    field.measure = self:Text(field, "", "regular", "body", "text")
+    field.measure:SetWordWrap(true)
+    field.measure:Hide()
+    local function resize(text)
+        local boxWidth = box:GetWidth()
+        if type(boxWidth) == "number" and boxWidth > 0 then
+            field.measure:SetWidth(boxWidth)
+        end
+        field.measure:SetText(text)
+        local lines = Widgets.LinesFor(field.measure:GetStringHeight(), lineHeight, maxLines)
+        local height = lines * lineHeight + 10
+        field:SetHeight(math.max(Widgets.INPUT_HEIGHT, height))
+        if lines ~= field.lines then
+            field.lines = lines
+            if options.onResize ~= nil then
+                options.onResize(height)
+            end
+        end
+    end
+    box:SetScript("OnTextChanged", function(self, userInput)
+        local text = self:GetText() or ""
+        local tidied = string.gsub(text, "[\r\n]+", " ")
+        if options.maxBytes ~= nil then
+            tidied = Widgets.CutBytes(tidied, options.maxBytes)
+        end
+        if tidied ~= text then
+            -- The game runs this again for the new text, not as typing.
+            self:SetText(tidied)
+            text = tidied
+        end
+        field.counter:SetText(Widgets.Length(text) .. "/" .. maxLetters)
+        resize(text)
+        if userInput and onChange ~= nil then
+            onChange(text)
+        end
+    end)
+    box:SetScript("OnEnterPressed", function()
+        if options.onEnter ~= nil then
+            options.onEnter()
+        end
+    end)
+    box:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+        if options.onEscape ~= nil then
+            options.onEscape()
+        end
+    end)
+    field.counter:SetText("0/" .. maxLetters)
     return field
 end
 
@@ -709,12 +1129,17 @@ function Widgets.ShowRoles(tiles, members, openRoles)
 end
 
 -- A small menu of text items. Open(anchor, items, title?) shows it under
--- `anchor` with one row per item ({ label, onClick }); picking one closes
--- it and runs its onClick, and a click anywhere outside it closes it.
+-- `anchor` with one row per item ({ label, onClick, disabled? }); picking
+-- one closes it and runs its onClick, and a click anywhere outside it
+-- closes it. A disabled item is greyed out and does nothing.
 -- Close() hides it.
 function UI:ContextMenu(parent)
-    local menu = self:Panel(parent, { radius = Theme.RADIUS.button, fill = "raised" })
-    menu:SetFrameStrata("DIALOG")
+    -- It lives on the screen itself, over everything, rather than inside
+    -- `parent`: inside the window it showed but couldn't be clicked in some
+    -- places (the listing editor). It closes when `parent` hides.
+    local screen = self.environment.UIParent or parent
+    local menu = self:Panel(screen, { radius = Theme.RADIUS.button, fill = "raised" })
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
     menu:SetWidth(180)
     menu:Hide()
     menu.rows = {}
@@ -730,10 +1155,10 @@ function UI:ContextMenu(parent)
     menu.divider:SetPoint("RIGHT", menu, "RIGHT", -Theme.SPACING.s, 0)
     -- A click anywhere outside the open menu closes it: a catcher covering
     -- the screen sits just under it.
-    local host = self.environment.UIParent or parent
+    local host = screen
     local catcher = self:frame("Button", host)
     catcher:SetAllPoints(host)
-    catcher:SetFrameStrata("DIALOG")
+    catcher:SetFrameStrata("FULLSCREEN_DIALOG")
     catcher:RegisterForClicks("AnyDown")
     catcher:SetScript("OnClick", function()
         menu:Close()
@@ -746,9 +1171,16 @@ function UI:ContextMenu(parent)
         menu.open = false
         catcher:Hide()
     end)
+    if parent ~= screen and type(parent.HookScript) == "function" then
+        parent:HookScript("OnHide", function()
+            menu:Hide()
+        end)
+    end
     local ui = self
+    -- The width it was made, read on first open.
+    local baseWidth
     -- Opens under `anchor` with `items`; `title` (text, may carry color
-    -- codes) heads them when given.
+    -- codes) heads them when given. It widens to fit its longest line.
     function menu.Open(_, anchor, items, title)
         local hasTitle = title ~= nil and title ~= ""
         menu.titleText = hasTitle and title or nil
@@ -772,12 +1204,17 @@ function UI:ContextMenu(parent)
                 row.label = ui:Text(row, "", "regular", "body", "text")
                 row.label:SetPoint("LEFT", row, "LEFT", Theme.SPACING.s, 0)
                 row:SetScript("OnEnter", function(self)
-                    self:SetFill("hover")
+                    if not self.disabled then
+                        self:SetFill("hover")
+                    end
                 end)
                 row:SetScript("OnLeave", function(self)
                     self:SetFill("raised")
                 end)
                 row:SetScript("OnClick", function(self)
+                    if self.disabled then
+                        return
+                    end
                     menu:Close()
                     if self.onClick ~= nil then
                         self.onClick()
@@ -792,6 +1229,8 @@ function UI:ContextMenu(parent)
                 if item ~= nil then
                     row.label:SetText(item.label)
                     row.onClick = item.onClick
+                    row.disabled = item.disabled == true
+                    row.label:SetTextColor(Theme.Color(row.disabled and "disabled" or "text"))
                     row:Show()
                 else
                     row:Hide()
@@ -800,14 +1239,31 @@ function UI:ContextMenu(parent)
         end
         menu.items = items
         menu.anchor = anchor
+        -- As wide as it was made, or wider when a line needs it, so no text
+        -- runs past its edge.
+        local function number(value)
+            return type(value) == "number" and value or nil
+        end
+        if baseWidth == nil then
+            baseWidth = number(menu:GetWidth()) or 180
+        end
+        local widest = hasTitle and (number(menu.title:GetStringWidth()) or 0) or 0
+        for index = 1, #items do
+            widest = math.max(widest, number(menu.rows[index].label:GetStringWidth()) or 0)
+        end
+        menu:SetWidth(math.max(baseWidth, math.ceil(widest) + 2 * (4 + Theme.SPACING.s)))
         menu:SetHeight(8 + first + #items * 22)
         menu:ClearAllPoints()
         menu:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
         menu.open = true
-        local level = type(menu.GetFrameLevel) == "function" and menu:GetFrameLevel() or nil
-        catcher:SetFrameLevel(math.max((tonumber(level) or 2) - 1, 1))
+        -- The catcher just under the menu, the menu (and its rows) on top.
+        catcher:SetFrameLevel(Widgets.MENU_LEVEL - 1)
+        menu:SetFrameLevel(Widgets.MENU_LEVEL)
         catcher:Show()
         menu:Show()
+        if type(menu.Raise) == "function" then
+            menu:Raise()
+        end
     end
     function menu.Close()
         menu.open = false

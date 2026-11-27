@@ -18,6 +18,9 @@ local function newFriends(players)
         version = function()
             return world.version
         end,
+        friends = function()
+            return world.pinned or {}
+        end,
     })
     return world, addon.GroupFriends
 end
@@ -194,4 +197,110 @@ test.test("group friends: a tier nobody is in has no sample", function()
     test.assertEqual("bolt", samples[GroupFriends.TOP])
     test.assertEqual(nil, samples[GroupFriends.FREQUENT])
     test.assertEqual(nil, samples[GroupFriends.GROUPED])
+end)
+
+-- Friends ----------------------------------------------------------------------
+
+test.test("group friends: a pinned player is a Friend, grouped with or not, with the perks and the star", function()
+    local world, GroupFriends = newFriends()
+    world.pinned = { "hammer" }
+
+    test.assertEqual(GroupFriends.FRIEND, world.friends:TierOf("hammer"))
+    test.assertTrue(GroupFriends.HasPerks(GroupFriends.FRIEND))
+    test.assertTrue(GroupFriends.IsStarred(GroupFriends.FRIEND))
+    test.assertTrue(GroupFriends.IsStarred(GroupFriends.TOP))
+    test.assertFalse(GroupFriends.IsStarred(GroupFriends.FREQUENT))
+    test.assertFalse(GroupFriends.IsStarred(nil))
+end)
+
+test.test("group friends: Friend wins over Top 5 and Frequent", function()
+    local world, GroupFriends = newFriends()
+    fillTop(world)
+    party(world, { "frank" }, 4)
+    world.pinned = { "ace", "frank" }
+
+    test.assertEqual(GroupFriends.FRIEND, world.friends:TierOf("ace"))
+    test.assertEqual(GroupFriends.FRIEND, world.friends:TierOf("frank"))
+    test.assertEqual(GroupFriends.TOP, world.friends:TierOf("bard"))
+end)
+
+test.test("group friends: a pin on any of a player's characters counts for the player, and follows merges", function()
+    local players = { tongs = "anvil" }
+    local world, GroupFriends = newFriends(players)
+    world.pinned = { "tongs" }
+
+    test.assertEqual(GroupFriends.FRIEND, world.friends:TierOf("anvil"))
+    test.assertEqual(nil, world.friends:TierOf("bellows"))
+
+    -- A scan links bellows to the same player.
+    players.bellows = "anvil"
+    world.version = 2
+    test.assertEqual(GroupFriends.FRIEND, world.friends:TierOf("bellows"))
+end)
+
+test.test("group friends: changing the Friend slots updates the tiers", function()
+    local world, GroupFriends = newFriends()
+    party(world, { "bolt" })
+    test.assertEqual(GroupFriends.TOP, world.friends:TierOf("bolt"))
+
+    world.pinned = { "bolt" }
+    test.assertEqual(GroupFriends.FRIEND, world.friends:TierOf("bolt"))
+
+    world.pinned = {}
+    test.assertEqual(GroupFriends.TOP, world.friends:TierOf("bolt"))
+    -- Unreadable slots pin nobody.
+    world.pinned = { 42, "bolt" }
+    test.assertEqual(GroupFriends.FRIEND, world.friends:TierOf("bolt"))
+end)
+
+test.test("group friends: a player's party count and last party, across their characters", function()
+    local world = newFriends({ tongs = "anvil" })
+    party(world, { "anvil" }, 2, NOW)
+    party(world, { "anvil", "tongs" }, 1, NOW + 3600)
+
+    local count, last = world.friends:StatsOf("tongs")
+    test.assertEqual(3, count)
+    test.assertEqual(NOW + 3660, last)
+    count, last = world.friends:StatsOf("ivy")
+    test.assertEqual(0, count)
+    test.assertEqual(nil, last)
+end)
+
+test.test("group friends: Top 5 skips pinned Friends, so the 6th-ranked player moves up", function()
+    local world, GroupFriends = newFriends()
+    fillTop(world)
+    party(world, { "frank" }, 9)
+    party(world, { "gus" }, 4)
+    test.assertEqual(GroupFriends.FREQUENT, world.friends:TierOf("frank"))
+
+    world.pinned = { "ace" }
+
+    test.assertEqual(GroupFriends.FRIEND, world.friends:TierOf("ace"))
+    test.assertEqual(GroupFriends.TOP, world.friends:TierOf("frank"))
+    test.assertEqual(GroupFriends.FREQUENT, world.friends:TierOf("gus"))
+end)
+
+test.test("group friends: Most grouped is the Top 5 in order with counts, and refills when one is pinned", function()
+    local world = newFriends()
+    party(world, { "ace" }, 6)
+    party(world, { "bard" }, 5)
+    party(world, { "cleric" }, 4)
+    party(world, { "druid" }, 3)
+    party(world, { "elf" }, 2)
+    party(world, { "frank" }, 1)
+
+    local most = world.friends:MostGrouped()
+    test.assertEqual(5, #most)
+    test.assertEqual("ace", most[1].player)
+    test.assertEqual(6, most[1].count)
+    test.assertEqual("elf", most[5].player)
+
+    world.pinned = { "bard" }
+    most = world.friends:MostGrouped()
+    test.assertEqual(5, #most)
+    test.assertEqual("cleric", most[2].player)
+    test.assertEqual("frank", most[5].player)
+    test.assertEqual(1, most[5].count)
+    -- No history, no list.
+    test.assertEqual(0, #newFriends().friends:MostGrouped())
 end)

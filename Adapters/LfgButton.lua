@@ -27,15 +27,14 @@ local LfgButton = {
     DRAWER_GAP = 6,
     -- How far the drawer slides in from.
     SLIDE = 24,
-    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 146, ask = 178, gate = 146, slot = 164, zone = 146 },
+    DRAWER_HEIGHTS = { newest = 156, none = 96, party = 146, ask = 178, gate = 146, slot = 164 },
     -- The party's role tiles, as on the Your listing card.
     TILE_SIZE = 22,
     NONE_TEXT = "No groups for you right now",
+    ASK_GUILD_TEXT = "Ask in guild",
     ASK_TEXT = "You're leading a party. List it on the Guild LFG Board?",
     GATE_TEXT = "Your party has players from outside the guild. List it on the Guild LFG Board?",
     SLOT_TEXT = "Someone left \226\128\148 fill the empty slot?",
-    -- %s: the zone the leader moved to.
-    ZONE_TEXT = "You're in %s now. Move your questing listing here?",
     -- Show Nearby: the names it lists (more are counted), each row's
     -- height, and the levels' column.
     NEARBY_ROWS = 25,
@@ -92,8 +91,6 @@ end
 --   onSnooze        function(): "don't ask for 30 minutes"
 --   onFillSlot      function(yes): the answer to "Someone left — fill the
 --                   empty slot?"
---   onMoveZone      function(yes): the answer to moving a questing listing
---                   to the zone its leader went to
 --   nearby          function() -> { zone, people = { { name, whisper,
 --                   level?, classToken? } } } of guildmates in the player's
 --                   zone, or nil; the menu's Show Nearby lists them
@@ -101,6 +98,15 @@ end
 --                   character can ask to join a dungeon listing as
 --   onAsk           function(listing, role?): Ask to join
 --   onWhisper       function(name): whispers someone
+--   onEditListing   function(): the drawer's Edit on the player's own
+--                   listing (the party's `own`)
+--   onEndListing    function(): its End listing
+--   onFindGuildmates function(): the drawer's Find guildmates, shown for
+--                   the party's `find` ({ reason? }: greyed out with the
+--                   reason when there is one)
+--   onAskInGuild    function(line): types `line` into guild chat, unsent;
+--                   the drawer's Ask in guild for the player's listed
+--                   party with open slots (the party's `guildLine`)
 --   onInvite        function(request): the leader invited an asker
 --   onDecline       function(request): the leader declined one
 --   classColor      function(classToken) -> "ffrrggbb", or nil
@@ -221,15 +227,12 @@ function Button:buildDrawer()
     drawer.question = ui:Text(drawer, LfgButton.ASK_TEXT, "regular", "body", "text")
     drawer.question:SetPoint("TOPLEFT", drawer.heading, "BOTTOMLEFT", 0, -Theme.SPACING.s)
     wrapAtWords(drawer.question, LfgButton.DRAWER_WIDTH - 2 * pad)
-    -- The same Yes and No answer "fill the empty slot?" and "move your
-    -- questing listing here?".
+    -- The same Yes and No answer "fill the empty slot?".
     self.listButton = ui:Button(drawer, "Choose what it's for", "primary", function()
         local kind = drawer.kind
         owner:CloseDrawer(true)
         if kind == addon.LfgDrawerModel.SLOT then
             owner.options.onFillSlot(true)
-        elseif kind == addon.LfgDrawerModel.ZONE then
-            owner.options.onMoveZone(true)
         else
             owner.options.onListParty()
         end
@@ -241,8 +244,6 @@ function Button:buildDrawer()
         owner:CloseDrawer(true)
         if kind == addon.LfgDrawerModel.SLOT then
             owner.options.onFillSlot(false)
-        elseif kind == addon.LfgDrawerModel.ZONE then
-            owner.options.onMoveZone(false)
         else
             owner.options.onNotLooking()
         end
@@ -282,6 +283,61 @@ function Button:buildDrawer()
     end
     drawer.raidTile = ui:RoleTile(drawer, "any", LfgButton.TILE_SIZE, LfgButton.TILE_SIZE)
     drawer.raidTile:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad)
+    -- Ask in guild, over the tiles, while the listed party has open slots:
+    -- types the line (with the note) into guild chat for the player to send.
+    self.askGuildButton = ui:Button(drawer, LfgButton.ASK_GUILD_TEXT, "secondary", function(button)
+        if button.line ~= nil and owner.options.onAskInGuild ~= nil then
+            owner:CloseDrawer()
+            owner.options.onAskInGuild(button.line)
+        end
+    end)
+    self.askGuildButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad + LfgButton.TILE_SIZE + Theme.SPACING.s)
+    self.askGuildButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+    self.askGuildButton:Hide()
+    -- Edit and End listing, side by side, on the player's own listing.
+    local half = (LfgButton.DRAWER_WIDTH - 2 * pad - Theme.SPACING.xs) / 2
+    self.editListingButton = ui:Button(drawer, "Edit", "secondary", function()
+        owner:CloseDrawer()
+        if owner.options.onEditListing ~= nil then
+            owner.options.onEditListing()
+        end
+    end)
+    self.editListingButton:SetWidth(half)
+    self.endListingButton = ui:Button(drawer, "End listing", "secondary", function()
+        owner:CloseDrawer()
+        if owner.options.onEndListing ~= nil then
+            owner.options.onEndListing()
+        end
+    end)
+    self.endListingButton:SetWidth(half)
+    self.endListingButton:SetPoint("LEFT", self.editListingButton, "RIGHT", Theme.SPACING.xs, 0)
+    self.editListingButton:Hide()
+    self.endListingButton:Hide()
+    -- Find guildmates, over Edit and End listing, as the board's party card
+    -- has it; greyed out with why, in the tooltip, when it can't be used.
+    self.findButton = ui:Button(drawer, "Find guildmates", "secondary", function()
+        owner:CloseDrawer()
+        if owner.options.onFindGuildmates ~= nil then
+            owner.options.onFindGuildmates()
+        end
+    end)
+    self.findButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+    local environment = self.environment
+    self.findButton:HookScript("OnEnter", function(button)
+        local tooltip = environment and environment.GameTooltip
+        if not button.active and button.reason ~= nil and type(tooltip) == "table" then
+            tooltip:SetOwner(button, "ANCHOR_RIGHT")
+            tooltip:SetText(button.reason, 1, 1, 1, 1, true)
+            tooltip:Show()
+        end
+    end)
+    self.findButton:HookScript("OnLeave", function()
+        local tooltip = environment and environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:Hide()
+        end
+    end)
+    self.findButton:Hide()
 
     -- Show Nearby (the button's menu): the guildmates in the player's zone,
     -- as the board's Nearby tab lists them, each name opening a menu to
@@ -479,17 +535,15 @@ function Button:refreshDrawer()
     local kind = top.kind
     drawer.kind = kind
     local slot = kind == addon.LfgDrawerModel.SLOT
-    local zone = kind == addon.LfgDrawerModel.ZONE
-    local gate = kind == addon.LfgDrawerModel.GATE or slot or zone
+    local gate = kind == addon.LfgDrawerModel.GATE or slot
     local asking = kind == addon.LfgDrawerModel.ASK or gate
-    local headings = { [addon.LfgDrawerModel.PARTY] = "Your party", [addon.LfgDrawerModel.ASK] = "List your party?",
-        [addon.LfgDrawerModel.GATE] = "List your party?", [addon.LfgDrawerModel.SLOT] = "Your party",
-        [addon.LfgDrawerModel.ZONE] = "Your party" }
+    local headings = { [addon.LfgDrawerModel.PARTY] = top.party ~= nil and top.party.solo and "Your listing"
+        or "Your party", [addon.LfgDrawerModel.ASK] = "List your party?",
+        [addon.LfgDrawerModel.GATE] = "List your party?", [addon.LfgDrawerModel.SLOT] = "Your party" }
     drawer.heading:SetText(Theme.Label(headings[kind] or "New for you"))
-    -- Asking whether to list a party with outsiders, to fill an empty slot,
-    -- or to move a questing listing is a plain yes or no.
-    drawer.question:SetText(zone and string.format(LfgButton.ZONE_TEXT, tostring(top.zone))
-        or slot and LfgButton.SLOT_TEXT or kind == addon.LfgDrawerModel.GATE and LfgButton.GATE_TEXT
+    -- Asking whether to list a party with outsiders, or to fill an empty
+    -- slot, is a plain yes or no.
+    drawer.question:SetText(slot and LfgButton.SLOT_TEXT or kind == addon.LfgDrawerModel.GATE and LfgButton.GATE_TEXT
         or LfgButton.ASK_TEXT)
     self.listButton:SetLabel(gate and "Yes" or "Choose what it's for")
     self.notLookingButton:SetLabel(gate and "No" or "Not looking")
@@ -518,6 +572,42 @@ function Button:refreshDrawer()
     setShown(drawer.party, party)
     setShown(drawer.partyDetails, party)
     setShown(drawer.note, party)
+    local guildLine = party and top.party ~= nil and top.party.guildLine or nil
+    self.askGuildButton.line = guildLine
+    local asksGuild = guildLine ~= nil and self.options.onAskInGuild ~= nil
+    setShown(self.askGuildButton, asksGuild)
+    -- Placed, and its words set, each time it shows: placed only once, at
+    -- build, it showed with no text in game.
+    local pad = Theme.SPACING.m
+    if asksGuild then
+        self.askGuildButton:ClearAllPoints()
+        self.askGuildButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad + LfgButton.TILE_SIZE + Theme.SPACING.s)
+        self.askGuildButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+        self.askGuildButton:SetLabel(LfgButton.ASK_GUILD_TEXT)
+    end
+    -- Edit and End listing go over Ask in guild, or over the tiles.
+    local own = party and top.party ~= nil and top.party.own == true
+    setShown(self.editListingButton, own)
+    setShown(self.endListingButton, own)
+    local above = pad + LfgButton.TILE_SIZE + Theme.SPACING.s
+    if asksGuild then
+        above = above + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.xs
+    end
+    self.editListingButton:ClearAllPoints()
+    self.editListingButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, above)
+    local find = party and top.party ~= nil and top.party.find or nil
+    local finds = find ~= nil and self.options.onFindGuildmates ~= nil
+    setShown(self.findButton, finds)
+    if finds then
+        self.findButton.reason = find.reason
+        self.findButton:SetActive(find.reason == nil)
+        if own then
+            above = above + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.xs
+        end
+        self.findButton:ClearAllPoints()
+        self.findButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, above)
+        self.findButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+    end
     local index
     for index = 1, 5 do
         drawer.roleTiles[index]:Hide()
@@ -572,11 +662,53 @@ function Button:refreshDrawer()
         self.askButton:SetPoint("RIGHT", drawer, "RIGHT", -Theme.SPACING.m, 0)
     elseif party then
         extra = extraHeight(drawer.party, 1) + extraHeight(drawer.partyDetails, 1) + extraHeight(drawer.note, 1)
-    elseif zone then
-        extra = extraHeight(drawer.question, 2)
     end
-    drawer:SetHeight((LfgButton.DRAWER_HEIGHTS[kind] or LfgButton.DRAWER_HEIGHTS.none) + extra)
+    if party and asksGuild then
+        extra = extra + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.s
+    end
+    if own then
+        extra = extra + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.xs
+    end
+    if finds then
+        extra = extra + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.xs
+    end
+    local height = (LfgButton.DRAWER_HEIGHTS[kind] or LfgButton.DRAWER_HEIGHTS.none) + extra
+    if party then
+        -- Where the game can measure it, the party's text decides: its
+        -- buttons and tiles sit just under its last line, with no gap.
+        local measured = self:partyHeight(asksGuild, own, finds)
+        height = measured or height
+    end
+    drawer:SetHeight(height)
     self:refreshToasts()
+end
+
+-- The party section's height from the game's measure of its text: the
+-- drawer's top to the last line shown (the note, else the details), then
+-- the buttons over the tiles. Nil where the client can't measure it.
+function Button:partyHeight(asksGuild, own, finds)
+    local drawer = self.drawer
+    local last = drawer.note
+    local note = type(last.GetText) == "function" and last:GetText() or nil
+    if type(note) ~= "string" or note == "" then
+        last = drawer.partyDetails
+    end
+    local top = type(drawer.GetTop) == "function" and drawer:GetTop() or nil
+    local bottom = type(last.GetBottom) == "function" and last:GetBottom() or nil
+    if type(top) ~= "number" or type(bottom) ~= "number" or top <= bottom then
+        return nil
+    end
+    local pad, button = Theme.SPACING.m, addon.Widgets.BUTTON_HEIGHT
+    -- From the drawer's bottom: the tiles, then each button shown.
+    local stack = pad + LfgButton.TILE_SIZE
+    if asksGuild or own or finds then
+        stack = stack + Theme.SPACING.s
+    end
+    local rows = (asksGuild and 1 or 0) + (own and 1 or 0) + (finds and 1 or 0)
+    if rows > 0 then
+        stack = stack + rows * button + (rows - 1) * Theme.SPACING.xs
+    end
+    return (top - bottom) + Theme.SPACING.m + stack
 end
 
 -- Show Nearby: the drawer lists the guildmates in the player's zone in
@@ -601,7 +733,8 @@ function Button:refreshNearby()
     drawer.kind = "nearby"
     local hidden = { drawer.icon, drawer.purpose, drawer.details, drawer.empty, drawer.question, drawer.slotDetails,
         drawer.party, drawer.partyDetails, drawer.note, drawer.raidTile, self.askButton, self.startButton,
-        self.listButton, self.notLookingButton, self.snoozeButton }
+        self.listButton, self.notLookingButton, self.snoozeButton, self.askGuildButton, self.editListingButton,
+        self.endListingButton, self.findButton }
     local index
     for index = 1, #hidden do
         hidden[index]:Hide()

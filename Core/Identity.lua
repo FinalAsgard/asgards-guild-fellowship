@@ -6,6 +6,7 @@ local VARIANTS = {
     AsgardsGuildFellowship = {
         commPrefix = "AGFSync",
         liveCommPrefix = "AGFLive",
+        lfgCommPrefix = "AGFLfg",
         displayName = "Asgard's Guild Fellowship",
         shortName = "Guild Fellowship",
         slashAlias = "/asgardsfellowship",
@@ -14,6 +15,7 @@ local VARIANTS = {
     AsgardsGuildFellowshipDev = {
         commPrefix = "AGFSyncDev",
         liveCommPrefix = "AGFLiveDev",
+        lfgCommPrefix = "AGFLfgDev",
         displayName = "Asgard's Guild Fellowship (Dev)",
         shortName = "Guild Fellowship (Dev)",
         slashAlias = "/asgardsfellowshipdev",
@@ -35,6 +37,9 @@ addon.Identity = {
     -- The prefix for messages others must hear within seconds, kept apart
     -- from sync's traffic (see Adapters/Comm.lua).
     liveCommPrefix = variant.liveCommPrefix,
+    -- The Guild LFG Board's own prefix, so listings never wait behind sync
+    -- or the live messages.
+    lfgCommPrefix = variant.lfgCommPrefix,
     databaseName = addonName .. "DB",
     displayName = variant.displayName,
     shortName = variant.shortName,

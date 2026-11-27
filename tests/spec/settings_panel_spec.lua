@@ -675,3 +675,54 @@ test.test("settings panel: resizing a page re-fits its scroll area's content and
     test.assertEqual(892, footer.width)
     test.assertEqual(892, panel.areas[1].content.width)
 end)
+
+-- A model with one choice setting backed by `saved.choice`.
+local function newChoicePanel(environment)
+    local addon = test.newAddon("Core/SettingsLayout.lua", "Core/SettingsModel.lua", "Adapters/Widgets.lua",
+        "Adapters/SettingsPanel.lua")
+    local saved = { choice = "everyone", refuse = false }
+    local model = addon.SettingsModel.Create()
+    model:AddSection("guildGreet", "Guild Greet")
+    model:Add("guildGreet", { id = "greetFor", kind = "choice", label = "Greet prompts for",
+        choices = { { id = "everyone", label = "Everyone" }, { id = "grouped", label = "Grouped with" },
+            { id = "friends", label = "My Friends" } },
+        get = function() return saved.choice end,
+        set = function(choice)
+            if saved.refuse then
+                return nil, "the saved setting is unreadable"
+            end
+            saved.choice = choice
+            return true
+        end })
+    environment.InterfaceOptions_AddCategory = function() end
+    local panel = addon.SettingsPanel.Create({ environment = environment }, model)
+    panel:Register()
+    return panel, saved, widgetFor(panel, "greetFor"), addon
+end
+
+test.test("settings panel: a choice shows its label, a check box per choice, and checks only the saved one", function()
+    local panel, saved, widget, addon = newChoicePanel(newEnvironment())
+
+    test.assertEqual("Greet prompts for", widget.label.text)
+    test.assertEqual(3, #widget.options)
+    test.assertEqual("My Friends", widget.options[3].text.text)
+    test.assertTrue(widget.options[1].checked)
+    test.assertFalse(widget.options[2].checked)
+
+    widget.options[3].scripts.OnClick(widget.options[3])
+    test.assertEqual("friends", saved.choice)
+    test.assertFalse(widget.options[1].checked)
+    test.assertTrue(widget.options[3].checked)
+
+    -- A refused change keeps the saved one checked.
+    saved.refuse = true
+    widget.options[2]:SetChecked(true)
+    widget.options[2].scripts.OnClick(widget.options[2])
+    test.assertEqual("friends", saved.choice)
+    test.assertFalse(widget.options[2].checked)
+    test.assertTrue(widget.options[3].checked)
+
+    -- It takes its label's row and a row of check boxes.
+    local layout = addon.SettingsLayout.Layout(panel.model:Sections())
+    test.assertEqual(2 * addon.SettingsLayout.ROW, layout.byId.greetFor.height)
+end)

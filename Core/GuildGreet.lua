@@ -53,6 +53,8 @@ local GuildGreet = {
     PROTOCOL = 1,
     TYPE_GREETED = "greeted",
     LEGACY_GREETED = true,
+    -- The greetings a starred friend's login or welcome back uses.
+    FRIENDS = "friends",
     -- Name parts shorter than this never count as naming someone, so a
     -- one-letter part of a two-part name doesn't match "a".
     MIN_NAME_LETTERS = 2,
@@ -120,9 +122,6 @@ function GuildGreet.Create(options)
         readyAt = nil,
         -- Bumped by each cooldown, so an older one's countdown stops.
         cooldownId = 0,
-        -- Hours since each offline member's last login, as the roster said
-        -- when the session's roster first loaded.
-        absences = {},
     }, Greet)
     greet.tally = addon.GreetTally.Create(function()
         return greet.policy:WelcomeBackSeconds()
@@ -138,9 +137,6 @@ function GuildGreet.Create(options)
         end,
         isOwn = function(key)
             return greet:IsOwn(key)
-        end,
-        absenceOf = function(key)
-            return greet:AbsenceOf(key)
         end,
         enabled = function()
             return greet:IsEnabled() and not greet:QuietHere()
@@ -305,7 +301,8 @@ function GuildGreet.NamesFor(partition, normalizer, key, rawName)
 end
 
 -- Whole hours since the roster's last-online time ({ years, months, days,
--- hours }), counting a month as 30 days and a year as 12 months.
+-- hours }), counting a month as 30 days and a year as 12 months. Guild
+-- mail's audience uses it.
 function GuildGreet.HoursAway(lastOnline)
     if type(lastOnline) ~= "table" then
         return nil
@@ -314,31 +311,9 @@ function GuildGreet.HoursAway(lastOnline)
     return (months * 30 + (lastOnline.days or 0)) * 24 + (lastOnline.hours or 0)
 end
 
--- Seconds between the player's latest login on any of their characters and
--- the start of the session, from the roster as it first loaded; nil when
--- none of their characters was in it.
-function Greet:AbsenceOf(key)
-    local keys = { key }
-    local service = self:service()
-    local playerId = service and service:PlayerOf(key)
-    if playerId ~= nil then
-        keys = service:CharactersOf(playerId)
-    end
-    local shortest
-    local index
-    for index = 1, #keys do
-        local hours = self.absences[keys[index]]
-        if hours ~= nil and (shortest == nil or hours < shortest) then
-            shortest = hours
-        end
-    end
-    return shortest and shortest * 3600 or nil
-end
-
 -- Called on every roster update. The first one with a loaded roster tells
--- the policy who was already online, and records how long everyone else has
--- been away. `readRoster()` returns the members ({ name, online, lastOnline
--- }), or nil while the roster is still loading.
+-- the policy who was already online. `readRoster()` returns the members
+-- ({ name, online }), or nil while the roster is still loading.
 function Greet:OnRosterUpdate(readRoster)
     if self.policy:IsReady() then
         return
@@ -355,8 +330,6 @@ function Greet:OnRosterUpdate(readRoster)
         local key = normalizer:Key(member.name)
         if key ~= nil and member.online then
             table.insert(online, key)
-        elseif key ~= nil then
-            self.absences[key] = GuildGreet.HoursAway(member.lastOnline)
         end
     end
     self.policy:Seed(online)
@@ -563,17 +536,33 @@ function Greet:groupedTier(key)
     return ok and tier or nil
 end
 
--- Whether the user only greets players they've grouped with: off without
--- saved data.
-function Greet:OnlyGrouped()
+-- Who the user greets (FellowshipStore.GREET_FOR): everyone without saved
+-- data.
+function Greet:GreetFor()
     local store = self.store()
-    return store ~= nil and store:GreetOnlyGrouped()
+    return store ~= nil and store:GreetFor() or addon.FellowshipStore.GREET_FOR.everyone
 end
 
--- True when the user only greets players they've grouped with and never
--- grouped with the player character `key` belongs to.
+-- Whether the user only greets players they've grouped with (or only their
+-- Friends): a prompt then needs the player to pass (Passes).
+function Greet:OnlyGrouped()
+    return self:GreetFor() ~= addon.FellowshipStore.GREET_FOR.everyone
+end
+
+-- True when the user's choice of who to greet leaves out the player
+-- character `key` belongs to: Grouped with needs any group friend tier
+-- (Friend included), My Friends a Friend or Top 5. Highlighting on or off
+-- doesn't matter.
 function Greet:NeverGrouped(key)
-    return self:OnlyGrouped() and self:groupedTier(key) == nil
+    local choice = self:GreetFor()
+    if choice == addon.FellowshipStore.GREET_FOR.everyone then
+        return false
+    end
+    local tier = self:groupedTier(key)
+    if choice == addon.FellowshipStore.GREET_FOR.friends then
+        return not addon.GroupFriends.IsStarred(tier)
+    end
+    return tier == nil
 end
 
 -- Closes the prompts whose player has had their current cap of greetings,
@@ -592,8 +581,8 @@ function Greet:dropCapped(now)
     return removed
 end
 
--- Closes the prompts, shown or waiting to show, for players the user never
--- grouped with while they only greet those they have. Returns true when any
+-- Closes the prompts, shown or waiting to show, for players the user's
+-- choice of who to greet leaves out (NeverGrouped). Returns true when any
 -- closed.
 function Greet:dropUngrouped(now)
     if not self:OnlyGrouped() then
@@ -837,11 +826,36 @@ function Greet:startCooldown(now)
     end
 end
 
--- Posts a random greeting from `prompt`'s category, using the names as they
--- are now, counts it, and tells older versions (see LEGACY_GREETED).
--- Returns the text sent, or nil.
+-- Which greetings a prompt picks from (a GreetingLibrary category): the
+-- Friends greetings for a login or welcome back of a starred friend
+-- (GroupFriends.IsStarred) while Friends is on and has any, else the
+-- prompt's own category. A join always uses Join. Only the words change:
+-- the prompt itself (title, cap, switch) is the occasion's.
+-- `starred`, `friendsOn` and `friendsCount` are what's known now.
+function GuildGreet.GreetingsCategory(category, starred, friendsOn, friendsCount)
+    if (category == addon.GreetPolicy.LOGIN or category == addon.GreetPolicy.WELCOME_BACK)
+        and starred and friendsOn and (friendsCount or 0) > 0
+    then
+        return GuildGreet.FRIENDS
+    end
+    return category
+end
+
+-- The category `prompt`'s greeting comes from (GreetingsCategory).
+function Greet:greetingsCategory(prompt, library)
+    local store = self.store()
+    local friendsOn = store == nil or store:GreetCategoryEnabled(GuildGreet.FRIENDS)
+    local starred = addon.GroupFriends.IsStarred(self:groupedTier(prompt.key))
+    return GuildGreet.GreetingsCategory(prompt.category, starred, friendsOn,
+        #library:Greetings(GuildGreet.FRIENDS))
+end
+
+-- Posts a random greeting for `prompt` (from greetingsCategory), using the
+-- names as they are now, counts it, and tells older versions (see
+-- LEGACY_GREETED). Returns the text sent, or nil.
 function Greet:post(prompt, now)
-    local greeting = self:Library():Pick(prompt.category)
+    local library = self:Library()
+    local greeting = library:Pick(self:greetingsCategory(prompt, library))
     local text
     if greeting ~= nil then
         text = addon.GreetingLibrary.Render(greeting, self:Names(prompt.key, prompt.rawName))

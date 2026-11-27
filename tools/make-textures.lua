@@ -103,8 +103,8 @@ end)
 -- The window's diagonal sweep: dark green at the top-left corner, fading to
 -- nothing by three quarters of the way across, laid over the window's gray.
 -- The window is one fixed size, so the texture is drawn in window pixels
--- (960x600) and its rounded corners stay round once stretched over it.
-local WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_RADIUS = 960, 600, 12
+-- (1100x680) and its rounded corners stay round once stretched over it.
+local WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_RADIUS = 1100, 680, 12
 local SWEEP_SIZE = 512
 write("Sweep.tga", SWEEP_SIZE, SWEEP_SIZE, function(x, y)
     local wx, wy = x / SWEEP_SIZE * WINDOW_WIDTH, y / SWEEP_SIZE * WINDOW_HEIGHT
@@ -270,4 +270,15 @@ write("Sword.tga", 32, 32, function(x, y)
     local grip = nearSegment(x, y, 12, 20, 7, 25, 1.8)
     local px, py = x - 6, y - 26
     return 1, 1, 1, inside(blade or guard or grip or px * px + py * py <= 2.8 * 2.8)
+end)
+
+-- A white bin, for deleting: a lid with a handle over a tapered can with
+-- two slits.
+write("Trash.tga", 32, 32, function(x, y)
+    local lid = x >= 6 and x <= 26 and y >= 7 and y <= 9.5
+    local handle = x >= 13 and x <= 19 and y >= 4 and y <= 7
+    local inset = (y - 11) / 17 * 2
+    local can = y >= 11 and y <= 28 and x >= 8 + inset and x <= 24 - inset
+    local slit = y >= 14 and y <= 25 and (math.abs(x - 13.5) <= 0.9 or math.abs(x - 18.5) <= 0.9)
+    return 1, 1, 1, inside(lid or handle or (can and not slit))
 end)

@@ -7,7 +7,7 @@ local _, addon = ...
 -- a shorter button leaves the name more room. A group friend's name is
 -- marked by their tier (GroupFriends): blue when grouped with, the raid
 -- target star before it too when Frequent, and the star with the name in
--- purple for the Top 5.
+-- purple for the Top 5 and pinned Friends.
 -- The anchor defaults to the left side of the screen (the right side holds
 -- the quest log). Unlocking it shows a handle above the stack that drags it
 -- anywhere; the new place is saved when the drag ends. While Slow mode is on
@@ -31,6 +31,7 @@ local GreetPrompts = {
         grouped = { color = "4da6ff" },
         frequent = { color = "4da6ff", star = true },
         top5 = { color = "a335ee", star = true },
+        friend = { color = "a335ee", star = true },
     },
     -- The greeting button's width when the client can't measure its labels.
     BUTTON_WIDTH = 170,
@@ -48,7 +49,6 @@ local GreetPrompts = {
         join = "Welcome to the Guild",
         login = "Greet",
         welcomeBack = "Welcome Back",
-        longAbsence = "Long Time No See!",
     },
     DEFAULT_LABEL = "Greet",
     -- The widest countdown a locked button adds to its label: a held

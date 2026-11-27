@@ -15,7 +15,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf` or `/agf roster` | Opens the add-on's window on the **Roster** tab, or closes it. |
 | `/agf rescan` | Scans the guild's notes right away. |
 | `/agf recruit` | Opens the window on the **Recruitment** tab. |
-| `/agf greet` | Opens the window on the **Greetings** tab, where you edit your Guild Greet greetings. |
+| `/agf greet` | Opens the add-on's new window on **Greetings**, where you edit your Guild Greet greetings and settings (see [Editing greetings](#editing-greetings)). |
 | `/agf options` | Opens the window on the **Settings** tab. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
@@ -35,6 +35,7 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** and **Promote to match** flags reach the game's guild roster (officers only). |
 | `/agf probe timer` | Shows the clock icon the roster uses for characters whose time requirements are met, whether this client loaded it (if not, the roster shows **[T]** instead), and how many characters show it (officers only). |
 | `/agf probe greet` | Shows your greet weight, how many guildmates with the add-on count as online, and how much longer your greet prompts wait because of it. |
+| `/agf probe lfg` | Shows the Guild LFG Board as your add-on sees it: your zone's levels and where they came from, how many questing zones the game's map tree gave, your listing and whether guildmates' add-ons can read it as sent, the listings on your board by tab, and since login how many board messages went out, how many came in and from whom, and how many were ignored and why (anyone). |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
@@ -45,12 +46,13 @@ Everything the add-on does is in one window, with picture tabs down its right ed
 - **My Profile**: your own player, its characters and their role preferences, and Do Not Disturb (see [My Profile](#my-profile)).
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
-- **Greetings**: Guild Greet's settings, with the greetings editor below them (see [Editing greetings](#editing-greetings)).
 - **Promotion Requirements** (officers only): each rank's promotion requirements (see [Promotions](#promotions)). Characters' checklists are in the player panel, and ready members are flagged on the game's guild roster.
 - **Guild Log** (officers only): the guild's long-term record of joins, invites, leaves, kicks, promotions and demotions (see [Guild Log](#guild-log)).
 - **Settings**: everything else (General, Chat Tags, Guild Map, and Do Not Disturb), and the version you're running.
 
-The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf profile`, `/agf recruit`, `/agf greet` and `/agf options` open their own tabs. Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
+The [Friends](#friends), [Guild LFG Board](#guild-lfg-board) and [Greetings](#editing-greetings) pages live in the add-on's new window, which the rest of these tabs will move to later.
+
+The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf profile`, `/agf recruit` and `/agf options` open their own tabs; `/agf greet` opens the new window on [Greetings](#editing-greetings). Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
 
 ## Settings
 
@@ -60,7 +62,7 @@ The settings are in two places that always agree: the window's tabs, and **Esc �
 - **Chat Tags**: turn chat tags on or off, and choose the colors of the alias tag and the main's-name tag (see [Chat tags](#chat-tags)).
 - **Do Not Disturb**: the same switch as on My Profile and `/agf dnd` (see [Do Not Disturb](#do-not-disturb)).
 - **Guild Map**: **Share my location with the guild** and **Show guildmates on the map and minimap**, both on unless you turn them off (see [Guild map](#guild-map)).
-- **Guild Greet**: first, **Show greet prompts** turns Guild Greet on or off on every character; under **Prompts**, turn it off on just the character you're playing, choose whether to greet during dungeons and raids, turn **Highlight group friends** and **Only greet players I've grouped with** on or off (see [Group friends](#group-friends)), and press **Move greeting pop-ups** to move the prompts; under **Which arrivals to prompt for**, turn each category's prompts on or off; under **Timing**, set the welcome-back minutes; under **Close my prompt after**, set how many greetings close your prompt for a login, welcome back or long absence, and how many welcomes close it for someone who just joined. Last comes a tinted **Officer settings (officer only)** area with the guild's **Slow mode** slider, from 0 (off, the default) to 15 minutes between each greeter's greetings. It applies to everyone in the guild: officers change it, and the newest officer change reaches every add-on user. Everyone else sees the guild's value greyed out, with a line saying only officers can change it. On the window's Greetings tab the greetings editor follows, under its own **Greetings** heading. In the AddOns options it also has an **Edit Greetings** button that opens the window's Greetings tab.
+- **Guild Greet**: first, **Show greet prompts** turns Guild Greet on or off on every character; under **Prompts**, turn it off on just the character you're playing, choose whether to greet during dungeons and raids, turn **Highlight group friends** on or off, choose **Greet prompts for: Everyone / Grouped with / My Friends** (see [Group friends](#group-friends)), and press **Move greeting pop-ups** to move the prompts; under **Which arrivals to prompt for**, turn each category's prompts on or off, and **Use friend greetings for starred friends**; under **Timing**, set the welcome-back minutes; under **Close my prompt after**, set how many greetings close your prompt for a login or welcome back, and how many welcomes close it for someone who just joined. Last comes a tinted **Officer settings (officer only)** area with the guild's **Slow mode** slider, from 0 (off, the default) to 15 minutes between each greeter's greetings. It applies to everyone in the guild: officers change it, and the newest officer change reaches every add-on user. Everyone else sees the guild's value greyed out, with a line saying only officers can change it. In the AddOns options it also has an **Edit Greetings** button that opens the new window on Greetings, where the same settings are (see [Editing greetings](#editing-greetings)).
 - **Recruitment**: how many guild ads you've posted (all your characters together, and in the last 30 days), then turn [Guild Recruit](#guild-recruit) prompts on or off on the character you're playing, write your own ad, choose whether you also post the officers' guild ad (hover the info icon beside it to read the guild ad), and set your own timers (sliders) for how long General and Trade go without a guild ad before you're asked. On a character that can't invite to the guild these are greyed out, with a line saying why. Officers also get the guild ad, the guild's floor under everyone's timers for General and for Trade, and a pause for the whole guild, under their own **Officer settings** heading because they apply to everyone in the guild. Regular members don't see the officer settings.
 
 A change made in the window, the AddOns options or a slash command shows up in the other places at once. Settings are saved for every character on this game install. The development build's options are labeled "(Dev)".
@@ -235,7 +237,7 @@ Any add-on user can pass officers' edits on, so the add-on checks what it receiv
 
 ## Chat tags
 
-In guild chat, officer chat, and guild achievement announcements, a tag after the speaker's name shows who the player is:
+In guild chat, officer chat, party chat, and guild achievement announcements, a tag after the speaker's name shows who the player is (in party chat, only for guildmates: anyone from outside the guild gets no tag):
 
 - If the player has an alias, the tag shows it: Hammer (an alt of Toolbox, alias TheTool) saying hi reads `[Hammer] [TheTool]: hi`.
 - If they have no alias and are on an alt, the tag shows their main's name: `[Wrench] [Toolbox]: hi`. If the main has left the guild, it's the acting main.
@@ -248,18 +250,29 @@ Tags are on by default. `/agf tags` or the **Chat Tags** settings turn them off,
 
 On Retail, the game hides chat from add-ons during encounters and keystone runs. Those lines appear without tags, and tags return once the restriction lifts.
 
+## Friends
+
+The **Friends** page of the add-on's new window is the people you play with. Pin up to 5 guildmates as your **Friends**: they get the star in greet prompts, on the LFG page and in **Find guildmates**, and can have [friend greetings](#editing-greetings) of their own. Friends are kept on this game install, per guild, and aren't shared with anyone.
+
+- **Your Friends** are on the left as small player cards, then **+ Add a friend** for each open slot. Hover a Friend for an **X** that removes them, or right-click one for **Replace...** and **Remove friend**.
+- **+ Add a friend** (or **Replace...**) opens **Choose a friend**: search by alias or any character's name, and pick from the list. When the search matched only an alt, the row says which (**Alt: ...**). **Cancel** goes back.
+- **Most grouped with**, under your Friends, lists the guildmates you've grouped with most who aren't Friends, with their party count. Right-click one for **Add as friend** (greyed out while all 5 slots are taken).
+- Click a player to see them on the right: their name with a gold **Friend** or **Most grouped** badge, their main's level, class and rank, where they are and when they were last online, the star (click it to pin or unpin them), **Whisper** and **Invite**, and tiles for their Discord, how often and when you last grouped, and when they joined the guild. Under them, the **Characters**, **Bio**, **Grouped** (your parties together, with **Show more**) and **Log** tabs.
+
+The page is built when you open it, and doesn't change while it's open. **Open in Guild Fellowship**, in the game's right-click menu on a guildmate's name, opens the window on that player.
+
 ## Guild Greet
 
-When someone joins the guild or a guild member comes online, a small prompt appears (at the left side of the screen unless you move it) with just the name they go by and a button named for the kind of greeting: **Welcome to the Guild** for someone who just joined, **Greet** for a login, **Welcome Back**, or **Long Time No See!** for a long absence. Each button is sized to fit its label. Press it to post a random greeting of that kind to guild chat. Nothing is ever posted unless you press the button.
+When someone joins the guild or a guild member comes online, a small prompt appears (at the left side of the screen unless you move it) with just the name they go by and a button named for the kind of greeting: **Welcome to the Guild** for someone who just joined, **Greet** for a login, or **Welcome Back**. Each button is sized to fit its label. Press it to post a random greeting of that kind to guild chat. Nothing is ever posted unless you press the button.
 
 - **Join**: someone joins the guild. They get this instead of a login prompt.
-- **Long absence**: someone's first login this session when none of their characters had logged in for 30 days or more, going by the guild roster's last-online times when you logged in.
-- **Login**: the first time you see someone come online this session.
+- **Login**: the first time you see someone come online this session, however long they were away.
 - **Welcome back**: someone you saw log off comes back 60 minutes or more later (you can change the minutes). Coming back sooner (a relog or a disconnect) gets no prompt.
+- **Friends**: not a prompt of its own, but the words for your starred friends. When one of your [Friends](#group-friends) or Top 5 logs in or comes back, the Greet or Welcome Back prompt is the usual one, and its greeting comes from your **Friends** greetings. With Friends switched off or empty, they get your Login or Welcome back greetings, so nobody goes unprompted. Someone joining the guild always gets a Join greeting.
 - People who were already online when you logged in, your own characters, and friends outside the guild never get a prompt.
 - Greet works per player, so switching from a main to an alt is the same person, not a new arrival.
 - A prompt shows 5 to 10 seconds (at random) after someone arrives, so your greeting doesn't reach them while their game is still loading. It disappears 90 seconds after it shows, or as soon as that person goes offline, leaves the guild or is removed from it (even before it shows); the **X** closes one without greeting.
-- To move the prompts, press **Move greeting pop-ups** in the Guild Greet settings and drag the gold bar that appears. The button then reads **Done moving**; press it to lock the prompts where they are. The place is saved for every character. The bar stays while the add-on's window is open, on any tab. Closing the window or the AddOns options also locks them, as does a reload.
+- To move the prompts, press **Move greeting pop-ups** (in the Greetings gear menu, or the Guild Greet settings) and drag the gold bar that appears. The button then reads **Done moving**; press it to lock the prompts where they are. The place is saved for every character. The bar stays while the add-on's window is open, on any tab. Closing the window or the AddOns options also locks them, as does a reload.
 - In combat or a boss encounter, prompts wait. When it's over, any that are still under 90 seconds old appear.
 - On Retail, the game hides some system messages from add-ons during encounters and keystone runs. Logins it hides get no prompt; nothing breaks.
 
@@ -281,7 +294,7 @@ The add-on counts greetings by reading guild chat. While your prompt for someone
 
 Once a player has had enough greetings, your prompt for them quietly closes, and you aren't prompted for them again until the welcome-back time (60 minutes unless you changed it) has passed since the last greeting. Each person's greeting counts once, whichever of their characters sent it, and the person's own lines never count. If two people press Greet at the same moment, an extra greeting can slip through. Pressing a greeting button also sends a short add-on message, for guildmates on v0.9.4 or earlier, whose add-on counts greetings only that way; it's heard from them too. It's counted once with the same person's line in guild chat, and goes away in a later release once everyone has updated. Typing a greeting by hand sends nothing extra.
 
-How many is enough is set under **Close my prompt after** in the Guild Greet settings, each from 1 to 10: **Greetings** (2 by default) for a login, welcome back or long absence, and **Guild join welcomes** (3 by default) for someone who just joined the guild.
+How many is enough is set on the Greetings page's **Settings** tab (or under **Close my prompt after** in the Guild Greet settings), each from 1 to 10: greetings (2 by default) for a login or welcome back, and welcomes (3 by default) for someone who just joined the guild.
 
 After each greeting, Greet is locked for a moment so nobody floods guild chat: 2 seconds after your first greeting in a row, 4 after the second, 6 after the third, and so on. While it's locked, the greeting buttons are greyed out and count down, as **Welcome Back (3)**. Press again once they unlock; the game only lets an add-on post to chat when you press a button, so nothing is sent for you later. A prompt whose player gets enough greetings from others in the meantime closes as usual. Once a lock runs out with no prompts showing, the next one starts at 2 seconds again.
 
@@ -299,20 +312,32 @@ Guild Greet uses your [group history](#group-history) to point out the guildmate
 
 Frequent and Top 5 friends get two perks:
 
-- Their prompts stay open until they've had twice your cap: twice **Greetings** for a login, welcome back or long absence, and twice **Guild join welcomes** for a join.
+- Their prompts stay open until they've had twice your cap: twice the greetings for a login or welcome back, and twice the welcomes for a join.
 - In Slow mode they're held instead of dropped. When you greet someone else, their prompts stay open with the greeting button locked and counting down the rest of your cooldown, as **Greet (4:32)** (whole seconds under a minute). If they come online during your cooldown, they get a prompt, locked the same way. Once the cooldown ends, greet them as usual, which starts a new cooldown. A held prompt stays until the cooldown ends and for the usual 90 seconds after. It still closes when they go offline, leave the guild or have had twice your cap.
 
 The tiers follow your history as it grows: someone you group with for the first time is marked from then on, without a reload. **Highlight group friends** (on by default) turns the marks and the perks on or off together.
 
-**Only greet players I've grouped with** (off by default) limits your prompts, of every kind, join welcomes included, to players you've grouped with at least once. Turning it on closes any prompts waiting for everyone else. It works whether or not **Highlight group friends** is on, and doesn't change the caps, marks or Slow mode for the players you're still prompted for.
+**Greet prompts for** (in the Greetings gear menu and the Guild Greet settings) chooses who you're prompted for, of every kind, join welcomes included: **Everyone** (the default), **Grouped with** (players you've grouped with at least once, and your Friends), or **My Friends** (only your 5 Friends and your Top 5). Changing it closes any prompts waiting for players who no longer fit. It works whether or not **Highlight group friends** is on, and doesn't change the caps, marks or Slow mode for the players you're still prompted for.
 
 Greeting messages, recruitment ad times, and the officer channel probe travel apart from guild sync's traffic, so a busy sync (a big guild logging in at once) doesn't hold them up.
 
 ### Editing greetings
 
-Greetings are edited on the window's **Greetings** tab (`/agf greet`, or **Edit Greetings** in the AddOns options), below Guild Greet's settings. The editor has a button for each category. Each lists that category's greetings, with **Edit** beside each one. Type in the box below the list and press **Add** (or Enter) to add a greeting. **Edit** puts a greeting in the box, with **Save**, **Delete** and **Cancel** beside it. A greeting must fit in one guild chat message (255 characters), and blank ones aren't saved. The editor lists every placeholder.
+Greetings are edited on the **Greetings** page of the add-on's new window: `/agf greet`, **Edit Greetings** in the AddOns options, or **Greetings** in the window's sidebar. Beside the gear at the top right, **Greet prompts on** / **off** is the same switch as **Show greet prompts**; while it's off the page is dimmed but still works. The page has two tabs, **Greetings** and **Settings**.
 
-A category with no greetings shows no prompts, so emptying one is a way to turn it off. **Restore starter greetings** puts back the starters in the open category, and **Restore all categories** does it everywhere. Both replace what's there, so each asks for a second click.
+**Greetings tab.** Pick a category at the top: **Join · Login · Welcome back · Friends**. A grey dot marks a category that's switched off or has no greetings. Under it, a line says when that category is used, beside its own switch (**Prompt me**, or **Use for friends** for Friends, which only changes the words, never whether you're prompted). A switched-off category keeps its greetings, dimmed under a short note. Then come its greetings, two lines each at most, with the whole greeting on mouseover:
+
+- Hover a greeting for **Edit** and 🗑. **Edit** turns it into a box in place, and **+ Add a greeting** opens an empty one at the bottom. The box grows to four lines as you type. **Save** (or **Add**, for a new one) is greyed out until there's something new to save; Enter saves and Escape cancels. A greeting must fit in one guild chat message (255 characters). If it can't be saved, the reason shows under the box for a few seconds.
+- Under the box, **Insert** buttons put `{name}`, `{main}` or `{character}` where your cursor is (hover one to see what it fills in), and **More ▼** has the rest. **Preview:** shows the greeting filled in with your own names.
+- Only one greeting is open at a time. Switching category or tab, editing another greeting, or leaving the page drops what you typed.
+- 🗑 turns into a red **Delete?**; click it again within 5 seconds to delete, or leave it and it goes back. On the last Join, Login or Welcome back greeting it reads **Delete? (last one)**, since an empty category shows no prompts. An empty category says so, with **+ Add a greeting** right there; an empty Friends category says friends get your Login and Welcome back greetings until you add one.
+- When prompts are off on the character you're playing, a banner says "Greet prompts are off on <character>. Your other characters still get them.", with **Turn on**.
+
+**Settings tab.** The numbers, written as sentences with − and + in them: hold − or + to keep going, or click the number and type one. "Count a login as a welcome back after [60] minutes away" moves in 5s, from 1 to 120. The **Close my prompt** card has "Once they've had [2] greetings" and "Once a new member has had [3] welcomes", each from 1 to 10. Officers then get a tinted **Officer · applies to the whole guild** card with the guild's **Slow mode** slider; everyone else gets one line saying what the guild's Slow mode is.
+
+**Gear menu.** The gear opens the **Greetings** menu: **Greet from this character** and **Greet in dungeons and raids** (hover their info icons for what they do), **Highlight group friends**, **Greet prompts for: Everyone / Grouped with / My Friends**, and **Move greeting pop-ups**, which reads **Done moving** while you place them and locks them when the window closes.
+
+Everything on the page is the same setting as in the AddOns options and the slash commands, so they always agree. Long absence greetings from older versions are deleted when you update, since that category is gone: a first login after a long time away is a Login.
 
 ## Guild Recruit
 
@@ -537,7 +562,7 @@ Due welcomes collect in a **Welcome mails** row in the Guild Mail tab, and the t
 
 ## Guild LFG Board
 
-The **Guild LFG Board** (**LFG** where space is short) shows the parties your guildmates are forming, and lists yours. Listings come from parties, not forms: lead a party and you're asked what it's for, and a full party with guildmates in it is listed quietly with a best guess. Nobody ever gets a prompt they didn't ask for: you **Ask to join** a listing, and the leader decides.
+The **Guild LFG Board** (**LFG** where space is short) shows the parties your guildmates are forming, and lists yours. Listings come from parties, not forms, and a party is never listed without your yes: list it yourself, or turn on **Auto-list my parties**. Nobody ever gets a prompt they didn't ask for: you **Ask to join** a listing, and the leader decides.
 
 Only guildmates with the add-on see the board. To reach the others, use [Ask in guild](#ask-in-guild).
 
@@ -556,20 +581,20 @@ Click the button to slide a small drawer out to its left; click again, or its **
 
 - **Not in a party:** the newest group you could join, with **Ask to join**, and **Start a group** under it (or "No groups for you right now").
 - **In a party:** your party's purpose, size, the roles it needs, and its note, with its slots as on your listing's card: a dungeon's Tank, Healer and DPS tiles with their icons (open ones in color, filled ones grey), a person tile per player otherwise.
-- **While you're being asked something** (what your party is for, whether to list a party with players outside the guild, whether to fill an empty slot, or, when you lead a questing party into another zone, whether to move the listing there), the question and its answers. Saying No to a zone means you're not asked about that zone again.
+- **While you're being asked something** (what your party is for, whether to list a party with players outside the guild, or whether to fill an empty slot), the question and its answers. A questing listing stays in its zone when you move; **Edit** it to change the zone.
 
 Long names wrap onto more lines at the spaces between words, and the drawer grows to fit.
 
 ### The window
 
-`/agf lfg` and **Open Guild LFG Board** open the add-on's new window on the board. It has one size and can be dragged. The sidebar has the add-on's name, an **LFG** button, and **Settings** at the bottom, with your character and the add-on's version under it. The **gear** at the top right opens the LFG settings (**Show LFG button**, and the chat line for new groups); the **X** closes the window. The Settings page has a **Chat** tab with the chat tags switch, the same setting as `/agf tags`, and the **Alias tag color** and **Main's name tag color**: click a swatch, or **Custom...** for any color from the game's color picker, and the sample shows the tag in that color. They're the same colors as in the old window's options.
+`/agf lfg` and **Open Guild LFG Board** open the add-on's new window on the board. It has one size and can be dragged. The sidebar has the add-on's name, then **Friends** (see [Friends](#friends)), **LFG** and **Greetings** (see [Editing greetings](#editing-greetings)), and **Settings** at the bottom, with your character and the add-on's version under it. The **gear** at the top right opens the LFG settings (**Show LFG button**, and the chat line for new groups); the **X** closes the window. The Settings page has a **Chat** tab with the chat tags switch, the same setting as `/agf tags`, and the **Alias tag color** and **Main's name tag color**: click a swatch, or **Custom...** for any color from the game's color picker, and the sample shows the tag in that color. They're the same colors as in the old window's options.
 
 ### The board
 
 At the top is **your party's card**:
 
 - **Solo:** **Start a group**, which lists you as a group of one. Your listing becomes your party's when someone joins, and ends after 30 minutes with nobody joining (a chat line tells you).
-- **Leading** (or the guild contact of a party whose leader isn't in the guild): your listing as others see it, with **Edit**, **Ask in guild** and **Not looking**. **Edit** opens it in the card: **What's it for?** — **Dungeon** (search the list; dungeons that fit your level come first, and typing finds any dungeon), **Questing** in your current zone, **Raid**, or **Other** (your own words) — and a **Note** of up to 60 characters. **Roles in your party** shows each member's role icon by their name. Set roles in the game's party menu; the listing follows them.
+- **Leading** (or the guild contact of a party whose leader isn't in the guild): your listing as others see it, with **Edit**, **Ask in guild**, **Find guildmates** and **Not looking**. **Find guildmates** (while your party is listed and has room; greyed out otherwise, and on an unlisted party with "List your party to find guildmates") opens a list in place of the board: guildmates online now whose level is in your listing's range and, for a dungeon, who play a role still open, each with **Invite** and **Whisper**. Then offline characters that fit, whose player is online on another character, shown as "Bobalt (22 Priest) · alt of Bob, online as Bobmain": their **Whisper** goes to the online character with a request to log over typed in, for you to send or not. You, your other characters and everyone in your party are left out; guildmates already in a listed group are marked "In a group" and listed last. Online guildmates come before alts, and within each your starred friends (a Friend or a Top 5) come first, marked with the star. The drawer's party section has the same **Find guildmates** button, which opens the board on the list. The list is built when it opens; **Back** returns to the board. **Edit** opens it in the card: **What's it for?** — **Dungeon** (search the list; dungeons that fit your level come first, and typing finds any dungeon), **Questing** (pick a zone from the list, your current zone chosen to start; zones that fit your level come first, the rest under Other levels, and the listing takes the zone's level range, or your party's levels 5 either way when the game has none), **Raid**, or **Other** (your own words) — and a **Note** of up to 60 characters. **Roles in your party** shows each member's role icon by their name; click a name to set their role from the ones their class plays. The leader (or contact) sets anyone's; in someone else's party, **My role** on the party's listing sets your own, and the listing shows it once the leader's add-on hears it. A role set here wins over the game's party menu, and is forgotten when that member leaves. Without one, a member's role is the game's party menu role, then their own role preference, then the first their class plays.
 - **In someone else's party:** the listing, read-only.
 
 Below it are four tabs:
@@ -585,14 +610,16 @@ A dungeon is relevant when your level fits and a role you play (by your [role pr
 
 ### Listing your party
 
-- **Becoming a party's leader** (inviting someone, or being promoted in an unlisted party) asks what the party is for. Answering lists it; ignoring the question means **Not looking**, which keeps it off the board. There's also a "don't ask for 30 minutes" choice for quick trading parties. Taking over a listed party's lead keeps its listing.
-- **A party with players outside the guild** asks first whether to list it at all. If the leader isn't in the guild, the first guildmate to answer becomes the listing's contact.
-- **A full party with another guildmate in it** is listed quietly with a guessed purpose, updated when you enter a dungeon (a purpose you set yourself is left alone).
+- **Auto-list my parties** (in the LFG gear menu and the AddOns options) is **off by default**. Off, a party you form or come to lead isn't listed and you aren't asked anything: list it from the board's **Start a group** when you want to. A party filling up never lists it either.
+- **With Auto-list on**, becoming a party's leader (inviting someone, or being promoted in an unlisted party) lists it straight away for what it looks like it's for: the dungeon you're in, else questing in your zone, updated when you enter a dungeon (a purpose you set yourself is left alone). When the add-on can't tell, the drawer asks what it's for; ignoring the question means **Not looking**, which keeps it off the board, and there's a "don't ask for 30 minutes" choice for quick trading parties. **Not looking** or **End listing** keeps that party off the board for good.
+- **A party with players outside the guild** (with Auto-list on) asks first whether to list it at all. If the leader isn't in the guild, the first guildmate to answer becomes the listing's contact.
+- With your LFG button hidden, nothing is listed; with Auto-list on, a chat line says your party wasn't listed and how to list it.
+- Taking over a listed party's lead keeps its listing, Auto-list or not.
 - A listing goes as soon as its party disbands or its leader chooses **Not looking**, and after 5 minutes without word from its party's add-ons. If its leader or contact logs off, it's handed to another guildmate in the party.
 
 ### Someone leaves
 
-When someone leaves your full party, your button glows orange and the drawer asks **Someone left — fill the empty slot?** with the open role. **Yes** posts the slot; **No** keeps the party listed as it was. Saying nothing posts it after 60 seconds, unless someone else leaves or the party disbands first. With the button hidden, the leader gets a chat line pointing to `/agf lfg` instead, and nothing is posted.
+When someone leaves your full party, your button glows orange and the drawer asks **Someone left — fill the empty slot?** with the open role. **Yes** posts the slot; **No** keeps the party listed as it was. Nothing is posted without an answer: the question waits, glowing orange, until someone answers, the party fills again, someone else leaves, or it disbands. With the button hidden, the leader gets a chat line pointing to `/agf lfg` instead, and nothing is posted.
 
 ### Ask to join
 
@@ -763,7 +790,7 @@ The production add-on lives in `AsgardsGuildFellowship` (managed by CurseForge) 
 The development build also has testing commands the production build leaves out:
 
 - `/agfdev greettest` shows a greet prompt right away in each look: never grouped with, Grouped, Frequent and Top 5, so you can see them without waiting for a friend to log in. Each tier shows a guildmate really in it when your party history has one, and otherwise another guildmate drawn in that tier's look (chat marks them "stand-in"). **Greet** on a test prompt posts nothing to guild chat and just closes it. `/agfdev greettest hold` shows the Frequent and Top 5 prompts held as in Slow mode, counting down 30 seconds.
-- `/agfdev lfgtest` fills your Guild LFG Board with stand-in listings for every look: relevant ones (one with a note, and a raid), one only an alt of yours fits (when you have an alt far enough from your level), one nothing of yours fits, and a full one. It also glows the LFG button orange with a stand-in **Someone left — fill the empty slot?**, and slides out a stand-in Ask to join request. Nothing about the stand-ins is ever sent: asking to join one, **Invite**, **Decline**, **Yes** and **No** only print a line in chat. The stand-in listings leave the board after 5 minutes.
+- `/agfdev lfgtest` fills your Guild LFG Board with stand-in listings for every look: relevant ones (one with a note, and a raid), one only an alt of yours fits (when you have an alt far enough from your level), one nothing of yours fits, and a full one. It also glows the LFG button orange with a stand-in **Someone left — fill the empty slot?**, slides out a stand-in Ask to join request, and adds stand-in guildmates (one an alt) to **Find guildmates**. Nothing about the stand-ins is ever sent: asking to join one, **Invite**, **Decline**, **Yes** and **No** only print a line in chat. The stand-in listings leave the board after 5 minutes.
 - To test with your production party history, quit WoW, copy `AsgardsGuildFellowship.lua` in `WTF/Account/<ACCOUNT>/SavedVariables/` to `AsgardsGuildFellowshipDev.lua`, and change its first line to `AsgardsGuildFellowshipDevDB = {`.
 
 ## Running the tests

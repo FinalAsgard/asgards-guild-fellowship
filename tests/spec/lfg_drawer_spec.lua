@@ -109,6 +109,28 @@ test.test("lfg drawer model: the drawer shows the party, else the newest group, 
     test.assertEqual("Stratholme", view.top.party.label)
 end)
 
+test.test("lfg drawer model: a solo listing is the drawer's top, and still lets groups glow and pulse", function()
+    local Model = newModel()
+    local model = Model.Create()
+    local solo = { solo = true, own = true, size = 1, maxSize = 5, kind = "dungeon", label = "Stratholme" }
+
+    local view = model:Update({ groups = groups(), party = solo })
+    test.assertEqual(Model.PARTY, view.top.kind)
+    test.assertTrue(view.top.party.solo)
+    test.assertEqual("Stratholme", view.top.party.label)
+
+    view = model:Update({ groups = groups(listing("a")), party = solo })
+    test.assertEqual("gold", view.glow)
+    test.assertEqual(1, #view.fresh)
+    -- The drawer still shows the listing, not the newest group.
+    test.assertEqual(Model.PARTY, view.top.kind)
+    -- Combat still holds a solo lister's pulses back.
+    view = model:Update({ groups = groups(listing("b"), listing("a")), party = solo, combat = true })
+    test.assertEqual(0, #view.fresh)
+    view = model:Update({ groups = groups(listing("b"), listing("a")), party = solo })
+    test.assertEqual(1, #view.fresh)
+end)
+
 -- The button and its drawer ----------------------------------------------------------
 
 local function newButton()
@@ -123,6 +145,9 @@ local function newButton()
         onHide = function() end,
         onDrawerOpened = function() state.seen = state.seen + 1 end,
         onStartGroup = function() state.started = state.started + 1 end,
+        onEditListing = function() state.edited = (state.edited or 0) + 1 end,
+        onEndListing = function() state.ended = (state.ended or 0) + 1 end,
+        onFindGuildmates = function() state.found = (state.found or 0) + 1 end,
         dungeonIcon = function() return nil end,
     })
     button:Refresh()
@@ -251,6 +276,90 @@ test.test("lfg button: the drawer's newest group, none, and the party", function
     test.assertTrue(drawer.party.wordWrap)
 end)
 
+test.test("lfg button: a solo listing shows as Your listing, with Edit and End listing", function()
+    local button, state = newButton()
+    button:OpenDrawer()
+    local drawer = button.drawer
+    local party = { kind = "dungeon", label = "Stratholme", size = 1, maxSize = 5, openRoles = { "tank", "healer", "dps" },
+        note = "Bring a key", members = { { role = "dps" } }, solo = true, own = true }
+
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = party } })
+    test.assertEqual("YOUR LISTING", drawer.heading.text)
+    test.assertEqual("Stratholme", drawer.party.text)
+    test.assertContains(drawer.partyDetails.text, "1/5")
+    test.assertEqual("Bring a key", drawer.note.text)
+    test.assertTrue(button.editListingButton.shown)
+    test.assertTrue(button.endListingButton.shown)
+    test.assertFalse(button.startButton.shown)
+
+    button.editListingButton.scripts.OnClick(button.editListingButton)
+    test.assertEqual(1, state.edited)
+    test.assertFalse(button:DrawerOpen())
+    button:OpenDrawer()
+    button.endListingButton.scripts.OnClick(button.endListingButton)
+    test.assertEqual(1, state.ended)
+
+    -- A party that isn't the player's own listing: neither button.
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = { kind = "other", size = 2, maxSize = 5 } } })
+    test.assertEqual("YOUR PARTY", drawer.heading.text)
+    test.assertFalse(button.editListingButton.shown)
+    test.assertFalse(button.endListingButton.shown)
+end)
+
+test.test("lfg button: Find guildmates shows for the lister's party, greyed out with the reason", function()
+    local button, state = newButton()
+    button:OpenDrawer()
+    local drawer = button.drawer
+    local party = { kind = "dungeon", label = "Stratholme", size = 2, maxSize = 5, members = { { role = "dps" } },
+        own = true, find = {} }
+
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = party } })
+    test.assertTrue(button.findButton.shown)
+    test.assertTrue(button.findButton.active)
+    local withFind = drawer.height
+    button.findButton.scripts.OnClick(button.findButton)
+    test.assertEqual(1, state.found)
+    test.assertFalse(button:DrawerOpen())
+
+    -- An unlisted party's leader: greyed out, and clicking does nothing.
+    button:OpenDrawer()
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = { kind = "other", size = 2, maxSize = 5,
+        find = { reason = "List your party to find guildmates" } } } })
+    test.assertTrue(button.findButton.shown)
+    test.assertFalse(button.findButton.active)
+    test.assertEqual("List your party to find guildmates", button.findButton.reason)
+    button.findButton.scripts.OnClick(button.findButton)
+    test.assertEqual(1, state.found)
+
+    -- Without `find` (not the lister), no button, and a shorter drawer.
+    party.find = nil
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = party } })
+    test.assertFalse(button.findButton.shown)
+    test.assertTrue(drawer.height < withFind)
+end)
+
+test.test("lfg button: the party drawer sits its buttons under the text it measures, Ask in guild labeled", function()
+    local button = newButton()
+    button.options.onAskInGuild = function() end
+    button:OpenDrawer()
+    local drawer = button.drawer
+    -- The game measures the drawer's top at 500 and the details' bottom
+    -- at 440 (no note).
+    rawset(drawer, "GetTop", function() return 500 end)
+    rawset(drawer.partyDetails, "GetBottom", function() return 440 end)
+    rawset(drawer.note, "GetText", function() return "" end)
+    button.askGuildButton.label:SetText("")
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = { kind = "questing",
+        label = "Questing in Alterac Mountains", size = 2, maxSize = 5, own = true, find = {},
+        guildLine = "LF3M questing in Alterac Mountains" } } })
+
+    test.assertTrue(button.askGuildButton.shown)
+    test.assertEqual("Ask in guild", button.askGuildButton.label.text)
+    -- 60 of text, 12 under it, then 3 buttons (26 each, 4 between), 8, the
+    -- tiles (22) and 12.
+    test.assertEqual(60 + 12 + 3 * 26 + 2 * 4 + 8 + 22 + 12, drawer.height)
+end)
+
 -- The composed add-on ----------------------------------------------------------------
 
 local function guild()
@@ -338,6 +447,38 @@ test.test("Forever the chat line for new groups is off by default and can be tur
     test.assertContains(hammer.messages[#hammer.messages], "New group for you on the Guild LFG Board: Stratholme")
 end)
 
+test.test("lfg auto-list setting: off by default, saved, and unusable saved data reads as off", function()
+    local addon = test.newAddon("Core/FellowshipStore.lua")
+    local database = { schemaVersion = 1, guilds = {} }
+    local store = addon.FellowshipStore.Create(database)
+
+    test.assertFalse(store:LfgAutoList())
+    test.assertTrue(store:SetLfgAutoList(true))
+    test.assertTrue(addon.FellowshipStore.Create(database):LfgAutoList())
+    test.assertTrue(store:SetLfgAutoList(false))
+    test.assertFalse(store:LfgAutoList())
+    test.assertFalse(store:SetLfgAutoList("yes"))
+
+    database.lfgAutoList = "corrupt"
+    test.assertFalse(store:LfgAutoList())
+    test.assertFalse(store:SetLfgAutoList(true))
+    test.assertEqual("corrupt", database.lfgAutoList)
+end)
+
+test.test("Forever Auto-list my parties is off by default, in the LFG popup and the AddOns options", function()
+    local channel = fixtures.newChannel()
+    local hammer, addon = login(channel, "Hammer Smith")
+    test.assertFalse(addon.settings:Get("lfgAutoList"))
+    test.assertTrue(addon.settings:InHost("lfgAutoList", "options"))
+    addon.agfWindow:Open("lfg")
+    addon.agfWindow:ToggleSettingsPopup()
+    local switch = addon.agfWindow:Switches("lfgAutoList")[1]
+    test.assertFalse(switch:IsOn())
+    test.assertTrue(addon.agfWindow.infoIcons.lfgAutoList ~= nil)
+    switch.scripts.OnClick(switch)
+    test.assertTrue(addon.settings:Get("lfgAutoList"))
+end)
+
 test.test("Forever no glow in a party or in Do Not Disturb, and the drawer shows the party", function()
     local channel = fixtures.newChannel()
     local tool = login(channel, "Tool Box")
@@ -355,6 +496,49 @@ test.test("Forever no glow in a party or in Do Not Disturb, and the drawer shows
     test.assertEqual("YOUR PARTY", addon.lfgButton.drawer.heading.text)
     test.assertEqual("Not listed", addon.lfgButton.drawer.party.text)
     test.assertEqual(nil, addon.lfgButton.glow.color)
+end)
+
+test.test("Forever after Start a group with no party, the drawer shows my listing; End listing ends it", function()
+    local channel = fixtures.newChannel()
+    local tool = login(channel, "Tool Box")
+    local hammer, addon = login(channel, "Hammer Smith")
+    local button = tool.addon.lfgButton
+
+    toolLists(tool)
+    button:OpenDrawer()
+    test.assertEqual("YOUR LISTING", button.drawer.heading.text)
+    test.assertEqual("Stratholme", button.drawer.party.text)
+    test.assertContains(button.drawer.partyDetails.text, "1/5")
+    test.assertTrue(button.editListingButton.shown)
+
+    -- Find guildmates opens the board on its panel.
+    tool.addon.agfWindow:Close()
+    test.assertTrue(button.findButton.shown)
+    test.assertTrue(button.findButton.active)
+    button.findButton.scripts.OnClick(button.findButton)
+    test.assertTrue(tool.addon.agfWindow:IsOpen())
+    test.assertTrue(tool.addon.lfgPage.fill.shown)
+    test.assertContains(tool.addon.lfgPage.fill.rows[1].name.text, "Hammer")
+    tool.addon.lfgPage:CloseFill()
+    button:OpenDrawer()
+
+    -- Edit opens the board's editor on it.
+    tool.addon.agfWindow:Close()
+    button.editListingButton.scripts.OnClick(button.editListingButton)
+    test.assertTrue(tool.addon.agfWindow:IsOpen())
+    test.assertEqual("edit", tool.addon.lfgPage:Mode())
+    tool.addon.lfgPage:Save()
+
+    -- End listing takes it off the board.
+    fixtures.deliver(channel)
+    test.assertEqual(1, addon.lfgButton.count.count)
+    button:OpenDrawer()
+    button.endListingButton.scripts.OnClick(button.endListingButton)
+    test.assertFalse(tool.addon.lfgListing:IsActive())
+    fixtures.deliver(channel)
+    test.assertEqual(0, addon.lfgButton.count.count)
+    button:OpenDrawer()
+    test.assertEqual("NEW FOR YOU", button.drawer.heading.text)
 end)
 
 test.test("Forever the drawer's Start a group opens the board's editor", function()
