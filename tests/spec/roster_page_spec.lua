@@ -14,7 +14,7 @@ local function setup(count, online)
     local environment = fakeFrames.install({})
     local ui = addon.Widgets.Create(environment)
     local content = environment.CreateFrame("Frame")
-    local world = { addon = addon, calls = {}, friends = {}, players = {} }
+    local world = { addon = addon, environment = environment, calls = {}, friends = {}, players = {} }
     local index
     for index = 1, count or 3 do
         table.insert(world.players, { playerId = index, name = string.format("Player%03d", index),
@@ -94,6 +94,9 @@ local function setup(count, online)
         end,
         onRescan = function()
             table.insert(world.calls, "rescan")
+        end,
+        countsTooltip = function()
+            return { "Guild size", "3 players, all known", "5 of 9 characters online" }
         end,
         -- Officers' entries; `world.member` makes the user player 1's.
         menuFor = function(target)
@@ -576,4 +579,31 @@ test.test("roster page: under Online only, a player who logs off keeps their car
 
     world.page:Refresh()
     test.assertEqual("Player001, Player003, Player005", cardOrder(world))
+end)
+
+test.test("roster page: hovering the counts shows the guild's size, characters included", function()
+    local world = setup(3, 1)
+    local shown = {}
+    world.environment.GameTooltip = {
+        SetOwner = function() end,
+        SetText = function(_, text)
+            shown = { text }
+        end,
+        AddLine = function(_, text)
+            table.insert(shown, text)
+        end,
+        Show = function(self)
+            self.open = true
+        end,
+        Hide = function(self)
+            self.open = false
+        end,
+    }
+    local hover = world.page.countsHover
+    hover.scripts.OnEnter(hover)
+
+    test.assertTrue(world.environment.GameTooltip.open)
+    test.assertEqual("Guild size | 3 players, all known | 5 of 9 characters online", table.concat(shown, " | "))
+    hover.scripts.OnLeave(hover)
+    test.assertFalse(world.environment.GameTooltip.open)
 end)

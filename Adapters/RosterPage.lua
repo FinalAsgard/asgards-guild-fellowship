@@ -63,6 +63,8 @@ Page.__index = Page
 --   onToggleFriend function(view) -> true, or false and why not: the star
 --             button, pinning or unpinning the panel's player
 --   onRescan  function(): rescans the guild roster
+--   countsTooltip function() -> lines: what hovering the counts shows (the
+--             guild's size, as RosterViewModel.CountsTooltip words it)
 --   onError   function(text): tells the user why something didn't happen
 -- and, for organizing players (RosterController's calls, by character key):
 --   menuFor   function(target) -> { { text, action, key } }: the right-click
@@ -90,6 +92,21 @@ function Page:build()
     local owner = self
     self.counts = ui:Text(content, "", "regular", "body", "muted")
     self.counts:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -6)
+    -- Hovering the counts shows the guild's size in full: characters,
+    -- alts, who's active.
+    self.countsHover = ui:frame("Frame", content)
+    self.countsHover:SetPoint("TOPLEFT", self.counts, "TOPLEFT", 0, 0)
+    self.countsHover:SetPoint("BOTTOMRIGHT", self.counts, "BOTTOMRIGHT", 0, 0)
+    self.countsHover:EnableMouse(true)
+    self.countsHover:SetScript("OnEnter", function(frame)
+        owner:showCountsTooltip(frame)
+    end)
+    self.countsHover:SetScript("OnLeave", function()
+        local tooltip = ui.environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:Hide()
+        end
+    end)
     self.rescan = ui:Button(content, "Rescan", "secondary", function()
         if owner.options.onRescan ~= nil then
             owner.options.onRescan()
@@ -300,6 +317,22 @@ function Page:rankMenu(anchor)
         end })
     end
     self.menu:Open(anchor, items)
+end
+
+-- The counts' tooltip, on `frame`: a title, then a line each.
+function Page:showCountsTooltip(frame)
+    local tooltip = self.ui.environment.GameTooltip
+    local lines = self:call("countsTooltip")
+    if type(tooltip) ~= "table" or type(lines) ~= "table" or lines[1] == nil then
+        return
+    end
+    tooltip:SetOwner(frame, "ANCHOR_BOTTOMLEFT")
+    tooltip:SetText(lines[1], 1, 1, 1)
+    local index
+    for index = 2, #lines do
+        tooltip:AddLine(lines[index], nil, nil, nil, true)
+    end
+    tooltip:Show()
 end
 
 -- A new frame for the list: a section's label, or a player card.

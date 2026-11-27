@@ -4844,6 +4844,14 @@ if clientProfile.supported then
             onRescan = function()
                 rosterController:Rescan()
             end,
+            countsTooltip = function()
+                local guild, partition, normalizer = rosterController:QuietContext()
+                if guild == nil then
+                    return nil
+                end
+                local counts = addon.RosterViewModel.Counts(partition, rosterController:LiveMembers(normalizer))
+                return addon.RosterViewModel.CountsTooltip(counts)
+            end,
             onError = function(text)
                 rosterController:Print(text)
             end,
