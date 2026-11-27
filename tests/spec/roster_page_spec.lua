@@ -26,11 +26,14 @@ local function setup(count, online)
             local view = { rows = {}, cards = {}, ranks = { { index = 0, name = "Guild Master" },
                 { index = 2, name = "Member" } } }
             local _, section
-            for _, section in ipairs({ { text = "Online", on = true }, { text = "Offline", on = false } }) do
+            -- `world.flat` lists everyone in one section, as the model does.
+            local sections = world.flat and { { text = "Players" } }
+                or { { text = "Online", on = true }, { text = "Offline", on = false } }
+            for _, section in ipairs(sections) do
                 local cards = {}
                 local _, player
                 for _, player in ipairs(world.players) do
-                    if player.online == section.on
+                    if (section.on == nil or player.online == section.on)
                         and string.find(string.lower(player.name), string.lower(filters.search or ""), 1, true)
                         and (player.online or not filters.onlineOnly)
                     then
@@ -38,6 +41,15 @@ local function setup(count, online)
                             sub = "2 characters", online = player.online, star = world.friends[player.playerId],
                             tag = world.tag })
                     end
+                end
+                -- `world.reverse` sorts each section the other way.
+                if world.reverse then
+                    local reversed = {}
+                    local position
+                    for position = #cards, 1, -1 do
+                        table.insert(reversed, cards[position])
+                    end
+                    cards = reversed
                 end
                 if cards[1] ~= nil then
                     table.insert(view.rows, { kind = "section", text = section.text, count = #cards })
@@ -463,4 +475,68 @@ test.test("roster page: a long list has a scroll bar that jumps through it", fun
     bar.scripts.OnValueChanged(bar, 0)
     test.assertEqual(0, world.page.list:Offset())
     test.assertEqual("Player001", shownCards(world)[1].name.text)
+end)
+
+-- The shown cards' names in list order (by where each sits).
+local function cardOrder(world)
+    local cards = {}
+    local _, frame
+    for _, frame in ipairs(world.page.list:Shown()) do
+        if rawget(frame, "entry") ~= nil and frame.shown then
+            table.insert(cards, frame)
+        end
+    end
+    local rows = world.page.list:Rows()
+    local index = {}
+    local position
+    for position = 1, #rows do
+        local row = rows[position]
+        index[row] = position
+    end
+    table.sort(cards, function(a, b)
+        return index[a.entry] < index[b.entry]
+    end)
+    local names = {}
+    local _, card
+    for _, card in ipairs(cards) do
+        table.insert(names, card.name.text)
+    end
+    return table.concat(names, ", ")
+end
+
+test.test("roster page: a roster update shows what's new without sorting the list again", function()
+    local world = setup(3, 3)
+    world.flat = true
+    world.page:Refresh()
+    world.reverse = true
+    world.players[2].online = false
+    world.page:Update()
+
+    -- Player002 went offline: their dot changes, but nobody moves.
+    test.assertEqual("Player001, Player002, Player003", cardOrder(world))
+    test.assertFalse(cardNamed(world, "Player002").entry.online)
+
+    -- A sort (or filter, or search) change sorts it again.
+    world.page:Refresh()
+    test.assertEqual("Player003, Player002, Player001", cardOrder(world))
+end)
+
+test.test("roster page: a player new to the list goes after the rest on an update", function()
+    local world = setup(3, 3)
+    table.insert(world.players, 1, { playerId = 9, name = "Player000", online = true })
+    world.players[9] = world.players[1]
+    world.page:Update()
+
+    test.assertEqual("Player001, Player002, Player003, Player000", cardOrder(world))
+end)
+
+test.test("roster page: a roster update leaves the list where it's scrolled to", function()
+    local world = setup(550, 40)
+    world.page:Refresh(1)
+    world.page.list:ScrollTo(5000)
+    local offset = world.page.list:Offset()
+    world.page:Update()
+
+    test.assertEqual(offset, world.page.list:Offset())
+    test.assertEqual(1, world.page:Selected())
 end)

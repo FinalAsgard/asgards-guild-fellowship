@@ -232,6 +232,16 @@ local function byField(field)
     end
 end
 
+-- Online first, then the most recent login (players on less than an hour
+-- ago, who count as 0 hours, after those online now), unknown last, then
+-- by name.
+local function byLastOnline(a, b)
+    if a.online ~= b.online then
+        return a.online
+    end
+    return byField("away")(a, b)
+end
+
 -- Most parties first, then by name; never grouped with, last.
 local function byGrouped(a, b)
     if (a.grouped or 0) ~= (b.grouped or 0) then
@@ -242,7 +252,7 @@ end
 
 local ORDERS = {
     name = byName,
-    lastOnline = byField("away"),
+    lastOnline = byLastOnline,
     rank = byField("rankIndex"),
     grouped = byGrouped,
 }

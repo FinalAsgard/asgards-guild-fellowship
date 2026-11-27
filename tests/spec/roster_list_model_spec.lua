@@ -397,3 +397,13 @@ test.test("roster list model: the user's own player has no party count", functio
     test.assertEqual("40×", cardOf(view, "Anvil").tag)
     test.assertEqual("TheTool", view.cards[#view.cards].name)
 end)
+
+test.test("roster list model: Last online puts those online now before those on less than an hour ago", function()
+    local world = setup({ Cog = "Ironforge", Bolt = "Gadgetzan" })
+    world.members[world.keys.Anvil].lastOnline = { hours = 0 }
+    world.members[world.keys.Hammer].lastOnline = { hours = 0 }
+    local view = world.build({ sort = "lastOnline" })
+
+    test.assertEqual("[Players 4], Bolt, Cog, Anvil, TheTool", outline(view))
+    test.assertEqual("less than an hour ago", cardOf(view, "Anvil").tag)
+end)

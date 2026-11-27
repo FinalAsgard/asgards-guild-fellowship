@@ -263,7 +263,7 @@ if clientProfile.supported then
             -- The new window's Roster follows along while it shows.
             if friendsUi.roster ~= nil and agfWindow ~= nil and agfWindow:IsOpen() and agfWindow:Page() == "roster"
             then
-                friendsUi.roster:Refresh()
+                friendsUi.roster:Update()
             end
         end,
         onDecideSuggestion = function(character, kind, approved)

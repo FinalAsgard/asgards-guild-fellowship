@@ -19,8 +19,10 @@ local _, addon = ...
 -- with a search box, as the Friends page's is. Set alias..., Set Discord...
 -- and the Bio tab's Edit ask for the text in a small prompt.
 --
--- It's built when the page is shown (Refresh), and again when the owner
--- says the roster changed.
+-- It's built when the page is shown (Refresh). When the roster changes on
+-- its own (Update), the cards show what's new but keep their order and the
+-- list its place, so it doesn't jump while it's being scrolled; a sort,
+-- filter or search change sorts it again.
 local Theme = addon.Theme
 local DOT = " · "
 
@@ -418,7 +420,7 @@ end
 -- where that player still has a card, else selecting the first. Given
 -- `focus` (a player id), selects that player instead. The selected card is
 -- kept in view.
-function Page:rebuild(focus)
+function Page:rebuild(focus, keepOrder)
     self.view = self.options.model(focus or self.selected, {
         search = self.query,
         sort = self.sort,
@@ -427,6 +429,14 @@ function Page:rebuild(focus)
     })
     if self.view == nil then
         self.view = { rows = {}, cards = {}, ranks = {}, header = "", sync = "" }
+    end
+    if keepOrder then
+        self:keepOrder()
+    end
+    self.order = {}
+    local index
+    for index = 1, #self.view.cards do
+        self.order[index] = self.view.cards[index].playerId
     end
     self.selected = focus or self.view.selected or self.view.default
     self:labelControls()
@@ -438,7 +448,59 @@ function Page:rebuild(focus)
         table.insert(parts, self.view.sync)
     end
     self.counts:SetText(table.concat(parts, DOT))
-    self.list:SetRows(self.view.rows, rowOf(self.view, self.selected))
+    -- An update leaves the list where it's scrolled to.
+    self.list:SetRows(self.view.rows, not keepOrder and rowOf(self.view, self.selected) or nil)
+end
+
+-- Puts the new view's cards back in the order shown before, under each
+-- section's label, with players new to the list after the rest.
+function Page:keepOrder()
+    local view, before = self.view, {}
+    local index
+    for index = 1, #(self.order or {}) do
+        local playerId = self.order[index]
+        before[playerId] = index
+    end
+    local sections, current = {}, nil
+    for index = 1, #view.rows do
+        local row = view.rows[index]
+        if row.kind == "section" or current == nil then
+            current = { label = row.kind == "section" and row or nil, cards = {} }
+            table.insert(sections, current)
+        end
+        if row.kind ~= "section" then
+            table.insert(current.cards, row)
+        end
+    end
+    local rows, cards = {}, {}
+    local _, section
+    for _, section in ipairs(sections) do
+        -- A stable sort: the cards' new order breaks ties among the new ones.
+        local position = {}
+        for index = 1, #section.cards do
+            local entry = section.cards[index]
+            position[entry] = index
+        end
+        table.sort(section.cards, function(a, b)
+            local first, second = before[a.playerId], before[b.playerId]
+            if first ~= nil and second ~= nil then
+                return first < second
+            end
+            if (first ~= nil) ~= (second ~= nil) then
+                return first ~= nil
+            end
+            return position[a] < position[b]
+        end)
+        if section.label ~= nil then
+            table.insert(rows, section.label)
+        end
+        for index = 1, #section.cards do
+            table.insert(rows, section.cards[index])
+            table.insert(cards, section.cards[index])
+        end
+    end
+    view.rows, view.cards = rows, cards
+    view.default = cards[1] and cards[1].playerId or nil
 end
 
 -- Builds the page again from saved data and the roster (see rebuild), and
@@ -446,6 +508,13 @@ end
 function Page:Refresh(focus)
     self.menu:Close()
     self:rebuild(focus)
+    self:showDetail()
+end
+
+-- The roster changed on its own (someone came online, a sync): the cards
+-- and the panel show what's new, in the order and place they're in.
+function Page:Update()
+    self:rebuild(nil, true)
     self:showDetail()
 end
 
