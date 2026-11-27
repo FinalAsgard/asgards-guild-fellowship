@@ -147,6 +147,7 @@ local function newButton()
         onStartGroup = function() state.started = state.started + 1 end,
         onEditListing = function() state.edited = (state.edited or 0) + 1 end,
         onEndListing = function() state.ended = (state.ended or 0) + 1 end,
+        onFindGuildmates = function() state.found = (state.found or 0) + 1 end,
         dungeonIcon = function() return nil end,
     })
     button:Refresh()
@@ -305,6 +306,38 @@ test.test("lfg button: a solo listing shows as Your listing, with Edit and End l
     test.assertFalse(button.endListingButton.shown)
 end)
 
+test.test("lfg button: Find guildmates shows for the lister's party, greyed out with the reason", function()
+    local button, state = newButton()
+    button:OpenDrawer()
+    local drawer = button.drawer
+    local party = { kind = "dungeon", label = "Stratholme", size = 2, maxSize = 5, members = { { role = "dps" } },
+        own = true, find = {} }
+
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = party } })
+    test.assertTrue(button.findButton.shown)
+    test.assertTrue(button.findButton.active)
+    local withFind = drawer.height
+    button.findButton.scripts.OnClick(button.findButton)
+    test.assertEqual(1, state.found)
+    test.assertFalse(button:DrawerOpen())
+
+    -- An unlisted party's leader: greyed out, and clicking does nothing.
+    button:OpenDrawer()
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = { kind = "other", size = 2, maxSize = 5,
+        find = { reason = "List your party to find guildmates" } } } })
+    test.assertTrue(button.findButton.shown)
+    test.assertFalse(button.findButton.active)
+    test.assertEqual("List your party to find guildmates", button.findButton.reason)
+    button.findButton.scripts.OnClick(button.findButton)
+    test.assertEqual(1, state.found)
+
+    -- Without `find` (not the lister), no button, and a shorter drawer.
+    party.find = nil
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = party } })
+    test.assertFalse(button.findButton.shown)
+    test.assertTrue(drawer.height < withFind)
+end)
+
 -- The composed add-on ----------------------------------------------------------------
 
 local function guild()
@@ -455,6 +488,17 @@ test.test("Forever after Start a group with no party, the drawer shows my listin
     test.assertEqual("Stratholme", button.drawer.party.text)
     test.assertContains(button.drawer.partyDetails.text, "1/5")
     test.assertTrue(button.editListingButton.shown)
+
+    -- Find guildmates opens the board on its panel.
+    tool.addon.agfWindow:Close()
+    test.assertTrue(button.findButton.shown)
+    test.assertTrue(button.findButton.active)
+    button.findButton.scripts.OnClick(button.findButton)
+    test.assertTrue(tool.addon.agfWindow:IsOpen())
+    test.assertTrue(tool.addon.lfgPage.fill.shown)
+    test.assertContains(tool.addon.lfgPage.fill.rows[1].name.text, "Hammer")
+    tool.addon.lfgPage:CloseFill()
+    button:OpenDrawer()
 
     -- Edit opens the board's editor on it.
     tool.addon.agfWindow:Close()

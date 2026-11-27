@@ -13,7 +13,8 @@ local GUILD = { name = "Knights of Camelot", realm = "Camelot" }
 --     online)
 --   Me, a warrior (24, online): the player, with alt Mealt (22, online)
 local function newGuild()
-    local addon = test.newAddon("Core/FellowshipStore.lua", "Core/LfgRelevance.lua", "Core/LfgFillCandidates.lua")
+    local addon = test.newAddon("Core/FellowshipStore.lua", "Core/GroupFriends.lua", "Core/LfgRelevance.lua",
+        "Core/LfgFillCandidates.lua")
     local partition = addon.FellowshipStore.Create({ schemaVersion = 3, guilds = {} }):Partition(GUILD)
     local function add(key, class, level)
         partition:RecordCharacter(key, { name = key:gsub("^%l", string.upper) .. "-Camelot", classToken = class,
@@ -46,7 +47,7 @@ local function newGuild()
     members.sleepier = { online = false, level = 23, name = "Sleepier" }
     members.boltalt = { online = false, level = 23, name = "Boltalt" }
     local roles = { cleric = { "healer" }, bolt = { "healer", "dps" }, hammer = { "tank" }, busy = { "tank" } }
-    return function(listing, grouped)
+    return function(listing, grouped, tiers)
         return addon.LfgFillCandidates.List({
             partition = partition,
             members = members,
@@ -60,6 +61,9 @@ local function newGuild()
             className = function(classToken)
                 return classToken:sub(1, 1) .. classToken:sub(2):lower()
             end,
+            tierOf = tiers and function(key)
+                return tiers[key]
+            end or nil,
         })
     end
 end
@@ -68,7 +72,8 @@ local function names(rows)
     local result = {}
     local index
     for index = 1, #rows do
-        result[index] = rows[index].name .. (rows[index].kind == "alt" and " (alt)" or "")
+        result[index] = rows[index].name .. (rows[index].starred and "*" or "")
+            .. (rows[index].kind == "alt" and " (alt)" or "")
             .. (rows[index].inGroup and " (in a group)" or "")
     end
     return table.concat(result, ", ")
@@ -127,4 +132,20 @@ test.test("lfg fill: offline alts that fit, of players online on another charact
     -- An alt whose player is online in a listed group goes last, marked.
     rows = list(listing, { bolt = true })
     test.assertEqual("Zap, Bolt (in a group), Boltalt (alt) (in a group)", names(rows))
+end)
+
+test.test("lfg fill: starred friends are marked and go first among the online rows, and among the alts", function()
+    local addon = test.newAddon("Core/GroupFriends.lua")
+    local GroupFriends = addon.GroupFriends
+    local list = newGuild()
+    local listing = { kind = "questing", minLevel = 1, maxLevel = 60, size = 2, maxSize = 5 }
+
+    local rows = list(listing, {}, { zap = GroupFriends.FRIEND, boltalt = GroupFriends.TOP,
+        cleric = GroupFriends.GROUPED })
+    -- A Friend or Top 5 is starred; a Grouped friend isn't.
+    test.assertEqual("Zap*, Bolt, Busy, Cleric, Hammer, Boltalt* (alt)", names(rows))
+    test.assertTrue(rows[1].starred)
+    test.assertFalse(rows[4].starred)
+    -- Without tiers, nobody is.
+    test.assertEqual("Bolt, Busy, Cleric, Hammer, Zap, Boltalt (alt)", names(list(listing, {})))
 end)

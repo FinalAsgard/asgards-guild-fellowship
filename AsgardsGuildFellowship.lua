@@ -1491,6 +1491,13 @@ if clientProfile.supported then
                 lfgPage:StartEditing()
             end
         end,
+        -- Opens the board on Find guildmates.
+        onFindGuildmates = function()
+            openBoard()
+            if lfgPage ~= nil then
+                lfgPage:OpenFill()
+            end
+        end,
         onEndListing = function()
             lfgTrigger:NotLooking()
             lfgJoin.endListing()
@@ -1915,6 +1922,9 @@ if clientProfile.supported then
             className = function(classToken)
                 return client:GetClassName(classToken)
             end,
+            tierOf = function(key)
+                return lfgFriendTier(key)
+            end,
         })
         if lfgJoin.standInCandidates then
             local standIns = addon.LfgStandIns.Candidates(listing)
@@ -2032,12 +2042,20 @@ if clientProfile.supported then
             party.openRoles = fields.r
             -- What the drawer's Ask in guild types, while slots are open.
             party.guildLine = addon.LfgListing.GuildLine(fields)
+            -- Find guildmates, for its lister: while there's room.
+            if lfgLister() then
+                party.find = { reason = fields.s >= fields.x and addon.LfgBoardPage.FILL_FULL or nil }
+            end
             -- The roster as announced, for the drawer's role tiles.
             party.members = {}
             local index
             for index = 1, #fields.mb do
                 party.members[index] = { role = fields.mb[index].r }
             end
+        end
+        -- A leader's unlisted party: Find guildmates, greyed out.
+        if fields == nil and grouped and client:IsGroupLeader() then
+            party.find = { reason = addon.LfgBoardPage.FILL_UNLISTED }
         end
         -- Fill the empty slot? What it would be posted as: the party's
         -- purpose (from the board when a guildmate lists it) and, for a

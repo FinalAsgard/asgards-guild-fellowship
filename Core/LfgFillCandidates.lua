@@ -28,11 +28,14 @@ addon.LfgFillCandidates = LfgFillCandidates
 --   display    optional function(name) -> the name as shown
 --   className  optional function(classToken) -> the class as the game
 --              names it
+--   tierOf     optional function(key) -> the character's GroupFriends tier
 -- Returns rows { key, kind, name, whisper (the saved full name to whisper),
--- level, class, className?, label (the player's alias or main), inGroup }.
+-- level, class, className?, label (the player's alias or main), inGroup,
+-- starred (a Friend or Top 5, GroupFriends.IsStarred) }.
 -- An alt row (kind ALT) also has onlineKey and onlineName (the player's
 -- character online now, whom `whisper` is to) and `message` (the log-over
--- request). Not in a group first; online before alts; then by name.
+-- request). Not in a group first; online before alts; starred first; then
+-- by name.
 function LfgFillCandidates.List(inputs)
     local partition = inputs.partition
     local members = inputs.members or {}
@@ -89,6 +92,7 @@ function LfgFillCandidates.List(inputs)
             className = inputs.className and inputs.className(character.class) or nil,
             label = player and (player.alias or nameOf(player.main)) or nil,
             inGroup = grouped[key] == true,
+            starred = inputs.tierOf ~= nil and addon.GroupFriends.IsStarred(inputs.tierOf(key)) or false,
         }
     end
     local playerId, onlineKey
@@ -126,6 +130,9 @@ function LfgFillCandidates.List(inputs)
         end
         if a.kind ~= b.kind then
             return a.kind == LfgFillCandidates.ONLINE
+        end
+        if a.starred ~= b.starred then
+            return a.starred
         end
         if a.name ~= b.name then
             return a.name < b.name

@@ -100,6 +100,9 @@ end
 --   onEditListing   function(): the drawer's Edit on the player's own
 --                   listing (the party's `own`)
 --   onEndListing    function(): its End listing
+--   onFindGuildmates function(): the drawer's Find guildmates, shown for
+--                   the party's `find` ({ reason? }: greyed out with the
+--                   reason when there is one)
 --   onAskInGuild    function(line): types `line` into guild chat, unsent;
 --                   the drawer's Ask in guild for the player's listed
 --                   party with open slots (the party's `guildLine`)
@@ -309,6 +312,31 @@ function Button:buildDrawer()
     self.endListingButton:SetPoint("LEFT", self.editListingButton, "RIGHT", Theme.SPACING.xs, 0)
     self.editListingButton:Hide()
     self.endListingButton:Hide()
+    -- Find guildmates, over Edit and End listing, as the board's party card
+    -- has it; greyed out with why, in the tooltip, when it can't be used.
+    self.findButton = ui:Button(drawer, "Find guildmates", "secondary", function()
+        owner:CloseDrawer()
+        if owner.options.onFindGuildmates ~= nil then
+            owner.options.onFindGuildmates()
+        end
+    end)
+    self.findButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+    local environment = self.environment
+    self.findButton:HookScript("OnEnter", function(button)
+        local tooltip = environment and environment.GameTooltip
+        if not button.active and button.reason ~= nil and type(tooltip) == "table" then
+            tooltip:SetOwner(button, "ANCHOR_RIGHT")
+            tooltip:SetText(button.reason, 1, 1, 1, 1, true)
+            tooltip:Show()
+        end
+    end)
+    self.findButton:HookScript("OnLeave", function()
+        local tooltip = environment and environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:Hide()
+        end
+    end)
+    self.findButton:Hide()
 
     -- Show Nearby (the button's menu): the guildmates in the player's zone,
     -- as the board's Nearby tab lists them, each name opening a menu to
@@ -558,6 +586,19 @@ function Button:refreshDrawer()
     end
     self.editListingButton:ClearAllPoints()
     self.editListingButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, above)
+    local find = party and top.party ~= nil and top.party.find or nil
+    local finds = find ~= nil and self.options.onFindGuildmates ~= nil
+    setShown(self.findButton, finds)
+    if finds then
+        self.findButton.reason = find.reason
+        self.findButton:SetActive(find.reason == nil)
+        if own then
+            above = above + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.xs
+        end
+        self.findButton:ClearAllPoints()
+        self.findButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, above)
+        self.findButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
+    end
     local index
     for index = 1, 5 do
         drawer.roleTiles[index]:Hide()
@@ -619,6 +660,9 @@ function Button:refreshDrawer()
     if own then
         extra = extra + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.xs
     end
+    if finds then
+        extra = extra + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.xs
+    end
     drawer:SetHeight((LfgButton.DRAWER_HEIGHTS[kind] or LfgButton.DRAWER_HEIGHTS.none) + extra)
     self:refreshToasts()
 end
@@ -646,7 +690,7 @@ function Button:refreshNearby()
     local hidden = { drawer.icon, drawer.purpose, drawer.details, drawer.empty, drawer.question, drawer.slotDetails,
         drawer.party, drawer.partyDetails, drawer.note, drawer.raidTile, self.askButton, self.startButton,
         self.listButton, self.notLookingButton, self.snoozeButton, self.askGuildButton, self.editListingButton,
-        self.endListingButton }
+        self.endListingButton, self.findButton }
     local index
     for index = 1, #hidden do
         hidden[index]:Hide()

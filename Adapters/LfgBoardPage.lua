@@ -1480,8 +1480,14 @@ function Page:fillRow(index)
     row:SetPoint("RIGHT", fill.list, "RIGHT", 0, 0)
     row.name = ui:Text(row, "", "semibold", "body", "text")
     row.name:SetPoint("LEFT", row, "LEFT", 0, 0)
+    -- A starred friend's star, after the name.
+    row.star = row:CreateTexture(nil, "ARTWORK")
+    row.star:SetTexture(Theme.TEXTURES.star)
+    row.star:SetVertexColor(Theme.Color("gold"))
+    row.star:SetSize(10, 10)
+    row.star:SetPoint("LEFT", row.name, "RIGHT", 4, 0)
     row.details = ui:Text(row, "", "regular", "small", "muted")
-    row.details:SetPoint("LEFT", row.name, "RIGHT", Theme.SPACING.s, 0)
+    row.details:SetPoint("LEFT", row.star, "RIGHT", Theme.SPACING.s - 4, 0)
     -- An alt's Whisper asks its player, on the character online now, to
     -- log over.
     row.whisper = ui:Button(row, "Whisper", "secondary", function()
@@ -1538,6 +1544,7 @@ function Page:OpenFill()
                 candidate.label ~= candidate.name and candidate.label or nil, candidate.inGroup and "In a group" or nil }))
             row.invite:Show()
         end
+        setShown(row.star, candidate.starred == true)
         row:Show()
     end
     setShown(fill.empty, #candidates == 0)
