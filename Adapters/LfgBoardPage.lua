@@ -81,6 +81,8 @@ local LfgBoardPage = {
     FILL_UNLISTED = "List your party to find guildmates",
     FILL_FULL = "Your party has no room",
     FILL_EMPTY = "No guildmates online could fill a slot right now.",
+    CHANGE_ZONE = "Change",
+    CHOOSE_ZONE = "Choose",
     SEARCH_PLACEHOLDERS = { dungeon = "Search all dungeons", questing = "Search all zones" },
     RAID_EXPLANATION = "A raid is listed as a big party: anyone can ask to join, with no role rules.",
 }
@@ -347,6 +349,8 @@ function Page:buildEditor(card)
             owner.search:SetValue("")
         end
         owner.draft.kind = id
+        -- Questing starts on the chosen zone, the list closed.
+        owner.draft.pickingZone = false
         owner:refreshEditor()
     end)
     self.kindSelector:SetPoint("TOPLEFT", editor.kindLabel, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
@@ -392,15 +396,29 @@ function Page:buildEditor(card)
                 owner.draft.dungeon = self.dungeon
                 owner:refreshDungeons()
             elseif type(self.zone) == "table" then
+                -- Picking a zone closes the list on it.
                 owner.draft.zone = self.zone
-                owner:refreshDungeons()
+                owner.draft.pickingZone = false
+                owner:refreshEditor()
             end
         end)
         self.dungeonRows[index] = row
     end
 
+    -- Questing: the chosen zone (the current one to start), with Change to
+    -- open the zone list.
     editor.questing = ui:Text(fields, "", "regular", "body", "text")
-    editor.questing:SetPoint("TOPLEFT", fields, "TOPLEFT", 0, 0)
+    editor.questing:SetPoint("TOPLEFT", fields, "TOPLEFT", 0, -Theme.SPACING.xs)
+    self.changeZoneButton = ui:Button(fields, LfgBoardPage.CHANGE_ZONE, "secondary", function()
+        owner.draft.pickingZone = true
+        owner.draft.search = ""
+        owner.draft.offset = 0
+        owner.search:SetValue("")
+        owner:refreshEditor()
+    end)
+    self.changeZoneButton:SetWidth(80)
+    self.changeZoneButton:SetPoint("TOPRIGHT", fields, "TOPRIGHT", 0, 0)
+    self.changeZoneButton:Hide()
     editor.raid = ui:Text(fields, LfgBoardPage.RAID_EXPLANATION, "regular", "body", "muted")
     editor.raid:SetPoint("TOPLEFT", fields, "TOPLEFT", 0, 0)
     editor.raid:SetWidth(LfgBoardPage.FIELD_WIDTH)
@@ -494,9 +512,10 @@ function Page:startingZone(purpose)
     return current and zones:Named(current) or nil
 end
 
--- Whether the draft's kind picks from the list: Dungeon and Questing.
+-- Whether the draft shows the list: Dungeon, and Questing while its zone
+-- is being changed.
 function Page:listed()
-    return self.draft.kind == "dungeon" or self.draft.kind == "questing"
+    return self.draft.kind == "dungeon" or (self.draft.kind == "questing" and self.draft.pickingZone == true)
 end
 
 -- The draft as a purpose to save. Questing carries the chosen zone's game
@@ -639,9 +658,13 @@ function Page:refreshMemberView()
 end
 
 -- Roles in your party: each member's role icon by their name.
+-- Questing shows the party too, by name only: its roles don't matter.
 function Page:refreshRoles()
-    local members = self.draft.kind == "dungeon" and (self.options.partyRoles and self.options.partyRoles()) or {}
+    local dungeon = self.draft.kind == "dungeon"
+    local shown = dungeon or self.draft.kind == "questing"
+    local members = shown and (self.options.partyRoles and self.options.partyRoles()) or {}
     setShown(self.editor.rolesLabel, #members > 0)
+    self.editor.rolesLabel:SetText(Theme.Label(dungeon and "Roles in your party" or "Your party"))
     local index
     for index = 1, #self.roleRows do
         local line, member = self.roleRows[index], members[index]
@@ -651,10 +674,11 @@ function Page:refreshRoles()
             line:Hide()
         else
             line.key = member.key
-            line.member = member
+            -- Only a dungeon's names open the role menu.
+            line.member = dungeon and member or false
             line.memberName = member.name
             self:showName(line, { text = colored(member.name, self.options.classColor
-                and self.options.classColor(member.classToken)), role = member.role })
+                and self.options.classColor(member.classToken)), role = dungeon and member.role or nil })
         end
     end
 end
@@ -690,9 +714,11 @@ end
 function Page:refreshEditor()
     local draft, editor = self.draft, self.editor
     self.kindSelector:Select(draft.kind)
-    -- Questing with no zone known says so in place of the list.
-    local unknown = draft.kind == "questing" and #self:zones().zones == 0
-    local listed = self:listed() and not unknown
+    -- Questing shows its zone, with Change opening the list; with no zone
+    -- known at all it says so.
+    local questing = draft.kind == "questing"
+    local unknown = questing and #self:zones().zones == 0
+    local listed = draft.kind == "dungeon" or (questing and draft.pickingZone == true and not unknown)
     setShown(self.search, listed)
     if listed then
         self.search.placeholder:SetText(LfgBoardPage.SEARCH_PLACEHOLDERS[draft.kind])
@@ -700,8 +726,13 @@ function Page:refreshEditor()
     else
         hideAll(self.dungeonRows)
     end
-    editor.questing:SetText("Your zone isn't known yet.")
-    setShown(editor.questing, unknown)
+    local zone = draft.zone
+    editor.questing:SetText(unknown and "Your zone isn't known yet."
+        or zone ~= nil and ("Questing in " .. zone.name .. (zone.minLevel and (" (" .. range(zone.minLevel,
+            zone.maxLevel) .. ")") or "")) or "Choose a zone.")
+    setShown(editor.questing, questing and not listed)
+    setShown(self.changeZoneButton, questing and not listed and not unknown)
+    self.changeZoneButton:SetLabel(zone ~= nil and LfgBoardPage.CHANGE_ZONE or LfgBoardPage.CHOOSE_ZONE)
     setShown(editor.raid, draft.kind == "raid")
     setShown(self.otherText, draft.kind == "other")
     self:refreshRoles()

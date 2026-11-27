@@ -576,11 +576,18 @@ test.test("lfg page: the editor shows each kind's fields, and Cancel goes back",
     test.assertEqual("11/60", page.note.counter.text)
 
     click(page.kindSelector.buttons[2])
-    -- Questing searches zones, the current one chosen.
+    -- Questing starts on the current zone, with Change to search the
+    -- zones.
+    test.assertFalse(page.search.shown)
+    test.assertTrue(page.editor.questing.shown)
+    test.assertEqual("Questing in Ironforge", page.editor.questing.text)
+    test.assertTrue(page.changeZoneButton.shown)
+    test.assertEqual("Ironforge", page.draft.zone.name)
+    click(page.changeZoneButton)
     test.assertTrue(page.search.shown)
     test.assertEqual("Search all zones", page.search.placeholder.text)
     test.assertFalse(page.editor.questing.shown)
-    test.assertEqual("Ironforge", page.draft.zone.name)
+    test.assertFalse(page.changeZoneButton.shown)
     click(page.kindSelector.buttons[3])
     test.assertTrue(page.editor.raid.shown)
     click(page.kindSelector.buttons[4])
@@ -775,9 +782,11 @@ test.test("Forever Questing picks a zone from the list, and the listing takes it
     click(page.startButton)
     click(page.kindSelector.buttons[2])
 
-    -- Your level's zones first, the rest (and zones with no levels) under
-    -- Other levels; the current zone is chosen.
+    -- The current zone is chosen; Change opens the list: your level's zones
+    -- first, the rest (and zones with no levels) under Other levels.
     test.assertEqual("Ironforge", page.draft.zone.name)
+    test.assertFalse(page.dungeonRows[1].shown)
+    click(page.changeZoneButton)
     test.assertEqual("Winterspring", page.dungeonRows[1].zone.name)
     test.assertEqual("OTHER LEVELS", page.dungeonRows[2].label.text)
     test.assertEqual("green", page.dungeonRows[4].fillColor)
@@ -786,7 +795,10 @@ test.test("Forever Questing picks a zone from the list, and the listing takes it
     test.assertEqual(nil, zoneRow(page, "Winterspring"))
     test.assertEqual("18" .. "\226\128\147" .. "30", zoneRow(page, "Duskwood").range.text)
     click(zoneRow(page, "Duskwood"))
+    -- Picking one closes the list on it.
     test.assertEqual("Duskwood", page.draft.zone.name)
+    test.assertFalse(page.search.shown)
+    test.assertEqual("Questing in Duskwood (18" .. "\226\128\147" .. "30)", page.editor.questing.text)
     click(page.saveButton)
     fixtures.deliver(channel)
 
@@ -799,6 +811,7 @@ test.test("Forever Questing picks a zone from the list, and the listing takes it
     -- party's, 5 either way.
     click(page.editButton)
     test.assertEqual("Duskwood", page.draft.zone.name)
+    click(page.changeZoneButton)
     type_(page.search, "storm")
     click(zoneRow(page, "Stormwind City"))
     click(page.saveButton)
@@ -821,6 +834,7 @@ test.test("Forever with no zone list, Questing offers the current zone alone", f
     click(page.kindSelector.buttons[2])
 
     test.assertEqual("Ironforge", page.draft.zone.name)
+    click(page.changeZoneButton)
     test.assertEqual("OTHER LEVELS", page.dungeonRows[1].label.text)
     test.assertEqual("Ironforge", page.dungeonRows[2].zone.name)
     test.assertFalse(page.dungeonRows[3].shown)
@@ -1222,6 +1236,20 @@ test.test("lfg page: Roles in your party shows each role's icon by the name, rea
     -- Roles are set in the game's party menu: the names open nothing.
     click(tool)
     test.assertTrue(page.namesMenu == nil or not page.namesMenu:IsOpen())
+    test.assertEqual("ROLES IN YOUR PARTY", page.editor.rolesLabel.text)
+
+    -- Questing shows the party too, by name, with no role icons.
+    click(page.kindSelector.buttons[2])
+    test.assertTrue(page.editor.rolesLabel.shown)
+    test.assertEqual("YOUR PARTY", page.editor.rolesLabel.text)
+    test.assertTrue(tool.shown)
+    test.assertEqual("|cffc79c6eTool|r", tool.name.text)
+    test.assertFalse(tool.roleIcon.shown)
+    test.assertTrue(zap.shown)
+    -- Raid and Other don't.
+    click(page.kindSelector.buttons[3])
+    test.assertFalse(page.editor.rolesLabel.shown)
+    test.assertFalse(tool.shown)
 end)
 
 test.test("lfg page: the name menu closes on a second click, a click outside it, and when its name goes", function()
