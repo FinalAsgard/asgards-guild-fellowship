@@ -338,6 +338,28 @@ test.test("lfg button: Find guildmates shows for the lister's party, greyed out 
     test.assertTrue(drawer.height < withFind)
 end)
 
+test.test("lfg button: the party drawer sits its buttons under the text it measures, Ask in guild labeled", function()
+    local button = newButton()
+    button.options.onAskInGuild = function() end
+    button:OpenDrawer()
+    local drawer = button.drawer
+    -- The game measures the drawer's top at 500 and the details' bottom
+    -- at 440 (no note).
+    rawset(drawer, "GetTop", function() return 500 end)
+    rawset(drawer.partyDetails, "GetBottom", function() return 440 end)
+    rawset(drawer.note, "GetText", function() return "" end)
+    button.askGuildButton.label:SetText("")
+    button:Update({ count = 0, fresh = {}, top = { kind = "party", party = { kind = "questing",
+        label = "Questing in Alterac Mountains", size = 2, maxSize = 5, own = true, find = {},
+        guildLine = "LF3M questing in Alterac Mountains" } } })
+
+    test.assertTrue(button.askGuildButton.shown)
+    test.assertEqual("Ask in guild", button.askGuildButton.label.text)
+    -- 60 of text, 12 under it, then 3 buttons (26 each, 4 between), 8, the
+    -- tiles (22) and 12.
+    test.assertEqual(60 + 12 + 3 * 26 + 2 * 4 + 8 + 22 + 12, drawer.height)
+end)
+
 -- The composed add-on ----------------------------------------------------------------
 
 local function guild()
