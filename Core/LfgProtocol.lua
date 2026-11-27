@@ -41,6 +41,9 @@ local LfgProtocol = {
     -- party menu). The lister's listing then shows it.
     TYPE_ROLE = "lfg-role",
     HEARTBEAT_SECONDS = 60,
+    -- Guild messages go out live and, for older add-ons, again under the
+    -- sync prefix: a copy heard within this long is the same message.
+    COPY_SECONDS = 10,
     -- The most characters a note or a free-text purpose holds.
     TEXT_LETTERS = 60,
     -- The largest party a listing can carry: a raid.
@@ -205,6 +208,35 @@ end
 -- The answer to "fill the empty slot?": `yes` posts it.
 function LfgProtocol.Slot(yes)
     return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_SLOT, y = yes == true }
+end
+
+-- A message's contents as one string, so two copies of it (the live one
+-- and the one under the sync prefix) can be told for the same: its fields
+-- in order, nested tables (the members, the open roles) included.
+function LfgProtocol.Fingerprint(message)
+    local function flat(value, depth)
+        if type(value) ~= "table" then
+            return type(value) .. ":" .. tostring(value)
+        end
+        if depth > 3 then
+            return "{...}"
+        end
+        local keys = {}
+        local key
+        for key in pairs(value) do
+            table.insert(keys, key)
+        end
+        table.sort(keys, function(a, b)
+            return tostring(a) < tostring(b)
+        end)
+        local parts = {}
+        local index
+        for index = 1, #keys do
+            parts[index] = tostring(keys[index]) .. "=" .. flat(value[keys[index]], depth + 1)
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+    return flat(message, 0)
 end
 
 -- Why `message` isn't understood ("version 2", "unknown type", or for a

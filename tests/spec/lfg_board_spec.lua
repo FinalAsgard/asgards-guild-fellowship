@@ -398,7 +398,9 @@ local function startDungeon(world, note)
     return page
 end
 
--- How many Guild LFG Board messages wait on `channel`.
+-- How many Guild LFG Board messages wait on `channel`. Each goes out live
+-- and again under the sync prefix for older add-ons; only the live one
+-- counts.
 local function lfgQueued(channel)
     local count = 0
     local index
@@ -406,7 +408,9 @@ local function lfgQueued(channel)
         local queued = channel.queue[index]
         local serializer = queued.from.environment.LibStub.libs["AceSerializer-3.0"]
         local ok, message = serializer:Deserialize(queued.text)
-        if ok and type(message) == "table" and string.sub(tostring(message.t), 1, 4) == "lfg-" then
+        if string.sub(queued.prefix, 1, 7) == "AGFLive" and ok and type(message) == "table"
+            and string.sub(tostring(message.t), 1, 4) == "lfg-"
+        then
             count = count + 1
         end
     end
@@ -669,6 +673,48 @@ local function zoneTree(world)
         return nil
     end
 end
+
+-- Keeps only the messages on `channel` whose prefix starts with `prefix`.
+local function keepPrefix(channel, prefix)
+    local kept = {}
+    local index
+    for index = 1, #channel.queue do
+        if string.sub(channel.queue[index].prefix, 1, #prefix) == prefix then
+            table.insert(kept, channel.queue[index])
+        end
+    end
+    channel.queue = kept
+end
+
+test.test("Forever a listing goes out live, so a sync backlog can't hold it back; older add-ons get a copy", function()
+    local channel = fixtures.newChannel()
+    local tool = login("Forever", channel, "Tool Box")
+    local hammer = login("Forever", channel, "Hammer Smith")
+    fixtures.deliver(channel)
+
+    -- Everything under the sync prefix stuck: the live copy still arrives.
+    startDungeon(tool)
+    keepPrefix(channel, "AGFLive")
+    fixtures.deliver(channel)
+    test.assertEqual(1, #hammer.addon.lfgBoard:Listings(hammer.time))
+
+    -- Only the copy under the sync prefix (all an older add-on hears)
+    -- arrives too, at the next heartbeat.
+    local zap = login("Forever", channel, "Zap Arcane", 30)
+    fixtures.deliver(channel)
+    fixtures.runTimers(tool, 60)
+    fixtures.runTimers(hammer, 60)
+    keepPrefix(channel, "AGFSync")
+    fixtures.deliver(channel)
+    test.assertEqual(1, #zap.addon.lfgBoard:Listings(zap.time))
+
+    -- Both copies of a heartbeat count once.
+    fixtures.runTimers(tool, 60)
+    fixtures.runTimers(hammer, 60)
+    fixtures.deliver(channel)
+    fixtures.slash(hammer, "probe lfg")
+    test.assertContains(table.concat(hammer.messages, "\n"), "Heard: 3, last from Tool Box")
+end)
 
 test.test("Forever Find guildmates lists online guildmates who fit, marking those in a listed group", function()
     local channel = fixtures.newChannel()

@@ -1640,7 +1640,9 @@ if clientProfile.supported then
         local message = lfgWaiting
         lfgWaiting = nil
         local stats = lfgJoin.stats
-        if comm:Broadcast(message, addon.Comm.PRIORITY_NORMAL) then
+        -- Live, as Ask to join is: under the sync prefix, a guild sync's
+        -- backlog holds it back.
+        if comm:BroadcastLive(message) then
             stats.sent = stats.sent + 1
             stats.sentAt = client:Timestamp()
             stats.sentType = message.t
@@ -2341,7 +2343,7 @@ if clientProfile.supported then
             lfgJoin.standInSlot = false
             rosterController:Print("Stand-in slot answered " .. (yes and "Yes" or "No") .. "; nothing was sent.")
         elseif lfgTrigger:SlotAnswered(yes) then
-            comm:Broadcast(addon.LfgProtocol.Slot(yes), addon.Comm.PRIORITY_NORMAL)
+            comm:BroadcastLive(addon.LfgProtocol.Slot(yes))
             if yes then
                 lfgJoin.postSlot()
             end
@@ -2354,7 +2356,7 @@ if clientProfile.supported then
         lfgTrigger:Claim(rosterController:SelfKey())
         local leader = lfgMembers()[1]
         if client:IsInGroup() and leader ~= nil and leader.isPlayer == false then
-            comm:Broadcast(addon.LfgProtocol.Contact(leader.fullName or leader.name), addon.Comm.PRIORITY_NORMAL)
+            comm:BroadcastLive(addon.LfgProtocol.Contact(leader.fullName or leader.name))
         end
         lfgRefresh()
     end
@@ -2656,6 +2658,22 @@ if clientProfile.supported then
     -- Guildmates' listings and their ends; the player's own echo is
     -- ignored.
     onLfgMessage = function(message, sender)
+        -- Guild messages come twice (live, and under the sync prefix for
+        -- older add-ons): the second copy is dropped.
+        local now = client:Timestamp() or 0
+        local fingerprint = tostring(sender) .. "|" .. addon.LfgProtocol.Fingerprint(message)
+        local copies = lfgJoin.copies or {}
+        lfgJoin.copies = copies
+        local seen, at
+        for seen, at in pairs(copies) do
+            if now - at > addon.LfgProtocol.COPY_SECONDS then
+                copies[seen] = nil
+            end
+        end
+        if copies[fingerprint] ~= nil then
+            return
+        end
+        copies[fingerprint] = now
         local senderKey = keyOfSender(sender)
         local stats = lfgJoin.stats
         stats.heard = stats.heard + 1
