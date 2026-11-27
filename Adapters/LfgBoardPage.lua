@@ -125,7 +125,7 @@ Page.__index = Page
 --   party         function() -> { inParty, isLeader, listing? (the party's
 --                 listing on the board, when someone else leads it) }
 --   partyRoles    function() -> the members for Roles in your party, each
---                 { key, name, classToken?, role, isPlayer? }
+--                 { key, name, classToken?, role, isPlayer?, whisper? }
 --   roleChoices   function(member) -> the roles `member` can be set to
 --                 (their class's), or nil
 --   canSetRole    function(member) -> whether the player may set it: the
@@ -455,8 +455,12 @@ function Page:buildEditor(card)
     self.roleRows = {}
     local row
     for row = 1, LfgBoardPage.ROLE_ROWS do
+        -- A dungeon's names pick a role where the player may set it;
+        -- otherwise a name opens the name menu, as everywhere else.
         local line = self:nameButton(editor, LfgBoardPage.ROLE_ROW_HEIGHT, function(clicked)
-            owner:pickRole(clicked, clicked.member)
+            if not (clicked.member and owner:pickRole(clicked, clicked.member)) then
+                owner:nameMenu(clicked)
+            end
         end)
         line:SetWidth(LfgBoardPage.FIELD_WIDTH)
         line:SetPoint("TOPLEFT", editor.rolesLabel, "BOTTOMLEFT", 0,
@@ -687,21 +691,22 @@ function Page:refreshRoles()
             line.member = dungeon and member or false
             line.memberName = member.name
             self:showName(line, { text = colored(member.name, self.options.classColor
-                and self.options.classColor(member.classToken)), role = dungeon and member.role or nil })
+                and self.options.classColor(member.classToken)), role = dungeon and member.role or nil,
+                whisper = member.whisper })
         end
     end
 end
 
 -- Opens the role menu on name `anchor` for party member `member`: the roles
--- their class plays, when the player may set theirs.
+-- their class plays, when the player may set theirs. True when it opened.
 function Page:pickRole(anchor, member)
     local options, owner = self.options, self
     if not member or options.canSetRole == nil or not options.canSetRole(member) then
-        return
+        return false
     end
     local roles = options.roleChoices and options.roleChoices(member) or nil
     if roles == nil or roles[1] == nil then
-        return
+        return false
     end
     local items = {}
     local index
@@ -718,6 +723,7 @@ function Page:pickRole(anchor, member)
     self.roleMenu = self.roleMenu or self.ui:ContextMenu(self.content)
     self.roleMenuFor = nil
     self.roleMenu:Open(anchor, items, member.name)
+    return true
 end
 
 function Page:refreshEditor()
@@ -978,11 +984,12 @@ function Page:openNameMenu(anchor, items)
     menu:Open(anchor, items, anchor.title)
 end
 
--- The menu a name opens: the name, then Whisper.
+-- The menu a name opens: the name, then Whisper (greyed out with no one
+-- to whisper, as on the player's own name).
 function Page:nameMenu(anchor)
     local owner, whisper = self, anchor.whisper
     self:openNameMenu(anchor, {
-        { label = "Whisper", onClick = function()
+        { label = "Whisper", disabled = not whisper, onClick = function()
             owner.nameMenuFor = nil
             if whisper then
                 owner.options.onWhisper(whisper)

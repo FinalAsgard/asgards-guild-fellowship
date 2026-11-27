@@ -2602,6 +2602,9 @@ if clientProfile.supported then
                         classToken = member.classToken,
                         role = member.role,
                         isPlayer = member.isPlayer,
+                        -- Whom the name menu's Whisper whispers (never the
+                        -- player).
+                        whisper = not member.isPlayer and (member.fullName or member.name) or nil,
                     }
                 end
                 return rows

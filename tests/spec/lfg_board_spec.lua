@@ -1229,11 +1229,11 @@ end)
 
 
 test.test("lfg page: Roles in your party shows each role's icon by the name, read-only", function()
-    local page = pageWith({ relevant = {}, alts = {}, other = {} }, {
+    local page, whispered = pageWith({ relevant = {}, alts = {}, other = {} }, {
         partyRoles = function()
             return {
-                { key = "tool", name = "Tool", classToken = "WARRIOR", role = "tank" },
-                { key = "zap", name = "Zap", classToken = "MAGE", role = "dps" },
+                { key = "tool", name = "Tool", classToken = "WARRIOR", role = "tank", isPlayer = true },
+                { key = "zap", name = "Zap", classToken = "MAGE", role = "dps", whisper = "Zap-Camelot" },
             }
         end,
     })
@@ -1244,12 +1244,15 @@ test.test("lfg page: Roles in your party shows each role's icon by the name, rea
     test.assertTrue(tool.roleIcon.shown)
     test.assertEqual("dps", zap.role)
     test.assertFalse(page.roleRows[3].shown)
-    -- Roles are set in the game's party menu: the names open nothing.
-    click(tool)
-    test.assertTrue(page.namesMenu == nil or not page.namesMenu:IsOpen())
+    -- With no role to set here, a name opens the name menu.
+    click(zap)
+    test.assertTrue(page.namesMenu:IsOpen())
+    click(zap)
+    test.assertFalse(page.namesMenu:IsOpen())
     test.assertEqual("ROLES IN YOUR PARTY", page.editor.rolesLabel.text)
 
-    -- Questing shows the party too, by name, with no role icons.
+    -- Questing shows the party too, by name, with no role icons; a name
+    -- opens the name menu, as everywhere.
     click(page.kindSelector.buttons[2])
     test.assertTrue(page.editor.rolesLabel.shown)
     test.assertEqual("YOUR PARTY", page.editor.rolesLabel.text)
@@ -1257,6 +1260,14 @@ test.test("lfg page: Roles in your party shows each role's icon by the name, rea
     test.assertEqual("|cffc79c6eTool|r", tool.name.text)
     test.assertFalse(tool.roleIcon.shown)
     test.assertTrue(zap.shown)
+    click(zap)
+    test.assertTrue(page.namesMenu:IsOpen())
+    test.assertEqual("Whisper", page.namesMenu.rows[1].label.text)
+    click(page.namesMenu.rows[1])
+    test.assertEqual("Zap-Camelot", whispered[1])
+    -- The player's own name: Whisper greyed out.
+    click(tool)
+    test.assertTrue(page.namesMenu.rows[1].disabled)
     -- Raid and Other don't.
     click(page.kindSelector.buttons[3])
     test.assertFalse(page.editor.rolesLabel.shown)
