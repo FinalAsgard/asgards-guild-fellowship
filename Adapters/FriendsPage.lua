@@ -500,7 +500,8 @@ function Page:clickCard(card)
             other:SetSelected(not other.empty and other.playerId == self.selected)
         end
     end
-    self:showPicker(false)
+    -- Leaving Choose a friend without a choice drops a Replace… too.
+    self:ClosePicker()
     self:showDetail()
 end
 
@@ -520,6 +521,8 @@ function Page:mostGroupedMenu(card)
     local owner, entry = self, card.friend
     self.menu:Open(card, {
         { label = "Add as friend", disabled = self.view.full, onClick = function()
+            -- Into an open slot, never one being replaced.
+            owner.replacing = nil
             owner:pick(entry)
         end },
     }, entry and entry.name or nil)
@@ -542,7 +545,8 @@ function Page:toggleFriend(view)
     local header = view.header
     if header.isFriend then
         self.options.onRemove(view.playerId)
-        self:Refresh()
+        -- They stay shown, with or without a card.
+        self:Refresh(view.playerId)
         return
     end
     self.replacing = nil

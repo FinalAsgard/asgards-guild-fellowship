@@ -707,6 +707,15 @@ test.test("agf window: a stepper steps to the next multiple, clamps, repeats whi
     box.scripts.OnEnterPressed(box)
     test.assertEqual(120, stepper:GetValue())
     test.assertEqual("120", box:GetText())
+
+    -- A refresh while a number is being typed leaves what's typed, and
+    -- Enter saves it.
+    rawset(box, "HasFocus", function() return true end)
+    box:SetText("45")
+    stepper:SetValue(120)
+    test.assertEqual("45", box:GetText())
+    box.scripts.OnEnterPressed(box)
+    test.assertEqual(45, stepper:GetValue())
 end)
 
 test.test("agf window: stepping and typed values are pure, and a slider shows its formatted value", function()

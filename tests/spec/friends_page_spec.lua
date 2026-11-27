@@ -362,6 +362,23 @@ test.test("friends page: Most grouped shows its cards with counts, or a hint wit
     test.assertEqual("Cog", world.page.detail.name.text)
 end)
 
+test.test("friends page: leaving Replace… by clicking a card drops it, so Add as friend fills an open slot", function()
+    local world = setup({ "Anvil" })
+    world.most = { world.players.Cog }
+    world.page:Refresh()
+    local menu = world.page.menu
+
+    click(world.page.cards[1], "RightButton")
+    click(menu.rows[1])
+    test.assertTrue(world.page:PickerOpen())
+    -- Back to Anvil's detail without choosing anyone.
+    click(world.page.cards[1])
+    test.assertFalse(world.page:PickerOpen())
+    click(world.page.mostCards[1], "RightButton")
+    click(menu.rows[1])
+    test.assertEqual("add cog", world.calls[1])
+end)
+
 test.test("friends page: right-clicking a Most grouped card offers Add as friend, greyed out when the slots are full", function()
     local world = setup({ "Anvil" })
     world.most = { world.players.Cog }
@@ -525,6 +542,9 @@ test.test("friends page: another player's Grouped tab starts at its first page",
     local world = setup({ "Anvil", "Bolt" })
     world.groupedMore = true
     world.page:Refresh()
+    -- Show more, on the Grouped tab where it shows.
+    click(world.page.detail.tabs.tabs[3])
+    test.assertTrue(world.page.detail.more.shown)
     click(world.page.detail.more)
     test.assertEqual(40, world.shown[#world.shown])
 

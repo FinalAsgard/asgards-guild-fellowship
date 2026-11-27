@@ -162,6 +162,9 @@ function PlayerCards.Small(ui, parent, callbacks)
         else
             card.dot:Show()
         end
+        -- A card that was an empty slot gets an occupied card's fill back.
+        local ok, over = pcall(card.IsMouseOver, card)
+        card:SetFill(ok and over == true and "hover" or "surface")
         card:SetSelected(card.selected)
         card:Show()
     end

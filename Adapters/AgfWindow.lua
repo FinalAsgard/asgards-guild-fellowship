@@ -71,6 +71,8 @@ Window.__index = Window
 --   version       the add-on's version text
 --   loadPosition  function() -> saved { point, relativePoint, x, y } or nil
 --   savePosition  function(position)
+--   onError       optional function(text): tells the player why something
+--                 (ending a mode as the window closes) didn't happen
 function AgfWindow.Create(client, options)
     local window = setmetatable({
         client = client,
@@ -617,6 +619,7 @@ function Window:Open(id, argument)
             end
             self.frame = nil
             self.pages, self.moduleButtons, self.switches, self.colorRows, self.headers = {}, {}, {}, {}, {}
+            self.choiceRows, self.actionRows, self.infoIcons = {}, {}, {}
             return false, failure
         end
     end
@@ -790,7 +793,13 @@ function Window:endModes()
     for id in pairs(self.actionRows) do
         local entry = settings:Entry(id)
         if entry ~= nil and entry.offOnClose and settings:IsActive(id) then
-            settings:Run(id)
+            -- A mode that won't end says why, rather than staying on
+            -- unnoticed.
+            local ended, reason = settings:Run(id)
+            if not ended and self.options.onError ~= nil then
+                self.options.onError("Couldn't end " .. tostring(settings:Label(id)) .. ": "
+                    .. tostring(reason or "it refused") .. ".")
+            end
             self:refreshSwitch(id)
         end
     end

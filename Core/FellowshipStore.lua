@@ -1884,22 +1884,35 @@ function Partition:friendPlayers()
 end
 
 -- Pins character `key`'s player as a Friend. False and why when all the
--- slots are taken or the player is already pinned.
+-- slots are taken or the player is already pinned. Slots are counted by
+-- the keys pinned, so however players are joined or split later, there are
+-- never more Friends than slots. Before counting, a second key of a player
+-- already pinned (left by a merge) is dropped: it's the same Friend, so no
+-- one is lost, and its slot is free again.
 function Partition:AddFriend(key)
     if not isText(key) then
         return false, "that character is not known"
     end
-    local players, count = self:friendPlayers()
+    local players = self:friendPlayers()
     if players[self:friendOwner(key)] then
         return false, "they're already a friend"
     end
-    if count >= FellowshipStore.FRIEND_SLOTS then
+    local kept, seen = {}, {}
+    local pinnedKeys = self:GetFriends()
+    local index
+    for index = 1, #pinnedKeys do
+        local pinned = pinnedKeys[index]
+        local owner = self:friendOwner(pinned)
+        if not seen[owner] then
+            seen[owner] = true
+            table.insert(kept, pinned)
+        end
+    end
+    if #kept >= FellowshipStore.FRIEND_SLOTS then
         return false, "all " .. FellowshipStore.FRIEND_SLOTS .. " friend slots are taken"
     end
-    if type(self.data.friends) ~= "table" then
-        self.data.friends = {}
-    end
-    table.insert(self.data.friends, key)
+    table.insert(kept, key)
+    self.data.friends = kept
     return true
 end
 

@@ -1467,6 +1467,9 @@ if clientProfile.supported then
                 store:SetWindowPosition(key, position)
             end
         end,
+        onError = function(text)
+            rosterController:Print(text)
+        end,
     })
     local function openBoard()
         local opened, failure = agfWindow:Open("lfg")
@@ -2612,7 +2615,20 @@ if clientProfile.supported then
             end,
             onSetRole = function(member, role)
                 if lfgLister() then
-                    lfgJoin.roleChoices[member.key] = role
+                    -- The player's own choice goes under their key in the
+                    -- party (My role may have been opened before they
+                    -- became the lister).
+                    local key = member.key
+                    if member.isPlayer then
+                        local members = lfgMembers()
+                        local index
+                        for index = 1, #members do
+                            if members[index].isPlayer then
+                                key = members[index].key
+                            end
+                        end
+                    end
+                    lfgJoin.roleChoices[key] = role
                     if lfgListing:IsActive() then
                         announceListing()
                     end
@@ -2633,16 +2649,21 @@ if clientProfile.supported then
                 if listing == nil then
                     return nil
                 end
-                local role = lfgJoin.myRole
                 local fullName = client:GetPlayerFullName()
                 local name = fullName and string.match(fullName, "^[^%-]+") or fullName
+                local listed
                 local index
                 for index = 1, #(listing.members or {}) do
-                    if role == nil and listing.members[index].name == name then
-                        role = listing.members[index].role
+                    if listing.members[index].name == name then
+                        listed = listing.members[index].role
                     end
                 end
-                return { role = role, classToken = client:GetPlayerClass() }
+                -- The player's choice shows until the listing has it; after
+                -- that the listing's role does (the lister may change it).
+                if lfgJoin.myRole ~= nil and listed == lfgJoin.myRole then
+                    lfgJoin.myRole = nil
+                end
+                return { role = lfgJoin.myRole or listed, classToken = client:GetPlayerClass() }
             end,
             onSave = saveListing,
             onAskInGuild = function(line)
@@ -4619,11 +4640,32 @@ if clientProfile.supported then
             return fields, partition
         end
         local function change(operation, ...)
-            local _, partition = rosterController:QuietContext()
-            if partition == nil then
+            local guild, partition = rosterController:QuietContext()
+            if guild == nil then
                 return false, "you're not in a guild"
             end
             return partition[operation](partition, ...)
+        end
+        -- A character to pin for `key`'s player: `key` itself while it's in
+        -- the guild, else one of their characters that is. Nil and why when
+        -- the player has none left.
+        local function pinnable(key)
+            local guild, partition = rosterController:QuietContext()
+            if guild == nil then
+                return nil, "you're not in a guild"
+            end
+            if partition:IsInGuild(key) then
+                return key
+            end
+            local character = partition:GetCharacter(key)
+            local keys = character and partition:CharactersOf(character.player) or {}
+            local index
+            for index = 1, #keys do
+                if partition:IsInGuild(keys[index]) then
+                    return keys[index]
+                end
+            end
+            return nil, "they've left the guild"
         end
         friendsUi.page = addon.FriendsPage.Create(content, ui, {
             model = function(selected)
@@ -4643,13 +4685,21 @@ if clientProfile.supported then
                 return fields and addon.FriendsViewModel.Picker(fields) or {}
             end,
             onAdd = function(key)
-                return change("AddFriend", key)
+                local pinned, why = pinnable(key)
+                if pinned == nil then
+                    return false, why
+                end
+                return change("AddFriend", pinned)
             end,
             onRemove = function(playerId)
                 return change("RemoveFriend", playerId)
             end,
             onReplace = function(playerId, key)
-                return change("ReplaceFriend", playerId, key)
+                local pinned, why = pinnable(key)
+                if pinned == nil then
+                    return false, why
+                end
+                return change("ReplaceFriend", playerId, pinned)
             end,
             onError = function(text)
                 rosterController:Print(text)
@@ -4724,10 +4774,12 @@ if clientProfile.supported then
             end
             return key
         end,
+        -- Checked again on the click: they may have left since the menu
+        -- opened.
         onOpen = function(key)
-            local _, partition = rosterController:QuietContext()
-            local character = partition and partition:GetCharacter(key)
-            if character == nil then
+            local guild, partition = rosterController:QuietContext()
+            local character = guild and partition:GetCharacter(key)
+            if character == nil or not partition:IsInGuild(key) then
                 return
             end
             local opened, failure = agfWindow:Open("friends", character.player)

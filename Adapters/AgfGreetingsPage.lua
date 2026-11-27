@@ -468,8 +468,12 @@ function Page:Save()
     self:refreshEditButtons()
     if error ~= nil and self.options.after ~= nil then
         local page = self
+        -- Each refusal clears only its own error, even when the next one
+        -- says the same.
+        self.saveFailures = (self.saveFailures or 0) + 1
+        local failure = self.saveFailures
         self.options.after(AgfGreetingsPage.ERROR_SECONDS, function()
-            if editor:View().error == error then
+            if page.saveFailures == failure and editor:View().error == error then
                 editor:ClearError()
                 page:refreshEditButtons()
             end

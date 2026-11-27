@@ -412,6 +412,11 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     end
 
     function panel.ShowPlayer(_, view)
+        -- Another player starts at the top; the same one (Show more) keeps
+        -- its place.
+        if state.view == nil or state.view.playerId ~= view.playerId then
+            area:SetVerticalScroll(0)
+        end
         state.view, panel.view = view, view
         local header = view.header
         showParts(true)

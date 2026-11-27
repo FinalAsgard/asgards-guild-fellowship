@@ -451,6 +451,10 @@ function UI:Stepper(parent, options)
                 held.wait = held.wait - (elapsed or 0)
                 while held ~= nil and held.wait <= 0 do
                     stepper:Step(held.direction)
+                    -- Stepping can hide the stepper, which ends the hold.
+                    if held == nil then
+                        break
+                    end
                     held.wait = held.wait + Widgets.HOLD_REPEAT
                 end
             end)
@@ -476,7 +480,7 @@ function UI:Stepper(parent, options)
     local function commit()
         local typed = Widgets.TypedValue(box:GetText(), options.min, options.max)
         if typed == nil then
-            stepper:SetValue(stepper.value)
+            box:SetText(tostring(stepper.value))
         else
             -- Shown kept in range even when it's the same value.
             box:SetText(tostring(typed))
@@ -491,9 +495,13 @@ function UI:Stepper(parent, options)
     stepper.plus = button("+", 1)
     stepper.plus:SetPoint("LEFT", stepper.field, "RIGHT", Theme.SPACING.xs, 0)
     stepper:SetScript("OnHide", stop)
+    -- A number being typed stays until the player finishes it.
     function stepper.SetValue(_, value)
         stepper.value = value
-        box:SetText(tostring(value))
+        local ok, focused = pcall(box.HasFocus, box)
+        if not (ok and focused == true) then
+            box:SetText(tostring(value))
+        end
     end
     function stepper.GetValue()
         return stepper.value

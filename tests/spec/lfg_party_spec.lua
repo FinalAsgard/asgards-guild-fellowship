@@ -45,6 +45,15 @@ test.test("lfg trigger: a party formed by my invite asks what it's for; a solo l
     test.assertFalse(trigger:Asking())
 end)
 
+test.test("lfg trigger: turning Auto-list off drops a waiting purpose question, so an outsider asks nothing", function()
+    local trigger = newTrigger()
+    trigger:Observe(SOLO, 0)
+    test.assertEqual("ask", names(trigger:Observe(party({ isLeader = true, leaderKey = "me" }), 0)))
+    test.assertEqual("", names(trigger:Observe(party({ isLeader = true, leaderKey = "me", autoList = false,
+        outsiders = 1 }), 1)))
+    test.assertFalse(trigger:Asking())
+end)
+
 test.test("lfg trigger: joining someone else's party ends a solo listing, and asks nothing", function()
     local trigger = newTrigger()
     trigger:Observe(SOLO, 0)
@@ -1889,9 +1898,11 @@ test.test("lfg listing: the Ask in guild line ends with the listing's note, shor
     fields.no = ""
     test.assertEqual("LF 1 more for Ony first, whisper me!", LfgListing.GuildLine(fields))
     -- Letters of several bytes each: the note is cut at a whole letter.
-    fields.no = string.rep("\226\130\172", 60)
+    fields.no = string.rep("\226\130\172", 80)
     local line = LfgListing.GuildLine(fields)
     test.assertTrue(#line <= LfgListing.CHAT_BYTES)
+    -- Long enough that it was cut.
+    test.assertTrue(#line < #"LF 1 more for Ony first, whisper me! Note: " + 80 * 3)
     test.assertContains(line, "whisper me! Note: \226\130\172")
     test.assertEqual(0, (#line - #"LF 1 more for Ony first, whisper me! Note: ") % 3)
     -- Nobody needed: still no line, note or not.

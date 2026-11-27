@@ -648,6 +648,24 @@ test.test("friend slots: keys follow their player, and two of one player's keys 
     test.assertEqual(1, #partition:GetFriends())
 end)
 
+test.test("friend slots: a merge frees a slot, and Friends never outnumber the slots", function()
+    local partition = withCharacters({ "a1", "a2", "a3", "a4", "a5", "a6" })
+    local index
+    for index = 1, 5 do
+        test.assertTrue(partition:AddFriend("a" .. index))
+    end
+    -- a2 joins a1's player: one Friend, so a slot opens; a2's pin goes.
+    partition:JoinPlayerOf("a2", "a1", "manual")
+    test.assertTrue(partition:AddFriend("a6"))
+    local keys = partition:GetFriends()
+    test.assertEqual(5, #keys)
+    test.assertEqual("a1,a3,a4,a5,a6", table.concat(keys, ","))
+    -- Five keys: however players are split later, at most five Friends.
+    local added, why = partition:AddFriend("a2")
+    test.assertFalse(added)
+    test.assertContains(why, "already")
+end)
+
 test.test("friend slots: unusable saved data reads as none, and bad entries are skipped", function()
     local partition, data = withCharacters({ "anvil" })
     data.friends = "anvil"

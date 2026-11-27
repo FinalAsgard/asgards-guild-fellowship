@@ -220,6 +220,11 @@ function Trigger:Observe(facts, now)
     elseif facts.guildLed == false and not facts.isLeader then
         self:succeed(facts, before, listed, act, ask)
     end
+    -- Auto-list turned off drops a question still waiting about what the
+    -- party's for.
+    if facts.autoList ~= true and self.asking == "purpose" then
+        self.asking = nil
+    end
     -- Someone outside the guild joined while the player was being asked
     -- what the party's for: they're asked whether to list it at all.
     if before.inGroup and gated and self.asking == "purpose" then
