@@ -196,11 +196,26 @@ test.test("roster page: clicking a card selects it and shows that player", funct
     test.assertEqual("Player003", world.page.detail.name.text)
 end)
 
-test.test("roster page: Whisper on the panel whispers the online player", function()
+test.test("roster page: the ⋯ menu's Whisper and Invite reach the online player", function()
     local world = setup(3, 1)
-    click(world.page.detail.whisper)
+    -- No buttons for them on the panel itself.
+    test.assertFalse(world.page.detail.whisper.shown)
+    test.assertFalse(world.page.detail.invite.shown)
+    click(world.page.detail.actions)
+    click(world.page.menu.rows[1])
 
     test.assertEqual("whisper Player001", world.calls[1])
+end)
+
+test.test("roster page: Whisper and Invite are greyed out for an offline player", function()
+    local world = setup(3, 1)
+    world.page:Refresh(2)
+    click(world.page.detail.actions)
+
+    test.assertTrue(world.page.menu.rows[1].disabled)
+    test.assertTrue(world.page.menu.rows[2].disabled)
+    click(world.page.menu.rows[1])
+    test.assertEqual(0, #world.calls)
 end)
 
 test.test("roster page: the header shows the counts and the sync time, and Rescan rescans", function()
@@ -423,28 +438,32 @@ test.test("roster page: the picker stays over the panel when the roster changes"
     test.assertTrue(world.page.detail.shown)
 end)
 
-test.test("roster page: the ⋯ menu offers Set alias..., Set Discord... and Merge into player...", function()
+test.test("roster page: the ⋯ menu offers Whisper, Invite, Set alias..., Set Discord... and Merge into player...", function()
     local world = setup(3, 1)
     local actions = world.page.detail.actions
 
     test.assertTrue(actions.shown)
     click(actions)
-    test.assertEqual("Set alias..., Set Discord..., Merge into player...", menuLabels(world))
-    click(world.page.menu.rows[3])
+    test.assertEqual("Whisper, Invite, Set alias..., Set Discord..., Merge into player...", menuLabels(world))
+    click(world.page.menu.rows[5])
     test.assertEqual("Merge into player", world.page.picker.title.text)
 end)
 
-test.test("roster page: someone else's player has no ⋯ and no Edit for a member", function()
+test.test("roster page: on someone else's player, a member's ⋯ has only Whisper and Invite, and there's no Edit", function()
     local world = setup(3, 1)
     world.member = true
     world.page:Refresh(2)
 
-    test.assertFalse(world.page.detail.actions.shown)
+    test.assertTrue(world.page.detail.actions.shown)
+    click(world.page.detail.actions)
+    test.assertEqual("Whisper, Invite", menuLabels(world))
+    world.page.menu:Close()
     world.page.detail:ShowTab("bio")
     test.assertEqual(0, #world.page.detail.edits)
 
     world.page:Refresh(1)
-    test.assertTrue(world.page.detail.actions.shown)
+    click(world.page.detail.actions)
+    test.assertEqual("Whisper, Invite, Set alias..., Set Discord..., Merge into player...", menuLabels(world))
 end)
 
 test.test("roster page: a card shows its tag after the name", function()
@@ -539,4 +558,22 @@ test.test("roster page: a roster update leaves the list where it's scrolled to",
 
     test.assertEqual(offset, world.page.list:Offset())
     test.assertEqual(1, world.page:Selected())
+end)
+
+test.test("roster page: under Online only, a player who logs off keeps their card until the list is sorted again", function()
+    local world = setup(3, 3)
+    world.flat = true
+    click(world.page.onlineSwitch)
+    world.players[2].online = false
+    table.insert(world.players, { playerId = 4, name = "Player004", online = false })
+    table.insert(world.players, { playerId = 5, name = "Player005", online = true })
+    world.page:Update()
+
+    -- Player002 stays where they were, now offline; only the new online
+    -- player is added.
+    test.assertEqual("Player001, Player002, Player003, Player005", cardOrder(world))
+    test.assertFalse(cardNamed(world, "Player002").entry.online)
+
+    world.page:Refresh()
+    test.assertEqual("Player001, Player003, Player005", cardOrder(world))
 end)

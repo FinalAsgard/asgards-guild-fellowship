@@ -1721,15 +1721,15 @@ test.test("roster: an officer's menus offer every organizing action", function()
     -- The ⋯ menu: Merge is offered only to a player that's just its main.
     test.assertTrue(page.detail.actions.shown)
     page.detail.actions.scripts.OnClick(page.detail.actions)
-    test.assertEqual("Set alias..., Set Discord...", menuLabels(page))
+    test.assertEqual("Whisper, Invite, Set alias..., Set Discord...", menuLabels(page))
     page.menu:Close()
     local zap = rosterCard(page, "Zap Arcane")
     zap.scripts.OnClick(zap, "LeftButton")
     page.detail.actions.scripts.OnClick(page.detail.actions)
-    test.assertEqual("Set alias..., Set Discord..., Merge into player...", menuLabels(page))
+    test.assertEqual("Whisper, Invite, Set alias..., Set Discord..., Merge into player...", menuLabels(page))
 
     -- Set alias... asks in a prompt, and the card takes the alias.
-    page.menu.rows[1].scripts.OnClick(page.menu.rows[1])
+    page.menu.rows[3].scripts.OnClick(page.menu.rows[3])
     test.assertTrue(page.prompt:IsOpen())
     page.prompt.single:SetValue("Sparky")
     page.prompt.save.scripts.OnClick(page.prompt.save)
@@ -1737,7 +1737,7 @@ test.test("roster: an officer's menus offer every organizing action", function()
 
     -- Merge into player... picks from a searchable list.
     page.detail.actions.scripts.OnClick(page.detail.actions)
-    page.menu.rows[3].scripts.OnClick(page.menu.rows[3])
+    page.menu.rows[5].scripts.OnClick(page.menu.rows[5])
     test.assertTrue(page:PickerOpen())
     test.assertEqual("Merge into player", page.picker.title.text)
     local box = page.picker.search.box
@@ -1770,7 +1770,9 @@ test.test("roster: a member is offered only what they may do to their own player
     zapCharacter.scripts.OnClick(zapCharacter, "RightButton")
     test.assertEqual("View player...", menuLabels(page))
     page.menu:Close()
-    test.assertFalse(page.detail.actions.shown)
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    test.assertEqual("Whisper, Invite", menuLabels(page))
+    page.menu:Close()
     page.detail:ShowTab("bio")
     test.assertFalse(page.detail.edits[1] ~= nil and page.detail.edits[1].shown)
 
@@ -1789,8 +1791,8 @@ test.test("roster: a member is offered only what they may do to their own player
     -- Set Discord... on their own player sends a suggestion to the officers.
     test.assertTrue(page.detail.actions.shown)
     page.detail.actions.scripts.OnClick(page.detail.actions)
-    test.assertEqual("Set alias..., Set Discord...", menuLabels(page))
-    page.menu.rows[2].scripts.OnClick(page.menu.rows[2])
+    test.assertEqual("Whisper, Invite, Set alias..., Set Discord...", menuLabels(page))
+    page.menu.rows[4].scripts.OnClick(page.menu.rows[4])
     page.prompt.single:SetValue("hammer#1")
     page.prompt.save.scripts.OnClick(page.prompt.save)
     test.assertEqual(1, addon.syncSession:Status().pending)

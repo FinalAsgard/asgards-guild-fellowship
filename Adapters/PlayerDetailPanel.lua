@@ -96,9 +96,10 @@ end
 --   formatDate      function(at) -> text, for the Grouped tab's dates
 --   onCharacterMenu function(card, character, view): a right click on a
 --                   Characters tab card (optional; without it, no menu)
---   onActions       function(button, view): the ⋯ button left of the star,
---                   shown while view.canEdit is true (optional; without
---                   it, there's no button)
+--   onActions       function(button, view): the ⋯ button left of the star
+--                   (optional; without it, there's no button). The owner's
+--                   menu holds Whisper and Invite, so the panel then has
+--                   no buttons for them.
 --   onEditProfile   function(field, view): Edit by the Bio tab's Location
 --                   or Bio heading ("location" or "bio"), shown while
 --                   view.canEdit is true
@@ -198,6 +199,13 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         box.value:SetWordWrap(false)
         panel.tiles[index] = box
     end
+    -- The tiles sit under Whisper and Invite, or under the sub line when
+    -- the ⋯ menu has them instead.
+    local tilesUnder = callbacks.onActions ~= nil and panel.sub or panel.whisper
+    if callbacks.onActions ~= nil then
+        panel.whisper:Hide()
+        panel.invite:Hide()
+    end
     -- Each tile takes a quarter of the width.
     local function layoutTiles(width)
         local gap = Theme.SPACING.s
@@ -207,7 +215,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         for tileIndex = 1, #panel.tiles do
             local box = panel.tiles[tileIndex]
             box:ClearAllPoints()
-            box:SetPoint("TOPLEFT", panel.whisper, "BOTTOMLEFT", (tileIndex - 1) * (tileWidth + gap), -Theme.SPACING.m)
+            box:SetPoint("TOPLEFT", tilesUnder, "BOTTOMLEFT", (tileIndex - 1) * (tileWidth + gap), -Theme.SPACING.m)
             box:SetWidth(tileWidth)
         end
     end
@@ -452,9 +460,12 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     panel.hint:SetWordWrap(true)
 
     local function showParts(shown)
-        local parts = { panel.name, panel.sub, panel.star, panel.whisper, panel.invite, panel.tabs, panel.area }
+        local parts = { panel.name, panel.sub, panel.star, panel.tabs, panel.area }
         if callbacks.onActions ~= nil then
             table.insert(parts, panel.actions)
+        else
+            table.insert(parts, panel.whisper)
+            table.insert(parts, panel.invite)
         end
         local partIndex
         for partIndex = 1, #parts do
@@ -482,9 +493,6 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         setShown(panel.badge, badge ~= nil)
         setShown(panel.badgeStar, badge ~= nil)
         panel.sub:SetText(subLine(header))
-        if callbacks.onActions ~= nil then
-            setShown(panel.actions, view.canEdit == true)
-        end
         panel.hint:SetText("")
         panel.whisper:SetActive(header.target ~= nil)
         panel.invite:SetActive(header.target ~= nil)

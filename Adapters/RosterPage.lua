@@ -9,7 +9,7 @@ local _, addon = ...
 -- smoothly. The cards are the Friends page's (PlayerCards).
 --
 -- The right side shows the selected player in the shared player detail
--- panel (PlayerDetailPanel), with Whisper, Invite and the Friend star.
+-- panel (PlayerDetailPanel), with the Friend star and a ⋯ menu.
 --
 -- Right-clicking a player card, or a character card in the panel's
 -- Characters tab, opens the old roster's organizing actions for it
@@ -425,7 +425,8 @@ function Page:rebuild(focus, keepOrder)
         search = self.query,
         sort = self.sort,
         rank = self.rank,
-        onlineOnly = self.onlineOnly,
+        -- An update keeps the cards of players who went offline (keepOrder).
+        onlineOnly = self.onlineOnly and not keepOrder,
     })
     if self.view == nil then
         self.view = { rows = {}, cards = {}, ranks = {}, header = "", sync = "" }
@@ -453,7 +454,9 @@ function Page:rebuild(focus, keepOrder)
 end
 
 -- Puts the new view's cards back in the order shown before, under each
--- section's label, with players new to the list after the rest.
+-- section's label, with players new to the list after the rest. Under
+-- Online only, a player who went offline keeps their card, and only those
+-- online are new.
 function Page:keepOrder()
     local view, before = self.view, {}
     local index
@@ -468,7 +471,9 @@ function Page:keepOrder()
             current = { label = row.kind == "section" and row or nil, cards = {} }
             table.insert(sections, current)
         end
-        if row.kind ~= "section" then
+        if row.kind ~= "section"
+            and (before[row.playerId] ~= nil or not self.onlineOnly or row.online)
+        then
             table.insert(current.cards, row)
         end
     end
@@ -491,8 +496,8 @@ function Page:keepOrder()
             end
             return position[a] < position[b]
         end)
-        if section.label ~= nil then
-            table.insert(rows, section.label)
+        if section.label ~= nil and section.cards[1] ~= nil then
+            table.insert(rows, { kind = "section", text = section.label.text, count = #section.cards })
         end
         for index = 1, #section.cards do
             table.insert(rows, section.cards[index])
@@ -501,6 +506,9 @@ function Page:keepOrder()
     end
     view.rows, view.cards = rows, cards
     view.default = cards[1] and cards[1].playerId or nil
+    if rowOf(view, view.selected) == nil then
+        view.selected = nil
+    end
 end
 
 -- Builds the page again from saved data and the roster (see rebuild), and
@@ -606,24 +614,32 @@ function Page:openMenu(anchor, target, title)
     self.menu:Open(anchor, items, title)
 end
 
--- The ⋯ menu: Set alias..., Set Discord... and Merge into player..., for a
--- player the user may change (Merge only while it's just the main).
+-- The ⋯ menu: Whisper and Invite (greyed out while the player is
+-- offline), then, for a player the user may change, Set alias..., Set
+-- Discord... and Merge into player... (Merge only while it's just the
+-- main).
 function Page:actionsMenu(anchor, view)
     local panel = view.panel or {}
     local main, name = panel.main, view.header and view.header.name
-    if not view.canEdit then
-        return
-    end
+    local target = view.header and view.header.target or nil
     local owner = self
     local items = {
-        { label = "Set alias...", onClick = function()
-            owner:run({ action = "alias", key = main }, name)
+        { label = "Whisper", disabled = target == nil, onClick = function()
+            owner:call("onWhisper", target)
         end },
-        { label = "Set Discord...", onClick = function()
-            owner:run({ action = "discord", key = main, current = panel.discord }, name)
+        { label = "Invite", disabled = target == nil, onClick = function()
+            owner:call("onInvite", target)
         end },
     }
-    if panel.canMerge then
+    if view.canEdit then
+        table.insert(items, { label = "Set alias...", onClick = function()
+            owner:run({ action = "alias", key = main }, name)
+        end })
+        table.insert(items, { label = "Set Discord...", onClick = function()
+            owner:run({ action = "discord", key = main, current = panel.discord }, name)
+        end })
+    end
+    if view.canEdit and panel.canMerge then
         table.insert(items, { label = "Merge into player...", onClick = function()
             owner:run({ action = "merge", key = main }, name)
         end })
