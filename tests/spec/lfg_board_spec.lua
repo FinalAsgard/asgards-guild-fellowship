@@ -1584,9 +1584,9 @@ test.test("greetings: Insert chips and More put placeholders in, and the preview
     test.assertEqual("Hi {name}!", box:GetText())
     test.assertEqual(9, rawget(box, "cursor"))
     -- The preview fills it in with the user's own name.
-    local _, _, normalizer = addon.rosterController:QuietContext()
-    local names = addon.guildGreet:Names(normalizer:Key(addon.client:GetPlayerFullName()),
-        addon.client:GetPlayerFullName())
+    local _, partition = addon.rosterController:QuietContext()
+    local selfKey = addon.rosterController:SelfKey()
+    local names = addon.guildGreet:Names(selfKey, partition:GetCharacter(selfKey).name)
     test.assertEqual("Preview: Hi " .. names.name .. "!", edit.preview.text)
 
     -- More offers the rare four and the note.
@@ -1602,6 +1602,29 @@ test.test("greetings: Insert chips and More put placeholders in, and the preview
     click(menu.rows[3])
     test.assertEqual("{characterFirst}Hi {name}!", box:GetText())
     test.assertEqual("Preview: " .. names.characterfirst .. "Hi " .. names.name .. "!", edit.preview.text)
+end)
+
+test.test("greetings: the preview uses the user's own alias and main, on an alt", function()
+    local profile
+    for _, profile in ipairs(fixtures.PROFILES) do
+        local world, addon = login(profile, fixtures.newChannel(), "Bolt Smith")
+        fakeFrames.install(world.environment)
+        local _, partition, normalizer = addon.rosterController:QuietContext()
+        local playerId = addon.PlayerService.Create(partition, { normalizer = normalizer })
+            :PlayerOf(addon.rosterController:SelfKey())
+        partition:SetAlias(playerId, "Hammy", "self")
+        test.assertTrue(addon.agfWindow:Open("greetings"))
+        local page = addon.greetingsPage
+        click(page.add)
+        local box = page.edit.input.box
+        box:SetText("{name} {main} {character}")
+        box.scripts.OnTextChanged(box, true)
+        -- Retail's one-word names don't link the fixture's ">Hammer Smith"
+        -- note, so there Bolt is their own main.
+        local main = profile == "Retail" and "Bolt Smith" or "Hammer Smith"
+        test.assertEqual("Preview: Hammy " .. normalizer:Display(main) .. " "
+            .. normalizer:Display("Bolt Smith"), page.edit.preview.text, profile)
+    end
 end)
 
 -- Friends -----------------------------------------------------------------------
