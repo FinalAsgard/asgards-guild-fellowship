@@ -19,6 +19,9 @@ local Widgets = {
     TOGGLE_WIDTH = 34,
     TOGGLE_HEIGHT = 18,
     INPUT_HEIGHT = 26,
+    -- A text prompt, and its multiline field.
+    PROMPT_WIDTH = 360,
+    PROMPT_MULTILINE_HEIGHT = 96,
     DOT_SIZE = 6,
     INFO_SIZE = 16,
     -- A stepper's buttons and number, and how holding a button repeats:
@@ -1093,6 +1096,124 @@ function UI:TextInput(parent, width, maxLetters, onChange, options)
     end)
     field.counter:SetText("0/" .. maxLetters)
     return field
+end
+
+-- A small dialog over everything that asks for one piece of text: a title,
+-- a field, and Save and Cancel. Open(options) shows it:
+--   title      what's asked ("Alias for Toolbox")
+--   text       what the field starts with
+--   maxLetters the most characters it holds
+--   maxBytes   the most bytes, for a multiline field (an accented letter
+--              takes two)
+--   multiline  true for a taller field that keeps line breaks (a bio)
+--   onSave     function(text): Save, or Enter in a one-line field
+-- A click outside it, Cancel or Escape closes it without saving. Close(),
+-- IsOpen() and Save() (as the button does) are there for its owner.
+function UI:TextPrompt(parent)
+    local screen = self.environment.UIParent or parent
+    local pad = Theme.SPACING.l
+    local width = Widgets.PROMPT_WIDTH
+    local prompt = self:Panel(screen, { fill = "raised" })
+    prompt:SetFrameStrata("FULLSCREEN_DIALOG")
+    prompt:SetWidth(width)
+    prompt:SetPoint("CENTER", screen, "CENTER", 0, 80)
+    prompt:EnableMouse(true)
+    prompt:Hide()
+    local catcher = self:frame("Button", screen)
+    catcher:SetAllPoints(screen)
+    catcher:SetFrameStrata("FULLSCREEN_DIALOG")
+    catcher:RegisterForClicks("AnyDown")
+    catcher:SetScript("OnClick", function()
+        prompt:Close()
+    end)
+    catcher:Hide()
+    prompt.catcher = catcher
+    prompt:SetScript("OnHide", function()
+        prompt.open = false
+        catcher:Hide()
+    end)
+    if parent ~= screen and type(parent.HookScript) == "function" then
+        parent:HookScript("OnHide", function()
+            prompt:Hide()
+        end)
+    end
+    prompt.title = self:Text(prompt, "", "semibold", "title", "text")
+    prompt.title:SetPoint("TOPLEFT", prompt, "TOPLEFT", pad, -pad)
+    prompt.title:SetPoint("RIGHT", prompt, "RIGHT", -pad, 0)
+    prompt.title:SetJustifyH("LEFT")
+    prompt.single = self:field(prompt, width - 2 * pad)
+    prompt.multi = self:field(prompt, width - 2 * pad)
+    prompt.multi:SetHeight(Widgets.PROMPT_MULTILINE_HEIGHT)
+    prompt.multi.box:SetMultiLine(true)
+    prompt.multi.box:ClearAllPoints()
+    prompt.multi.box:SetPoint("TOPLEFT", prompt.multi, "TOPLEFT", Theme.SPACING.s, -5)
+    prompt.multi.box:SetPoint("BOTTOMRIGHT", prompt.multi, "BOTTOMRIGHT", -Theme.SPACING.s, 5)
+    local _, field
+    for _, field in ipairs({ prompt.single, prompt.multi }) do
+        field:SetPoint("TOPLEFT", prompt.title, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+        field.box:SetScript("OnEscapePressed", function()
+            prompt:Close()
+        end)
+    end
+    prompt.single.box:SetScript("OnEnterPressed", function()
+        prompt:Save()
+    end)
+    prompt.save = self:Button(prompt, "Save", "primary", function()
+        prompt:Save()
+    end)
+    prompt.save:SetWidth(90)
+    prompt.save:SetPoint("BOTTOMRIGHT", prompt, "BOTTOMRIGHT", -pad, pad)
+    prompt.cancel = self:Button(prompt, "Cancel", "secondary", function()
+        prompt:Close()
+    end)
+    prompt.cancel:SetWidth(90)
+    prompt.cancel:SetPoint("RIGHT", prompt.save, "LEFT", -Theme.SPACING.s, 0)
+
+    function prompt.Open(_, options)
+        prompt.options = options
+        prompt.title:SetText(options.title or "")
+        local shown = options.multiline and prompt.multi or prompt.single
+        local hidden = options.multiline and prompt.single or prompt.multi
+        hidden:Hide()
+        shown:Show()
+        prompt.field = shown
+        shown.box:SetMaxLetters(options.maxLetters or 0)
+        if options.maxBytes ~= nil then
+            -- The game's cap counts the terminating zero.
+            shown.box:SetMaxBytes(options.maxBytes + 1)
+        end
+        shown:SetValue(options.text or "")
+        local fieldHeight = options.multiline and Widgets.PROMPT_MULTILINE_HEIGHT or Widgets.INPUT_HEIGHT
+        prompt:SetHeight(2 * pad + 22 + Theme.SPACING.m + fieldHeight + Theme.SPACING.l + Widgets.BUTTON_HEIGHT)
+        prompt.open = true
+        catcher:SetFrameLevel(Widgets.MENU_LEVEL - 1)
+        prompt:SetFrameLevel(Widgets.MENU_LEVEL)
+        catcher:Show()
+        prompt:Show()
+        if type(prompt.Raise) == "function" then
+            prompt:Raise()
+        end
+        shown.box:SetFocus()
+        if type(shown.box.HighlightText) == "function" then
+            shown.box:HighlightText()
+        end
+    end
+    function prompt.Save()
+        local options, field = prompt.options, prompt.field
+        prompt:Close()
+        if options ~= nil and field ~= nil and options.onSave ~= nil then
+            options.onSave(field:GetValue())
+        end
+    end
+    function prompt.Close()
+        prompt.open = false
+        catcher:Hide()
+        prompt:Hide()
+    end
+    function prompt.IsOpen()
+        return prompt.open == true
+    end
+    return prompt
 end
 
 -- Signals -------------------------------------------------------------------

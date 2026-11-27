@@ -26,6 +26,11 @@ local PlayerDetailPanel = {
     THEIRS_COLOR = "ffd9b038",
     LINE_HEIGHT = 18,
     PARTY_MEMBER_HEIGHT = 16,
+    -- The ⋯ actions button, and the Bio tab's Edit buttons.
+    ACTIONS = "•••",
+    ACTIONS_WIDTH = 32,
+    EDIT = "Edit",
+    EDIT_WIDTH = 44,
     TABS = {
         { id = "characters", label = "Characters" },
         { id = "bio", label = "Bio" },
@@ -89,6 +94,14 @@ end
 --   onMoreGrouped   function(view): Show more on the Grouped tab; the
 --                   owner shows the view again with another page
 --   formatDate      function(at) -> text, for the Grouped tab's dates
+--   onCharacterMenu function(card, character, view): a right click on a
+--                   Characters tab card (optional; without it, no menu)
+--   onActions       function(button, view): the ⋯ button left of the star,
+--                   shown while view.canEdit is true (optional; without
+--                   it, there's no button)
+--   onEditProfile   function(field, view): Edit by the Bio tab's Location
+--                   or Bio heading ("location" or "bio"), shown while
+--                   view.canEdit is true
 -- ShowPlayer(view) fills and shows it; ShowEmpty(text) shows only `text`.
 function PlayerDetailPanel.Create(ui, parent, callbacks)
     callbacks = callbacks or {}
@@ -142,6 +155,14 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         end
     end)
     panel.star:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -pad, -pad)
+    if callbacks.onActions ~= nil then
+        panel.actions = ui:TextButton(panel, PlayerDetailPanel.ACTIONS, PlayerDetailPanel.ACTIONS_WIDTH, function(button)
+            if state.view ~= nil then
+                callbacks.onActions(button, state.view)
+            end
+        end)
+        panel.actions:SetPoint("RIGHT", panel.star, "LEFT", -Theme.SPACING.xs, 0)
+    end
     -- Gold for a Friend, grey to add one, dim when every slot is taken.
     local function tintStar(hovered)
         local header = state.view and state.view.header or {}
@@ -222,7 +243,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         end
     end)
     panel.area, panel.list = area, list
-    panel.characterCards, panel.lines, panel.parties = {}, {}, {}
+    panel.characterCards, panel.lines, panel.parties, panel.edits = {}, {}, {}, {}
     panel.more = ui:Button(list, "Show more", "secondary", function()
         if state.view ~= nil and callbacks.onMoreGrouped ~= nil then
             callbacks.onMoreGrouped(state.view)
@@ -255,10 +276,31 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     local function characterCard(index)
         local card = panel.characterCards[index]
         if card == nil then
-            card = addon.PlayerCards.Character(ui, list)
+            local onRightClick
+            if callbacks.onCharacterMenu ~= nil then
+                onRightClick = function(clicked)
+                    if state.view ~= nil and clicked.fields ~= nil then
+                        callbacks.onCharacterMenu(clicked, clicked.fields, state.view)
+                    end
+                end
+            end
+            card = addon.PlayerCards.Character(ui, list, onRightClick)
             panel.characterCards[index] = card
         end
         return card
+    end
+    -- The Edit button for Bio heading `index`, made on first use.
+    local function editButton(index)
+        local button = panel.edits[index]
+        if button == nil then
+            button = ui:TextButton(list, PlayerDetailPanel.EDIT, PlayerDetailPanel.EDIT_WIDTH, function(self)
+                if state.view ~= nil and callbacks.onEditProfile ~= nil then
+                    callbacks.onEditProfile(self.field, state.view)
+                end
+            end)
+            panel.edits[index] = button
+        end
+        return button
     end
     -- A Grouped party: its date and dungeon or "Party", then its members.
     local function partyRow(index)
@@ -285,8 +327,8 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
 
     -- Bio and Log rows: section headings, lines, history entries and empty
     -- states.
-    local function textRows(rows, top)
-        local used = 0
+    local function textRows(rows, top, editable)
+        local used, edits = 0, 0
         local rowIndex
         for rowIndex = 1, #(rows or {}) do
             local row = rows[rowIndex]
@@ -314,6 +356,15 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
             text:SetText(words)
             text.kind = row.kind
             place(text, top, PlayerDetailPanel.LINE_HEIGHT)
+            if editable and row.kind == "section" and row.field ~= nil then
+                edits = edits + 1
+                local button = editButton(edits)
+                button.field = row.field
+                button:ClearAllPoints()
+                button:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+                button:SetPoint("TOP", text, "TOP", 0, 2)
+                button:Show()
+            end
             top = top + PlayerDetailPanel.LINE_HEIGHT
         end
         return top
@@ -324,6 +375,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         hideAll(panel.characterCards)
         hideAll(panel.lines)
         hideAll(panel.parties)
+        hideAll(panel.edits)
         panel.more:Hide()
         local view = state.view
         if view == nil then
@@ -340,7 +392,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
                 top = top + addon.PlayerCards.CHARACTER_HEIGHT + Theme.SPACING.xs
             end
         elseif panel.tab == "bio" then
-            top = textRows(view.bioRows, top)
+            top = textRows(view.bioRows, top, view.canEdit == true and callbacks.onEditProfile ~= nil)
         elseif panel.tab == "grouped" then
             local grouped = view.grouped or { parties = {} }
             if grouped.parties[1] == nil then
@@ -401,6 +453,9 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
 
     local function showParts(shown)
         local parts = { panel.name, panel.sub, panel.star, panel.whisper, panel.invite, panel.tabs, panel.area }
+        if callbacks.onActions ~= nil then
+            table.insert(parts, panel.actions)
+        end
         local partIndex
         for partIndex = 1, #parts do
             setShown(parts[partIndex], shown)
@@ -427,6 +482,9 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         setShown(panel.badge, badge ~= nil)
         setShown(panel.badgeStar, badge ~= nil)
         panel.sub:SetText(subLine(header))
+        if callbacks.onActions ~= nil then
+            setShown(panel.actions, view.canEdit == true)
+        end
         panel.hint:SetText("")
         panel.whisper:SetActive(header.target ~= nil)
         panel.invite:SetActive(header.target ~= nil)

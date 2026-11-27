@@ -211,11 +211,20 @@ end
 
 -- A character card on `parent`: the initial on a rounded tile, the name in
 -- class color with a MAIN badge for the main, "Level 60 Dwarf Warrior",
--- the status, and the roles on the right. ShowCharacter(fields) fills and
+-- status, and the roles on the right. ShowCharacter(fields) fills and
 -- shows it: name, color ("ffrrggbb"), isMain, level, race, className,
--- status, roles (text).
-function PlayerCards.Character(ui, parent)
-    local card = ui:frame("Frame", parent)
+-- status, roles (text). Given `onRightClick` (function(card)), a right
+-- click on the card calls it; `card.fields` holds what it shows.
+function PlayerCards.Character(ui, parent, onRightClick)
+    local card = ui:frame(onRightClick ~= nil and "Button" or "Frame", parent)
+    if onRightClick ~= nil then
+        card:RegisterForClicks("RightButtonUp")
+        card:SetScript("OnClick", function(self, button)
+            if button == "RightButton" then
+                onRightClick(self)
+            end
+        end)
+    end
     card:SetHeight(PlayerCards.CHARACTER_HEIGHT)
     ui:Round(card, Theme.RADIUS.card, "surface", "border")
     local pad = Theme.SPACING.s
@@ -243,6 +252,7 @@ function PlayerCards.Character(ui, parent)
     card.roles:SetJustifyH("RIGHT")
 
     function card.ShowCharacter(_, fields)
+        card.fields = fields
         local initial = PlayerCards.Initial(fields.name)
         card.initial:SetText(colored(initial, fields.color))
         card.name:SetText(colored(fields.name or "", fields.color))

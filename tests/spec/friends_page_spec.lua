@@ -574,3 +574,9 @@ test.test("friends page: opened on a player with no card, none is selected and t
     world.page:Refresh("nobody")
     test.assertEqual(nil, world.page:Selected())
 end)
+
+test.test("friends page: the player panel has no ⋯ actions button", function()
+    local world = setup({ "Anvil" })
+
+    test.assertEqual(nil, rawget(world.page.detail, "actions"))
+end)
