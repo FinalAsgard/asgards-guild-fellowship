@@ -2676,23 +2676,28 @@ if clientProfile.supported then
     end
     -- Guildmates' listings and their ends; the player's own echo is
     -- ignored.
-    onLfgMessage = function(message, sender)
-        -- Guild messages come twice (live, and under the sync prefix for
-        -- older add-ons): the second copy is dropped.
+    onLfgMessage = function(message, sender, prefix)
+        -- Each message comes under the board's prefix and again under the
+        -- sync prefix for older add-ons: the copy under the other prefix is
+        -- dropped. The same message heard again under the same prefix is
+        -- sent again (listed again, asked again), and counts.
         local now = client:Timestamp() or 0
         local fingerprint = tostring(sender) .. "|" .. addon.LfgProtocol.Fingerprint(message)
         local copies = lfgJoin.copies or {}
         lfgJoin.copies = copies
-        local seen, at
-        for seen, at in pairs(copies) do
-            if now - at > addon.LfgProtocol.COPY_SECONDS then
+        local seen, heard
+        for seen, heard in pairs(copies) do
+            if now - heard.at > addon.LfgProtocol.COPY_SECONDS then
                 copies[seen] = nil
             end
         end
-        if copies[fingerprint] ~= nil then
+        local earlier = copies[fingerprint]
+        if earlier ~= nil and prefix ~= nil and earlier.prefix ~= prefix then
+            -- The other copy: both are in, so the next one is new.
+            copies[fingerprint] = nil
             return
         end
-        copies[fingerprint] = now
+        copies[fingerprint] = { at = now, prefix = prefix }
         local senderKey = keyOfSender(sender)
         local stats = lfgJoin.stats
         stats.heard = stats.heard + 1
@@ -5575,7 +5580,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
     comm:OnHeard(function(sender)
         heardFrom(sender)
     end)
-    if comm:Start(function(message, sender)
+    if comm:Start(function(message, sender, prefix)
         if message.t == addon.GuildGreet.TYPE_GREETED then
             guildGreet:OnGreeted(message, sender)
         elseif addon.GuildRecruit.TYPES[message.t] ~= nil then
@@ -5588,7 +5593,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
             and message.t ~= addon.LfgProtocol.TYPE_ANSWER and message.t ~= addon.LfgProtocol.TYPE_ROLE
         then
             -- Asks, answers and roles are only ever whispered.
-            onLfgMessage(message, sender)
+            onLfgMessage(message, sender, prefix)
         elseif addon.LocationProtocol.TYPES[message.t] ~= nil then
             onLocationMessage(message, sender)
         elseif addon.RankRequirements.TYPES[message.t] ~= nil then
@@ -5598,7 +5603,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         else
             syncSession:Receive(message, sender)
         end
-    end, function(message, sender)
+    end, function(message, sender, prefix)
         -- Only guild map updates, resync requests and answers, Guild LFG
         -- Board asks and answers, and, to officers who miss the officer
         -- channel, guild log messages are whispered.
@@ -5607,7 +5612,7 @@ local lifecycle = addon.Lifecycle.Create(client, router, persistence, rosterCont
         elseif message.t == addon.LfgProtocol.TYPE_ASK or message.t == addon.LfgProtocol.TYPE_ANSWER
             or message.t == addon.LfgProtocol.TYPE_ROLE
         then
-            onLfgMessage(message, sender)
+            onLfgMessage(message, sender, prefix)
         elseif addon.GuildLogSync.TYPES[message.t] ~= nil then
             guildLogSync:Receive(message, sender)
         elseif addon.Resync.TYPES[message.t] ~= nil then

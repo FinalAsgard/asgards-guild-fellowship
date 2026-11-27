@@ -715,6 +715,15 @@ test.test("Forever a listing goes out under the board's own prefix, clear of syn
     fixtures.deliver(channel)
     fixtures.slash(hammer, "probe lfg")
     test.assertContains(table.concat(hammer.messages, "\n"), "Heard: 3, last from Tool Box")
+
+    -- Listed again at once, the same as before, after Not looking: it's
+    -- sent again, not a copy, and guildmates see it.
+    click(tool.addon.lfgPage.notLookingButton)
+    fixtures.deliver(channel)
+    test.assertEqual(0, #hammer.addon.lfgBoard:Listings(hammer.time))
+    startDungeon(tool)
+    fixtures.deliver(channel)
+    test.assertEqual(1, #hammer.addon.lfgBoard:Listings(hammer.time))
 end)
 
 test.test("Forever Find guildmates lists online guildmates who fit, marking those in a listed group", function()

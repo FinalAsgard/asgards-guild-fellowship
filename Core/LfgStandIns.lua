@@ -149,8 +149,7 @@ function LfgStandIns.Candidates(listing)
     end
     table.insert(rows, 3, { key = LfgStandIns.PREFIX .. "fillalt", kind = addon.LfgFillCandidates.ALT,
         name = NAMES[8] .. "alt", whisper = NAMES[8] .. "-StandIn", level = level, class = CLASSES[2],
-        classToken = CLASSES[2], label = NAMES[8], onlineKey = LfgStandIns.PREFIX .. "fill4",
-        onlineName = NAMES[8], inGroup = false, standIn = true,
+        classToken = CLASSES[2], label = NAMES[8], onlineName = NAMES[8], inGroup = false, standIn = true,
         message = addon.LfgFillCandidates.LogOver(listing.label, NAMES[8] .. "alt") })
     return rows
 end

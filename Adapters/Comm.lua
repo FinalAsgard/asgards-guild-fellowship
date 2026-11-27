@@ -51,10 +51,12 @@ function Comm.Create(client, prefix, livePrefix, lfgPrefix)
         Endpoint)
 end
 
--- Starts listening: onMessage(message, sender) runs for every guild message
--- with this prefix that deserializes to a table, onWhisper(message,
--- sender), when given, for every whispered one, and onOfficer(message,
--- sender), when given, for every one sent to the officer channel. Returns
+-- Starts listening: onMessage(message, sender, prefix) runs for every guild
+-- message with this prefix that deserializes to a table, onWhisper(message,
+-- sender, prefix), when given, for every whispered one, and
+-- onOfficer(message, sender, prefix), when given, for every one sent to the
+-- officer channel. `prefix` is the one it came under, so a copy sent under
+-- two can be told from a message sent twice. Returns
 -- false when the libraries are missing, so sync simply stays off.
 function Endpoint:Start(onMessage, onWhisper, onOfficer)
     if self.endpoint ~= nil then
@@ -69,7 +71,7 @@ function Endpoint:Start(onMessage, onWhisper, onOfficer)
     if not pcall(aceComm.Embed, aceComm, endpoint) then
         return false
     end
-    local function heard(_, text, distribution, sender)
+    local function heard(prefix, text, distribution, sender)
         local receive = distribution == Comm.DISTRIBUTION and onMessage
             or distribution == Comm.WHISPER and onWhisper
             or distribution == Comm.OFFICER and onOfficer or nil
@@ -84,7 +86,7 @@ function Endpoint:Start(onMessage, onWhisper, onOfficer)
             pcall(self.onHeard, sender)
         end
         if type(receive) == "function" then
-            pcall(receive, message, sender)
+            pcall(receive, message, sender, prefix)
         end
     end
     if not pcall(endpoint.RegisterComm, endpoint, self.prefix, heard) then
