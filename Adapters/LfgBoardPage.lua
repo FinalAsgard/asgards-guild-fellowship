@@ -76,6 +76,11 @@ local LfgBoardPage = {
         other = "No other groups right now.",
         history = "No parties in your history yet.",
     },
+    -- Find guildmates: each row's height, and why the button's greyed out.
+    FILL_ROW_HEIGHT = 28,
+    FILL_UNLISTED = "List your party to find guildmates",
+    FILL_FULL = "Your party has no room",
+    FILL_EMPTY = "No guildmates online could fill a slot right now.",
     SEARCH_PLACEHOLDERS = { dungeon = "Search all dungeons", questing = "Search all zones" },
     RAID_EXPLANATION = "A raid is listed as a big party: anyone can ask to join, with no role rules.",
 }
@@ -127,6 +132,9 @@ Page.__index = Page
 --                 member of, as { role, classToken }, or nil
 --   onSave        function(purpose, note) -> true, or false and why not
 --   onAskInGuild  function(line): types `line` into guild chat, unsent
+--   fillCandidates function() -> the Find guildmates rows
+--                 (LfgFillCandidates.List, each with classToken? too)
+--   onInvite      function(row): invites a Find guildmates row's character
 --   onNotLooking  function()
 function LfgBoardPage.Create(content, ui, options)
     local page = setmetatable({ content = content, ui = ui, options = options, tab = "relevant" }, Page)
@@ -192,6 +200,38 @@ function Page:build()
         owner:ShowTab(id)
     end)
     self:buildList()
+    self:buildFill()
+end
+
+-- A Find guildmates button on `parent` (the solo card or the listing),
+-- with why it's greyed out in the game's tooltip.
+function Page:findButton(parent)
+    local owner, environment = self, self.ui.environment
+    local button = self.ui:Button(parent, "Find guildmates", "secondary", function()
+        owner:OpenFill()
+    end)
+    button:SetWidth(130)
+    button:HookScript("OnEnter", function(self)
+        local tooltip = environment and environment.GameTooltip
+        if not self.active and self.reason ~= nil and type(tooltip) == "table" then
+            tooltip:SetOwner(self, "ANCHOR_RIGHT")
+            tooltip:SetText(self.reason, 1, 1, 1, 1, true)
+            tooltip:Show()
+        end
+    end)
+    button:HookScript("OnLeave", function()
+        local tooltip = environment and environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:Hide()
+        end
+    end)
+    return button
+end
+
+-- Greys `button` out with `reason`, or enables it (no reason).
+local function offerFind(button, reason)
+    button.reason = reason
+    button:SetActive(reason == nil)
 end
 
 function Page:buildSolo(card)
@@ -206,6 +246,10 @@ function Page:buildSolo(card)
     end)
     self.startButton:SetWidth(120)
     self.startButton:SetPoint("RIGHT", solo, "RIGHT", -Theme.SPACING.l, 0)
+    -- A leader whose party isn't listed sees it greyed out.
+    self.soloFindButton = self:findButton(solo)
+    self.soloFindButton:SetPoint("RIGHT", self.startButton, "LEFT", -Theme.SPACING.s, 0)
+    self.soloFindButton:Hide()
     self.solo = solo
 end
 
@@ -244,6 +288,8 @@ function Page:buildView(card)
     end)
     self.askGuildButton:SetWidth(100)
     self.askGuildButton:SetPoint("RIGHT", self.editButton, "LEFT", -Theme.SPACING.s, 0)
+    self.listingFindButton = self:findButton(view)
+    self.listingFindButton:SetPoint("RIGHT", self.askGuildButton, "LEFT", -Theme.SPACING.s, 0)
     -- In someone else's dungeon party: the player's own role in it.
     self.myRoleButton = ui:Button(view, "My role", "secondary", function(button)
         local mine = owner.options.myRole and owner.options.myRole() or nil
@@ -520,6 +566,8 @@ function Page:refreshCard()
         self.solo.text:SetText(party.inParty and "Your party isn't listed" or "You're not in a party")
         self.startButton:SetLabel(party.inParty and "List your party" or "Start a group")
         setShown(self.startButton, not party.inParty or party.isLeader)
+        setShown(self.soloFindButton, party.inParty and party.isLeader and self.options.fillCandidates ~= nil)
+        offerFind(self.soloFindButton, LfgBoardPage.FILL_UNLISTED)
     elseif mode == "view" then
         self:refreshView()
     elseif mode == "member" then
@@ -556,6 +604,8 @@ function Page:refreshView()
     self.askGuildButton:Show()
     self.myRoleButton:Hide()
     self.askGuildButton:SetActive(addon.LfgListing.GuildLine(fields) ~= nil)
+    setShown(self.listingFindButton, self.options.fillCandidates ~= nil)
+    offerFind(self.listingFindButton, fields.s >= fields.x and LfgBoardPage.FILL_FULL or nil)
 end
 
 -- In someone else's party: its listing as the guild sees it, read-only.
@@ -575,6 +625,7 @@ function Page:refreshMemberView()
     self.editButton:Hide()
     self.notLookingButton:Hide()
     self.askGuildButton:Hide()
+    self.listingFindButton:Hide()
     -- A dungeon member picks their own role here.
     local mine = listing.kind == "dungeon" and self.options.myRole and self.options.myRole() or nil
     if mine ~= nil then
@@ -1300,10 +1351,14 @@ function Page:ShowTab(id)
     self:refreshTab()
 end
 
--- Redraws the card and the tabs from what the options say now.
+-- Redraws the card and the tabs from what the options say now. Find
+-- guildmates, while open, stays as it was built.
 function Page:Refresh()
     self:refreshCard()
     self:refreshTab()
+    setShown(self.tabs, not self.filling)
+    setShown(self.area, not self.filling)
+    setShown(self.fill, self.filling == true)
     -- The role menu goes once its card is hidden or shows another listing.
     local asked = self.roleMenuFor
     if asked ~= nil and self.roleMenu ~= nil and self.roleMenu:IsOpen() then
@@ -1378,4 +1433,103 @@ function Page:ask(anchor, listing, card)
         end
         self.roleMenu:Open(anchor, items)
     end
+end
+
+-- Find guildmates ---------------------------------------------------------------
+
+-- The Find guildmates panel, in the board list's place while it's open: a
+-- header with the listing's label and range, Back, and a row per guildmate
+-- who could fill a slot, with Invite and Whisper.
+function Page:buildFill()
+    local ui, content, owner = self.ui, self.content, self
+    local fill = ui:frame("Frame", content)
+    fill:SetPoint("TOPLEFT", self.card, "BOTTOMLEFT", 0, -Theme.SPACING.l)
+    fill:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
+    fill.label = ui:SectionLabel(fill, "Find guildmates")
+    fill.label:SetPoint("TOPLEFT", fill, "TOPLEFT", 0, 0)
+    fill.title = ui:Text(fill, "", "semibold", "heading", "text")
+    fill.title:SetPoint("TOPLEFT", fill.label, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+    self.backButton = ui:Button(fill, "Back", "secondary", function()
+        owner:CloseFill()
+    end)
+    self.backButton:SetWidth(70)
+    self.backButton:SetPoint("TOPRIGHT", fill, "TOPRIGHT", 0, 0)
+    local area, list = ui:ScrollList(fill, LfgBoardPage.SCROLL_STEP, LfgBoardPage.LIST_WIDTH)
+    area:SetPoint("TOPLEFT", fill.title, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+    area:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT", 0, 0)
+    fill.area, fill.list = area, list
+    fill.empty = ui:Text(list, LfgBoardPage.FILL_EMPTY, "regular", "body", "muted")
+    fill.empty:SetPoint("TOPLEFT", list, "TOPLEFT", 0, 0)
+    fill.rows = {}
+    fill:Hide()
+    self.fill = fill
+end
+
+-- Find guildmates row `index`, made the first time it's needed.
+function Page:fillRow(index)
+    local fill, ui, owner = self.fill, self.ui, self
+    local row = fill.rows[index]
+    if row ~= nil then
+        return row
+    end
+    row = ui:frame("Frame", fill.list)
+    row:SetHeight(LfgBoardPage.FILL_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", fill.list, "TOPLEFT", 0, -(index - 1) * LfgBoardPage.FILL_ROW_HEIGHT)
+    row:SetPoint("RIGHT", fill.list, "RIGHT", 0, 0)
+    row.name = ui:Text(row, "", "semibold", "body", "text")
+    row.name:SetPoint("LEFT", row, "LEFT", 0, 0)
+    row.details = ui:Text(row, "", "regular", "small", "muted")
+    row.details:SetPoint("LEFT", row.name, "RIGHT", Theme.SPACING.s, 0)
+    row.whisper = ui:Button(row, "Whisper", "secondary", function()
+        if owner.options.onWhisper ~= nil then
+            owner.options.onWhisper(row.candidate.whisper)
+        end
+    end)
+    row.whisper:SetWidth(80)
+    row.whisper:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    row.invite = ui:Button(row, "Invite", "primary", function()
+        if owner.options.onInvite ~= nil then
+            owner.options.onInvite(row.candidate)
+        end
+    end)
+    row.invite:SetWidth(70)
+    row.invite:SetPoint("RIGHT", row.whisper, "LEFT", -Theme.SPACING.s, 0)
+    fill.rows[index] = row
+    return row
+end
+
+-- Opens Find guildmates for the player's listing, built from who's online
+-- now; it isn't refreshed while open.
+function Page:OpenFill()
+    local options, fill = self.options, self.fill
+    local fields = options.listing:IsActive() and options.listing:Announcement(options.members()) or nil
+    if fields == nil or options.fillCandidates == nil then
+        return false
+    end
+    fill.title:SetText(join({ addon.LfgListing.Label(fields.k, fields.p), range(fields.lo, fields.hi) }))
+    local candidates = options.fillCandidates() or {}
+    self.fillCandidates = candidates
+    hideAll(fill.rows)
+    local index
+    for index = 1, #candidates do
+        local candidate, row = candidates[index], self:fillRow(index)
+        row.candidate = candidate
+        row.name:SetText(colored(candidate.name, options.classColor and options.classColor(candidate.classToken
+            or candidate.class)))
+        row.details:SetText(join({ candidate.level and ("Level " .. candidate.level) or nil, candidate.label ~= candidate.name
+            and candidate.label or nil, candidate.inGroup and "In a group" or nil }))
+        row:Show()
+    end
+    setShown(fill.empty, #candidates == 0)
+    fill.list:SetHeight(math.max(1, #candidates * LfgBoardPage.FILL_ROW_HEIGHT))
+    fill.area:SetVerticalScroll(0)
+    self.filling = true
+    self:Refresh()
+    return true
+end
+
+-- Back: the board list again.
+function Page:CloseFill()
+    self.filling = false
+    self:Refresh()
 end

@@ -1871,6 +1871,53 @@ if clientProfile.supported then
         return { zone = zone.name, people = people }
     end
     lfgJoin.nearby = lfgNearby
+    -- Find guildmates: online guildmates who could fill a slot in the
+    -- player's listing, those in a listed group on the board marked.
+    lfgJoin.fillCandidates = function()
+        local fields = lfgListing:Announcement(lfgMembers())
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if fields == nil or guild == nil then
+            return {}
+        end
+        local listing = { kind = fields.k, minLevel = fields.lo, maxLevel = fields.hi, openRoles = fields.r,
+            size = fields.s, maxSize = fields.x }
+        local partyKeys = {}
+        local members = lfgMembers()
+        local index, position
+        for index = 1, #members do
+            table.insert(partyKeys, lfgKeyOf(members[index]))
+        end
+        local grouped = {}
+        local listings = lfgBoard:Listings(client:Timestamp())
+        for index = 1, #listings do
+            grouped[listings[index].id] = true
+            for position = 1, #(listings[index].members or {}) do
+                local key = rosterController:RosterKeyFor(listings[index].members[position].name)
+                if key ~= nil then
+                    grouped[key] = true
+                end
+            end
+        end
+        local rows = addon.LfgFillCandidates.List({
+            partition = partition,
+            members = rosterController:LiveMembers(normalizer),
+            rolesOf = rolesOf,
+            listing = listing,
+            selfKey = rosterController:SelfKey(),
+            partyKeys = partyKeys,
+            grouped = grouped,
+            display = function(name)
+                return normalizer:Display(name)
+            end,
+        })
+        if lfgJoin.standInCandidates then
+            local standIns = addon.LfgStandIns.Candidates(listing)
+            for index = 1, #standIns do
+                table.insert(rows, standIns[index])
+            end
+        end
+        return rows
+    end
     -- /agf probe lfg: where questing's zone levels come from, and what's on
     -- the board for this character.
     probeLfg = function()
@@ -2427,6 +2474,7 @@ if clientProfile.supported then
                 lfgBoard:OnListing(listings[index].message, listings[index].key, listings[index].sender, now)
             end
             lfgJoin.standInSlot = true
+            lfgJoin.standInCandidates = true
             lfgJoin.requests:Add(addon.LfgStandIns.Request(), now)
             rosterController:Print(#listings .. " stand-in listings are on your Guild LFG Board for " ..
                 math.floor(addon.LfgBoard.STALE_SECONDS / 60) .. " minutes, with a stand-in slot question and" ..
@@ -2575,6 +2623,17 @@ if clientProfile.supported then
             onSave = saveListing,
             onAskInGuild = function(line)
                 client:OpenGuildChat(line)
+            end,
+            fillCandidates = function()
+                return lfgJoin.fillCandidates()
+            end,
+            -- A stand-in is never invited.
+            onInvite = function(row)
+                if row.standIn then
+                    rosterController:Print(row.name .. " is a stand-in; no invite was sent.")
+                else
+                    client:InviteToParty(row.whisper)
+                end
             end,
             onNotLooking = function()
                 lfgTrigger:NotLooking()

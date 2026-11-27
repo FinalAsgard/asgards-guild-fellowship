@@ -133,6 +133,22 @@ function LfgStandIns.Listings(facts)
     return listings, note
 end
 
+-- Stand-in Find guildmates rows for the player's `listing` ({ minLevel?,
+-- maxLevel? }), as LfgFillCandidates.List gives them: two who could fill a
+-- slot, then one already in a listed group. Never invited.
+function LfgStandIns.Candidates(listing)
+    local level = type(listing.minLevel) == "number" and listing.minLevel or 1
+    local rows = {}
+    local index
+    for index = 1, 3 do
+        local slot = index + 4
+        table.insert(rows, { key = LfgStandIns.PREFIX .. "fill" .. index, name = NAMES[slot],
+            whisper = NAMES[slot] .. "-StandIn", level = level, class = CLASSES[slot], classToken = CLASSES[slot],
+            label = NAMES[slot], inGroup = index == 3, standIn = true })
+    end
+    return rows
+end
+
 -- A stand-in Ask to join request, for the leader's toast.
 function LfgStandIns.Request()
     return { key = LfgStandIns.PREFIX .. "asker", sender = "Brightleaf-StandIn", name = "Brightleaf",

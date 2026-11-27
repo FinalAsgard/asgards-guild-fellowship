@@ -2144,6 +2144,17 @@ test.test("Forever /agfdev lfgtest shows every look with stand-ins, and nothing 
     test.assertEqual(nil, button.view.glow)
     -- Not even once the stand-ins' requests would expire. (Guild sync
     -- goes on as usual.)
+    -- Find guildmates shows stand-in guildmates too, never invited.
+    addon.lfgListing:Start({ kind = "raid" }, nil, world.time)
+    addon.lfgPage:Refresh()
+    test.assertTrue(addon.lfgPage:OpenFill())
+    local candidates = addon.lfgPage.fillCandidates
+    test.assertEqual("Oakheart", candidates[#candidates - 2].name)
+    test.assertTrue(candidates[#candidates].inGroup)
+    click(addon.lfgPage.fill.rows[#candidates - 2].invite)
+    test.assertEqual(nil, invited)
+    test.assertContains(table.concat(world.messages, "\n"), "Oakheart is a stand-in; no invite was sent.")
+    addon.lfgListing:End()
     fixtures.runTimers(world, 180)
     local serializer = world.environment.LibStub:GetLibrary("AceSerializer-3.0")
     local index

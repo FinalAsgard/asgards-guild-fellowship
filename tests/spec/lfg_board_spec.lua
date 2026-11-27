@@ -670,6 +670,34 @@ local function zoneTree(world)
     end
 end
 
+test.test("Forever Find guildmates lists online guildmates who fit, marking those in a listed group", function()
+    local channel = fixtures.newChannel()
+    local tool = login("Forever", channel, "Tool Box")
+    local hammer = login("Forever", channel, "Hammer Smith")
+    login("Forever", channel, "Zap Arcane", 30)
+    local invited
+    tool.environment.C_PartyInfo = { InviteUnit = function(name) invited = name end }
+    local page = startDungeon(tool)
+    test.assertTrue(page.listingFindButton.active)
+    click(page.listingFindButton)
+
+    -- Hammer fits Stratholme; Zap (30) doesn't, Bolt is offline, and Tool
+    -- is the player.
+    test.assertTrue(page.fill.shown)
+    test.assertEqual(1, #page.fillCandidates)
+    test.assertContains(page.fill.rows[1].name.text, "Hammer")
+    test.assertFalse(string.find(page.fill.rows[1].details.text, "In a group", 1, true) ~= nil)
+    click(page.fill.rows[1].invite)
+    test.assertContains(invited, "Hammer")
+    click(page.backButton)
+
+    -- Hammer lists his own group: still there, marked In a group.
+    startDungeon(hammer)
+    fixtures.deliver(channel)
+    click(page.listingFindButton)
+    test.assertContains(page.fill.rows[1].details.text, "In a group")
+end)
+
 test.test("Forever Questing picks a zone from the list, and the listing takes its levels", function()
     local channel = fixtures.newChannel()
     local tool = login("Forever", channel, "Tool Box")
@@ -884,6 +912,94 @@ local function listingOf(kind, fields)
     listing.sender = listing.sender or "Tool-Camelot"
     return listing
 end
+
+test.test("lfg page: Find guildmates shows to the lister, greyed out until the party's listed with room", function()
+    local inParty = { inParty = true, isLeader = true, members = {} }
+    local page = pageWith({ relevant = {}, alts = {}, other = {} }, {
+        party = function() return inParty end,
+        fillCandidates = function() return {} end,
+    })
+
+    -- Leading an unlisted party: greyed out, and the tooltip says why.
+    test.assertEqual("solo", page:Mode())
+    test.assertTrue(page.soloFindButton.shown)
+    test.assertFalse(page.soloFindButton.active)
+    test.assertEqual("List your party to find guildmates", page.soloFindButton.reason)
+    click(page.soloFindButton)
+    test.assertFalse(page.filling == true)
+    -- A member of someone else's party doesn't see it.
+    inParty.isLeader = false
+    page:Refresh()
+    test.assertFalse(page.soloFindButton.shown)
+
+    -- Listed with room: enabled. Full: greyed out.
+    inParty.isLeader = true
+    page.options.listing:Start({ kind = "raid" }, nil, 0)
+    page:Refresh()
+    test.assertTrue(page.listingFindButton.shown)
+    test.assertTrue(page.listingFindButton.active)
+    page.options.members = function()
+        local full = {}
+        local index
+        for index = 1, 40 do
+            full[index] = { name = "M" .. index, classToken = "MAGE", level = 60, role = "dps" }
+        end
+        return full
+    end
+    page:Refresh()
+    test.assertFalse(page.listingFindButton.active)
+
+    -- Without the option, no button at all.
+    local plain = pageWith({ relevant = {}, alts = {}, other = {} })
+    plain.options.listing:Start({ kind = "raid" }, nil, 0)
+    plain:Refresh()
+    test.assertFalse(plain.listingFindButton.shown)
+end)
+
+test.test("lfg page: the Find guildmates panel replaces the list, with Invite, Whisper and Back", function()
+    local invited, built = {}, 0
+    local page, whispered = pageWith({ relevant = {}, alts = {}, other = {} }, {
+        fillCandidates = function()
+            built = built + 1
+            return {
+                { key = "hammer", name = "Hammer", whisper = "Hammer-Camelot", level = 60, class = "PALADIN",
+                    label = "Thunderer" },
+                { key = "busy", name = "Busy", whisper = "Busy-Camelot", level = 58, class = "WARRIOR",
+                    label = "Busy", inGroup = true },
+            }
+        end,
+        onInvite = function(row) table.insert(invited, row.whisper) end,
+    })
+    page.options.listing:Start({ kind = "dungeon", dungeon = { name = "Stratholme", minLevel = 58, maxLevel = 60 } },
+        nil, 0)
+    page:Refresh()
+    click(page.listingFindButton)
+
+    test.assertTrue(page.filling)
+    test.assertTrue(page.fill.shown)
+    test.assertFalse(page.tabs.shown)
+    test.assertFalse(page.area.shown)
+    test.assertEqual("Stratholme" .. " \194\183 " .. "58" .. "\226\128\147" .. "60", page.fill.title.text)
+    test.assertEqual("Hammer", page.fill.rows[1].name.text)
+    test.assertEqual("Level 60" .. " \194\183 " .. "Thunderer", page.fill.rows[1].details.text)
+    test.assertContains(page.fill.rows[2].name.text, "Busy")
+    test.assertEqual("Level 58" .. " \194\183 " .. "In a group", page.fill.rows[2].details.text)
+    test.assertFalse(page.fill.empty.shown)
+    click(page.fill.rows[1].invite)
+    click(page.fill.rows[2].whisper)
+    test.assertEqual("Hammer-Camelot", invited[1])
+    test.assertEqual("Busy-Camelot", whispered[1])
+
+    -- Built on open only: a refresh leaves it as it was.
+    page:Refresh()
+    test.assertEqual(1, built)
+    test.assertTrue(page.fill.shown)
+
+    click(page.backButton)
+    test.assertFalse(page.fill.shown)
+    test.assertTrue(page.tabs.shown)
+    test.assertTrue(page.area.shown)
+end)
 
 test.test("lfg page: a large card marks the leader, top friends, members' roles and the game's icon", function()
     local listing = listingOf("dungeon", {
