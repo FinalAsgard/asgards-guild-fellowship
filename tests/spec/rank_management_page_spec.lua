@@ -8,7 +8,8 @@ local function setup()
     local environment = fakeFrames.install({})
     local ui = addon.Widgets.Create(environment)
     local content = environment.CreateFrame("Frame")
-    local world = { addon = addon, searches = {}, snoozed = {}, ranks = {}, ticks = {} }
+    local world = { addon = addon, searches = {}, snoozed = {}, ranks = {}, ticks = {}, missings = {},
+        missingRanks = {} }
     world.rows = {
         { playerId = 1, key = "toolbox", name = "TheTool", status = "Ready", rankText = "→ Member",
             promoteText = "Toolbox, Hammer" },
@@ -16,9 +17,10 @@ local function setup()
             waitingText = "Discord name · Interview" },
     }
     world.page = addon.RankManagementPage.Create(content, ui, {
-        model = function(search, rank)
+        model = function(search, rank, missing)
             table.insert(world.searches, search)
             table.insert(world.ranks, rank or "any")
+            table.insert(world.missings, missing or "none")
             if rank ~= nil then
                 return world.grid(rank)
             end
@@ -46,6 +48,15 @@ local function setup()
         end,
         targets = function()
             return { { text = "Any rank" }, { rank = 3, text = "→ Member" }, { rank = 2, text = "→ Veteran" } }
+        end,
+        missing = function(rank)
+            table.insert(world.missingRanks, rank or "any")
+            if rank == 3 then
+                return { { rank = 3, id = "level", label = "Level 70", text = "Level 70" },
+                    { rank = 3, id = "rules", label = "Read the rules", text = "Read the rules" } }
+            end
+            return { { rank = 3, id = "level", label = "Level 70", text = "Level 70 (→ Member)" },
+                { rank = 2, id = "raids", label = "Raid ready", text = "Raid ready (→ Veteran)" } }
         end,
         onTick = function(key, item, ticked, note)
             table.insert(world.ticks, { key = key, item = item, ticked = ticked, note = note })
@@ -386,4 +397,76 @@ test.test("rank management page: a met automated cell and a check box have no ri
     test.assertFalse(world.page.menu:IsOpen())
     row.cells[3].scripts.OnClick(row.cells[3], "RightButton")
     test.assertFalse(world.page.menu:IsOpen())
+end)
+
+-- The Missing filter ----------------------------------------------------------------
+
+local function filter(world, row)
+    click(world.page.missingPicker)
+    click(world.page.menu.rows[row])
+end
+
+test.test("rank management page: Missing lists the picked rank's requirements, or every rank's for Any rank", function()
+    local world = setup()
+    click(world.page.missingPicker)
+    test.assertEqual("any", world.missingRanks[1])
+    test.assertEqual("Level 70 (→ Member)", world.page.menu.rows[1].label.text)
+    test.assertEqual("Raid ready (→ Veteran)", world.page.menu.rows[2].label.text)
+
+    pick(world, 2)
+    click(world.page.missingPicker)
+    test.assertEqual(3, world.missingRanks[2])
+    test.assertEqual("Level 70", world.page.menu.rows[1].label.text)
+    test.assertEqual("Read the rules", world.page.menu.rows[2].label.text)
+end)
+
+test.test("rank management page: choosing a Missing requirement filters the list and shows a chip that clears it", function()
+    local world = setup()
+    test.assertFalse(world.page.chip.shown)
+    filter(world, 1)
+
+    test.assertEqual("level", world.missings[#world.missings].id)
+    test.assertEqual(3, world.missings[#world.missings].rank)
+    test.assertTrue(world.page.chip.shown)
+    test.assertEqual("Missing: Level 70 (→ Member)", world.page.chip.label.text)
+
+    click(world.page.chip.clear)
+    test.assertEqual("none", world.missings[#world.missings])
+    test.assertFalse(world.page.chip.shown)
+end)
+
+test.test("rank management page: in the grid the filtered requirement's header is highlighted", function()
+    local world = setup()
+    pick(world, 2)
+    filter(world, 1)
+    local labels = world.page.header.labels
+
+    test.assertTrue(labels[2].highlighted)
+    test.assertFalse(labels[1].highlighted)
+    test.assertFalse(labels[3].highlighted)
+
+    click(world.page.chip.clear)
+    test.assertFalse(labels[2].highlighted)
+end)
+
+test.test("rank management page: picking another rank drops a filter of a different rank, Any rank keeps it", function()
+    local world = setup()
+    pick(world, 2)
+    filter(world, 2)
+    pick(world, 1)
+    test.assertEqual("rules", world.missings[#world.missings].id)
+    test.assertTrue(world.page.chip.shown)
+
+    pick(world, 3)
+    test.assertEqual("none", world.missings[#world.missings])
+    test.assertFalse(world.page.chip.shown)
+end)
+
+test.test("rank management page: nobody missing the filtered requirement says so", function()
+    local world = setup()
+    pick(world, 3)
+    filter(world, 2)
+
+    test.assertTrue(world.page.empty.shown)
+    test.assertEqual("Nobody due is missing that.", world.page.empty.text)
 end)

@@ -25,6 +25,10 @@ local _, addon = ...
 -- per column. The columns come from the rank's requirement list, so a new
 -- kind of requirement is just another column.
 --
+-- The Missing filter (see MissingChoices) narrows the list to the Due
+-- players missing one requirement, and the footer counts them out of
+-- everyone up for that rank.
+--
 -- Pure: PromotionPolicy's inputs are handed in, plus how names show.
 local RankUpViewModel = {
     READY = "Ready",
@@ -105,6 +109,48 @@ function RankUpViewModel.Targets(inputs)
     return targets
 end
 
+-- The Missing filter's choices: the picked rank's requirements, in the
+-- rank's order, or for Any rank every rank's, the newest members' first:
+--   { { rank = 3, id, label, text = "Has a Discord name set" }, ... }
+-- where `rank` is the rank promoted to, and `text` names it too for Any
+-- rank ("Has a Discord name set (→ Member)").
+function RankUpViewModel.MissingChoices(inputs)
+    local choices = {}
+    local function add(from, named)
+        local items = inputs.requirements:Items(from)
+        local index
+        for index = 1, #items do
+            local label = items[index].label
+            table.insert(choices, { rank = from - 1, id = items[index].id, label = label,
+                text = named and (label .. " (" .. RankUpViewModel.ARROW .. rankNameOf(inputs, from - 1) .. ")")
+                    or label })
+        end
+    end
+    if inputs.rank ~= nil then
+        add(inputs.rank + 1, false)
+        return choices
+    end
+    local ranks = inputs.requirements:Ranks()
+    local index
+    for index = #ranks, 1, -1 do
+        if ranks[index] >= 1 then
+            add(ranks[index], true)
+        end
+    end
+    return choices
+end
+
+-- Whether Evaluate's `status` has item `id` unmet.
+local function lacks(status, id)
+    local index
+    for index = 1, #status.items do
+        if status.items[index].id == id then
+            return not status.items[index].met
+        end
+    end
+    return false
+end
+
 -- A grid cell from one of PromotionPolicy.Evaluate's items: { id, kind,
 -- check (an officer's checkbox), checked, needsNote (a checkbox ticked
 -- with a note), state (MET, MISSING or OVERRIDDEN for an automated item,
@@ -151,6 +197,8 @@ end
 --   rank        the rank promoted to that was picked (a Targets choice), or
 --               nil for Any rank: just the Ready and Due players up for
 --               it, as a grid
+--   missing     a MissingChoices choice, or nil: just the Due players up
+--               for its rank who are missing it
 -- Returns {
 --   rows    { playerId, key (the profile character), name (the alias, else
 --           the main's name), status (READY, MATCH or DUE), rank, rankName
@@ -166,6 +214,10 @@ end
 --   columns with a rank picked, the rank's requirements in order: { id,
 --           label, kind, check }; each row then has `cells`, one per
 --           column (see cellOf)
+--   missing with the Missing filter, { count (the Due players missing it),
+--           of (everyone Ready or Due up for its rank) }, whatever the
+--           search; the footer then says "9 of 22 players due → Member are
+--           missing: Has a Discord name set · Promotion happens ..."
 -- }
 function RankUpViewModel.Due(inputs)
     local partition = inputs.partition
@@ -179,8 +231,13 @@ function RankUpViewModel.Due(inputs)
     end
     local view = { rows = {}, ready = 0, match = 0, due = 0, snoozed = 0 }
     local picked = inputs.rank
-    -- A picked rank has no Match rows: they have no checklist to show.
-    local matches = picked == nil and addon.PromotionPolicy.MatchSet(inputs) or {}
+    local missing = inputs.missing
+    -- A picked rank has no Match rows: they have no checklist to show; nor
+    -- does the Missing filter, as Match has no requirement to miss.
+    local matches = (picked == nil and missing == nil) and addon.PromotionPolicy.MatchSet(inputs) or {}
+    if missing ~= nil then
+        view.missing = { count = 0, of = 0 }
+    end
     local function rankName(rank)
         return rankNameOf(inputs, rank)
     end
@@ -225,6 +282,16 @@ function RankUpViewModel.Due(inputs)
         end
         if not ready and not due and matched[1] == nil then
             return
+        end
+        if missing ~= nil then
+            if status.nextRank ~= missing.rank then
+                return
+            end
+            view.missing.of = view.missing.of + 1
+            if not due or not lacks(status, missing.id) then
+                return
+            end
+            view.missing.count = view.missing.count + 1
         end
         if ready then
             view.ready = view.ready + 1
@@ -313,6 +380,13 @@ function RankUpViewModel.Due(inputs)
         return tostring(a.playerId) < tostring(b.playerId)
     end)
     view.count = view.ready + view.match + view.due
+    if missing ~= nil then
+        local count, of = view.missing.count, view.missing.of
+        view.footer = count .. " of " .. of .. (of == 1 and " player" or " players") .. " due "
+            .. RankUpViewModel.ARROW .. rankName(missing.rank) .. (count == 1 and " is" or " are") .. " missing: "
+            .. missing.label .. DOT .. RankUpViewModel.FOOTER
+        return view
+    end
     local parts = { view.ready .. " " .. RankUpViewModel.READY }
     if view.match > 0 then
         table.insert(parts, view.match .. " " .. RankUpViewModel.MATCH)

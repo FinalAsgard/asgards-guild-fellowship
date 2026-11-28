@@ -21,6 +21,8 @@ local Widgets = {
     -- A check box, and the game's check mark drawn in it.
     CHECK_SIZE = 18,
     CHECK_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Check",
+    CHIP_CLEAR_TEXTURE = "Interface\\Buttons\\UI-StopButton",
+    CHIP_CLEAR_SIZE = 18,
     INPUT_HEIGHT = 26,
     -- A pooled list's scroll bar, and its thumb at its shortest.
     SCROLLBAR_WIDTH = 6,
@@ -356,6 +358,29 @@ function UI:TextButton(parent, label, width, onClick)
         end
     end)
     return button
+end
+
+-- A rounded chip naming an active filter, with an X that clears it:
+-- `onClear` runs on a click of the X. SetLabel names the filter and sizes
+-- the chip to fit.
+function UI:Chip(parent, onClear)
+    local chip = self:frame("Frame", parent)
+    chip:SetHeight(Widgets.BUTTON_HEIGHT - 4)
+    round(chip, Theme.RADIUS.button, "raised", "border")
+    chip.label = self:Text(chip, "", "semibold", "small", "text")
+    chip.label:SetPoint("LEFT", chip, "LEFT", Theme.SPACING.s, 0)
+    chip.clear = self:IconButton(chip, Widgets.CHIP_CLEAR_TEXTURE, Widgets.CHIP_CLEAR_SIZE, function()
+        if onClear ~= nil then
+            onClear()
+        end
+    end)
+    chip.clear:SetPoint("RIGHT", chip, "RIGHT", -Theme.SPACING.xs, 0)
+    function chip.SetLabel(_, text)
+        chip.label:SetText(text or "")
+        chip:SetWidth((chip.label:GetStringWidth() or 0) + Widgets.CHIP_CLEAR_SIZE + 2 * Theme.SPACING.s
+            + Theme.SPACING.xs)
+    end
+    return chip
 end
 
 -- A small round "i" that shows `text()` (a function, read on each

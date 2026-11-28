@@ -438,3 +438,76 @@ test.test("rank up view model: a ticked check shows its note, else who ticked it
     view = world.due()
     test.assertEqual("", cellOf(view.rows[1], "Read the rules", view).text)
 end)
+
+-- The Missing filter ----------------------------------------------------------------
+
+local function choiceOf(choices, text)
+    local index
+    for index = 1, #choices do
+        if choices[index].text == text then
+            return choices[index]
+        end
+    end
+    return nil
+end
+
+test.test("rank up view model: Missing lists the picked rank's requirements, or every rank's for Any rank", function()
+    local world = newGuild({})
+    world.inputs.rank = 3
+    local choices = world.addon.RankUpViewModel.MissingChoices(world.inputs)
+
+    test.assertEqual(2, #choices)
+    test.assertEqual("In the guild 7 days", choices[1].text)
+    test.assertEqual("Read the rules", choices[2].text)
+    test.assertEqual(world.rules.id, choices[2].id)
+    test.assertEqual(3, choices[2].rank)
+
+    world.inputs.rank = nil
+    choices = world.addon.RankUpViewModel.MissingChoices(world.inputs)
+    test.assertEqual(3, #choices)
+    -- The newest members' rank first, each named by the rank promoted to.
+    test.assertEqual("In the guild 7 days (→ Member)", choices[1].text)
+    test.assertEqual("Read the rules (→ Member)", choices[2].text)
+    test.assertEqual("Read the rules", choices[2].label)
+    test.assertEqual("In the guild 7 days (→ Veteran)", choices[3].text)
+    test.assertEqual(2, choices[3].rank)
+end)
+
+test.test("rank up view model: Missing keeps the Due players missing it, counted out of everyone up for the rank", function()
+    local world = newGuild({ ready = { 4, 30 }, waiting = { 4, 30 }, other = { 4, 30 }, early = { 4, 2 },
+        steady = { 3, 30 }, boss = { 2, 30 }, grunt = { 3, 1 } })
+    world.inputs.partition:JoinPlayerOf("grunt", "boss", "manual")
+    world.inputs.checks:Set("ready", world.rules, true, nil, OFFICER, NOW)
+    world.inputs.missing = choiceOf(world.addon.RankUpViewModel.MissingChoices(world.inputs),
+        "Read the rules (→ Member)")
+    local view = world.due()
+
+    -- No Ready, no Match, nobody up for another rank.
+    test.assertEqual("other Due, waiting Due", names(view))
+    test.assertEqual(2, view.missing.count)
+    test.assertEqual(3, view.missing.of)
+    test.assertEqual("2 of 3 players due → Member are missing: Read the rules · Promotion happens on the guild "
+        .. "roster, where the Ready arrow shows.", view.footer)
+
+    -- The same with the rank picked, and the counts ignore the search.
+    world.inputs.rank = 3
+    view = world.due("oth")
+    test.assertEqual("other Due", names(view))
+    test.assertEqual(2, view.missing.count)
+    test.assertEqual(3, view.missing.of)
+end)
+
+test.test("rank up view model: Missing for one player says is, and a met requirement leaves nobody", function()
+    local world = newGuild({ waiting = { 4, 30 } })
+    local choices = world.addon.RankUpViewModel.MissingChoices(world.inputs)
+    world.inputs.missing = choiceOf(choices, "Read the rules (→ Member)")
+
+    test.assertEqual("1 of 1 player due → Member is missing: Read the rules · Promotion happens on the guild "
+        .. "roster, where the Ready arrow shows.", world.due().footer)
+
+    world.inputs.missing = choiceOf(choices, "In the guild 7 days (→ Member)")
+    local view = world.due()
+    test.assertEqual("", names(view))
+    test.assertEqual(0, view.missing.count)
+    test.assertEqual(1, view.missing.of)
+end)

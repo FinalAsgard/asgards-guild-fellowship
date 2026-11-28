@@ -2043,6 +2043,52 @@ test.test("rank management: a note and an override from the grid save through th
     test.assertEqual("Due", zap().entry.status)
 end)
 
+test.test("rank management: the Missing filter keeps the players missing a requirement, and the chip clears it", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    -- Members (rank 3) need a day in the guild and level 50. Zap Arcane is
+    -- level 30.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "char-guild-days", true, 1, "Member", officer, 1)
+    requirements:SetAutomated(3, "level", true, 50, "Member", officer, 1)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+
+    page.missingPicker.scripts.OnClick(page.missingPicker, "LeftButton")
+    local level
+    local _, menuRow
+    for _, menuRow in ipairs(page.menu.rows) do
+        if menuRow.shown and string.find(menuRow.label.text, "Level 50 (→ ", 1, true) == 1 then
+            level = menuRow
+        end
+    end
+    test.assertTrue(level ~= nil)
+    level.scripts.OnClick(level, "LeftButton")
+
+    local names = {}
+    local _, frame
+    for _, frame in ipairs(page.list:Shown()) do
+        if frame.shown and rawget(frame, "entry") ~= nil then
+            table.insert(names, frame.entry.name)
+        end
+    end
+    test.assertContains(table.concat(names, ","), "Zap Arcane")
+    test.assertContains(page.footer.text, "missing: Level 50")
+    test.assertTrue(page.chip.shown)
+
+    page.chip.clear.scripts.OnClick(page.chip.clear, "LeftButton")
+    test.assertFalse(page.chip.shown)
+    test.assertContains(page.footer.text, "Ready")
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the page is built on show, and a pinned Friend is starred", function()

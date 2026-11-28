@@ -1484,12 +1484,20 @@ if clientProfile.supported then
                 end,
                 draw = function(content, ui)
                     friendsUi.rankPage = addon.RankManagementPage.Create(content, ui, {
-                        model = function(search, rank)
-                            return promotions.due(search, rank)
+                        model = function(search, rank, missing)
+                            return promotions.due(search, rank, missing)
                         end,
                         targets = function()
                             local inputs = promotions.inputs()
                             return inputs and addon.RankUpViewModel.Targets(inputs) or {}
+                        end,
+                        missing = function(rank)
+                            local inputs = promotions.inputs()
+                            if inputs == nil then
+                                return {}
+                            end
+                            inputs.rank = rank
+                            return addon.RankUpViewModel.MissingChoices(inputs)
                         end,
                         onSnooze = function(key)
                             return promotions.snooze(key)
@@ -3438,9 +3446,10 @@ if clientProfile.supported then
     end
     promotions.inputs = promotionInputs
     -- The Rank management page's Due list (RankUpViewModel.Due) for what's
-    -- typed in its search and the rank picked to promote to (nil for any),
-    -- or nil for a member or without a guild.
-    promotions.due = function(search, rank)
+    -- typed in its search, the rank picked to promote to (nil for any) and
+    -- the Missing choice picked (nil for none), or nil for a member or
+    -- without a guild.
+    promotions.due = function(search, rank, missing)
         local inputs = promotionInputs()
         if inputs == nil or not selfIsOfficer() then
             return nil
@@ -3450,6 +3459,7 @@ if clientProfile.supported then
         inputs.members = rosterController:LiveMembers(normalizer)
         inputs.search = search
         inputs.rank = rank
+        inputs.missing = missing
         return addon.RankUpViewModel.Due(inputs)
     end
     -- The characters ready for promotion, as a set, for the roster's marker:

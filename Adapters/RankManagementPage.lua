@@ -18,6 +18,10 @@ local _, addon = ...
 -- who ticked it. Right-clicking a failed automated cell offers Override as
 -- met... (with an optional reason), and an overridden one Remove override.
 --
+-- Missing picks one requirement of the picked rank (or of any rank): the
+-- list keeps the Due players missing it, a chip with an X names it, its
+-- column header is highlighted in the grid, and the footer counts them.
+--
 -- It's built when the page is shown (Refresh), and again when the owner
 -- says something changed (Update), keeping the list where it's scrolled.
 local Theme = addon.Theme
@@ -46,6 +50,12 @@ local RankManagementPage = {
     NO_MATCHES = "No players match.",
     EMPTY_RANK = "Nobody is up for %s right now.",
     PROMOTE_TO = "Promote to: ",
+    MISSING = "Missing...",
+    MISSING_WIDTH = 100,
+    MISSING_CHIP = "Missing: ",
+    NO_MISSING = "Nobody due is missing that.",
+    -- The filtered requirement's header.
+    HIGHLIGHT = "gold",
     -- An automated cell's color, by its state.
     CELL_COLORS = { met = "green", missing = "red", overridden = "gold" },
     OVERRIDE = "Override as met...",
@@ -73,13 +83,16 @@ end
 --          player whose profile character is `key`
 --   onError function(text): tells the user why something didn't happen
 --   targets function() -> RankUpViewModel.Targets' choices, for Promote to
+--   missing function(rank) -> RankUpViewModel.MissingChoices' choices for
+--           the picked rank (nil for Any rank), for Missing
 --   onTick  function(key, item, ticked, note) -> true, or false and why
 --           not: ticks or unticks officer check `item` for the player whose
 --           profile character is `key`, with `note` (a check's note, or an
 --           override's reason); ticking a failed automated item overrides
 --           it, and unticking it takes the override back
--- `model` is called as model(search, rank), `rank` the rank promoted to
--- that was picked, or nil for Any rank.
+-- `model` is called as model(search, rank, missing), `rank` the rank
+-- promoted to that was picked, or nil for Any rank, and `missing` the
+-- Missing choice picked, or nil.
 function RankManagementPage.Create(content, ui, options)
     local page = setmetatable({ content = content, ui = ui, options = options, query = "" }, Page)
     page:build()
@@ -102,6 +115,16 @@ function Page:build()
     end)
     self.picker:SetWidth(RankManagementPage.PICKER_WIDTH)
     self.picker:SetPoint("LEFT", self.search, "RIGHT", Theme.SPACING.m, 0)
+    self.missingPicker = ui:Button(content, RankManagementPage.MISSING, "secondary", function(button)
+        owner:missingMenu(button)
+    end)
+    self.missingPicker:SetWidth(RankManagementPage.MISSING_WIDTH)
+    self.missingPicker:SetPoint("LEFT", self.picker, "RIGHT", Theme.SPACING.m, 0)
+    self.chip = ui:Chip(content, function()
+        owner:filterMissing(nil)
+    end)
+    self.chip:SetPoint("LEFT", self.missingPicker, "RIGHT", Theme.SPACING.m, 0)
+    self.chip:Hide()
     self.menu = ui:ContextMenu(content)
     self.prompt = ui:TextPrompt(content)
     -- The grid's column labels, over the list while a rank is picked.
@@ -159,10 +182,39 @@ function Page:pickerMenu(anchor)
             owner.rank = rank
             owner.rankText = rank ~= nil and label or nil
             owner:labelPicker()
-            owner:rebuild(false)
+            -- A requirement of another rank isn't one this rank can miss.
+            if owner.missing ~= nil and rank ~= nil and owner.missing.rank ~= rank then
+                owner:filterMissing(nil)
+            else
+                owner:rebuild(false)
+            end
         end })
     end
     self.menu:Open(anchor, items)
+end
+
+-- Missing's menu: the requirements the picked rank (or any rank) can miss.
+function Page:missingMenu(anchor)
+    local owner, items = self, {}
+    local _, choice
+    for _, choice in ipairs(self.options.missing ~= nil and self.options.missing(self.rank) or {}) do
+        local picked = choice
+        table.insert(items, { label = choice.text, onClick = function()
+            owner:filterMissing(picked)
+        end })
+    end
+    self.menu:Open(anchor, items)
+end
+
+-- Filters the list to the players missing `choice`, or clears the filter
+-- for nil.
+function Page:filterMissing(choice)
+    self.missing = choice
+    setShown(self.chip, choice ~= nil)
+    if choice ~= nil then
+        self.chip:SetLabel(RankManagementPage.MISSING_CHIP .. choice.text)
+    end
+    self:rebuild(false)
 end
 
 -- A grid column's width, for `count` columns.
@@ -198,6 +250,9 @@ function Page:labelColumns(columns)
                 label:SetWidth(width - Theme.SPACING.s)
                 label:SetHeight(RankManagementPage.HEADER_HEIGHT - Theme.SPACING.xs)
                 label:SetText(column.label)
+                local missing = self.missing
+                label.highlighted = missing ~= nil and missing.rank == self.rank and missing.id == column.id
+                label:SetTextColor(Theme.Color(label.highlighted and RankManagementPage.HIGHLIGHT or "label"))
             end
         end
     end
@@ -399,7 +454,7 @@ end
 -- The list again from the rules engine; `keepPlace` leaves it scrolled
 -- where it is, else it starts at the top.
 function Page:rebuild(keepPlace)
-    self.view = self.options.model(self.query, self.rank) or { rows = {}, count = 0, footer = "" }
+    self.view = self.options.model(self.query, self.rank, self.missing) or { rows = {}, count = 0, footer = "" }
     local grid = self.view.columns ~= nil
     self:placeList(grid)
     self:labelColumns(self.view.columns or {})
@@ -409,7 +464,9 @@ function Page:rebuild(keepPlace)
     self.list:SetRows(self.view.rows)
     self.footer:SetText(self.view.footer or "")
     local empty = RankManagementPage.EMPTY
-    if self.query ~= "" and self.view.count > 0 then
+    if self.missing ~= nil then
+        empty = RankManagementPage.NO_MISSING
+    elseif self.query ~= "" and self.view.count > 0 then
         empty = RankManagementPage.NO_MATCHES
     elseif self.rankText ~= nil then
         empty = string.format(RankManagementPage.EMPTY_RANK, self.rankText)
