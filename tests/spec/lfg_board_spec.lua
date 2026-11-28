@@ -2089,6 +2089,90 @@ test.test("rank management: the Missing filter keeps the players missing a requi
     test.assertContains(page.footer.text, "Ready")
 end)
 
+-- Members (rank 3) need a day in the guild and the rules read; returns the
+-- rules item.
+local function memberRules(addon)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "char-guild-days", true, 1, "Member", officer, 1)
+    return requirements:Add(3, "Read the rules", "check", "Member", officer, 1)[1]
+end
+
+test.test("rank management: a row opens the player on the Roster's Rank tab, where an officer ticks", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    memberRules(addon)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local hammer
+    local _, frame
+    for _, frame in ipairs(addon.rankPage.list:Shown()) do
+        if frame.shown and rawget(frame, "entry") ~= nil and frame.entry.name == "Hammer Smith" then
+            hammer = frame
+        end
+    end
+    test.assertTrue(hammer ~= nil)
+    hammer.scripts.OnMouseUp(hammer, "LeftButton")
+
+    test.assertEqual("roster", addon.agfWindow:Page())
+    local detail = addon.rosterPage.detail
+    test.assertEqual("Hammer Smith", detail.name.text)
+    test.assertEqual("rank", detail.tabs:Selected())
+    test.assertContains(detail.lines[1].text, "Due")
+    local rules = detail.rankRows[2]
+    test.assertEqual("Read the rules", rules.label.text)
+    rules.box.scripts.OnClick(rules.box, "LeftButton")
+    test.assertContains(detail.lines[1].text, "Ready")
+    test.assertTrue(detail.rankRows[2].box:IsChecked())
+end)
+
+test.test("rank management: the Friends page's player panel has the Rank tab too", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    memberRules(addon)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("friends", partition:GetCharacter(normalizer:Key("Hammer Smith")).player)
+    local detail = addon.friendsPage.detail
+
+    test.assertEqual("Hammer Smith", detail.name.text)
+    test.assertTrue(detail.tabs.tabs[5].shown)
+    detail.tabs.tabs[5].scripts.OnClick(detail.tabs.tabs[5], "LeftButton")
+    local rules = detail.rankRows[2]
+    rules.box.scripts.OnClick(rules.box, "LeftButton")
+    test.assertContains(detail.lines[1].text, "Ready")
+end)
+
+test.test("rank management: a member sees their own Rank tab, read-only, and nobody else's", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(world.environment)
+    memberRules(addon)
+    test.assertTrue(addon.agfWindow:Open())
+    local page = addon.rosterPage
+    local hammer = rosterCard(page, "Hammer Smith")
+    hammer.scripts.OnClick(hammer, "LeftButton")
+    local detail = page.detail
+    test.assertTrue(detail.tabs.tabs[5].shown)
+    detail.tabs.tabs[5].scripts.OnClick(detail.tabs.tabs[5], "LeftButton")
+    test.assertEqual("Only officers can change this checklist.", detail.lines[2].text)
+    local rules = detail.rankRows[2]
+    rules.box.scripts.OnClick(rules.box, "LeftButton")
+    test.assertFalse(detail.rankRows[2].box:IsChecked())
+
+    local zap = rosterCard(page, "Zap Arcane")
+    zap.scripts.OnClick(zap, "LeftButton")
+    test.assertFalse(detail.tabs.tabs[5].shown)
+    test.assertEqual("characters", detail.tabs:Selected())
+end)
+
 test.test("rank management: All players lists the guild's players, Not yet counting down", function()
     local profile = fixtures.PROFILES[1]
     local world, addon = login(profile, fixtures.newChannel(), "Tool Box")

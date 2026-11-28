@@ -587,3 +587,61 @@ test.test("rank up view model: All players' filter keeps Snoozed or Not yet, and
     test.assertEqual(1, view.snoozed)
     test.assertEqual(1, view.notYet)
 end)
+
+-- The player panel's checklist ------------------------------------------------------
+
+local function checklist(world, key)
+    return world.addon.RankUpViewModel.Checklist(world.inputs,
+        world.inputs.partition:GetCharacter(key).player)
+end
+
+test.test("rank up view model: a checklist has the status, the rank promoted to and every requirement in words", function()
+    local world = newGuild({ waiting = { 4, 30 } })
+    local list = checklist(world, "waiting")
+
+    test.assertEqual("Due", list.status)
+    test.assertEqual("→ Member", list.rankText)
+    test.assertEqual("waiting", list.key)
+    test.assertEqual(2, #list.items)
+    test.assertEqual("In the guild 7 days", list.items[1].label)
+    test.assertEqual("30 days (needs 7)", list.items[1].detail)
+    test.assertEqual("met", list.items[1].state)
+    test.assertEqual("Read the rules", list.items[2].label)
+    test.assertTrue(list.items[2].check)
+    test.assertFalse(list.items[2].checked)
+    test.assertEqual("", list.promoteText)
+
+    world.inputs.checks:Set("waiting", world.rules, true, nil, OFFICER, NOW)
+    list = checklist(world, "waiting")
+    test.assertEqual("Ready", list.status)
+    test.assertEqual("by officer", list.items[2].detail)
+    test.assertEqual("officer", list.items[2].by)
+    test.assertEqual("waiting", list.promoteText)
+end)
+
+test.test("rank up view model: a checklist shows an override with its reason, and Not yet with its days", function()
+    local world = newGuild({ early = { 4, 2 } })
+    local joined = world.inputs.requirements:ItemOfKind(4, "char-guild-days")
+    local list = checklist(world, "early")
+    test.assertEqual("Not yet: 5 days", list.statusText)
+    test.assertEqual("missing", list.items[1].state)
+    test.assertEqual("2 of 7 days", list.items[1].detail)
+
+    world.inputs.checks:Set("early", joined, true, "Played on another server", OFFICER, NOW)
+    list = checklist(world, "early")
+    test.assertEqual("overridden", list.items[1].state)
+    test.assertEqual("met by override · Played on another server", list.items[1].detail)
+    test.assertEqual("Due", list.status)
+end)
+
+test.test("rank up view model: a checklist for Match lists the alts, and no requirements has no items", function()
+    local world = newGuild({ boss = { 2, 30 }, grunt = { 4, 1 }, vet = { 2, 30 } })
+    world.inputs.partition:JoinPlayerOf("grunt", "boss", "manual")
+    local list = checklist(world, "boss")
+
+    test.assertEqual("Match", list.status)
+    test.assertEqual("grunt", list.promoteText)
+    test.assertEqual(0, #list.items)
+    test.assertEqual("No requirements", checklist(world, "vet").status)
+    test.assertEqual(nil, world.addon.RankUpViewModel.Checklist(world.inputs, "nobody"))
+end)

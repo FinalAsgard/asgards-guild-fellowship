@@ -416,6 +416,76 @@ local function plural(count, word)
     return count .. " " .. word .. (count == 1 and "" or "s")
 end
 
+-- Player `playerId`'s standing, as All rows it (see there), or nil when
+-- none of the player's characters is in the guild; plus Evaluate's status
+-- for the profile character (nil without a checklist), and the player's
+-- characters in the guild, main first. `matches` is MatchSet's, and
+-- `itemsOf(rank)` a rank's items.
+local function standing(inputs, playerId, matches, itemsOf)
+    local partition = inputs.partition
+    local key = addon.PromotionPolicy.HighestCharacter(partition, playerId)
+    if key == nil then
+        return nil
+    end
+    local status = addon.PromotionPolicy.Evaluate(inputs, key, itemsOf)
+    local keys = inGuild(partition, playerId)
+    local target
+    local index
+    for index = 1, #keys do
+        local rank = matches[keys[index]]
+        if rank ~= nil and (target == nil or rank < target) then
+            target = rank
+        end
+    end
+    local snooze = inputs.checks:IsSnoozed(key, inputs.now) and inputs.checks:SnoozeOf(key) or nil
+    local row = { playerId = playerId, key = key, target = target }
+    if status ~= nil and status.ready then
+        row.status, row.statusText = RankUpViewModel.READY, RankUpViewModel.READY
+    elseif snooze ~= nil then
+        row.status = RankUpViewModel.SNOOZED
+        row.untilTime = snooze.untilTime
+        row.snoozedBy = snooze.by and nameOf(inputs, snooze.by) or nil
+        local ends
+        if inputs.dateText ~= nil then
+            ends = " until " .. inputs.dateText(snooze.untilTime)
+        else
+            ends = " for " .. plural(math.ceil((snooze.untilTime - inputs.now) / addon.PromotionPolicy.DAY),
+                "more day")
+        end
+        row.statusText = RankUpViewModel.SNOOZED .. ends .. (row.snoozedBy and (" by " .. row.snoozedBy) or "")
+    elseif status ~= nil and status.timeMet then
+        row.status, row.statusText = RankUpViewModel.DUE, RankUpViewModel.DUE
+    elseif target ~= nil then
+        row.status, row.statusText = RankUpViewModel.MATCH, RankUpViewModel.MATCH
+    elseif status ~= nil then
+        row.status = RankUpViewModel.NOT_YET
+        row.days = status.remaining
+        row.statusText = RankUpViewModel.NOT_YET .. (row.days and (": " .. plural(row.days, "day")) or "")
+    else
+        row.status, row.statusText = RankUpViewModel.NONE, RankUpViewModel.NONE
+    end
+    if row.status == RankUpViewModel.MATCH or status == nil then
+        row.rank = target
+    else
+        row.rank = status.nextRank
+    end
+    if row.rank ~= nil then
+        row.rankText = RankUpViewModel.ARROW .. rankNameOf(inputs, row.rank)
+    end
+    return row, status, keys
+end
+
+-- A rank's items, read once each, as itemsOf(rank).
+local function itemsReader(inputs)
+    local itemsByRank = {}
+    return function(rank)
+        if itemsByRank[rank] == nil then
+            itemsByRank[rank] = inputs.requirements:Items(rank)
+        end
+        return itemsByRank[rank]
+    end
+end
+
 -- inputs: as for Due (search, but no rank), plus
 --   filter    FILTER_ALL (or nil), FILTER_SNOOZED or FILTER_NOT_YET
 --   dateText  function(time) -> how a date shows ("Dec 4"); without it, a
@@ -439,71 +509,21 @@ function RankUpViewModel.All(inputs)
     local partition = inputs.partition
     local needle = string.match(lower(inputs.search), "^%s*(.-)%s*$")
     local filter = inputs.filter or RankUpViewModel.FILTER_ALL
-    local itemsByRank = {}
-    local function itemsOf(rank)
-        if itemsByRank[rank] == nil then
-            itemsByRank[rank] = inputs.requirements:Items(rank)
-        end
-        return itemsByRank[rank]
-    end
+    local itemsOf = itemsReader(inputs)
     local matches = addon.PromotionPolicy.MatchSet(inputs)
     local view = { rows = {}, count = 0, snoozed = 0, notYet = 0 }
     partition:EachPlayer(function(playerId, player)
-        local key = addon.PromotionPolicy.HighestCharacter(partition, playerId)
-        if key == nil then
+        local row, _, keys = standing(inputs, playerId, matches, itemsOf)
+        if row == nil then
             return
         end
         view.count = view.count + 1
-        local status = addon.PromotionPolicy.Evaluate(inputs, key, itemsOf)
-        local keys = inGuild(partition, playerId)
-        local target
-        local index
-        for index = 1, #keys do
-            local rank = matches[keys[index]]
-            if rank ~= nil and (target == nil or rank < target) then
-                target = rank
-            end
-        end
-        local snooze = inputs.checks:IsSnoozed(key, inputs.now) and inputs.checks:SnoozeOf(key) or nil
-        local row = { playerId = playerId, key = key }
-        if status ~= nil and status.ready then
-            row.status, row.statusText = RankUpViewModel.READY, RankUpViewModel.READY
-        elseif snooze ~= nil then
-            row.status = RankUpViewModel.SNOOZED
-            row.untilTime = snooze.untilTime
-            row.snoozedBy = snooze.by and nameOf(inputs, snooze.by) or nil
-            local ends
-            if inputs.dateText ~= nil then
-                ends = " until " .. inputs.dateText(snooze.untilTime)
-            else
-                ends = " for " .. plural(math.ceil((snooze.untilTime - inputs.now) / addon.PromotionPolicy.DAY),
-                    "more day")
-            end
-            row.statusText = RankUpViewModel.SNOOZED .. ends
-                .. (row.snoozedBy and (" by " .. row.snoozedBy) or "")
+        if row.status == RankUpViewModel.SNOOZED then
             view.snoozed = view.snoozed + 1
-        elseif status ~= nil and status.timeMet then
-            row.status, row.statusText = RankUpViewModel.DUE, RankUpViewModel.DUE
-        elseif target ~= nil then
-            row.status, row.statusText = RankUpViewModel.MATCH, RankUpViewModel.MATCH
-        elseif status ~= nil then
-            row.status = RankUpViewModel.NOT_YET
-            row.days = status.remaining
-            row.statusText = RankUpViewModel.NOT_YET .. (row.days and (": " .. plural(row.days, "day")) or "")
+        elseif row.status == RankUpViewModel.NOT_YET then
             view.notYet = view.notYet + 1
-        else
-            row.status, row.statusText = RankUpViewModel.NONE, RankUpViewModel.NONE
         end
-        if row.status == RankUpViewModel.MATCH then
-            row.rank = target
-        elseif status ~= nil then
-            row.rank = status.nextRank
-        else
-            row.rank = target
-        end
-        if row.rank ~= nil then
-            row.rankText = RankUpViewModel.ARROW .. rankNameOf(inputs, row.rank)
-        end
+        local index
         if (filter == RankUpViewModel.FILTER_SNOOZED and row.status ~= RankUpViewModel.SNOOZED)
             or (filter == RankUpViewModel.FILTER_NOT_YET and row.status ~= RankUpViewModel.NOT_YET)
         then
@@ -550,4 +570,58 @@ function RankUpViewModel.All(inputs)
         return tostring(a.playerId) < tostring(b.playerId)
     end)
     return view
+end
+
+-- Player `playerId`'s checklist, for the player panel's Rank management
+-- tab, or nil when none of the player's characters is in the guild:
+--   { playerId, key (the profile character), status, statusText, rank,
+--     rankText, untilTime, snoozedBy (as All's rows), promote (the
+--     characters to promote: for Ready, each below the rank promoted to;
+--     for Match, the alts behind), promoteText, items }
+-- where each item is a grid cell (see cellOf) plus its `label` and
+-- `detail` in words: an automated item's ("5 of 7 days", "met by
+-- override", with an override's reason after it), a check's note or who
+-- ticked it. A player with no requirements has no items.
+function RankUpViewModel.Checklist(inputs, playerId)
+    local partition = inputs.partition
+    local itemsOf = itemsReader(inputs)
+    local matches = addon.PromotionPolicy.MatchSet(inputs)
+    local row, status, keys = standing(inputs, playerId, matches, itemsOf)
+    if row == nil then
+        return nil
+    end
+    row.items = {}
+    row.promote = {}
+    local index
+    if row.status == RankUpViewModel.MATCH then
+        for index = 1, #keys do
+            if matches[keys[index]] ~= nil then
+                table.insert(row.promote, nameOf(inputs, keys[index]))
+            end
+        end
+    elseif row.status == RankUpViewModel.READY then
+        for index = 1, #keys do
+            local rank = (partition:GetCharacter(keys[index]) or {}).rank
+            if type(rank) == "number" and rank > status.nextRank then
+                table.insert(row.promote, nameOf(inputs, keys[index]))
+            end
+        end
+    end
+    row.promoteText = table.concat(row.promote, ", ")
+    if status ~= nil then
+        for index = 1, #status.items do
+            local item = status.items[index]
+            local cell = cellOf(inputs, item)
+            cell.label = item.label
+            if cell.check then
+                cell.detail = cell.text
+            elseif item.overridden then
+                cell.detail = RankUpViewModel.OVERRIDE_TEXT .. (cell.note and (DOT .. cell.note) or "")
+            else
+                cell.detail = item.detail or cell.text
+            end
+            row.items[index] = cell
+        end
+    end
+    return row
 end

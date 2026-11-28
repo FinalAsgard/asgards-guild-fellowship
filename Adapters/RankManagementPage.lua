@@ -101,6 +101,8 @@ end
 --           the picked rank (nil for Any rank), for Missing
 --   players function(search, filter) -> RankUpViewModel.All's view, for All
 --           players, or nil outside a guild
+--   onSelect function(playerId): a click on a row, to show that player's
+--           full checklist
 --   onTick  function(key, item, ticked, note) -> true, or false and why
 --           not: ticks or unticks officer check `item` for the player whose
 --           profile character is `key`, with `note` (a check's note, or an
@@ -306,6 +308,13 @@ end
 function Page:buildRow(parent)
     local ui, owner = self.ui, self
     local row = ui:Panel(parent)
+    -- A click shows the player's full checklist.
+    row:EnableMouse(true)
+    row:SetScript("OnMouseUp", function(_, button)
+        if button == "LeftButton" and row.entry ~= nil and owner.options.onSelect ~= nil then
+            owner.options.onSelect(row.entry.playerId)
+        end
+    end)
     row.name = ui:Text(row, "", "semibold", "body", "text")
     row.name:SetPoint("TOPLEFT", row, "TOPLEFT", Theme.SPACING.m, -Theme.SPACING.s)
     row.name:SetJustifyH("LEFT")

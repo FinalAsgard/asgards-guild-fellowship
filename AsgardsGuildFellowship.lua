@@ -1508,6 +1508,13 @@ if clientProfile.supported then
                         onTick = function(key, item, ticked, note)
                             return promotions.tick(key, item, ticked, note)
                         end,
+                        -- A row's player on the Roster, on their Rank tab.
+                        onSelect = function(playerId)
+                            agfWindow:ShowPage("roster", playerId)
+                            if friendsUi.roster ~= nil then
+                                friendsUi.roster:ShowDetailTab("rank")
+                            end
+                        end,
                         onError = function(text)
                             rosterController:Print(text)
                         end,
@@ -3632,6 +3639,35 @@ if clientProfile.supported then
         promotions.changed()
         return true
     end
+    -- The player panel's Rank tab for `playerId` (RankUpViewModel
+    -- .Checklist), editable for an officer; a member sees only their own
+    -- player's, read-only. Nil when the user may not see it, or without a
+    -- guild.
+    promotions.checklist = function(playerId)
+        local inputs = promotionInputs()
+        if inputs == nil then
+            return nil
+        end
+        local officer = selfIsOfficer()
+        if not officer then
+            local selfKey = rosterController:SelfKey()
+            local own = selfKey and inputs.partition:GetCharacter(selfKey) or nil
+            if own == nil or own.player ~= playerId then
+                return nil
+            end
+        end
+        local _, _, normalizer = rosterController:QuietContext()
+        inputs.normalizer = normalizer
+        inputs.members = rosterController:LiveMembers(normalizer)
+        inputs.dateText = function(time)
+            return client:FormatDate(time)
+        end
+        local checklist = addon.RankUpViewModel.Checklist(inputs, playerId)
+        if checklist ~= nil then
+            checklist.editable = officer
+        end
+        return checklist
+    end
     -- Not ready: snoozes `key`'s timer marker for its rank's snooze length,
     -- from now. Returns true, or false and why.
     promotions.snooze = function(key)
@@ -4843,6 +4879,9 @@ if clientProfile.supported then
             joined = function(keys)
                 return earliestJoin(keys)
             end,
+            rankChecklist = function(id)
+                return promotions.checklist(id)
+            end,
         })
         return fields and addon.PlayerDetailViewModel.Build(fields) or nil
     end
@@ -4851,6 +4890,12 @@ if clientProfile.supported then
     friendsUi.draw = function(content, ui)
         local inputs, change, pinnable = friendsUi.inputs, friendsUi.change, friendsUi.pinnable
         friendsUi.page = addon.FriendsPage.Create(content, ui, {
+            onRankTick = function(key, item, ticked, note)
+                return promotions.tick(key, item, ticked, note)
+            end,
+            onSnooze = function(key)
+                return promotions.snooze(key)
+            end,
             model = function(selected)
                 local friends = currentFriends()
                 local fields = inputs({ selected = selected, mostGrouped = friends and friends:MostGrouped() or {} })
@@ -4924,6 +4969,12 @@ if clientProfile.supported then
             return rosterController[method](rosterController, ...)
         end
         friendsUi.roster = addon.RosterPage.Create(content, ui, {
+            onRankTick = function(key, item, ticked, note)
+                return promotions.tick(key, item, ticked, note)
+            end,
+            onSnooze = function(key)
+                return promotions.snooze(key)
+            end,
             model = function(selected, filters)
                 local friends = currentFriends()
                 local fields, partition = friendsUi.inputs({ selected = selected, now = client:Timestamp(),

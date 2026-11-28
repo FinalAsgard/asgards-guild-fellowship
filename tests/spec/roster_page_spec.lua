@@ -8,7 +8,7 @@ local fakeFrames = require("tests.fake_frames")
 -- Online only.
 local function setup(count, online)
     local addon = test.newAddon("Core/FellowshipStore.lua", "Core/ListWindow.lua", "Core/RosterViewModel.lua", "Core/RosterListModel.lua",
-        "Core/LfgHistoryView.lua", "Core/PlayerDetailViewModel.lua",
+        "Core/LfgHistoryView.lua", "Core/PlayerDetailViewModel.lua", "Core/RankUpViewModel.lua",
         "Adapters/Theme.lua", "Adapters/Widgets.lua", "Adapters/PlayerCards.lua", "Adapters/PlayerDetailPanel.lua",
         "Adapters/RosterPage.lua")
     local environment = fakeFrames.install({})
@@ -82,7 +82,24 @@ local function setup(count, online)
                 characters = { { key = "key" .. playerId, name = player.name, isMain = true } },
                 panel = { main = "key" .. playerId, canMerge = true },
                 tiles = {},
+                -- `world.checklist(playerId)` is the Rank tab's, when set.
+                rank = world.checklist and world.checklist(playerId) or nil,
             }
+        end,
+        onRankTick = function(key, item, ticked, note)
+            table.insert(world.calls, "tick " .. key .. " " .. item .. " " .. tostring(ticked)
+                .. (note and (" " .. note) or ""))
+            if world.refuse ~= nil then
+                return false, world.refuse
+            end
+            return true
+        end,
+        onSnooze = function(key)
+            table.insert(world.calls, "snooze " .. key)
+            return true
+        end,
+        onError = function(text)
+            world.error = text
         end,
         onWhisper = function(target)
             table.insert(world.calls, "whisper " .. target)
@@ -879,4 +896,141 @@ test.test("roster page: a review closes once its suggestions are all decided", f
     click(world.page.approveAll)
 
     test.assertFalse(world.page.reviewView.shown)
+end)
+
+-- The panel's Rank tab --------------------------------------------------------------
+
+-- A Due checklist for the panel: an automated item met, one missing, an
+-- officer check and one that needs a note.
+local function dueChecklist(editable)
+    return function(playerId)
+        return {
+            playerId = playerId,
+            key = "key" .. playerId,
+            status = "Due",
+            statusText = "Due",
+            rankText = "→ Member",
+            promoteText = "",
+            editable = editable,
+            items = {
+                { id = "days", label = "In the guild 7 days", state = "met", detail = "30 days (needs 7)" },
+                { id = "level", label = "Level 70", state = "missing", detail = "level 66 of 70" },
+                { id = "rules", label = "Read the rules", check = true, checked = true, state = "ticked",
+                    detail = "by Toolbox" },
+                { id = "interview", label = "Interview", check = true, needsNote = true, checked = false,
+                    state = "unticked", detail = "" },
+            },
+        }
+    end
+end
+
+local function rankTab(world)
+    local detail = world.page.detail
+    detail.tabs.tabs[5].scripts.OnClick(detail.tabs.tabs[5], "LeftButton")
+    return detail
+end
+
+test.test("roster page: the panel's Rank tab shows only with a checklist", function()
+    local world = setup()
+    world.page:Refresh()
+    test.assertFalse(world.page.detail.tabs.tabs[5].shown)
+
+    world.checklist = dueChecklist(true)
+    world.page:Refresh()
+    test.assertTrue(world.page.detail.tabs.tabs[5].shown)
+    test.assertEqual("Rank", world.page.detail.tabs.tabs[5].label.text)
+end)
+
+test.test("roster page: the Rank tab shows the status, the rank promoted to and each requirement in words", function()
+    local world = setup()
+    world.checklist = dueChecklist(true)
+    world.page:Refresh()
+    local detail = rankTab(world)
+
+    test.assertEqual("rank", detail.tabs:Selected())
+    test.assertEqual("Due · → Member", detail.lines[1].text)
+    local rows = detail.rankRows
+    test.assertEqual("In the guild 7 days", rows[1].label.text)
+    test.assertEqual("30 days (needs 7)", rows[1].detail.text)
+    test.assertEqual("green", rows[1].color)
+    test.assertFalse(rows[1].box.shown)
+    test.assertEqual("red", rows[2].color)
+    test.assertTrue(rows[3].box.shown)
+    test.assertTrue(rows[3].box:IsChecked())
+    test.assertEqual("by Toolbox", rows[3].detail.text)
+    test.assertTrue(detail.snooze.shown)
+end)
+
+test.test("roster page: an officer ticks, notes, overrides and snoozes from the Rank tab", function()
+    local world = setup()
+    world.checklist = dueChecklist(true)
+    world.page:Refresh()
+    local detail = rankTab(world)
+    local rows = detail.rankRows
+
+    rows[3].box.scripts.OnClick(rows[3].box, "LeftButton")
+    test.assertEqual("tick key1 rules false", world.calls[#world.calls])
+
+    -- A check that needs a note asks for it first.
+    rows[4].box.scripts.OnClick(rows[4].box, "LeftButton")
+    test.assertTrue(detail.prompt:IsOpen())
+    detail.prompt.single:SetValue("Talked on Discord")
+    detail.prompt.save.scripts.OnClick(detail.prompt.save, "LeftButton")
+    test.assertEqual("tick key1 interview true Talked on Discord", world.calls[#world.calls])
+
+    -- Right-click a failed automated one to override it.
+    rows[2].scripts.OnClick(rows[2], "RightButton")
+    test.assertEqual("Override as met...", detail.menu.rows[1].label.text)
+    detail.menu.rows[1].scripts.OnClick(detail.menu.rows[1], "LeftButton")
+    detail.prompt.single:SetValue("Levels on an alt")
+    detail.prompt.save.scripts.OnClick(detail.prompt.save, "LeftButton")
+    test.assertEqual("tick key1 level true Levels on an alt", world.calls[#world.calls])
+
+    detail.snooze.scripts.OnClick(detail.snooze, "LeftButton")
+    test.assertEqual("snooze key1", world.calls[#world.calls])
+    -- Still on the Rank tab, shown again.
+    test.assertEqual("rank", detail.tabs:Selected())
+end)
+
+test.test("roster page: a refused tick on the Rank tab says why", function()
+    local world = setup()
+    world.checklist = dueChecklist(true)
+    world.page:Refresh()
+    local rows = rankTab(world).rankRows
+    world.refuse = "only officers can tick promotion requirements"
+    rows[3].box.scripts.OnClick(rows[3].box, "LeftButton")
+
+    test.assertEqual("Player001's checklist wasn't changed: only officers can tick promotion requirements.",
+        world.error)
+end)
+
+test.test("roster page: a member's own Rank tab is read-only", function()
+    local world = setup()
+    world.checklist = dueChecklist(false)
+    world.page:Refresh()
+    local detail = rankTab(world)
+    local rows = detail.rankRows
+    local before = #world.calls
+
+    test.assertEqual("Only officers can change this checklist.", detail.lines[2].text)
+    test.assertFalse(detail.snooze.shown)
+    rows[3].box.scripts.OnClick(rows[3].box, "LeftButton")
+    rows[2].scripts.OnClick(rows[2], "RightButton")
+    test.assertFalse(detail.menu:IsOpen())
+    test.assertEqual(before, #world.calls)
+    test.assertTrue(rows[3].box:IsChecked())
+end)
+
+test.test("roster page: ShowDetailTab opens the Rank tab, and a player without one stays on Characters", function()
+    local world = setup()
+    world.checklist = dueChecklist(true)
+    world.page:Refresh()
+    world.page:ShowDetailTab("rank")
+    test.assertEqual("rank", world.page.detail.tabs:Selected())
+
+    world.checklist = nil
+    world.page:Refresh()
+    test.assertEqual("characters", world.page.detail.tabs:Selected())
+    world.page:ShowDetailTab("rank")
+    test.assertEqual("characters", world.page.detail.tabs:Selected())
 end)

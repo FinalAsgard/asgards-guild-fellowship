@@ -107,6 +107,8 @@ Page.__index = Page
 --   reviewOf  function(group) -> { title, suggestedBy, lines = { { before,
 --             after } } }: a bundle's before and after, or nil
 --   onError   function(text): tells the user why something didn't happen
+--   onRankTick, onSnooze  the panel's Rank tab (see
+--             PlayerDetailPanel.RankCallbacks)
 -- and, for organizing players (RosterController's calls, by character key):
 --   menuFor   function(target) -> { { text, action, key } }: the right-click
 --             entries for { kind = "player", id } or { kind = "character",
@@ -189,7 +191,12 @@ function Page:build()
     side:SetPoint("TOPLEFT", column, "TOPRIGHT", Theme.SPACING.l, 0)
     side:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
     self.side = side
+    local onRankTick, onRankSnooze = addon.PlayerDetailPanel.RankCallbacks(self.options, function()
+        owner:showDetail()
+    end)
     self.detail = addon.PlayerDetailPanel.Create(ui, side, {
+        onRankTick = onRankTick,
+        onRankSnooze = onRankSnooze,
         onWhisper = function(target)
             if owner.options.onWhisper ~= nil then
                 owner.options.onWhisper(target)
@@ -1157,6 +1164,15 @@ function Page:pick(entry)
     end
     self:call("onSetMain", self.linking.key, entry.id)
     self:changed()
+end
+
+-- Shows tab `id` of the selected player's panel (the Rank tab when Rank
+-- management opens a player), when it has that tab.
+function Page:ShowDetailTab(id)
+    local view = self.detail.view
+    if view ~= nil and (id ~= "rank" or view.rank ~= nil) then
+        self.detail:ShowTab(id)
+    end
 end
 
 -- The selected player's id, or nil.

@@ -90,9 +90,13 @@ end
 --   tierOf      function(key) -> their GroupFriends tier, or nil
 --   groupedShown how many of the Grouped tab's parties to show (default
 --               LfgHistoryView.PAGE_SIZE; Show more adds a page)
+--   rankChecklist function(playerId) -> the Rank tab's checklist
+--               (RankUpViewModel.Checklist, plus `editable`), or nil when
+--               the user may not see it
 -- Returns nil when the player no longer exists, or:
 --   { playerId, panel (PlayerPanelViewModel's view), header, tiles,
---     characters, bioRows, grouped, logRows }
+--     characters, bioRows, grouped, logRows, rank (the Rank tab's
+--     checklist, nil when it isn't shown) }
 -- header: { name (the alias, else the main's name), alias, mainName,
 --   color, level, race, className, rank, facts ("Level 60 Dwarf Warrior ·
 --   Officer"), badge (nil, or { kind = FRIEND } or { kind = TOP, rank }),
@@ -284,6 +288,7 @@ function PlayerDetailViewModel.Build(inputs)
         bioRows = panel.bioRows,
         logRows = panel.logRows,
         grouped = grouped,
+        rank = ask(inputs.rankChecklist, playerId),
         header = {
             name = alias or panel.mainName,
             alias = alias,

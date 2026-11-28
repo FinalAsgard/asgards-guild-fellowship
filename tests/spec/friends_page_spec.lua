@@ -498,7 +498,9 @@ test.test("friends page: the detail tabs draw Characters, Bio, Grouped with Show
     test.assertEqual("Bio", detail.tabs.tabs[2].label.text)
     test.assertEqual("Grouped · 0", detail.tabs.tabs[3].label.text)
     test.assertEqual("Log", detail.tabs.tabs[4].label.text)
-    test.assertEqual(4, #detail.tabs.tabs)
+    -- The fifth, Rank, shows only with a checklist.
+    test.assertEqual(5, #detail.tabs.tabs)
+    test.assertFalse(detail.tabs.tabs[5].shown)
     local main, alt = detail.characterCards[1], detail.characterCards[2]
     test.assertEqual("Anvil", main.name.text)
     test.assertTrue(main.main.shown)
