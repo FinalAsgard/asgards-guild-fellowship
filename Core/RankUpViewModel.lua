@@ -19,6 +19,12 @@ local _, addon = ...
 --          promotes them, and a snooze hides Match as it hides Due.
 -- Ready rows come first, then Match, then Due, each by name.
 --
+-- Picking a rank (the Promote to picker, see Targets) narrows the list to
+-- the players up for that rank and turns it into a grid: one column per
+-- requirement of the rank, in the rank's order, and on each row one cell
+-- per column. The columns come from the rank's requirement list, so a new
+-- kind of requirement is just another column.
+--
 -- Pure: PromotionPolicy's inputs are handed in, plus how names show.
 local RankUpViewModel = {
     READY = "Ready",
@@ -26,6 +32,13 @@ local RankUpViewModel = {
     MATCH = "Match",
     ARROW = "→ ",
     FOOTER = "Promotion happens on the guild roster, where the Ready arrow shows.",
+    ANY_RANK = "Any rank",
+    -- A grid cell's state.
+    MET = "met",
+    MISSING = "missing",
+    OVERRIDDEN = "overridden",
+    TICKED = "ticked",
+    UNTICKED = "unticked",
 }
 addon.RankUpViewModel = RankUpViewModel
 
@@ -70,11 +83,58 @@ local function found(needle, alias, names)
     return false
 end
 
+local function rankNameOf(inputs, rank)
+    return (inputs.rankNames or {})[rank + 1] or ("Rank " .. rank)
+end
+
+-- The Promote to picker's choices: Any rank, then each rank that has
+-- requirements, named by the rank promoted to, the newest members' first:
+--   { { text = "Any rank" }, { rank = 3, text = "→ Member" }, ... }
+-- where `rank` is the rank promoted to (a row's `rank`).
+function RankUpViewModel.Targets(inputs)
+    local targets = { { text = RankUpViewModel.ANY_RANK } }
+    local ranks = inputs.requirements:Ranks()
+    local index
+    for index = #ranks, 1, -1 do
+        local from = ranks[index]
+        if from >= 1 then
+            table.insert(targets, { rank = from - 1, text = RankUpViewModel.ARROW .. rankNameOf(inputs, from - 1) })
+        end
+    end
+    return targets
+end
+
+-- A grid cell from one of PromotionPolicy.Evaluate's items: { id, kind,
+-- check (an officer's checkbox), checked, state (MET, MISSING or
+-- OVERRIDDEN for an automated item, TICKED or UNTICKED for a checkbox),
+-- text (an automated item's detail in short: "44 d", "level 76", "not
+-- seen", "≈" before an approximate date) }.
+local function cellOf(item)
+    local cell = { id = item.id, kind = item.kind, check = not item.automated, text = "" }
+    if cell.check then
+        cell.checked = item.met == true
+        cell.state = cell.checked and RankUpViewModel.TICKED or RankUpViewModel.UNTICKED
+        return cell
+    end
+    cell.text = item.short or item.detail or ""
+    if item.overridden then
+        cell.state = RankUpViewModel.OVERRIDDEN
+    elseif item.met then
+        cell.state = RankUpViewModel.MET
+    else
+        cell.state = RankUpViewModel.MISSING
+    end
+    return cell
+end
+
 -- inputs: PromotionPolicy's (partition, requirements, checks, dates, now,
 -- rankNames), plus
 --   normalizer  a NameNormalizer, for how names show
 --   members     live roster facts by character key, for names (optional)
 --   search      text to find in aliases and character names, ignoring case
+--   rank        the rank promoted to that was picked (a Targets choice), or
+--               nil for Any rank: just the Ready and Due players up for
+--               it, as a grid
 -- Returns {
 --   rows    { playerId, key (the profile character), name (the alias, else
 --           the main's name), status (READY, MATCH or DUE), rank, rankName
@@ -87,6 +147,9 @@ end
 --   footer  "2 Ready · 1 Match · 5 Due · 4 snoozed · Promotion happens on
 --           the guild roster, ..." (Match and snoozed only when there are
 --           any)
+--   columns with a rank picked, the rank's requirements in order: { id,
+--           label, kind, check }; each row then has `cells`, one per
+--           column (see cellOf)
 -- }
 function RankUpViewModel.Due(inputs)
     local partition = inputs.partition
@@ -99,14 +162,27 @@ function RankUpViewModel.Due(inputs)
         return itemsByRank[rank]
     end
     local view = { rows = {}, ready = 0, match = 0, due = 0, snoozed = 0 }
-    local matches = addon.PromotionPolicy.MatchSet(inputs)
-    local names = inputs.rankNames or {}
+    local picked = inputs.rank
+    -- A picked rank has no Match rows: they have no checklist to show.
+    local matches = picked == nil and addon.PromotionPolicy.MatchSet(inputs) or {}
     local function rankName(rank)
-        return names[rank + 1] or ("Rank " .. rank)
+        return rankNameOf(inputs, rank)
+    end
+    if picked ~= nil then
+        view.columns = {}
+        local items = itemsOf(picked + 1)
+        local index
+        for index = 1, #items do
+            table.insert(view.columns, { id = items[index].id, label = items[index].label, kind = items[index].kind,
+                check = not addon.RankRequirements.IsAutomated(items[index].kind) })
+        end
     end
     partition:EachPlayer(function(playerId, player)
         local key = addon.PromotionPolicy.HighestCharacter(partition, playerId)
         local status = key and addon.PromotionPolicy.Evaluate(inputs, key, itemsOf) or nil
+        if picked ~= nil and (status == nil or status.nextRank ~= picked) then
+            return
+        end
         local snoozed = key ~= nil and inputs.checks:IsSnoozed(key, inputs.now)
         local ready = status ~= nil and status.ready
         local due = status ~= nil and not ready and status.timeMet
@@ -184,6 +260,12 @@ function RankUpViewModel.Due(inputs)
             rankName = status.nextRankName,
             rankText = RankUpViewModel.ARROW .. status.nextRankName,
         }
+        if picked ~= nil then
+            row.cells = {}
+            for index = 1, #status.items do
+                row.cells[index] = cellOf(status.items[index])
+            end
+        end
         if ready then
             row.promote = {}
             for index = 1, #keys do

@@ -1930,6 +1930,60 @@ test.test("rank management: officers get it under Officer with a count of player
     test.assertEqual("roster", memberAddon.agfWindow:Page())
 end)
 
+test.test("rank management: picking a rank shows the grid, and ticking a check saves it at once", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    -- Members (rank 3) need a day in the guild and the rules read.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "char-guild-days", true, 1, "Member", officer, 1)
+    local rules = requirements:Add(3, "Read the rules", "check", "Member", officer, 1)[1]
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+
+    page.picker.scripts.OnClick(page.picker, "LeftButton")
+    test.assertEqual("Any rank", page.menu.rows[1].label.text)
+    local menuRow = page.menu.rows[2]
+    test.assertContains(menuRow.label.text, "→ ")
+    menuRow.scripts.OnClick(menuRow, "LeftButton")
+    test.assertTrue(page.header.shown)
+    test.assertEqual("In the guild 1 days", page.header.labels[1].text)
+    test.assertEqual("Read the rules", page.header.labels[2].text)
+
+    local row
+    local _, frame
+    for _, frame in ipairs(page.list:Shown()) do
+        if frame.shown and rawget(frame, "entry") ~= nil and frame.entry.name == "Hammer Smith" then
+            row = frame
+        end
+    end
+    test.assertTrue(row ~= nil)
+    local box = row.cells[2].box
+    test.assertFalse(box:IsChecked())
+    box.scripts.OnClick(box, "LeftButton")
+
+    -- Saved through the promotion checks, so the rules engine has it:
+    -- Hammer is Ready now.
+    local saved = partition:GetPromotionChecks()
+    local found = false
+    local _, record
+    for _, record in pairs(saved.records or saved) do
+        if type(record) == "table" and record.item == rules.id and record.ticked then
+            found = true
+        end
+    end
+    test.assertTrue(found)
+    test.assertEqual("Ready", row.entry.status)
+    test.assertTrue(row.cells[2].box:IsChecked())
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the page is built on show, and a pinned Friend is starred", function()

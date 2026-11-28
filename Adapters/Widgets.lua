@@ -18,6 +18,9 @@ local Widgets = {
     MENU_LEVEL = 100,
     TOGGLE_WIDTH = 34,
     TOGGLE_HEIGHT = 18,
+    -- A check box, and the game's check mark drawn in it.
+    CHECK_SIZE = 18,
+    CHECK_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Check",
     INPUT_HEIGHT = 26,
     -- A pooled list's scroll bar, and its thumb at its shortest.
     SCROLLBAR_WIDTH = 6,
@@ -770,6 +773,36 @@ function UI:Toggle(parent, onChange)
     end)
     switch:SetOn(false)
     return switch
+end
+
+-- A small square check box, green with a check mark while checked.
+-- `onChange(wanted)` runs on a click with the state asked for; the owner
+-- calls SetChecked once it holds.
+function UI:CheckBox(parent, onChange)
+    local box = self:frame("Button", parent)
+    box:SetSize(Widgets.CHECK_SIZE, Widgets.CHECK_SIZE)
+    round(box, Theme.RADIUS.small, "raised", "border")
+    box.mark = box:CreateTexture(nil, "ARTWORK")
+    box.mark:SetTexture(Widgets.CHECK_TEXTURE)
+    box.mark:SetPoint("TOPLEFT", box, "TOPLEFT", -2, 2)
+    box.mark:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 2, -2)
+    box.mark:SetVertexColor(Theme.Color("text"))
+    function box.SetChecked(_, checked)
+        box.checked = checked == true
+        box.mark:SetShown(box.checked)
+        box:SetFill(box.checked and "green" or "raised")
+        box:SetBorder(not box.checked and "border" or nil)
+    end
+    function box.IsChecked()
+        return box.checked == true
+    end
+    box:SetScript("OnClick", function(self)
+        if onChange ~= nil then
+            onChange(not self.checked)
+        end
+    end)
+    box:SetChecked(false)
+    return box
 end
 
 -- Scrolling -----------------------------------------------------------------

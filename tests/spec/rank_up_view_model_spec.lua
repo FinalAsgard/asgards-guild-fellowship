@@ -259,3 +259,154 @@ test.test("rank up view model: a player not yet due still gets a Match row for a
     test.assertEqual("→ Member", view.rows[1].rankText)
     test.assertEqual("alt", view.rows[1].promoteText)
 end)
+
+-- The rank grid ------------------------------------------------------------------
+
+local function cellOf(row, label, view)
+    local index
+    for index = 1, #view.columns do
+        if view.columns[index].label == label then
+            return row.cells[index]
+        end
+    end
+    return nil
+end
+
+test.test("rank up view model: the Promote to picker lists Any rank and each rank with requirements, by the rank promoted to", function()
+    local world = newGuild({})
+    local targets = world.addon.RankUpViewModel.Targets(world.inputs)
+
+    test.assertEqual(3, #targets)
+    test.assertEqual("Any rank", targets[1].text)
+    test.assertEqual(nil, targets[1].rank)
+    -- The newest members' rank first: Initiates become Members.
+    test.assertEqual("→ Member", targets[2].text)
+    test.assertEqual(3, targets[2].rank)
+    test.assertEqual("→ Veteran", targets[3].text)
+    test.assertEqual(2, targets[3].rank)
+end)
+
+test.test("rank up view model: picking a rank keeps only the players up for it, with one column per requirement in order", function()
+    local world = newGuild({ ready = { 4, 30 }, waiting = { 4, 30 }, steady = { 3, 30 }, boss = { 2, 30 },
+        grunt = { 3, 1 } })
+    world.inputs.partition:JoinPlayerOf("grunt", "boss", "manual")
+    world.inputs.checks:Set("ready", world.rules, true, nil, OFFICER, NOW)
+    world.inputs.rank = 3
+    local view = world.due()
+
+    test.assertEqual("ready Ready, waiting Due", names(view))
+    test.assertEqual(2, #view.columns)
+    test.assertEqual("In the guild 7 days", view.columns[1].label)
+    test.assertFalse(view.columns[1].check)
+    test.assertEqual("Read the rules", view.columns[2].label)
+    test.assertTrue(view.columns[2].check)
+    test.assertEqual(2, #view.rows[1].cells)
+    test.assertEqual("1 Ready · 1 Due · Promotion happens on the guild roster, where the Ready arrow shows.",
+        view.footer)
+
+    world.inputs.rank = nil
+    local any = world.due()
+    test.assertEqual(nil, any.columns)
+    test.assertEqual(nil, any.rows[1].cells)
+end)
+
+test.test("rank up view model: grid cells for every requirement kind", function()
+    local world = newGuild({ alt = { 4, 30 } })
+    local addon, inputs = world.addon, world.inputs
+    local requirements, partition = inputs.requirements, inputs.partition
+    partition:RecordCharacter("lead", { name = "lead", rankIndex = 4, level = 66 })
+    partition:JoinPlayerOf("alt", "lead", "manual")
+    requirements:SetAutomated(4, "player-guild-days", true, 30, RANKS[5], OFFICER, NOW)
+    requirements:SetAutomated(4, "rank-days", true, 7, RANKS[5], OFFICER, NOW)
+    requirements:SetAutomated(4, "level", true, 70, RANKS[5], OFFICER, NOW)
+    requirements:SetAutomated(4, "addon", true, nil, RANKS[5], OFFICER, NOW)
+    requirements:SetAutomated(4, "discord", true, nil, RANKS[5], OFFICER, NOW)
+    requirements:Add(4, "Interview", "check-note", RANKS[5], OFFICER, NOW)
+    -- Lead's join date is approximate. (A Due player's time is always met:
+    -- one not met keeps them off the list.)
+    inputs.dates:Offer("lead", "joined", { time = NOW - 44 * DAY, source = "first-seen" })
+    inputs.dates:Offer("lead", "rankSince", { time = NOW - 10 * DAY, rank = 4, source = "log" })
+    inputs.checks:Set("lead", world.rules, true, nil, OFFICER, NOW)
+    inputs.rank = 3
+    local view = world.due()
+    local row = view.rows[1]
+    local Model = addon.RankUpViewModel
+
+    test.assertEqual(8, #view.columns)
+    local days = cellOf(row, "In the guild 7 days", view)
+    test.assertEqual(Model.MET, days.state)
+    test.assertEqual("≈44 d", days.text)
+    local player = cellOf(row, "Player in the guild 30 days", view)
+    test.assertEqual(Model.MET, player.state)
+    test.assertEqual("≈44 d", player.text)
+    local rank = cellOf(row, "At this rank 7 days", view)
+    test.assertEqual(Model.MET, rank.state)
+    test.assertEqual("10 d", rank.text)
+    local level = cellOf(row, "Level 70", view)
+    test.assertEqual(Model.MISSING, level.state)
+    test.assertEqual("level 66", level.text)
+    local seen = cellOf(row, "Has the Guild Fellowship Addon", view)
+    test.assertEqual(Model.MISSING, seen.state)
+    test.assertEqual("not seen", seen.text)
+    local discord = cellOf(row, "Has a Discord name set", view)
+    test.assertEqual(Model.MISSING, discord.state)
+    test.assertEqual("not set", discord.text)
+    local rules = cellOf(row, "Read the rules", view)
+    test.assertTrue(rules.check)
+    test.assertTrue(rules.checked)
+    test.assertEqual(Model.TICKED, rules.state)
+    local interview = cellOf(row, "Interview", view)
+    test.assertTrue(interview.check)
+    test.assertFalse(interview.checked)
+    test.assertEqual(Model.UNTICKED, interview.state)
+
+    -- Seen on sync, with a Discord name, and an officer's override on the
+    -- level.
+    inputs.dates:Heard("alt", NOW - 3 * DAY)
+    partition:SetProfileText("lead", "discord", "lead#1234", NOW, "lead")
+    inputs.checks:Set("lead", requirements:ItemOfKind(4, "level"), true, "Levels on the alt", OFFICER, NOW)
+    view = world.due()
+    row = view.rows[1]
+    test.assertEqual("seen 3 d ago", cellOf(row, "Has the Guild Fellowship Addon", view).text)
+    test.assertEqual(Model.MET, cellOf(row, "Has the Guild Fellowship Addon", view).state)
+    test.assertEqual("lead#1234", cellOf(row, "Has a Discord name set", view).text)
+    test.assertEqual(Model.OVERRIDDEN, cellOf(row, "Level 70", view).state)
+    test.assertEqual("level 66", cellOf(row, "Level 70", view).text)
+
+    -- An unknown date: the time isn't met, so Lead is off the list, and
+    -- the cell would say so.
+    test.assertEqual("unknown", select(3, addon.PromotionPolicy.STATUS["rank-days"](
+        { dates = { RankSince = function() end }, now = NOW }, "lead", { n = 7 }, { rank = 4 })))
+end)
+
+test.test("rank up view model: a kind the grid doesn't know is still a column", function()
+    local world = newGuild({ waiting = { 4, 30 } })
+    local addon = world.addon
+    -- A kind #352 might add: automated, judged by its own rule.
+    local Requirements = addon.RankRequirements
+    local isAutomated = Requirements.IsAutomated
+    Requirements.IsAutomated = function(kind)
+        return kind == "future" or isAutomated(kind)
+    end
+    addon.PromotionPolicy.STATUS.future = function()
+        return true, "sighted on Discord", "sighted"
+    end
+    local items = world.inputs.requirements:Items(4)
+    local itemsOf = world.inputs.requirements.Items
+    world.inputs.requirements.Items = function(self, rank)
+        local list = itemsOf(self, rank)
+        if rank == 4 then
+            table.insert(list, { id = "future-1", label = "Seen on Discord", kind = "future" })
+        end
+        return list
+    end
+    world.inputs.rank = 3
+    local view = world.due()
+    Requirements.IsAutomated = isAutomated
+
+    test.assertEqual(#items + 1, #view.columns)
+    test.assertEqual("Seen on Discord", view.columns[#view.columns].label)
+    local cell = view.rows[1].cells[#view.columns]
+    test.assertEqual(addon.RankUpViewModel.MET, cell.state)
+    test.assertEqual("sighted", cell.text)
+end)

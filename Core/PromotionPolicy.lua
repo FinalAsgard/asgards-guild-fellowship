@@ -27,10 +27,10 @@ end
 -- join): before tracking passes any N; an approximate date says so.
 local function daysCheck(inputs, record, n, unknown)
     if record == nil then
-        return false, unknown
+        return false, unknown, "unknown"
     end
     if record.beforeTracking or record.source == addon.MembershipDates.BEFORE_TRACKING then
-        return true, "before tracking"
+        return true, "before tracking", "before tracking"
     end
     local count = days(inputs, record.time)
     local approximate = record.approximate or record.source == addon.MembershipDates.FIRST_SEEN
@@ -41,7 +41,7 @@ local function daysCheck(inputs, record, n, unknown)
     else
         text = count .. " of " .. n .. " days"
     end
-    return count >= n, text .. (approximate and " (approx.)" or "")
+    return count >= n, text .. (approximate and " (approx.)" or ""), (approximate and "≈" or "") .. count .. " d"
 end
 
 -- The characters of `key`'s player now in the guild (just `key` when it
@@ -65,7 +65,8 @@ local function playerCharacters(partition, key, character)
 end
 
 -- How each kind of item is judged for `key` (whose record is `character`):
--- true when met, and for an automated kind the detail ("5 of 7 days").
+-- true when met, and for an automated kind the detail ("5 of 7 days") and
+-- the detail in short, for a grid cell ("5 d", "≈44 d", "level 76").
 -- Manual kinds are met by an officer's tick; any failed automated kind can
 -- be overridden by one (see Evaluate).
 PromotionPolicy.STATUS = {
@@ -88,23 +89,23 @@ PromotionPolicy.STATUS = {
     level = function(inputs, key, item, character)
         local level = character.level
         if type(level) ~= "number" then
-            return false, "level unknown"
+            return false, "level unknown", "unknown"
         end
         if level >= item.n then
-            return true, "level " .. level .. " (needs " .. item.n .. ")"
+            return true, "level " .. level .. " (needs " .. item.n .. ")", "level " .. level
         end
-        return false, "level " .. level .. " of " .. item.n
+        return false, "level " .. level .. " of " .. item.n, "level " .. level
     end,
     -- Player-wide: any of the player's characters in the guild ever heard
     -- on add-on sync.
     addon = function(inputs, key, item, character)
         local heard = inputs.dates and inputs.dates:LastHeard(playerCharacters(inputs.partition, key, character))
         if heard == nil then
-            return false, "add-on not seen"
+            return false, "add-on not seen", "not seen"
         end
         local count = days(inputs, heard)
         local text = count == 0 and "seen today" or ("seen " .. count .. (count == 1 and " day ago" or " days ago"))
-        return true, text
+        return true, text, count == 0 and "seen today" or ("seen " .. count .. " d ago")
     end,
     -- Player-wide: the player's Discord name (the newest any of its
     -- characters set) isn't empty.
@@ -117,9 +118,9 @@ PromotionPolicy.STATUS = {
             name = partition:GetProfileText(key, "discord")
         end
         if type(name) ~= "string" or not string.find(name, "%S") then
-            return false, "not set"
+            return false, "not set", "not set"
         end
-        return true, name
+        return true, name, name
     end,
 }
 PromotionPolicy.STATUS["check-note"] = PromotionPolicy.STATUS.check
@@ -167,9 +168,10 @@ end
 -- doesn't hold its player's profile (see ProfileOf), its rank is the top
 -- one (nothing above it), or its rank has no requirements:
 --   { key, rank, rankName, nextRank, nextRankName, items, met, total, ready }
--- where each item is { id, label, kind, automated, met, detail,
+-- where each item is { id, label, kind, automated, met, detail, short,
 -- overridden, record }: `record` is the officer's tick (or override) when
--- there is one, `detail` an automated item's status in words, and
+-- there is one, `detail` an automated item's status in words, `short` the
+-- same for a grid cell, and
 -- `overridden` true when an officer's override is what meets a failed
 -- automated item.
 -- `key`'s record and its rank's items, or nil when it has no checklist.
@@ -189,12 +191,13 @@ local function checklistOf(inputs, key, itemsOf)
 end
 
 -- One item's status for `key`: met, detail, the officer's record, whether
--- the kind is automated, and whether an override is what meets it.
+-- the kind is automated, whether an override is what meets it, and the
+-- detail in short.
 local function judgeItem(inputs, key, item, character)
     local judge = PromotionPolicy.STATUS[item.kind]
-    local met, detail = false, nil
+    local met, detail, short = false, nil, nil
     if judge ~= nil then
-        met, detail = judge(inputs, key, item, character)
+        met, detail, short = judge(inputs, key, item, character)
     end
     met = met == true
     local record = inputs.checks:Record(key, item.id)
@@ -203,7 +206,7 @@ local function judgeItem(inputs, key, item, character)
     if automated and not met and record ~= nil and record.ticked then
         met, overridden = true, true
     end
-    return met, detail, record, automated, overridden
+    return met, detail, record, automated, overridden, short or detail
 end
 
 -- The time kinds: when a rank has any, a character whose every one is met
@@ -264,9 +267,9 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
     local index
     for index = 1, #items do
         local item = items[index]
-        local met, detail, record, automated, overridden = judgeItem(inputs, key, item, character)
+        local met, detail, record, automated, overridden, short = judgeItem(inputs, key, item, character)
         table.insert(result.items, { id = item.id, label = item.label, kind = item.kind, automated = automated,
-            met = met, detail = detail, overridden = overridden, record = record })
+            met = met, detail = detail, short = short, overridden = overridden, record = record })
         if met then
             result.met = result.met + 1
         end

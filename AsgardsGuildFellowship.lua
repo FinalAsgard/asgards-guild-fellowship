@@ -1484,11 +1484,18 @@ if clientProfile.supported then
                 end,
                 draw = function(content, ui)
                     friendsUi.rankPage = addon.RankManagementPage.Create(content, ui, {
-                        model = function(search)
-                            return promotions.due(search)
+                        model = function(search, rank)
+                            return promotions.due(search, rank)
+                        end,
+                        targets = function()
+                            local inputs = promotions.inputs()
+                            return inputs and addon.RankUpViewModel.Targets(inputs) or {}
                         end,
                         onSnooze = function(key)
                             return promotions.snooze(key)
+                        end,
+                        onTick = function(key, item, ticked)
+                            return promotions.tick(key, item, ticked)
                         end,
                         onError = function(text)
                             rosterController:Print(text)
@@ -3431,8 +3438,9 @@ if clientProfile.supported then
     end
     promotions.inputs = promotionInputs
     -- The Rank management page's Due list (RankUpViewModel.Due) for what's
-    -- typed in its search, or nil for a member or without a guild.
-    promotions.due = function(search)
+    -- typed in its search and the rank picked to promote to (nil for any),
+    -- or nil for a member or without a guild.
+    promotions.due = function(search, rank)
         local inputs = promotionInputs()
         if inputs == nil or not selfIsOfficer() then
             return nil
@@ -3441,6 +3449,7 @@ if clientProfile.supported then
         inputs.normalizer = normalizer
         inputs.members = rosterController:LiveMembers(normalizer)
         inputs.search = search
+        inputs.rank = rank
         return addon.RankUpViewModel.Due(inputs)
     end
     -- The characters ready for promotion, as a set, for the roster's marker:
