@@ -47,12 +47,18 @@ local function setup()
         targets = function()
             return { { text = "Any rank" }, { rank = 3, text = "→ Member" }, { rank = 2, text = "→ Veteran" } }
         end,
-        onTick = function(key, item, ticked)
-            table.insert(world.ticks, { key = key, item = item, ticked = ticked })
+        onTick = function(key, item, ticked, note)
+            table.insert(world.ticks, { key = key, item = item, ticked = ticked, note = note })
             if world.refuse ~= nil then
                 return false, world.refuse
             end
-            world.checked = ticked
+            if item == "interview" then
+                world.note = ticked and note or nil
+            elseif item == "level" then
+                world.overridden = ticked
+            else
+                world.checked = ticked
+            end
             return true
         end,
     })
@@ -68,14 +74,19 @@ local function setup()
                 { id = "days", label = "In the guild 7 days", check = false },
                 { id = "level", label = "Level 70", check = false },
                 { id = "rules", label = "Read the rules", check = true },
+                { id = "interview", label = "Interview", check = true },
             },
             rows = { { playerId = 2, key = "bolt", name = "Bolt", status = "Due", rankText = "→ Member",
                 waitingText = "Level 70 · Read the rules",
                 cells = {
                     { id = "days", state = "met", text = "≈44 d" },
-                    { id = "level", state = "missing", text = "level 66" },
+                    world.overridden and { id = "level", state = "overridden", text = "met by override" }
+                        or { id = "level", state = "missing", text = "level 66" },
                     { id = "rules", check = true, checked = world.checked == true,
-                        state = world.checked and "ticked" or "unticked", text = "" },
+                        state = world.checked and "ticked" or "unticked", text = world.checked and "by Toolbox" or "" },
+                    { id = "interview", check = true, needsNote = true, checked = world.note ~= nil,
+                        state = world.note and "ticked" or "unticked",
+                        text = world.note and ("\"" .. world.note .. "\"") or "" },
                 } } },
         }
     end
@@ -221,7 +232,7 @@ test.test("rank management page: a picked rank shows a column per requirement, h
     test.assertFalse(row.cells[1].box.shown)
     test.assertEqual("level 66", row.cells[2].text.text)
     test.assertTrue(row.cells[3].box.shown)
-    test.assertFalse(row.cells[3].text.shown)
+    test.assertEqual("", row.cells[3].text.text)
     test.assertFalse(row.cells[3].box:IsChecked())
 end)
 
@@ -283,4 +294,96 @@ test.test("rank management page: leaving the grid hides the cells", function()
             test.assertFalse(cell.shown)
         end
     end
+end)
+
+-- Notes and overrides ---------------------------------------------------------------
+
+test.test("rank management page: a ticked check shows who ticked it beside the box", function()
+    local world = setup()
+    pick(world, 2)
+    click(shown(world)[1].cells[3].box)
+    local cell = shown(world)[1].cells[3]
+
+    test.assertTrue(cell.text.shown)
+    test.assertEqual("by Toolbox", cell.text.text)
+end)
+
+test.test("rank management page: ticking a check that needs a note asks for it, and Save ticks it with the note", function()
+    local world = setup()
+    pick(world, 2)
+    click(shown(world)[1].cells[4].box)
+    local prompt = world.page.prompt
+
+    test.assertTrue(prompt:IsOpen())
+    test.assertEqual("Interview for Bolt", prompt.title.text)
+    test.assertEqual(0, #world.ticks)
+    prompt.single:SetValue("Talked on Discord")
+    click(prompt.save)
+
+    test.assertEqual("interview", world.ticks[1].item)
+    test.assertTrue(world.ticks[1].ticked)
+    test.assertEqual("Talked on Discord", world.ticks[1].note)
+    local cell = shown(world)[1].cells[4]
+    test.assertTrue(cell.box:IsChecked())
+    test.assertEqual("\"Talked on Discord\"", cell.text.text)
+
+    -- Unticking it needs no note.
+    click(cell.box)
+    test.assertFalse(prompt:IsOpen())
+    test.assertFalse(world.ticks[2].ticked)
+end)
+
+test.test("rank management page: Cancel on the note leaves the check unticked", function()
+    local world = setup()
+    pick(world, 2)
+    click(shown(world)[1].cells[4].box)
+    click(world.page.prompt.cancel)
+
+    test.assertEqual(0, #world.ticks)
+    test.assertFalse(shown(world)[1].cells[4].box:IsChecked())
+end)
+
+test.test("rank management page: right-clicking a failed automated cell overrides it, with an optional reason", function()
+    local world = setup()
+    pick(world, 2)
+    local cell = shown(world)[1].cells[2]
+    cell.scripts.OnClick(cell, "RightButton")
+    local menu = world.page.menu
+
+    test.assertTrue(menu:IsOpen())
+    test.assertEqual("Override as met...", menu.rows[1].label.text)
+    click(menu.rows[1])
+    test.assertTrue(world.page.prompt:IsOpen())
+    world.page.prompt.single:SetValue("Levels on an alt")
+    click(world.page.prompt.save)
+
+    test.assertEqual("level", world.ticks[1].item)
+    test.assertTrue(world.ticks[1].ticked)
+    test.assertEqual("Levels on an alt", world.ticks[1].note)
+    cell = shown(world)[1].cells[2]
+    test.assertEqual("met by override", cell.text.text)
+    test.assertEqual("gold", cell.color)
+end)
+
+test.test("rank management page: Remove override takes the override back", function()
+    local world = setup()
+    world.overridden = true
+    pick(world, 2)
+    local cell = shown(world)[1].cells[2]
+    cell.scripts.OnClick(cell, "RightButton")
+
+    test.assertEqual("Remove override", world.page.menu.rows[1].label.text)
+    click(world.page.menu.rows[1])
+    test.assertFalse(world.ticks[1].ticked)
+    test.assertEqual("level 66", shown(world)[1].cells[2].text.text)
+end)
+
+test.test("rank management page: a met automated cell and a check box have no right-click menu", function()
+    local world = setup()
+    pick(world, 2)
+    local row = shown(world)[1]
+    row.cells[1].scripts.OnClick(row.cells[1], "RightButton")
+    test.assertFalse(world.page.menu:IsOpen())
+    row.cells[3].scripts.OnClick(row.cells[3], "RightButton")
+    test.assertFalse(world.page.menu:IsOpen())
 end)

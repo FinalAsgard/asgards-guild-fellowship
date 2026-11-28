@@ -33,6 +33,7 @@ local RankUpViewModel = {
     ARROW = "→ ",
     FOOTER = "Promotion happens on the guild roster, where the Ready arrow shows.",
     ANY_RANK = "Any rank",
+    OVERRIDE_TEXT = "met by override",
     -- A grid cell's state.
     MET = "met",
     MISSING = "missing",
@@ -105,20 +106,35 @@ function RankUpViewModel.Targets(inputs)
 end
 
 -- A grid cell from one of PromotionPolicy.Evaluate's items: { id, kind,
--- check (an officer's checkbox), checked, state (MET, MISSING or
--- OVERRIDDEN for an automated item, TICKED or UNTICKED for a checkbox),
--- text (an automated item's detail in short: "44 d", "level 76", "not
--- seen", "≈" before an approximate date) }.
-local function cellOf(item)
+-- check (an officer's checkbox), checked, needsNote (a checkbox ticked
+-- with a note), state (MET, MISSING or OVERRIDDEN for an automated item,
+-- TICKED or UNTICKED for a checkbox), text, by (who ticked or overrode
+-- it, by name), note (its note, or an override's reason) }. `text` is an
+-- automated item's detail in short ("44 d", "level 76", "not seen", "≈"
+-- before an approximate date), "met by override" when overridden; and for
+-- a ticked checkbox its note in quotes, else who ticked it.
+local function cellOf(inputs, item)
     local cell = { id = item.id, kind = item.kind, check = not item.automated, text = "" }
+    local record = item.record
+    if record ~= nil and record.ticked then
+        cell.by = record.by and nameOf(inputs, record.by) or nil
+        cell.note = record.note
+    end
     if cell.check then
         cell.checked = item.met == true
+        cell.needsNote = item.kind == addon.RankRequirements.KIND_CHECK_NOTE
         cell.state = cell.checked and RankUpViewModel.TICKED or RankUpViewModel.UNTICKED
+        if cell.checked and cell.note ~= nil then
+            cell.text = "\"" .. cell.note .. "\""
+        elseif cell.checked and cell.by ~= nil then
+            cell.text = "by " .. cell.by
+        end
         return cell
     end
     cell.text = item.short or item.detail or ""
     if item.overridden then
         cell.state = RankUpViewModel.OVERRIDDEN
+        cell.text = RankUpViewModel.OVERRIDE_TEXT
     elseif item.met then
         cell.state = RankUpViewModel.MET
     else
@@ -263,7 +279,7 @@ function RankUpViewModel.Due(inputs)
         if picked ~= nil then
             row.cells = {}
             for index = 1, #status.items do
-                row.cells[index] = cellOf(status.items[index])
+                row.cells[index] = cellOf(inputs, status.items[index])
             end
         end
         if ready then

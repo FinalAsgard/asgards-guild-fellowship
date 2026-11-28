@@ -13,7 +13,10 @@ local _, addon = ...
 -- up for it and becomes a grid, a column per requirement of the rank, each
 -- headed by its label. An automated cell says met or missing with the
 -- add-on's detail; an officer check is a check box, ticked or unticked at
--- once with no confirm.
+-- once with no confirm. A check that needs a note asks for it first (Save
+-- ticks it, Cancel leaves it unticked), and a ticked one shows its note or
+-- who ticked it. Right-clicking a failed automated cell offers Override as
+-- met... (with an optional reason), and an overridden one Remove override.
 --
 -- It's built when the page is shown (Refresh), and again when the owner
 -- says something changed (Update), keeping the list where it's scrolled.
@@ -45,6 +48,10 @@ local RankManagementPage = {
     PROMOTE_TO = "Promote to: ",
     -- An automated cell's color, by its state.
     CELL_COLORS = { met = "green", missing = "red", overridden = "gold" },
+    OVERRIDE = "Override as met...",
+    REMOVE_OVERRIDE = "Remove override",
+    -- The most a note or reason holds (PromotionChecks' limit).
+    NOTE_LETTERS = 100,
 }
 addon.RankManagementPage = RankManagementPage
 
@@ -66,9 +73,11 @@ end
 --          player whose profile character is `key`
 --   onError function(text): tells the user why something didn't happen
 --   targets function() -> RankUpViewModel.Targets' choices, for Promote to
---   onTick  function(key, item, ticked) -> true, or false and why not:
---           ticks or unticks officer check `item` for the player whose
---           profile character is `key`
+--   onTick  function(key, item, ticked, note) -> true, or false and why
+--           not: ticks or unticks officer check `item` for the player whose
+--           profile character is `key`, with `note` (a check's note, or an
+--           override's reason); ticking a failed automated item overrides
+--           it, and unticking it takes the override back
 -- `model` is called as model(search, rank), `rank` the rank promoted to
 -- that was picked, or nil for Any rank.
 function RankManagementPage.Create(content, ui, options)
@@ -94,6 +103,7 @@ function Page:build()
     self.picker:SetWidth(RankManagementPage.PICKER_WIDTH)
     self.picker:SetPoint("LEFT", self.search, "RIGHT", Theme.SPACING.m, 0)
     self.menu = ui:ContextMenu(content)
+    self.prompt = ui:TextPrompt(content)
     -- The grid's column labels, over the list while a rank is picked.
     self.header = ui:frame("Frame", content)
     self.header:SetHeight(RankManagementPage.HEADER_HEIGHT)
@@ -226,16 +236,22 @@ function Page:cellOf(row, index)
         return row.cells[index]
     end
     local ui, owner = self.ui, self
-    local cell = ui:frame("Frame", row)
+    -- A button, for an automated cell's right-click menu.
+    local cell = ui:frame("Button", row)
     cell:SetHeight(RankManagementPage.ROW_HEIGHT)
+    cell:RegisterForClicks("RightButtonUp")
+    cell:SetScript("OnClick", function(_, button)
+        if button == "RightButton" and row.entry ~= nil and cell.column ~= nil then
+            owner:cellMenu(cell, row.entry, cell.column, cell.value)
+        end
+    end)
     cell.box = ui:CheckBox(cell, function(wanted)
         if row.entry ~= nil and cell.column ~= nil then
-            owner:tick(row.entry, cell.column, wanted)
+            owner:check(row.entry, cell.column, cell.value, wanted)
         end
     end)
     cell.box:SetPoint("LEFT", cell, "LEFT", 0, 0)
     cell.text = ui:Text(cell, "", "regular", "small", "text")
-    cell.text:SetPoint("LEFT", cell, "LEFT", 0, 0)
     cell.text:SetPoint("RIGHT", cell, "RIGHT", -Theme.SPACING.xs, 0)
     cell.text:SetJustifyH("LEFT")
     cell.text:SetWordWrap(false)
@@ -243,15 +259,59 @@ function Page:cellOf(row, index)
     return cell
 end
 
--- Ticks or unticks officer check `column` for `entry`'s player, at once.
-function Page:tick(entry, column, wanted)
+-- A click on a check box: unticking, or ticking a check without a note,
+-- saves at once; ticking one that needs a note asks for the note first.
+function Page:check(entry, column, value, wanted)
+    if not wanted or value == nil or not value.needsNote then
+        self:tick(entry, column, wanted, nil, wanted and "ticked" or "unticked")
+        return
+    end
+    local owner = self
+    self.prompt:Open({
+        title = column.label .. " for " .. entry.name,
+        maxLetters = RankManagementPage.NOTE_LETTERS,
+        onSave = function(note)
+            owner:tick(entry, column, true, note, "ticked")
+        end,
+    })
+end
+
+-- An automated cell's right-click menu: Override as met... when it's
+-- missing, Remove override when an override meets it.
+function Page:cellMenu(anchor, entry, column, value)
+    if value == nil or value.check then
+        return
+    end
+    local owner, items = self, {}
+    if value.state == addon.RankUpViewModel.MISSING then
+        table.insert(items, { label = RankManagementPage.OVERRIDE, onClick = function()
+            owner.prompt:Open({
+                title = "Override " .. column.label .. " for " .. entry.name .. " (reason optional)",
+                maxLetters = RankManagementPage.NOTE_LETTERS,
+                onSave = function(reason)
+                    owner:tick(entry, column, true, reason, "overridden")
+                end,
+            })
+        end })
+    elseif value.state == addon.RankUpViewModel.OVERRIDDEN then
+        table.insert(items, { label = RankManagementPage.REMOVE_OVERRIDE, onClick = function()
+            owner:tick(entry, column, false, nil, "un-overridden")
+        end })
+    end
+    if items[1] ~= nil then
+        self.menu:Open(anchor, items, entry.name)
+    end
+end
+
+-- Ticks or unticks `column` for `entry`'s player, at once; `done` says
+-- what didn't happen when it's refused ("ticked").
+function Page:tick(entry, column, wanted, note, done)
     local ok, why = true, nil
     if self.options.onTick ~= nil then
-        ok, why = self.options.onTick(entry.key, column.id, wanted)
+        ok, why = self.options.onTick(entry.key, column.id, wanted, note)
     end
     if ok == false and self.options.onError ~= nil then
-        self.options.onError(entry.name .. "'s " .. column.label .. " wasn't " .. (wanted and "ticked" or "unticked")
-            .. ": " .. tostring(why) .. ".")
+        self.options.onError(entry.name .. "'s " .. column.label .. " wasn't " .. done .. ": " .. tostring(why) .. ".")
     end
     self:Update()
 end
@@ -268,18 +328,24 @@ function Page:fillCells(frame, entry)
         setShown(cell, value ~= nil)
         if value ~= nil then
             cell.column = columns[index]
+            cell.value = value
             cell:ClearAllPoints()
             cell:SetPoint("TOPLEFT", frame, "TOPLEFT", cellLeft(index, width), 0)
             cell:SetWidth(width)
             setShown(cell.box, value.check)
-            setShown(cell.text, not value.check)
+            cell.text:ClearAllPoints()
+            cell.text:SetPoint("RIGHT", cell, "RIGHT", -Theme.SPACING.xs, 0)
+            cell.text:SetText(value.text or "")
             if value.check then
+                -- A ticked check's note, or who ticked it, after the box.
+                cell.text:SetPoint("LEFT", cell.box, "RIGHT", Theme.SPACING.xs, 0)
                 cell.box:SetChecked(value.checked)
+                cell.color = "muted"
             else
-                cell.text:SetText(value.text or "")
+                cell.text:SetPoint("LEFT", cell, "LEFT", 0, 0)
                 cell.color = RankManagementPage.CELL_COLORS[value.state] or "text"
-                cell.text:SetTextColor(Theme.Color(cell.color))
             end
+            cell.text:SetTextColor(Theme.Color(cell.color))
         end
     end
 end

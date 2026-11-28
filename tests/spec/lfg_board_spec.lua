@@ -1984,6 +1984,65 @@ test.test("rank management: picking a rank shows the grid, and ticking a check s
     test.assertTrue(row.cells[2].box:IsChecked())
 end)
 
+test.test("rank management: a note and an override from the grid save through the promotion checks", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    -- Members (rank 3) need a day in the guild, level 50, and an interview
+    -- with a note. Zap Arcane is level 30.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "char-guild-days", true, 1, "Member", officer, 1)
+    requirements:SetAutomated(3, "level", true, 50, "Member", officer, 1)
+    requirements:Add(3, "Interview", "check-note", "Member", officer, 1)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+    page.picker.scripts.OnClick(page.picker, "LeftButton")
+    page.menu.rows[2].scripts.OnClick(page.menu.rows[2], "LeftButton")
+    local function zap()
+        local _, frame
+        for _, frame in ipairs(page.list:Shown()) do
+            if frame.shown and rawget(frame, "entry") ~= nil and frame.entry.name == "Zap Arcane" then
+                return frame
+            end
+        end
+        return nil
+    end
+    test.assertEqual("Level 50", page.header.labels[2].text)
+    test.assertEqual("level 30", zap().cells[2].text.text)
+
+    -- Override the level, with a reason.
+    local cell = zap().cells[2]
+    cell.scripts.OnClick(cell, "RightButton")
+    page.menu.rows[1].scripts.OnClick(page.menu.rows[1], "LeftButton")
+    page.prompt.single:SetValue("Levels on an alt")
+    page.prompt.save.scripts.OnClick(page.prompt.save, "LeftButton")
+    test.assertEqual("met by override", zap().cells[2].text.text)
+
+    -- Tick the interview, with its note.
+    local box = zap().cells[3].box
+    box.scripts.OnClick(box, "LeftButton")
+    page.prompt.single:SetValue("Talked on Discord")
+    page.prompt.save.scripts.OnClick(page.prompt.save, "LeftButton")
+    test.assertTrue(zap().cells[3].box:IsChecked())
+    test.assertEqual("\"Talked on Discord\"", zap().cells[3].text.text)
+    test.assertEqual("Ready", zap().entry.status)
+
+    -- Remove override: Zap is waiting on the level again.
+    cell = zap().cells[2]
+    cell.scripts.OnClick(cell, "RightButton")
+    test.assertEqual("Remove override", page.menu.rows[1].label.text)
+    page.menu.rows[1].scripts.OnClick(page.menu.rows[1], "LeftButton")
+    test.assertEqual("level 30", zap().cells[2].text.text)
+    test.assertEqual("Due", zap().entry.status)
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the page is built on show, and a pinned Friend is starred", function()

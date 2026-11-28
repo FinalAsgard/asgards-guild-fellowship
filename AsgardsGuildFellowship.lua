@@ -1494,8 +1494,8 @@ if clientProfile.supported then
                         onSnooze = function(key)
                             return promotions.snooze(key)
                         end,
-                        onTick = function(key, item, ticked)
-                            return promotions.tick(key, item, ticked)
+                        onTick = function(key, item, ticked, note)
+                            return promotions.tick(key, item, ticked, note)
                         end,
                         onError = function(text)
                             rosterController:Print(text)

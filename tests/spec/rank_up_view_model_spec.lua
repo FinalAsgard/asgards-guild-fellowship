@@ -371,7 +371,9 @@ test.test("rank up view model: grid cells for every requirement kind", function(
     test.assertEqual(Model.MET, cellOf(row, "Has the Guild Fellowship Addon", view).state)
     test.assertEqual("lead#1234", cellOf(row, "Has a Discord name set", view).text)
     test.assertEqual(Model.OVERRIDDEN, cellOf(row, "Level 70", view).state)
-    test.assertEqual("level 66", cellOf(row, "Level 70", view).text)
+    test.assertEqual("met by override", cellOf(row, "Level 70", view).text)
+    test.assertEqual("Levels on the alt", cellOf(row, "Level 70", view).note)
+    test.assertEqual("officer", cellOf(row, "Level 70", view).by)
 
     -- An unknown date: the time isn't met, so Lead is off the list, and
     -- the cell would say so.
@@ -409,4 +411,30 @@ test.test("rank up view model: a kind the grid doesn't know is still a column", 
     local cell = view.rows[1].cells[#view.columns]
     test.assertEqual(addon.RankUpViewModel.MET, cell.state)
     test.assertEqual("sighted", cell.text)
+end)
+
+test.test("rank up view model: a ticked check shows its note, else who ticked it", function()
+    local world = newGuild({ waiting = { 4, 30 } })
+    local inputs = world.inputs
+    local interview = inputs.requirements:Add(4, "Interview", "check-note", RANKS[5], OFFICER, NOW)[1]
+    inputs.rank = 3
+    local view = world.due()
+    local row = view.rows[1]
+
+    test.assertTrue(cellOf(row, "Interview", view).needsNote)
+    test.assertFalse(cellOf(row, "Read the rules", view).needsNote)
+    test.assertEqual("", cellOf(row, "Interview", view).text)
+
+    inputs.checks:Set("waiting", world.rules, true, nil, OFFICER, NOW)
+    inputs.checks:Set("waiting", interview, true, "Talked on Discord", OFFICER, NOW)
+    view = world.due()
+    row = view.rows[1]
+    test.assertEqual("by officer", cellOf(row, "Read the rules", view).text)
+    test.assertEqual("\"Talked on Discord\"", cellOf(row, "Interview", view).text)
+    test.assertEqual("Talked on Discord", cellOf(row, "Interview", view).note)
+
+    -- Unticked, it says nothing.
+    inputs.checks:Set("waiting", world.rules, false, nil, OFFICER, NOW + 1)
+    view = world.due()
+    test.assertEqual("", cellOf(view.rows[1], "Read the rules", view).text)
 end)
