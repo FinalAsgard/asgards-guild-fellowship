@@ -1,5 +1,6 @@
 local test = require("tests.test_helper")
 local fixtures = require("tests.client_fixtures")
+local fakeFrames = require("tests.fake_frames")
 
 -- A font string or frame that records what the overlay does with it.
 local function fakeWidget()
@@ -364,20 +365,16 @@ local function registerProfileTests(profile)
             local world = fixtures.newEnvironment(profile)
             local detail = installGuildRoster(world.environment)
             fixtures.loadAddon(world)
-            -- The add-on's window, never shown here: only its player panel.
+            -- The add-on's old window, never shown here.
             local window = { shown = false }
             function window:IsShown() return self.shown end
             function window:Show() self.shown = true end
             function window:Hide() self.shown = false end
             function window:ShowPage(id) self.page = id end
             function window:SetTitle() end
-            function window:SetStatus() end
-            function window:SetRows() return true end
             function window:SetConflicts() return true end
             function window:SetRecruiters() return true end
             function window:SetRecentAds() return true end
-            function window:ShowPlayer(model) self.player = model return true end
-            function window:HidePlayer() self.player = nil return true end
             world.addon.RosterWindow.Create = function()
                 return window
             end
@@ -391,9 +388,7 @@ local function registerProfileTests(profile)
             local officerName = world.guild.members[1].name
             detail:DisplayMember(1, { name = officerName })
             test.assertFalse(detail.panel.shown, "the officer's own note reads correctly")
-            -- The officer's player opens in the player panel, without the
-            -- window.
-            test.assertEqual("TheTool (", string.sub(window.player.label, 1, #"TheTool ("))
+            -- Selecting a member opens no window of the add-on's.
             test.assertFalse(window.shown)
 
             world.guild.members[1].note = "raid lead"
@@ -417,6 +412,34 @@ local function registerProfileTests(profile)
             fixtures.runTimers(world)
             test.assertTrue(detail.panel.shown)
             test.assertEqual("Should be: @TheTool raid lead, tank", detail.panel.suggested.text)
+        end)
+
+    test.test(profile .. ": in the whole add-on, the Guild Roster follows a member selected in the game's roster",
+        function()
+            local world = fixtures.newEnvironment(profile)
+            local detail = installGuildRoster(world.environment)
+            fixtures.loadAddon(world)
+            fixtures.fire(world, "ADDON_LOADED", world.addonName)
+            world.loggedIn = true
+            fixtures.fire(world, "PLAYER_LOGIN")
+            fixtures.fire(world, "PLAYER_ENTERING_WORLD")
+            fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+            fixtures.runTimers(world)
+            local addon = world.addon
+            local _, partition, normalizer = addon.rosterController:QuietContext()
+            local member = world.guild.members[3]
+            local player = partition:GetCharacter(normalizer:Key(member.name)).player
+
+            -- With the window shut, nothing opens.
+            fakeFrames.install(world.environment)
+            detail:DisplayMember(1, { name = member.name })
+            test.assertFalse(addon.agfWindow:IsOpen())
+
+            -- On the Guild Roster, it shows that member's player.
+            test.assertTrue(addon.agfWindow:Open("roster"))
+            detail:DisplayMember(1, { name = world.guild.members[1].name })
+            detail:DisplayMember(1, { name = member.name })
+            test.assertEqual(player, addon.rosterPage:Selected())
         end)
 end
 
@@ -666,16 +689,10 @@ local function registerRowTests(profile)
         local _, partition, normalizer = world.addon.rosterController:QuietContext()
         local altKey = normalizer:Key(alt.name)
         local promotions = world.addon.promotions
-        -- The player panel's Promotion tab line for the alt.
+        -- The rank the alt should be promoted to, as the note panel says it.
         local function matchLine()
-            local rows = promotions.panelRows({ altKey }, partition:GetCharacter(altKey).player) or {}
-            local index
-            for index = 1, #rows do
-                if string.find(rows[index].text or "", "Promote to match", 1, true) then
-                    return rows[index].text
-                end
-            end
-            return nil
+            local match = promotions.matchFor(alt.name)
+            return match and ("Promote to match: " .. match.rankName) or nil
         end
 
         -- The alt's rank has no requirements: the match line still shows.

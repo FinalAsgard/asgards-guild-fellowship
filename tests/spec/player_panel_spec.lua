@@ -185,7 +185,7 @@ test.test("the panel is gone when its player no longer exists", function()
     test.assertEqual(nil, model)
 end)
 
--- Controller: selecting and editing ------------------------------------------
+-- Controller: editing a player, as the Guild Roster's panel does ------------
 
 -- `options.onDiscordChanged` as for the controller; `options.profile` the
 -- client (Retail by default); `options.officer` makes the user, logged in
@@ -212,16 +212,12 @@ local function controllerSetup(_, options)
     )
     local client = addon.Compatibility.Create(world.environment)
     local database = { schemaVersion = 1, guilds = {} }
-    local window = { shown = false, rows = {}, player = nil }
+    local window = { shown = false }
     function window:IsShown() return self.shown end
     function window:Show() self.shown = true end
     function window:Hide() self.shown = false end
     function window:SetTitle() end
-    function window:SetStatus() end
-    function window:SetRows(rows) self.rows = rows return true end
     function window:SetConflicts() return true end
-    function window:ShowPlayer(model) self.player = model return true end
-    function window:HidePlayer() self.player = nil return true end
     local controller = addon.RosterController.Create({
         client = client,
         nameRules = client:GetClientProfile().nameRules,
@@ -238,83 +234,33 @@ local function controllerSetup(_, options)
     return controller, window, client, addon
 end
 
-test.test("selecting a character opens its player's panel", function()
-    local controller, window = controllerSetup()
-
-    test.assertTrue(controller:SelectPlayerOf("hammer-area52"))
-
-    test.assertEqual("TheTool (Toolbox)", window.player.label)
-end)
-
-test.test("panel edits are manual and refresh the roster and the panel at once", function()
-    local controller, window = controllerSetup()
-    controller:SelectPlayerOf("hammer-area52")
-
-    controller:SetAlias(window.player.main, "Tool Time")
-    test.assertEqual("Tool Time (Toolbox)", window.player.label)
+test.test("edits from the panel are manual", function()
+    local controller = controllerSetup()
     local partition = controller.current.partition
-    test.assertEqual("manual", partition:GetPlayer(window.player.id).aliasSource)
-    test.assertEqual("Tool Time (Toolbox)", window.rows[1].label)
+    local player = partition:GetCharacter("toolbox-area52").player
+
+    controller:SetAlias("toolbox-area52", "Tool Time")
+    test.assertEqual("Tool Time", partition:GetPlayer(player).alias)
+    test.assertEqual("manual", partition:GetPlayer(player).aliasSource)
 
     controller:MakeMain("hammer-area52")
-    test.assertEqual("hammer-area52", window.player.main)
-
-    controller:Detach("toolbox-area52")
-    test.assertEqual("Tool Time (Hammer)", window.player.label)
-    test.assertEqual("No alts", window.player.rows[4].text)
+    test.assertEqual("hammer-area52", partition:GetPlayer(player).main)
 end)
 
-test.test("the panel closes when its player is merged away", function()
-    local controller, window = controllerSetup(nil, { officer = true })
-    controller:SelectPlayerOf("visitor-stormrage")
-    test.assertTrue(window.player ~= nil)
-
-    local toolPlayer = controller.current.partition:GetCharacter("toolbox-area52").player
-    controller:SetMainPlayer("visitor-stormrage", toolPlayer)
-
-    test.assertEqual(nil, window.player)
-end)
-
-test.test("the panel stays open without the window, and follows changes", function()
-    local controller, window = controllerSetup()
-    controller:SelectPlayerOf("hammer-area52")
-
-    controller:Toggle()
-    test.assertFalse(window:IsShown())
-    test.assertTrue(window.player ~= nil)
-
-    local partition = controller.current.partition
-    partition:SetAlias(partition:GetCharacter("toolbox-area52").player, "Tool Box", "manual")
-    controller:Invalidate()
-    test.assertEqual("Tool Box (Toolbox)", window.player.label)
-end)
-
-test.test("set discord: the panel carries the player's Discord to prefill the dialog", function()
-    local controller, window = controllerSetup()
-    controller.current.partition:SetProfileText("hammer-area52", "discord", "hammer#1", 1790000000, "hammer-area52")
-
-    controller:SelectPlayerOf("hammer-area52")
-
-    test.assertEqual("hammer#1", window.player.discord)
-end)
-
-test.test("set discord: the edit goes to guild sync and the panel redraws", function()
+test.test("set discord: the edit goes to guild sync", function()
     local edits = {}
-    local controller, window
-    controller, window = controllerSetup(nil, {
+    local controller = controllerSetup(nil, {
         onDiscordChanged = function(key, text)
             table.insert(edits, { key = key, text = text })
-            controller.current.partition:SetProfileText(key, "discord", text, 1790000000, "toolbox-area52")
             return { {} }
         end,
     })
-    controller:SelectPlayerOf("hammer-area52")
 
-    test.assertTrue(controller:SetDiscord(window.player.main, "tool#1"))
+    test.assertTrue(controller:SetDiscord("toolbox-area52", "tool#1"))
 
     test.assertEqual(1, #edits)
-    test.assertEqual(window.player.main, edits[1].key)
-    test.assertEqual("tool#1", window.player.discord)
+    test.assertEqual("toolbox-area52", edits[1].key)
+    test.assertEqual("tool#1", edits[1].text)
 end)
 
 local profile
@@ -324,9 +270,9 @@ for _, profile in ipairs({ "Forever", "Retail" }) do
     local alt = fixtures.GUILDS[profile].members[2].name
     local other = fixtures.GUILDS[profile].members[3].name
 
-    test.test(profile .. ": a member may edit only their own player's alias and Discord from the panel", function()
+    test.test(profile .. ": a member may edit only their own player's alias and Discord", function()
         local edits = 0
-        local controller, window, client = controllerSetup(nil, { profile = profile,
+        local controller, _, client = controllerSetup(nil, { profile = profile,
             onDiscordChanged = function()
                 edits = edits + 1
                 return { {} }
@@ -336,21 +282,11 @@ for _, profile in ipairs({ "Forever", "Retail" }) do
         local _, partition, normalizer = controller:QuietContext()
         local otherKey = normalizer:Key(other)
 
-        controller:SelectPlayerOf(normalizer:Key(alt))
-        test.assertTrue(window.player.canEdit, "their own player")
-        test.assertTrue(controller:SetDiscord(window.player.main, "tool#1"))
+        test.assertTrue(controller:CanEditPlayer(normalizer:Key(alt)), "their own player")
+        test.assertTrue(controller:SetDiscord(normalizer:Key(alt), "tool#1"))
         test.assertEqual(1, edits)
 
-        controller:SelectPlayerOf(otherKey)
-        test.assertFalse(window.player.canEdit, "someone else's player")
-        test.assertFalse(window.player.canMerge, "Merge into player... greyed out")
-        local index
-        for index = 1, #window.player.rows do
-            local row = window.player.rows[index]
-            if row.kind == "character" then
-                test.assertFalse(row.canMakeMain == true or row.canDetach == true, "no Make main or Detach")
-            end
-        end
+        test.assertFalse(controller:CanEditPlayer(otherKey), "someone else's player")
         test.assertFalse(controller:SetDiscord(otherKey, "spam#1"))
         test.assertFalse(controller:SetAlias(otherKey, "Spam"))
         test.assertEqual(1, edits, "nothing sent for someone else")
@@ -358,9 +294,9 @@ for _, profile in ipairs({ "Forever", "Retail" }) do
         test.assertContains(printed, "members can only change their own player")
     end)
 
-    test.test(profile .. ": an officer may edit any player's alias and Discord from the panel", function()
+    test.test(profile .. ": an officer may edit any player's alias and Discord", function()
         local edits = 0
-        local controller, window = controllerSetup(nil, { profile = profile, officer = true,
+        local controller = controllerSetup(nil, { profile = profile, officer = true,
             onDiscordChanged = function()
                 edits = edits + 1
                 return { {} }
@@ -368,31 +304,29 @@ for _, profile in ipairs({ "Forever", "Retail" }) do
         local _, _, normalizer = controller:QuietContext()
         local otherKey = normalizer:Key(other)
 
-        controller:SelectPlayerOf(otherKey)
-        test.assertTrue(window.player.canEdit)
+        test.assertTrue(controller:CanEditPlayer(otherKey))
         test.assertTrue(controller:SetDiscord(otherKey, "visitor#1"))
         test.assertTrue(controller:SetAlias(otherKey, "Visi"))
         test.assertEqual(1, edits)
     end)
 
-    test.test(profile .. ": the Bio tab's location and bio are editable for their own player, or by an officer",
+    test.test(profile .. ": the location and bio are editable for their own player, or by an officer",
         function()
         local sent = {}
         local function record(key, kind, text)
             table.insert(sent, kind .. "=" .. text)
             return { {} }
         end
-        local controller, window, client = controllerSetup(nil, { profile = profile,
+        local controller, _, client = controllerSetup(nil, { profile = profile,
             onProfileTextChanged = record })
         local printed
         client.Print = function(_, message) printed = message end
         local _, _, normalizer = controller:QuietContext()
         local otherKey = normalizer:Key(other)
+        local own = normalizer:Key(alt)
 
-        controller:SelectPlayerOf(normalizer:Key(alt))
-        test.assertEqual("location", window.player.bioRows[1].field)
-        test.assertTrue(controller:SetProfileText(window.player.main, "location", "Ohio"))
-        test.assertTrue(controller:SetProfileText(window.player.main, "bio", "Healer"))
+        test.assertTrue(controller:SetProfileText(own, "location", "Ohio"))
+        test.assertTrue(controller:SetProfileText(own, "bio", "Healer"))
         test.assertFalse(controller:SetProfileText(otherKey, "bio", "Spam"))
         test.assertEqual("location=Ohio,bio=Healer", table.concat(sent, ","))
         test.assertContains(printed, "That bio wasn't saved: members can only change their own player")
@@ -402,7 +336,7 @@ for _, profile in ipairs({ "Forever", "Retail" }) do
         test.assertEqual("bio=Raider", sent[3])
 
         -- 251 accented letters fit 500 letters but not 500 bytes.
-        test.assertFalse(controller:SetProfileText(window.player.main, "bio", string.rep("\195\169", 251)))
+        test.assertFalse(controller:SetProfileText(own, "bio", string.rep("\195\169", 251)))
         test.assertContains(printed, "longer than 500 bytes")
         test.assertEqual(3, #sent, "nothing sent")
     end)
@@ -557,28 +491,6 @@ test.test("the Bio tab shows Location and Bio headings, each Not set until the p
     model = state.build()
     test.assertEqual(nil, model.location)
     test.assertEqual("empty", model.bioRows[2].kind)
-end)
-
-test.test("promotion rows go to the panel's Promotion tab, not the profile list", function()
-    local context = setup()
-    local promotion = { { kind = "promotion", key = "toolbox-area52", text = "Toolbox: Member", toggle = true } }
-    local normalizer = context.addon.NameNormalizer.Create(RULES)
-    local model = context.addon.PlayerPanelViewModel.Build({
-        partition = context.partition,
-        playerId = context.playerId,
-        normalizer = normalizer,
-        promotion = function()
-            return promotion
-        end,
-    })
-    test.assertEqual(promotion, model.promotionRows)
-    local index
-    for index = 1, #model.rows do
-        test.assertTrue(model.rows[index].kind ~= "promotion")
-    end
-    model = context.addon.PlayerPanelViewModel.Build({ partition = context.partition, playerId = context.playerId,
-        normalizer = normalizer })
-    test.assertEqual(nil, model.promotionRows, "no tab without promotion rows")
 end)
 
 test.test("player panel: the Log tab lists the player's logged changes, newest first, with who made them", function()

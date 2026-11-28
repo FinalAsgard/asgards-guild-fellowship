@@ -35,7 +35,6 @@ Adapters/GameMenu.lua
 Adapters/AgfGreetingsPage.lua
 Adapters/LfgButton.lua
 Adapters/LfgBoardPage.lua
-Adapters/PromotionLines.lua
 Adapters/RosterWindow.lua
 Adapters/EntryPoints.lua
 Adapters/GuildNoteOverlay.lua

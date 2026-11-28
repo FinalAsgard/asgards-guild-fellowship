@@ -1,5 +1,6 @@
 local test = require("tests.test_helper")
 local fixtures = require("tests.client_fixtures")
+local fakeFrames = require("tests.fake_frames")
 
 -- Several add-on users in one guild, each running the whole add-on in its
 -- own fake client, joined by one fake guild add-on channel.
@@ -34,18 +35,10 @@ local function newWindow()
         self.shown = false
     end
     function window:SetTitle() end
-    function window:SetStatus(text)
-        self.status = text
-    end
-    function window:SetRows(rows)
-        self.rows = rows
-        return true
-    end
     function window:SetConflicts(rows)
         self.conflicts = rows
         return true
     end
-    function window:ShowPlayer() end
     function window:ShowReview(model)
         self.review = model
         return true
@@ -53,7 +46,6 @@ local function newWindow()
     function window:HideReview()
         self.review = nil
     end
-    function window:HidePlayer() end
     return window
 end
 
@@ -130,12 +122,23 @@ local function aliasOf(world, key)
 end
 
 -- The roster row labeled `label` in `world`'s open window, or nil.
-local function rosterRow(world, label)
-    local rows = world.addon.rosterController.window.rows or {}
+-- The Guild Roster in `world`'s window, opened when it isn't.
+local function rosterPage(world)
+    if not world.addon.agfWindow:IsOpen() then
+        fakeFrames.install(world.environment)
+        world.addon.agfWindow:Open("roster")
+    end
+    return world.addon.rosterPage
+end
+
+-- The Guild Roster's card with alias `alias` for the player whose main is
+-- `mainName`, or nil.
+local function rosterCard(world, alias, mainName)
+    local cards = rosterPage(world).view.cards or {}
     local index
-    for index = 1, #rows do
-        if rows[index].label == label then
-            return rows[index]
+    for index = 1, #cards do
+        if cards[index].alias == alias and cards[index].mainName == mainName then
+            return cards[index]
         end
     end
     return nil
@@ -350,7 +353,7 @@ test.test("an officer's edit reaches a member who logs in after the officer logg
 
     test.assertEqual("toolbox-area52", mainOf(wrench, "hammer-area52"))
     test.assertEqual("The Tool", aliasOf(wrench, "hammer-area52"))
-    test.assertTrue(rosterRow(wrench, "The Tool (Toolbox)") ~= nil, "the roster shows the relayed data")
+    test.assertTrue(rosterCard(wrench, "The Tool", "Toolbox") ~= nil, "the roster shows the relayed data")
     local reply = decode(hammer, hammer.sentMessages[#hammer.sentMessages])
     test.assertEqual("facts", reply.t)
     test.assertEqual("wrench-area52", reply.re)
@@ -608,7 +611,7 @@ test.test("an officer's alias shows in members' roster and chat tags", function(
     fixtures.deliver(channel)
 
     test.assertEqual("The Tool", aliasOf(member, "hammer-area52"))
-    test.assertTrue(rosterRow(member, "The Tool (Toolbox)") ~= nil, "the roster shows the synced alias")
+    test.assertTrue(rosterCard(member, "The Tool", "Toolbox") ~= nil, "the roster shows the synced alias")
     local tag = member.addon.chatAnnotator:TagFor("Hammer-Area52")
     test.assertEqual("The Tool", tag.text)
     test.assertEqual("alias", tag.kind)
@@ -1206,20 +1209,20 @@ local function syncStatus(world)
     return table.concat(lines, "\n")
 end
 
-test.test("/agf sync and the roster footer show when this client last synced", function()
+test.test("/agf sync and the Guild Roster show when this client last synced", function()
     local channel = fixtures.newChannel()
     local officer = login(channel, "Toolbox-Area52")
     local member = login(channel, "Hammer-Area52")
-    local window = member.addon.rosterController.window
+    local page = rosterPage(member)
 
     local status = syncStatus(member)
     test.assertContains(status, "Guild sync is running. Not synced yet.")
     test.assertContains(status, "None of your suggestions are waiting for an officer.")
-    test.assertContains(window.status, "\nNot synced yet")
+    test.assertEqual("Not synced yet", page.view.sync)
 
     linkAlt(officer, "wrench-area52", "toolbox-area52")
     fixtures.deliver(channel)
-    test.assertContains(window.status, "\nSynced just now", "the footer updates as data arrives")
+    test.assertEqual("Synced just now", page.view.sync, "the Roster updates as data arrives")
     member.time = member.time + 300
     test.assertContains(syncStatus(member), "Guild sync is running. Synced 5 minutes ago.")
     test.assertFalse(string.find(syncStatus(officer), "suggestions", 1, true) ~= nil, "an officer has none")

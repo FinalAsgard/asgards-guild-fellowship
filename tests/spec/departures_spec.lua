@@ -312,31 +312,6 @@ test.test("only departed characters can be purged", function()
     test.assertTrue(state.partition:GetCharacter("toolbox-area52") ~= nil)
 end)
 
-test.test("departed characters are hidden by default and shown with the toggle", function()
-    local state = setup()
-    state.scan(GUILD, "initial")
-    state.now = START + 3 * DAY
-    state.scan({ GUILD[1], GUILD[2] })
-
-    local function build(showDeparted)
-        return state.addon.RosterViewModel.Build({
-            partition = state.partition,
-            members = state.roster({ GUILD[1], GUILD[2] }),
-            normalizer = state.normalizer,
-            showDeparted = showDeparted,
-            now = START + 5 * DAY,
-        })
-    end
-
-    local hidden = build(false)
-    test.assertEqual(3, #hidden)
-    local shown = build(true)
-    test.assertEqual(4, #shown)
-    local visitor = shown[4]
-    test.assertTrue(visitor.departed)
-    test.assertEqual("Left 2 days ago", visitor.location)
-end)
-
 test.test("legacy saved data without departure fields still loads", function()
     local addon = load()
     local database = { schemaVersion = 1, guilds = { ["Knights-Area52"] = {

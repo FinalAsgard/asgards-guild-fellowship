@@ -185,32 +185,6 @@ end)
 
 -- Roster -------------------------------------------------------------------------
 
-test.test("the roster marks declared mains, apart from characters nobody organized", function()
-    local world = scanned({
-        { "Toolbox-Area52", ">Toolbox" },
-        { "Wrench-Area52", "" },
-    })
-    local rows = world.addon.RosterViewModel.Build({
-        partition = world.partition,
-        normalizer = world.normalizer,
-        members = {},
-        classColor = function()
-            return nil
-        end,
-        collapsed = {},
-    })
-
-    local declared = {}
-    local index
-    for index = 1, #rows do
-        if rows[index].kind == "character" then
-            declared[rows[index].key] = rows[index].declared
-        end
-    end
-    test.assertTrue(declared["toolbox-area52"])
-    test.assertFalse(declared["wrench-area52"])
-end)
-
 test.test("a declaration set by hand, even without guild sync stamping it, is never overridden by a note", function()
     local world = scanned({
         { "Toolbox-Area52", "" },

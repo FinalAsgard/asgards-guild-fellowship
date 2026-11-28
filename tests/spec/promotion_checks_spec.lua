@@ -357,38 +357,6 @@ test.test("a player has one rank-up profile, on its highest-ranked character", f
     test.assertEqual(nil, policy.Evaluate(inputs, "twin"))
 end)
 
-test.test("the panel says whose checklist a player's other characters follow", function()
-    local _, addon = newGuild({ main = 4 })
-    local rows = addon.PromotionsViewModel.PanelRows({
-        { key = "main", name = "Main", rankName = "Initiate", evaluated = nil, follows = "Alt" },
-    }, { officer = true })
-    test.assertContains(rows[1].text, "checklist on Alt")
-    test.assertFalse(string.find(rows[1].text, "no requirements", 1, true) ~= nil)
-end)
-
-test.test("an item's tooltip says who ticked it, when, and its note", function()
-    local inputs, addon = newGuild({ bolt = 4 })
-    local item = addItem(inputs, 4, "Attend an event", "check-note")
-    local plain = addItem(inputs, 4, "Read the rules")
-    inputs.checks:Set("bolt", item, true, "Raid night", OFFICER, NOW)
-    local evaluated = addon.PromotionPolicy.Evaluate(inputs, "bolt")
-    local function nameOf(key)
-        return key == OFFICER and "Toolbox" or key
-    end
-    local function formatDate()
-        return "2026-10-20"
-    end
-
-    local ticked = addon.PromotionsViewModel.ItemRow("bolt", itemOf(evaluated, item.id), nameOf, formatDate)
-    test.assertTrue(ticked.ticked)
-    test.assertTrue(ticked.needsNote)
-    test.assertEqual("Ticked by Toolbox on 2026-10-20", ticked.tooltip[1])
-    test.assertEqual("Note: Raid night", ticked.tooltip[2])
-    local open = addon.PromotionsViewModel.ItemRow("bolt", itemOf(evaluated, plain.id), nameOf, formatDate)
-    test.assertFalse(open.ticked)
-    test.assertEqual(nil, open.tooltip)
-end)
-
 -- Automated items -------------------------------------------------------------------
 
 
@@ -476,53 +444,6 @@ test.test("a level item compares the character's level", function()
     test.assertEqual("level unknown", itemOf(addon.PromotionPolicy.Evaluate(inputs, "rivet"), item.id).detail)
 end)
 
-test.test("an officer overrides a failed automated item with an optional reason, and can remove it", function()
-    local inputs, addon = newGuild({ bolt = 4 })
-    local item = addItem(inputs, 4, "", "level", 50)
-    inputs.partition:RecordCharacter("bolt", { level = 42 })
-    local checks = inputs.checks
-
-    test.assertEqual(nil, (checks:Set("bolt", item, true, "Old friend", MEMBER, NOW)), "officers only")
-    test.assertTrue(checks:Set("bolt", item, true, "  Old friend ", OFFICER, NOW) ~= nil)
-    local row = addon.PromotionPolicy.Evaluate(inputs, "bolt")
-    local status = itemOf(row, item.id)
-    test.assertTrue(status.met)
-    test.assertTrue(status.overridden)
-    test.assertEqual("level 42 of 50", status.detail, "the detail still says what the data shows")
-    test.assertTrue(row.ready)
-
-    local Model = addon.PromotionsViewModel
-    local function nameOf(key)
-        return key == OFFICER and "Toolbox" or key
-    end
-    local function formatDate()
-        return "2026-10-20"
-    end
-    local function itemRow()
-        return Model.ItemRow("bolt", itemOf(addon.PromotionPolicy.Evaluate(inputs, "bolt"), item.id), nameOf,
-            formatDate)
-    end
-    local shown = itemRow()
-    test.assertEqual("level 42 of 50", shown.ranks)
-    test.assertEqual("overridden", shown.progress)
-    test.assertEqual("Undo override", shown.action)
-    test.assertEqual("Overridden by Toolbox on 2026-10-20", shown.tooltip[1])
-    test.assertEqual("Reason: Old friend", shown.tooltip[2])
-
-    test.assertTrue(checks:Set("bolt", item, false, nil, OTHER_OFFICER, NOW) ~= nil)
-    test.assertFalse(itemOf(addon.PromotionPolicy.Evaluate(inputs, "bolt"), item.id).met)
-    shown = itemRow()
-    test.assertEqual("Override", shown.action)
-    test.assertContains(shown.tooltip[1], "Override removed by")
-
-    -- No reason is needed, and a met item offers no override.
-    test.assertTrue(checks:Set("bolt", item, true, nil, OFFICER, NOW) ~= nil)
-    test.assertTrue(itemOf(addon.PromotionPolicy.Evaluate(inputs, "bolt"), item.id).overridden)
-    checks:Set("bolt", item, false, nil, OFFICER, NOW)
-    inputs.partition:RecordCharacter("bolt", { level = 55 })
-    test.assertEqual(nil, itemRow().action)
-end)
-
 test.test("the add-on check passes when any of the player's characters was ever heard", function()
     local inputs, addon = newGuild({ main = 5, alt = 4, solo = 4, quiet = 4 })
     local records = inputs.requirements:Add(4, "", "addon", RANKS[5], OFFICER, NOW)
@@ -549,15 +470,6 @@ test.test("the add-on check passes when any of the player's characters was ever 
 end)
 
 -- The list at scale ------------------------------------------------------------------
-
-local function keysOf(rows)
-    local keys = {}
-    local index
-    for index = 1, #rows do
-        table.insert(keys, rows[index].key)
-    end
-    return table.concat(keys, ",")
-end
 
 test.test("a 1,000-character guild's ready flags are worked out within their time budget", function()
     local characters = {}
@@ -593,341 +505,7 @@ test.test("a 1,000-character guild's ready flags are worked out within their tim
     test.assertTrue(elapsed < 1, "took " .. elapsed .. " seconds")
 end)
 
-local function panelFor(inputs, addon, keys, options)
-    local characters = {}
-    local index
-    for index = 1, #keys do
-        local character = inputs.partition:GetCharacter(keys[index])
-        table.insert(characters, {
-            key = keys[index],
-            name = keys[index],
-            rankName = RANKS[character.rank + 1],
-            evaluated = addon.PromotionPolicy.Evaluate(inputs, keys[index]),
-            lastPromotion = options.lastPromotion,
-            matchRankName = options.matchRankNames and options.matchRankNames[keys[index]] or nil,
-        })
-    end
-    return addon.PromotionsViewModel.PanelRows(characters, options)
-end
-
-local function rowWith(rows, text)
-    local index
-    for index = 1, #rows do
-        if rows[index].text ~= nil and string.find(rows[index].text, text, 1, true) then
-            return rows[index]
-        end
-    end
-    return nil
-end
-
-test.test("an officer's panel shows each character's checklist with its check boxes, Override and who ticked",
-    function()
-    local inputs, addon = newGuild({ main = 2, bolt = 4 })
-    local noted = addItem(inputs, 4, "Attend an event", "check-note")
-    addItem(inputs, 4, "", "level", 10)
-    inputs.checks:Set("bolt", noted, true, "Raid night", OFFICER, NOW)
-
-    local rows = panelFor(inputs, addon, { "main", "bolt" }, {
-        officer = true,
-        highestRankName = "Veteran",
-        lastPromotion = { time = NOW, rank = 4, promoter = OFFICER },
-        expanded = { main = true, bolt = true },
-        nameOf = function(key)
-            return key == OFFICER and "Toolbox" or key
-        end,
-        formatDate = function()
-            return "2026-10-20"
-        end,
-    })
-    test.assertEqual("Highest rank: Veteran", rows[1].text)
-    test.assertContains(rowWith(rows, "bolt: Initiate").text, "[-] ", "an open checklist")
-    test.assertContains(rowWith(rows, "main: Veteran").text, "no requirements")
-    test.assertContains(rowWith(rows, "bolt: Initiate -> Member, 1 of 2").text, "1 of 2")
-    test.assertContains(rowWith(rows, "Promoted on 2026-10-20").text, "by Toolbox")
-    local ticked = rowWith(rows, "Attend an event")
-    test.assertEqual(nil, ticked.action, "a check box, not a button")
-    test.assertTrue(ticked.check)
-    test.assertTrue(ticked.checked)
-    test.assertTrue(ticked.canCheck)
-    test.assertEqual("Raid night", ticked.note)
-    test.assertFalse(string.find(ticked.text, "Raid night", 1, true) ~= nil, "the note is on its own line")
-    local noteLine
-    local index
-    for index = 1, #rows do
-        if rows[index].noteInput and rows[index].item == noted.id then
-            noteLine = rows[index]
-        end
-    end
-    test.assertEqual("Raid night", noteLine.note, "a ticked item's note shows on its line")
-    test.assertTrue(noteLine.ticked)
-    test.assertContains(ticked.tooltip[1], "Ticked by Toolbox")
-    local level = rowWith(rows, "Level 10")
-    test.assertEqual("Override", level.action)
-    test.assertFalse(level.checked)
-    test.assertEqual(nil, level.canCheck, "an automated item's box only shows whether it's met")
-    test.assertContains(level.text, "level unknown")
-    local reason
-    for index = 1, #rows do
-        if rows[index].noteInput and rows[index].item == level.item then
-            reason = rows[index]
-        end
-    end
-    test.assertTrue(reason.reason, "a failed check has a line for the override's optional reason")
-    test.assertEqual(nil, rowWith(rows, "Promote to"), "add-ons can't promote: no Promote button")
-end)
-
-test.test("an officer sees a Promote to match line beside an alt that's behind, apart from its checklist", function()
-    local inputs, addon = newGuild({ main = 2, bolt = 4, quiet = 3 })
-    addItem(inputs, 4, "Read the rules")
-    local matches = { bolt = "Veteran", quiet = "Veteran" }
-
-    local rows = panelFor(inputs, addon, { "main", "bolt", "quiet" }, { officer = true, matchRankNames = matches,
-        expanded = { bolt = true } })
-    local function indexOf(text)
-        local index
-        for index = 1, #rows do
-            if rows[index].text ~= nil and string.find(rows[index].text, text, 1, true) then
-                return index
-            end
-        end
-        return nil
-    end
-    local header = indexOf("bolt: Initiate")
-    test.assertContains(rows[header + 1].text, "Promote to match: Veteran", "right under the alt's line")
-    test.assertTrue(rows[header + 1].match)
-    test.assertEqual("bolt", rows[header + 1].key)
-    test.assertEqual(nil, rows[header + 1].check, "not one of its checklist's items")
-    test.assertContains(rows[header + 2].text, "Read the rules", "the checklist follows")
-    local quiet = indexOf("quiet: Member")
-    test.assertContains(rows[quiet].text, "no requirements")
-    test.assertContains(rows[quiet + 1].text, "Promote to match: Veteran", "even with no checklist")
-    test.assertEqual(nil, rows[indexOf("main: Veteran") + 1].match)
-
-    local member = panelFor(inputs, addon, { "bolt" }, { officer = false, matchRankNames = matches,
-        expanded = { bolt = true } })
-    test.assertEqual(nil, rowWith(member, "Promote to match"), "officers only")
-end)
-
-test.test("a member's own panel shows progress and details read-only, without notes or names", function()
-    local inputs, addon = newGuild({ bolt = 4 })
-    local noted = addItem(inputs, 4, "Attend an event", "check-note")
-    addItem(inputs, 4, "", "level", 10)
-    inputs.checks:Set("bolt", noted, true, "Raid night", OFFICER, NOW)
-
-    local rows = panelFor(inputs, addon, { "bolt" }, {
-        officer = false,
-        highestRankName = "Veteran",
-        lastPromotion = { time = NOW, rank = 4, promoter = OFFICER },
-        expanded = { bolt = true },
-    })
-    test.assertEqual(nil, rowWith(rows, "Highest rank"))
-    test.assertEqual(nil, rowWith(rows, "Promoted on"))
-    test.assertEqual(nil, rowWith(rows, "Promote to"))
-    local ticked = rowWith(rows, "Attend an event")
-    test.assertTrue(ticked.check)
-    test.assertTrue(ticked.checked)
-    test.assertEqual(nil, ticked.canCheck, "read-only")
-    test.assertFalse(string.find(ticked.text, "Raid night", 1, true) ~= nil, "no notes")
-    test.assertEqual(nil, ticked.action)
-    test.assertEqual(nil, ticked.tooltip)
-    test.assertContains(rowWith(rows, "Level 10").text, "level unknown")
-    local index
-    for index = 1, #rows do
-        test.assertEqual(nil, rows[index].action)
-    end
-end)
-
-test.test("the panel's Promotion tab can open its first checklist until it's closed", function()
-    local inputs, addon = newGuild({ main = 2, bolt = 4, alt = 4 })
-    addItem(inputs, 4, "Attend an event")
-
-    local rows = panelFor(inputs, addon, { "main", "bolt", "alt" }, { officer = true, openFirst = true })
-    test.assertEqual(nil, rowWith(rows, "main: Veteran").toggle, "nothing to open without requirements")
-    test.assertTrue(rowWith(rows, "bolt: Initiate").expanded, "the first with a checklist opens")
-    test.assertFalse(rowWith(rows, "alt: Initiate").expanded, "only the first")
-
-    rows = panelFor(inputs, addon, { "main", "bolt", "alt" }, { officer = true, openFirst = true,
-        expanded = { bolt = false } })
-    test.assertFalse(rowWith(rows, "bolt: Initiate").expanded, "closed once the user closes it")
-    test.assertFalse(rowWith(rows, "alt: Initiate").expanded)
-
-    -- A promotion date alone can be opened, but doesn't take the default.
-    rows = panelFor(inputs, addon, { "main", "bolt", "alt" }, { officer = true, openFirst = true,
-        lastPromotion = { time = NOW, rank = 2, promoter = OFFICER } })
-    test.assertTrue(rowWith(rows, "main: Veteran").toggle)
-    test.assertFalse(rowWith(rows, "main: Veteran").expanded)
-    test.assertTrue(rowWith(rows, "bolt: Initiate").expanded)
-end)
-
-test.test("the panel's Promotion tab shows one line per character, each opening to its checklist", function()
-    local inputs, addon = newGuild({ main = 2, bolt = 4 })
-    addItem(inputs, 4, "Attend an event")
-
-    local rows = panelFor(inputs, addon, { "main", "bolt" }, { officer = true })
-    test.assertEqual(2, #rows, "closed, just the characters")
-    local bolt = rowWith(rows, "bolt: Initiate")
-    test.assertTrue(bolt.toggle)
-    test.assertFalse(bolt.expanded)
-    test.assertContains(bolt.text, "[+] ")
-    test.assertEqual(nil, rowWith(rows, "main: Veteran").toggle, "nothing to open without requirements")
-    test.assertEqual(nil, rowWith(rows, "Attend an event"))
-
-    local noted = addItem(inputs, 4, "Write a guide", "check-note")
-    rows = panelFor(inputs, addon, { "main", "bolt" }, { officer = true,
-        expanded = { bolt = true } })
-    local at
-    local index
-    for index = 1, #rows do
-        if rows[index].item == noted.id and not rows[index].noteInput then
-            at = index
-        end
-    end
-    test.assertTrue(rows[at].needsNote)
-    test.assertTrue(rows[at + 1].noteInput, "the note is typed on the line under the item")
-    test.assertEqual(noted.id, rows[at + 1].item)
-    inputs.checks:Set("bolt", noted, true, "The raid guide", OFFICER, NOW)
-    rows = panelFor(inputs, addon, { "bolt" }, { officer = true, expanded = { bolt = true } })
-    local saved
-    for index = 1, #rows do
-        if rows[index].noteInput then
-            saved = rows[index]
-        end
-    end
-    test.assertEqual("The raid guide", saved.note, "once ticked, the line shows the note")
-    test.assertTrue(saved.ticked)
-    inputs.checks:Set("bolt", noted, false, nil, OFFICER, NOW + 1)
-    rows = panelFor(inputs, addon, { "bolt" }, { officer = true, expanded = { bolt = true } })
-    for index = 1, #rows do
-        if rows[index].noteInput then
-            saved = rows[index]
-        end
-    end
-    test.assertFalse(saved.ticked)
-    test.assertEqual(nil, saved.note, "unticked, the window keeps what was typed")
-    local member = panelFor(inputs, addon, { "bolt" }, { officer = false, expanded = { bolt = true } })
-    for index = 1, #member do
-        test.assertEqual(nil, member[index].noteInput, "members get no note line")
-    end
-    rows = panelFor(inputs, addon, { "main", "bolt" }, { officer = true,
-        expanded = { bolt = true } })
-    test.assertTrue(rowWith(rows, "bolt: Initiate").expanded)
-    local item = rowWith(rows, "Attend an event")
-    test.assertTrue(item.canCheck)
-    test.assertFalse(item.checked)
-
-    -- Every item met: the character is flagged ready for promotion.
-    test.assertFalse(string.find(rowWith(rows, "bolt: Initiate").text, "Ready for promotion", 1, true) ~= nil)
-    inputs.checks:Set("bolt", inputs.requirements:Item(item.item), true, nil, OFFICER, NOW + 2)
-    inputs.checks:Set("bolt", noted, true, "The raid guide", OFFICER, NOW + 3)
-    rows = panelFor(inputs, addon, { "bolt" }, { officer = true })
-    test.assertContains(rowWith(rows, "bolt: Initiate").text, "Ready for promotion")
-end)
-
-test.test("the roster marks ready characters' rows, and clears marks that no longer apply", function()
-    local inputs, addon = newGuild({ bolt = 4, nail = 4 })
-    local item = addItem(inputs, 4, "Read the rules")
-    inputs.checks:Set("bolt", item, true, nil, OFFICER, NOW)
-    local Roster = test.newAddon("Core/RosterViewModel.lua").RosterViewModel
-    local ready = addon.PromotionPolicy.ReadySet(inputs)
-    test.assertTrue(ready.bolt)
-    test.assertEqual(nil, ready.nail)
-
-    local rows = { { kind = "player" }, { kind = "character", key = "bolt" }, { kind = "character", key = "nail" } }
-    test.assertTrue(Roster.MarkReady(rows, ready))
-    test.assertTrue(rows[2].ready)
-    test.assertEqual(nil, rows[3].ready)
-    test.assertEqual(nil, rows[1].ready)
-    test.assertFalse(Roster.MarkReady(rows, ready), "nothing changed")
-    test.assertTrue(Roster.MarkReady(rows, nil))
-    test.assertEqual(nil, rows[2].ready)
-end)
-
-test.test("the rank cell shows Ready over the timer, the timer, or no marker", function()
-    local Roster = test.newAddon("Core/RosterViewModel.lua").RosterViewModel
-    local rows = { { kind = "character", key = "both" }, { kind = "character", key = "due" },
-        { kind = "character", key = "neither" } }
-    test.assertTrue(Roster.MarkReady(rows, { both = true }, { both = true, due = true }))
-    test.assertEqual("ready", Roster.RankMarker(rows[1]))
-    test.assertEqual("timer", Roster.RankMarker(rows[2]))
-    test.assertEqual(nil, Roster.RankMarker(rows[3]))
-    test.assertFalse(Roster.MarkReady(rows, { both = true }, { both = true, due = true }), "nothing changed")
-    test.assertTrue(Roster.MarkReady(rows, { both = true }, nil), "a member gets no timer keys")
-    test.assertEqual(nil, Roster.RankMarker(rows[2]))
-end)
-
-test.test("the timer icon falls back to text only when the client says its texture is missing", function()
-    local Roster = test.newAddon("Core/RosterViewModel.lua").RosterViewModel
-    test.assertContains(Roster.TimerIcon(true), Roster.TIMER_TEXTURE)
-    test.assertContains(Roster.TimerIcon(nil), Roster.TIMER_TEXTURE, "a client that can't say tries the texture")
-    test.assertEqual(Roster.TIMER_FALLBACK, Roster.TimerIcon(false))
-end)
-
 -- In the composed add-on -----------------------------------------------------------
-
-test.test("a character's line offers Not ready while its timer shows, then says who snoozed it until when",
-    function()
-    local inputs, addon = newGuild({ due = 4, snoozed = 4, ready = 4, early = 4 })
-    inputs.requirements:SetAutomated(4, "char-guild-days", true, 7, RANKS[5], OFFICER, NOW)
-    local rules = addItem(inputs, 4, "Read the rules")
-    local key
-    for _, key in ipairs({ "due", "snoozed", "ready" }) do
-        inputs.dates:Offer(key, "joined", { time = NOW - 30 * DAY, source = "log" })
-    end
-    inputs.dates:Offer("early", "joined", { time = NOW - DAY, source = "log" })
-    inputs.checks:Set("ready", rules, true, nil, OFFICER, NOW)
-    local snoozes = { snoozed = { untilTime = NOW + 7 * DAY, by = OFFICER, at = NOW } }
-    local function panel(officer)
-        local characters = {}
-        local index
-        local keys = { "due", "snoozed", "ready", "early" }
-        for index = 1, #keys do
-            table.insert(characters, { key = keys[index], name = keys[index], rankName = RANKS[5],
-                evaluated = addon.PromotionPolicy.Evaluate(inputs, keys[index]), snooze = snoozes[keys[index]] })
-        end
-        return addon.PromotionsViewModel.PanelRows(characters, {
-            officer = officer,
-            nameOf = function(name)
-                return name == OFFICER and "Toolbox" or name
-            end,
-            formatDate = function(time)
-                return time == NOW + 7 * DAY and "2026-10-27" or "?"
-            end,
-        })
-    end
-
-    -- The button is on its own line, the last of the character's.
-    local function notReady(rows, key)
-        local last, index
-        for index = 1, #rows do
-            if rows[index].key == key then
-                last = rows[index]
-            end
-        end
-        return last ~= nil and last.action == "Not ready" and last.snooze == "can" and last or nil
-    end
-
-    local rows = panel(true)
-    test.assertEqual("can", rowWith(rows, "due: Initiate").snooze)
-    test.assertEqual(nil, rowWith(rows, "due: Initiate").action, "the header doesn't crowd its rank names")
-    test.assertTrue(notReady(rows, "due") ~= nil, "Not ready under the closed header")
-    test.assertEqual("snoozed", rowWith(rows, "snoozed: Initiate").snooze)
-    test.assertEqual(nil, notReady(rows, "snoozed"), "no button while snoozed")
-
-    -- Open, it's under the checklist.
-    local open = addon.PromotionsViewModel.PanelRows({ { key = "due", name = "due", rankName = RANKS[5],
-        evaluated = addon.PromotionPolicy.Evaluate(inputs, "due") } }, { officer = true, expanded = { due = true } })
-    test.assertTrue(notReady(open, "due") ~= nil)
-    test.assertTrue(open[#open - 1].item ~= nil or open[#open - 1].noteInput, "after the requirements")
-    test.assertTrue(rowWith(rows, "Snoozed until 2026-10-27 by Toolbox").snoozed)
-    test.assertEqual("none", rowWith(rows, "ready: Initiate").snooze, "Ready, so no timer")
-    test.assertEqual("none", rowWith(rows, "early: Initiate").snooze, "time not up")
-
-    rows = panel(false)
-    test.assertEqual("none", rowWith(rows, "due: Initiate").snooze, "members get none")
-    test.assertEqual(nil, notReady(rows, "due"))
-    test.assertEqual("none", rowWith(rows, "snoozed: Initiate").snooze)
-    test.assertEqual(nil, rowWith(rows, "Snoozed until"))
-end)
 
 local NAMES = {
     Forever = { "Tool Box", "Hammer Smith", "Bolt Nut" },
@@ -982,27 +560,39 @@ local function keyOf(world, name)
     return normalizer:Key(name)
 end
 
--- The player panel's Promotion tab for the player of the character named
--- `name`, that character's checklist open, and its line (the first of its
--- rows): its rank, progress and Ready flag.
+-- The player panel's Rank tab (promotions.checklist) for the player of
+-- the character named `name`, as rows and a header line: each requirement
+-- { item, text (its detail), action ("Override" for a failed automated one
+-- an officer can override) }, and { text ("Due · 0 of 1", with "Ready for
+-- promotion" when it is, or "no requirements"), snooze ("can" for a Due
+-- player an officer can snooze, "snoozed"), statusText, key }.
 local function panelOf(world, name)
     local _, partition = world.addon.rosterController:QuietContext()
     local key = keyOf(world, name)
-    local player = partition:GetCharacter(key).player
-    local function draw()
-        local rows = world.addon.promotions.panelRows(partition:CharactersOf(player), player)
-        local index
-        for index = 1, #(rows or {}) do
-            if rows[index].key == key then
-                return rows, rows[index]
-            end
-        end
-        return rows, nil
+    local list = world.addon.promotions.checklist(partition:GetCharacter(key).player)
+    if list == nil then
+        return {}, nil, key
     end
-    local rows, header = draw()
-    if header ~= nil and header.toggle and not header.expanded then
-        world.addon.promotions.togglePanel(key, false)
-        rows, header = draw()
+    local rows, met = {}, 0
+    local _, item
+    for _, item in ipairs(list.items) do
+        if item.state == "met" or item.state == "overridden" or item.state == "ticked" then
+            met = met + 1
+        end
+        table.insert(rows, { item = item.id, text = item.detail,
+            action = (list.editable and item.state == "missing") and "Override" or nil })
+    end
+    local header = { key = list.key, statusText = list.statusText }
+    if list.status == "No requirements" then
+        header.text = "no requirements"
+    else
+        header.text = list.statusText .. " · " .. met .. " of " .. #list.items
+            .. (list.status == "Ready" and " · Ready for promotion" or "")
+    end
+    if list.editable and list.status == "Due" then
+        header.snooze = "can"
+    elseif list.editable and list.status == "Snoozed" then
+        header.snooze = "snoozed"
     end
     return rows, header, key
 end
@@ -1161,40 +751,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertContains(table.concat(hammer.messages, "\n"), "Only officers")
     end)
 
-    test.test(profile .. " /agf probe timer counts whose time is up, and the count follows ticks", function()
-        local channel = fixtures.newChannel()
-        local tool = login(profile, channel, names[1])
-        local hammer = login(profile, channel, names[2])
-        settle(channel, 5)
-        local rank = newest(tool.addon)
-        local promotions = tool.addon.promotions
-        test.assertTrue(promotions.add(rank, "Read the rules", false))
-        test.assertTrue(promotions.automated(rank, "char-guild-days", true, "7"))
-        local boltKey = keyOf(tool, names[3])
-        local _, partition = tool.addon.rosterController:QuietContext()
-        partition:GetMembershipDates().characters[boltKey].joined =
-            { time = tool.time - 10 * DAY, source = "log", at = tool.time, by = tool.addon.rosterController:SelfKey() }
-        test.assertTrue(promotions.timeMetKeys()[boltKey])
-        tool.messages = {}
-        fixtures.slash(tool, "probe timer")
-        local printed = table.concat(tool.messages, "\n")
-        test.assertContains(printed, "Timer marker probe:")
-        test.assertContains(printed, "Texture: " .. tool.addon.RosterViewModel.TIMER_TEXTURE)
-        test.assertContains(printed, "Loaded:")
-        test.assertContains(printed, "Time requirement met: 1")
-
-        -- Ticking the manual item makes Bolt Ready, which replaces the timer.
-        test.assertTrue(promotions.tick(boltKey, promotions.editor(rank).items[1].id, true))
-        test.assertTrue(promotions.readyKeys()[boltKey])
-        test.assertEqual(nil, promotions.timeMetKeys()[boltKey])
-
-        test.assertEqual(nil, hammer.addon.promotions.timeMetKeys(), "members get no timer keys")
-        hammer.messages = {}
-        fixtures.slash(hammer, "probe timer")
-        test.assertContains(table.concat(hammer.messages, "\n"), "Only officers")
-    end)
-
-    test.test(profile .. " Not ready snoozes the timer for the rank's length, shared, and Ready still shows",
+    test.test(profile .. " Snooze puts a Due player off for the rank's length, shared, and Ready still shows",
         function()
         local channel = fixtures.newChannel()
         local tool = login(profile, channel, names[1])
@@ -1209,26 +766,16 @@ for profileIndex = 1, #fixtures.PROFILES do
         local _, partition = tool.addon.rosterController:QuietContext()
         partition:GetMembershipDates().characters[boltKey].joined =
             { time = tool.time - 10 * DAY, source = "log", at = tool.time, by = tool.addon.rosterController:SelfKey() }
-        local rows, header = panelOf(tool, names[3])
+        local _, header = panelOf(tool, names[3])
         test.assertEqual("can", header.snooze)
-        local button = rows[#rows]
-        test.assertEqual("Not ready", button.action, "under the checklist")
-        test.assertEqual(header.key, button.key)
+        test.assertEqual(boltKey, header.key)
 
         local clicked = tool.time
         test.assertTrue(promotions.snooze(boltKey))
-        test.assertEqual(nil, promotions.timeMetKeys()[boltKey], "the timer is snoozed")
-        rows, header = panelOf(tool, names[3])
+        _, header = panelOf(tool, names[3])
         test.assertEqual("snoozed", header.snooze)
-        test.assertEqual(nil, rows[#rows].action)
-        local index, snoozedLine
-        for index = 1, #rows do
-            if rows[index].snoozed then
-                snoozedLine = rows[index]
-            end
-        end
-        test.assertContains(snoozedLine.text, "Snoozed until ")
-        test.assertContains(snoozedLine.text, " by ")
+        test.assertContains(header.statusText, "Snoozed until ")
+        test.assertContains(header.statusText, " by ")
 
         -- A later change to the length doesn't move the snooze.
         test.assertTrue(promotions.snoozeDays(rank, "30"))
@@ -1251,9 +798,8 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertTrue(promotions.readyKeys()[boltKey])
         promotions.tick(boltKey, promotions.editor(rank).items[1].id, false)
 
-        -- When the snooze ends, the timer comes back.
+        -- When the snooze ends, Bolt is Due again.
         tool.time = clicked + 3 * DAY
-        test.assertTrue(promotions.timeMetKeys()[boltKey])
         _, header = panelOf(tool, names[3])
         test.assertEqual("can", header.snooze)
     end)
@@ -1289,7 +835,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertContains(select(2, panelOf(hammer, names[2])).text, "1 of 1", "the member's own view agrees")
     end)
 
-    test.test(profile .. " the player panel works promotions for officers, marks the roster, and only a member's own",
+    test.test(profile .. " the Rank tab works promotions for officers, and a member sees only their own, read-only",
         function()
         local channel = fixtures.newChannel()
         local tool = login(profile, channel, names[1])
@@ -1304,53 +850,27 @@ for profileIndex = 1, #fixtures.PROFILES do
         local _, partition = tool.addon.rosterController:QuietContext()
         local boltKey = keyOf(tool, names[3])
         local boltPlayer = partition:GetCharacter(boltKey).player
-        local boltKeys = partition:CharactersOf(boltPlayer)
 
-        local panel = promotions.panelRows(boltKeys, boltPlayer)
-        test.assertTrue(rowWith(panel, "Initiate -> Member").toggle)
-        test.assertTrue(rowWith(panel, "Initiate -> Member").expanded, "the top checklist starts open")
-        test.assertTrue(rowWith(panel, "Read the rules") ~= nil)
-        test.assertTrue(promotions.togglePanel(boltKey, true))
-        panel = promotions.panelRows(boltKeys, boltPlayer)
-        test.assertEqual(nil, rowWith(panel, "Read the rules"), "closing the top checklist keeps it closed")
-        test.assertTrue(promotions.togglePanel(boltKey, false))
-        panel = promotions.panelRows(boltKeys, boltPlayer)
-        local item = rowWith(panel, "Read the rules")
-        test.assertTrue(item.canCheck)
-        test.assertFalse(item.checked)
-        test.assertEqual(nil, rowWith(panel, "Promote to"), "add-ons can't promote")
-        test.assertTrue(promotions.tick(item.key, item.item, true))
-        panel = promotions.panelRows(boltKeys, boltPlayer)
-        test.assertTrue(rowWith(panel, "Read the rules").checked)
-        test.assertContains(rowWith(panel, "Initiate -> Member").text, "Ready for promotion")
+        local list = promotions.checklist(boltPlayer)
+        test.assertTrue(list.editable)
+        test.assertEqual("Read the rules", list.items[1].label)
+        test.assertFalse(list.items[1].checked)
+        test.assertTrue(promotions.tick(list.key, list.items[1].id, true))
+        list = promotions.checklist(boltPlayer)
+        test.assertTrue(list.items[1].checked)
+        test.assertEqual("Ready", list.status)
         test.assertTrue(promotions.readyKeys()[boltKey])
 
-        -- The roster marks Bolt's row once the window redraws.
-        local controller = tool.addon.rosterController
-        local drawnRows
-        controller.window = {
-            IsShown = function()
-                return true
-            end,
-            ShowPage = function() end,
-            SetRows = function(_, rows)
-                drawnRows = rows
-            end,
-            SetPromotions = function() end,
-        }
-        controller.rosterRows = { { kind = "character", key = boltKey } }
-        controller:RefreshPromotions()
-        test.assertTrue(drawnRows[1].ready)
-
-        -- Members: nothing about others, nor a ready marker; their own,
+        -- Members: nothing about others, nor Ready arrows; their own,
         -- read-only.
         settle(channel, 10)
         test.assertEqual(nil, hammer.addon.promotions.readyKeys())
-        test.assertEqual(nil, hammer.addon.promotions.panelRows(boltKeys, boltPlayer))
-        local own = panelOf(hammer, names[2])
-        local help = rowWith(own, "Help a new member")
-        test.assertFalse(help.checked)
-        test.assertEqual(nil, help.canCheck)
-        test.assertEqual(nil, help.action)
+        test.assertEqual(nil, hammer.addon.promotions.checklist(boltPlayer))
+        local _, memberPartition = hammer.addon.rosterController:QuietContext()
+        local own = hammer.addon.promotions.checklist(memberPartition:GetCharacter(keyOf(hammer, names[2])).player)
+        test.assertFalse(own.editable)
+        test.assertEqual("Help a new member", own.items[1].label)
+        test.assertFalse(own.items[1].checked)
+        test.assertFalse((hammer.addon.promotions.tick(own.key, own.items[1].id, true)))
     end)
 end

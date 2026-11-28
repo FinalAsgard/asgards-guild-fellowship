@@ -1,7 +1,9 @@
 local _, addon = ...
 
--- Connects the guild roster, the store, the scan scheduler, and the roster
--- window for `/agf`, `/agf rescan`, and the window's Rescan button.
+-- Connects the guild roster, the store and the scan scheduler, for the AGF
+-- window's Guild Roster and `/agf rescan`, and draws the old window's
+-- pages (My Profile, Recruitment, Recent ads, Guild Log, Settings) and its
+-- guild note Conflicts.
 --
 -- Opening the window never scans: it only reads live roster facts for
 -- display. Scans are the ScanScheduler's job (daily at login, new members
@@ -53,24 +55,6 @@ Controller.__index = Controller
 --                 changed (a scan, sync, manual change, or roster update)
 --   onDecideSuggestion  optional function(character, kind, approved) ->
 --                 ok, reason: decides a member's suggestion in the queue
---   adStats       optional function(keys) -> a player's ad count line for
---                 the player panel, or nil
---   rolesOf       optional function(key) -> a character's role preferences
---                 for the player panel ("Tank, DPS"), or nil
---   grouped       optional function(keys) -> how many times this user
---                 grouped with a player and when last, for the player
---                 panel, or nil
---   joined        optional function(keys) -> when a player first joined, as
---                 text, for the player panel (officers), or nil
---   membership    optional function(keys) -> lines about each of a player's
---                 characters' join and rank dates for the player panel's
---                 Log (officers), or nil
---   promotion     optional function(keys, playerId) -> the player panel's
---                 promotion rows (officers, or a member's own player), or nil
---   readyKeys     optional function() -> the set of characters ready for
---                 promotion, for the roster's marker (officers), or nil
---   timeMetKeys   optional function() -> the set of characters whose time is
---                 up, for the roster's timer marker (officers), or nil
 --   recruitRecord optional function(keys) -> a player's ad record (see
 --                 RecruitStats), for the officers' Recruiters leaderboard
 --   isOfficer     optional function() -> true when the logged-in character
@@ -83,14 +67,6 @@ Controller.__index = Controller
 function RosterController.Create(options)
     local controller = setmetatable({
         client = options.client,
-        adStats = options.adStats,
-        rolesOf = options.rolesOf,
-        grouped = options.grouped,
-        joined = options.joined,
-        membership = options.membership,
-        promotion = options.promotion,
-        readyKeys = options.readyKeys,
-        timeMetKeys = options.timeMetKeys,
         recruitRecord = options.recruitRecord,
         recentAds = options.recentAds,
         offZones = options.offZones,
@@ -108,8 +84,6 @@ function RosterController.Create(options)
         onDeclaredChanged = options.onDeclaredChanged,
         onScanFinished = options.onScanFinished,
         onChanged = options.onChanged,
-        collapsed = {},
-        showDeparted = false,
         createWindow = options.createWindow,
         pages = options.pages,
         getDatabase = options.getDatabase,
@@ -298,7 +272,7 @@ function Controller:AuditStamp(partition)
     return partition.key .. "#" .. tostring(self.dataRevision or 0) .. "#" .. tostring(self.rosterVersion or 0)
 end
 
--- `/agf rescan` and the Rescan button.
+-- `/agf rescan` and the Guild Roster's Rescan.
 function Controller:Rescan()
     if self.scheduler:IsRunning() then
         self:Print("A roster scan is already running.")
@@ -309,7 +283,6 @@ function Controller:Rescan()
         return false
     end
     self:Print("Scanning the guild roster...")
-    self:UpdateStatus()
     return self.scheduler:RequestFull(true)
 end
 
@@ -366,22 +339,6 @@ function Controller:OnScanFinished(result, summary)
     end
 end
 
--- "Last scan 5 minutes ago: 3 new characters, 1 alt linked", and below it
--- "Synced 2 minutes ago".
-function Controller:StatusText(partition)
-    local now = self.client:Timestamp()
-    local sync = addon.RosterViewModel.SyncText(partition:GetLastSync(), now)
-    if self.scheduler:IsRunning() then
-        return "Scanning the guild roster...\n" .. sync
-    end
-    local summary = partition:GetLastScanSummary()
-    if summary == nil then
-        return "Not scanned yet. The roster is scanned once it loads, or use Rescan.\n" .. sync
-    end
-    local when = addon.RosterViewModel.Ago(math.max(0, (now or summary.at) - summary.at))
-    return "Last scan " .. when .. ": " .. RosterController.DescribeScan(summary) .. "\n" .. sync
-end
-
 -- For `/agf probe`: when the last full scan ran, and how many notes the
 -- latest scan that found anything changed (an incremental scan that found
 -- nothing records nothing). Returns lines of text.
@@ -409,12 +366,6 @@ function Controller:ScanProbeLines()
         table.insert(lines, "A scan is running now.")
     end
     return lines
-end
-
-function Controller:UpdateStatus()
-    if self.window ~= nil and self.current ~= nil then
-        self.window:SetStatus(self:StatusText(self.current.partition))
-    end
 end
 
 -- Decides members' suggestions in the queue (all of them, or the one about
@@ -942,13 +893,6 @@ function Controller:AliasOf(key)
     return player and player.alias or ""
 end
 
--- Shows or hides characters who left the guild. Lasts for the session.
-function Controller:ToggleDeparted()
-    self.showDeparted = not self.showDeparted
-    self:Refresh()
-    return self.showDeparted
-end
-
 -- Purges one departed character, keeping its player's history entry.
 function Controller:Purge(key)
     if self.current == nil then
@@ -970,150 +914,6 @@ function Controller:PurgeAllDeparted()
     self:Print("Purged " .. plural(purged, "departed character") .. ".")
     self:Refresh()
     return purged
-end
-
--- The player edit panel ------------------------------------------------------
-
--- Selects a player (by id, or by one of its characters' keys) and opens the
--- edit panel for it.
-function Controller:SelectPlayer(playerId)
-    if self.current == nil or self.current.partition:GetPlayer(playerId) == nil then
-        return false
-    end
-    self.selected = playerId
-    self:RedrawPanel()
-    return true
-end
-
-function Controller:SelectPlayerOf(key)
-    local character = self.current and self.current.partition:GetCharacter(key)
-    return character ~= nil and self:SelectPlayer(character.player)
-end
-
--- The game's guild roster selected `name`: opens the player panel for its
--- player, without the add-on's window. False when the add-on has no record
--- of them, or the panel can't be drawn.
-function Controller:ShowPlayerNamed(name)
-    local guild, partition, normalizer = self:QuietContext()
-    local key = guild and type(name) == "string" and normalizer:Key(name)
-    local character = key and partition:GetCharacter(key)
-    if character == nil or character.player == nil then
-        return false
-    end
-    if self.window == nil then
-        local window = self.createWindow()
-        if window == nil then
-            return false
-        end
-        self.window = window
-    end
-    if self.current == nil or self.current.partition ~= partition then
-        self.current = { guild = guild, partition = partition }
-    end
-    return self:SelectPlayer(character.player)
-end
-
-function Controller:ClosePanel()
-    self.selected = nil
-    if self.window ~= nil then
-        self.window:HidePlayer()
-    end
-end
-
--- Rebuilds the panel for the selected player, or closes it when that player
--- no longer exists (merged away, or purged).
-function Controller:RedrawPanel()
-    if self.window == nil or self.current == nil or self.selected == nil then
-        return
-    end
-    local normalizer = self:Normalizer(self.current.guild)
-    local model = addon.PlayerPanelViewModel.Build({
-        partition = self.current.partition,
-        playerId = self.selected,
-        -- The window's snapshot is only kept current while it shows.
-        members = (self.window:IsShown() and self.liveMembers) or self:LiveMembers(normalizer),
-        normalizer = normalizer,
-        formatDate = function(timestamp)
-            return self.client:FormatDate(timestamp)
-        end,
-        classColor = function(classToken)
-            return self.client:GetClassColor(classToken)
-        end,
-        adStats = self.adStats,
-        rolesOf = self.rolesOf,
-        grouped = self.grouped,
-        joined = self.joined,
-        membership = self.membership,
-        promotion = self.promotion,
-        -- The window wraps the bio to the panel's width, when it can
-        -- measure text.
-        wrap = self.window.WrapAbout and function(text)
-            return self.window:WrapAbout(text)
-        end or nil,
-    })
-    if model == nil then
-        self:ClosePanel()
-        return
-    end
-    -- Set alias…, Set Discord…, Merge into player… and each character's
-    -- Make main and Detach only for a player this user may change.
-    model.canEdit = self:CanEditPlayer(model.main)
-    if not model.canEdit then
-        model.canMerge = false
-        local index
-        for index = 1, #model.rows do
-            local row = model.rows[index]
-            if row.kind == "character" then
-                row.canMakeMain = false
-                row.canDetach = false
-            end
-        end
-    end
-    self.window:ShowPlayer(model)
-end
-
--- Collapses or expands a player's group. The state lasts for the session,
--- so groups stay as they were when the window is reopened.
-function Controller:ToggleGroup(playerId)
-    if playerId == nil then
-        return
-    end
-    self.collapsed[playerId] = not self.collapsed[playerId] or nil
-    self:Refresh()
-end
-
-function Controller:ExpandAll()
-    self.collapsed = {}
-    self:Refresh()
-end
-
-function Controller:CollapseAll()
-    if self.current == nil then
-        return
-    end
-    self.collapsed = {}
-    local ids = addon.RosterViewModel.GroupIds(self.current.partition)
-    local index
-    for index = 1, #ids do
-        self.collapsed[ids[index]] = true
-    end
-    self:Refresh()
-end
-
--- The search box: matches character names and aliases.
-function Controller:SetSearch(text)
-    local search = type(text) == "string" and text or ""
-    if search == self.search then
-        return
-    end
-    self.search = search
-    self:Refresh()
-end
-
-function Controller:ToggleOnlineOnly()
-    self.onlineOnly = not self.onlineOnly
-    self:Refresh()
-    return self.onlineOnly
 end
 
 -- True when two roster reads hold the same characters with the same notes,
@@ -1187,10 +987,9 @@ function Controller:NotifyChanged()
     end
 end
 
--- Data changed: the rows are stale even while the window is hidden, so the
--- next open rebuilds them. Only a shown window redraws now, or the player
--- panel when it's open on its own. `fromRoster` when it's only the live
--- roster that may have changed (a roster update), not saved data.
+-- Data changed: a shown window redraws now; a hidden one when it next
+-- opens. `fromRoster` when it's only the live roster that may have changed
+-- (a roster update), not saved data.
 function Controller:Invalidate(fromRoster)
     self.revision = (self.revision or 0) + 1
     if not fromRoster then
@@ -1198,45 +997,23 @@ function Controller:Invalidate(fromRoster)
     end
     if self.window ~= nil and self.window:IsShown() then
         self:Redraw()
-    elseif self.selected ~= nil then
-        -- The player panel stays open without the window.
-        self:RedrawPanel()
     end
     self:NotifyChanged()
 end
 
--- Draws the window from the store plus live roster facts. The rows are
--- only rebuilt when the revision or guild changed since the last build.
+-- Draws the old window's guild note Conflicts from the store plus live
+-- roster facts, only when the revision or guild changed since the last
+-- draw.
 function Controller:Redraw()
     if self.window == nil or self.current == nil then
         return
     end
     local stamp = self.current.partition.key .. "#" .. tostring(self.revision or 0)
-    if self.cache == nil then
-        self.cache = addon.RosterViewModel.CreateCache()
-    end
-    if self.cache.stamp ~= stamp then
+    if self.drawnStamp ~= stamp then
+        self.drawnStamp = stamp
         local normalizer = self:Normalizer(self.current.guild)
         local members = self:LiveMembers(normalizer)
-        self.liveMembers = members
-        local rows = self.cache:Build({
-            partition = self.current.partition,
-            members = members,
-            normalizer = normalizer,
-            classColor = function(classToken)
-                return self.client:GetClassColor(classToken)
-            end,
-            collapsed = self.collapsed,
-            showDeparted = self.showDeparted == true,
-            onlineOnly = self.onlineOnly == true,
-            search = self.search,
-            now = self.client:Timestamp(),
-        }, stamp)
-        self.rosterRows = rows
-        self:MarkReady(false)
         self.window:SetTitle(addon.Identity.displayName .. " - " .. self.current.guild.name)
-        self.window:SetRows(rows)
-        self:RedrawCounts(members)
         local conflictRows = addon.ConflictViewModel.Build({
             partition = self.current.partition,
             members = members,
@@ -1250,25 +1027,8 @@ function Controller:Redraw()
             self.window:SetConflictsShown(self:IsOfficerUser())
         end
         self:RedrawReview(conflictRows, normalizer, members)
-        self:RedrawPanel()
     end
     self:RefreshRecruiters()
-    self:UpdateStatus()
-end
-
--- Draws the guild-size counts line and its tooltip (see
--- RosterViewModel.Counts) from `members`, the live roster facts, or hides
--- it while the guild has no characters yet, so it never reads "0 players".
-function Controller:RedrawCounts(members)
-    if type(self.window.SetCounts) ~= "function" then
-        return
-    end
-    local counts = addon.RosterViewModel.Counts(self.current.partition, members)
-    if counts.characters == 0 then
-        self.window:SetCounts(nil)
-        return
-    end
-    self.window:SetCounts(addon.RosterViewModel.CountsText(counts), addon.RosterViewModel.CountsTooltip(counts))
 end
 
 -- The officers' Recruiters rows (see RecruitStats.Recruiters) for the
@@ -1560,35 +1320,6 @@ function Controller:RefreshGuildLog()
     end
 end
 
--- Marks the roster's rows of characters ready for promotion, and whose time
--- is up (see RosterViewModel.MarkReady; only officers get any), redrawing
--- the roster when that changed and `redraw` is set.
-function Controller:MarkReady(redraw)
-    if self.rosterRows == nil or self.readyKeys == nil then
-        return
-    end
-    local ok, ready = pcall(self.readyKeys)
-    local timeOk, timeMet = false, nil
-    if self.timeMetKeys ~= nil then
-        timeOk, timeMet = pcall(self.timeMetKeys)
-    end
-    if addon.RosterViewModel.MarkReady(self.rosterRows, ok and ready or nil, timeOk and timeMet or nil)
-        and redraw and self.window ~= nil
-    then
-        self.window:SetRows(self.rosterRows)
-    end
-end
-
--- Redraws the roster's ready markers and the player panel's Promotion tab
--- when the window is open.
-function Controller:RefreshPromotions()
-    if self.window == nil or not self.window:IsShown() then
-        return
-    end
-    self:MarkReady(true)
-    self:RedrawPanel()
-end
-
 -- Shows or hides the tabs whose pages follow the character's rank (see
 -- PageNavigator), falling back to the home page when the page showing is
 -- hidden now. Run when the roster changes, so a promotion or demotion
@@ -1602,7 +1333,7 @@ end
 -- Selects the page `entry` opens (see PageNavigator:PageFor) and shows it
 -- in the window.
 function Controller:ShowPage(entry)
-    if self.pages == nil then
+    if self.pages == nil or self.window == nil then
         return
     end
     self.pages:Select(self.pages:PageFor(entry))
@@ -1611,9 +1342,8 @@ function Controller:ShowPage(entry)
     end
 end
 
--- `/agf` and the other entry points: opens the window on the page `entry`
--- opens (the Roster page unless it names another), whatever page showed
--- last. When the window is already showing that page, it closes instead.
+-- `/agf profile` and the like: opens the old window on the page `entry`
+-- opens (My Profile unless it names another), whatever page showed last. When the window is already showing that page, it closes instead.
 -- Never scans.
 function Controller:Toggle(entry)
     if self.window ~= nil and self.window:IsShown() then
@@ -1646,7 +1376,6 @@ function Controller:Toggle(entry)
     self.window:Show()
     self:RefreshRecruiters()
     self:RefreshGuildLog()
-    self:RefreshPromotions()
     return true
 end
 
