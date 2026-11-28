@@ -46,13 +46,16 @@ local function setup()
         end,
         onSnooze = function(key)
             table.insert(world.snoozed, key)
+            if world.refuse ~= nil then
+                return false, world.refuse
+            end
             local index
             for index = #world.rows, 1, -1 do
                 if world.rows[index].key == key then
                     table.remove(world.rows, index)
                 end
             end
-            return world.refuse == nil, world.refuse
+            return true
         end,
         onError = function(text)
             world.error = text
@@ -264,6 +267,18 @@ test.test("rank management page: a refused snooze says why", function()
     row.snooze.scripts.OnClick(row.snooze)
 
     test.assertEqual("Bolt wasn't snoozed: only officers can snooze a promotion check.", world.error)
+    test.assertEqual("Bolt", shown(world)[2].entry.name, "still on Due")
+end)
+
+test.test("rank management page: an update keeps All players' count current from Due", function()
+    local world = setup()
+    test.assertEqual("All players (4)", world.page.tabs.tabs[2].label.text)
+    table.insert(world.players, { playerId = 6, key = "newbie", name = "Newbie", status = "Not yet",
+        statusText = "Not yet: 7 days" })
+
+    world.page:Update()
+    test.assertEqual("due", world.page.tabs:Selected())
+    test.assertEqual("All players (5)", world.page.tabs.tabs[2].label.text)
 end)
 
 test.test("rank management page: a Match row lists the characters to bring up, with no Snooze", function()
@@ -694,6 +709,34 @@ test.test("rank management page: an automated check is a switch with its number"
     click(addonCheck.toggle)
     test.assertEqual("The requirements weren't changed: only officers can change promotion requirements.",
         world.error)
+end)
+
+test.test("rank management page: a number set while its check is off waits through a refresh for the switch", function()
+    local world = setup()
+    local editor = requirementsTab(world)
+    click(editor.rankRows[1])
+    local days = editor.automatedRows[1]
+    test.assertFalse(days.toggle:IsOn())
+    local start = days.stepper:GetValue()
+
+    days.stepper:Step(1)
+    test.assertEqual("view 4", lastEdit(world), "nothing saved while it's off")
+    editor:Refresh()
+    test.assertEqual(start + 1, days.stepper:GetValue())
+
+    click(days.toggle)
+    test.assertEqual("automated 4 char-guild-days true " .. (start + 1), lastEdit(world))
+end)
+
+test.test("rank management page: Add saves to the rank shown when it was clicked", function()
+    local world = setup()
+    local editor = requirementsTab(world)
+    click(editor.add)
+    editor.rank = 4
+    editor.prompt.single:SetValue("Attend an event")
+    click(editor.prompt.save)
+
+    test.assertEqual("add 3 Attend an event false", lastEdit(world))
 end)
 
 test.test("rank management page: officer checks are added, renamed and reordered", function()

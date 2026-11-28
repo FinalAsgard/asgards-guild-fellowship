@@ -271,15 +271,11 @@ function RankUpViewModel.Due(inputs)
         local snoozed = key ~= nil and inputs.checks:IsSnoozed(key, inputs.now)
         local ready = status ~= nil and status.ready
         local due = status ~= nil and not ready and status.timeMet
-        if due and snoozed then
-            view.snoozed = view.snoozed + 1
-            due = false
-        end
         local keys = inGuild(partition, playerId)
         -- Alts to bring up to the player's rank, and the highest rank any of
         -- them goes to.
         local matched, target = {}, nil
-        if not ready and not snoozed then
+        if not ready then
             local index
             for index = 1, #keys do
                 local alt = keys[index]
@@ -291,6 +287,13 @@ function RankUpViewModel.Due(inputs)
                     end
                 end
             end
+        end
+        -- A snooze hides a player's Due or Match work (never Ready), and
+        -- they're counted once, as All players shows them Snoozed. The
+        -- count follows a picked rank but not the Missing filter.
+        if snoozed and not ready and (due or matched[1] ~= nil) then
+            view.snoozed = view.snoozed + 1
+            due, matched, target = false, {}, nil
         end
         if not ready and not due and matched[1] == nil then
             return
@@ -585,7 +588,12 @@ end
 function RankUpViewModel.Checklist(inputs, playerId)
     local partition = inputs.partition
     local itemsOf = itemsReader(inputs)
-    local matches = addon.PromotionPolicy.MatchSet(inputs)
+    -- Match targets for this player's characters only, not the guild's.
+    local matches = {}
+    local _, alt
+    for _, alt in ipairs(inGuild(partition, playerId)) do
+        matches[alt] = addon.PromotionPolicy.MatchTarget(inputs, alt)
+    end
     local row, status, keys = standing(inputs, playerId, matches, itemsOf)
     if row == nil then
         return nil

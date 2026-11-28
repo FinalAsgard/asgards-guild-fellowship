@@ -865,8 +865,11 @@ for profileIndex = 1, #fixtures.PROFILES do
         -- read-only.
         settle(channel, 10)
         test.assertEqual(nil, hammer.addon.promotions.readyKeys())
-        test.assertEqual(nil, hammer.addon.promotions.checklist(boltPlayer))
         local _, memberPartition = hammer.addon.rosterController:QuietContext()
+        -- Bolt's player as Hammer's own data numbers it.
+        local boltOnMember = memberPartition:GetCharacter(keyOf(hammer, names[3]))
+        test.assertTrue(boltOnMember ~= nil and boltOnMember.player ~= nil)
+        test.assertEqual(nil, hammer.addon.promotions.checklist(boltOnMember.player))
         local own = hammer.addon.promotions.checklist(memberPartition:GetCharacter(keyOf(hammer, names[2])).player)
         test.assertFalse(own.editable)
         test.assertEqual("Help a new member", own.items[1].label)

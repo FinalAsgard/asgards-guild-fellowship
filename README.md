@@ -604,7 +604,7 @@ Long names wrap onto more lines at the spaces between words, and the drawer grow
 
 ### The window
 
-`/agf lfg` and **Open Guild LFG Board** open the add-on's new window on the board. It has one size and can be dragged. The sidebar has the add-on's name, then **Friends** (see [Friends](#friends)), **LFG** and **Greetings** (see [Editing greetings](#editing-greetings)), and **Settings** at the bottom, with your character and the add-on's version under it. The **gear** at the top right opens the LFG settings (**Show LFG button**, and the chat line for new groups); the **X** closes the window. The Settings page has a **Chat** tab with the chat tags switch, the same setting as `/agf tags`, and the **Alias tag color** and **Main's name tag color**: click a swatch, or **Custom...** for any color from the game's color picker, and the sample shows the tag in that color. They're the same colors as in the old window's options.
+`/agf lfg` and **Open Guild LFG Board** open the add-on's new window on the board. Its sidebar is described under [The add-on's window](#the-add-ons-window): **Roster**, **Friends** (see [Friends](#friends)), **LFG**, **Greetings** (see [Editing greetings](#editing-greetings)), **Rank management** for officers, and **Settings** at the bottom. The **gear** at the top right opens the LFG settings (**Show LFG button**, **Auto-list my parties**, **Show my party on the guild's board**, and the chat line for new groups); the **X** closes the window. The Settings page has a **Chat** tab with the chat tags switch, the same setting as `/agf tags`, and the **Alias tag color** and **Main's name tag color**: click a swatch, or **Custom...** for any color from the game's color picker, and the sample shows the tag in that color. They're the same colors as in the old window's options.
 
 ### The board
 
@@ -628,8 +628,8 @@ A dungeon is relevant when your level fits and a role you play (by your [role pr
 
 ### Listing your party
 
-- **Auto-list my parties** (in the LFG gear menu and the AddOns options) is **off by default**. Off, a party you form or come to lead isn't listed and you aren't asked anything: list it from the board's **Start a group** when you want to. A party filling up never lists it either.
-- **With Auto-list on**, becoming a party's leader (inviting someone, or being promoted in an unlisted party) lists it straight away for what it looks like it's for: the dungeon you're in, else questing in your zone, updated when you enter a dungeon (a purpose you set yourself is left alone). When the add-on can't tell, the drawer asks what it's for; ignoring the question means **Not looking**, which keeps it off the board, and there's a "don't ask for 30 minutes" choice for quick trading parties. **Not looking** or **End listing** keeps that party off the list for good.
+- **Auto-list my parties** (in the LFG gear menu and the AddOns options) is **off by default**. Off, a party you form or come to lead isn't listed and you aren't asked anything: list it from the board's **Open to guild** when you want to (**Start a group** when you're solo). A party filling up never lists it either.
+- **With Auto-list on**, becoming a party's leader (inviting someone, or being promoted in an unlisted party) lists it straight away for what it looks like it's for: the dungeon you're in, else questing in your zone, updated when you enter a dungeon (a purpose you set yourself is left alone). When the add-on can't tell, the drawer asks what it's for; ignoring the question means **Not looking**, which keeps it from being opened to the guild, and there's a "don't ask for 30 minutes" choice for quick trading parties. **Not looking** or **End listing** keeps that party from being listed for good. It can still show as [Playing](#playing-parties); turn off **Show my party on the guild's board** to keep it off the board entirely.
 - **A party with players outside the guild** (with Auto-list on) asks first whether to list it at all. If the leader isn't in the guild, the first guildmate to answer becomes the listing's contact.
 - With your LFG button hidden, nothing is listed; with Auto-list on, a chat line says your party wasn't listed and how to list it.
 - Taking over a listed party's lead keeps its listing, Auto-list or not.
@@ -704,7 +704,7 @@ Two settings, in the window's **Settings** tab and the **Guild Map** page of the
 
 ## My Profile
 
-**My Profile** is a tab of the add-on's window, right below **Roster**: one place for everything about your own player. Click its tab, or type `/agf profile` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it reads everything again.
+**My Profile** is a tab of the old window (`/agf options`), its first: one place for everything about your own player. Click its tab, or type `/agf profile` to open the old window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it reads everything again.
 
 It shows the player of the character you're logged in on: its alias and main at the top, for example **TheTool (Toolbox)**, then the main and each alt still in the guild, in its class color with its level. The character you're logged in on is marked **logged in**.
 

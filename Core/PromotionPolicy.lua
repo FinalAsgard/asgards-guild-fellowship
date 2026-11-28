@@ -275,10 +275,16 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
         total = #items,
     }
     local timeItems, timeMet = 0, 0
+    -- An unmet time check whose date isn't known: no countdown, since the
+    -- others' wait isn't the whole of it.
+    local unknownWait = false
     local index
     for index = 1, #items do
         local item = items[index]
         local met, detail, record, automated, overridden, short, remaining = judgeItem(inputs, key, item, character)
+        if PromotionPolicy.TIME_KINDS[item.kind] and not met and remaining == nil then
+            unknownWait = true
+        end
         table.insert(result.items, { id = item.id, label = item.label, kind = item.kind, automated = automated,
             met = met, detail = detail, short = short, overridden = overridden, record = record,
             remaining = remaining })
@@ -297,6 +303,9 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
     end
     result.ready = result.met == result.total
     result.timeMet = timeItems > 0 and timeMet == timeItems
+    if unknownWait then
+        result.remaining = nil
+    end
     return result
 end
 

@@ -594,8 +594,13 @@ function Page:Refresh()
     self:showTab("due")
 end
 
--- Something changed (a tick, a scan): the list again, in its place.
+-- Something changed (a tick, a scan): the list again, in its place, and
+-- All players' count (its own list keeps it on that tab).
 function Page:Update()
+    if self.tab ~= "all" and self.options.players ~= nil then
+        local players = self.options.players("", "all")
+        self:labelAll(players and players.count or 0)
+    end
     self:rebuild(true)
 end
 

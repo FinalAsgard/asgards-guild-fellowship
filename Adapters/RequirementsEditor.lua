@@ -70,7 +70,7 @@ end
 -- Refresh() draws it again from saved data.
 function RequirementsEditor.Create(parent, ui, actions)
     local editor = setmetatable({ parent = parent, ui = ui, actions = actions, rankRows = {}, automatedRows = {},
-        itemRows = {} }, Editor)
+        itemRows = {}, staged = {} }, Editor)
     editor:build()
     return editor
 end
@@ -97,15 +97,19 @@ function Editor:build()
     self.checksLabel = ui:SectionLabel(list, RequirementsEditor.CHECKS)
     self.settingsLabel = ui:SectionLabel(list, RequirementsEditor.SETTINGS)
     self.noChecks = ui:Text(list, "", "regular", "body", "muted")
+    -- The rank is the one shown on the click, should a refresh move off it
+    -- while the prompt is open.
     self.add = ui:Button(list, RequirementsEditor.ADD, "secondary", function()
+        local rank = owner.rank
         owner:askLabel(RequirementsEditor.ADD, "", function(label)
-            owner:run("add", owner.rank, label, false)
+            owner:run("add", rank, label, false)
         end)
     end)
     self.add:SetWidth(RequirementsEditor.ADD_WIDTH)
     self.addNote = ui:Button(list, RequirementsEditor.ADD_NOTE, "secondary", function()
+        local rank = owner.rank
         owner:askLabel(RequirementsEditor.ADD_NOTE, "", function(label)
-            owner:run("add", owner.rank, label, true)
+            owner:run("add", rank, label, true)
         end)
     end)
     self.addNote:SetWidth(RequirementsEditor.ADD_WIDTH)
@@ -195,6 +199,9 @@ function Editor:automatedRow(index)
     row.toggle = ui:Toggle(row, function(wanted)
         local line = row.line
         if line ~= nil then
+            if wanted then
+                owner.staged[owner.rank .. "/" .. line.kind] = nil
+            end
             owner:run("automated", owner.rank, line.kind, wanted, line.numberText and row.stepper:GetValue() or nil)
         end
     end)
@@ -205,10 +212,13 @@ function Editor:automatedRow(index)
         min = 1,
         max = 3650,
         onChange = function(value)
-            -- A number counts once the check is on; until then it waits.
+            -- A number counts once the check is on; until then it waits,
+            -- through refreshes, for the switch.
             local line = row.line
             if line ~= nil and line.enabled then
                 owner:run("automated", owner.rank, line.kind, true, value)
+            elseif line ~= nil then
+                owner.staged[owner.rank .. "/" .. line.kind] = value
             end
         end,
     })
@@ -384,9 +394,13 @@ function Editor:drawEditor(model, ranks)
             setShown(row.number, line.numberText ~= nil)
             if line.numberText ~= nil then
                 local range = addon.RankRequirements.AUTOMATED[line.kind] or {}
+                local stagedKey = self.rank .. "/" .. line.kind
+                if line.enabled then
+                    self.staged[stagedKey] = nil
+                end
                 row.number:SetText(line.numberText)
                 row.stepper:SetValue(math.max(range.low or 1, math.min(range.high or 3650,
-                    line.n or RequirementsEditor.DEFAULT_NUMBER)))
+                    self.staged[stagedKey] or line.n or RequirementsEditor.DEFAULT_NUMBER)))
             end
             top = top + RequirementsEditor.LINE_HEIGHT
         end

@@ -322,7 +322,7 @@ test.test("days remaining per time item, and the most of them for the status", f
     -- An approximate date counts from that date; an unknown one says nothing.
     item, status = statusOf(inputs, addon, "guessed", joined.id)
     test.assertEqual(4, item.remaining)
-    test.assertEqual(4, status.remaining, "the unknown rank date leaves only the known one")
+    test.assertEqual(nil, status.remaining, "the unknown rank date may hold it longer: no countdown")
     test.assertEqual(nil, (statusOf(inputs, addon, "guessed", atRank.id)).remaining)
 
     -- Before tracking, an override, and met all have none to go.

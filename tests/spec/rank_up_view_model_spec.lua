@@ -245,7 +245,9 @@ test.test("rank up view model: Match comes after Ready and before Due, and a sno
 
     test.assertEqual("ready Ready, boss Match, waiting Due", names(world.due()))
     world.inputs.checks:Snooze("boss", 2, NOW + 7 * DAY, OFFICER, NOW)
-    test.assertEqual("ready Ready, waiting Due", names(world.due()))
+    local view = world.due()
+    test.assertEqual("ready Ready, waiting Due", names(view))
+    test.assertEqual(1, view.snoozed, "the hidden Match counts as snoozed")
 end)
 
 test.test("rank up view model: a player not yet due still gets a Match row for alts behind", function()
