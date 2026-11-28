@@ -13,6 +13,9 @@ local PlayerCards = {
     DOT_SIZE = 8,
     STAR_SIZE = 12,
     REMOVE_SIZE = 20,
+    -- What a long name leaves for the tag after it: the name yields, so a
+    -- rank tag still shows.
+    TAG_ROOM = 64,
 }
 addon.PlayerCards = PlayerCards
 
@@ -161,6 +164,13 @@ function PlayerCards.Small(ui, parent, callbacks)
             card.star:Hide()
         end
         card.tag:SetText(fields.tag or "")
+        -- A long name is cut short before it crowds out the star and tag.
+        local cardWidth, nameWidth = card:GetWidth(), card.name:GetStringWidth()
+        if type(cardWidth) == "number" and type(nameWidth) == "number" and cardWidth > 0 and nameWidth > 0 then
+            local room = cardWidth - (2 * pad + 2 + PlayerCards.INITIAL_SIZE) - (pad + PlayerCards.DOT_SIZE + 6)
+                - (starred and PlayerCards.STAR_SIZE + 4 or 0) - ((fields.tag or "") ~= "" and PlayerCards.TAG_ROOM or 0)
+            card.name:SetWidth(math.max(1, math.min(nameWidth, room)))
+        end
         card.tag:ClearAllPoints()
         card.tag:SetPoint("LEFT", starred and card.star or card.name, "RIGHT", Theme.SPACING.xs + 2, 0)
         -- Clear of the online dot; a long tag is cut short.

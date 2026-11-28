@@ -12,7 +12,9 @@ local function shown(window)
     local parts = {}
     local index
     for index = window.first, window.last do
-        table.insert(parts, index .. "@" .. window.tops[index])
+        if window.tops[index] ~= nil then
+            table.insert(parts, index .. "@" .. window.tops[index])
+        end
     end
     return table.concat(parts, " ")
 end
@@ -120,4 +122,33 @@ test.test("list window: keeping a row in view works with mixed heights", functio
     -- Row 6 spans 20 + 4 * 48 = 212..260.
     test.assertEqual(160, ListWindow.KeepInView(6, 20, height, 100, 0))
     test.assertEqual(212, ListWindow.KeepInView(6, 20, height, 100, 400))
+end)
+
+test.test("list window: an empty viewport shows nothing but keeps the offset and total", function()
+    local ListWindow = setup()
+    local window = ListWindow.Visible(10, 40, 0, 10)
+
+    test.assertEqual(nil, window.first)
+    test.assertEqual(400, window.total)
+    test.assertEqual(10, window.offset)
+end)
+
+test.test("list window: a row with no height doesn't show between the rows around it", function()
+    local ListWindow = setup()
+    local function height(index)
+        return index == 2 and 0 or 40
+    end
+    local window = ListWindow.Visible(3, height, 80, 0)
+
+    test.assertEqual("1@0 3@40", shown(window))
+    test.assertEqual(nil, window.tops[2])
+end)
+
+test.test("list window: keeping a fractional row in view only clamps the offset", function()
+    local ListWindow = setup()
+    local function height(index)
+        return index == 1 and 20 or 40
+    end
+
+    test.assertEqual(20, ListWindow.KeepInView(1.5, 3, height, 40, 20))
 end)

@@ -435,10 +435,13 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         return top
     end
 
-    -- The Rank tab ticking `item` for the shown player.
-    local function tick(item, ticked, note)
-        if state.view ~= nil and callbacks.onRankTick ~= nil then
-            callbacks.onRankTick(state.view, item.id, ticked, note)
+    -- The Rank tab ticking `item` for `view` (the shown player when
+    -- omitted). A prompt passes the view it was opened on, so a refresh
+    -- to another player can't move its Save to them.
+    local function tick(item, ticked, note, view)
+        view = view or state.view
+        if view ~= nil and callbacks.onRankTick ~= nil then
+            callbacks.onRankTick(view, item.id, ticked, note)
         end
     end
     -- A click on a check box: unticking, or ticking a check without a
@@ -448,11 +451,12 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
             tick(item, wanted, nil)
             return
         end
+        local view = state.view
         panel.prompt:Open({
-            title = item.label .. " for " .. (state.view and state.view.header.name or ""),
+            title = item.label .. " for " .. (view and view.header.name or ""),
             maxLetters = PlayerDetailPanel.NOTE_LETTERS,
             onSave = function(note)
-                tick(item, true, note)
+                tick(item, true, note, view)
             end,
         })
     end
@@ -460,19 +464,21 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     -- (with an optional reason), or Remove override for an overridden one.
     local function itemMenu(anchor, item)
         local items = {}
+        local view = state.view
         if item.state == addon.RankUpViewModel.MISSING then
             table.insert(items, { label = PlayerDetailPanel.OVERRIDE, onClick = function()
                 panel.prompt:Open({
-                    title = "Override " .. item.label .. " (reason optional)",
+                    title = "Override " .. item.label .. " for " .. (view and view.header.name or "")
+                        .. " (reason optional)",
                     maxLetters = PlayerDetailPanel.NOTE_LETTERS,
                     onSave = function(reason)
-                        tick(item, true, reason)
+                        tick(item, true, reason, view)
                     end,
                 })
             end })
         elseif item.state == addon.RankUpViewModel.OVERRIDDEN then
             table.insert(items, { label = PlayerDetailPanel.REMOVE_OVERRIDE, onClick = function()
-                tick(item, false, nil)
+                tick(item, false, nil, view)
             end })
         end
         if items[1] ~= nil then

@@ -50,13 +50,18 @@ end
 
 -- What a list of `count` rows shows in a `viewport`-tall window scrolled
 -- `offset` down: { first, last, tops = { [index] = top within the
--- viewport }, offset (clamped), total }. A row partly in view counts.
--- first and last are nil when nothing shows.
+-- viewport }, offset (clamped), total }. A row partly in view counts; a
+-- row with no height, or any row in an empty viewport, doesn't (so tops
+-- can skip an index between first and last). first and last are nil when
+-- nothing shows.
 function ListWindow.Visible(count, height, viewport, offset)
     local layout = ListWindow.Layout(count, height)
     offset = ListWindow.Clamp(offset, layout.total, viewport)
     local window = { tops = {}, offset = offset, total = layout.total }
-    local bottom = offset + math.max(0, viewport or 0)
+    if (viewport or 0) <= 0 then
+        return window
+    end
+    local bottom = offset + viewport
     local first = 1
     if layout.tops == nil then
         local step = heightOf(height)
@@ -71,7 +76,8 @@ function ListWindow.Visible(count, height, viewport, offset)
         if top >= bottom then
             break
         end
-        if top + heightOf(height, index) > offset then
+        local rowHeight = heightOf(height, index)
+        if rowHeight > 0 and top + rowHeight > offset then
             window.first = window.first or index
             window.last = index
             window.tops[index] = top - offset
@@ -86,7 +92,7 @@ end
 -- Clamped; `offset` clamped when `index` isn't a row.
 function ListWindow.KeepInView(index, count, height, viewport, offset)
     local layout = ListWindow.Layout(count, height)
-    if type(index) ~= "number" or index < 1 or index > count then
+    if type(index) ~= "number" or index ~= math.floor(index) or index < 1 or index > count then
         return ListWindow.Clamp(offset, layout.total, viewport)
     end
     local top = topOf(layout, height, index)

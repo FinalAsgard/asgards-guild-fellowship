@@ -2136,6 +2136,17 @@ test.test("rank management: the Missing filter keeps the players missing a requi
     test.assertTrue(addon.agfWindow:Open())
     addon.agfWindow:ShowPage("rank")
     local page = addon.rankPage
+    local function shownNames()
+        local names = {}
+        local _, frame
+        for _, frame in ipairs(page.list:Shown()) do
+            if frame.shown and rawget(frame, "entry") ~= nil then
+                table.insert(names, frame.entry.name)
+            end
+        end
+        return table.concat(names, ",")
+    end
+    test.assertContains(shownNames(), "Hammer Smith")
 
     page.missingPicker.scripts.OnClick(page.missingPicker, "LeftButton")
     local level
@@ -2148,20 +2159,16 @@ test.test("rank management: the Missing filter keeps the players missing a requi
     test.assertTrue(level ~= nil)
     level.scripts.OnClick(level, "LeftButton")
 
-    local names = {}
-    local _, frame
-    for _, frame in ipairs(page.list:Shown()) do
-        if frame.shown and rawget(frame, "entry") ~= nil then
-            table.insert(names, frame.entry.name)
-        end
-    end
-    test.assertContains(table.concat(names, ","), "Zap Arcane")
+    -- Zap is missing level 50; Hammer has it, so he's filtered out.
+    test.assertContains(shownNames(), "Zap Arcane")
+    test.assertEqual(nil, string.find(shownNames(), "Hammer Smith", 1, true))
     test.assertContains(page.footer.text, "missing: Level 50")
     test.assertTrue(page.chip.shown)
 
     page.chip.clear.scripts.OnClick(page.chip.clear, "LeftButton")
     test.assertFalse(page.chip.shown)
     test.assertContains(page.footer.text, "Ready")
+    test.assertContains(shownNames(), "Hammer Smith")
 end)
 
 -- Members (rank 3) need a day in the guild and the rules read; returns the

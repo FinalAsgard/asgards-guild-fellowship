@@ -983,14 +983,18 @@ function UI:PooledList(parent, options)
         if window.first ~= nil then
             local index
             for index = window.first, window.last do
-                local row = state.rows[index]
-                local frame = take(row.kind or "row")
-                options.fill(frame, row, index)
-                frame:ClearAllPoints()
-                frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -window.tops[index])
-                frame:SetPoint("RIGHT", list, "RIGHT", -inset, 0)
-                frame:SetHeight(rowHeight(row) - (options.gap or 0))
-                frame:Show()
+                -- A row with no height has no top, and gets no frame.
+                local top = window.tops[index]
+                if top ~= nil then
+                    local row = state.rows[index]
+                    local frame = take(row.kind or "row")
+                    options.fill(frame, row, index)
+                    frame:ClearAllPoints()
+                    frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top)
+                    frame:SetPoint("RIGHT", list, "RIGHT", -inset, 0)
+                    frame:SetHeight(rowHeight(row) - (options.gap or 0))
+                    frame:Show()
+                end
             end
         end
         for kind, pool in pairs(state.pools) do
@@ -1329,6 +1333,10 @@ function UI:TextPrompt(parent)
         end
     end
     function prompt.Save()
+        -- A closed prompt (cancelled, or already saved) saves nothing.
+        if not prompt.open then
+            return
+        end
         local options, field = prompt.options, prompt.field
         prompt:Close()
         if options ~= nil and field ~= nil and options.onSave ~= nil then
