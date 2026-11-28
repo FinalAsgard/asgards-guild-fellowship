@@ -2132,6 +2132,42 @@ test.test("rank management: a row opens the player on the Roster's Rank tab, whe
     test.assertTrue(detail.rankRows[2].box:IsChecked())
 end)
 
+test.test("rank management: the Requirements tab edits a rank's requirements through the saved store", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+    page.tabs.tabs[3].scripts.OnClick(page.tabs.tabs[3], "LeftButton")
+    local editor = page.editor
+    test.assertContains(editor.rankRows[1].label.text, "→ ")
+    test.assertEqual("None", editor.rankRows[1].count.text)
+    local rank = editor.rankRows[1].rank
+
+    -- Turn on the level check, then add an officer check.
+    local level
+    local _, row
+    for _, row in ipairs(editor.automatedRows) do
+        if row.line.kind == "level" then
+            level = row
+        end
+    end
+    level.toggle.scripts.OnClick(level.toggle, "LeftButton")
+    editor.add.scripts.OnClick(editor.add, "LeftButton")
+    editor.prompt.single:SetValue("Read the rules")
+    editor.prompt.save.scripts.OnClick(editor.prompt.save, "LeftButton")
+
+    local _, partition = addon.rosterController:QuietContext()
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {})
+    local items = requirements:Items(rank)
+    test.assertEqual(2, #items)
+    test.assertEqual("level", items[1].kind)
+    test.assertEqual("Read the rules", items[2].label)
+    test.assertEqual("2 requirements", editor.rankRows[1].count.text)
+    test.assertTrue(level.toggle:IsOn())
+end)
+
 test.test("rank management: the Friends page's player panel has the Rank tab too", function()
     local profile = fixtures.PROFILES[1]
     local world, addon = login(profile, fixtures.newChannel(), "Tool Box")

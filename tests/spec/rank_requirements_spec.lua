@@ -162,6 +162,26 @@ test.test("a snapshot covers what's held only when it has every record, as new o
     test.assertFalse(requirements:CoveredBy("junk"))
 end)
 
+test.test("the Requirements tab lists each rank by the rank promoted to, the newest members' first", function()
+    local requirements, addon = newRequirements()
+    requirements:Add(2, "Lead a raid", "check", "Veteran", OFFICER, NOW)
+    requirements:SetAutomated(2, "level", true, 60, "Veteran", OFFICER, NOW)
+    requirements:Add(4, "Read the rules", "check", "Initiate", OFFICER, NOW)
+    local list = addon.PromotionsViewModel.RankList(requirements, RANKS)
+
+    -- The guild master's rank has nothing above it.
+    test.assertEqual(4, #list)
+    test.assertEqual(4, list[1].rank)
+    test.assertEqual("→ Member", list[1].text)
+    test.assertEqual("1 requirement", list[1].countText)
+    test.assertEqual("→ Veteran", list[2].text)
+    test.assertEqual("None", list[2].countText)
+    test.assertEqual(0, list[2].count)
+    test.assertEqual("→ Officer", list[3].text)
+    test.assertEqual("2 requirements", list[3].countText)
+    test.assertEqual("→ Guild Master", list[4].text)
+end)
+
 test.test("the editor shows the picked rank, what it promotes to, and a clear message when empty", function()
     local requirements, addon = newRequirements()
     local Model = addon.PromotionsViewModel
@@ -171,9 +191,6 @@ test.test("the editor shows the picked rank, what it promotes to, and a clear me
     test.assertEqual("Initiate (rank 4)", model.rankText)
     test.assertEqual("Promotes to Member", model.nextText)
     test.assertEqual(Model.NONE_ANYWHERE, model.empty)
-    -- The guild master's rank has nothing above it.
-    test.assertEqual(4, Model.StepRank(1, -1, RANKS))
-    test.assertEqual(1, Model.StepRank(4, 1, RANKS))
 
     requirements:Add(2, "Lead a raid", "check", "Veteran", OFFICER, NOW)
     requirements:Add(2, "Write a guide", "check-note", "Veteran", OFFICER, NOW + 1)
@@ -654,6 +671,11 @@ local function settle(channel, seconds)
     end
 end
 
+-- The newest members' rank, the first the Requirements tab lists.
+local function newest(addon)
+    return addon.promotions.rankList()[1].rank
+end
+
 local function hasTab(addon, id)
     local tabs = addon.pages:Tabs()
     local index
@@ -669,67 +691,69 @@ for profileIndex = 1, #fixtures.PROFILES do
     local profile = fixtures.PROFILES[profileIndex]
     local names = NAMES[profile]
 
-    test.test(profile .. " officers edit requirements on the officer-only Promotions tab, and members get them", function()
+    test.test(profile .. " officers edit requirements in Rank management, and members get them", function()
         local channel = fixtures.newChannel()
         local tool = login(profile, channel, names[1])
         local hammer = login(profile, channel, names[2])
         settle(channel, 5)
 
-        test.assertTrue(hasTab(tool.addon, "promotions"))
+        -- The old window's Promotion Requirements page is gone.
+        test.assertFalse(hasTab(tool.addon, "promotions"))
         test.assertFalse(hasTab(hammer.addon, "promotions"))
-        local model = tool.addon.promotions.view()
+        local model = tool.addon.promotions.editor(newest(tool.addon))
         test.assertEqual(tool.addon.PromotionsViewModel.NONE_ANYWHERE, model.empty)
 
-        test.assertTrue(tool.addon.promotions.add("Attend an event", true))
-        test.assertTrue(tool.addon.promotions.add("Read the rules", false))
-        model = tool.addon.promotions.view()
+        test.assertTrue(tool.addon.promotions.add(newest(tool.addon), "Attend an event", true))
+        test.assertTrue(tool.addon.promotions.add(newest(tool.addon), "Read the rules", false))
+        model = tool.addon.promotions.editor(newest(tool.addon))
         test.assertEqual(2, #model.items)
         test.assertTrue(tool.addon.promotions.move(model.items[2].id, -1))
-        model = tool.addon.promotions.view()
+        model = tool.addon.promotions.editor(newest(tool.addon))
         test.assertEqual("Attend an event", model.items[2].label)
         test.assertTrue(tool.addon.promotions.rename(model.items[2].id, "Attend a guild event"))
         settle(channel, 5)
 
-        local memberView = hammer.addon.promotions.view()
+        local memberView = hammer.addon.promotions.editor(newest(hammer.addon))
         test.assertEqual(model.rank, memberView.rank)
         test.assertEqual("Read the rules", memberView.items[1].label)
         test.assertEqual("Attend a guild event", memberView.items[2].label)
-        local ok, reason = hammer.addon.promotions.add("Sneaky", false)
+        local ok, reason = hammer.addon.promotions.add(newest(hammer.addon), "Sneaky", false)
         test.assertFalse(ok)
         test.assertEqual("only officers can change promotion requirements", reason)
 
         test.assertTrue(tool.addon.promotions.delete(memberView.items[1].id))
         settle(channel, 5)
-        test.assertEqual(1, #hammer.addon.promotions.view().items)
+        test.assertEqual(1, #hammer.addon.promotions.editor(newest(hammer.addon)).items)
 
         -- A member who logs in later catches up.
         channel.time = tool.time
         local late = login(profile, channel, names[2])
-        test.assertEqual(0, #late.addon.promotions.view().items)
+        test.assertEqual(0, #late.addon.promotions.editor(newest(late.addon)).items)
         settle(channel, 200)
-        test.assertEqual("Attend a guild event", late.addon.promotions.view().items[1].label)
+        test.assertEqual("Attend a guild event", late.addon.promotions.editor(newest(late.addon)).items[1].label)
     end)
 
-    test.test(profile .. " an officer sets the rank's snooze length on the Promotions page, and members get it",
+    test.test(profile .. " an officer sets the rank's snooze length, and members get it",
         function()
         local channel = fixtures.newChannel()
         local tool = login(profile, channel, names[1])
         local hammer = login(profile, channel, names[2])
         settle(channel, 5)
         local promotions = tool.addon.promotions
+        local rank = newest(tool.addon)
 
-        test.assertEqual(7, promotions.view().snoozeDays)
-        test.assertTrue(promotions.snoozeDays("14"))
-        test.assertEqual(14, promotions.view().snoozeDays)
-        local ok, reason = promotions.snoozeDays("0")
+        test.assertEqual(7, promotions.editor(rank).snoozeDays)
+        test.assertTrue(promotions.snoozeDays(rank, "14"))
+        test.assertEqual(14, promotions.editor(rank).snoozeDays)
+        local ok, reason = promotions.snoozeDays(rank, "0")
         test.assertFalse(ok)
         test.assertEqual("a snooze needs to be 1 to 90 whole days", reason)
-        test.assertFalse((promotions.snoozeDays("")), "a blank box is refused")
-        test.assertEqual(14, promotions.view().snoozeDays)
+        test.assertFalse((promotions.snoozeDays(rank, "")), "a blank box is refused")
+        test.assertEqual(14, promotions.editor(rank).snoozeDays)
         settle(channel, 5)
 
-        test.assertEqual(14, hammer.addon.promotions.view().snoozeDays)
-        ok, reason = hammer.addon.promotions.snoozeDays("30")
+        test.assertEqual(14, hammer.addon.promotions.editor(newest(hammer.addon)).snoozeDays)
+        ok, reason = hammer.addon.promotions.snoozeDays(newest(hammer.addon), "30")
         test.assertFalse(ok)
         test.assertEqual("only officers can change promotion requirements", reason)
     end)

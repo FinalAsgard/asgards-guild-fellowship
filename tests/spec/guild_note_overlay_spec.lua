@@ -690,18 +690,16 @@ local function registerRowTests(profile)
 
         -- The officer turns matching off for Officer, then Veteran too:
         -- the flag moves down, then goes, then comes back.
-        test.assertTrue(promotions.rank(1), "from the newest members' rank round to Officer")
-        test.assertEqual(1, promotions.view().rank)
-        test.assertTrue(promotions.view().matchAlts, "ticked by default")
-        test.assertTrue(promotions.matchAlts(false))
-        test.assertFalse(promotions.view().matchAlts)
+        -- Officer is rank 1, Veteran rank 2.
+        test.assertEqual(1, promotions.editor(1).rank)
+        test.assertTrue(promotions.editor(1).matchAlts, "ticked by default")
+        test.assertTrue(promotions.matchAlts(1, false))
+        test.assertFalse(promotions.editor(1).matchAlts)
         test.assertContains(matchLine(), "Promote to match: Veteran")
-        test.assertTrue(promotions.rank(1))
-        test.assertTrue(promotions.matchAlts(false))
+        test.assertTrue(promotions.matchAlts(2, false))
         test.assertEqual(nil, matchLine(), "no rank in range is on")
         test.assertFalse(arrow.shown, "and the roster's arrow goes")
-        test.assertTrue(promotions.rank(-1))
-        test.assertTrue(promotions.matchAlts(true))
+        test.assertTrue(promotions.matchAlts(1, true))
         test.assertContains(matchLine(), "Promote to match: Officer")
 
         -- Promoted in the game's own guild window: the flag clears on the
@@ -732,15 +730,9 @@ local function registerRowTests(profile)
         local _, partition, normalizer = world.addon.rosterController:QuietContext()
         local key = normalizer:Key(member.name)
         local rank = partition:GetCharacter(key).rank
-        local step = rank - (promotions.view().rank or rank)
-        local guard = 0
-        while promotions.view().rank ~= rank and guard < 10 do
-            promotions.rank(step > 0 and 1 or -1)
-            guard = guard + 1
-        end
-        test.assertTrue(promotions.add("Read the rules", false))
+        test.assertTrue(promotions.add(rank, "Read the rules", false))
         test.assertFalse(row.readyMarker.shown)
-        test.assertTrue(promotions.tick(key, promotions.view().items[1].id, true))
+        test.assertTrue(promotions.tick(key, promotions.editor(rank).items[1].id, true))
         test.assertTrue(row.readyMarker.shown, "flagged without waiting for a scan")
     end)
 end

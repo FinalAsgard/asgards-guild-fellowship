@@ -1,6 +1,7 @@
 local _, addon = ...
 
--- Builds the officers' Promotions page. Pure: the caller passes the
+-- Builds Rank management's Requirements tab (the requirements editor) and
+-- the old player panel's Promotion tab. Pure: the caller passes the
 -- requirements (RankRequirements) and the game's rank names.
 local PromotionsViewModel = {
     NONE_ANYWHERE = "No rank has promotion requirements yet. Pick a rank and add the first item.",
@@ -46,20 +47,26 @@ function PromotionsViewModel.PickRank(rank, requirements, rankNames)
     return ranks[#ranks]
 end
 
--- The rank `step` places along from `rank` (wrapping), among the editable
--- ranks.
-function PromotionsViewModel.StepRank(rank, step, rankNames)
-    local ranks = PromotionsViewModel.EditableRanks(rankNames)
-    if ranks[1] == nil then
-        return rank
-    end
+-- Rank management's Requirements tab: each rank that can have requirements,
+-- named by the rank promoted to, the newest members' first:
+--   { { rank (the rank the requirements are on), text ("→ Member"), count
+--       (how many requirements), countText ("3 requirements") } }
+function PromotionsViewModel.RankList(requirements, rankNames)
+    local names = rankNames or {}
+    local ranks = PromotionsViewModel.EditableRanks(names)
+    local list = {}
     local index
-    for index = 1, #ranks do
-        if ranks[index] == rank then
-            return ranks[(index - 1 + step) % #ranks + 1]
-        end
+    for index = #ranks, 1, -1 do
+        local rank = ranks[index]
+        local count = #requirements:Items(rank)
+        table.insert(list, {
+            rank = rank,
+            text = "→ " .. tostring(names[rank] or ("Rank " .. (rank - 1))),
+            count = count,
+            countText = count == 0 and "None" or (count .. (count == 1 and " requirement" or " requirements")),
+        })
     end
-    return ranks[1]
+    return list
 end
 
 -- An item's kind in words, with its number: "Days at rank: 14".

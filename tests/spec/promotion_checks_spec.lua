@@ -1018,6 +1018,11 @@ local function itemRowOf(rows, id)
     return nil
 end
 
+-- The newest members' rank, the first Rank management's Requirements tab
+-- lists.
+local function newest(addon)
+    return addon.promotions.rankList()[1].rank
+end
 for profileIndex = 1, #fixtures.PROFILES do
     local profile = fixtures.PROFILES[profileIndex]
     local names = NAMES[profile]
@@ -1027,14 +1032,15 @@ for profileIndex = 1, #fixtures.PROFILES do
         local tool = login(profile, channel, names[1])
         local hammer = login(profile, channel, names[2])
         settle(channel, 5)
+        local rank = newest(tool.addon)
         local promotions = tool.addon.promotions
 
         local _, header = panelOf(tool, names[3])
         test.assertContains(header.text, "no requirements")
-        test.assertTrue(promotions.add("Attend an event", true))
+        test.assertTrue(promotions.add(rank, "Attend an event", true))
         local rows, bolt, boltKey = panelOf(tool, names[3])
         test.assertContains(bolt.text, "0 of 1")
-        local item = itemRowOf(rows, promotions.view().items[1].id)
+        local item = itemRowOf(rows, promotions.editor(rank).items[1].id)
         local ok, reason = promotions.tick(boltKey, item.item, true, "")
         test.assertFalse(ok)
         test.assertEqual("this item needs a note", reason)
@@ -1070,10 +1076,11 @@ for profileIndex = 1, #fixtures.PROFILES do
         local channel = fixtures.newChannel()
         local tool = login(profile, channel, names[1])
         settle(channel, 5)
+        local rank = newest(tool.addon)
         local promotions = tool.addon.promotions
-        test.assertTrue(promotions.add("Read the rules", false))
+        test.assertTrue(promotions.add(rank, "Read the rules", false))
         local boltKey = keyOf(tool, names[3])
-        test.assertTrue(promotions.tick(boltKey, promotions.view().items[1].id, true))
+        test.assertTrue(promotions.tick(boltKey, promotions.editor(rank).items[1].id, true))
         test.assertContains(select(2, panelOf(tool, names[3])).text, "1 of 1")
 
         local _, partition = tool.addon.rosterController:QuietContext()
@@ -1100,13 +1107,14 @@ for profileIndex = 1, #fixtures.PROFILES do
         local tool = login(profile, channel, names[1])
         local hammer = login(profile, channel, names[2])
         settle(channel, 5)
+        local rank = newest(tool.addon)
         local promotions = tool.addon.promotions
 
-        local ok, reason = promotions.automated("level", true, "")
+        local ok, reason = promotions.automated(rank, "level", true, "")
         test.assertFalse(ok)
         test.assertEqual("a level needs to be 1 to 100", reason)
-        test.assertTrue(promotions.automated("level", true, "50"))
-        local level = promotions.view().automated[4]
+        test.assertTrue(promotions.automated(rank, "level", true, "50"))
+        local level = promotions.editor(rank).automated[4]
         test.assertTrue(level.enabled)
         test.assertEqual(50, level.n)
         local itemId = level.id
@@ -1125,11 +1133,11 @@ for profileIndex = 1, #fixtures.PROFILES do
 
         test.assertTrue(promotions.tick(boltKey, itemId, false))
         test.assertContains(select(2, panelOf(tool, names[3])).text, "0 of 1")
-        test.assertTrue(promotions.automated("level", true, "10"))
-        test.assertEqual(10, promotions.view().automated[4].n)
+        test.assertTrue(promotions.automated(rank, "level", true, "10"))
+        test.assertEqual(10, promotions.editor(rank).automated[4].n)
         test.assertContains(select(2, panelOf(tool, names[3])).text, "1 of 1")
         settle(channel, 5)
-        test.assertEqual(10, hammer.addon.promotions.view().automated[4].n)
+        test.assertEqual(10, hammer.addon.promotions.editor(rank).automated[4].n)
     end)
 
     test.test(profile .. " /agf probe ready counts the ready and says whether the game's roster is followed",
@@ -1138,9 +1146,10 @@ for profileIndex = 1, #fixtures.PROFILES do
         local tool = login(profile, channel, names[1])
         local hammer = login(profile, channel, names[2])
         settle(channel, 5)
-        test.assertTrue(tool.addon.promotions.add("Read the rules", false))
+        local rank = newest(tool.addon)
+        test.assertTrue(tool.addon.promotions.add(rank, "Read the rules", false))
         local boltKey = keyOf(tool, names[3])
-        test.assertTrue(tool.addon.promotions.tick(boltKey, tool.addon.promotions.view().items[1].id, true))
+        test.assertTrue(tool.addon.promotions.tick(boltKey, tool.addon.promotions.editor(rank).items[1].id, true))
         tool.messages = {}
         fixtures.slash(tool, "probe ready")
         local printed = table.concat(tool.messages, "\n")
@@ -1157,9 +1166,10 @@ for profileIndex = 1, #fixtures.PROFILES do
         local tool = login(profile, channel, names[1])
         local hammer = login(profile, channel, names[2])
         settle(channel, 5)
+        local rank = newest(tool.addon)
         local promotions = tool.addon.promotions
-        test.assertTrue(promotions.add("Read the rules", false))
-        test.assertTrue(promotions.automated("char-guild-days", true, "7"))
+        test.assertTrue(promotions.add(rank, "Read the rules", false))
+        test.assertTrue(promotions.automated(rank, "char-guild-days", true, "7"))
         local boltKey = keyOf(tool, names[3])
         local _, partition = tool.addon.rosterController:QuietContext()
         partition:GetMembershipDates().characters[boltKey].joined =
@@ -1174,7 +1184,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertContains(printed, "Time requirement met: 1")
 
         -- Ticking the manual item makes Bolt Ready, which replaces the timer.
-        test.assertTrue(promotions.tick(boltKey, promotions.view().items[1].id, true))
+        test.assertTrue(promotions.tick(boltKey, promotions.editor(rank).items[1].id, true))
         test.assertTrue(promotions.readyKeys()[boltKey])
         test.assertEqual(nil, promotions.timeMetKeys()[boltKey])
 
@@ -1190,10 +1200,11 @@ for profileIndex = 1, #fixtures.PROFILES do
         local tool = login(profile, channel, names[1])
         local hammer = login(profile, channel, names[2])
         settle(channel, 5)
+        local rank = newest(tool.addon)
         local promotions = tool.addon.promotions
-        test.assertTrue(promotions.add("Read the rules", false))
-        test.assertTrue(promotions.automated("char-guild-days", true, "7"))
-        test.assertTrue(promotions.snoozeDays("3"))
+        test.assertTrue(promotions.add(rank, "Read the rules", false))
+        test.assertTrue(promotions.automated(rank, "char-guild-days", true, "7"))
+        test.assertTrue(promotions.snoozeDays(rank, "3"))
         local boltKey = keyOf(tool, names[3])
         local _, partition = tool.addon.rosterController:QuietContext()
         partition:GetMembershipDates().characters[boltKey].joined =
@@ -1220,7 +1231,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertContains(snoozedLine.text, " by ")
 
         -- A later change to the length doesn't move the snooze.
-        test.assertTrue(promotions.snoozeDays("30"))
+        test.assertTrue(promotions.snoozeDays(rank, "30"))
         settle(channel, 5)
         local _, memberPartition = hammer.addon.rosterController:QuietContext()
         local found
@@ -1236,9 +1247,9 @@ for profileIndex = 1, #fixtures.PROFILES do
         test.assertFalse(refused, "members can't snooze")
 
         -- Ticking the missing item makes Bolt Ready, snooze or not.
-        test.assertTrue(promotions.tick(boltKey, promotions.view().items[1].id, true))
+        test.assertTrue(promotions.tick(boltKey, promotions.editor(rank).items[1].id, true))
         test.assertTrue(promotions.readyKeys()[boltKey])
-        promotions.tick(boltKey, promotions.view().items[1].id, false)
+        promotions.tick(boltKey, promotions.editor(rank).items[1].id, false)
 
         -- When the snooze ends, the timer comes back.
         tool.time = clicked + 3 * DAY
@@ -1254,18 +1265,19 @@ for profileIndex = 1, #fixtures.PROFILES do
         local hammer = login(profile, channel, names[2])
         -- Long enough for both add-ons' login sync to go out.
         settle(channel, 70)
+        local rank = newest(tool.addon)
         local promotions = tool.addon.promotions
 
-        test.assertTrue(promotions.rank(-1))
-        test.assertTrue(promotions.automated("addon", true))
-        test.assertTrue(promotions.view().automated[5].enabled)
+        rank = rank - 1
+        test.assertTrue(promotions.automated(rank, "addon", true))
+        test.assertTrue(promotions.editor(rank).automated[5].enabled)
         test.assertContains(select(2, panelOf(tool, names[2])).text, "1 of 1", "the officer heard Hammer's add-on")
 
         -- Bolt, at another rank, has never been heard.
-        promotions.rank(1)
-        test.assertTrue(promotions.automated("addon", true))
+        rank = rank + 1
+        test.assertTrue(promotions.automated(rank, "addon", true))
         local rows = panelOf(tool, names[3])
-        test.assertContains(itemRowOf(rows, promotions.view().automated[5].id).text, "add-on not seen")
+        test.assertContains(itemRowOf(rows, promotions.editor(rank).automated[5].id).text, "add-on not seen")
 
         -- The officer's add-on shares what it heard a few minutes later.
         settle(channel, 310)
@@ -1283,10 +1295,11 @@ for profileIndex = 1, #fixtures.PROFILES do
         local tool = login(profile, channel, names[1])
         local hammer = login(profile, channel, names[2])
         settle(channel, 5)
+        local rank = newest(tool.addon)
         local promotions = tool.addon.promotions
-        test.assertTrue(promotions.add("Read the rules", false))
-        test.assertTrue(promotions.rank(-1))
-        test.assertTrue(promotions.add("Help a new member", false))
+        test.assertTrue(promotions.add(rank, "Read the rules", false))
+        rank = rank - 1
+        test.assertTrue(promotions.add(rank, "Help a new member", false))
         settle(channel, 10)
         local _, partition = tool.addon.rosterController:QuietContext()
         local boltKey = keyOf(tool, names[3])

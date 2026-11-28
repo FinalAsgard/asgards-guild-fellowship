@@ -40,16 +40,12 @@ local guildLogSync
 local observeMembership, membershipLines, earliestJoin = function() end, function() end, function() end
 -- An add-on message was heard from a character (see MembershipDates:Heard).
 local heardFrom = function() end
--- The officers' Promotions page, the requirements editor (see
--- RankRequirements), set up with guild sync below: view() gives its
--- model, and the rest edit it.
+-- Promotions: the requirements (see RankRequirements), ticks and snoozes,
+-- set up with guild sync below; Rank management's pages read and edit them
+-- through it.
 local promotions = {
-    view = function()
-        return nil
-    end,
     askOnce = function() end,
     prune = function() end,
-    shown = function() end,
     changed = function() end,
     readyKeys = function()
         return nil
@@ -183,10 +179,7 @@ if clientProfile.supported then
     pages:Add("profile", "My Profile", addon.MasterFrame.ICONS.profile)
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
-    -- Officers only: they come and go with the character's rank.
-    pages:Add("promotions", "Promotion Requirements", addon.MasterFrame.ICONS.promotions, function()
-        return guildLogOf() ~= nil
-    end)
+    -- Officers only: it comes and goes with the character's rank.
     pages:Add("guildlog", "Guild Log", addon.MasterFrame.ICONS.guildlog, function()
         return guildLogOf() ~= nil
     end)
@@ -298,9 +291,6 @@ if clientProfile.supported then
         membership = function(keys)
             return membershipLines(keys)
         end,
-        promotionsView = function()
-            return promotions.view()
-        end,
         promotion = function(keys, playerId)
             return promotions.panelRows(keys, playerId)
         end,
@@ -375,33 +365,6 @@ if clientProfile.supported then
                 end,
                 onGuildLogShown = function()
                     rosterController:RefreshGuildLog()
-                end,
-                onPromotionsShown = function()
-                    promotions.shown()
-                end,
-                onPromotionsRank = function(step)
-                    return promotions.rank(step)
-                end,
-                onPromotionsAdd = function(label, needsNote)
-                    return promotions.add(label, needsNote)
-                end,
-                onPromotionsRename = function(id, label, needsNote)
-                    return promotions.rename(id, label, needsNote)
-                end,
-                onPromotionsAutomated = function(kind, enabled, n)
-                    return promotions.automated(kind, enabled, n)
-                end,
-                onPromotionsMatchAlts = function(on)
-                    return promotions.matchAlts(on)
-                end,
-                onPromotionsSnoozeDays = function(days)
-                    return promotions.snoozeDays(days)
-                end,
-                onPromotionsMove = function(id, step)
-                    return promotions.move(id, step)
-                end,
-                onPromotionsDelete = function(id)
-                    return promotions.delete(id)
                 end,
                 onPromotionsTick = function(key, item, ticked, note)
                     return promotions.tick(key, item, ticked, note)
@@ -1508,6 +1471,38 @@ if clientProfile.supported then
                         onTick = function(key, item, ticked, note)
                             return promotions.tick(key, item, ticked, note)
                         end,
+                        requirements = {
+                            ranks = function()
+                                return promotions.rankList()
+                            end,
+                            view = function(rank)
+                                return promotions.editor(rank)
+                            end,
+                            add = function(rank, label, needsNote)
+                                return promotions.add(rank, label, needsNote)
+                            end,
+                            rename = function(_, id, label)
+                                return promotions.rename(id, label)
+                            end,
+                            automated = function(rank, kind, enabled, n)
+                                return promotions.automated(rank, kind, enabled, n)
+                            end,
+                            matchAlts = function(rank, on)
+                                return promotions.matchAlts(rank, on)
+                            end,
+                            snoozeDays = function(rank, days)
+                                return promotions.snoozeDays(rank, days)
+                            end,
+                            move = function(_, id, step)
+                                return promotions.move(id, step)
+                            end,
+                            delete = function(_, id)
+                                return promotions.delete(id)
+                            end,
+                            onError = function(text)
+                                rosterController:Print(text)
+                            end,
+                        },
                         -- A row's player on the Roster, on their Rank tab.
                         onSelect = function(playerId)
                             agfWindow:ShowPage("roster", playerId)
@@ -3312,7 +3307,7 @@ if clientProfile.supported then
         end
         return log, normalizer
     end
-    -- Promotion requirements: officers edit them on the Promotions page;
+    -- Promotion requirements: officers edit them in Rank management;
     -- every add-on keeps them, shares edits with the guild, and asks for
     -- them once a session.
     local function requirementsOf()
@@ -3433,10 +3428,6 @@ if clientProfile.supported then
             guildNoteOverlay:Refresh()
         end
         friendsUi.followRank()
-    end
-    -- The Promotions page (the requirements editor) opened: redraw it.
-    promotions.shown = function()
-        rosterController:RefreshPromotions()
     end
     -- What the rules engine reads, or nil before the guild is known.
     local function promotionInputs()
@@ -3693,22 +3684,32 @@ if clientProfile.supported then
         promotions.changed()
         return true
     end
-    local selectedRank
     local function rankNames()
         return client:GetGuildRankNames() or {}
     end
-    promotions.view = function()
+    -- Rank management's Requirements tab: the ranks (PromotionsViewModel
+    -- .RankList), and rank `rank`'s editor (PromotionsViewModel.Editor).
+    promotions.rankList = function()
+        local requirements = requirementsOf()
+        return requirements and addon.PromotionsViewModel.RankList(requirements, rankNames()) or nil
+    end
+    promotions.editor = function(rank)
         local requirements = requirementsOf()
         if requirements == nil then
             return nil
         end
-        local model = addon.PromotionsViewModel.Editor({
-            requirements = requirements,
-            rank = selectedRank,
-            rankNames = rankNames(),
-        })
-        selectedRank = model.rank
-        return model
+        return addon.PromotionsViewModel.Editor({ requirements = requirements, rank = rank, rankNames = rankNames() })
+    end
+    -- Rank `rank` when it can have requirements, or nil.
+    local function editableRank(rank)
+        local ranks = addon.PromotionsViewModel.EditableRanks(rankNames())
+        local index
+        for index = 1, #ranks do
+            if ranks[index] == rank then
+                return rank
+            end
+        end
+        return nil
     end
     -- Makes an edit with `change(requirements, author, now)` -> records, or
     -- nil and why, shares it, and redraws. Returns true, or false and why.
@@ -3730,23 +3731,12 @@ if clientProfile.supported then
         promotions.changed()
         return true
     end
-    promotions.rank = function(step)
-        local requirements = requirementsOf()
-        if requirements == nil then
-            return false, "saved data is unavailable"
-        end
-        local names = rankNames()
-        selectedRank = addon.PromotionsViewModel.StepRank(
-            addon.PromotionsViewModel.PickRank(selectedRank, requirements, names), step, names)
-        promotions.changed()
-        return true
-    end
-    -- Adds a custom requirement: a checkbox, needing a note when
+    -- Adds a custom requirement to `rank`: a checkbox, needing a note when
     -- `needsNote`. (Automated checks are turned on with promotions.automated.)
-    promotions.add = function(label, needsNote)
+    promotions.add = function(rank, label, needsNote)
         return editRequirements(function(requirements, author, now)
             local names = rankNames()
-            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, names)
+            rank = editableRank(rank)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end
@@ -3784,32 +3774,31 @@ if clientProfile.supported then
         end)
     end
     -- Turns automated check `kind` on (with its number `n`, as typed) or
-    -- off for the rank shown.
-    promotions.automated = function(kind, enabled, n)
+    -- off for `rank`.
+    promotions.automated = function(rank, kind, enabled, n)
         return editRequirements(function(requirements, author, now)
             local names = rankNames()
-            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, names)
+            rank = editableRank(rank)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end
             return requirements:SetAutomated(rank, kind, enabled == true, tonumber(n), names[rank + 1], author, now)
         end)
     end
-    -- Sets whether alts are matched to the rank shown.
-    promotions.matchAlts = function(on)
+    -- Sets whether alts are matched to `rank`.
+    promotions.matchAlts = function(rank, on)
         return editRequirements(function(requirements, author, now)
-            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, rankNames())
+            rank = editableRank(rank)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end
             return requirements:SetMatchesAlts(rank, on == true, author, now)
         end)
     end
-    -- Sets how many days Not ready snoozes for at the rank shown (`days`
-    -- as typed).
-    promotions.snoozeDays = function(days)
+    -- Sets how many days a snooze lasts at `rank` (`days` as typed).
+    promotions.snoozeDays = function(rank, days)
         return editRequirements(function(requirements, author, now)
-            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, rankNames())
+            rank = editableRank(rank)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end

@@ -29,6 +29,7 @@ Adapters/PlayerCards.lua
 Adapters/PlayerDetailPanel.lua
 Adapters/FriendsPage.lua
 Adapters/RosterPage.lua
+Adapters/RequirementsEditor.lua
 Adapters/RankManagementPage.lua
 Adapters/GameMenu.lua
 Adapters/AgfGreetingsPage.lua

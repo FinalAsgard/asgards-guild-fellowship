@@ -4,12 +4,13 @@ local fakeFrames = require("tests.fake_frames")
 -- The Rank management page on fake frames, over a Due list held here.
 local function setup()
     local addon = test.newAddon("Core/ListWindow.lua", "Core/RankUpViewModel.lua", "Adapters/Theme.lua",
-        "Adapters/Widgets.lua", "Adapters/RankManagementPage.lua")
+        "Adapters/Widgets.lua", "Core/RankRequirements.lua", "Adapters/RequirementsEditor.lua",
+        "Adapters/RankManagementPage.lua")
     local environment = fakeFrames.install({})
     local ui = addon.Widgets.Create(environment)
     local content = environment.CreateFrame("Frame")
     local world = { addon = addon, searches = {}, snoozed = {}, ranks = {}, ticks = {}, missings = {},
-        missingRanks = {}, filters = {} }
+        missingRanks = {}, filters = {}, edits = {} }
     -- All players, soonest first.
     world.players = {
         { playerId = 1, key = "toolbox", name = "TheTool", status = "Ready", statusText = "Ready",
@@ -72,6 +73,65 @@ local function setup()
             end
             return { rows = rows, count = #world.players, snoozed = 1, notYet = 1 }
         end,
+        requirements = {
+            ranks = function()
+                return {
+                    { rank = 4, text = "→ Member", count = 0, countText = "None" },
+                    { rank = 3, text = "→ Veteran", count = 2, countText = "2 requirements" },
+                }
+            end,
+            view = function(rank)
+                table.insert(world.edits, "view " .. rank)
+                local automated = {
+                    { kind = "char-guild-days", text = "Character days in guild", enabled = rank == 3,
+                        n = rank == 3 and 14 or nil, numberText = "Days" },
+                    { kind = "addon", text = "Has the Guild Fellowship Addon", enabled = false },
+                }
+                local items = {}
+                if rank == 3 then
+                    items = {
+                        { id = "rules", label = "Read the rules", kindText = "Checkbox", canUp = false, canDown = true },
+                        { id = "interview", label = "Interview", kindText = "Checkbox, needs a note", canUp = true,
+                            canDown = false },
+                    }
+                end
+                return { rank = rank, rankText = "Member (rank " .. rank .. ")", nextText = "Promotes to Veteran",
+                    automated = automated, items = items, empty = items[1] == nil and "No custom requirements." or nil,
+                    matchAlts = rank == 3, snoozeDays = 7 }
+            end,
+            add = function(rank, label, needsNote)
+                table.insert(world.edits, "add " .. rank .. " " .. label .. " " .. tostring(needsNote))
+                return true
+            end,
+            rename = function(rank, id, label)
+                table.insert(world.edits, "rename " .. rank .. " " .. id .. " " .. label)
+                return true
+            end,
+            automated = function(rank, kind, enabled, n)
+                table.insert(world.edits, "automated " .. rank .. " " .. kind .. " " .. tostring(enabled) .. " "
+                    .. tostring(n))
+                return world.refuse == nil, world.refuse
+            end,
+            matchAlts = function(rank, on)
+                table.insert(world.edits, "matchAlts " .. rank .. " " .. tostring(on))
+                return true
+            end,
+            snoozeDays = function(rank, days)
+                table.insert(world.edits, "snoozeDays " .. rank .. " " .. days)
+                return true
+            end,
+            move = function(rank, id, step)
+                table.insert(world.edits, "move " .. rank .. " " .. id .. " " .. step)
+                return true
+            end,
+            delete = function(rank, id)
+                table.insert(world.edits, "delete " .. rank .. " " .. id)
+                return true
+            end,
+            onError = function(text)
+                world.error = text
+            end,
+        },
         missing = function(rank)
             table.insert(world.missingRanks, rank or "any")
             if rank == 3 then
@@ -567,4 +627,135 @@ test.test("rank management page: back on Due, the list is Due's again", function
     test.assertTrue(world.page.picker.shown)
     test.assertFalse(world.page.filterBar.shown)
     test.assertEqual("1 Ready · 1 Due · Promotion happens on the guild roster.", world.page.footer.text)
+end)
+
+-- Requirements ----------------------------------------------------------------------
+
+local function requirementsTab(world)
+    click(world.page.tabs.tabs[3])
+    return world.page.editor
+end
+
+-- The last change asked for (or "view <rank>" when it's only been shown).
+local function lastEdit(world)
+    local index
+    for index = #world.edits, 1, -1 do
+        if string.find(world.edits[index], "view ", 1, true) ~= 1 then
+            return world.edits[index]
+        end
+    end
+    return world.edits[#world.edits]
+end
+
+test.test("rank management page: Requirements lists the ranks by the rank promoted to, with their counts", function()
+    local world = setup()
+    local editor = requirementsTab(world)
+
+    test.assertEqual("Requirements", world.page.tabs.tabs[3].label.text)
+    test.assertFalse(world.page.search.shown)
+    test.assertFalse(world.page.list.shown)
+    test.assertEqual("→ Member", editor.rankRows[1].label.text)
+    test.assertEqual("None", editor.rankRows[1].count.text)
+    test.assertEqual("→ Veteran", editor.rankRows[2].label.text)
+    test.assertEqual("2 requirements", editor.rankRows[2].count.text)
+    -- It opens on the first rank that has requirements.
+    test.assertTrue(editor.rankRows[2].selected)
+    test.assertEqual("→ Veteran", editor.title.text)
+
+    click(editor.rankRows[1])
+    test.assertTrue(editor.rankRows[1].selected)
+    test.assertEqual("view 4", lastEdit(world))
+    test.assertEqual("No custom requirements.", editor.noChecks.text)
+
+    -- Back on Due, the list is back.
+    click(world.page.tabs.tabs[1])
+    test.assertTrue(world.page.search.shown)
+    test.assertTrue(world.page.list.shown)
+end)
+
+test.test("rank management page: an automated check is a switch with its number", function()
+    local world = setup()
+    local editor = requirementsTab(world)
+    local days, addonCheck = editor.automatedRows[1], editor.automatedRows[2]
+
+    test.assertTrue(days.toggle:IsOn())
+    test.assertEqual("Days", days.number.text)
+    test.assertEqual(14, days.stepper:GetValue())
+    test.assertFalse(addonCheck.stepper.shown, "the add-on check takes no number")
+
+    days.stepper:Step(1)
+    test.assertEqual("automated 3 char-guild-days true 15", lastEdit(world))
+    click(days.toggle)
+    test.assertEqual("automated 3 char-guild-days false 14", lastEdit(world))
+    click(addonCheck.toggle)
+    test.assertEqual("automated 3 addon true nil", lastEdit(world))
+
+    world.refuse = "only officers can change promotion requirements"
+    click(addonCheck.toggle)
+    test.assertEqual("The requirements weren't changed: only officers can change promotion requirements.",
+        world.error)
+end)
+
+test.test("rank management page: officer checks are added, renamed and reordered", function()
+    local world = setup()
+    local editor = requirementsTab(world)
+    local prompt = editor.prompt
+
+    click(editor.add)
+    prompt.single:SetValue("Attend an event")
+    prompt.save.scripts.OnClick(prompt.save, "LeftButton")
+    test.assertEqual("add 3 Attend an event false", lastEdit(world))
+    click(editor.addNote)
+    prompt.single:SetValue("Interview")
+    prompt.save.scripts.OnClick(prompt.save, "LeftButton")
+    test.assertEqual("add 3 Interview true", lastEdit(world))
+
+    local rules = editor.itemRows[1]
+    test.assertEqual("Read the rules", rules.label.text)
+    test.assertEqual("Checkbox", rules.kind.text)
+    test.assertFalse(rules.up.shown, "the first can't go up")
+    click(rules.down)
+    test.assertEqual("move 3 rules 1", lastEdit(world))
+    click(editor.itemRows[2].up)
+    test.assertEqual("move 3 interview -1", lastEdit(world))
+
+    click(editor.itemRows[1].rename)
+    test.assertEqual("Read the rules", prompt.single:GetValue())
+    prompt.single:SetValue("Read the guild rules")
+    prompt.save.scripts.OnClick(prompt.save, "LeftButton")
+    test.assertEqual("rename 3 rules Read the guild rules", lastEdit(world))
+end)
+
+test.test("rank management page: Delete warns that the check's ticks go too, and asks first", function()
+    local world = setup()
+    local editor = requirementsTab(world)
+    local row = editor.itemRows[1]
+    local before = #world.edits
+
+    click(row.delete)
+    test.assertTrue(row.warning.shown)
+    test.assertEqual("Delete \"Read the rules\"? Every tick and note on it is dropped too.", row.warning.text)
+    test.assertFalse(row.rename.shown)
+    click(row.cancel)
+    test.assertFalse(row.warning.shown)
+    test.assertFalse(string.find(lastEdit(world), "delete", 1, true) ~= nil)
+
+    click(row.delete)
+    click(row.confirm)
+    test.assertEqual("delete 3 rules", lastEdit(world))
+    test.assertFalse(row.warning.shown)
+    test.assertTrue(#world.edits > before)
+end)
+
+test.test("rank management page: each rank has its alts switch and its snooze length", function()
+    local world = setup()
+    local editor = requirementsTab(world)
+
+    test.assertTrue(editor.matchAlts:IsOn())
+    test.assertEqual("Alts should match this rank", editor.matchAltsText.text)
+    click(editor.matchAlts)
+    test.assertEqual("matchAlts 3 false", lastEdit(world))
+    test.assertEqual(7, editor.snooze:GetValue())
+    editor.snooze:Step(1)
+    test.assertEqual("snoozeDays 3 8", lastEdit(world))
 end)

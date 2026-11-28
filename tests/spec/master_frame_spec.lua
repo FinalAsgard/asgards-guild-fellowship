@@ -313,7 +313,7 @@ end)
 -- The patterns read RosterWindow.lua's layout: build's one-line
 -- "    return host, scroll, ..." and Create's "local ok, host, ... = pcall(build,".
 -- A failure on "found build's return" means that layout changed, not a part.
-test.test("the roster window keeps every part build makes, the Guild Log and Promotions pages included", function()
+test.test("the roster window keeps every part build makes, the Guild Log page included", function()
     local handle = assert(io.open("Adapters/RosterWindow.lua", "r"))
     local source = handle:read("*a")
     handle:close()
@@ -340,7 +340,7 @@ test.test("the roster window keeps every part build makes, the Guild Log and Pro
         end
     end
     test.assertTrue(kept >= 9, "found the window's parts")
-    test.assertTrue(returned.guildLog and returned.promotions, "build returns the Guild Log and Promotions pages")
+    test.assertTrue(returned.guildLog, "build returns the Guild Log page")
 end)
 
 -- A frame that remembers its one point, as the game reports it back.

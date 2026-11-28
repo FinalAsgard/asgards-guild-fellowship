@@ -26,6 +26,8 @@ local _, addon = ...
 -- with its status in words (RankUpViewModel.All), the soonest first, and
 -- a status filter: All, Snoozed or Not yet.
 --
+-- The Requirements tab is the requirements editor (RequirementsEditor).
+--
 -- It's built when the page is shown (Refresh), and again when the owner
 -- says something changed (Update), keeping the list where it's scrolled.
 local Theme = addon.Theme
@@ -34,6 +36,7 @@ local RankManagementPage = {
     TABS = {
         { id = "due", label = "Due" },
         { id = "all", label = "All players" },
+        { id = "requirements", label = "Requirements" },
     },
     ALL_LABEL = "All players (%d)",
     -- All players' status filter.
@@ -103,6 +106,8 @@ end
 --           players, or nil outside a guild
 --   onSelect function(playerId): a click on a row, to show that player's
 --           full checklist
+--   requirements the Requirements tab's actions (see RequirementsEditor
+--           .Create)
 --   onTick  function(key, item, ticked, note) -> true, or false and why
 --           not: ticks or unticks officer check `item` for the player whose
 --           profile character is `key`, with `note` (a check's note, or an
@@ -179,6 +184,12 @@ function Page:build()
         end,
     })
     self.empty = ui:Text(content, RankManagementPage.EMPTY, "regular", "body", "muted")
+    -- The Requirements tab, under the tabs.
+    self.editorHost = ui:frame("Frame", content)
+    self.editorHost:SetPoint("TOPLEFT", self.tabs, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+    self.editorHost:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
+    self.editor = addon.RequirementsEditor.Create(self.editorHost, ui, self.options.requirements or {})
+    self.editorHost:Hide()
     self:placeList(false)
     self:labelPicker()
 end
@@ -186,11 +197,21 @@ end
 -- Shows tab `id`: Due's picker and Missing, or All players' filter.
 function Page:showTab(id)
     self.tab = id
-    local all = id == "all"
-    setShown(self.picker, not all)
-    setShown(self.missingPicker, not all)
-    setShown(self.chip, not all and self.missing ~= nil)
+    local all, editing = id == "all", id == "requirements"
+    local due = not all and not editing
+    setShown(self.picker, due)
+    setShown(self.missingPicker, due)
+    setShown(self.chip, due and self.missing ~= nil)
     setShown(self.filterBar, all)
+    -- The Requirements tab has none of the lists' parts.
+    setShown(self.search, not editing)
+    setShown(self.list, not editing)
+    setShown(self.footer, not editing)
+    setShown(self.editorHost, editing)
+    if editing then
+        self.header:Hide()
+        self.empty:Hide()
+    end
     self:rebuild(false)
 end
 
@@ -514,6 +535,10 @@ end
 -- The list again from the rules engine; `keepPlace` leaves it scrolled
 -- where it is, else it starts at the top.
 function Page:rebuild(keepPlace)
+    if self.tab == "requirements" then
+        self.editor:Refresh()
+        return
+    end
     if self.tab == "all" then
         self:rebuildAll(keepPlace)
         return
