@@ -583,8 +583,6 @@ local function loggedIn(profile, playerName, database)
         return true
     end
     function frame:SetTitle() end
-    function frame:SetStatus() end
-    function frame:SetRows() return true end
     function frame:SetConflicts() return true end
     function frame:SetRecruiters() return true end
     function frame:SetRecentAds() return true end
@@ -633,18 +631,18 @@ local function registerProfileTests(profile)
         test.assertFalse(world.frame.shown)
 
         -- Another tab showing: it switches to My Profile.
-        fixtures.slash(world, "roster")
+        fixtures.slash(world, "options")
         fixtures.slash(world, "profile")
         test.assertTrue(world.frame.shown)
         test.assertEqual("profile", world.frame.page)
 
         local tabs = addon.pages:Tabs()
-        -- The second tab, right after the Roster.
-        test.assertEqual("profile", tabs[2].id)
-        test.assertEqual("My Profile", tabs[2].label)
-        test.assertEqual(addon.MasterFrame.ICONS.profile, tabs[2].icon)
+        -- The first tab: the Roster moved to the new window.
+        test.assertEqual("profile", tabs[1].id)
+        test.assertEqual("My Profile", tabs[1].label)
+        test.assertEqual(addon.MasterFrame.ICONS.profile, tabs[1].icon)
         -- The Group Finder tab is gone: Recruitment follows.
-        test.assertEqual("recruitment", tabs[3].id)
+        test.assertEqual("recruitment", tabs[2].id)
     end)
 
     test.test(profile .. " /agf help lists /agf profile", function()

@@ -12,15 +12,15 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 
 | Command | What it does |
 |---|---|
-| `/agf` or `/agf roster` | Opens the add-on's window on the **Roster** tab, or closes it. |
+| `/agf` or `/agf roster` | Opens the add-on's window on the **Guild Roster**, or closes it. |
 | `/agf rescan` | Scans the guild's notes right away. |
-| `/agf recruit` | Opens the window on the **Recruitment** tab. |
+| `/agf recruit` | Opens the old window on the **Recruitment** tab. |
 | `/agf greet` | Opens the add-on's new window on **Greetings**, where you edit your Guild Greet greetings and settings (see [Editing greetings](#editing-greetings)). |
-| `/agf options` | Opens the window on the **Settings** tab. |
+| `/agf options` | Opens the old window on the **Settings** tab. |
 | `/agf minimap` | Hides the minimap button, or brings it back. |
 | `/agf tags` | Turns chat tags off, or back on. |
 | `/agf lfg` | Shows the LFG button if it's hidden, and opens the [Guild LFG Board](#guild-lfg-board). |
-| `/agf profile` | Opens the window on the **My Profile** tab (see [My Profile](#my-profile)), or closes it. |
+| `/agf profile` | Opens the old window on the **My Profile** tab (see [My Profile](#my-profile)), or closes it. |
 | `/agf dnd` | Turns [Do Not Disturb](#do-not-disturb) on, or back off. |
 | `/agf advertise` | Posts your guild ad to General where you are, now. `/agf advertise trade` posts it to Trade. Works in a macro. Won't post again before your timer allows (see [Guild Recruit](#channels-and-timing)). |
 | `/agf channels` | Shows the chat channels Guild Recruit sees where you are: each channel the game lists, whether it's disabled here, and which ones it would post to for General and Trade. |
@@ -33,32 +33,38 @@ Install **Asgard's Guild Fellowship** from CurseForge, for example with the Curs
 | `/agf probe forgeries` | Lists the last 10 guild sync edits your add-on caught as forged in your name: when, who passed each on, what it changed, its stamp, and what your own record of your edits held for it (anyone). |
 | `/agf probe player <name or alias>` | Shows how your add-on holds a player: its alias, who set it and when, and through which character; each character's link and Discord name with who set them and when; and the player's last 10 logged changes (anyone). |
 | `/agf probe log`, `/agf probe officer`, `/agf probe ready` | Reports what the game gives the add-on: the guild event log, the officer channel, or whether the **Ready** and **Promote to match** flags reach the game's guild roster (officers only). |
-| `/agf probe timer` | Shows the clock icon the roster uses for characters whose time requirements are met, whether this client loaded it (if not, the roster shows **[T]** instead), and how many characters show it (officers only). |
 | `/agf probe greet` | Shows your greet weight, how many guildmates with the add-on count as online, and how much longer your greet prompts wait because of it. |
 | `/agf probe lfg` | Shows the Guild LFG Board as your add-on sees it: your zone's levels and where they came from, how many questing zones the game's map tree gave, your listing and whether guildmates' add-ons can read it as sent, the listings on your board by tab, and since login how many board messages went out, how many came in and from whom, and how many were ignored and why (anyone). |
 | `/agf help` | Lists the commands, with the version, client, and library status. |
 
 ## The add-on's window
 
-Everything the add-on does is in one window, with picture tabs down its right edge. Hover a tab to see its name, and click it to show its page; the tab you're on looks selected. Every page scrolls when it's taller than the window.
+The add-on has two windows while its pages move over.
+
+**The window**, which `/agf`, the minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and the AddOns options' **Open window** open on the **Guild Roster**. Its sidebar has:
 
 - **Roster**: the guild's players, mains and alts (see [Using the roster](#using-the-roster)).
+- **Friends** (see [Friends](#friends)), **LFG** (the [Guild LFG Board](#guild-lfg-board)) and **Greetings** (see [Editing greetings](#editing-greetings)).
+- **Rank management** (officers only, under **Officer**): who's due a promotion, every player's standing, and each rank's requirements (see [Promotions](#promotions)). Its sidebar button counts the players due.
+- **Settings** at the bottom.
+
+`/agf` closes the window when it's showing the Roster, and switches to the Roster from any other page. It remembers where you left it.
+
+**The old window**, with picture tabs down its right edge. Hover a tab to see its name, and click it to show its page. `/agf profile`, `/agf recruit` and `/agf options` open it on their tabs:
+
 - **My Profile**: your own player, its characters and their role preferences, and Do Not Disturb (see [My Profile](#my-profile)).
 - **Recruitment**: your [Guild Recruit](#guild-recruit) settings, and for officers the guild's settings and the **Recruiters** leaderboard (see [Ad counts](#ad-counts)).
 - **Recent Guild Advertisements**: where the guild advertised lately, who posted, and how long ago (see [Ad counts](#ad-counts)).
-- **Promotion Requirements** (officers only): each rank's promotion requirements (see [Promotions](#promotions)). Characters' checklists are in the player panel, and ready members are flagged on the game's guild roster.
 - **Guild Log** (officers only): the guild's long-term record of joins, invites, leaves, kicks, promotions and demotions (see [Guild Log](#guild-log)).
-- **Settings**: everything else (General, Chat Tags, Guild Map, and Do Not Disturb), and the version you're running.
+- **Settings**: everything else (General, Chat Tags, Guild Map, and Do Not Disturb), the version you're running, and for officers the guild note **Conflicts** button (see [Guild notes are the master copy](#guild-notes-are-the-master-copy)).
 
-The [Friends](#friends), [Guild LFG Board](#guild-lfg-board) and [Greetings](#editing-greetings) pages live in the add-on's new window, which the rest of these tabs will move to later.
-
-The minimap button, the add-on compartment, the guild window's **Guild Fellowship** button and `/agf` always open the window on the Roster tab, whatever tab you used last. `/agf profile`, `/agf recruit` and `/agf options` open their own tabs; `/agf greet` opens the new window on [Greetings](#editing-greetings). Escape or the close button closes the window. It remembers its size and position (the first time, it starts where the old roster window was), and you can resize it down to a minimum.
+Every page scrolls when it's taller than the window. Escape or the close button closes it. It remembers its size and position, and you can resize it down to a minimum.
 
 ## Settings
 
 The settings are in two places that always agree: the window's tabs, and **Esc → Options → AddOns → Asgard's Guild Fellowship**. In the AddOns options, the add-on's own page has an **Open window** button and the version, and each feature has a sub-page of its own under it:
 
-- **General**: show or hide the minimap button, and the version you're running.
+- **General**: show or hide the minimap button, **Auto-list my parties** and **Show my party on the guild's board** (see [Listing your party](#listing-your-party)), and the version you're running.
 - **Chat Tags**: turn chat tags on or off, and choose the colors of the alias tag and the main's-name tag (see [Chat tags](#chat-tags)).
 - **Do Not Disturb**: the same switch as on My Profile and `/agf dnd` (see [Do Not Disturb](#do-not-disturb)).
 - **Guild Map**: **Share my location with the guild** and **Show guildmates on the map and minimap**, both on unless you turn them off (see [Guild map](#guild-map)).
@@ -71,23 +77,24 @@ A change made in the window, the AddOns options or a slash command shows up in t
 
 ### Opening it
 
-The roster is the **Roster** tab of [the add-on's window](#the-add-ons-window).
+The roster is the **Guild Roster**, the **Roster** page of [the add-on's window](#the-add-ons-window).
 
-- `/agf` (or `/agf roster`) opens the window on the Roster tab. If it's already showing the Roster tab, it closes the window; on another tab, it switches to Roster. The development build uses `/agfdev`.
+- `/agf` (or `/agf roster`) opens the window on the Guild Roster. If it's already showing it, it closes the window; on another page, it switches to the Roster. The development build uses `/agfdev`.
 - The minimap button does the same. For officers, its tooltip shows how many conflicts are waiting. Drag it to move it; its position is saved. `/agf minimap` hides it, and running it again brings it back.
 - On Retail, the add-on compartment has an entry for it as well.
 - The guild window gets a **Guild Fellowship** button left of **Invite Member**. If the add-on can't find that button, it skips this one quietly.
 - `/agf help` lists the commands with the version, client, and library status.
 
-Opening the window never scans the guild, so it's always quick. The Conflicts window opens beside the window and closes with it. The player panel opens beside the window too, but stays open on its own until you close it. Once you drag the player panel somewhere else, it opens there from then on, across reloads and on every character.
+Opening the window never scans the guild, so it's always quick.
+
+The page has a column of player cards on the left and the selected player's [player panel](#the-player-panel) on the right. Across the top it says how many players there are and how many are online, and when you last synced, with **Rescan** on the right. Officers also get three tabs: **Members** (the cards), **Departed** (see [Mains, alts, and departures](#mains-alts-and-departures)) and **Review** (members' suggestions, see [Suggestions](#suggestions)).
 
 ### Guild size
 
-A line above the roster gives the guild's size, whatever the search and filters, for example **320 players (27 known + 293 unlinked) · 31 alts · 351 characters**. Departed characters never count.
+Hover the player and online counts at the top of the Guild Roster for the guild's size, whatever the search and filters: how many players there are, and how many of them are **known** or **unlinked**, how many were active (online, or last online) within 7, 30 and 90 days, who is online now, and how many players have an alias or a declared main. Departed characters never count.
 
 - A **known** player has two or more linked characters, an alias, or a declared main.
 - An **unlinked** character stands alone, with no link, alias or declared main. It counts as a player of its own until it's linked, though it may be someone's alt. Linking it moves it from players to alts.
-- Hover the line for the breakdown, how many players were active (online, or last online) within 7, 30 and 90 days, who is online now, and how many players have an alias or a declared main.
 
 ### The guild note convention
 
@@ -115,9 +122,9 @@ The add-on never writes to guild notes.
 
 - Every login (and `/reload`) scans the roster, so ranks, notes and departures that changed while you were away show at once. Only notes that changed are read again, so it's quick. It says nothing in chat unless it found something.
 - New members, changed guild notes, and rank or level changes (including promotions made in the game's own guild window) are picked up automatically when the guild roster updates. While you're online the add-on asks the game for a fresh roster every 15 minutes, so a note an officer edits reaches you within 15 minutes, without a relog. `/agf probe` shows when the last full scan ran and how many notes the latest scan changed.
-- **Rescan** in the window, or `/agf rescan`, scans right away.
+- **Rescan** at the top of the Guild Roster, or `/agf rescan`, scans right away.
 
-Scans run a little at a time, so even a large guild doesn't cause a hitch. The window's footer shows when the last scan ran and what it found.
+Scans run a little at a time, so even a large guild doesn't cause a hitch. A scan that found something says so in chat, and `/agf probe` shows when the last one ran.
 
 ### Guild notes are the master copy
 
@@ -125,7 +132,7 @@ Scans run a little at a time, so even a large guild doesn't cause a hitch. The w
 - After that, a note that changes wins over what the notes or the roster set before: a character moves to the main its note now names, a player takes the alias its notes now give it, and an alt whose note now names itself as main becomes a main of its own. Nothing goes to the conflict queue for these. The player the character left records it in their history ("moved by a guild note").
 - The only conflicts are changes submitted through the add-on that disagree with the guild notes: a member's suggestion (see [Suggestions](#suggestions)), and a note that disagrees with a link or alias set by hand or through [guild sync](#guild-sync). Those keep what was submitted until an officer decides.
 - A note naming a character that doesn't exist, matching more than one, or looping back on itself changes nothing and is not a conflict. Neither do notes read in the same scan that give one player different aliases (a note changed later can still rename the player), or two mains whose notes name each other's players. A note naming someone not in the guild yet is read again when someone new joins, or when the guild's aliases change.
-- **Conflicts (N)** at the bottom of the window opens the queue. Only officers have it: members see no Conflicts button or window, no count in the minimap tooltip, and no conflicts in the scan report in chat. It appears or disappears without a reload when someone is promoted to or demoted from an officer rank. Members' changes are listed under **Changes to Player**, one line per player. Notes that disagree with a submitted link or alias are listed below them under **Note conflicts**: each shows the character, then one wrapped column with the note, what it suggests and what the database says. Accept or reject each one, or all at once.
+- **Conflicts (N)** at the bottom of the old window's **Settings** tab opens the queue. Only officers have it: members see no Conflicts button or window, no count in the minimap tooltip, and no conflicts in the scan report in chat. It appears or disappears without a reload when someone is promoted to or demoted from an officer rank. Members' changes are listed under **Changes to Player**, one line per player. Notes that disagree with a submitted link or alias are listed below them under **Note conflicts**: each shows the character, then one wrapped column with the note, what it suggests and what the database says. Accept or reject each one, or all at once.
 - A rejected note conflict stays away until that note changes again.
 - Conflicts an earlier version queued that don't fit these rules (unknown or ambiguous mains, loops, competing aliases, new acting mains to confirm) are cleared once, and the notes behind them are read again by the next scan.
 - Officer data from [guild sync](#guild-sync) beats an unchanged guild note. On a new install, notes fill in the roster first, and officer edits replace them where the two disagree. After an officer edit arrives, the next scan checks the notes it affects again. A note that disagrees goes to the conflict queue, and a pending conflict the edit already settled disappears.
@@ -148,34 +155,43 @@ What a note should say:
 
 **Ignore** hides a mismatch you've chosen to leave alone. It comes back when the note or the add-on's record for that character changes. The list is worked out again after every scan, sync and change in the roster. Departed characters are skipped.
 
-### Player panel from the guild roster
+### Following the game's guild roster
 
-Select any member in the game's guild roster and, if the add-on knows their player, the add-on's [player panel](#organizing-by-hand) opens for that player, with all its tabs (Profile, Bio, Promotion where you may see it, and Log), whether or not the add-on's window is open. It stays open until you close it. Selecting another member switches it to their player. The game redrawing the same member (on a roster update) doesn't reopen a panel you closed; select someone else, or close and reselect the member, to open it again. Everyone gets it, not just officers.
+While the Guild Roster is open, selecting a member in the game's guild roster selects their player there too, when the add-on knows them. With the window closed, nothing opens.
 
 ### Mains, alts, and departures
 
 - A player always leads with a character who is in the guild. If their main leaves, or a note names a main outside the guild, an in-guild alt becomes the acting main: the highest level, then the most recently online. The player's history records it, and you can pick another main with **Make this the main**.
-- Characters who leave are kept and marked departed. They're hidden until you choose **Show departed**. A returning character goes back to their old player automatically.
-- **Purge** removes one departed character. **Purge all departed** removes them all.
+- Characters who leave are kept and marked departed. They're left off the player cards, and officers list them on the Guild Roster's **Departed** tab: each character, its player, and when it left. A returning character goes back to their old player automatically.
+- **Purge** on the Departed tab removes one departed character. **Purge all departed** removes them all, after asking.
 
 ### Organizing by hand
 
-The roster marks a **declared main** (a player who said "this is my main" on purpose) as **(declared main)**, so confirmed players stand apart from characters nobody has organized yet. Players declare their main on [My Profile](#my-profile), or by starting the character's note with `^` (see [The guild note convention](#the-guild-note-convention)). Like the other organizing changes, an officer's declaration is official at once and a member's goes to officers as a [suggestion](#suggestions).
+A player card marks a **declared main** (a player who said "this is my main" on purpose), so confirmed players stand apart from characters nobody has organized yet. Players declare their main on [My Profile](#my-profile), or by starting the character's note with `^` (see [The guild note convention](#the-guild-note-convention)). Like the other organizing changes, an officer's declaration is official at once and a member's goes to officers as a [suggestion](#suggestions).
 
-Right-click a character for **Link as alt of…** (makes it an alt of another player), **Make this the main**, **Set alias…**, **Split off as own player** (takes it out of its player into one of its own), and **View player…**. Clicking a character also opens the player panel. Its header shows the alias and the player's Discord on the left, and, on the right, when they first joined (officers only) and how often you grouped with them (0 times included). Its **Profile** tab shows their main and alts, with each character's name in its class color. Right-click a character's name there for **Make main** and **Detach from player**. Its **Bio** tab shows their **Location** and **Bio** (see [About me](#about-me)), each "Not set" until it is. On your own player, or anyone's if you're an officer, each has an **Edit** button: Location's opens a one-line box, and Bio's a larger window with a several-line box and a character count. Empty either and save to clear it. Your own player's Location and Bio go to the guild at once with no officer approval (see [About me](#about-me)), and an officer's edit of anyone's does too; the Bio's count is in bytes, since an accented letter takes two. Its **Log** tab lists the rest, wrapped to fit: the player's ad count, when you last grouped with them, and each character's join and rank dates (officers only), then **Changes** (each change to the player's alias, main, characters, Discord, location or bio, newest first, with when, who made it, and whether it was made here or arrived through guild sync), then **History** at the bottom. The panel has **Set alias…**, **Set Discord…** and **Merge into player…** buttons. **Set Discord…** sets the player's Discord name: an officer's edit is saved at once, and a member's becomes a suggestion for an officer to approve. Members can change only their own player: on anyone else's player, **Set alias…**, **Set Discord…** and **Merge into player…** are greyed out in the panel, its characters' names have no right-click menu, and the roster's right-click menu offers only **View player…**. A member can link a character only if the add-on knows it's theirs (it's on their player, or they've logged in on it with this install), and only to a player the add-on knows is theirs: **Link as alt of…** and My Profile's **Add alt** list nobody else. Officers can change anyone's. **Merge into player…** links the player's main as an alt of another player, the same as **Link as alt of…** on the main. A main that still has alts can't be moved: **Merge into player…** is greyed out and its right-click menu has no **Link as alt of…**. Move its alts or split them off first. History lists characters that left the player: ones that left the guild, were split off, or were moved to another player.
+Right-click a player card for **Set alias…** and **View player…**. Right-click a character card on the player panel's **Characters** tab for **Link as alt of…** (makes it an alt of another player), **Make this the main**, **Set alias…**, **Split off as own player** (takes it out of its player into one of its own), and **View player…**. The panel's **⋯** button has **Whisper** and **Invite** (for a character online), **Set alias…**, **Set Discord…** and **Merge into player…**. **Link as alt of…** and **Merge into player…** swap the panel for a player picker with a search box; **Set alias…** and **Set Discord…** ask for the text in a small box. **Set Discord…** sets the player's Discord name: an officer's edit is saved at once, and a member's becomes a suggestion for an officer to approve.
 
-For a player who has posted recruitment ads, the player panel's **Log** tab also shows **Advertised: N (M in last 30 days)** (see [Ad counts](#ad-counts)).
+Members can change only their own player: on anyone else's player, the menus offer only what they may do (**View player…**, **Whisper**, **Invite**). A member can link a character only if the add-on knows it's theirs (it's on their player, or they've logged in on it with this install), and only to a player the add-on knows is theirs: **Link as alt of…** and My Profile's **Add alt** list nobody else. Officers can change anyone's. **Merge into player…** links the player's main as an alt of another player, the same as **Link as alt of…** on the main. A main that still has alts can't be moved: move its alts or split them off first.
 
 Changes show up right away and are recorded as manual. An officer's changes then reach the rest of the guild through [guild sync](#guild-sync), and a member's are sent to officers as [suggestions](#suggestions). Data is saved per guild and shared by every character on this game install.
 
+### The player panel
+
+The player panel, on the Guild Roster and the [Friends](#friends) page, shows the player's alias (else their main's name) with their main's level, class and rank and where they are, the **Friend** star, and four tiles: **Discord**, **Grouped** (how often you grouped with them, 0 times included), **Last grouped** and **Joined guild** (officers only). Its tabs:
+
+- **Characters**: their characters in the guild, main first, each with its role preferences.
+- **Bio**: their **Location** and **Bio** (see [About me](#about-me)), each "Not set" until it is. On your own player, or anyone's if you're an officer, each has an **Edit** button. Empty either and save to clear it. Your own player's Location and Bio go to the guild at once with no officer approval, and an officer's edit of anyone's does too; the Bio's count is in bytes, since an accented letter takes two.
+- **Grouped**: your parties together, newest first, with **Show more**.
+- **Log**: the player's ad count (see [Ad counts](#ad-counts)), when you last grouped, and each character's join and rank dates (officers only), then **Changes** (each change to the player's alias, main, characters, Discord, location or bio, newest first, with when, who made it, and whether it was made here or arrived through guild sync), then **History**: characters that left the player (left the guild, split off, or moved to another player).
+- **Rank** (officers on anyone, members on their own player only): see [The player panel's Rank tab](#the-player-panels-rank-tab).
+
 ### Finding people
 
-- The search box matches character names, aliases and Discord usernames.
-- The **Discord** column shows a player's Discord username, when it's known, on their group's header (or their row, for a player with one character).
+- The search box matches aliases, character names and Discord usernames. A card found by an alt's name says so ("matches Bolt Smith").
+- **Sort** orders the cards by **Name**, **Last online**, **Rank** (with each player's rank after their name) or **Grouped with** (how often you grouped).
+- **Rank** shows only players at one rank.
 - **Online only** hides players with no character online.
-- **Expand all** and **Collapse all** open and close every group.
-- Online players come first, then everyone else by name. A group shows "online as …" when the player is on an alt.
-- A player with one character is shown as a single row.
+- Cards for players online come first. A card stays where it is when someone logs on or off, until you sort, filter or search again.
 
 ## Guild sync
 
@@ -187,7 +203,7 @@ When an officer changes which characters belong together, or what a player goes 
 - Edits made before sync existed: they become official and are sent to the guild once you log in on an officer character with this version. Until then, and for members, they stay in your own roster only.
 - Only main and alt links, aliases, each character's [role preferences](#role-preferences), and each player's [Discord, location and bio](#about-me) are shared. Role preferences and About me are set by the player's own characters and reach the guild at once with no approval. The exception is officers: an officer can also set or clear anyone's Discord name with **Set Discord…**, and their location and bio from the player panel's **Bio** tab. A member's **Set Discord…** on another of their own characters becomes a suggestion for an officer to approve. Officers' add-ons ignore a member's alias or Discord suggestion about a player who isn't theirs. Guildmates who were offline get them through the same catch-up as everything else. Departures, purges, history (including your [group history](#group-history)), conflicts, and settings stay on your computer.
 - Sync messages go out at the game's lowest add-on priority, so they never hold up chat or other add-ons.
-- The Roster tab's footer shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
+- The top of the Guild Roster shows when you last synced, meaning the last time your add-on compared or exchanged officers' data with another add-on user. `/agf sync` shows the same, plus whether sync is paused and how many of your suggestions are waiting.
 - Sync never gets in the way of play. It sends and processes nothing while you're in combat, or on Retail during a boss encounter or a keystone run, and picks up where it left off once that's over. Like scans, it works on data a little at a time, so even a large guild's full sync doesn't cause a hitch, and your roster redraws once per batch rather than once per change.
 
 ### Resync
@@ -206,7 +222,7 @@ Members know their own alts best, so a member's edits become suggestions for the
 
 - When you're not an officer, **Link as alt of…**, **Merge into player…**, **Make this the main**, **Split off as own player**, and **Set alias…** still change your roster at once. Each change is also kept as a suggestion. They work only on your own player (the character you're logged in on and the characters linked to it), and you can link only characters the add-on knows are yours (on your player, or logged in on with this install). Officers' add-ons ignore a member's suggestion about a player who isn't theirs, one that would bring over a character the officer's roster has on another organized player (with an alias, other characters, or declared as a main), and one that would take the member's own characters to another player. A character nobody organized that the member is playing may still ask to join a main, for the officer to review. An approval is checked again, so a suggestion that's no longer the member's to make is refused.
 - Suggestions go to the guild as soon as an officer is online. If none is, they wait, and are sent when an officer logs in.
-- Officers find them in their **Conflicts** window under **Changes to Player**, above **Note conflicts**: one line per player with changes waiting, with how many there are, **Suggested by** (the character that suggested them, with its player's alias or main when that differs, for example "Bolt (Hammer)") and a **Review** button. Suggestions from members on older versions of the add-on are grouped the same way. The Conflicts button and the minimap tooltip count each player's changes once, plus each note conflict.
+- Officers find them on the Guild Roster's **Review** tab, with **Approve**, **Deny**, **Approve all** and **Deny all**, and **Review** for a change to a main or its alts, which shows the player before and after. They're also in the old window's **Conflicts** window under **Changes to Player**, above **Note conflicts**: one line per player with changes waiting, with how many there are, **Suggested by** (the character that suggested them, with its player's alias or main when that differs, for example "Bolt (Hammer)") and a **Review** button. Suggestions from members on older versions of the add-on are grouped the same way. The Conflicts button and the minimap tooltip count each player's changes once, plus each note conflict.
 - **Review** opens a panel beside the window. Its header says who suggested the changes. For every player the changes touch (a member linking their character under someone else's main touches both players), it shows the player as they are now (**Before**) and as they'd be with every change (**Suggested**): main (and whether it's declared), alias, Discord, and each alt on a line of its own. Lines that change are colored: the old value red, the new one green. The live guild note of each character involved is shown below for context. Then each change has its own line in plain words, for example "Bolt: Alt of Toolbox → Alt of Hammer", with **Approve** and **Deny**. **Approve all** and **Deny all** decide the whole player at once, and Accept all and Reject all at the bottom of the Conflicts window still decide everything.
 - The first officer to decide settles the suggestion for every officer, and it disappears from the other officers' queues. Accepting makes it an official edit under that officer's name, which reaches everyone.
 - Denying puts your roster back the way the officers have it, so you stay on the same data as everyone else. If no officer ever set that character or alias, it goes back to what the guild notes and the roster say.
@@ -257,7 +273,7 @@ The **Friends** page of the add-on's new window is the people you play with. Pin
 - **Your Friends** are on the left as small player cards, then **+ Add a friend** for each open slot. Hover a Friend for an **X** that removes them, or right-click one for **Replace...** and **Remove friend**.
 - **+ Add a friend** (or **Replace...**) opens **Choose a friend**: search by alias or any character's name, and pick from the list. When the search matched only an alt, the row says which (**Alt: ...**). **Cancel** goes back.
 - **Most grouped with**, under your Friends, lists the guildmates you've grouped with most who aren't Friends, with their party count. Right-click one for **Add as friend** (greyed out while all 5 slots are taken).
-- Click a player to see them on the right: their name with a gold **Friend** or **Most grouped** badge, their main's level, class and rank, where they are and when they were last online, the star (click it to pin or unpin them), **Whisper** and **Invite**, and tiles for their Discord, how often and when you last grouped, and when they joined the guild. Under them, the **Characters**, **Bio**, **Grouped** (your parties together, with **Show more**) and **Log** tabs.
+- Click a player to see them on the right: their name with a gold **Friend** or **Most grouped** badge, their main's level, class and rank, where they are and when they were last online, the star (click it to pin or unpin them), **Whisper** and **Invite**, and tiles for their Discord, how often and when you last grouped, and when they joined the guild. Under them, the **Characters**, **Bio**, **Grouped** (your parties together, with **Show more**) and **Log** tabs, and the **Rank** tab for officers (and on your own player), as on the Guild Roster (see [The player panel](#the-player-panel)).
 
 The page is built when you open it, and doesn't change while it's open. **Open in Guild Fellowship**, in the game's right-click menu on a guildmate's name, opens the window on that player.
 
@@ -452,49 +468,59 @@ A mail paused at the limit doesn't hold you up: **Edit** your draft and send a n
 
 ## Promotions
 
-Each guild rank can have **promotion requirements**: what a character at that rank must do to move up to the next one. Officers set them up on the window's **Promotion Requirements** tab and work through each player's checklist in the [player panel](#in-the-player-panel-and-the-roster). A player has **one rank-up checklist**, on their highest-ranked character in the guild (their main, when several share the top rank). Ticks, notes, overrides and **Not ready** all go on that character; the player's other characters have no checklist of their own and catch up through **Promote to match**. If another character later outranks it, the checklist moves there, starting fresh for its rank. A character who meets every requirement is flagged **Ready for promotion**, and an officer promotes them in the game's own guild window (add-ons aren't allowed to promote). The rest of the guild only sees their own progress (see [Your own progress](#your-own-progress)). The Promotion Requirements and [Guild Log](#guild-log) tabs are only shown to officers (the guild master's rank, or any rank that can view officer notes), and appear or disappear without a reload when someone is promoted or demoted.
+Each guild rank can have **promotion requirements**: what a player at that rank must do to move up to the next one. Officers set them up and work through them on the **Rank management** page of [the add-on's window](#the-add-ons-window), and on the player panel's **Rank** tab. The *player* earns the rank: a player has **one rank-up checklist**, on their highest-ranked character in the guild (their main, when several share the top rank). Ticks, notes, overrides and snoozes all go on that character; the player's other characters have no checklist of their own and catch up through **Promote to match**. If another character later outranks it, the checklist moves there, starting fresh for its rank. A player who meets every requirement is **Ready**, and an officer promotes them in the game's own guild window (add-ons aren't allowed to promote). Ranks are always named by the rank promoted *to*: "→ Member".
 
-### Setting up requirements
+Rank management is only shown to officers (the guild master's rank, or any rank that can view officer notes), and appears or disappears without a reload when someone is promoted or demoted. The rest of the guild only sees their own progress (see [Your own progress](#your-own-progress)).
 
-Every rank starts with no requirements, so nothing changes until your guild sets them up. The **Promotion Requirements** tab is the editor.
+### Due
 
-- `<` and `>` pick the rank, for example **Member (rank 4)**, with the rank it promotes to beside it. The guild master's rank has no rank above it, so it isn't offered.
-- **Automatic checks** lists every check the add-on works out for itself, each with a check box to turn it on or off for the rank. A check that takes a number has a box beside it; type the number before turning the check on, and change it later by typing a new one and pressing Enter:
+The **Due** tab (Rank management opens on it) lists the players whose time requirements are met, so you can see who to check on:
+
+- **Ready**: every requirement is met. The row lists the characters to promote.
+- **Match**: the player's alts are behind their highest rank (see [Promote to match](#promote-to-match)). The row lists them.
+- **Due**: the time is up, but something else isn't. The row says what it's waiting on ("Has a Discord name set · Interview"), with **Snooze**.
+
+Ready comes first, then Match, then Due. The search box finds players by alias or character name, and the footer counts Ready, Match, Due and snoozed. The sidebar button counts the players due. Click a row to open that player on the Guild Roster, on the [Rank tab](#the-player-panels-rank-tab).
+
+**Snooze** puts a Due player off for their rank's snooze length (see [Requirements](#requirements)), counted from the click, in one click. While snoozed they leave Due, and the All players tab says **Snoozed until <date> by <officer>**. Ready isn't affected: tick what was missing, and once every requirement is met they're Ready at once. When the snooze ends they're Due again if they still aren't Ready. There's no unsnooze. Snoozes are shared with every officer, including those who log in later, and only taken from officers. When two officers snooze the same character, the newest wins. A rank change clears the snooze.
+
+### Promote to, and the grid
+
+**Promote to** picks one rank (or **Any rank**). The list narrows to the players up for it and becomes a grid, with a column per requirement of the rank:
+
+- An automated cell is green when it's met and red when it isn't, with the add-on's detail ("44 d", "≈12 d" for an approximate date, "level 66", "not seen", "seen 3 d ago", "not set").
+- An officer check is a check box, ticked or unticked at once with no confirm. A check that needs a note asks for it first (**Save** ticks it, **Cancel** leaves it unticked). A ticked check shows its note, or who ticked it.
+- Right-click a red cell for **Override as met…**, with an optional reason: the cell turns gold and reads "met by override". Right-click a gold cell for **Remove override**.
+
+**Missing** picks one requirement of the picked rank (or of every rank, for Any rank) and keeps only the Due players missing it. A chip with an **X** names it, its column's header is highlighted, and the footer counts them: "9 of 22 players due → Member are missing: Has a Discord name set".
+
+### All players
+
+The **All players (N)** tab lists every player in the guild with their standing in words: **Ready**, **Match**, **Due**, **Snoozed until <date> by <officer>**, **Not yet: N days** (counting down to the last time requirement still open), or **No requirements**. The soonest come first. **All**, **Snoozed** and **Not yet** filter it.
+
+### Requirements
+
+The **Requirements** tab is the editor. Every rank starts with no requirements, so nothing changes until your guild sets them up. On the left, each rank is listed by the rank it promotes to ("→ Member") with how many requirements it has; click one to edit it.
+
+- **Automated checks** are switches, each with a number (days or a level) where it takes one:
   - **Character days in guild**: this character has been in the guild at least N days.
   - **Player days in guild**: the player has, counted from the earliest join among their characters still in the guild, so a long-time member's new alt doesn't have to wait.
   - **Days at rank**: the character has held its current rank at least N days.
   - **Character level**: the character is at least level N.
-  - **Has the Guild Fellowship Addon**: any of the player's characters has been heard on the add-on. It's a simple yes or no, with no number.
-  - **Has a Discord name set**: the player has a Discord name on file, set on any of their characters. Any name counts, and it's met as soon as the name is saved; clearing it fails the check again. When it isn't met, its detail says "not set". It's a yes or no too, with no number. Add-ons older than this check don't show it.
-- Turning a check off deletes it, along with any overrides on it.
-- **Custom requirements** are the ones an officer ticks. Type the **Requirement text**, tick **Needs a note** if ticking it should ask for a note (up to 100 characters, such as which event the member attended), and press **Add** (or Enter).
-- Each custom requirement has **Up** and **Down** to reorder it, **Edit** to change its text or whether it needs a note (ticks are kept), and **Delete**, which asks first because it drops the requirement's ticks too.
-- **Not ready snoozes for N days** (beside **Alts should match this rank**) sets how long the [Not ready](#time-requirement-met) button quiets a character at this rank: 1 to 90 whole days, 7 by default. Type the number and press Enter (or click away). Anything else is refused with a message and the box goes back to the saved value. It's shared with every officer like the rest of the requirements, and changing it only affects new snoozes.
+  - **Has the Guild Fellowship Addon**: any of the player's characters has been heard on the add-on.
+  - **Has a Discord name set**: the player has a Discord name on file, set on any of their characters.
+- Switching a check off deletes it, along with any overrides on it.
+- **Officer checks** are the ones an officer ticks. **Add check** and **Add check needing a note** ask for the text (a note holds up to 100 characters, such as which event the member attended). Each has ▲ ▼ to reorder it, **Rename**, and **Delete**, which asks first: every tick and note on it is dropped too.
+- **Alts should match this rank** (see [Promote to match](#promote-to-match)), and the **Snooze length (days)**: 1 to 90, 7 by default. Changing it only affects new snoozes.
 - If the guild master inserts or removes a rank, requirements stay with their rank's position, and the editor warns when the rank there now has a different name, so you can check they still belong.
 
 Requirements reach every add-on in the guild through [guild sync](#guild-sync). When two officers edit the same item, the newest edit wins everywhere. Changes are only taken from an officer's add-on, so nobody else can send one, even in an officer's name. An add-on that logs in catches up from an officer online.
 
 ### Ready for promotion
 
-Officers see who's ready in three places:
+A Ready player is on Rank management's Due tab, and their characters to promote show an up arrow just after their rank in **the game's guild roster**. Promote them in that window. `/agf probe ready` says how many are ready, whether the roster's rows are being followed, and how many flags sit next to the rank (open the guild roster first). A row whose rank isn't shown gets the arrow at its right edge instead, beside the yellow out-of-date note marker.
 
-- **The game's guild roster:** a ready member's row shows an up arrow just after their rank. Promote them in that window. `/agf probe ready` says how many are ready, whether the roster's rows are being followed, and how many flags sit next to the rank (open the guild roster first). A row whose rank isn't shown gets the arrow at its right edge instead, beside the yellow out-of-date note marker.
-- **The add-on's roster:** a ready character shows **Ready** before its rank.
-- **The player panel's Promotion tab:** a ready character's line says **Ready for promotion**.
-
-Any rank change, up or down, clears that character's ticks, notes and overrides. A character promoted and later demoted back to a rank starts that rank's checklist afresh. That holds even on an officer's add-on that was offline the whole time, once the guild log (or an officer's date) shows when it came back to the rank. The last promotion's date and promoter are kept, from the guild event log when it names who did it.
-
-### Time requirement met
-
-Most ranks mix time requirements with checks an officer ticks after talking to the member. So officers can see who to check on, the add-on's roster shows a **clock icon** before the rank of each character whose **time requirements** (character days in guild, player days in guild and days at rank) are all met but who isn't Ready yet. It only shows at a rank with at least one time requirement, every one of them has to be met, and "before tracking" dates and overrides count, as they do for Ready. Once every requirement is met, **Ready** replaces the clock. If a client can't load the icon, the roster shows **[T]** instead; `/agf probe timer` says which, and how many characters have it. Members never see it.
-
-Checked someone and they're still missing something? Press **Not ready** under their checklist in the player panel's Promotion tab (it's there only while the clock shows). That snoozes the clock for the rank's snooze length (see [Setting up requirements](#setting-up-requirements)), counted from the click. While snoozed:
-
-- the roster shows no clock for them
-- their line has no button, and a line under it says **Snoozed until <date> by <officer>**
-- Ready isn't affected: tick what was missing, and once every requirement is met they show **Ready** (and the arrow on the game's guild roster) at once
-
-When the snooze ends, the clock comes back if they still aren't Ready. There's no unsnooze. Snoozes are shared with every officer, including those who log in later, and only taken from officers. When two officers snooze the same character, the newest wins. A rank change clears the snooze. Older versions of the add-on ignore snoozes and keep everything else.
+Any rank change, up or down, clears that character's ticks, notes and overrides. A character promoted and later demoted back to a rank starts that rank's checklist afresh. That holds even on an officer's add-on that was offline the whole time, once the guild log (or an officer's date) shows when it came back to the rank.
 
 ### Promote to match
 
@@ -502,32 +528,23 @@ When a player has characters at different ranks, officers see each alt that's be
 
 The flag shows in three places:
 
-- **The player panel's Promotion tab**, as a line of its own under the alt's line, apart from its checklist.
+- **Rank management**: the player's **Match** row lists the alts to bring up.
 - **The panel under the game guild roster's member details**, when that alt is selected, saying which rank and why, for example **Promote to Officer to match Toolbox (Guild Master), this player's highest.** It shares the panel with the [out-of-date note](#out-of-date-guild-notes) suggestion when both apply.
 - **The game's guild roster list**, as the same up arrow as Ready for promotion, tinted blue. Hover it for the rank, for example **Promote to match: Officer**. An alt that's both behind and ready shows the blue arrow. `/agf probe ready` counts the alts to promote to match, lists each with its target rank, and says how many rows show the blue arrow.
 
 Members never see match flags.
 
-Each rank in the Promotion Requirements editor has an **Alts should match this rank** check box, beside the rank's name. It's ticked by default. Untick it and alts aren't matched to that rank: an alt is flagged with the next rank down that's still ticked, and isn't flagged at all when none between it and the player's highest rank are. For example, untick Officer, and an Officer's alt at Member is flagged **Promote to match: Veteran**. The setting is shared with every officer, the newest change wins, and flags update as soon as it changes. The guild master's rank has no box, since alts are never matched to it.
+Each rank in Rank management's [Requirements](#requirements) tab has an **Alts should match this rank** switch. It's ticked by default. Untick it and alts aren't matched to that rank: an alt is flagged with the next rank down that's still ticked, and isn't flagged at all when none between it and the player's highest rank are. For example, untick Officer, and an Officer's alt at Member is flagged **Promote to match: Veteran**. The setting is shared with every officer, the newest change wins, and flags update as soon as it changes. The guild master's rank has no switch, since alts are never matched to it.
 
-### In the player panel and the roster
+### The player panel's Rank tab
 
-An officer's player panel has four tabs: **Profile** (the player's main and alts), **Bio** (their location and bio), **Promotion**, and **Log** (membership dates and the rest, then history). The Promotion tab shows the player's highest rank, then one line per character with its rank. The character holding the player's checklist also shows its next rank, its progress, and **Ready** when it is, and its checklist opens on its own; the others say "checklist on <name>". Click a character's line (`[+]`) to open its last promotion ("Promoted on <date> by Thunderer") and its checklist, and click it again (`[-]`) to close them; a closed top line stays closed for the session. Each item has a check box: tick or untick a custom requirement with it. A needs-a-note item has a **Note:** box on the line under it: type the note, then tick the item (or press Enter). Once it's ticked, the box shows the saved note; change it and press Enter to save the new one. Unticking keeps the note in the box, ready to tick again. An automated item's box shows whether it's met, how close the character is ("5 of 7 days", "level 42 of 50", "seen 3 days ago", or "before tracking"; an approximate date is marked "(approx.)"), with **Override** or **Undo override** beside it. A failed check has a **Reason:** box under it for the override's optional reason. Hover an item to see who ticked or overrode it, when, and the note or reason. While a character's clock shows, a **Not ready** button sits under its checklist (see [Time requirement met](#time-requirement-met)).
+The [player panel](#the-player-panel) on the Guild Roster and the Friends page has a **Rank** tab for officers on anyone, and for a member on their own player only. It shows the player's standing and the rank promoted to ("Due · → Member"), the characters to promote, and each requirement with its detail ("30 days (needs 7)", "level 66 of 70", "met by override · Levels on an alt", or who ticked a check and its note). Officers work on it there as in the grid: tick checks (one that needs a note asks for it), right-click a failed automated requirement to override it or take the override back, and **Snooze** a Due player.
 
 Ticks, notes and overrides reach every officer's add-on through guild sync, including officers who were offline, who catch up when they log in. They're only taken from an officer's add-on, so nobody can tick their own items, even in an officer's name.
 
-On officers' rosters, the character holding a player's checklist shows **Ready** before its rank when it meets every requirement, and one whose time requirements are met shows the [clock icon](#time-requirement-met) there instead. Members never see either.
-
-### In the game's guild roster
-
-Select a member in the game's guild roster and the add-on's [player panel](#player-panel-from-the-guild-roster) opens for their player. Its **Promotion** tab shows all of that player's characters, with the player's one checklist open:
-
-- Officers see anyone's, and work on it there: tick and untick, notes, overrides with a reason, **Not ready**, opening and closing each character's checklist.
-- Members get the tab only on their own player, read-only, and never on anyone else's.
-
 ### Your own progress
 
-A member sees the Promotion tab in their own player panel only: each of their characters' items toward the next rank, with whether each is met and the automated items' progress ("5 of 7 days"). It's read-only, and it never shows notes, who ticked what, or anyone else's progress.
+A member sees the Rank tab on their own player only, read-only: their standing, and each requirement toward the next rank with whether it's met and its progress. It says "Only officers can change this checklist." and never shows anyone else's progress.
 
 ### Dates behind the checks
 
@@ -587,21 +604,22 @@ Long names wrap onto more lines at the spaces between words, and the drawer grow
 
 ### The window
 
-`/agf lfg` and **Open Guild LFG Board** open the add-on's new window on the board. It has one size and can be dragged. The sidebar has the add-on's name, then **Friends** (see [Friends](#friends)), **LFG** and **Greetings** (see [Editing greetings](#editing-greetings)), and **Settings** at the bottom, with your character and the add-on's version under it. The **gear** at the top right opens the LFG settings (**Show LFG button**, and the chat line for new groups); the **X** closes the window. The Settings page has a **Chat** tab with the chat tags switch, the same setting as `/agf tags`, and the **Alias tag color** and **Main's name tag color**: click a swatch, or **Custom...** for any color from the game's color picker, and the sample shows the tag in that color. They're the same colors as in the old window's options.
+`/agf lfg` and **Open Guild LFG Board** open the add-on's new window on the board. Its sidebar is described under [The add-on's window](#the-add-ons-window): **Roster**, **Friends** (see [Friends](#friends)), **LFG**, **Greetings** (see [Editing greetings](#editing-greetings)), **Rank management** for officers, and **Settings** at the bottom. The **gear** at the top right opens the LFG settings (**Show LFG button**, **Auto-list my parties**, **Show my party on the guild's board**, and the chat line for new groups); the **X** closes the window. The Settings page has a **Chat** tab with the chat tags switch, the same setting as `/agf tags`, and the **Alias tag color** and **Main's name tag color**: click a swatch, or **Custom...** for any color from the game's color picker, and the sample shows the tag in that color. They're the same colors as in the old window's options.
 
 ### The board
 
 At the top is **your party's card**:
 
 - **Solo:** **Start a group**, which lists you as a group of one. Your listing becomes your party's when someone joins, and ends after 30 minutes with nobody joining (a chat line tells you).
-- **Leading** (or the guild contact of a party whose leader isn't in the guild): your listing as others see it, with **Edit**, **Ask in guild**, **Find guildmates** and **Not looking**. **Find guildmates** (while your party is listed and has room; greyed out otherwise, and on an unlisted party with "List your party to find guildmates") opens a list in place of the board: guildmates online now whose level is in your listing's range and, for a dungeon, who play a role still open, each with **Invite** and **Whisper**. Then offline characters that fit, whose player is online on another character, shown as "Bobalt (22 Priest) · alt of Bob, online as Bobmain": their **Whisper** goes to the online character with a request to log over typed in, for you to send or not. You, your other characters and everyone in your party are left out; guildmates already in a listed group are marked "In a group" and listed last. Online guildmates come before alts, and within each your starred friends (a Friend or a Top 5) come first, marked with the star. The drawer's party section has the same **Find guildmates** button, which opens the board on the list. The list is built when it opens; **Back** returns to the board. **Edit** opens it in the card: **What's it for?** — **Dungeon** (search the list; dungeons that fit your level come first, and typing finds any dungeon), **Questing** (pick a zone from the list, your current zone chosen to start; zones that fit your level come first, the rest under Other levels, and the listing takes the zone's level range, or your party's levels 5 either way when the game has none), **Raid**, or **Other** (your own words) — and a **Note** of up to 60 characters. **Roles in your party** shows each member's role icon by their name; click a name to set their role from the ones their class plays. The leader (or contact) sets anyone's; in someone else's party, **My role** on the party's listing sets your own, and the listing shows it once the leader's add-on hears it. A role set here wins over the game's party menu, and is forgotten when that member leaves. Without one, a member's role is the game's party menu role, then their own role preference, then the first their class plays.
+- **Leading an unlisted party:** **Your party is Playing**, with **Open to guild** (it lists your party, so guildmates can ask to join). Guildmates see it as [Playing](#playing-parties) meanwhile.
+- **Leading** an open party (or the guild contact of a party whose leader isn't in the guild): **Open to the guild**, your listing as others see it, with **Edit**, **Ask in guild**, **Find guildmates** and **Stop looking** (your party stays together but shows as Playing). **Find guildmates** (while your party is open and has room; greyed out otherwise, and on a Playing party with "Open your party to the guild to find guildmates") opens a list in place of the board: guildmates online now whose level is in your listing's range and, for a dungeon, who play a role still open, each with **Invite** and **Whisper**. Then offline characters that fit, whose player is online on another character, shown as "Bobalt (22 Priest) · alt of Bob, online as Bobmain": their **Whisper** goes to the online character with a request to log over typed in, for you to send or not. You, your other characters and everyone in your party are left out; guildmates already in a listed group are marked "In a group" and listed last. Online guildmates come before alts, and within each your starred friends (a Friend or a Top 5) come first, marked with the star. The drawer's party section has the same **Find guildmates** button, which opens the board on the list. The list is built when it opens; **Back** returns to the board. **Edit** opens it in the card: **What's it for?** — **Dungeon** (search the list; dungeons that fit your level come first, and typing finds any dungeon), **Questing** (pick a zone from the list, your current zone chosen to start; zones that fit your level come first, the rest under Other levels, and the listing takes the zone's level range, or your party's levels 5 either way when the game has none), **Raid**, or **Other** (your own words) — and a **Note** of up to 60 characters. **Roles in your party** shows each member's role icon by their name; click a name to set their role from the ones their class plays. The leader (or contact) sets anyone's; in someone else's party, **My role** on the party's listing sets your own, and the listing shows it once the leader's add-on hears it. A role set here wins over the game's party menu, and is forgotten when that member leaves. Without one, a member's role is the game's party menu role, then their own role preference, then the first their class plays.
 - **In someone else's party:** the listing, read-only.
 
 Below it are four tabs:
 
 - **Relevant Parties · N:** large gold-bordered cards for groups you could join on this character: the purpose, level range and size; the members in class color, each with their role's icon in a dungeon (a crown for the leader, a star for your Top 5 [group friends](#group-friends)); role tiles on the right with their icons (open roles in color, filled ones grey); the note, **Ask to join** and **Whisper**. Then, under **Your alts could join**, small cards with the type, levels and leader (in class color; click to whisper) and a row of small role tiles.
 - **Nearby · N:** a **Nearby in <zone>** card listing the guildmates in your zone, one per line, their levels in a column left of their names in class color, for finding people to quest with.
-- **Other Parties · N:** small greyed cards for full groups and groups nothing of yours fits.
+- **Other Parties · N:** small greyed cards for full groups and groups nothing of yours fits, then under **Playing** the [Playing parties](#playing-parties).
 - **History:** your own recent parties, newest first, 20 at a time with **Show more**: the date, the dungeon when known, and the guildmates, with a star for Top 5 group friends (see [Group history](#group-history)).
 
 Click any name on the board (a card's members, Nearby, History) for a menu with the name at the top and **Whisper** under it. A click anywhere outside the menu closes it.
@@ -610,12 +628,18 @@ A dungeon is relevant when your level fits and a role you play (by your [role pr
 
 ### Listing your party
 
-- **Auto-list my parties** (in the LFG gear menu and the AddOns options) is **off by default**. Off, a party you form or come to lead isn't listed and you aren't asked anything: list it from the board's **Start a group** when you want to. A party filling up never lists it either.
-- **With Auto-list on**, becoming a party's leader (inviting someone, or being promoted in an unlisted party) lists it straight away for what it looks like it's for: the dungeon you're in, else questing in your zone, updated when you enter a dungeon (a purpose you set yourself is left alone). When the add-on can't tell, the drawer asks what it's for; ignoring the question means **Not looking**, which keeps it off the board, and there's a "don't ask for 30 minutes" choice for quick trading parties. **Not looking** or **End listing** keeps that party off the board for good.
+- **Auto-list my parties** (in the LFG gear menu and the AddOns options) is **off by default**. Off, a party you form or come to lead isn't listed and you aren't asked anything: list it from the board's **Open to guild** when you want to (**Start a group** when you're solo). A party filling up never lists it either.
+- **With Auto-list on**, becoming a party's leader (inviting someone, or being promoted in an unlisted party) lists it straight away for what it looks like it's for: the dungeon you're in, else questing in your zone, updated when you enter a dungeon (a purpose you set yourself is left alone). When the add-on can't tell, the drawer asks what it's for; ignoring the question means **Not looking**, which keeps it from being opened to the guild, and there's a "don't ask for 30 minutes" choice for quick trading parties. **Not looking** or **Stop looking** keeps that party from being listed for good. It can still show as [Playing](#playing-parties); turn off **Show my party on the guild's board** to keep it off the board entirely.
 - **A party with players outside the guild** (with Auto-list on) asks first whether to list it at all. If the leader isn't in the guild, the first guildmate to answer becomes the listing's contact.
 - With your LFG button hidden, nothing is listed; with Auto-list on, a chat line says your party wasn't listed and how to list it.
 - Taking over a listed party's lead keeps its listing, Auto-list or not.
-- A listing goes as soon as its party disbands or its leader chooses **Not looking**, and after 5 minutes without word from its party's add-ons. If its leader or contact logs off, it's handed to another guildmate in the party.
+- A listing goes as soon as its party disbands or its leader chooses **Stop looking**, and after 5 minutes without word from its party's add-ons. If its leader or contact logs off, it's handed to another guildmate in the party.
+
+### Playing parties
+
+A party you lead with a guildmate in it shows on the guild's boards as **Playing** while it isn't open to the guild, so everyone can see what the guild is up to: where it is (the dungeon, else the zone), how many are in it, and its leader. Nobody can ask to join a Playing party. Open it to the guild and it's an open listing instead; **Stop looking** and it's Playing again. It goes when the party breaks up, or after 5 minutes without word from it.
+
+**Show my party on the guild's board** (in the LFG gear menu and the AddOns options) is **on by default**. Turn it off to keep your party to yourselves until you open it; it leaves guildmates' boards at once. Only the party's leader's add-on shares it, and older versions of the add-on don't show Playing parties.
 
 ### Someone leaves
 
@@ -639,7 +663,7 @@ The button never glows while you're in a party, in combat or inside an instance 
 
 ### Role preferences
 
-Each character has its own role preferences: the roles you're willing to play on it. They start as every role its class can fill. To turn one off (say, a paladin you never heal on), log into that character and untick it on the [My Profile](#my-profile) tab. Only the roles that character's class can fill are listed. The player panel shows each character's role preferences next to it, as **Roles: Tank, DPS**.
+Each character has its own role preferences: the roles you're willing to play on it. They start as every role its class can fill. To turn one off (say, a paladin you never heal on), log into that character and untick it on the [My Profile](#my-profile) tab. Only the roles that character's class can fill are listed. The player panel's **Characters** tab shows each character's role preferences.
 
 Your role preferences reach the whole guild through [guild sync](#guild-sync), even while you're on another character or offline. Only the character itself can set them, not officers or anyone else. If your add-on sees a change in your character's name that you never made, it sends your real preferences back out to correct it, and warns you who passed it on.
 
@@ -647,7 +671,7 @@ Your role preferences reach the whole guild through [guild sync](#guild-sync), e
 
 Your add-on remembers, on your computer only, each party you've been in with guildmates: any party, not just listed ones. It records when, which guild characters, and the dungeon when it knows it (the one your party is listed for on the [Guild LFG Board](#guild-lfg-board), or the instance you're in). Guildmates joining later count as the same party, and so does reloading while in it. Your own alts never count. The history is never sent to anyone.
 
-A guildmate's player panel then shows **Grouped together 3 times** in its header, counted across all their characters, and its Log tab says when you last grouped. Players you've never grouped with show **Grouped together 0 times**. Guild Greet uses the same history to mark your [group friends](#group-friends) on their prompts. The history is never trimmed, however long it gets.
+A guildmate's player panel then shows **3 times** on its **Grouped** tile, counted across all their characters, the parties on its **Grouped** tab, and when you last grouped. Players you've never grouped with show **Never**. Guild Greet uses the same history to mark your [group friends](#group-friends) on their prompts. The history is never trimmed, however long it gets.
 
 ## Guild map
 
@@ -680,7 +704,7 @@ Two settings, in the window's **Settings** tab and the **Guild Map** page of the
 
 ## My Profile
 
-**My Profile** is a tab of the add-on's window, right below **Roster**: one place for everything about your own player. Click its tab, or type `/agf profile` to open the window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it reads everything again.
+**My Profile** is a tab of the old window (`/agf options`), its first: one place for everything about your own player. Click its tab, or type `/agf profile` to open the old window straight on it (typing it again while it's showing closes the window). Each time the tab comes into view, it reads everything again.
 
 It shows the player of the character you're logged in on: its alias and main at the top, for example **TheTool (Toolbox)**, then the main and each alt still in the guild, in its class color with its level. The character you're logged in on is marked **logged in**.
 
@@ -702,7 +726,7 @@ Below your characters, **Your other characters on this computer** lists the char
 
 Below the alias are your **Discord** username (up to 32 characters), **Location** (up to 40, for example "Ohio, evenings") and a **Bio** (up to 500, in a taller box that wraps onto several lines). Each box shows how many characters you've used. Type in one and press Enter (or click elsewhere) to save it; Escape puts back what was saved. Empty a box and save to stop sharing it.
 
-These belong to your player, not to one character: whichever of your characters you're on, you see and edit the same values, and the newest edit wins. They're saved and sent to the guild at once, with no officer approving them, and only your own characters and officers can change your location and bio (officers from your player panel's **Bio** tab). Your Discord name can also be set or cleared by an officer with **Set Discord…** (in the player panel). Other members can't change any of them. If someone's add-on passes on a change in your name that you never made, yours sends your real values back out, and you're warned who passed it on, as for role preferences. Guildmates see your Discord in your player panel's header, and your location and bio on its **Bio** tab, where you can also edit them.
+These belong to your player, not to one character: whichever of your characters you're on, you see and edit the same values, and the newest edit wins. They're saved and sent to the guild at once, with no officer approving them, and only your own characters and officers can change your location and bio (officers from your player panel's **Bio** tab). Your Discord name can also be set or cleared by an officer with **Set Discord…** (in the player panel's **⋯** menu). Other members can't change any of them. If someone's add-on passes on a change in your name that you never made, yours sends your real values back out, and you're warned who passed it on, as for role preferences. Guildmates see your Discord on your player panel's **Discord** tile, and your location and bio on its **Bio** tab, where you can also edit them.
 
 ### Characters and roles
 

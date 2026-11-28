@@ -289,6 +289,18 @@ test.test("friends page: Cancel backs out of Choose a friend without changing an
     test.assertEqual(0, #world.calls)
 end)
 
+test.test("friends page: an update waits while the picker's open, and Cancel shows it", function()
+    local world = setup({ "Anvil" })
+    click(world.page.cards[2])
+    local built = #world.shown
+    world.page:Update()
+    test.assertEqual(built, #world.shown, "the covered panel isn't built")
+
+    click(world.page.picker.cancel)
+    test.assertEqual(built + 1, #world.shown)
+    test.assertTrue(world.page.detail.shown)
+end)
+
 test.test("friends page: hovering a Friend shows the X, which removes them", function()
     local world = setup({ "Anvil", "Bolt" })
     local card = world.page.cards[1]
@@ -498,7 +510,9 @@ test.test("friends page: the detail tabs draw Characters, Bio, Grouped with Show
     test.assertEqual("Bio", detail.tabs.tabs[2].label.text)
     test.assertEqual("Grouped · 0", detail.tabs.tabs[3].label.text)
     test.assertEqual("Log", detail.tabs.tabs[4].label.text)
-    test.assertEqual(4, #detail.tabs.tabs)
+    -- The fifth, Rank, shows only with a checklist.
+    test.assertEqual(5, #detail.tabs.tabs)
+    test.assertFalse(detail.tabs.tabs[5].shown)
     local main, alt = detail.characterCards[1], detail.characterCards[2]
     test.assertEqual("Anvil", main.name.text)
     test.assertTrue(main.main.shown)
@@ -573,4 +587,10 @@ test.test("friends page: opened on a player with no card, none is selected and t
     world.gone = true
     world.page:Refresh("nobody")
     test.assertEqual(nil, world.page:Selected())
+end)
+
+test.test("friends page: the player panel has no ⋯ actions button", function()
+    local world = setup({ "Anvil" })
+
+    test.assertEqual(nil, rawget(world.page.detail, "actions"))
 end)

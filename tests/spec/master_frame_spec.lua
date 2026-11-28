@@ -70,8 +70,6 @@ local function newFrame()
     function frame:Show() self.shown = true end
     function frame:Hide() self.shown = false end
     function frame:SetTitle() end
-    function frame:SetStatus() end
-    function frame:SetRows() return true end
     function frame:SetConflicts() return true end
     function frame:SetRecruiters() return true end
     function frame:ShowPage(id)
@@ -116,43 +114,44 @@ local function loggedIn(profile)
 end
 
 local function registerProfileTests(profile)
-    test.test(profile .. " /agf and /agf roster open the frame on the Roster tab", function()
+    test.test(profile .. " /agf and /agf roster open the new window on the Guild Roster", function()
         local world, addon, frame = loggedIn(profile)
+        fakeFrames.install(world.environment)
 
         fixtures.slash(world, "")
-        test.assertTrue(frame.shown)
-        test.assertEqual("roster", frame:LastPage())
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("roster", addon.agfWindow:Page())
+        test.assertFalse(frame.shown, "the old window stays shut")
 
         fixtures.slash(world, "")
-        test.assertFalse(frame.shown)
+        test.assertFalse(addon.agfWindow:IsOpen())
 
         fixtures.slash(world, "roster")
-        test.assertTrue(frame.shown)
-        test.assertEqual("roster", addon.pages:Current())
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("roster", addon.agfWindow:Page())
     end)
 
-    test.test(profile .. " the minimap button opens the frame on the Roster tab, whatever tab showed last", function()
-        local _, addon, frame, launcher = loggedIn(profile)
-        addon.pages:Add("other", "Other", "other.blp")
+    test.test(profile .. " the minimap button opens the Guild Roster, whatever page showed last", function()
+        local world, addon, _, launcher = loggedIn(profile)
+        fakeFrames.install(world.environment)
 
         launcher.OnClick()
-        test.assertTrue(frame.shown)
-        test.assertEqual("roster", frame:LastPage())
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("roster", addon.agfWindow:Page())
 
-        -- Another tab is showing: the button brings the Roster tab back
-        -- instead of closing the frame.
-        addon.pages:Select("other")
+        -- Another page is showing: the button brings the Roster back
+        -- instead of closing the window.
+        addon.agfWindow:ShowPage("friends")
         launcher.OnClick()
-        test.assertTrue(frame.shown)
-        test.assertEqual("roster", frame:LastPage())
-        test.assertEqual("roster", addon.pages:Current())
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("roster", addon.agfWindow:Page())
 
-        -- Closed on another tab, it reopens on Roster.
-        addon.pages:Select("other")
-        frame:Hide()
+        -- Closed on another page, it reopens on the Roster.
+        addon.agfWindow:ShowPage("friends")
+        addon.agfWindow:Close()
         launcher.OnClick()
-        test.assertTrue(frame.shown)
-        test.assertEqual("roster", addon.pages:Current())
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("roster", addon.agfWindow:Page())
     end)
 
     test.test(profile .. " /agf options opens the frame on the Settings tab", function()
@@ -168,10 +167,11 @@ local function registerProfileTests(profile)
         test.assertTrue(frame.shown)
         test.assertEqual("settings", frame:LastPage())
 
-        -- /agf brings the Roster tab back.
+        -- /agf opens the Guild Roster in the new window.
+        fakeFrames.install(world.environment)
         fixtures.slash(world, "")
-        test.assertTrue(frame.shown)
-        test.assertEqual("roster", frame:LastPage())
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("roster", addon.agfWindow:Page())
     end)
 
     test.test(profile .. " /agf greet and the options' Edit Greetings button open the new window on Greetings", function()
@@ -194,19 +194,20 @@ local function registerProfileTests(profile)
         test.assertTrue(addon.settings:InHost("editGreetings", "options"))
     end)
 
-    test.test(profile .. " the old window has no Greetings tab; the rest of its tabs are unchanged", function()
+    test.test(profile .. " the old window has no Greetings or Roster tab; it opens on My Profile", function()
         local world, addon, frame = loggedIn(profile)
 
-        fixtures.slash(world, "")
+        fixtures.slash(world, "profile")
         test.assertTrue(frame.shown)
-        test.assertEqual("roster", frame:LastPage())
+        test.assertEqual("profile", frame:LastPage())
         local ids = {}
         local _, page
         for _, page in ipairs(addon.pages:Pages()) do
             table.insert(ids, page.id)
         end
         test.assertFalse(string.find(table.concat(ids, ","), "greetings", 1, true) ~= nil)
-        test.assertContains(table.concat(ids, ","), "roster,profile,recruitment,ads")
+        test.assertFalse(string.find(table.concat(ids, ","), "roster", 1, true) ~= nil)
+        test.assertContains(table.concat(ids, ","), "profile,recruitment,ads")
         test.assertEqual(nil, addon.GreetingsPage)
     end)
 
@@ -220,7 +221,7 @@ local function registerProfileTests(profile)
 
         -- Moving between tabs keeps the mode on.
         fixtures.slash(world, "options")
-        fixtures.slash(world, "")
+        fixtures.slash(world, "recruit")
         test.assertTrue(addon.settings:IsActive("greetMove"))
 
         -- Pressing Done moving locks them again.
@@ -235,15 +236,14 @@ local function registerProfileTests(profile)
         test.assertEqual("Move greeting pop-ups", addon.settings:Label("greetMove"))
     end)
 
-    test.test(profile .. " the guild window's button opens the frame on the Roster tab", function()
-        local world, addon, frame = loggedIn(profile)
-        addon.pages:Add("other", "Other", "other.blp")
-        addon.pages:Select("other")
+    test.test(profile .. " the guild window's button opens the Guild Roster", function()
+        local world, addon = loggedIn(profile)
+        fakeFrames.install(world.environment)
 
         addon.entryPoints.toggle()
 
-        test.assertTrue(frame.shown)
-        test.assertEqual("roster", addon.pages:Current())
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("roster", addon.agfWindow:Page())
         test.assertEqual(0, #world.messages)
     end)
 
@@ -266,7 +266,7 @@ for index = 1, #fixtures.PROFILES do
     registerProfileTests(fixtures.PROFILES[index])
 end
 
-test.test("the add-on compartment opens the frame on the Roster tab", function()
+test.test("the add-on compartment opens the Guild Roster", function()
     local world = fixtures.newEnvironment("Retail")
     local entry
     world.environment.AddonCompartmentFrame = {
@@ -283,10 +283,12 @@ test.test("the add-on compartment opens the frame on the Roster tab", function()
     world.loggedIn = true
     fixtures.fire(world, "PLAYER_LOGIN")
 
+    fakeFrames.install(world.environment)
     entry.func()
 
-    test.assertTrue(frame.shown)
-    test.assertEqual("roster", frame:LastPage())
+    test.assertTrue(addon.agfWindow:IsOpen())
+    test.assertEqual("roster", addon.agfWindow:Page())
+    test.assertFalse(frame.shown, "not the old window")
 end)
 
 test.test("no window closes on a right-click: every framework panel turns that off", function()
@@ -305,15 +307,15 @@ test.test("no window closes on a right-click: every framework panel turns that o
         end
     end
     listing:close()
-    test.assertTrue(checked >= 5, "found the panels")
+    test.assertTrue(checked >= 3, "found the panels")
 end)
 
 -- The specs stand in for RosterWindow.Create, so the real window's parts are
 -- checked in its source: every part Create keeps must come back from build.
 -- The patterns read RosterWindow.lua's layout: build's one-line
--- "    return host, scroll, ..." and Create's "local ok, host, ... = pcall(build,".
+-- "    return host, conflicts, ..." and Create's "local ok, host, ... = pcall(build,".
 -- A failure on "found build's return" means that layout changed, not a part.
-test.test("the roster window keeps every part build makes, the Guild Log and Promotions pages included", function()
+test.test("the roster window keeps every part build makes, the Guild Log page included", function()
     local handle = assert(io.open("Adapters/RosterWindow.lua", "r"))
     local source = handle:read("*a")
     handle:close()
@@ -325,7 +327,7 @@ test.test("the roster window keeps every part build makes, the Guild Log and Pro
         end
         return set
     end
-    local returned = string.match(source, "\n    return (host, scroll, [^\n]+)\nend\n")
+    local returned = string.match(source, "\n    return (host, conflicts, [^\n]+)\nend\n")
     local captured = string.match(source, "local ok, (host, [^=]+)=%s*pcall%(build,")
     test.assertTrue(returned ~= nil and captured ~= nil, "found build's return and Create's call")
     returned, captured = names(returned), names(captured)
@@ -339,8 +341,8 @@ test.test("the roster window keeps every part build makes, the Guild Log and Pro
             kept = kept + 1
         end
     end
-    test.assertTrue(kept >= 9, "found the window's parts")
-    test.assertTrue(returned.guildLog and returned.promotions, "build returns the Guild Log and Promotions pages")
+    test.assertTrue(kept >= 5, "found the window's parts")
+    test.assertTrue(returned.guildLog, "build returns the Guild Log page")
 end)
 
 -- A frame that remembers its one point, as the game reports it back.
@@ -398,4 +400,16 @@ test.test("a pop-out panel opens where it was left, else beside the master frame
     addon.MasterFrame.PlacePopOut(fallback, master, { point = "TOPLEFT", relativePoint = "TOPLEFT", x = "far",
         y = 1 }, screen)
     test.assertEqual(master, fallback.point[2])
+end)
+
+-- The old window draws no roster; its Settings page holds the guild note
+-- Conflicts button (see RosterWindow's build), until conflicts are retired.
+test.test("the old window has no roster, and its Settings page holds the Conflicts button", function()
+    local handle = assert(io.open("Adapters/RosterWindow.lua", "r"))
+    local source = handle:read("*a")
+    handle:close()
+    test.assertFalse(string.find(source, "host:Content(\"roster\")", 1, true) ~= nil, "no Roster page")
+    test.assertTrue(string.find(source, "local settingsPage = host:Content(\"settings\")", 1, true) ~= nil)
+    test.assertTrue(string.find(source, "CreateFrame(\"Button\", nil, settingsPage, \"UIPanelButtonTemplate\")", 1,
+        true) ~= nil, "the Conflicts button is made on the Settings page")
 end)

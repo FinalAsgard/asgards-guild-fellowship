@@ -609,6 +609,26 @@ function Store:SetLfgAutoList(enabled)
     return true
 end
 
+-- Whether the player's unlisted parties show on guildmates' Guild LFG
+-- Boards as Playing (Show my party on the guild's board); on unless turned
+-- off, and an unusable saved value reads as on. Account-wide.
+function Store:LfgShareParty()
+    return not (type(self.database) == "table" and self.database.lfgShareParty == false)
+end
+
+-- Turns Show my party on the guild's board on or off. An unusable existing
+-- value is left alone.
+function Store:SetLfgShareParty(enabled)
+    if type(self.database) ~= "table" or type(enabled) ~= "boolean" then
+        return false
+    end
+    if self.database.lfgShareParty ~= nil and type(self.database.lfgShareParty) ~= "boolean" then
+        return false
+    end
+    self.database.lfgShareParty = enabled
+    return true
+end
+
 -- The kinds of chat tag whose color can be chosen (see ChatAnnotator).
 local CHAT_TAG_KINDS = { alias = true, main = true }
 

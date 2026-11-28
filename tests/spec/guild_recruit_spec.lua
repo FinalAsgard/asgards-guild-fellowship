@@ -1398,8 +1398,6 @@ local function openRecruitment(world)
     function frame:Show() self.shown = true end
     function frame:Hide() self.shown = false end
     function frame:SetTitle() end
-    function frame:SetStatus() end
-    function frame:SetRows() return true end
     function frame:SetConflicts() return true end
     function frame:ShowPage(id) table.insert(self.pages, id) end
     function frame:SetRecruiters(rows)

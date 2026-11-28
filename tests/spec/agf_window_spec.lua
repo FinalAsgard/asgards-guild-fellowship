@@ -295,6 +295,69 @@ test.test("agf window: switching modules keeps the popup open and retitled; Sett
     test.assertFalse(window.gear.shown)
 end)
 
+test.test("agf window: a module's badge shows its count on its sidebar button, hidden at 0", function()
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/Theme.lua", "Adapters/Widgets.lua",
+        "Adapters/AgfWindow.lua")
+    local environment = fakeFrames.install({})
+    local waiting = 3
+    local window = addon.AgfWindow.Create({ environment = environment }, {
+        modules = { { id = "roster", label = "Roster", title = "Guild Roster", badge = function()
+            return waiting
+        end }, { id = "lfg", label = "LFG", title = "Guild LFG Board" } },
+        settings = addon.SettingsModel.Create(),
+        settingsTabs = {},
+    })
+    test.assertEqual(nil, window:Badge("roster"))
+    window:Open()
+
+    local badge = window:Badge("roster")
+    test.assertTrue(badge.shown)
+    test.assertEqual("3", badge.text.text)
+    test.assertEqual(nil, window:Badge("lfg"))
+    waiting = 0
+    window:RefreshBadges()
+    test.assertFalse(badge.shown)
+    -- Read again whenever a page shows.
+    waiting = 1
+    window:ShowPage("lfg")
+    test.assertTrue(badge.shown)
+    test.assertEqual("1", badge.text.text)
+end)
+
+test.test("agf window: an officer-only module shows under its group's label, and hides for a member", function()
+    local addon = test.newAddon("Core/SettingsModel.lua", "Adapters/Theme.lua", "Adapters/Widgets.lua",
+        "Adapters/AgfWindow.lua")
+    local environment = fakeFrames.install({})
+    local officer = true
+    local window = addon.AgfWindow.Create({ environment = environment }, {
+        modules = {
+            { id = "roster", label = "Roster", title = "Guild Roster" },
+            { id = "rank", label = "Rank management", title = "Rank management", group = "Officer",
+                visible = function()
+                    return officer
+                end },
+        },
+        settings = addon.SettingsModel.Create(),
+        settingsTabs = {},
+    })
+    window:Open("rank")
+
+    test.assertEqual("rank", window:Page())
+    test.assertTrue(window:ModuleShown("rank"))
+    test.assertTrue(window.buttonFor.rank.shown)
+    test.assertTrue(window.groupLabels.Officer.shown)
+    test.assertEqual("OFFICER", window.groupLabels.Officer.text)
+
+    -- Demoted: the module and its label go, and its page gives way.
+    officer = false
+    window:ShowPage("rank")
+    test.assertEqual("roster", window:Page())
+    test.assertFalse(window:ModuleShown("rank"))
+    test.assertFalse(window.buttonFor.rank.shown)
+    test.assertFalse(window.groupLabels.Officer.shown)
+    test.assertTrue(window.buttonFor.roster.shown)
+end)
+
 test.test("agf window: the Settings page's Chat tags switch round-trips the shared setting", function()
     local _, window, environment, settings, state = newWindow()
     window:Open("settings")

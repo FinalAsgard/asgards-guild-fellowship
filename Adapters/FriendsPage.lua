@@ -46,6 +46,8 @@ Page.__index = Page
 --   onRemove  function(playerId)
 --   onReplace function(playerId, key) -> true, or false and why not
 --   onError   function(text): tells the user why something didn't happen
+--   onRankTick, onSnooze  the panel's Rank tab (see
+--             PlayerDetailPanel.RankCallbacks)
 --   detail    function(playerId, groupedShown) -> PlayerDetailViewModel
 --             .Build's view (showing `groupedShown` Grouped parties, nil for
 --             the first page), or nil when the player is gone
@@ -172,7 +174,12 @@ end
 -- friends.
 function Page:buildDetail(side)
     local owner = self
+    local onRankTick, onRankSnooze = addon.PlayerDetailPanel.RankCallbacks(self.options, function()
+        owner:showDetail()
+    end)
     self.detail = addon.PlayerDetailPanel.Create(self.ui, side, {
+        onRankTick = onRankTick,
+        onRankSnooze = onRankSnooze,
         onWhisper = function(target)
             if owner.options.onWhisper ~= nil then
                 owner.options.onWhisper(target)
@@ -394,6 +401,15 @@ function Page:showDetail()
     self.detail:ShowPlayer(view or fallbackView(friend, self:isFriend(friend.playerId)))
 end
 
+-- The roster or a checklist changed: the selected player's panel shows
+-- what's new (an officer's Rank tab goes once they're not). The cards and
+-- an open picker stay as they are.
+function Page:Update()
+    if self.view ~= nil and not self.pickerOpen then
+        self:showDetail()
+    end
+end
+
 -- Whether `playerId` is one of the pinned Friends.
 function Page:isFriend(playerId)
     local index
@@ -477,6 +493,8 @@ end
 function Page:ClosePicker()
     self.replacing = nil
     self:showPicker(false)
+    -- What changed while the picker covered the panel (see Update) shows.
+    self:showDetail()
 end
 
 -- Whether Choose a friend is showing.

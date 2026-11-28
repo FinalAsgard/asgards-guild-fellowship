@@ -297,6 +297,42 @@ test.test("time met counts before-tracking dates, player days and an officer's o
     test.assertEqual(nil, due.fresh)
 end)
 
+test.test("days remaining per time item, and the most of them for the status", function()
+    local inputs, addon = newGuild({ early = 4, guessed = 4, veteran = 4, unknown = 4, waived = 4, done = 4 })
+    local joined = timeItem(inputs, 4, "char-guild-days", 7)
+    local atRank = timeItem(inputs, 4, "rank-days", 14)
+    local rules = manualItem(inputs, 4)
+    inputs.dates:Offer("early", "joined", { time = NOW - 2 * DAY, source = "log" })
+    inputs.dates:Offer("early", "rankSince", { time = NOW - 10 * DAY, rank = 4, source = "log" })
+    inputs.dates:Offer("guessed", "joined", { time = NOW - 3 * DAY, source = "first-seen" })
+    inputs.dates:Offer("veteran", "joined", { time = NOW, source = "before-tracking" })
+    inputs.dates:Offer("veteran", "rankSince", { time = NOW - 20 * DAY, rank = 4, source = "log" })
+    inputs.dates:Offer("waived", "joined", { time = NOW - DAY, source = "log" })
+    inputs.dates:Offer("waived", "rankSince", { time = NOW - 20 * DAY, rank = 4, source = "log" })
+    inputs.checks:Set("waived", joined, true, nil, OFFICER, NOW)
+    inputs.dates:Offer("done", "joined", { time = NOW - 30 * DAY, source = "log" })
+    inputs.dates:Offer("done", "rankSince", { time = NOW - 30 * DAY, rank = 4, source = "log" })
+
+    local item, status = statusOf(inputs, addon, "early", joined.id)
+    test.assertEqual(5, item.remaining)
+    test.assertEqual(4, (statusOf(inputs, addon, "early", atRank.id)).remaining)
+    test.assertEqual(nil, (statusOf(inputs, addon, "early", rules.id)).remaining, "not a time item")
+    test.assertEqual(5, status.remaining, "the last time item still open")
+
+    -- An approximate date counts from that date; an unknown one says nothing.
+    item, status = statusOf(inputs, addon, "guessed", joined.id)
+    test.assertEqual(4, item.remaining)
+    test.assertEqual(nil, status.remaining, "the unknown rank date may hold it longer: no countdown")
+    test.assertEqual(nil, (statusOf(inputs, addon, "guessed", atRank.id)).remaining)
+
+    -- Before tracking, an override, and met all have none to go.
+    test.assertEqual(nil, (select(2, statusOf(inputs, addon, "veteran", joined.id))).remaining)
+    test.assertEqual(nil, (statusOf(inputs, addon, "waived", joined.id)).remaining)
+    test.assertEqual(nil, (select(2, statusOf(inputs, addon, "waived", joined.id))).remaining)
+    test.assertEqual(nil, (select(2, statusOf(inputs, addon, "done", joined.id))).remaining)
+    test.assertEqual(nil, (select(2, statusOf(inputs, addon, "unknown", joined.id))).remaining)
+end)
+
 test.test("time met ignores other kinds, and a rank with no time item never shows it", function()
     local inputs, addon = newGuild({ timed = 4, untimed = 3 })
     timeItem(inputs, 4, "char-guild-days", 7)

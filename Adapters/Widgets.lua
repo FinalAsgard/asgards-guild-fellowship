@@ -18,7 +18,18 @@ local Widgets = {
     MENU_LEVEL = 100,
     TOGGLE_WIDTH = 34,
     TOGGLE_HEIGHT = 18,
+    -- A check box, and the game's check mark drawn in it.
+    CHECK_SIZE = 18,
+    CHECK_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Check",
+    CHIP_CLEAR_TEXTURE = "Interface\\Buttons\\UI-StopButton",
+    CHIP_CLEAR_SIZE = 18,
     INPUT_HEIGHT = 26,
+    -- A pooled list's scroll bar, and its thumb at its shortest.
+    SCROLLBAR_WIDTH = 6,
+    SCROLLBAR_MIN_THUMB = 24,
+    -- A text prompt, and its multiline field.
+    PROMPT_WIDTH = 360,
+    PROMPT_MULTILINE_HEIGHT = 96,
     DOT_SIZE = 6,
     INFO_SIZE = 16,
     -- A stepper's buttons and number, and how holding a button repeats:
@@ -347,6 +358,50 @@ function UI:TextButton(parent, label, width, onClick)
         end
     end)
     return button
+end
+
+-- A rounded chip naming an active filter, with an X that clears it:
+-- `onClear` runs on a click of the X. SetLabel names the filter and sizes
+-- the chip to fit.
+function UI:Chip(parent, onClear)
+    local chip = self:frame("Frame", parent)
+    chip:SetHeight(Widgets.BUTTON_HEIGHT - 4)
+    round(chip, Theme.RADIUS.button, "raised", "border")
+    chip.label = self:Text(chip, "", "semibold", "small", "text")
+    chip.label:SetPoint("LEFT", chip, "LEFT", Theme.SPACING.s, 0)
+    chip.clear = self:IconButton(chip, Widgets.CHIP_CLEAR_TEXTURE, Widgets.CHIP_CLEAR_SIZE, function()
+        if onClear ~= nil then
+            onClear()
+        end
+    end)
+    chip.clear:SetPoint("RIGHT", chip, "RIGHT", -Theme.SPACING.xs, 0)
+    function chip.SetLabel(_, text)
+        chip.label:SetText(text or "")
+        chip:SetWidth((chip.label:GetStringWidth() or 0) + Widgets.CHIP_CLEAR_SIZE + 2 * Theme.SPACING.s
+            + Theme.SPACING.xs)
+    end
+    return chip
+end
+
+-- A one-line tooltip on `frame` (a button, say) while it's hovered, kept
+-- as `frame.hint` too. Hooked, so the frame's own mouseover still runs.
+function UI:Hint(frame, text)
+    local environment = self.environment
+    frame.hint = text
+    frame:HookScript("OnEnter", function(self)
+        local tooltip = environment.GameTooltip
+        if type(tooltip) == "table" and type(self.hint) == "string" then
+            tooltip:SetOwner(self, "ANCHOR_TOP")
+            tooltip:SetText(self.hint, 1, 1, 1, 1, true)
+            tooltip:Show()
+        end
+    end)
+    frame:HookScript("OnLeave", function()
+        local tooltip = environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:Hide()
+        end
+    end)
 end
 
 -- A small round "i" that shows `text()` (a function, read on each
@@ -766,6 +821,36 @@ function UI:Toggle(parent, onChange)
     return switch
 end
 
+-- A small square check box, green with a check mark while checked.
+-- `onChange(wanted)` runs on a click with the state asked for; the owner
+-- calls SetChecked once it holds.
+function UI:CheckBox(parent, onChange)
+    local box = self:frame("Button", parent)
+    box:SetSize(Widgets.CHECK_SIZE, Widgets.CHECK_SIZE)
+    round(box, Theme.RADIUS.small, "raised", "border")
+    box.mark = box:CreateTexture(nil, "ARTWORK")
+    box.mark:SetTexture(Widgets.CHECK_TEXTURE)
+    box.mark:SetPoint("TOPLEFT", box, "TOPLEFT", -2, 2)
+    box.mark:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 2, -2)
+    box.mark:SetVertexColor(Theme.Color("text"))
+    function box.SetChecked(_, checked)
+        box.checked = checked == true
+        box.mark:SetShown(box.checked)
+        box:SetFill(box.checked and "green" or "raised")
+        box:SetBorder(not box.checked and "border" or nil)
+    end
+    function box.IsChecked()
+        return box.checked == true
+    end
+    box:SetScript("OnClick", function(self)
+        if onChange ~= nil then
+            onChange(not self.checked)
+        end
+    end)
+    box:SetChecked(false)
+    return box
+end
+
 -- Scrolling -----------------------------------------------------------------
 
 -- A list that scrolls with the mouse wheel, `step` pixels a notch: a scroll
@@ -788,6 +873,182 @@ function UI:ScrollList(parent, step, width)
         end
     end)
     return area, list
+end
+
+-- A scroll list for long lists (the roster's hundreds of players): it
+-- builds only enough row frames to fill its height, never one per row,
+-- places them where ListWindow says, and fills them again as it scrolls.
+-- While the rows don't all fit, a slim scroll bar runs down its right edge:
+-- drag its thumb, or click the track, to jump through the list.
+-- options:
+--   height    each row's height: a number, or function(row) -> height
+--   gap       space left under each row's frame, counted in its height
+--             (default 0)
+--   build     function(kind, parent) -> a new frame for a row of `kind`
+--             (the row's `kind` field, "row" without one)
+--   fill      function(frame, row, index): shows `row` on `frame`
+--   step      pixels a mouse wheel notch scrolls (default 48)
+--   viewport  the height to lay out for while the frame can't say
+-- SetRows(rows, keep) shows `rows`, keeping row index `keep` (optional) in
+-- view; ScrollTo(offset) scrolls; Offset() and Rows() read them back, and
+-- Built(kind) counts the frames made for `kind`. `list.bar` is the scroll
+-- bar.
+function UI:PooledList(parent, options)
+    local list = self:frame("Frame", parent)
+    list:SetClipsChildren(true)
+    list:EnableMouseWheel(true)
+    local state = { rows = {}, offset = 0, pools = {} }
+    local bar = self:frame("Slider", list)
+    bar:SetOrientation("VERTICAL")
+    bar:SetWidth(Widgets.SCROLLBAR_WIDTH)
+    bar:SetPoint("TOPRIGHT", list, "TOPRIGHT", 0, 0)
+    bar:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", 0, 0)
+    bar:SetMinMaxValues(0, 1)
+    bar:SetValueStep(1)
+    bar.track = bar:CreateTexture(nil, "BACKGROUND")
+    bar.track:SetTexture(Theme.TEXTURES.white)
+    bar.track:SetVertexColor(Theme.Color("raised"))
+    bar.track:SetAllPoints(bar)
+    bar.thumb = bar:CreateTexture(nil, "ARTWORK")
+    bar.thumb:SetTexture(Theme.TEXTURES.white)
+    bar.thumb:SetVertexColor(Theme.Color("muted"))
+    bar.thumb:SetSize(Widgets.SCROLLBAR_WIDTH, Widgets.SCROLLBAR_MIN_THUMB)
+    bar:SetThumbTexture(bar.thumb)
+    bar:SetScript("OnEnter", function(self)
+        self.thumb:SetVertexColor(Theme.Color("text"))
+    end)
+    bar:SetScript("OnLeave", function(self)
+        self.thumb:SetVertexColor(Theme.Color("muted"))
+    end)
+    bar:Hide()
+    list.bar = bar
+    local function rowHeight(row)
+        if type(options.height) == "function" then
+            return options.height(row)
+        end
+        return options.height
+    end
+    local function height()
+        if type(options.height) ~= "function" then
+            return options.height
+        end
+        return function(index)
+            return rowHeight(state.rows[index])
+        end
+    end
+    local function viewport()
+        local ok, shown = pcall(list.GetHeight, list)
+        if ok and type(shown) == "number" and shown > 0 then
+            return shown
+        end
+        return options.viewport or 0
+    end
+    local function take(kind)
+        local pool = state.pools[kind]
+        if pool == nil then
+            pool = { frames = {}, used = 0 }
+            state.pools[kind] = pool
+        end
+        pool.used = pool.used + 1
+        local frame = pool.frames[pool.used]
+        if frame == nil then
+            frame = options.build(kind, list)
+            pool.frames[pool.used] = frame
+        end
+        return frame
+    end
+    function list.Layout()
+        local shownHeight = viewport()
+        local window = addon.ListWindow.Visible(#state.rows, height(), shownHeight, state.offset)
+        state.offset = window.offset
+        -- The bar, while there's more than fits; the rows stop short of it.
+        local most = math.max(0, window.total - shownHeight)
+        local inset = 0
+        if most > 0 and shownHeight > 0 then
+            inset = Widgets.SCROLLBAR_WIDTH + Theme.SPACING.xs
+            -- Setting the bar runs its OnValueChanged, which mustn't scroll.
+            state.syncing = true
+            bar:SetMinMaxValues(0, most)
+            bar:SetValue(state.offset)
+            state.syncing = false
+            bar.thumb:SetHeight(math.max(Widgets.SCROLLBAR_MIN_THUMB, shownHeight * shownHeight / window.total))
+            bar:Show()
+        else
+            bar:Hide()
+        end
+        local kind, pool
+        for kind, pool in pairs(state.pools) do
+            pool.used = 0
+        end
+        if window.first ~= nil then
+            local index
+            for index = window.first, window.last do
+                -- A row with no height has no top, and gets no frame.
+                local top = window.tops[index]
+                if top ~= nil then
+                    local row = state.rows[index]
+                    local frame = take(row.kind or "row")
+                    options.fill(frame, row, index)
+                    frame:ClearAllPoints()
+                    frame:SetPoint("TOPLEFT", list, "TOPLEFT", 0, -top)
+                    frame:SetPoint("RIGHT", list, "RIGHT", -inset, 0)
+                    frame:SetHeight(rowHeight(row) - (options.gap or 0))
+                    frame:Show()
+                end
+            end
+        end
+        for kind, pool in pairs(state.pools) do
+            local index
+            for index = pool.used + 1, #pool.frames do
+                pool.frames[index]:Hide()
+            end
+        end
+    end
+    function list.SetRows(_, rows, keep)
+        state.rows = rows or {}
+        if keep ~= nil then
+            state.offset = addon.ListWindow.KeepInView(keep, #state.rows, height(), viewport(), state.offset)
+        end
+        list.Layout()
+    end
+    function list.ScrollTo(_, offset)
+        state.offset = offset or 0
+        list.Layout()
+    end
+    function list.Offset()
+        return state.offset
+    end
+    function list.Rows()
+        return state.rows
+    end
+    function list.Built(_, kind)
+        local pool = state.pools[kind or "row"]
+        return pool and #pool.frames or 0
+    end
+    -- The frames showing rows now.
+    function list.Shown()
+        local shown = {}
+        local _, pool
+        for _, pool in pairs(state.pools) do
+            local index
+            for index = 1, pool.used do
+                table.insert(shown, pool.frames[index])
+            end
+        end
+        return shown
+    end
+    list:SetScript("OnMouseWheel", function(_, delta)
+        list:ScrollTo(state.offset - delta * (options.step or 48))
+    end)
+    bar:SetScript("OnValueChanged", function(_, value)
+        if not state.syncing and type(value) == "number" then
+            list:ScrollTo(value)
+        end
+    end)
+    list:SetScript("OnSizeChanged", function()
+        list.Layout()
+    end)
+    return list
 end
 
 -- Text entry ----------------------------------------------------------------
@@ -969,6 +1230,128 @@ function UI:TextInput(parent, width, maxLetters, onChange, options)
     end)
     field.counter:SetText("0/" .. maxLetters)
     return field
+end
+
+-- A small dialog over everything that asks for one piece of text: a title,
+-- a field, and Save and Cancel. Open(options) shows it:
+--   title      what's asked ("Alias for Toolbox")
+--   text       what the field starts with
+--   maxLetters the most characters it holds
+--   maxBytes   the most bytes, for a multiline field (an accented letter
+--              takes two)
+--   multiline  true for a taller field that keeps line breaks (a bio)
+--   onSave     function(text): Save, or Enter in a one-line field
+-- A click outside it, Cancel or Escape closes it without saving. Close(),
+-- IsOpen() and Save() (as the button does) are there for its owner.
+function UI:TextPrompt(parent)
+    local screen = self.environment.UIParent or parent
+    local pad = Theme.SPACING.l
+    local width = Widgets.PROMPT_WIDTH
+    local prompt = self:Panel(screen, { fill = "raised" })
+    prompt:SetFrameStrata("FULLSCREEN_DIALOG")
+    prompt:SetWidth(width)
+    prompt:SetPoint("CENTER", screen, "CENTER", 0, 80)
+    prompt:EnableMouse(true)
+    prompt:Hide()
+    local catcher = self:frame("Button", screen)
+    catcher:SetAllPoints(screen)
+    catcher:SetFrameStrata("FULLSCREEN_DIALOG")
+    catcher:RegisterForClicks("AnyDown")
+    catcher:SetScript("OnClick", function()
+        prompt:Close()
+    end)
+    catcher:Hide()
+    prompt.catcher = catcher
+    prompt:SetScript("OnHide", function()
+        prompt.open = false
+        catcher:Hide()
+    end)
+    if parent ~= screen and type(parent.HookScript) == "function" then
+        parent:HookScript("OnHide", function()
+            prompt:Hide()
+        end)
+    end
+    prompt.title = self:Text(prompt, "", "semibold", "title", "text")
+    prompt.title:SetPoint("TOPLEFT", prompt, "TOPLEFT", pad, -pad)
+    prompt.title:SetPoint("RIGHT", prompt, "RIGHT", -pad, 0)
+    prompt.title:SetJustifyH("LEFT")
+    prompt.single = self:field(prompt, width - 2 * pad)
+    prompt.multi = self:field(prompt, width - 2 * pad)
+    prompt.multi:SetHeight(Widgets.PROMPT_MULTILINE_HEIGHT)
+    prompt.multi.box:SetMultiLine(true)
+    prompt.multi.box:ClearAllPoints()
+    prompt.multi.box:SetPoint("TOPLEFT", prompt.multi, "TOPLEFT", Theme.SPACING.s, -5)
+    prompt.multi.box:SetPoint("BOTTOMRIGHT", prompt.multi, "BOTTOMRIGHT", -Theme.SPACING.s, 5)
+    local _, field
+    for _, field in ipairs({ prompt.single, prompt.multi }) do
+        field:SetPoint("TOPLEFT", prompt.title, "BOTTOMLEFT", 0, -Theme.SPACING.m)
+        field.box:SetScript("OnEscapePressed", function()
+            prompt:Close()
+        end)
+    end
+    prompt.single.box:SetScript("OnEnterPressed", function()
+        prompt:Save()
+    end)
+    prompt.save = self:Button(prompt, "Save", "primary", function()
+        prompt:Save()
+    end)
+    prompt.save:SetWidth(90)
+    prompt.save:SetPoint("BOTTOMRIGHT", prompt, "BOTTOMRIGHT", -pad, pad)
+    prompt.cancel = self:Button(prompt, "Cancel", "secondary", function()
+        prompt:Close()
+    end)
+    prompt.cancel:SetWidth(90)
+    prompt.cancel:SetPoint("RIGHT", prompt.save, "LEFT", -Theme.SPACING.s, 0)
+
+    function prompt.Open(_, options)
+        prompt.options = options
+        prompt.title:SetText(options.title or "")
+        local shown = options.multiline and prompt.multi or prompt.single
+        local hidden = options.multiline and prompt.single or prompt.multi
+        hidden:Hide()
+        shown:Show()
+        prompt.field = shown
+        shown.box:SetMaxLetters(options.maxLetters or 0)
+        if options.maxBytes ~= nil then
+            -- The game's cap counts the terminating zero.
+            shown.box:SetMaxBytes(options.maxBytes + 1)
+        end
+        shown:SetValue(options.text or "")
+        local fieldHeight = options.multiline and Widgets.PROMPT_MULTILINE_HEIGHT or Widgets.INPUT_HEIGHT
+        prompt:SetHeight(2 * pad + 22 + Theme.SPACING.m + fieldHeight + Theme.SPACING.l + Widgets.BUTTON_HEIGHT)
+        prompt.open = true
+        catcher:SetFrameLevel(Widgets.MENU_LEVEL - 1)
+        prompt:SetFrameLevel(Widgets.MENU_LEVEL)
+        catcher:Show()
+        prompt:Show()
+        if type(prompt.Raise) == "function" then
+            prompt:Raise()
+        end
+        shown.box:SetFocus()
+        if type(shown.box.HighlightText) == "function" then
+            shown.box:HighlightText()
+        end
+    end
+    function prompt.Save()
+        -- A closed prompt (cancelled, or already saved) saves nothing.
+        if not prompt.open then
+            return
+        end
+        local options, field = prompt.options, prompt.field
+        prompt:Close()
+        if options ~= nil and field ~= nil and options.onSave ~= nil then
+            options.onSave(field:GetValue())
+        end
+    end
+    function prompt.Close()
+        prompt.open = false
+        catcher:Hide()
+        prompt:Hide()
+    end
+    function prompt.IsOpen()
+        return prompt.open == true
+    end
+    return prompt
 end
 
 -- Signals -------------------------------------------------------------------

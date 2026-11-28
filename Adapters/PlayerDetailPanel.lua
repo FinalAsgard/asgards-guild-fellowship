@@ -10,6 +10,13 @@ local _, addon = ...
 --
 -- It takes the view and callbacks only, with no Friends-specific code, so
 -- the roster can embed it as-is when it moves to the new window.
+--
+-- The Rank tab, shown only when the view has a checklist (an officer on
+-- anyone, a member on their own player), has the player's status, the
+-- rank promoted to, the characters to promote, and every requirement with
+-- its detail. An officer ticks checks there (one that needs a note asks
+-- for it), right-clicks a failed automated one to override it, and snoozes
+-- a Due player; a member's own is read-only.
 local Theme = addon.Theme
 local DOT = " · "
 
@@ -26,12 +33,28 @@ local PlayerDetailPanel = {
     THEIRS_COLOR = "ffd9b038",
     LINE_HEIGHT = 18,
     PARTY_MEMBER_HEIGHT = 16,
+    -- The ⋯ actions button, and the Bio tab's Edit buttons.
+    ACTIONS = "•••",
+    ACTIONS_WIDTH = 32,
+    EDIT = "Edit",
+    EDIT_WIDTH = 44,
     TABS = {
         { id = "characters", label = "Characters" },
         { id = "bio", label = "Bio" },
         { id = "grouped", label = "Grouped" },
         { id = "log", label = "Log" },
+        { id = "rank", label = "Rank" },
     },
+    RANK_ROW_HEIGHT = 38,
+    -- A requirement's detail color, by its state.
+    RANK_COLORS = { met = "green", missing = "red", overridden = "gold", ticked = "muted", unticked = "muted" },
+    READ_ONLY = "Only officers can change this checklist.",
+    NO_REQUIREMENTS = "This rank has no requirements to show.",
+    OVERRIDE = "Override as met...",
+    REMOVE_OVERRIDE = "Remove override",
+    -- The most a note or reason holds (PromotionChecks' limit).
+    NOTE_LETTERS = 100,
+    SNOOZE = "Snooze",
 }
 addon.PlayerDetailPanel = PlayerDetailPanel
 
@@ -81,6 +104,30 @@ local function subLine(header)
     return table.concat(parts, DOT)
 end
 
+-- The Rank tab's onRankTick and onRankSnooze for a page whose `options`
+-- has onRankTick(key, item, ticked, note) and onSnooze(key) (each true, or
+-- false and why not) and onError(text); `refresh()` shows the panel again
+-- after each.
+function PlayerDetailPanel.RankCallbacks(options, refresh)
+    local function report(ok, why, what)
+        if ok == false and options.onError ~= nil then
+            options.onError(what .. " wasn't changed: " .. tostring(why) .. ".")
+        end
+        refresh()
+    end
+    return function(view, item, ticked, note)
+        if options.onRankTick ~= nil and view.rank ~= nil then
+            local ok, why = options.onRankTick(view.rank.key, item, ticked, note)
+            report(ok, why, (view.header.name or "") .. "'s checklist")
+        end
+    end, function(view)
+        if options.onSnooze ~= nil and view.rank ~= nil then
+            local ok, why = options.onSnooze(view.rank.key)
+            report(ok, why, (view.header.name or "") .. "'s snooze")
+        end
+    end
+end
+
 -- Draws the panel on `parent` with widget factory `ui`. callbacks (each
 -- given the target or player id, then the view):
 --   onWhisper       function(target, view)
@@ -89,6 +136,20 @@ end
 --   onMoreGrouped   function(view): Show more on the Grouped tab; the
 --                   owner shows the view again with another page
 --   formatDate      function(at) -> text, for the Grouped tab's dates
+--   onCharacterMenu function(card, character, view): a right click on a
+--                   Characters tab card (optional; without it, no menu)
+--   onActions       function(button, view): the ⋯ button left of the star
+--                   (optional; without it, there's no button). The owner's
+--                   menu holds Whisper and Invite, so the panel then has
+--                   no buttons for them.
+--   onEditProfile   function(field, view): Edit by the Bio tab's Location
+--                   or Bio heading ("location" or "bio"), shown while
+--                   view.canEdit is true
+--   onRankTick      function(view, item, ticked, note): the Rank tab ticks
+--                   or unticks requirement `item` (an override for an
+--                   automated one), with `note`; the owner saves it and
+--                   shows the view again
+--   onRankSnooze    function(view): the Rank tab's Snooze, likewise
 -- ShowPlayer(view) fills and shows it; ShowEmpty(text) shows only `text`.
 function PlayerDetailPanel.Create(ui, parent, callbacks)
     callbacks = callbacks or {}
@@ -142,6 +203,14 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         end
     end)
     panel.star:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -pad, -pad)
+    if callbacks.onActions ~= nil then
+        panel.actions = ui:TextButton(panel, PlayerDetailPanel.ACTIONS, PlayerDetailPanel.ACTIONS_WIDTH, function(button)
+            if state.view ~= nil then
+                callbacks.onActions(button, state.view)
+            end
+        end)
+        panel.actions:SetPoint("RIGHT", panel.star, "LEFT", -Theme.SPACING.xs, 0)
+    end
     -- Gold for a Friend, grey to add one, dim when every slot is taken.
     local function tintStar(hovered)
         local header = state.view and state.view.header or {}
@@ -177,6 +246,13 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         box.value:SetWordWrap(false)
         panel.tiles[index] = box
     end
+    -- The tiles sit under Whisper and Invite, or under the sub line when
+    -- the ⋯ menu has them instead.
+    local tilesUnder = callbacks.onActions ~= nil and panel.sub or panel.whisper
+    if callbacks.onActions ~= nil then
+        panel.whisper:Hide()
+        panel.invite:Hide()
+    end
     -- Each tile takes a quarter of the width.
     local function layoutTiles(width)
         local gap = Theme.SPACING.s
@@ -186,7 +262,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         for tileIndex = 1, #panel.tiles do
             local box = panel.tiles[tileIndex]
             box:ClearAllPoints()
-            box:SetPoint("TOPLEFT", panel.whisper, "BOTTOMLEFT", (tileIndex - 1) * (tileWidth + gap), -Theme.SPACING.m)
+            box:SetPoint("TOPLEFT", tilesUnder, "BOTTOMLEFT", (tileIndex - 1) * (tileWidth + gap), -Theme.SPACING.m)
             box:SetWidth(tileWidth)
         end
     end
@@ -222,7 +298,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         end
     end)
     panel.area, panel.list = area, list
-    panel.characterCards, panel.lines, panel.parties = {}, {}, {}
+    panel.characterCards, panel.lines, panel.parties, panel.edits = {}, {}, {}, {}
     panel.more = ui:Button(list, "Show more", "secondary", function()
         if state.view ~= nil and callbacks.onMoreGrouped ~= nil then
             callbacks.onMoreGrouped(state.view)
@@ -230,6 +306,16 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     end)
     panel.more:SetWidth(120)
     panel.more:Hide()
+    panel.rankRows = {}
+    panel.snooze = ui:Button(list, PlayerDetailPanel.SNOOZE, "secondary", function()
+        if state.view ~= nil and callbacks.onRankSnooze ~= nil then
+            callbacks.onRankSnooze(state.view)
+        end
+    end)
+    panel.snooze:SetWidth(80)
+    panel.snooze:Hide()
+    panel.menu = ui:ContextMenu(panel)
+    panel.prompt = ui:TextPrompt(panel)
 
     -- Places `frame` at height `top` of the list, across it.
     local function place(frame, top, height)
@@ -255,10 +341,31 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     local function characterCard(index)
         local card = panel.characterCards[index]
         if card == nil then
-            card = addon.PlayerCards.Character(ui, list)
+            local onRightClick
+            if callbacks.onCharacterMenu ~= nil then
+                onRightClick = function(clicked)
+                    if state.view ~= nil and clicked.fields ~= nil then
+                        callbacks.onCharacterMenu(clicked, clicked.fields, state.view)
+                    end
+                end
+            end
+            card = addon.PlayerCards.Character(ui, list, onRightClick)
             panel.characterCards[index] = card
         end
         return card
+    end
+    -- The Edit button for Bio heading `index`, made on first use.
+    local function editButton(index)
+        local button = panel.edits[index]
+        if button == nil then
+            button = ui:TextButton(list, PlayerDetailPanel.EDIT, PlayerDetailPanel.EDIT_WIDTH, function(self)
+                if state.view ~= nil and callbacks.onEditProfile ~= nil then
+                    callbacks.onEditProfile(self.field, state.view)
+                end
+            end)
+            panel.edits[index] = button
+        end
+        return button
     end
     -- A Grouped party: its date and dungeon or "Party", then its members.
     local function partyRow(index)
@@ -285,8 +392,8 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
 
     -- Bio and Log rows: section headings, lines, history entries and empty
     -- states.
-    local function textRows(rows, top)
-        local used = 0
+    local function textRows(rows, top, editable)
+        local used, edits = 0, 0
         local rowIndex
         for rowIndex = 1, #(rows or {}) do
             local row = rows[rowIndex]
@@ -314,17 +421,155 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
             text:SetText(words)
             text.kind = row.kind
             place(text, top, PlayerDetailPanel.LINE_HEIGHT)
+            if editable and row.kind == "section" and row.field ~= nil then
+                edits = edits + 1
+                local button = editButton(edits)
+                button.field = row.field
+                button:ClearAllPoints()
+                button:SetPoint("RIGHT", list, "RIGHT", 0, 0)
+                button:SetPoint("TOP", text, "TOP", 0, 2)
+                button:Show()
+            end
             top = top + PlayerDetailPanel.LINE_HEIGHT
         end
         return top
     end
 
+    -- The Rank tab ticking `item` for `view` (the shown player when
+    -- omitted). A prompt passes the view it was opened on, so a refresh
+    -- to another player can't move its Save to them.
+    local function tick(item, ticked, note, view)
+        view = view or state.view
+        if view ~= nil and callbacks.onRankTick ~= nil then
+            callbacks.onRankTick(view, item.id, ticked, note)
+        end
+    end
+    -- A click on a check box: unticking, or ticking a check without a
+    -- note, at once; one that needs a note asks for it first.
+    local function check(item, wanted)
+        if not wanted or not item.needsNote then
+            tick(item, wanted, nil)
+            return
+        end
+        local view = state.view
+        panel.prompt:Open({
+            title = item.label .. " for " .. (view and view.header.name or ""),
+            maxLetters = PlayerDetailPanel.NOTE_LETTERS,
+            onSave = function(note)
+                tick(item, true, note, view)
+            end,
+        })
+    end
+    -- A failed automated requirement's right-click menu: Override as met...
+    -- (with an optional reason), or Remove override for an overridden one.
+    local function itemMenu(anchor, item)
+        local items = {}
+        local view = state.view
+        if item.state == addon.RankUpViewModel.MISSING then
+            table.insert(items, { label = PlayerDetailPanel.OVERRIDE, onClick = function()
+                panel.prompt:Open({
+                    title = "Override " .. item.label .. " for " .. (view and view.header.name or "")
+                        .. " (reason optional)",
+                    maxLetters = PlayerDetailPanel.NOTE_LETTERS,
+                    onSave = function(reason)
+                        tick(item, true, reason, view)
+                    end,
+                })
+            end })
+        elseif item.state == addon.RankUpViewModel.OVERRIDDEN then
+            table.insert(items, { label = PlayerDetailPanel.REMOVE_OVERRIDE, onClick = function()
+                tick(item, false, nil, view)
+            end })
+        end
+        if items[1] ~= nil then
+            panel.menu:Open(anchor, items, item.label)
+        end
+    end
+    -- Requirement row `index` of the Rank tab, made on first use: a check
+    -- box for an officer check, then the label and its detail.
+    local function rankRow(index)
+        local row = panel.rankRows[index]
+        if row == nil then
+            row = ui:frame("Button", list)
+            row:RegisterForClicks("RightButtonUp")
+            row:SetScript("OnClick", function(self, button)
+                local rank = state.view and state.view.rank
+                if button == "RightButton" and self.item ~= nil and not self.item.check and rank ~= nil
+                    and rank.editable
+                then
+                    itemMenu(self, self.item)
+                end
+            end)
+            row.box = ui:CheckBox(row, function(wanted)
+                local rank = state.view and state.view.rank
+                if row.item ~= nil and rank ~= nil and rank.editable then
+                    check(row.item, wanted)
+                end
+            end)
+            row.box:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -2)
+            row.label = ui:Text(row, "", "semibold", "body", "text")
+            row.label:SetPoint("TOPLEFT", row, "TOPLEFT", addon.Widgets.CHECK_SIZE + Theme.SPACING.s, 0)
+            row.label:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+            row.label:SetJustifyH("LEFT")
+            row.label:SetWordWrap(false)
+            row.detail = ui:Text(row, "", "regular", "small", "muted")
+            row.detail:SetPoint("TOPLEFT", row.label, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
+            row.detail:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+            row.detail:SetJustifyH("LEFT")
+            row.detail:SetWordWrap(false)
+            panel.rankRows[index] = row
+        end
+        return row
+    end
+    -- The Rank tab: the status and rank promoted to, who to promote, the
+    -- Snooze button for a Due player, then a row per requirement.
+    local function rankBody(rank, top)
+        local status = rank.statusText .. (rank.rankText and (DOT .. rank.rankText) or "")
+        local rows = { { kind = "line", text = status } }
+        if rank.promoteText ~= nil and rank.promoteText ~= "" then
+            table.insert(rows, { kind = "line", text = "Promote: " .. rank.promoteText })
+        end
+        if not rank.editable then
+            table.insert(rows, { kind = "empty", text = PlayerDetailPanel.READ_ONLY })
+        end
+        if rank.items[1] == nil then
+            table.insert(rows, { kind = "empty", text = PlayerDetailPanel.NO_REQUIREMENTS })
+        end
+        top = textRows(rows, top)
+        if rank.editable and rank.status == addon.RankUpViewModel.DUE then
+            panel.snooze:ClearAllPoints()
+            panel.snooze:SetPoint("TOPRIGHT", list, "TOPRIGHT", 0, 0)
+            panel.snooze:Show()
+        end
+        top = top + Theme.SPACING.s
+        local index
+        for index = 1, #rank.items do
+            local item = rank.items[index]
+            local row = rankRow(index)
+            row.item = item
+            place(row, top, PlayerDetailPanel.RANK_ROW_HEIGHT)
+            setShown(row.box, item.check)
+            if item.check then
+                row.box:SetChecked(item.checked)
+                row.box:EnableMouse(rank.editable == true)
+            end
+            row.label:SetText(item.label or "")
+            row.detail:SetText(item.detail or "")
+            row.color = PlayerDetailPanel.RANK_COLORS[item.state] or "muted"
+            row.detail:SetTextColor(Theme.Color(row.color))
+            top = top + PlayerDetailPanel.RANK_ROW_HEIGHT + Theme.SPACING.xs
+        end
+        return top
+    end
     -- Draws the selected tab's body.
     function panel.refreshBody()
         hideAll(panel.characterCards)
         hideAll(panel.lines)
         hideAll(panel.parties)
+        hideAll(panel.edits)
+        hideAll(panel.rankRows)
         panel.more:Hide()
+        panel.snooze:Hide()
         local view = state.view
         if view == nil then
             return
@@ -340,7 +585,7 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
                 top = top + addon.PlayerCards.CHARACTER_HEIGHT + Theme.SPACING.xs
             end
         elseif panel.tab == "bio" then
-            top = textRows(view.bioRows, top)
+            top = textRows(view.bioRows, top, view.canEdit == true and callbacks.onEditProfile ~= nil)
         elseif panel.tab == "grouped" then
             local grouped = view.grouped or { parties = {} }
             if grouped.parties[1] == nil then
@@ -378,6 +623,8 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
                 panel.more:Show()
                 top = top + addon.Widgets.BUTTON_HEIGHT + Theme.SPACING.s
             end
+        elseif panel.tab == "rank" and view.rank ~= nil then
+            top = rankBody(view.rank, top)
         else
             top = textRows(view.logRows, top)
         end
@@ -400,7 +647,13 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
     panel.hint:SetWordWrap(true)
 
     local function showParts(shown)
-        local parts = { panel.name, panel.sub, panel.star, panel.whisper, panel.invite, panel.tabs, panel.area }
+        local parts = { panel.name, panel.sub, panel.star, panel.tabs, panel.area }
+        if callbacks.onActions ~= nil then
+            table.insert(parts, panel.actions)
+        else
+            table.insert(parts, panel.whisper)
+            table.insert(parts, panel.invite)
+        end
         local partIndex
         for partIndex = 1, #parts do
             setShown(parts[partIndex], shown)
@@ -450,6 +703,12 @@ function PlayerDetailPanel.Create(ui, parent, callbacks)
         local grouped = view.grouped and view.grouped.total or 0
         panel.tabs:SetLabel("characters", "Characters" .. DOT .. count)
         panel.tabs:SetLabel("grouped", "Grouped" .. DOT .. grouped)
+        -- The Rank tab only for those who may see it; a player without it
+        -- opens on Characters.
+        setShown(panel.tabs.tabs[#panel.tabs.tabs], view.rank ~= nil)
+        if panel.tab == "rank" and view.rank == nil then
+            panel.tab = PlayerDetailPanel.TABS[1].id
+        end
         panel.tabs:Select(panel.tab)
         panel.refreshBody()
         panel:Show()

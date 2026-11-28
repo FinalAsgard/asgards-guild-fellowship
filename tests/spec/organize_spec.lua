@@ -257,13 +257,11 @@ local function controllerSetup(options)
     )
     local client = addon.Compatibility.Create(world.environment)
     local database = { schemaVersion = 1, guilds = {} }
-    local window = { shown = false, rows = {}, conflicts = {} }
+    local window = { shown = false, conflicts = {} }
     function window:IsShown() return self.shown end
     function window:Show() self.shown = true end
     function window:Hide() self.shown = false end
     function window:SetTitle() end
-    function window:SetStatus() end
-    function window:SetRows(rows) self.rows = rows return true end
     function window:SetConflicts(rows) self.conflicts = rows return true end
     local controller = addon.RosterController.Create({
         client = client,
@@ -279,14 +277,19 @@ local function controllerSetup(options)
     return controller, window, world, addon
 end
 
-local function rowFor(window, name)
-    local index
-    for index = 1, #window.rows do
-        if window.rows[index].name == name or window.rows[index].label == name then
-            return window.rows[index]
-        end
+-- The Guild Roster's right-click target for a character, or for TheTool's
+-- player card.
+local KEYS = { Hammer = "hammer-area52", Toolbox = "toolbox-area52", ["Visitor-Stormrage"] = "visitor-stormrage" }
+local function rowFor(controller, name)
+    if name == "TheTool (Toolbox)" then
+        return { kind = "player", id = controller.current.partition:GetCharacter("toolbox-area52").player }
     end
-    return nil
+    return { kind = "character", key = KEYS[name] }
+end
+
+local function aliasOf(controller, key)
+    local partition = controller.current.partition
+    return partition:GetPlayer(partition:GetCharacter(key).player).alias
 end
 
 local function actions(entries)
@@ -301,18 +304,18 @@ end
 test.test("the right-click menu offers the actions that apply to the row", function()
     local controller, window = controllerSetup()
 
-    local alt = actions(controller:MenuFor(rowFor(window, "Hammer")))
+    local alt = actions(controller:MenuFor(rowFor(controller, "Hammer")))
     test.assertTrue(alt.setMain and alt.makeMain and alt.alias and alt.detach)
 
     -- A main with alts can't join another player.
-    local main = actions(controller:MenuFor(rowFor(window, "Toolbox")))
+    local main = actions(controller:MenuFor(rowFor(controller, "Toolbox")))
     test.assertTrue(main.alias and main.detach)
     test.assertEqual(nil, main.makeMain)
     test.assertEqual(nil, main.setMain)
 
     -- Visitor is another player's, so a member is offered none of its
     -- organizing actions.
-    local single = actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage")))
+    local single = actions(controller:MenuFor(rowFor(controller, "Visitor-Stormrage")))
     test.assertTrue(single.view)
     test.assertEqual(nil, single.setMain)
     test.assertEqual(nil, single.alias)
@@ -320,7 +323,7 @@ test.test("the right-click menu offers the actions that apply to the row", funct
 
     -- Each label says what it does.
     local labels = {}
-    local entries = controller:MenuFor(rowFor(window, "Hammer"))
+    local entries = controller:MenuFor(rowFor(controller, "Hammer"))
     local index
     for index = 1, #entries do
         labels[index] = entries[index].text
@@ -328,7 +331,7 @@ test.test("the right-click menu offers the actions that apply to the row", funct
     test.assertEqual("Link as alt of..., Make this the main, Set alias..., View player..., Split off as own player",
         table.concat(labels, ", "))
 
-    local header = actions(controller:MenuFor(rowFor(window, "TheTool (Toolbox)")))
+    local header = actions(controller:MenuFor(rowFor(controller, "TheTool (Toolbox)")))
     test.assertTrue(header.alias and header.view)
     test.assertEqual(nil, header.detach)
     test.assertTrue(alt.view and main.view and single.view)
@@ -337,15 +340,15 @@ end)
 test.test("an officer is offered the alias on anyone's rows", function()
     local controller, window = controllerSetup({ officer = true })
 
-    test.assertTrue(actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage"))).alias)
-    test.assertTrue(actions(controller:MenuFor(rowFor(window, "TheTool (Toolbox)"))).alias)
+    test.assertTrue(actions(controller:MenuFor(rowFor(controller, "Visitor-Stormrage"))).alias)
+    test.assertTrue(actions(controller:MenuFor(rowFor(controller, "TheTool (Toolbox)"))).alias)
 end)
 
 test.test("a member is offered the alias on their own player's rows and header", function()
     local controller, window = controllerSetup()
 
-    test.assertTrue(actions(controller:MenuFor(rowFor(window, "Hammer"))).alias, "an alt of theirs")
-    test.assertTrue(actions(controller:MenuFor(rowFor(window, "TheTool (Toolbox)"))).alias, "their header")
+    test.assertTrue(actions(controller:MenuFor(rowFor(controller, "Hammer"))).alias, "an alt of theirs")
+    test.assertTrue(actions(controller:MenuFor(rowFor(controller, "TheTool (Toolbox)"))).alias, "their header")
 end)
 
 test.test("a member's alias for another player is refused and reported", function()
@@ -353,7 +356,7 @@ test.test("a member's alias for another player is refused and reported", functio
 
     test.assertFalse(controller:SetAlias("visitor-stormrage", "Visi"))
 
-    test.assertEqual("Visitor-Stormrage", rowFor(window, "Visitor-Stormrage").label)
+    test.assertEqual(nil, aliasOf(controller, "visitor-stormrage"))
     test.assertContains(world.messages[#world.messages],
         "That change wasn't made: members can only change their own player.")
 end)
@@ -363,26 +366,26 @@ test.test("a member can set their own player's alias", function()
 
     test.assertTrue(controller:SetAlias("hammer-area52", "Tool Time"))
 
-    test.assertEqual("Tool Time (Toolbox)", rowFor(window, "Tool Time (Toolbox)").label)
+    test.assertEqual("Tool Time", aliasOf(controller, "toolbox-area52"))
 end)
 
-test.test("organizing from the menu refreshes the roster at once without a scan", function()
-    local controller, window, world = controllerSetup({ officer = true })
+test.test("organizing from the menu needs no scan", function()
+    local controller, _, world = controllerSetup({ officer = true })
     local requests = world.rosterRequests
 
-    test.assertTrue(controller:Detach(rowFor(window, "Hammer").key))
+    test.assertTrue(controller:Detach("hammer-area52"))
 
     test.assertEqual(requests, world.rosterRequests)
-    local hammer = rowFor(window, "Hammer")
-    test.assertTrue(hammer.standalone)
-    test.assertTrue(controller:SetAlias(hammer.key, "Hammer Time"))
-    test.assertEqual("Hammer Time (Hammer)", rowFor(window, "Hammer").label)
+    local partition = controller.current.partition
+    test.assertEqual(1, #partition:CharactersOf(partition:GetCharacter("hammer-area52").player))
+    test.assertTrue(controller:SetAlias("hammer-area52", "Hammer Time"))
+    test.assertEqual("Hammer Time", aliasOf(controller, "hammer-area52"))
 end)
 
 test.test("a refused change is reported in chat", function()
     local controller, window, world = controllerSetup({ officer = true })
 
-    test.assertFalse(controller:Detach(rowFor(window, "Visitor-Stormrage").key))
+    test.assertFalse(controller:Detach(rowFor(controller, "Visitor-Stormrage").key))
 
     test.assertContains(world.messages[#world.messages], "That change wasn't made: it is already its own player.")
 end)
@@ -390,7 +393,7 @@ end)
 test.test("an officer is offered every organizing action on anyone's character", function()
     local controller, window = controllerSetup({ officer = true })
 
-    local single = actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage")))
+    local single = actions(controller:MenuFor(rowFor(controller, "Visitor-Stormrage")))
     test.assertTrue(single.setMain and single.alias and single.view)
 end)
 
@@ -415,7 +418,7 @@ test.test("a member may link a character this install has logged in on to their 
     local toolPlayer = partition:GetCharacter("toolbox-area52").player
     partition:RecordOwnCharacter("visitor-stormrage", 1)
 
-    test.assertTrue(actions(controller:MenuFor(rowFor(window, "Visitor-Stormrage"))).setMain)
+    test.assertTrue(actions(controller:MenuFor(rowFor(controller, "Visitor-Stormrage"))).setMain)
     local offered = controller:SearchPlayers("visitor-stormrage", "")
     test.assertEqual(1, #offered)
     test.assertEqual(toolPlayer, offered[1].id)

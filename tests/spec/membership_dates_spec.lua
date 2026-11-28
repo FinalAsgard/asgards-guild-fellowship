@@ -1,5 +1,6 @@
 local test = require("tests.test_helper")
 local fixtures = require("tests.client_fixtures")
+local fakeFrames = require("tests.fake_frames")
 
 -- Membership dates: when each character joined, and since when it has held
 -- its rank.
@@ -411,6 +412,29 @@ local function keyOf(world, name)
     return normalizer:Key(name)
 end
 
+-- The Guild Roster's player panel for `name`'s player, as `world` sees it:
+-- its Joined guild tile's value, and its Log tab's lines.
+local function panelOf(world, name)
+    fakeFrames.install(world.environment)
+    local _, partition = world.addon.rosterController:QuietContext()
+    world.addon.agfWindow:Open("roster", partition:GetCharacter(keyOf(world, name)).player)
+    local view = world.addon.rosterPage.detail.view
+    local joined
+    local _, tile
+    for _, tile in ipairs(view.tiles) do
+        if tile.id == "joined" then
+            joined = tile
+        end
+    end
+    local lines = {}
+    local row
+    for _, row in ipairs(view.logRows or {}) do
+        table.insert(lines, row.text or "")
+    end
+    -- Wrapped lines, joined again.
+    return joined, table.concat(lines, " ")
+end
+
 for profileIndex = 1, #fixtures.PROFILES do
     local profile = fixtures.PROFILES[profileIndex]
     local names = NAMES[profile]
@@ -453,12 +477,14 @@ for profileIndex = 1, #fixtures.PROFILES do
         local hammer = login(profile, channel, names[2])
         settle(channel)
 
-        -- The header's earliest join, and each character's dates for the Log.
-        test.assertEqual("before tracking", tool.addon.rosterController.joined({ keyOf(tool, names[2]) }))
-        local lines = tool.addon.rosterController.membership({ keyOf(tool, names[2]) })
-        test.assertEqual(1, #lines)
-        test.assertContains(lines[1], "joined before tracking, at this rank since before tracking")
-        test.assertEqual(nil, hammer.addon.rosterController.joined({ keyOf(hammer, names[2]) }))
-        test.assertEqual(nil, hammer.addon.rosterController.membership({ keyOf(hammer, names[2]) }))
+        -- The Joined guild tile's earliest join, and each character's dates
+        -- in the Log.
+        local joined, log = panelOf(tool, names[2])
+        test.assertEqual("before tracking", joined.value)
+        test.assertContains(log, "joined before tracking, at this rank since before tracking")
+        -- A member gets neither.
+        joined, log = panelOf(hammer, names[2])
+        test.assertTrue(joined.notSet)
+        test.assertFalse(string.find(log, "joined before tracking", 1, true) ~= nil)
     end)
 end

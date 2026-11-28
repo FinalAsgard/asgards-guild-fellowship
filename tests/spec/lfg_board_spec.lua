@@ -260,6 +260,81 @@ test.test("lfg board: a listing not heard from for 5 minutes is dropped", functi
     test.assertEqual(1, #board:Listings(1000 + 5 * 60))
 end)
 
+-- Playing parties ------------------------------------------------------------------
+
+local PARTY = { { name = "Tool", classToken = "WARRIOR", level = 60 }, { name = "Hammer", level = 58 } }
+
+test.test("lfg protocol: an unlisted party is understood, and ignored when malformed", function()
+    local addon = load()
+    local protocol = addon.LfgProtocol
+    local message = protocol.Party(PARTY, "Stratholme")
+
+    test.assertEqual("lfg-party", message.t)
+    test.assertEqual(2, message.s)
+    test.assertEqual("Hammer", message.mb[2].n)
+    test.assertEqual("Stratholme", message.w)
+    test.assertTrue(protocol.IsValid(message))
+    test.assertTrue(protocol.TYPES["lfg-party"])
+    test.assertTrue(protocol.IsValid(protocol.Party(PARTY, nil)), "where it is can be unknown")
+
+    -- A party is two or more, with as many members as it says, and a short place.
+    test.assertFalse(protocol.IsValid(protocol.Party({ PARTY[1] }, "Stratholme")))
+    message = protocol.Party(PARTY, "Stratholme")
+    message.s = 3
+    test.assertFalse(protocol.IsValid(message))
+    test.assertFalse(protocol.IsValid(protocol.Party(PARTY, string.rep("x", 61))))
+    message = protocol.Party(PARTY, "Stratholme")
+    message.mb[2].n = ""
+    test.assertFalse(protocol.IsValid(message))
+    test.assertEqual("bad fields", protocol.Problem(message))
+end)
+
+test.test("lfg board: a Playing party shows until it's listed, ends or goes quiet", function()
+    local addon = load()
+    local protocol = addon.LfgProtocol
+    local board = addon.LfgBoard.Create()
+
+    board:OnParty(protocol.Party(PARTY, "Stratholme"), "tool-key", "Tool-Realm", 1000)
+    board:OnParty(protocol.Party({ { name = "Anvil" }, { name = "Zap" } }, nil), "anvil-key", "Anvil", 1000)
+    local parties = board:Parties(1000)
+    test.assertEqual(2, #parties)
+    test.assertEqual("Anvil", parties[1].leader)
+    test.assertEqual("Tool", parties[2].leader)
+    test.assertEqual("Stratholme", parties[2].place)
+    test.assertEqual(2, parties[2].size)
+    test.assertEqual(58, parties[2].members[2].level)
+    test.assertEqual(0, #board:Listings(1000), "a party isn't a listing")
+
+    -- Listed: it's Open, no longer Playing. Stop looking: Playing again.
+    board:OnListing(listingMessage(addon), "tool-key", "Tool-Realm", 1010)
+    test.assertEqual(1, #board:Parties(1010))
+    test.assertEqual(1, #board:Listings(1010))
+    board:OnParty(protocol.Party(PARTY, "Stratholme"), "tool-key", "Tool-Realm", 1020)
+    test.assertEqual(0, #board:Listings(1020))
+    test.assertEqual(2, #board:Parties(1020))
+
+    -- An end takes it off; so does going quiet.
+    board:OnEnd("anvil-key", false)
+    test.assertEqual(1, #board:Parties(1020))
+    test.assertEqual(0, #board:Parties(1020 + addon.LfgBoard.STALE_SECONDS))
+end)
+
+test.test("fellowship store: Show my party on the guild's board is on until turned off", function()
+    local addon = test.newAddon("Core/FellowshipStore.lua")
+    local database = { schemaVersion = 2, guilds = {} }
+    local store = addon.FellowshipStore.Create(database)
+
+    test.assertTrue(store:LfgShareParty())
+    test.assertTrue(store:SetLfgShareParty(false))
+    test.assertFalse(store:LfgShareParty())
+    test.assertTrue(store:SetLfgShareParty(true))
+    test.assertTrue(store:LfgShareParty())
+    test.assertFalse(store:SetLfgShareParty("yes"))
+    database.lfgShareParty = "junk"
+    test.assertTrue(store:LfgShareParty(), "an unusable value reads as on")
+    test.assertFalse(store:SetLfgShareParty(false), "and is left alone")
+end)
+
 -- DungeonCatalog search ------------------------------------------------------------
 
 local SAMPLE = {
@@ -1023,7 +1098,7 @@ test.test("lfg page: Find guildmates shows to the lister, greyed out until the p
     test.assertEqual("solo", page:Mode())
     test.assertTrue(page.soloFindButton.shown)
     test.assertFalse(page.soloFindButton.active)
-    test.assertEqual("List your party to find guildmates", page.soloFindButton.reason)
+    test.assertEqual("Open your party to the guild to find guildmates", page.soloFindButton.reason)
     click(page.soloFindButton)
     test.assertFalse(page.filling == true)
     -- A member of someone else's party doesn't see it.
@@ -1392,7 +1467,7 @@ test.test("greetings: the module sits after LFG, with the Greet prompts switch a
     for index = 1, #window.moduleButtons do
         order[index] = window.moduleButtons[index].id
     end
-    test.assertEqual("friends,lfg,greetings,settings", table.concat(order, ","))
+    test.assertEqual("roster,friends,lfg,greetings,rank,settings", table.concat(order, ","))
     test.assertEqual("Greetings", window.pages.greetings.title.text)
     test.assertTrue(window.gear.shown)
 
@@ -1604,14 +1679,687 @@ test.test("greetings: Insert chips and More put placeholders in, and the preview
     test.assertEqual("Preview: " .. names.characterfirst .. "Hi " .. names.name .. "!", edit.preview.text)
 end)
 
--- Friends -----------------------------------------------------------------------
+-- Roster ------------------------------------------------------------------------
 
-test.test("friends: the window opens on Friends, the page is built on show, and a pinned Friend is starred", function()
+-- The Roster page's shown card for `name`, or nil.
+local function rosterCard(page, name)
+    local _, frame
+    for _, frame in ipairs(page.list:Shown()) do
+        if rawget(frame, "entry") ~= nil and frame.shown and frame.entry.name == name then
+            return frame
+        end
+    end
+    return nil
+end
+
+test.test("roster: the window opens on the Roster, a card per player with the player panel beside it", function()
     local profile = fixtures.PROFILES[1]
     local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
     fakeFrames.install(world.environment)
 
     test.assertTrue(addon.agfWindow:Open())
+    test.assertEqual("roster", addon.agfWindow:Page())
+    test.assertEqual("Guild Roster", addon.agfWindow.pages.roster.title.text)
+    local page = addon.rosterPage
+    test.assertTrue(page ~= nil)
+    -- Hammer Smith and the alt Bolt Smith are one card.
+    local hammer = rosterCard(page, "Hammer Smith")
+    test.assertTrue(hammer ~= nil)
+    test.assertEqual(nil, rosterCard(page, "Bolt Smith"))
+    test.assertContains(hammer.sub.text, "2 characters")
+    test.assertContains(page.counts.text, "players")
+    test.assertContains(page.counts.text, "online")
+
+    -- Clicking the card shows Hammer in the player panel, with both
+    -- characters in its Characters tab.
+    hammer.scripts.OnClick(hammer, "LeftButton")
+    test.assertEqual("Hammer Smith", page.detail.name.text)
+    test.assertEqual("Characters · 2", page.detail.tabs.tabs[1].label.text)
+
+    -- The star pins Hammer as a Friend, and the card gets the star.
+    page.detail.star.scripts.OnClick(page.detail.star, "LeftButton")
+    local _, partition = addon.rosterController:QuietContext()
+    test.assertEqual(1, #partition:GetFriends())
+    test.assertTrue(rosterCard(page, "Hammer Smith").star.shown)
+
+    -- Searching for the alt finds Hammer's card, saying it matched Bolt.
+    local box = page.search.box
+    box:SetText("bolt")
+    box.scripts.OnTextChanged(box, true)
+    test.assertEqual("matches Bolt Smith", rosterCard(page, "Hammer Smith").sub.text)
+    test.assertEqual(1, #page.view.cards)
+
+    -- Sorted by Rank, the card says Hammer's rank after the name.
+    box:SetText("")
+    box.scripts.OnTextChanged(box, true)
+    page.sortButton.scripts.OnClick(page.sortButton)
+    page.menu.rows[3].scripts.OnClick(page.menu.rows[3])
+    test.assertEqual("Member", rosterCard(page, "Hammer Smith").tag.text)
+    -- Sorted by Grouped with, nobody's been grouped with yet: no counts.
+    page.sortButton.scripts.OnClick(page.sortButton)
+    page.menu.rows[4].scripts.OnClick(page.menu.rows[4])
+    test.assertEqual("grouped", page.sort)
+    test.assertEqual("", rosterCard(page, "Hammer Smith").tag.text)
+end)
+
+-- The labels of the page's open context menu, in order.
+local function menuLabels(page)
+    local labels = {}
+    local index
+    for index = 1, #(page.menu.items or {}) do
+        labels[index] = page.menu.items[index].label
+    end
+    return table.concat(labels, ", ")
+end
+
+-- The panel's character card for `name`, or nil.
+local function characterCard(page, name)
+    local _, card
+    for _, card in ipairs(page.detail.characterCards) do
+        if card.shown and card.fields ~= nil and card.fields.name == name then
+            return card
+        end
+    end
+    return nil
+end
+
+-- Opens the Roster on `name`'s player. Returns the page.
+local function openRosterOn(addon, name)
+    test.assertTrue(addon.agfWindow:Open())
+    local page = addon.rosterPage
+    local card = rosterCard(page, name)
+    card.scripts.OnClick(card, "LeftButton")
+    return page
+end
+
+test.test("roster: an officer's menus offer every organizing action", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local page = openRosterOn(addon, "Hammer Smith")
+
+    -- The player card: Set alias... and View player...
+    local hammer = rosterCard(page, "Hammer Smith")
+    hammer.scripts.OnClick(hammer, "RightButton")
+    test.assertEqual("Set alias..., View player...", menuLabels(page))
+
+    -- The alt in the Characters tab: every action that applies.
+    local bolt = characterCard(page, "Bolt Smith")
+    bolt.scripts.OnClick(bolt, "RightButton")
+    test.assertEqual("Link as alt of..., Make this the main, Set alias..., View player..., Split off as own player",
+        menuLabels(page))
+    -- The main, with an alt, can't join another player.
+    local main = characterCard(page, "Hammer Smith")
+    main.scripts.OnClick(main, "RightButton")
+    test.assertEqual("Set alias..., View player..., Split off as own player", menuLabels(page))
+
+    -- The ⋯ menu: Merge is offered only to a player that's just its main.
+    test.assertTrue(page.detail.actions.shown)
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    test.assertEqual("Whisper, Invite, Set alias..., Set Discord...", menuLabels(page))
+    page.menu:Close()
+    local zap = rosterCard(page, "Zap Arcane")
+    zap.scripts.OnClick(zap, "LeftButton")
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    test.assertEqual("Whisper, Invite, Set alias..., Set Discord..., Merge into player...", menuLabels(page))
+
+    -- Set alias... asks in a prompt, and the card takes the alias.
+    page.menu.rows[3].scripts.OnClick(page.menu.rows[3])
+    test.assertTrue(page.prompt:IsOpen())
+    page.prompt.single:SetValue("Sparky")
+    page.prompt.save.scripts.OnClick(page.prompt.save)
+    test.assertTrue(rosterCard(page, "Sparky") ~= nil)
+
+    -- Merge into player... picks from a searchable list.
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    page.menu.rows[5].scripts.OnClick(page.menu.rows[5])
+    test.assertTrue(page:PickerOpen())
+    test.assertEqual("Merge into player", page.picker.title.text)
+    local box = page.picker.search.box
+    box:SetText("hammer")
+    box.scripts.OnTextChanged(box, true)
+    local row = page.picker.rows[1]
+    test.assertTrue(row.shown)
+    test.assertEqual("Hammer Smith", row.name.text)
+    row.scripts.OnClick(row)
+    test.assertFalse(page:PickerOpen())
+    -- Zap is one of Hammer's characters now.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertEqual(partition:GetCharacter(normalizer:Key("Hammer Smith")).player,
+        partition:GetCharacter(normalizer:Key("Zap Arcane")).player)
+    test.assertEqual(nil, rosterCard(page, "Sparky"))
+end)
+
+test.test("roster: a member is offered only what they may do to their own player", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(world.environment)
+    local page = openRosterOn(addon, "Zap Arcane")
+
+    -- Someone else's player: only View player..., and no ⋯ or Edit.
+    local zap = rosterCard(page, "Zap Arcane")
+    zap.scripts.OnClick(zap, "RightButton")
+    test.assertEqual("View player...", menuLabels(page))
+    page.menu:Close()
+    local zapCharacter = characterCard(page, "Zap Arcane")
+    zapCharacter.scripts.OnClick(zapCharacter, "RightButton")
+    test.assertEqual("View player...", menuLabels(page))
+    page.menu:Close()
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    test.assertEqual("Whisper, Invite", menuLabels(page))
+    page.menu:Close()
+    page.detail:ShowTab("bio")
+    test.assertFalse(page.detail.edits[1] ~= nil and page.detail.edits[1].shown)
+
+    -- Their own player: the organizing actions on their own characters.
+    local hammer = rosterCard(page, "Hammer Smith")
+    hammer.scripts.OnClick(hammer, "LeftButton")
+    hammer.scripts.OnClick(hammer, "RightButton")
+    test.assertEqual("Set alias..., View player...", menuLabels(page))
+    page.detail:ShowTab("characters")
+    local bolt = characterCard(page, "Bolt Smith")
+    bolt.scripts.OnClick(bolt, "RightButton")
+    test.assertEqual("Link as alt of..., Make this the main, Set alias..., View player..., Split off as own player",
+        menuLabels(page))
+    page.menu:Close()
+
+    -- Set Discord... on their own player sends a suggestion to the officers.
+    test.assertTrue(page.detail.actions.shown)
+    page.detail.actions.scripts.OnClick(page.detail.actions)
+    test.assertEqual("Whisper, Invite, Set alias..., Set Discord...", menuLabels(page))
+    page.menu.rows[4].scripts.OnClick(page.menu.rows[4])
+    page.prompt.single:SetValue("hammer#1")
+    page.prompt.save.scripts.OnClick(page.prompt.save)
+    test.assertEqual(1, addon.syncSession:Status().pending)
+
+    -- And they edit their own location and bio from the Bio tab.
+    page.detail:ShowTab("bio")
+    local edit = page.detail.edits[1]
+    test.assertTrue(edit.shown)
+    test.assertEqual("location", edit.field)
+    edit.scripts.OnClick(edit)
+    test.assertTrue(page.prompt:IsOpen())
+    page.prompt.single:SetValue("Lakeshire")
+    page.prompt.save.scripts.OnClick(page.prompt.save)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local player = partition:GetCharacter(normalizer:Key("Hammer Smith")).player
+    test.assertEqual("Lakeshire", (partition:PlayerProfileText(player, "location")))
+    local bioEdit = page.detail.edits[2]
+    test.assertEqual("bio", bioEdit.field)
+    bioEdit.scripts.OnClick(bioEdit)
+    test.assertTrue(page.prompt.multi.shown)
+    page.prompt.multi:SetValue("Heals.\nAlso fishes.")
+    page.prompt.save.scripts.OnClick(page.prompt.save)
+    test.assertEqual("Heals.\nAlso fishes.", (partition:PlayerProfileText(player, "bio")))
+end)
+
+test.test("roster: an officer purges departed characters from the Departed tab; a member has no tabs", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    partition:MarkDeparted(normalizer:Key("Bolt Smith"), (world.environment.time and world.environment.time()) or 0)
+    test.assertTrue(addon.agfWindow:Open())
+    local page = addon.rosterPage
+
+    test.assertTrue(page.tabs.shown)
+    test.assertEqual("Departed · 1", page.tabs.tabs[2].label.text)
+    page.tabs.tabs[2].scripts.OnClick(page.tabs.tabs[2])
+    local row
+    local _, frame
+    for _, frame in ipairs(page.departedList:Shown()) do
+        if frame.shown then
+            row = frame
+        end
+    end
+    test.assertContains(row.name.text, "Bolt Smith")
+    test.assertContains(row.sub.text, "Still in the guild: Hammer Smith")
+    row.purge.scripts.OnClick(row.purge)
+    test.assertEqual(nil, partition:GetCharacter(normalizer:Key("Bolt Smith")))
+    test.assertEqual("Departed · 0", page.tabs.tabs[2].label.text)
+
+    local memberWorld, memberAddon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(memberWorld.environment)
+    test.assertTrue(memberAddon.agfWindow:Open())
+    test.assertFalse(memberAddon.rosterPage.tabs.shown)
+end)
+
+test.test("roster: an officer reviews members' suggestions, not note conflicts, with the count on the Roster button", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local zap, hammer = normalizer:Key("Zap Arcane"), normalizer:Key("Hammer Smith")
+    partition:SetConflicts({
+        { character = zap, kind = "suggested main", suggestion = { main = hammer }, from = zap, at = 1 },
+        { character = zap, kind = "main", suggestion = { main = hammer } },
+    })
+    test.assertTrue(addon.agfWindow:Open())
+    local page = addon.rosterPage
+
+    test.assertEqual("1", addon.agfWindow:Badge("roster").text.text)
+    test.assertEqual("Review · 1", page.tabs.tabs[3].label.text)
+    page.tabs.tabs[3].scripts.OnClick(page.tabs.tabs[3])
+    -- The guild note conflict stays out of Review.
+    test.assertEqual(1, #page.reviewRows)
+    local row
+    local _, frame
+    for _, frame in ipairs(page.reviewList:Shown()) do
+        if frame.shown then
+            row = frame
+        end
+    end
+    test.assertContains(row.name.text, "Zap Arcane")
+    test.assertContains(row.sub.text, "Alt of Hammer Smith")
+    test.assertTrue(row.review.shown)
+    row.review.scripts.OnClick(row.review)
+    test.assertTrue(page.reviewView.shown)
+    test.assertContains(page.reviewView.title.text, "Zap Arcane")
+
+    -- Approve all decides the suggestion and leaves the note conflict.
+    page.approveAll.scripts.OnClick(page.approveAll)
+    local left = partition:GetConflicts()
+    test.assertEqual(1, #left)
+    test.assertEqual("main", left[1].kind)
+    test.assertEqual(partition:GetCharacter(hammer).player, partition:GetCharacter(zap).player)
+    test.assertFalse(addon.agfWindow:Badge("roster").shown)
+    test.assertFalse(page.reviewView.shown)
+end)
+
+test.test("roster: a member's window has no suggestion count", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(world.environment)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local zap = normalizer:Key("Zap Arcane")
+    partition:SetConflicts({
+        { character = zap, kind = "suggested main", suggestion = { main = zap }, from = zap, at = 1 },
+    })
+    test.assertTrue(addon.agfWindow:Open())
+
+    test.assertFalse(addon.agfWindow:Badge("roster").shown)
+end)
+
+-- Rank management ---------------------------------------------------------------
+
+test.test("rank management: officers get it under Officer with a count of players due; members don't", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open())
+
+    test.assertTrue(addon.agfWindow:ModuleShown("rank"))
+    test.assertTrue(addon.agfWindow.groupLabels.Officer.shown)
+    addon.agfWindow:ShowPage("rank")
+    test.assertEqual("rank", addon.agfWindow:Page())
+    local page = addon.rankPage
+    test.assertTrue(page ~= nil)
+    test.assertEqual("due", page.tabs:Selected())
+    test.assertContains(page.footer.text, "Promotion happens on the guild roster")
+
+    local memberWorld, memberAddon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(memberWorld.environment)
+    test.assertTrue(memberAddon.agfWindow:Open())
+    test.assertFalse(memberAddon.agfWindow:ModuleShown("rank"))
+    memberAddon.agfWindow:ShowPage("rank")
+    test.assertEqual("roster", memberAddon.agfWindow:Page())
+end)
+
+test.test("rank management: picking a rank shows the grid, and ticking a check saves it at once", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    -- Members (rank 3) need a day in the guild and the rules read.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "char-guild-days", true, 1, "Member", officer, 1)
+    local rules = requirements:Add(3, "Read the rules", "check", "Member", officer, 1)[1]
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+
+    page.picker.scripts.OnClick(page.picker, "LeftButton")
+    test.assertEqual("Any rank", page.menu.rows[1].label.text)
+    local menuRow = page.menu.rows[2]
+    test.assertContains(menuRow.label.text, "→ ")
+    menuRow.scripts.OnClick(menuRow, "LeftButton")
+    test.assertTrue(page.header.shown)
+    test.assertEqual("In the guild 1 days", page.header.labels[1].text)
+    test.assertEqual("Read the rules", page.header.labels[2].text)
+
+    local row
+    local _, frame
+    for _, frame in ipairs(page.list:Shown()) do
+        if frame.shown and rawget(frame, "entry") ~= nil and frame.entry.name == "Hammer Smith" then
+            row = frame
+        end
+    end
+    test.assertTrue(row ~= nil)
+    local box = row.cells[2].box
+    test.assertFalse(box:IsChecked())
+    box.scripts.OnClick(box, "LeftButton")
+
+    -- Saved through the promotion checks, so the rules engine has it:
+    -- Hammer is Ready now.
+    local saved = partition:GetPromotionChecks()
+    local found = false
+    local _, record
+    for _, record in pairs(saved.records or saved) do
+        if type(record) == "table" and record.item == rules.id and record.ticked then
+            found = true
+        end
+    end
+    test.assertTrue(found)
+    test.assertEqual("Ready", row.entry.status)
+    test.assertTrue(row.cells[2].box:IsChecked())
+end)
+
+test.test("rank management: a note and an override from the grid save through the promotion checks", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    -- Members (rank 3) need a day in the guild, level 50, and an interview
+    -- with a note. Zap Arcane is level 30.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "char-guild-days", true, 1, "Member", officer, 1)
+    requirements:SetAutomated(3, "level", true, 50, "Member", officer, 1)
+    requirements:Add(3, "Interview", "check-note", "Member", officer, 1)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+    page.picker.scripts.OnClick(page.picker, "LeftButton")
+    page.menu.rows[2].scripts.OnClick(page.menu.rows[2], "LeftButton")
+    local function zap()
+        local _, frame
+        for _, frame in ipairs(page.list:Shown()) do
+            if frame.shown and rawget(frame, "entry") ~= nil and frame.entry.name == "Zap Arcane" then
+                return frame
+            end
+        end
+        return nil
+    end
+    test.assertEqual("Level 50", page.header.labels[2].text)
+    test.assertEqual("level 30", zap().cells[2].text.text)
+
+    -- Override the level, with a reason.
+    local cell = zap().cells[2]
+    cell.scripts.OnClick(cell, "RightButton")
+    page.menu.rows[1].scripts.OnClick(page.menu.rows[1], "LeftButton")
+    page.prompt.single:SetValue("Levels on an alt")
+    page.prompt.save.scripts.OnClick(page.prompt.save, "LeftButton")
+    test.assertEqual("met by override", zap().cells[2].text.text)
+
+    -- Tick the interview, with its note.
+    local box = zap().cells[3].box
+    box.scripts.OnClick(box, "LeftButton")
+    page.prompt.single:SetValue("Talked on Discord")
+    page.prompt.save.scripts.OnClick(page.prompt.save, "LeftButton")
+    test.assertTrue(zap().cells[3].box:IsChecked())
+    test.assertEqual("\"Talked on Discord\"", zap().cells[3].text.text)
+    test.assertEqual("Ready", zap().entry.status)
+
+    -- Remove override: Zap is waiting on the level again.
+    cell = zap().cells[2]
+    cell.scripts.OnClick(cell, "RightButton")
+    test.assertEqual("Remove override", page.menu.rows[1].label.text)
+    page.menu.rows[1].scripts.OnClick(page.menu.rows[1], "LeftButton")
+    test.assertEqual("level 30", zap().cells[2].text.text)
+    test.assertEqual("Due", zap().entry.status)
+end)
+
+test.test("rank management: the Missing filter keeps the players missing a requirement, and the chip clears it", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    -- Members (rank 3) need a day in the guild and level 50. Zap Arcane is
+    -- level 30.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "char-guild-days", true, 1, "Member", officer, 1)
+    requirements:SetAutomated(3, "level", true, 50, "Member", officer, 1)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+    local function shownNames()
+        local names = {}
+        local _, frame
+        for _, frame in ipairs(page.list:Shown()) do
+            if frame.shown and rawget(frame, "entry") ~= nil then
+                table.insert(names, frame.entry.name)
+            end
+        end
+        return table.concat(names, ",")
+    end
+    test.assertContains(shownNames(), "Hammer Smith")
+
+    page.missingPicker.scripts.OnClick(page.missingPicker, "LeftButton")
+    local level
+    local _, menuRow
+    for _, menuRow in ipairs(page.menu.rows) do
+        if menuRow.shown and string.find(menuRow.label.text, "Level 50 (→ ", 1, true) == 1 then
+            level = menuRow
+        end
+    end
+    test.assertTrue(level ~= nil)
+    level.scripts.OnClick(level, "LeftButton")
+
+    -- Zap is missing level 50; Hammer has it, so he's filtered out.
+    test.assertContains(shownNames(), "Zap Arcane")
+    test.assertEqual(nil, string.find(shownNames(), "Hammer Smith", 1, true))
+    test.assertContains(page.footer.text, "missing: Level 50")
+    test.assertTrue(page.chip.shown)
+
+    page.chip.clear.scripts.OnClick(page.chip.clear, "LeftButton")
+    test.assertFalse(page.chip.shown)
+    test.assertContains(page.footer.text, "Ready")
+    test.assertContains(shownNames(), "Hammer Smith")
+end)
+
+-- Members (rank 3) need a day in the guild and the rules read; returns the
+-- rules item.
+local function memberRules(addon)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "char-guild-days", true, 1, "Member", officer, 1)
+    return requirements:Add(3, "Read the rules", "check", "Member", officer, 1)[1]
+end
+
+test.test("rank management: a row opens the player on the Roster's Rank tab, where an officer ticks", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    memberRules(addon)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local hammer
+    local _, frame
+    for _, frame in ipairs(addon.rankPage.list:Shown()) do
+        if frame.shown and rawget(frame, "entry") ~= nil and frame.entry.name == "Hammer Smith" then
+            hammer = frame
+        end
+    end
+    test.assertTrue(hammer ~= nil)
+    hammer.scripts.OnMouseUp(hammer, "LeftButton")
+
+    test.assertEqual("roster", addon.agfWindow:Page())
+    local detail = addon.rosterPage.detail
+    test.assertEqual("Hammer Smith", detail.name.text)
+    test.assertEqual("rank", detail.tabs:Selected())
+    test.assertContains(detail.lines[1].text, "Due")
+    local rules = detail.rankRows[2]
+    test.assertEqual("Read the rules", rules.label.text)
+    rules.box.scripts.OnClick(rules.box, "LeftButton")
+    test.assertContains(detail.lines[1].text, "Ready")
+    test.assertTrue(detail.rankRows[2].box:IsChecked())
+end)
+
+test.test("rank management: the Requirements tab edits a rank's requirements through the saved store", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+    page.tabs.tabs[3].scripts.OnClick(page.tabs.tabs[3], "LeftButton")
+    local editor = page.editor
+    test.assertContains(editor.rankRows[1].label.text, "→ ")
+    test.assertEqual("None", editor.rankRows[1].count.text)
+    local rank = editor.rankRows[1].rank
+
+    -- Turn on the level check, then add an officer check.
+    local level
+    local _, row
+    for _, row in ipairs(editor.automatedRows) do
+        if row.line.kind == "level" then
+            level = row
+        end
+    end
+    level.toggle.scripts.OnClick(level.toggle, "LeftButton")
+    editor.add.scripts.OnClick(editor.add, "LeftButton")
+    editor.prompt.single:SetValue("Read the rules")
+    editor.prompt.save.scripts.OnClick(editor.prompt.save, "LeftButton")
+
+    local _, partition = addon.rosterController:QuietContext()
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {})
+    local items = requirements:Items(rank)
+    test.assertEqual(2, #items)
+    test.assertEqual("level", items[1].kind)
+    test.assertEqual("Read the rules", items[2].label)
+    test.assertEqual("2 requirements", editor.rankRows[1].count.text)
+    test.assertTrue(level.toggle:IsOn())
+end)
+
+test.test("rank management: the Friends page's player panel has the Rank tab too", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    memberRules(addon)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("friends", partition:GetCharacter(normalizer:Key("Hammer Smith")).player)
+    local detail = addon.friendsPage.detail
+
+    test.assertEqual("Hammer Smith", detail.name.text)
+    test.assertTrue(detail.tabs.tabs[5].shown)
+    detail.tabs.tabs[5].scripts.OnClick(detail.tabs.tabs[5], "LeftButton")
+    local rules = detail.rankRows[2]
+    rules.box.scripts.OnClick(rules.box, "LeftButton")
+    test.assertContains(detail.lines[1].text, "Ready")
+end)
+
+test.test("rank management: an officer demoted while it's open leaves it, and Friends drops the Rank tab", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    memberRules(addon)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    test.assertEqual("rank", addon.agfWindow:Page())
+
+    -- Demoted: the next roster scan moves the window off Rank management.
+    world.officerRanks = { [0] = true }
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 5)
+    test.assertFalse(addon.agfWindow:ModuleShown("rank"))
+    test.assertFalse(addon.agfWindow:Page() == "rank")
+
+    -- Back to officer, on Friends with Hammer's Rank tab: demoted, it goes.
+    world.officerRanks = { [0] = true, [1] = true }
+    addon.agfWindow:ShowPage("friends", partition:GetCharacter(normalizer:Key("Hammer Smith")).player)
+    local detail = addon.friendsPage.detail
+    test.assertTrue(detail.tabs.tabs[5].shown)
+    world.officerRanks = { [0] = true }
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 5)
+    test.assertEqual("Hammer Smith", detail.name.text)
+    test.assertFalse(detail.tabs.tabs[5].shown)
+end)
+
+test.test("rank management: a member sees their own Rank tab, read-only, and nobody else's", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Hammer Smith")
+    fakeFrames.install(world.environment)
+    memberRules(addon)
+    test.assertTrue(addon.agfWindow:Open())
+    local page = addon.rosterPage
+    local hammer = rosterCard(page, "Hammer Smith")
+    hammer.scripts.OnClick(hammer, "LeftButton")
+    local detail = page.detail
+    test.assertTrue(detail.tabs.tabs[5].shown)
+    detail.tabs.tabs[5].scripts.OnClick(detail.tabs.tabs[5], "LeftButton")
+    test.assertEqual("Only officers can change this checklist.", detail.lines[2].text)
+    local rules = detail.rankRows[2]
+    rules.box.scripts.OnClick(rules.box, "LeftButton")
+    test.assertFalse(detail.rankRows[2].box:IsChecked())
+
+    local zap = rosterCard(page, "Zap Arcane")
+    zap.scripts.OnClick(zap, "LeftButton")
+    test.assertFalse(detail.tabs.tabs[5].shown)
+    test.assertEqual("characters", detail.tabs:Selected())
+end)
+
+test.test("rank management: All players lists the guild's players, Not yet counting down", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    -- Members (rank 3) need level 50, with no time requirement: Zap Arcane
+    -- (level 30) isn't due.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "level", true, 50, "Member", officer, 1)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+    local tab = page.tabs.tabs[2]
+    test.assertContains(tab.label.text, "All players (")
+    tab.scripts.OnClick(tab, "LeftButton")
+
+    local texts = {}
+    local _, frame
+    for _, frame in ipairs(page.list:Shown()) do
+        if frame.shown and rawget(frame, "entry") ~= nil then
+            table.insert(texts, frame.entry.name .. ": " .. frame.entry.statusText)
+        end
+    end
+    test.assertContains(table.concat(texts, ", "), "Zap Arcane: Not yet")
+    test.assertContains(page.footer.text, " players · ")
+end)
+
+-- Friends -----------------------------------------------------------------------
+
+test.test("friends: the page is built on show, and a pinned Friend is starred", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+
+    test.assertTrue(addon.agfWindow:Open("friends"))
     test.assertEqual("friends", addon.agfWindow:Page())
     local page = addon.friendsPage
     test.assertTrue(page ~= nil)

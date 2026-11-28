@@ -40,24 +40,14 @@ local guildLogSync
 local observeMembership, membershipLines, earliestJoin = function() end, function() end, function() end
 -- An add-on message was heard from a character (see MembershipDates:Heard).
 local heardFrom = function() end
--- The officers' Promotions page, the requirements editor (see
--- RankRequirements), set up with guild sync below: view() gives its
--- model, and the rest edit it.
+-- Promotions: the requirements (see RankRequirements), ticks and snoozes,
+-- set up with guild sync below; Rank management's pages read and edit them
+-- through it.
 local promotions = {
-    view = function()
-        return nil
-    end,
     askOnce = function() end,
     prune = function() end,
-    shown = function() end,
     changed = function() end,
     readyKeys = function()
-        return nil
-    end,
-    timeMetKeys = function()
-        return nil
-    end,
-    panelRows = function()
         return nil
     end,
 }
@@ -130,7 +120,62 @@ local lfgFriendTier = function() return nil end
 local friendsUi = {
     page = nil,
     draw = function() end,
+    -- The Roster page, which shares the Friends page's player panel.
+    roster = nil,
+    drawRoster = function() end,
+    -- The officers' Rank management page.
+    rankPage = nil,
 }
+-- `/agf` and the general entry points: opens the window on the Guild Roster,
+-- or with `toggle`, closes it when it's already showing the Roster.
+function friendsUi.showRoster(toggle)
+    if agfWindow == nil then
+        return false
+    end
+    if toggle and agfWindow:IsOpen() and agfWindow:Page() == "roster" then
+        agfWindow:Close()
+        return true
+    end
+    local opened, failure = agfWindow:Open("roster")
+    if not opened then
+        rosterController:Print("The Guild Roster can't open on this client: " .. tostring(failure))
+    end
+    return opened
+end
+-- A member selected in the game's guild roster: the Guild Roster shows
+-- their player, when it's showing. False when it isn't, or the add-on has
+-- no record of them.
+function friendsUi.followGuildRoster(name)
+    if agfWindow == nil or not agfWindow:IsOpen() or agfWindow:Page() ~= "roster" or friendsUi.roster == nil then
+        return false
+    end
+    local guild, partition, normalizer = rosterController:QuietContext()
+    local key = guild and type(name) == "string" and normalizer:Key(name) or nil
+    local character = key and partition:GetCharacter(key)
+    if character == nil or character.player == nil then
+        return false
+    end
+    friendsUi.roster:Refresh(character.player)
+    return true
+end
+-- Rank management, the Friends page's player panel and the window's badges
+-- follow a change while the window is open. Rank management open for a
+-- user who's no longer an officer gives way to a page they may see.
+function friendsUi.followRank()
+    if agfWindow == nil or not agfWindow:IsOpen() then
+        return
+    end
+    agfWindow:RefreshBadges()
+    if agfWindow:Page() == "rank" and not agfWindow:ModuleShown("rank") then
+        agfWindow:ShowPage("rank")
+    end
+    if friendsUi.rankPage ~= nil and agfWindow:Page() == "rank" then
+        friendsUi.rankPage:Update()
+    elseif friendsUi.page ~= nil and agfWindow:Page() == "friends" then
+        -- The panel's Rank tab follows, and goes for a demoted officer.
+        friendsUi.page:Update()
+    end
+end
 -- The Greetings page in the new window, once it's drawn.
 local greetingsUi = {
     page = nil,
@@ -163,14 +208,10 @@ if clientProfile.supported then
     -- The master frame's tabs, in order. The first is where the general
     -- entry points open it.
     pages = addon.PageNavigator.Create()
-    pages:Add("roster", "Roster", addon.MasterFrame.ICONS.roster)
     pages:Add("profile", "My Profile", addon.MasterFrame.ICONS.profile)
     pages:Add("recruitment", "Recruitment", addon.MasterFrame.ICONS.recruitment)
     pages:Add("ads", "Recent Guild Advertisements", addon.MasterFrame.ICONS.ads)
-    -- Officers only: they come and go with the character's rank.
-    pages:Add("promotions", "Promotion Requirements", addon.MasterFrame.ICONS.promotions, function()
-        return guildLogOf() ~= nil
-    end)
+    -- Officers only: it comes and goes with the character's rank.
     pages:Add("guildlog", "Guild Log", addon.MasterFrame.ICONS.guildlog, function()
         return guildLogOf() ~= nil
     end)
@@ -257,41 +298,17 @@ if clientProfile.supported then
             if guildNoteOverlay ~= nil then
                 guildNoteOverlay:Refresh()
             end
+            -- The new window's Roster and Rank management follow along while
+            -- they show, and their badges while the window does.
+            if agfWindow ~= nil and agfWindow:IsOpen() then
+                if friendsUi.roster ~= nil and agfWindow:Page() == "roster" then
+                    friendsUi.roster:Update()
+                end
+                friendsUi.followRank()
+            end
         end,
         onDecideSuggestion = function(character, kind, approved)
             return syncSession:Decide(character, kind, approved)
-        end,
-        adStats = function(keys)
-            return guildRecruit:StatsLine(keys)
-        end,
-        rolesOf = function(key)
-            local roles = rolesOf(key)
-            return roles and addon.RoleCatalog.Describe(roles) or nil
-        end,
-        joined = function(keys)
-            return earliestJoin(keys)
-        end,
-        membership = function(keys)
-            return membershipLines(keys)
-        end,
-        promotionsView = function()
-            return promotions.view()
-        end,
-        promotion = function(keys, playerId)
-            return promotions.panelRows(keys, playerId)
-        end,
-        readyKeys = function()
-            return promotions.readyKeys()
-        end,
-        timeMetKeys = function()
-            return promotions.timeMetKeys()
-        end,
-        grouped = function(keys)
-            local guild, partition = rosterController:QuietContext()
-            if guild == nil then
-                return nil
-            end
-            return addon.GroupHistory.Create(partition):Stats(keys)
         end,
         recruitRecord = function(keys)
             return guildRecruit:RecordFor(keys)
@@ -321,7 +338,6 @@ if clientProfile.supported then
         createWindow = function()
             return addon.RosterWindow.Create(client, {
                 navigator = pages,
-                timerIcon = addon.RosterViewModel.TimerIcon(client:TextureLoads(addon.RosterViewModel.TIMER_TEXTURE)),
                 drawPages = {
                     profile = function(content)
                         if drawProfile ~= nil then
@@ -352,42 +368,6 @@ if clientProfile.supported then
                 onGuildLogShown = function()
                     rosterController:RefreshGuildLog()
                 end,
-                onPromotionsShown = function()
-                    promotions.shown()
-                end,
-                onPromotionsRank = function(step)
-                    return promotions.rank(step)
-                end,
-                onPromotionsAdd = function(label, needsNote)
-                    return promotions.add(label, needsNote)
-                end,
-                onPromotionsRename = function(id, label, needsNote)
-                    return promotions.rename(id, label, needsNote)
-                end,
-                onPromotionsAutomated = function(kind, enabled, n)
-                    return promotions.automated(kind, enabled, n)
-                end,
-                onPromotionsMatchAlts = function(on)
-                    return promotions.matchAlts(on)
-                end,
-                onPromotionsSnoozeDays = function(days)
-                    return promotions.snoozeDays(days)
-                end,
-                onPromotionsMove = function(id, step)
-                    return promotions.move(id, step)
-                end,
-                onPromotionsDelete = function(id)
-                    return promotions.delete(id)
-                end,
-                onPromotionsTick = function(key, item, ticked, note)
-                    return promotions.tick(key, item, ticked, note)
-                end,
-                onPanelPromotionToggle = function(key, expanded)
-                    return promotions.togglePanel(key, expanded)
-                end,
-                onPromotionsSnooze = function(key)
-                    return promotions.snooze(key)
-                end,
                 onGuildLogSearch = function(text)
                     rosterController:SetGuildLogSearch(text)
                 end,
@@ -416,22 +396,6 @@ if clientProfile.supported then
                         store:SetFrameState(state)
                     end
                 end,
-                loadPlayerPanelPosition = function()
-                    local store = rosterController:Store()
-                    return store and store:GetPlayerPanelPosition()
-                end,
-                savePlayerPanelPosition = function(position)
-                    local store = rosterController:Store()
-                    if store ~= nil then
-                        store:SetPlayerPanelPosition(position)
-                    end
-                end,
-                onToggleGroup = function(playerId)
-                    rosterController:ToggleGroup(playerId)
-                end,
-                onRescan = function()
-                    rosterController:Rescan()
-                end,
                 onAcceptConflict = function(character, kind)
                     rosterController:AcceptConflict(character, kind)
                 end,
@@ -453,68 +417,11 @@ if clientProfile.supported then
                 onCloseReview = function()
                     rosterController:CloseReview()
                 end,
-                onToggleDeparted = function()
-                    return rosterController:ToggleDeparted()
-                end,
-                onPurge = function(key)
-                    rosterController:Purge(key)
-                end,
-                onPurgeAll = function()
-                    rosterController:PurgeAllDeparted()
-                end,
-                menuFor = function(row)
-                    return rosterController:MenuFor(row)
-                end,
-                onSetMain = function(key, playerId)
-                    rosterController:SetMainPlayer(key, playerId)
-                end,
-                onMakeMain = function(key)
-                    rosterController:MakeMain(key)
-                end,
-                onSetAlias = function(key, text)
-                    rosterController:SetAlias(key, text)
-                end,
-                onSetProfileText = function(key, kind, text)
-                    rosterController:SetProfileText(key, kind, text)
-                end,
-                onSetDiscord = function(key, text)
-                    rosterController:SetDiscord(key, text)
-                end,
-                onDetach = function(key)
-                    rosterController:Detach(key)
-                end,
-                searchPlayers = function(key, query)
-                    return rosterController:SearchPlayers(key, query)
-                end,
-                aliasOf = function(key)
-                    return rosterController:AliasOf(key)
-                end,
-                onSearch = function(text)
-                    rosterController:SetSearch(text)
-                end,
-                onToggleOnlineOnly = function()
-                    return rosterController:ToggleOnlineOnly()
-                end,
-                onExpandAll = function()
-                    rosterController:ExpandAll()
-                end,
-                onCollapseAll = function()
-                    rosterController:CollapseAll()
-                end,
-                onSelectCharacter = function(key)
-                    rosterController:SelectPlayerOf(key)
-                end,
-                onClosePanel = function()
-                    rosterController:ClosePanel()
-                end,
-                onMenuUnavailable = function()
-                    rosterController:Print("The organize menu isn't available on this client.")
-                end,
             })
         end,
     })
-    router:Register("roster", "show or hide the roster window", function()
-        rosterController:Toggle()
+    router:Register("roster", "show or hide the Guild Roster", function()
+        friendsUi.showRoster(true)
     end)
     router:Register("rescan", "rescan the guild roster now", function()
         rosterController:Rescan()
@@ -530,7 +437,7 @@ if clientProfile.supported then
         kind = "action",
         label = "Open window",
         run = function()
-            rosterController:Open()
+            friendsUi.showRoster(false)
         end,
     })
     settings:Add("about", {
@@ -617,6 +524,36 @@ if clientProfile.supported then
             end
             if not store:SetLfgAutoList(enabled) then
                 return nil, "the saved setting is unreadable"
+            end
+            return true
+        end,
+    })
+    -- Whether the player's unlisted parties show on guildmates' Guild LFG
+    -- Boards as Playing, account-wide, on unless turned off.
+    settings:Add("general", {
+        id = "lfgShareParty",
+        kind = "toggle",
+        label = "Show my party on the guild's board",
+        info = function()
+            return "On by default: a party you lead with a guildmate in it shows on the guild's Guild LFG " ..
+                "Board as Playing, even when it isn't open to the guild. Nobody can ask to join it. Turn " ..
+                "it off to keep your party to yourselves until you open it."
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:LfgShareParty()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetLfgShareParty(enabled) then
+                return nil, "the saved setting is unreadable"
+            end
+            -- Off takes the party off guildmates' boards now; on puts it back.
+            if lfgJoin.sharePlaying ~= nil then
+                lfgJoin.sharePlaying()
             end
             return true
         end,
@@ -1330,8 +1267,8 @@ if clientProfile.supported then
             rosterController:Print("Chat tags off.")
         end
     end)
-    -- The add-on's new window, which features move into one at a time; for
-    -- now it has the Guild LFG Board. Its fonts are shared through
+    -- The add-on's new window, which features move into one at a time,
+    -- opening on the Roster. Its fonts are shared through
     -- LibSharedMedia. It's made on first open, and its place is saved per
     -- character.
     addon.Theme.Register(client:GetLibrary("LibSharedMedia-3.0"))
@@ -1339,6 +1276,23 @@ if clientProfile.supported then
         frameName = addon.Identity.addonName .. "Window",
         modules = {
             -- First, so it's the window's default page.
+            { id = "roster", label = "Roster", title = "Guild Roster",
+                draw = function(content, ui)
+                    friendsUi.drawRoster(content, ui)
+                end,
+                -- Members' suggestions waiting for an officer.
+                badge = function()
+                    if not rosterController:IsOfficerUser() then
+                        return 0
+                    end
+                    return rosterController:SuggestionCount()
+                end,
+                -- Given a player id, shows them.
+                onShow = function(playerId)
+                    if friendsUi.roster ~= nil then
+                        friendsUi.roster:Refresh(playerId)
+                    end
+                end },
             { id = "friends", label = "Friends", title = "Friends",
                 draw = function(content, ui)
                     friendsUi.draw(content, ui)
@@ -1353,6 +1307,7 @@ if clientProfile.supported then
                 settingsRows = {
                     { id = "lfgButton", label = "Show LFG button" },
                     { id = "lfgAutoList", label = "Auto-list my parties", info = true },
+                    { id = "lfgShareParty", label = "Show my party on the guild's board", info = true },
                     { id = "lfgChatLine", label = "Chat line for new groups",
                         info = "A line in chat for each new group you could join." },
                 },
@@ -1429,6 +1384,93 @@ if clientProfile.supported then
                 onShow = function()
                     if greetingsUi.page ~= nil then
                         greetingsUi.page:Refresh()
+                    end
+                end },
+            -- Officers only, under the Officer label at the bottom.
+            { id = "rank", label = "Rank management", title = "Rank management", group = "Officer",
+                visible = function()
+                    return rosterController:IsOfficerUser()
+                end,
+                -- The players due a rank.
+                badge = function()
+                    local due = promotions.due()
+                    return due and due.count or 0
+                end,
+                draw = function(content, ui)
+                    friendsUi.rankPage = addon.RankManagementPage.Create(content, ui, {
+                        model = function(search, rank, missing)
+                            return promotions.due(search, rank, missing)
+                        end,
+                        targets = function()
+                            local inputs = promotions.inputs()
+                            return inputs and addon.RankUpViewModel.Targets(inputs) or {}
+                        end,
+                        missing = function(rank)
+                            local inputs = promotions.inputs()
+                            if inputs == nil then
+                                return {}
+                            end
+                            inputs.rank = rank
+                            return addon.RankUpViewModel.MissingChoices(inputs)
+                        end,
+                        players = function(search, filter)
+                            return promotions.players(search, filter)
+                        end,
+                        onSnooze = function(key)
+                            return promotions.snooze(key)
+                        end,
+                        onTick = function(key, item, ticked, note)
+                            return promotions.tick(key, item, ticked, note)
+                        end,
+                        requirements = {
+                            ranks = function()
+                                return promotions.rankList()
+                            end,
+                            view = function(rank)
+                                return promotions.editor(rank)
+                            end,
+                            add = function(rank, label, needsNote)
+                                return promotions.add(rank, label, needsNote)
+                            end,
+                            rename = function(_, id, label)
+                                return promotions.rename(id, label)
+                            end,
+                            automated = function(rank, kind, enabled, n)
+                                return promotions.automated(rank, kind, enabled, n)
+                            end,
+                            matchAlts = function(rank, on)
+                                return promotions.matchAlts(rank, on)
+                            end,
+                            snoozeDays = function(rank, days)
+                                return promotions.snoozeDays(rank, days)
+                            end,
+                            move = function(_, id, step)
+                                return promotions.move(id, step)
+                            end,
+                            delete = function(_, id)
+                                return promotions.delete(id)
+                            end,
+                            onError = function(text)
+                                rosterController:Print(text)
+                            end,
+                        },
+                        -- A row's player on the Roster, on their Rank tab.
+                        onSelect = function(playerId)
+                            agfWindow:ShowPage("roster", playerId)
+                            if friendsUi.roster ~= nil then
+                                friendsUi.roster:ShowDetailTab("rank")
+                            end
+                        end,
+                        onError = function(text)
+                            rosterController:Print(text)
+                        end,
+                    })
+                    -- Drawn on the window's first open; specs reach it here.
+                    addon.rankPage = friendsUi.rankPage
+                end,
+                onShow = function()
+                    if friendsUi.rankPage ~= nil then
+                        friendsUi.rankPage:Refresh()
                     end
                 end },
         },
@@ -1633,23 +1675,31 @@ if clientProfile.supported then
     -- Ask to join requests to the player's listing.
     lfgJoin.requests = addon.LfgRequests.Create()
     local lfgWaiting, lfgFlushing, lfgHeartbeat
+    -- An End that waited when something else was announced: it goes out
+    -- first, so a client that ignores what follows (a Playing party) still
+    -- drops the listing.
+    local lfgEndFirst
     local function refreshLfg()
         lfgRefresh()
     end
     local function flushLfg()
         lfgFlushing = false
-        if lfgWaiting == nil then
+        if lfgWaiting == nil and lfgEndFirst == nil then
             return
         end
         if comm:IsBusy() then
             lfgFlushing = client:After(2, flushLfg)
             if not lfgFlushing then
-                lfgWaiting = nil
+                lfgWaiting, lfgEndFirst = nil, nil
             end
             return
         end
-        local message = lfgWaiting
-        lfgWaiting = nil
+        local message = lfgEndFirst or lfgWaiting
+        if lfgEndFirst ~= nil then
+            lfgEndFirst = nil
+        else
+            lfgWaiting = nil
+        end
         local stats = lfgJoin.stats
         -- Under the board's own prefix: under the sync prefix, a guild
         -- sync's backlog held it back.
@@ -1660,8 +1710,15 @@ if clientProfile.supported then
         else
             stats.refused = stats.refused + 1
         end
+        if lfgWaiting ~= nil and not lfgFlushing then
+            flushLfg()
+        end
     end
     local function sendLfg(message)
+        local ended = addon.LfgProtocol.TYPE_END
+        if lfgWaiting ~= nil and lfgWaiting.t == ended and message.t ~= ended then
+            lfgEndFirst = lfgWaiting
+        end
         lfgWaiting = message
         if not lfgFlushing then
             flushLfg()
@@ -1731,6 +1788,9 @@ if clientProfile.supported then
         local fields = lfgListing:Announcement(lfgMembers(), settings:Get("lfgButton") == true)
         if fields ~= nil then
             sendLfg(addon.LfgProtocol.Listing(fields))
+            -- The listing replaces a Playing party on guildmates' boards,
+            -- so its end is the listing's own.
+            lfgJoin.playingSent = false
         end
     end
     -- Ends the listing; `left` when the player left the party, so a
@@ -1741,6 +1801,10 @@ if clientProfile.supported then
             sendLfg(addon.LfgProtocol.End(left))
         end
         lfgJoin.requests:Clear()
+        -- Stopped looking: the party, if it goes on, is Playing.
+        if lfgJoin.sharePlaying ~= nil then
+            lfgJoin.sharePlaying()
+        end
         refreshLfg()
     end
     lfgJoin.endListing = endListing
@@ -2199,6 +2263,47 @@ if clientProfile.supported then
         end
         lfgRefresh()
     end
+    -- Playing: the party the player leads, unlisted, with a guildmate in it,
+    -- shows on guildmates' boards (unless Show my party on the guild's board
+    -- is off): announced when it changes and every HEARTBEAT_SECONDS while
+    -- it lasts, and ended once it doesn't. A listing replaces it.
+    lfgJoin.sharePlaying = function()
+        local members = {}
+        local share = settings:Get("lfgShareParty") ~= false and client:IsInGroup() and client:IsGroupLeader()
+            and not lfgListing:IsActive()
+        local guildmate = false
+        if share then
+            members = lfgMembers()
+            local index
+            for index = 1, #members do
+                if not members[index].isPlayer and members[index].inGuild then
+                    guildmate = true
+                end
+            end
+        end
+        if share and guildmate then
+            local dungeon = lfgCurrentDungeon()
+            local zone = client:GetZone()
+            local place = dungeon and dungeon.name or (zone and zone.name) or nil
+            if place ~= nil and addon.LfgProtocol.Length(place) > addon.LfgProtocol.TEXT_LETTERS then
+                place = nil
+            end
+            sendLfg(addon.LfgProtocol.Party(members, place))
+            lfgJoin.playingSent = true
+            if not lfgJoin.playingTimer then
+                lfgJoin.playingTimer = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, function()
+                    lfgJoin.playingTimer = false
+                    lfgJoin.sharePlaying()
+                end)
+            end
+        elseif lfgJoin.playingSent then
+            lfgJoin.playingSent = false
+            -- A listing that took over says so itself.
+            if not lfgListing:IsActive() then
+                sendLfg(addon.LfgProtocol.End())
+            end
+        end
+    end
     -- The party changed: LfgTrigger says what that means for the listing
     -- (ask, take over, hand off, end, become a raid's), and a live listing
     -- is announced with the party as it is now.
@@ -2330,6 +2435,7 @@ if clientProfile.supported then
             end
         end
         lfgJoin.before = inGroup and lfgMembers() or {}
+        lfgJoin.sharePlaying()
         lfgRefresh()
     end
     -- The role of whoever left (in `before`, not in `after`): the one the
@@ -2736,6 +2842,8 @@ if clientProfile.supported then
         end
         if message.t == addon.LfgProtocol.TYPE_LISTING then
             lfgBoard:OnListing(message, senderKey, sender, client:Timestamp() or 0)
+        elseif message.t == addon.LfgProtocol.TYPE_PARTY then
+            lfgBoard:OnParty(message, senderKey, sender, client:Timestamp() or 0)
         elseif message.t == addon.LfgProtocol.TYPE_CONTACT or message.t == addon.LfgProtocol.TYPE_SLOT then
             -- Only a claim or an answer from a guildmate in the player's
             -- party counts.
@@ -3216,7 +3324,7 @@ if clientProfile.supported then
         end
         return log, normalizer
     end
-    -- Promotion requirements: officers edit them on the Promotions page;
+    -- Promotion requirements: officers edit them in Rank management;
     -- every add-on keeps them, shares edits with the guild, and asks for
     -- them once a session.
     local function requirementsOf()
@@ -3329,17 +3437,17 @@ if clientProfile.supported then
             checks:Prune()
         end
     end
-    -- Requirements or ticks changed: redraw the page, the player panel and
-    -- the roster's Ready markers, here and on the game's guild roster.
+    -- Requirements or ticks changed: redraw the Ready arrows on the game's
+    -- guild roster, the Guild Roster and Rank management.
     promotions.changed = function()
-        rosterController:RefreshPromotions()
         if guildNoteOverlay ~= nil then
             guildNoteOverlay:Refresh()
         end
-    end
-    -- The Promotions page (the requirements editor) opened: redraw it.
-    promotions.shown = function()
-        rosterController:RefreshPromotions()
+        -- The Guild Roster's player panel shows the Rank tab's checklist.
+        if agfWindow ~= nil and agfWindow:IsOpen() and agfWindow:Page() == "roster" and friendsUi.roster ~= nil then
+            friendsUi.roster:Update()
+        end
+        friendsUi.followRank()
     end
     -- What the rules engine reads, or nil before the guild is known.
     local function promotionInputs()
@@ -3357,23 +3465,50 @@ if clientProfile.supported then
             rankNames = client:GetGuildRankNames() or {},
         }
     end
-    -- The characters ready for promotion, as a set, for the roster's marker:
-    -- officers only.
+    promotions.inputs = promotionInputs
+    -- The Rank management page's Due list (RankUpViewModel.Due) for what's
+    -- typed in its search, the rank picked to promote to (nil for any) and
+    -- the Missing choice picked (nil for none), or nil for a member or
+    -- without a guild.
+    promotions.due = function(search, rank, missing)
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        local _, _, normalizer = rosterController:QuietContext()
+        inputs.normalizer = normalizer
+        inputs.members = rosterController:LiveMembers(normalizer)
+        inputs.search = search
+        inputs.rank = rank
+        inputs.missing = missing
+        return addon.RankUpViewModel.Due(inputs)
+    end
+    -- The Rank management page's All players list (RankUpViewModel.All) for
+    -- what's typed in its search and the status filter, or nil for a member
+    -- or without a guild.
+    promotions.players = function(search, filter)
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        local _, _, normalizer = rosterController:QuietContext()
+        inputs.normalizer = normalizer
+        inputs.members = rosterController:LiveMembers(normalizer)
+        inputs.search = search
+        inputs.filter = filter
+        inputs.dateText = function(time)
+            return client:FormatDate(time)
+        end
+        return addon.RankUpViewModel.All(inputs)
+    end
+    -- The characters ready for promotion, as a set, for the Ready arrow on
+    -- the game's guild roster: officers only.
     promotions.readyKeys = function()
         local inputs = promotionInputs()
         if inputs == nil or not selfIsOfficer() then
             return nil
         end
         return addon.PromotionPolicy.ReadySet(inputs)
-    end
-    -- The characters whose time is up but who aren't ready, as a set, for
-    -- the roster's timer marker: officers only.
-    promotions.timeMetKeys = function()
-        local inputs = promotionInputs()
-        if inputs == nil or not selfIsOfficer() then
-            return nil
-        end
-        return addon.PromotionPolicy.TimeMetSet(inputs)
     end
     -- The characters to promote to match their player, as key -> target
     -- rank, for the roster's marker: officers only.
@@ -3419,71 +3554,6 @@ if clientProfile.supported then
     promotions.rankName = function(rank)
         return (client:GetGuildRankNames() or {})[rank + 1] or ("Rank " .. rank)
     end
-    -- The characters whose checklists were opened (true) or closed (false)
-    -- on the player panel's Promotion tab, for the session; the top one
-    -- opens until it's closed.
-    local panelExpanded = {}
-    promotions.togglePanel = function(key, expanded)
-        panelExpanded[key] = not expanded
-        rosterController:RedrawPanel()
-        return true
-    end
-    -- The player panel's Promotion tab (see PromotionsViewModel.PanelRows):
-    -- an officer's for anyone, a member's for their own player only, and
-    -- nil for everyone else. `expanded` is the set of open checklists
-    -- (the panel's own, by default).
-    promotions.panelRows = function(keys, playerId, expanded)
-        local inputs = promotionInputs()
-        if inputs == nil then
-            return nil
-        end
-        local partition = inputs.partition
-        local _, _, normalizer = rosterController:QuietContext()
-        local officer = selfIsOfficer()
-        local selfKey = rosterController:SelfKey()
-        local own = selfKey ~= nil and partition:GetCharacter(selfKey) ~= nil
-            and partition:GetCharacter(selfKey).player == playerId
-        if not officer and not own then
-            return nil
-        end
-        local function nameOf(key)
-            local character = partition:GetCharacter(key)
-            return (character and normalizer:Display(character.name)) or key
-        end
-        local dates = inputs.dates
-        local characters = {}
-        local index
-        for index = 1, #keys do
-            local key = keys[index]
-            local character = partition:GetCharacter(key)
-            if character ~= nil and partition:IsInGuild(key) and type(character.rank) == "number" then
-                local match = officer and addon.PromotionPolicy.MatchTarget(inputs, key) or nil
-                local snoozed = officer and inputs.checks:IsSnoozed(key, inputs.now)
-                local profile = addon.PromotionPolicy.ProfileOf(partition, key)
-                table.insert(characters, {
-                    follows = profile ~= key and nameOf(profile) or nil,
-                    key = key,
-                    name = nameOf(key),
-                    rankName = inputs.rankNames[character.rank + 1] or ("Rank " .. character.rank),
-                    evaluated = addon.PromotionPolicy.Evaluate(inputs, key),
-                    lastPromotion = dates and dates:LastPromotion(key) or nil,
-                    matchRankName = match and (inputs.rankNames[match + 1] or ("Rank " .. match)) or nil,
-                    snooze = snoozed and inputs.checks:SnoozeOf(key) or nil,
-                })
-            end
-        end
-        local highest = addon.PromotionPolicy.HighestRank(partition, playerId)
-        return addon.PromotionsViewModel.PanelRows(characters, {
-            officer = officer,
-            expanded = expanded or panelExpanded,
-            openFirst = true,
-            highestRankName = highest and (inputs.rankNames[highest + 1] or ("Rank " .. highest)) or nil,
-            nameOf = nameOf,
-            formatDate = function(timestamp)
-                return client:FormatDate(timestamp)
-            end,
-        })
-    end
     promotions.tick = function(key, itemId, ticked, note)
         local requirements, checks = requirementsOf(), checksOf()
         local author = rosterController:SelfKey()
@@ -3505,6 +3575,35 @@ if clientProfile.supported then
         ticksSync:Share(records)
         promotions.changed()
         return true
+    end
+    -- The player panel's Rank tab for `playerId` (RankUpViewModel
+    -- .Checklist), editable for an officer; a member sees only their own
+    -- player's, read-only. Nil when the user may not see it, or without a
+    -- guild.
+    promotions.checklist = function(playerId)
+        local inputs = promotionInputs()
+        if inputs == nil then
+            return nil
+        end
+        local officer = selfIsOfficer()
+        if not officer then
+            local selfKey = rosterController:SelfKey()
+            local own = selfKey and inputs.partition:GetCharacter(selfKey) or nil
+            if own == nil or own.player ~= playerId then
+                return nil
+            end
+        end
+        local _, _, normalizer = rosterController:QuietContext()
+        inputs.normalizer = normalizer
+        inputs.members = rosterController:LiveMembers(normalizer)
+        inputs.dateText = function(time)
+            return client:FormatDate(time)
+        end
+        local checklist = addon.RankUpViewModel.Checklist(inputs, playerId)
+        if checklist ~= nil then
+            checklist.editable = officer
+        end
+        return checklist
     end
     -- Not ready: snoozes `key`'s timer marker for its rank's snooze length,
     -- from now. Returns true, or false and why.
@@ -3531,22 +3630,32 @@ if clientProfile.supported then
         promotions.changed()
         return true
     end
-    local selectedRank
     local function rankNames()
         return client:GetGuildRankNames() or {}
     end
-    promotions.view = function()
+    -- Rank management's Requirements tab: the ranks (PromotionsViewModel
+    -- .RankList), and rank `rank`'s editor (PromotionsViewModel.Editor).
+    promotions.rankList = function()
+        local requirements = requirementsOf()
+        return requirements and addon.PromotionsViewModel.RankList(requirements, rankNames()) or nil
+    end
+    promotions.editor = function(rank)
         local requirements = requirementsOf()
         if requirements == nil then
             return nil
         end
-        local model = addon.PromotionsViewModel.Editor({
-            requirements = requirements,
-            rank = selectedRank,
-            rankNames = rankNames(),
-        })
-        selectedRank = model.rank
-        return model
+        return addon.PromotionsViewModel.Editor({ requirements = requirements, rank = rank, rankNames = rankNames() })
+    end
+    -- Rank `rank` when it can have requirements, or nil.
+    local function editableRank(rank)
+        local ranks = addon.PromotionsViewModel.EditableRanks(rankNames())
+        local index
+        for index = 1, #ranks do
+            if ranks[index] == rank then
+                return rank
+            end
+        end
+        return nil
     end
     -- Makes an edit with `change(requirements, author, now)` -> records, or
     -- nil and why, shares it, and redraws. Returns true, or false and why.
@@ -3568,23 +3677,12 @@ if clientProfile.supported then
         promotions.changed()
         return true
     end
-    promotions.rank = function(step)
-        local requirements = requirementsOf()
-        if requirements == nil then
-            return false, "saved data is unavailable"
-        end
-        local names = rankNames()
-        selectedRank = addon.PromotionsViewModel.StepRank(
-            addon.PromotionsViewModel.PickRank(selectedRank, requirements, names), step, names)
-        promotions.changed()
-        return true
-    end
-    -- Adds a custom requirement: a checkbox, needing a note when
+    -- Adds a custom requirement to `rank`: a checkbox, needing a note when
     -- `needsNote`. (Automated checks are turned on with promotions.automated.)
-    promotions.add = function(label, needsNote)
+    promotions.add = function(rank, label, needsNote)
         return editRequirements(function(requirements, author, now)
             local names = rankNames()
-            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, names)
+            rank = editableRank(rank)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end
@@ -3622,32 +3720,31 @@ if clientProfile.supported then
         end)
     end
     -- Turns automated check `kind` on (with its number `n`, as typed) or
-    -- off for the rank shown.
-    promotions.automated = function(kind, enabled, n)
+    -- off for `rank`.
+    promotions.automated = function(rank, kind, enabled, n)
         return editRequirements(function(requirements, author, now)
             local names = rankNames()
-            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, names)
+            rank = editableRank(rank)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end
             return requirements:SetAutomated(rank, kind, enabled == true, tonumber(n), names[rank + 1], author, now)
         end)
     end
-    -- Sets whether alts are matched to the rank shown.
-    promotions.matchAlts = function(on)
+    -- Sets whether alts are matched to `rank`.
+    promotions.matchAlts = function(rank, on)
         return editRequirements(function(requirements, author, now)
-            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, rankNames())
+            rank = editableRank(rank)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end
             return requirements:SetMatchesAlts(rank, on == true, author, now)
         end)
     end
-    -- Sets how many days Not ready snoozes for at the rank shown (`days`
-    -- as typed).
-    promotions.snoozeDays = function(days)
+    -- Sets how many days a snooze lasts at `rank` (`days` as typed).
+    promotions.snoozeDays = function(rank, days)
         return editRequirements(function(requirements, author, now)
-            local rank = addon.PromotionsViewModel.PickRank(selectedRank, requirements, rankNames())
+            rank = editableRank(rank)
             if rank == nil then
                 return nil, "the guild's ranks aren't known yet"
             end
@@ -3819,35 +3916,11 @@ if clientProfile.supported then
             client:Print("  " .. lines[index])
         end
     end
-    -- Whether the timer marker's art loads, and how many characters it
-    -- marks. Changes nothing.
-    local function probeTimer()
-        if not selfIsOfficer() then
-            rosterController:Print("Only officers can probe the timer marker.")
-            return
-        end
-        local loads = client:TextureLoads(addon.RosterViewModel.TIMER_TEXTURE)
-        local count = 0
-        local key
-        for key in pairs(promotions.timeMetKeys() or {}) do
-            count = count + 1
-        end
-        rosterController:Print("Timer marker probe:")
-        client:Print("  Texture: " .. addon.RosterViewModel.TIMER_TEXTURE)
-        if loads == true then
-            client:Print("  Loaded: yes")
-        elseif loads == false then
-            client:Print("  Loaded: no, so the roster shows " .. addon.RosterViewModel.TIMER_FALLBACK .. " instead")
-        else
-            client:Print("  Loaded: unknown (this client can't say)")
-        end
-        client:Print("  Time requirement met: " .. count)
-    end
     router:Register("probe",
         "check what the game reports to the add-on (probe: when the roster was last scanned and how many" ..
         " notes changed; probe forgeries: the guild sync edits caught as forged in your name; probe log: the" ..
         " guild event log; probe officer: the officer channel; probe ready: the Ready flags on the game's" ..
-        " guild roster; officers; probe timer: the roster's timer marker, officers; probe player <name or" ..
+        " guild roster; officers; probe player <name or" ..
         " alias>: a player's alias, links and Discord, with who" ..
         " set each and when, and its logged changes; probe greet: your greet weight and how long it holds your" ..
         " prompts back; probe realm: the realm or region your guild's data is kept under; probe lfg: the Guild" ..
@@ -3865,7 +3938,7 @@ if clientProfile.supported then
                 end
                 if what == "" then
                     client:Print("  Also: " .. addon.Identity.slashCommand .. " probe forgeries, probe log," ..
-                        " probe officer, probe ready, probe timer, probe player <name>, probe greet, probe realm," ..
+                        " probe officer, probe ready, probe player <name>, probe greet, probe realm," ..
                         " probe lfg or probe menu.")
                 end
                 return
@@ -3929,10 +4002,6 @@ if clientProfile.supported then
                 probeReady()
                 return
             end
-            if what == "timer" then
-                probeTimer()
-                return
-            end
             if what == "realm" then
                 rosterController:Print("Realm probe:")
                 local guild = client:GetGuildIdentity()
@@ -3979,7 +4048,7 @@ if clientProfile.supported then
                 rosterController:Print("Use " .. addon.Identity.slashCommand .. " probe forgeries, " ..
                     addon.Identity.slashCommand .. " probe log, " ..
                     addon.Identity.slashCommand .. " probe officer, " .. addon.Identity.slashCommand ..
-                    " probe ready, " .. addon.Identity.slashCommand .. " probe timer, " ..
+                    " probe ready, " ..
                     addon.Identity.slashCommand .. " probe player <name>, " ..
                     addon.Identity.slashCommand .. " probe greet, " ..
                     addon.Identity.slashCommand .. " probe lfg or " ..
@@ -4089,9 +4158,6 @@ if clientProfile.supported then
         end,
         onError = function(problem)
             rosterController:Print("Guild sync failed: " .. tostring(problem))
-        end,
-        onSynced = function()
-            rosterController:UpdateStatus()
         end,
         rolesOf = rolesOf,
     })
@@ -4616,61 +4682,124 @@ if clientProfile.supported then
         groupFriends.partition = partition
         return groupFriends
     end
+    -- What the Friends and Roster pages build from: the partition, its
+    -- Friends, the live roster and the class lookups, plus `extra`. Nil
+    -- without a guild.
+    friendsUi.inputs = function(extra)
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return nil
+        end
+        local fields = {
+            partition = partition,
+            friendKeys = partition:GetFriends(),
+            members = rosterController:LiveMembers(normalizer),
+            normalizer = normalizer,
+            classColor = function(classToken)
+                return client:GetClassColor(classToken)
+            end,
+            className = function(classToken)
+                return client:GetClassName(classToken)
+            end,
+        }
+        local name, value
+        for name, value in pairs(extra) do
+            fields[name] = value
+        end
+        return fields, partition
+    end
+    -- Runs partition method `operation` (AddFriend and the like): its
+    -- answer, or false and why without a guild.
+    friendsUi.change = function(operation, ...)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return false, "you're not in a guild"
+        end
+        return partition[operation](partition, ...)
+    end
+    -- A character to pin for `key`'s player: `key` itself while it's in the
+    -- guild, else one of their characters that is. Nil and why when the
+    -- player has none left.
+    friendsUi.pinnable = function(key)
+        local guild, partition = rosterController:QuietContext()
+        if guild == nil then
+            return nil, "you're not in a guild"
+        end
+        if partition:IsInGuild(key) then
+            return key
+        end
+        local character = partition:GetCharacter(key)
+        local keys = character and partition:CharactersOf(character.player) or {}
+        local index
+        for index = 1, #keys do
+            if partition:IsInGuild(keys[index]) then
+                return keys[index]
+            end
+        end
+        return nil, "they've left the guild"
+    end
+    -- Player `playerId` as the shared player detail panel shows them
+    -- (PlayerDetailViewModel), with `groupedShown` Grouped parties, or nil.
+    friendsUi.detail = function(playerId, groupedShown)
+        local friends = currentFriends()
+        local fields = friendsUi.inputs({
+            playerId = playerId,
+            groupedShown = groupedShown,
+            rolesOf = function(key)
+                local roles = rolesOf(key)
+                return roles and addon.RoleCatalog.Describe(roles) or nil
+            end,
+            adStats = function(keys)
+                return guildRecruit:StatsLine(keys)
+            end,
+            membership = function(keys)
+                return membershipLines(keys)
+            end,
+            history = function()
+                local _, partition = rosterController:QuietContext()
+                return partition:GetGroupHistory()
+            end,
+            historyMember = function(key)
+                local _, partition, normalizer = rosterController:QuietContext()
+                local character = partition:GetCharacter(key)
+                if not character then
+                    return nil
+                end
+                local name = character.name or key
+                return { name = normalizer:Display(name) or name, whisper = name,
+                    classToken = character.class }
+            end,
+            tierOf = function(key)
+                return lfgFriendTier(key)
+            end,
+            mostGrouped = friends and friends:MostGrouped() or {},
+            formatDate = function(timestamp)
+                return client:FormatDate(timestamp)
+            end,
+            grouped = function(keys)
+                local _, partition = rosterController:QuietContext()
+                return addon.GroupHistory.Create(partition):Stats(keys)
+            end,
+            joined = function(keys)
+                return earliestJoin(keys)
+            end,
+            rankChecklist = function(id)
+                return promotions.checklist(id)
+            end,
+        })
+        return fields and addon.PlayerDetailViewModel.Build(fields) or nil
+    end
     -- The Friends page: the Friend slots and the picker, built from saved
     -- data and the live roster each time it's shown.
     friendsUi.draw = function(content, ui)
-        local function inputs(extra)
-            local guild, partition, normalizer = rosterController:QuietContext()
-            if guild == nil then
-                return nil
-            end
-            local fields = {
-                partition = partition,
-                friendKeys = partition:GetFriends(),
-                members = rosterController:LiveMembers(normalizer),
-                normalizer = normalizer,
-                classColor = function(classToken)
-                    return client:GetClassColor(classToken)
-                end,
-                className = function(classToken)
-                    return client:GetClassName(classToken)
-                end,
-            }
-            local name, value
-            for name, value in pairs(extra) do
-                fields[name] = value
-            end
-            return fields, partition
-        end
-        local function change(operation, ...)
-            local guild, partition = rosterController:QuietContext()
-            if guild == nil then
-                return false, "you're not in a guild"
-            end
-            return partition[operation](partition, ...)
-        end
-        -- A character to pin for `key`'s player: `key` itself while it's in
-        -- the guild, else one of their characters that is. Nil and why when
-        -- the player has none left.
-        local function pinnable(key)
-            local guild, partition = rosterController:QuietContext()
-            if guild == nil then
-                return nil, "you're not in a guild"
-            end
-            if partition:IsInGuild(key) then
-                return key
-            end
-            local character = partition:GetCharacter(key)
-            local keys = character and partition:CharactersOf(character.player) or {}
-            local index
-            for index = 1, #keys do
-                if partition:IsInGuild(keys[index]) then
-                    return keys[index]
-                end
-            end
-            return nil, "they've left the guild"
-        end
+        local inputs, change, pinnable = friendsUi.inputs, friendsUi.change, friendsUi.pinnable
         friendsUi.page = addon.FriendsPage.Create(content, ui, {
+            onRankTick = function(key, item, ticked, note)
+                return promotions.tick(key, item, ticked, note)
+            end,
+            onSnooze = function(key)
+                return promotions.snooze(key)
+            end,
             model = function(selected)
                 local friends = currentFriends()
                 local fields = inputs({ selected = selected, mostGrouped = friends and friends:MostGrouped() or {} })
@@ -4707,52 +4836,7 @@ if clientProfile.supported then
             onError = function(text)
                 rosterController:Print(text)
             end,
-            detail = function(playerId, groupedShown)
-                local friends = currentFriends()
-                local fields = inputs({
-                    playerId = playerId,
-                    groupedShown = groupedShown,
-                    rolesOf = function(key)
-                        local roles = rolesOf(key)
-                        return roles and addon.RoleCatalog.Describe(roles) or nil
-                    end,
-                    adStats = function(keys)
-                        return guildRecruit:StatsLine(keys)
-                    end,
-                    membership = function(keys)
-                        return membershipLines(keys)
-                    end,
-                    history = function()
-                        local _, partition = rosterController:QuietContext()
-                        return partition:GetGroupHistory()
-                    end,
-                    historyMember = function(key)
-                        local _, partition, normalizer = rosterController:QuietContext()
-                        local character = partition:GetCharacter(key)
-                        if not character then
-                            return nil
-                        end
-                        local name = character.name or key
-                        return { name = normalizer:Display(name) or name, whisper = name,
-                            classToken = character.class }
-                    end,
-                    tierOf = function(key)
-                        return lfgFriendTier(key)
-                    end,
-                    mostGrouped = friends and friends:MostGrouped() or {},
-                    formatDate = function(timestamp)
-                        return client:FormatDate(timestamp)
-                    end,
-                    grouped = function(keys)
-                        local _, partition = rosterController:QuietContext()
-                        return addon.GroupHistory.Create(partition):Stats(keys)
-                    end,
-                    joined = function(keys)
-                        return earliestJoin(keys)
-                    end,
-                })
-                return fields and addon.PlayerDetailViewModel.Build(fields) or nil
-            end,
+            detail = friendsUi.detail,
             formatDate = function(at)
                 return client:FormatDate(at)
             end,
@@ -4765,6 +4849,173 @@ if clientProfile.supported then
         })
         -- Drawn on the window's first open; specs reach it here.
         addon.friendsPage = friendsUi.page
+    end
+    -- The Roster page: a card per player and the selected one in the player
+    -- panel, built from saved data and the live roster when it's shown and
+    -- whenever the roster changes while it is.
+    -- The conflict queue's rows (ConflictViewModel), for the Roster's Review
+    -- tab; none without a guild.
+    friendsUi.queue = function()
+        local guild, partition, normalizer = rosterController:QuietContext()
+        if guild == nil then
+            return {}
+        end
+        return addon.ConflictViewModel.Build({ partition = partition, normalizer = normalizer,
+            members = rosterController:LiveMembers(normalizer) })
+    end
+    friendsUi.drawRoster = function(content, ui)
+        -- Runs RosterController method `method` for the current guild, which
+        -- the old window may never have opened; nil without a guild.
+        local function organize(method, ...)
+            if not rosterController:UseCurrentGuild() then
+                return nil
+            end
+            return rosterController[method](rosterController, ...)
+        end
+        friendsUi.roster = addon.RosterPage.Create(content, ui, {
+            onRankTick = function(key, item, ticked, note)
+                return promotions.tick(key, item, ticked, note)
+            end,
+            onSnooze = function(key)
+                return promotions.snooze(key)
+            end,
+            model = function(selected, filters)
+                local friends = currentFriends()
+                local fields, partition = friendsUi.inputs({ selected = selected, now = client:Timestamp(),
+                    search = filters.search, sort = filters.sort, rank = filters.rank,
+                    onlineOnly = filters.onlineOnly, selfKey = rosterController:SelfKey(),
+                    groupedOf = function(key)
+                        return friends and friends:StatsOf(key) or 0
+                    end })
+                if fields == nil then
+                    return nil
+                end
+                fields.lastSync = partition:GetLastSync()
+                return addon.RosterListModel.Build(fields)
+            end,
+            detail = friendsUi.detail,
+            formatDate = function(at)
+                return client:FormatDate(at)
+            end,
+            onWhisper = function(target)
+                client:OpenWhisper(target)
+            end,
+            onInvite = function(target)
+                client:InviteToParty(target)
+            end,
+            -- The star pins the player in an open Friend slot, or unpins them.
+            onToggleFriend = function(view)
+                if view.header.isFriend then
+                    return friendsUi.change("RemoveFriend", view.playerId)
+                end
+                local pinned, why = friendsUi.pinnable(view.header.key)
+                if pinned == nil then
+                    return false, why
+                end
+                return friendsUi.change("AddFriend", pinned)
+            end,
+            onRescan = function()
+                rosterController:Rescan()
+            end,
+            countsTooltip = function()
+                local guild, partition, normalizer = rosterController:QuietContext()
+                if guild == nil then
+                    return nil
+                end
+                local counts = addon.RosterViewModel.Counts(partition, rosterController:LiveMembers(normalizer))
+                return addon.RosterViewModel.CountsTooltip(counts)
+            end,
+            onError = function(text)
+                rosterController:Print(text)
+            end,
+            -- The officers' tabs.
+            isOfficer = function()
+                return rosterController:IsOfficerUser()
+            end,
+            departed = function()
+                local fields = friendsUi.inputs({ now = client:Timestamp() })
+                return fields and addon.RosterListModel.Departed(fields) or {}
+            end,
+            onPurge = function(key)
+                organize("Purge", key)
+            end,
+            onPurgeAll = function()
+                organize("PurgeAllDeparted")
+            end,
+            suggestions = function()
+                return addon.RosterListModel.Suggestions(friendsUi.queue())
+            end,
+            onApprove = function(character, kind)
+                organize("AcceptConflict", character, kind)
+            end,
+            onDeny = function(character, kind)
+                organize("RejectConflict", character, kind)
+            end,
+            onApproveAll = function()
+                organize("DecideAllSuggestions", true)
+            end,
+            onDenyAll = function()
+                organize("DecideAllSuggestions", false)
+            end,
+            -- The old window's review of a member's bundle: the player before
+            -- and after.
+            reviewOf = function(group)
+                local guild, partition, normalizer = rosterController:QuietContext()
+                if guild == nil then
+                    return nil
+                end
+                local rows = friendsUi.queue()
+                local index
+                for index = 1, #rows do
+                    if rows[index].kind == "bundle" and rows[index].group == group then
+                        local model = addon.BundleReviewViewModel.Build({ partition = partition,
+                            normalizer = normalizer, bundle = rows[index],
+                            members = rosterController:LiveMembers(normalizer) })
+                        return { title = model.title, suggestedBy = model.suggestedBy,
+                            lines = addon.RosterWindow.ReviewLines(model) }
+                    end
+                end
+                return nil
+            end,
+            -- The old roster's organizing actions and permission rules.
+            menuFor = function(target)
+                return organize("MenuFor", target) or {}
+            end,
+            canEdit = function(key)
+                return organize("CanEditPlayer", key) == true
+            end,
+            playerOf = function(key)
+                local _, partition = rosterController:QuietContext()
+                local character = partition and partition:GetCharacter(key)
+                return character and character.player or nil
+            end,
+            aliasOf = function(key)
+                return organize("AliasOf", key)
+            end,
+            searchPlayers = function(key, query)
+                return organize("SearchPlayers", key, query) or {}
+            end,
+            onSetAlias = function(key, text)
+                organize("SetAlias", key, text)
+            end,
+            onSetDiscord = function(key, text)
+                organize("SetDiscord", key, text)
+            end,
+            onSetMain = function(key, playerId)
+                organize("SetMainPlayer", key, playerId)
+            end,
+            onMakeMain = function(key)
+                organize("MakeMain", key)
+            end,
+            onDetach = function(key)
+                organize("Detach", key)
+            end,
+            onSetProfileText = function(key, field, text)
+                organize("SetProfileText", key, field, text)
+            end,
+        })
+        -- Drawn on the window's first open; specs reach it here.
+        addon.rosterPage = friendsUi.roster
     end
     -- Open in Guild Fellowship, on the game's right-click menus for a
     -- guildmate: the new window on Friends, showing their player.
@@ -5219,7 +5470,7 @@ if clientProfile.supported then
         -- Selecting a member there opens the player panel for their
         -- player, for anyone.
         showPlayer = function(name)
-            return rosterController:ShowPlayerNamed(name)
+            return friendsUi.followGuildRoster(name)
         end,
         -- Officers see why a selected alt should be promoted to match.
         matchFor = function(name)
@@ -5594,7 +5845,7 @@ if clientProfile.supported then
     entryPoints = addon.EntryPoints.Create({
         client = client,
         toggle = function()
-            rosterController:Toggle()
+            friendsUi.showRoster(true)
         end,
         conflictCount = function()
             return rosterController:PendingConflictCount()

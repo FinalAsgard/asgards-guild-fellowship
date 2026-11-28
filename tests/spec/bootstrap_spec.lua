@@ -13,11 +13,13 @@ local MANIFEST_FILES = {
     "Adapters/PlayerCards.lua",
     "Adapters/PlayerDetailPanel.lua",
     "Adapters/FriendsPage.lua",
+    "Adapters/RosterPage.lua",
+    "Adapters/RequirementsEditor.lua",
+    "Adapters/RankManagementPage.lua",
     "Adapters/GameMenu.lua",
     "Adapters/AgfGreetingsPage.lua",
     "Adapters/LfgButton.lua",
     "Adapters/LfgBoardPage.lua",
-    "Adapters/PromotionLines.lua",
     "Adapters/RosterWindow.lua",
     "Adapters/EntryPoints.lua",
     "Adapters/GuildNoteOverlay.lua",
@@ -37,7 +39,9 @@ local MANIFEST_FILES = {
     "Core/ReconcileEngine.lua",
     "Core/NoteAudit.lua",
     "Core/PlayerService.lua",
+    "Core/ListWindow.lua",
     "Core/RosterViewModel.lua",
+    "Core/RosterListModel.lua",
     "Core/ConflictViewModel.lua",
     "Core/BundleReviewViewModel.lua",
     "Core/PlayerPanelViewModel.lua",
@@ -97,6 +101,7 @@ local MANIFEST_FILES = {
     "Core/RankRequirements.lua",
     "Core/PromotionChecks.lua",
     "Core/PromotionPolicy.lua",
+    "Core/RankUpViewModel.lua",
     "Core/PromotionsViewModel.lua",
     "Core/LocationProtocol.lua",
     "Core/LocationScheduler.lua",
@@ -212,7 +217,7 @@ local function registerBootstrapTest(variant)
         test.assertContains(world.messages[1], variant.chatTag .. "|r Commands:")
         test.assertEqual("  " .. variant.slashCommand .. " help - show available commands", world.messages[2])
         local help = table.concat(world.messages, "\n")
-        test.assertContains(help, "\n  " .. variant.slashCommand .. " roster - show or hide the roster window\n")
+        test.assertContains(help, "\n  " .. variant.slashCommand .. " roster - show or hide the Guild Roster\n")
         test.assertContains(help, "\n  " .. variant.slashCommand .. " rescan - rescan the guild roster now\n")
         test.assertContains(help, "\n  " .. variant.slashCommand .. " sync - show guild sync status\n")
         test.assertContains(
@@ -221,11 +226,11 @@ local function registerBootstrapTest(variant)
         )
         test.assertContains(world.messages[helpLines], "Libraries: all 10 present.")
 
-        -- A bare slash command opens the roster. The fixtures' stand-in
-        -- framework can't build windows, so it reports that instead of
-        -- raising errors.
+        -- A bare slash command opens the Guild Roster. The fixtures' stand-in
+        -- frames can't build windows, so it reports that instead of raising
+        -- errors.
         environment.SlashCmdList[variant.slashKey]("")
-        test.assertContains(world.messages[helpLines + 1], "The roster window can't open")
+        test.assertContains(world.messages[helpLines + 1], "The Guild Roster can't open")
     end)
 end
 

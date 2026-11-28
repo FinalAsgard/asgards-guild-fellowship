@@ -19,8 +19,16 @@ local LfgProtocol = {
     -- lasts. The sender leads it, or is its contact.
     TYPE_LISTING = "lfg-listing",
     -- { v, t, lf = true when the sender left the party }: the sender's
-    -- listing ended. One that ended by leaving can be handed on.
+    -- listing ended. One that ended by leaving can be handed on. It also
+    -- ends the sender's party announcement (TYPE_PARTY).
     TYPE_END = "lfg-end",
+    -- { v, t, s = size, mb = the members, each { n = name, c = class
+    -- token?, l = level? }, w = where it is (a dungeon or zone)? }: the
+    -- party the sender leads, unlisted, with a guildmate in it: Playing on
+    -- guildmates' boards, with nothing to join. Re-sent every
+    -- HEARTBEAT_SECONDS while it lasts; a listing of the party replaces it.
+    -- An add-on that doesn't know the type ignores it.
+    TYPE_PARTY = "lfg-party",
     -- { v, t, ld = the party leader's name }: the sender claims contact for
     -- their party, whose leader isn't in the guild. The party's other
     -- guildmates stop being asked about it.
@@ -147,6 +155,10 @@ local CHECKS = {
     [LfgProtocol.TYPE_END] = function(message)
         return message.lf == nil or message.lf == true
     end,
+    [LfgProtocol.TYPE_PARTY] = function(message)
+        return isCount(message.s, 2, LfgProtocol.MOST_PLAYERS) and isMembers(message.mb, message.s)
+            and (message.w == nil or isShortText(message.w))
+    end,
     [LfgProtocol.TYPE_CONTACT] = function(message)
         return isShortText(message.ld)
     end,
@@ -187,6 +199,18 @@ end
 -- party.
 function LfgProtocol.End(left)
     return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_END, lf = left == true or nil }
+end
+
+-- The sender's unlisted party: `members` ({ name, classToken?, level? },
+-- the leader first) and where it is (`place`, a dungeon or zone, or nil).
+function LfgProtocol.Party(members, place)
+    local list = {}
+    local index
+    for index = 1, #members do
+        local member = members[index]
+        list[index] = { n = member.name, c = member.classToken, l = member.level }
+    end
+    return { v = LfgProtocol.VERSION, t = LfgProtocol.TYPE_PARTY, s = #list, mb = list, w = place }
 end
 
 -- A contact claim for the party led by `leaderName`.

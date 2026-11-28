@@ -4,8 +4,10 @@ local _, addon = ...
 -- per leader, until it ends or nothing is heard of it for STALE_SECONDS (a
 -- leader re-announces it every HEARTBEAT_SECONDS). It sorts them for the
 -- logged-in character into Relevant, alts and Other (see Groups), and keeps
--- this player's Ask to join requests and how they stand. Pure: messages,
--- characters and times are handed in.
+-- this player's Ask to join requests and how they stand. It also keeps the
+-- parties guildmates lead without listing them (LfgProtocol.TYPE_PARTY):
+-- Playing, with nothing to join (see Parties). Pure: messages, characters
+-- and times are handed in.
 local LfgBoard = {
     STALE_SECONDS = 5 * 60,
     -- How often the board is looked at again with nothing new heard, so
@@ -25,7 +27,7 @@ local Board = {}
 Board.__index = Board
 
 function LfgBoard.Create()
-    return setmetatable({ listings = {}, ended = {}, requests = {} }, Board)
+    return setmetatable({ listings = {}, ended = {}, requests = {}, parties = {} }, Board)
 end
 
 local function bareName(name)
@@ -47,6 +49,8 @@ function Board:OnListing(message, leader, sender, now)
         openRoles[index] = message.r[index]
     end
     self.ended[leader] = nil
+    -- Listed now: it's Open, no longer Playing.
+    self.parties[leader] = nil
     self.listings[leader] = {
         id = leader,
         leader = bareName(sender) or leader,
@@ -78,6 +82,30 @@ function Board:OnEnd(leader, left)
     end
     self.listings[leader] = nil
     self.requests[leader] = nil
+    self.parties[leader] = nil
+end
+
+-- Leader `leader` (named `sender`) announced their unlisted party
+-- (`message`, an LfgProtocol.TYPE_PARTY) at `now`. It replaces a listing of
+-- theirs: they stopped looking.
+function Board:OnParty(message, leader, sender, now)
+    local members = {}
+    local index
+    for index = 1, #message.mb do
+        local member = message.mb[index]
+        members[index] = { name = member.n, classToken = member.c, level = member.l }
+    end
+    self.listings[leader] = nil
+    self.requests[leader] = nil
+    self.parties[leader] = {
+        id = leader,
+        leader = bareName(sender) or leader,
+        sender = sender,
+        size = message.s,
+        members = members,
+        place = message.w,
+        heardAt = now,
+    }
 end
 
 -- The listing leader `id` had when they left their party, or nil.
@@ -118,6 +146,27 @@ function Board:Listings(now)
     return list
 end
 
+-- The Playing parties at `now` (stale ones are dropped), by leader:
+-- { id, leader, sender, size, members, place, heardAt }.
+function Board:Parties(now)
+    local list = {}
+    local id, party
+    for id, party in pairs(self.parties) do
+        if isStale(party, now) then
+            self.parties[id] = nil
+        else
+            table.insert(list, party)
+        end
+    end
+    table.sort(list, function(a, b)
+        if string.lower(a.leader) ~= string.lower(b.leader) then
+            return string.lower(a.leader) < string.lower(b.leader)
+        end
+        return a.id < b.id
+    end)
+    return list
+end
+
 -- The listings at `now` sorted for the logged-in character (`current`, {
 -- level, roles }) and its `alts` (a list of { name, level, roles }), each
 -- by LfgRelevance and newest first:
@@ -125,8 +174,9 @@ end
 --   alts      of the rest, those an alt could join, each { listing, alt }
 --             with the first alt that fits
 --   other     the rest: full, or nothing of the player's fits
+--   playing   the Playing parties (see Parties)
 function Board:Groups(now, current, alts)
-    local groups = { relevant = {}, alts = {}, other = {} }
+    local groups = { relevant = {}, alts = {}, other = {}, playing = self:Parties(now) }
     local listings = self:Listings(now)
     local index
     for index = 1, #listings do

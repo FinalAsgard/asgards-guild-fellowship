@@ -11,8 +11,6 @@ local function newFrame()
     function frame:Show() self.shown = true end
     function frame:Hide() self.shown = false end
     function frame:SetTitle() end
-    function frame:SetStatus() end
-    function frame:SetRows() return true end
     function frame:SetConflicts() return true end
     function frame:SetRecruiters() return true end
     function frame:ShowPage(id)
@@ -104,15 +102,18 @@ local function registerProfileTests(profile)
         test.assertContains(version.frame.text, "Version ")
     end)
 
-    test.test(profile .. " AddOns options: Open window opens the master frame on the Roster tab", function()
+    test.test(profile .. " AddOns options: Open window opens the new window on the Guild Roster", function()
         local _, addon, frame = withOptions(profile)
-        addon.pages:Select("settings")
         local button = widgetFor(addon.settingsPanel, "openWindow").frame
 
         button.scripts.OnClick(button)
 
-        test.assertTrue(frame.shown)
-        test.assertEqual("roster", frame.pages[#frame.pages])
+        test.assertTrue(addon.agfWindow:IsOpen())
+        test.assertEqual("roster", addon.agfWindow:Page())
+        test.assertFalse(frame.shown, "not the old window")
+        -- Pressed again, it stays open.
+        button.scripts.OnClick(button)
+        test.assertTrue(addon.agfWindow:IsOpen())
     end)
 
     test.test(profile .. " AddOns options: a setting changed there reads back on the frame's tab, and back", function()

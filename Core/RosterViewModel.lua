@@ -1,13 +1,8 @@
 local _, addon = ...
 
--- Builds the rows the roster window shows from stored players and
--- characters plus live roster facts. Pure: the caller passes in everything
--- it needs.
---
--- The result is a flat list ready for a virtualized scroll list: a header
--- row per player with alts, followed (unless the group is collapsed) by its
--- character rows with the main first; a player with one character is a
--- single row. Filters and search come in later slices.
+-- How the roster words time and the guild's size: last online, "Synced 5
+-- minutes ago", "Left 3 days ago", and the counts the Guild Roster's
+-- tooltip shows. Pure: the caller passes in everything it needs.
 local RosterViewModel = {}
 addon.RosterViewModel = RosterViewModel
 
@@ -83,15 +78,8 @@ function RosterViewModel.SyncStatusLines(status, now)
     return lines
 end
 
-local function coloredName(name, color)
-    if type(color) ~= "string" then
-        return name
-    end
-    return "|c" .. color .. name .. "|r"
-end
-
 -- "Left 3 days ago" for a departed character, from its departure date.
-local function leftText(departed, now)
+function RosterViewModel.LeftText(departed, now)
     local elapsed = math.max(0, (now or departed) - departed)
     local days = math.floor(elapsed / 86400)
     if days < 1 then
@@ -99,215 +87,19 @@ local function leftText(departed, now)
     end
     return "Left " .. plural(days, "day") .. " ago"
 end
-
-local function characterRow(inputs, key, character, playerId, isMain)
-    local live = inputs.members[key] or {}
-    local name = inputs.normalizer:Display(live.name or character.name) or key
-    local classToken = live.classToken or character.class
-    local online = live.online == true
-    local departed = character.departed ~= nil
-    local location = online and live.zone or RosterViewModel.FormatLastOnline(live.lastOnline)
-    if departed then
-        location = leftText(character.departed, inputs.now)
-    end
-    return {
-        kind = "character",
-        key = key,
-        player = playerId,
-        isMain = isMain,
-        -- A main the player deliberately declared.
-        declared = isMain and inputs.partition:IsDeclared(key),
-        name = name,
-        coloredName = coloredName(name, inputs.classColor(classToken)),
-        classToken = classToken,
-        level = live.level or character.level,
-        rank = live.rankName or (character.rank and ("Rank " .. character.rank)) or nil,
-        online = online,
-        departed = departed,
-        location = location,
-    }
-end
-
-local function byName(first, second)
-    local firstName, secondName = string.lower(first.label), string.lower(second.label)
-    if firstName ~= secondName then
-        return firstName < secondName
-    end
-    return first.id < second.id
-end
-
--- inputs:
---   partition    a FellowshipStore partition
---   members      live roster facts keyed by character key (from the adapter)
---   normalizer   a NameNormalizer, for display names
---   classColor   function(classToken) -> "ffrrggbb" or nil
---   collapsed    set of player ids whose groups are collapsed
---   showDeparted true to include characters who left the guild
---   now          the current timestamp, for "Left N days ago"
---   search       text to match against character names, aliases and
---                Discord usernames, ignoring case; a matching player shows
---                its whole group
---   onlineOnly   true to show only players with a character online
--- Returns rows. A player with several characters gets a header row:
---   { kind = "player", id, label, alias, discord, mainName, online,
---     onlineAs, collapsed, count }
--- where `label` is "Alias (Main)", or the main's name without an alias,
--- `discord` is the player's Discord username or nil, and
--- `onlineAs` names the online character (the main if it is online),
--- followed (unless collapsed) by its character rows:
---   { kind = "character", key, player, isMain, declared, name, coloredName,
---     classToken, level, rank, online, departed, location }
--- where `declared` marks a main the player declared on purpose, and
--- `location` is the zone when online, the last-online text, or when
--- the character left. Departed characters are hidden unless showDeparted;
--- a player with no visible characters is left out.
--- A single-character player is just its character row, marked
--- `standalone = true` and carrying the player's `label`, `coloredLabel` and
--- `discord`.
--- Players sort online first, then by label. MarkReady adds `ready` and
--- `timeMet`.
-local function trimmedLower(text)
-    if type(text) ~= "string" then
-        return ""
-    end
-    return string.lower((string.gsub(text, "^%s*(.-)%s*$", "%1")))
-end
-
-local function contains(text, needle)
-    return text ~= nil and string.find(string.lower(text), needle, 1, true) ~= nil
-end
-
--- Whether a group passes the search and online filters.
-local function shown(group, needle, onlineOnly)
-    if onlineOnly and not group.online then
-        return false
-    end
-    if needle == "" or contains(group.alias, needle) or contains(group.discord, needle) then
-        return true
-    end
-    local index
-    for index = 1, #group.rows do
-        if contains(group.rows[index].name, needle) then
-            return true
-        end
-    end
-    return false
-end
-
-function RosterViewModel.Build(inputs)
-    inputs.members = inputs.members or {}
-    inputs.classColor = inputs.classColor or function() return nil end
-    local collapsed = inputs.collapsed or {}
-    local partition = inputs.partition
-    local needle = trimmedLower(inputs.search)
-
-    local groups = {}
-    partition:EachPlayer(function(id, player)
-        local keys = partition:CharactersOf(id)
-        if keys[1] ~= nil then
-            local rows = {}
-            local online = false
-            local onlineAs
-            -- CharactersOf puts the main first, so the label uses the
-            -- main's name even when it is hidden.
-            local mainName = characterRow(inputs, keys[1], partition:GetCharacter(keys[1]), id, true).name
-            local index
-            for index = 1, #keys do
-                local row = characterRow(inputs, keys[index], partition:GetCharacter(keys[index]), id,
-                    keys[index] == player.main)
-                if not row.departed or inputs.showDeparted then
-                    if row.online and onlineAs == nil then
-                        onlineAs = row.name
-                    end
-                    online = online or row.online
-                    table.insert(rows, row)
-                end
-            end
-            local group = {
-                id = id,
-                label = player.alias and (player.alias .. " (" .. mainName .. ")") or mainName,
-                alias = player.alias,
-                discord = (partition:PlayerProfileText(id, "discord")),
-                mainName = mainName,
-                online = online,
-                onlineAs = onlineAs,
-                rows = rows,
-            }
-            if rows[1] ~= nil and shown(group, needle, inputs.onlineOnly) then
-                table.insert(groups, group)
-            end
-        end
-    end)
-
-    table.sort(groups, function(first, second)
-        if first.online ~= second.online then
-            return first.online
-        end
-        return byName(first, second)
-    end)
-
-    local rows = {}
-    local groupIndex
-    for groupIndex = 1, #groups do
-        local group = groups[groupIndex]
-        if #group.rows == 1 then
-            -- A single-character player is one plain row, labeled like a
-            -- header would be, so the list isn't doubled up.
-            local row = group.rows[1]
-            row.standalone = true
-            row.label = group.label
-            row.discord = group.discord
-            row.coloredLabel = group.alias and (group.alias .. " (" .. row.coloredName .. ")")
-                or row.coloredName
-            table.insert(rows, row)
-        else
-            table.insert(rows, {
-                kind = "player",
-                id = group.id,
-                label = group.label,
-                alias = group.alias,
-                discord = group.discord,
-                mainName = group.mainName,
-                online = group.online,
-                onlineAs = group.onlineAs,
-                collapsed = collapsed[group.id] == true,
-                count = #group.rows,
-            })
-            if not collapsed[group.id] then
-                local rowIndex
-                for rowIndex = 1, #group.rows do
-                    table.insert(rows, group.rows[rowIndex])
-                end
-            end
-        end
-    end
-    return rows
-end
-
--- The ids of every player with more than one character, for Collapse all.
-function RosterViewModel.GroupIds(partition)
-    local ids = {}
-    partition:EachPlayer(function(id)
-        if partition:CharactersOf(id)[2] ~= nil then
-            table.insert(ids, id)
-        end
-    end)
-    table.sort(ids)
-    return ids
-end
-
 -- The windows, in days, players are counted active within.
 RosterViewModel.ACTIVE_DAYS = { 7, 30, 90 }
 
 -- Hours since a character was last online, from the roster's { years,
 -- months, days, hours } (a month taken as 30 days), or nil when unknown.
-local function hoursAway(lastOnline)
+function RosterViewModel.HoursAway(lastOnline)
     if type(lastOnline) ~= "table" then
         return nil
     end
     local months = (lastOnline.years or 0) * 12 + (lastOnline.months or 0)
     return (months * 30 + (lastOnline.days or 0)) * 24 + (lastOnline.hours or 0)
 end
+local hoursAway = RosterViewModel.HoursAway
 
 -- How big the guild is, from every player's current characters (departed
 -- ones never count), whatever the roster's search and filters:
@@ -381,17 +173,8 @@ function RosterViewModel.Counts(partition, members)
     return counts
 end
 
--- The roster's counts line: "320 players (27 known + 293 unlinked) · 31 alts
--- · 351 characters", leaving out the breakdown when none are unlinked.
-function RosterViewModel.CountsText(counts)
-    local players = plural(counts.players, "player")
-    if counts.unlinked > 0 then
-        players = players .. " (" .. counts.known .. " known + " .. counts.unlinked .. " unlinked)"
-    end
-    return table.concat({ players, plural(counts.alts, "alt"), plural(counts.characters, "character") }, " · ")
-end
-
--- The counts line's tooltip, one string per line: a "Guild size" title,
+-- The guild's counts as the Guild Roster's tooltip shows them, one string
+-- per line: a "Guild size" title,
 -- the players and how many are known, who is active and online, how
 -- complete the Fellowship data is, and (when there are any) what
 -- "unlinked" means.
@@ -420,71 +203,4 @@ function RosterViewModel.CountsTooltip(counts)
         table.insert(lines, "  It counts as a player until it's linked, but may be someone's alt.")
     end
     return lines
-end
-
--- Remembers the last build and returns it again while `stamp` (a value the
--- caller changes whenever any input changes) is the same, so reopening the
--- window or redrawing without changes doesn't rebuild.
-local Cache = {}
-Cache.__index = Cache
-
-function RosterViewModel.CreateCache()
-    return setmetatable({ builds = 0 }, Cache)
-end
-
-function Cache:Build(inputs, stamp)
-    if self.rows ~= nil and stamp ~= nil and stamp == self.stamp then
-        return self.rows
-    end
-    self.rows = RosterViewModel.Build(inputs)
-    self.stamp = stamp
-    self.builds = self.builds + 1
-    return self.rows
-end
-
--- Marks each character row whose key is in `ready` (a set, or nil for
--- none) with `ready = true`, for the officers' ready marker, and each in
--- `timeMet` (likewise) with `timeMet = true`, for their timer marker; clears
--- the rest. True when any row changed.
-function RosterViewModel.MarkReady(rows, ready, timeMet)
-    local changed = false
-    local index
-    for index = 1, #(rows or {}) do
-        local row = rows[index]
-        if row.kind == "character" then
-            local mark = ready ~= nil and ready[row.key] == true or nil
-            local timer = timeMet ~= nil and timeMet[row.key] == true or nil
-            if row.ready ~= mark or row.timeMet ~= timer then
-                row.ready, row.timeMet = mark, timer
-                changed = true
-            end
-        end
-    end
-    return changed
-end
-
--- The marker a row's rank cell shows: "ready" (Ready wins), "timer", or
--- nil.
-function RosterViewModel.RankMarker(row)
-    if row.ready then
-        return "ready"
-    end
-    if row.timeMet then
-        return "timer"
-    end
-    return nil
-end
-
--- The timer marker's art: a pocket watch, in the game's icons on every
--- client. TimerIcon gives the text it draws: the texture, or a plain "[T]"
--- when the client says the texture is missing (`loads` false; nil means it
--- can't tell, so the texture is tried).
-RosterViewModel.TIMER_TEXTURE = "Interface\\Icons\\INV_Misc_PocketWatch_01"
-RosterViewModel.TIMER_FALLBACK = "|cffffd100[T]|r"
-
-function RosterViewModel.TimerIcon(loads)
-    if loads == false then
-        return RosterViewModel.TIMER_FALLBACK
-    end
-    return "|T" .. RosterViewModel.TIMER_TEXTURE .. ":14|t"
 end

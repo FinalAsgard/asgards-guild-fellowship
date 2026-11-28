@@ -13,6 +13,9 @@ local PlayerCards = {
     DOT_SIZE = 8,
     STAR_SIZE = 12,
     REMOVE_SIZE = 20,
+    -- What a long name leaves for the tag after it: the name yields, so a
+    -- rank tag still shows.
+    TAG_ROOM = 64,
 }
 addon.PlayerCards = PlayerCards
 
@@ -41,7 +44,8 @@ end
 --   onRemove      the hover X; without it there's no X
 -- ShowPlayer(fields) fills and shows it: name, initial?, sub (may carry
 -- color codes), color (the initial's class color, "ffrrggbb"), star,
--- online, count (text shown in the online dot's place), greyed. ShowEmpty
+-- online, count (text shown in the online dot's place), greyed, tag (quiet
+-- text after the name and star). ShowEmpty
 -- (text) makes it an empty slot that only shows `text`. SetSelected(on)
 -- borders it green.
 function PlayerCards.Small(ui, parent, callbacks)
@@ -73,6 +77,9 @@ function PlayerCards.Small(ui, parent, callbacks)
     card.star:SetVertexColor(Theme.Color("gold"))
     card.star:SetSize(PlayerCards.STAR_SIZE, PlayerCards.STAR_SIZE)
     card.star:SetPoint("LEFT", card.name, "RIGHT", 4, 0)
+    card.tag = ui:Text(card, "", "regular", "small", "label")
+    card.tag:SetJustifyH("LEFT")
+    card.tag:SetWordWrap(false)
     card.dot = card:CreateTexture(nil, "ARTWORK")
     card.dot:SetTexture(Theme.TEXTURES.rounded)
     card.dot:SetSize(PlayerCards.DOT_SIZE, PlayerCards.DOT_SIZE)
@@ -150,11 +157,24 @@ function PlayerCards.Small(ui, parent, callbacks)
         card.name:SetText(fields.name or "")
         card.name:SetTextColor(Theme.Color(fields.greyed and "disabled" or "text"))
         card.sub:SetText(fields.sub or "")
-        if fields.star and not fields.greyed then
+        local starred = fields.star and not fields.greyed
+        if starred then
             card.star:Show()
         else
             card.star:Hide()
         end
+        card.tag:SetText(fields.tag or "")
+        -- A long name is cut short before it crowds out the star and tag.
+        local cardWidth, nameWidth = card:GetWidth(), card.name:GetStringWidth()
+        if type(cardWidth) == "number" and type(nameWidth) == "number" and cardWidth > 0 and nameWidth > 0 then
+            local room = cardWidth - (2 * pad + 2 + PlayerCards.INITIAL_SIZE) - (pad + PlayerCards.DOT_SIZE + 6)
+                - (starred and PlayerCards.STAR_SIZE + 4 or 0) - ((fields.tag or "") ~= "" and PlayerCards.TAG_ROOM or 0)
+            card.name:SetWidth(math.max(1, math.min(nameWidth, room)))
+        end
+        card.tag:ClearAllPoints()
+        card.tag:SetPoint("LEFT", starred and card.star or card.name, "RIGHT", Theme.SPACING.xs + 2, 0)
+        -- Clear of the online dot; a long tag is cut short.
+        card.tag:SetPoint("RIGHT", card, "RIGHT", -pad - PlayerCards.DOT_SIZE - 6, 0)
         card.dot:SetVertexColor(Theme.Color(fields.online and "green" or "disabled"))
         card.count:SetText(fields.count or "")
         if fields.greyed or fields.count ~= nil then
@@ -175,6 +195,7 @@ function PlayerCards.Small(ui, parent, callbacks)
         showParts(false)
         card.star:Hide()
         card.dot:Hide()
+        card.tag:SetText("")
         card.count:SetText("")
         if card.remove ~= nil then
             card.remove:Hide()
@@ -211,11 +232,20 @@ end
 
 -- A character card on `parent`: the initial on a rounded tile, the name in
 -- class color with a MAIN badge for the main, "Level 60 Dwarf Warrior",
--- the status, and the roles on the right. ShowCharacter(fields) fills and
+-- status, and the roles on the right. ShowCharacter(fields) fills and
 -- shows it: name, color ("ffrrggbb"), isMain, level, race, className,
--- status, roles (text).
-function PlayerCards.Character(ui, parent)
-    local card = ui:frame("Frame", parent)
+-- status, roles (text). Given `onRightClick` (function(card)), a right
+-- click on the card calls it; `card.fields` holds what it shows.
+function PlayerCards.Character(ui, parent, onRightClick)
+    local card = ui:frame(onRightClick ~= nil and "Button" or "Frame", parent)
+    if onRightClick ~= nil then
+        card:RegisterForClicks("RightButtonUp")
+        card:SetScript("OnClick", function(self, button)
+            if button == "RightButton" then
+                onRightClick(self)
+            end
+        end)
+    end
     card:SetHeight(PlayerCards.CHARACTER_HEIGHT)
     ui:Round(card, Theme.RADIUS.card, "surface", "border")
     local pad = Theme.SPACING.s
@@ -243,6 +273,7 @@ function PlayerCards.Character(ui, parent)
     card.roles:SetJustifyH("RIGHT")
 
     function card.ShowCharacter(_, fields)
+        card.fields = fields
         local initial = PlayerCards.Initial(fields.name)
         card.initial:SetText(colored(initial, fields.color))
         card.name:SetText(colored(fields.name or "", fields.color))

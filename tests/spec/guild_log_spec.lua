@@ -500,8 +500,6 @@ local function loggedIn(profile, options)
         return true
     end
     function frame:SetTitle() end
-    function frame:SetStatus() end
-    function frame:SetRows() return true end
     function frame:SetConflicts() return true end
     function frame:SetRecruiters() return true end
     function frame:SetRecentAds() return true end
@@ -558,7 +556,8 @@ for profileIndex = 1, #fixtures.PROFILES do
         fixtures.fire(world, "GUILD_EVENT_LOG_UPDATE")
 
         test.assertEqual(4, #storedLog(addon).entries)
-        fixtures.slash(world, "roster")
+        -- The old window, where the Guild Log page is.
+        fixtures.slash(world, "profile")
         test.assertTrue(hasTab(addon, "guildlog"))
         test.assertTrue(addon.rosterController:ShowPage("guildlog") == nil)
         test.assertEqual("guildlog", world.frame.page)
@@ -680,7 +679,7 @@ for profileIndex = 1, #fixtures.PROFILES do
 
     test.test(profile .. " the Guild Log tab goes away on demotion, without a reload, back to the home page", function()
         local world, addon = loggedIn(profile)
-        fixtures.slash(world, "roster")
+        fixtures.slash(world, "profile")
         addon.rosterController:ShowPage("guildlog")
         test.assertEqual("guildlog", world.frame.page)
 
@@ -690,7 +689,7 @@ for profileIndex = 1, #fixtures.PROFILES do
         fixtures.runTimers(world, 1)
 
         test.assertFalse(hasTab(addon, "guildlog"))
-        test.assertEqual("roster", world.frame.page)
+        test.assertEqual("profile", world.frame.page)
     end)
 
     test.test(profile .. " without the game's event log, live joins are still recorded and the probe says so", function()

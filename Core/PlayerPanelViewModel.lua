@@ -179,14 +179,12 @@ end
 -- when last, or nil), joined (optional function(keys) -> when the player
 -- first joined, as text, or nil; only officers get it), membership
 -- (optional function(keys) -> lines about each character's join and rank
--- dates, or nil; only officers get them), promotion (optional
--- function(keys, playerId) -> the Promotion tab's rows, see
--- PromotionsViewModel.PanelRows, or nil), wrap (optional function(text) ->
+-- dates, or nil; only officers get them), wrap (optional function(text) ->
 -- a long line's lines as they fit the panel; by default, lines of at most
 -- BIO_LINE bytes).
 -- Returns nil when the player no longer exists, or:
 --   { id, label, alias, main, mainName, canMerge, discord, location, bio,
---     joined, grouped, rows, bioRows, logRows, promotionRows }
+--     joined, grouped, rows, bioRows, logRows }
 -- where `main` is the main's character key, `canMerge` whether the player
 -- can be merged into another (only with no alts), `discord` the player's
 -- Discord username or nil, `location` and `bio` the player's location and
@@ -196,8 +194,7 @@ end
 --   { kind = "empty", text = "Not set" },
 -- `joined` "Joined: …" or nil, `grouped`
 -- "Grouped together 3 times", 0 included (the header shows these),
--- `promotionRows` the Promotion tab's rows (nil when there's no such tab
--- for this player), `logRows` the Log tab's rows: the ad count, when they
+-- `logRows` the Log tab's rows: the ad count, when they
 -- last grouped with this user, and each character's dates, wrapped, then
 -- the Changes section (what changed about the player, and who changed it,
 -- newest first), then the History section (characters that left the
@@ -277,13 +274,6 @@ function PlayerPanelViewModel.Build(inputs)
     local joined = ask(inputs.joined, keys)
     joined = type(joined) == "string" and ("Joined: " .. joined) or nil
 
-    local promotionRows
-    if inputs.promotion ~= nil then
-        local ok, promotion = pcall(inputs.promotion, keys, inputs.playerId)
-        if ok and type(promotion) == "table" then
-            promotionRows = promotion
-        end
-    end
     local location = profileText(partition, inputs.playerId, "location")
     local bio = profileText(partition, inputs.playerId, "bio")
     table.insert(rows, { kind = "section", text = "Main" })
@@ -362,6 +352,5 @@ function PlayerPanelViewModel.Build(inputs)
         rows = rows,
         bioRows = bioRows(location, bio, wrap),
         logRows = logRows,
-        promotionRows = promotionRows,
     }
 end
