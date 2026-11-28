@@ -521,6 +521,36 @@ if clientProfile.supported then
             return true
         end,
     })
+    -- Whether the player's unlisted parties show on guildmates' Guild LFG
+    -- Boards as Playing, account-wide, on unless turned off.
+    settings:Add("general", {
+        id = "lfgShareParty",
+        kind = "toggle",
+        label = "Show my party on the guild's board",
+        info = function()
+            return "On by default: a party you lead with a guildmate in it shows on the guild's Guild LFG " ..
+                "Board as Playing, even when it isn't open to the guild. Nobody can ask to join it. Turn " ..
+                "it off to keep your party to yourselves until you open it."
+        end,
+        get = function()
+            local store = rosterController:Store()
+            return store == nil or store:LfgShareParty()
+        end,
+        set = function(enabled)
+            local store = rosterController:Store()
+            if store == nil then
+                return nil, "saved data is unavailable"
+            end
+            if not store:SetLfgShareParty(enabled) then
+                return nil, "the saved setting is unreadable"
+            end
+            -- Off takes the party off guildmates' boards now; on puts it back.
+            if lfgJoin.sharePlaying ~= nil then
+                lfgJoin.sharePlaying()
+            end
+            return true
+        end,
+    })
     settings:Add("general", {
         id = "version",
         kind = "text",
@@ -1270,6 +1300,7 @@ if clientProfile.supported then
                 settingsRows = {
                     { id = "lfgButton", label = "Show LFG button" },
                     { id = "lfgAutoList", label = "Auto-list my parties", info = true },
+                    { id = "lfgShareParty", label = "Show my party on the guild's board", info = true },
                     { id = "lfgChatLine", label = "Chat line for new groups",
                         info = "A line in chat for each new group you could join." },
                 },
@@ -1735,6 +1766,9 @@ if clientProfile.supported then
         local fields = lfgListing:Announcement(lfgMembers(), settings:Get("lfgButton") == true)
         if fields ~= nil then
             sendLfg(addon.LfgProtocol.Listing(fields))
+            -- The listing replaces a Playing party on guildmates' boards,
+            -- so its end is the listing's own.
+            lfgJoin.playingSent = false
         end
     end
     -- Ends the listing; `left` when the player left the party, so a
@@ -1745,6 +1779,10 @@ if clientProfile.supported then
             sendLfg(addon.LfgProtocol.End(left))
         end
         lfgJoin.requests:Clear()
+        -- Stopped looking: the party, if it goes on, is Playing.
+        if lfgJoin.sharePlaying ~= nil then
+            lfgJoin.sharePlaying()
+        end
         refreshLfg()
     end
     lfgJoin.endListing = endListing
@@ -2203,6 +2241,47 @@ if clientProfile.supported then
         end
         lfgRefresh()
     end
+    -- Playing: the party the player leads, unlisted, with a guildmate in it,
+    -- shows on guildmates' boards (unless Show my party on the guild's board
+    -- is off): announced when it changes and every HEARTBEAT_SECONDS while
+    -- it lasts, and ended once it doesn't. A listing replaces it.
+    lfgJoin.sharePlaying = function()
+        local members = {}
+        local share = settings:Get("lfgShareParty") ~= false and client:IsInGroup() and client:IsGroupLeader()
+            and not lfgListing:IsActive()
+        local guildmate = false
+        if share then
+            members = lfgMembers()
+            local index
+            for index = 1, #members do
+                if not members[index].isPlayer and members[index].inGuild then
+                    guildmate = true
+                end
+            end
+        end
+        if share and guildmate then
+            local dungeon = lfgCurrentDungeon()
+            local zone = client:GetZone()
+            local place = dungeon and dungeon.name or (zone and zone.name) or nil
+            if place ~= nil and addon.LfgProtocol.Length(place) > addon.LfgProtocol.TEXT_LETTERS then
+                place = nil
+            end
+            sendLfg(addon.LfgProtocol.Party(members, place))
+            lfgJoin.playingSent = true
+            if not lfgJoin.playingTimer then
+                lfgJoin.playingTimer = client:After(addon.LfgProtocol.HEARTBEAT_SECONDS, function()
+                    lfgJoin.playingTimer = false
+                    lfgJoin.sharePlaying()
+                end)
+            end
+        elseif lfgJoin.playingSent then
+            lfgJoin.playingSent = false
+            -- A listing that took over says so itself.
+            if not lfgListing:IsActive() then
+                sendLfg(addon.LfgProtocol.End())
+            end
+        end
+    end
     -- The party changed: LfgTrigger says what that means for the listing
     -- (ask, take over, hand off, end, become a raid's), and a live listing
     -- is announced with the party as it is now.
@@ -2334,6 +2413,7 @@ if clientProfile.supported then
             end
         end
         lfgJoin.before = inGroup and lfgMembers() or {}
+        lfgJoin.sharePlaying()
         lfgRefresh()
     end
     -- The role of whoever left (in `before`, not in `after`): the one the
@@ -2740,6 +2820,8 @@ if clientProfile.supported then
         end
         if message.t == addon.LfgProtocol.TYPE_LISTING then
             lfgBoard:OnListing(message, senderKey, sender, client:Timestamp() or 0)
+        elseif message.t == addon.LfgProtocol.TYPE_PARTY then
+            lfgBoard:OnParty(message, senderKey, sender, client:Timestamp() or 0)
         elseif message.t == addon.LfgProtocol.TYPE_CONTACT or message.t == addon.LfgProtocol.TYPE_SLOT then
             -- Only a claim or an answer from a guildmate in the player's
             -- party counts.

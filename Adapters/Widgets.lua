@@ -383,6 +383,27 @@ function UI:Chip(parent, onClear)
     return chip
 end
 
+-- A one-line tooltip on `frame` (a button, say) while it's hovered, kept
+-- as `frame.hint` too. Hooked, so the frame's own mouseover still runs.
+function UI:Hint(frame, text)
+    local environment = self.environment
+    frame.hint = text
+    frame:HookScript("OnEnter", function(self)
+        local tooltip = environment.GameTooltip
+        if type(tooltip) == "table" and type(self.hint) == "string" then
+            tooltip:SetOwner(self, "ANCHOR_TOP")
+            tooltip:SetText(self.hint, 1, 1, 1, 1, true)
+            tooltip:Show()
+        end
+    end)
+    frame:HookScript("OnLeave", function()
+        local tooltip = environment.GameTooltip
+        if type(tooltip) == "table" then
+            tooltip:Hide()
+        end
+    end)
+end
+
 -- A small round "i" that shows `text()` (a function, read on each
 -- mouseover; nothing shows while it gives nil) in the game's tooltip,
 -- headed `title`.

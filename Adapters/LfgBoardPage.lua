@@ -13,7 +13,10 @@ local _, addon = ...
 --                     under "Your alts could join"
 --   Nearby            a card listing the guildmates in the player's zone,
 --                     their levels in a column left of their names
---   Other Parties     small greyed cards for the rest
+--   Other Parties     small greyed cards for the rest: the Open parties
+--                     the player can't join, then under Playing the
+--                     parties guildmates lead without opening them to the
+--                     guild, with nothing to join
 --   History           the player's own recent parties (LfgHistoryView),
 --                     newest first, 20 at a time with Show more
 -- An empty tab shows one line.
@@ -78,7 +81,14 @@ local LfgBoardPage = {
     },
     -- Find guildmates: each row's height, and why the button's greyed out.
     FILL_ROW_HEIGHT = 28,
-    FILL_UNLISTED = "List your party to find guildmates",
+    FILL_UNLISTED = "Open your party to the guild to find guildmates",
+    -- A party that isn't open to the guild, on the board and the player's
+    -- own card.
+    PLAYING = "Playing",
+    OPEN_TO_GUILD = "Open to guild",
+    OPEN_HINT = "Guildmates see your party on the board and can ask to join.",
+    STOP_LOOKING = "Stop looking",
+    STOP_HINT = "Your party stays together but shows as Playing.",
     FILL_FULL = "Your party has no room",
     FILL_EMPTY = "No guildmates online could fill a slot right now.",
     CHANGE_ZONE = "Change",
@@ -252,6 +262,7 @@ function Page:buildSolo(card)
     end)
     self.startButton:SetWidth(120)
     self.startButton:SetPoint("RIGHT", solo, "RIGHT", -Theme.SPACING.l, 0)
+    ui:Hint(self.startButton, nil)
     -- A leader whose party isn't listed sees it greyed out.
     self.soloFindButton = self:findButton(solo)
     self.soloFindButton:SetPoint("RIGHT", self.startButton, "LEFT", -Theme.SPACING.s, 0)
@@ -264,7 +275,7 @@ function Page:buildView(card)
     local view = ui:frame("Frame", card)
     view:SetAllPoints(card)
     local pad = Theme.SPACING.l
-    view.label = ui:SectionLabel(view, "Your listing")
+    view.label = ui:SectionLabel(view, "Open to the guild")
     view.label:SetPoint("TOPLEFT", view, "TOPLEFT", pad, -pad)
     view.purpose = ui:Text(view, "", "semibold", "heading", "text")
     view.purpose:SetPoint("TOPLEFT", view.label, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
@@ -273,11 +284,12 @@ function Page:buildView(card)
     view.note = ui:Text(view, "", "italic", "small", "muted")
     view.note:SetPoint("TOPLEFT", view.details, "BOTTOMLEFT", 0, -Theme.SPACING.xs)
     local owner = self
-    self.notLookingButton = ui:Button(view, "Not looking", "secondary", function()
+    self.notLookingButton = ui:Button(view, LfgBoardPage.STOP_LOOKING, "secondary", function()
         owner.options.onNotLooking()
         owner:Refresh()
     end)
-    self.notLookingButton:SetWidth(100)
+    ui:Hint(self.notLookingButton, LfgBoardPage.STOP_HINT)
+    self.notLookingButton:SetWidth(110)
     self.notLookingButton:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -pad, pad)
     self.editButton = ui:Button(view, "Edit", "secondary", function()
         owner:StartEditing()
@@ -598,8 +610,10 @@ function Page:refreshCard()
     if mode == "solo" then
         -- In a party it isn't listed; only its leader can list it.
         local party = self:party()
-        self.solo.text:SetText(party.inParty and "Your party isn't listed" or "You're not in a party")
-        self.startButton:SetLabel(party.inParty and "List your party" or "Start a group")
+        self.solo.text:SetText(party.inParty and ("Your party is " .. LfgBoardPage.PLAYING)
+            or "You're not in a party")
+        self.startButton:SetLabel(party.inParty and LfgBoardPage.OPEN_TO_GUILD or "Start a group")
+        self.startButton.hint = party.inParty and LfgBoardPage.OPEN_HINT or nil
         setShown(self.startButton, not party.inParty or party.isLeader)
         setShown(self.soloFindButton, party.inParty and party.isLeader and self.options.fillCandidates ~= nil)
         offerFind(self.soloFindButton, LfgBoardPage.FILL_UNLISTED)
@@ -617,7 +631,7 @@ function Page:refreshView()
     local purpose = listing:Purpose()
     local members = self.options.members()
     local fields = listing:Announcement(members)
-    view.label:SetText(Theme.Label("Your listing"))
+    view.label:SetText(Theme.Label("Open to the guild"))
     view.purpose:SetText(addon.LfgListing.Label(fields.k, fields.p))
     view.details:SetText(join({ addon.LfgListing.KindLabel(fields.k), range(fields.lo, fields.hi),
         fields.k == "raid" and (fields.s .. " players") or (fields.s .. "/" .. fields.x) }))
@@ -818,6 +832,7 @@ function Page:buildList()
     self.area, self.list = area, list
     self.emptyText = ui:Text(list, "", "regular", "body", "muted")
     self.altsLabel = ui:SectionLabel(list, "Your alts could join")
+    self.playingLabel = ui:SectionLabel(list, LfgBoardPage.PLAYING)
     self:buildNearby()
     self.largeCards, self.smallCards = {}, {}
     self.historyRows = {}
@@ -1229,6 +1244,32 @@ function Page:showSmall(card, listing, greyed)
     card:Show()
 end
 
+-- Shows a small card for `party`, a Playing party (LfgBoard:Parties): where
+-- it is (or "Party"), then Playing, its size and its leader; no roles and
+-- nothing to join.
+function Page:showPlaying(card, party)
+    card.listing = nil
+    card.party = party
+    card.purpose:SetText(party.place or "Party")
+    card.details:SetText(LfgBoardPage.PLAYING .. DOT .. party.size .. " players" .. DOT)
+    local leader = party.members ~= nil and party.members[1] or nil
+    local color = leader ~= nil and self.options.classColor(leader.classToken) or nil
+    self:showName(card.leader, { text = colored(party.leader, color), whisper = party.sender })
+    local index
+    for index = 1, #card.roleTiles do
+        card.roleTiles[index]:Hide()
+    end
+    for index = 1, #card.anyTiles do
+        card.anyTiles[index]:Hide()
+    end
+    card.raidTile:Hide()
+    card.count:SetText("")
+    card.greyed = true
+    card.purpose:SetTextColor(Theme.Color("muted"))
+    card:SetAlpha(LfgBoardPage.GREYED_ALPHA)
+    card:Show()
+end
+
 -- Lays out small cards for `entries` (each { listing, alt? }) two per row
 -- from height `top`. Returns the height under them.
 function Page:smallRows(entries, top, greyed, used)
@@ -1239,7 +1280,12 @@ function Page:smallRows(entries, top, greyed, used)
         local row = math.floor((index - 1) / 2)
         self:place(card, top + row * (LfgBoardPage.SMALL_CARD_HEIGHT + Theme.SPACING.s),
             index % 2 == 1 and "left" or "right")
-        self:showSmall(card, entries[index].listing, greyed)
+        if entries[index].party ~= nil then
+            self:showPlaying(card, entries[index].party)
+        else
+            card.party = nil
+            self:showSmall(card, entries[index].listing, greyed)
+        end
     end
     local rows = math.ceil(#entries / 2)
     return top + rows * (LfgBoardPage.SMALL_CARD_HEIGHT + Theme.SPACING.s)
@@ -1252,13 +1298,15 @@ function Page:refreshTab()
     local people = nearby ~= nil and nearby.people or {}
     self.tabs:SetLabel("relevant", "Relevant Parties" .. DOT .. #groups.relevant)
     self.tabs:SetLabel("nearby", "Nearby" .. DOT .. #people)
-    self.tabs:SetLabel("other", "Other Parties" .. DOT .. #groups.other)
+    local playing = groups.playing or {}
+    self.tabs:SetLabel("other", "Other Parties" .. DOT .. (#groups.other + #playing))
     self.tabs:Select(self.tab)
     hideAll(self.largeCards)
     hideAll(self.smallCards)
     hideAll(self.historyRows)
     self.moreButton:Hide()
     self.altsLabel:Hide()
+    self.playingLabel:Hide()
     self.nearbyCard:Hide()
     self.emptyText:Hide()
     local used = { small = 0 }
@@ -1294,7 +1342,7 @@ function Page:refreshTab()
             top = self:showNearby(nearby)
         end
     elseif self.tab == "other" then
-        if #groups.other == 0 then
+        if #groups.other == 0 and #playing == 0 then
             empty(LfgBoardPage.EMPTY.other)
         end
         local entries = {}
@@ -1303,6 +1351,15 @@ function Page:refreshTab()
             entries[index] = { listing = groups.other[index] }
         end
         top = self:smallRows(entries, top, true, used)
+        if #playing > 0 then
+            self:place(self.playingLabel, top + Theme.SPACING.xs)
+            self.playingLabel:Show()
+            entries = {}
+            for index = 1, #playing do
+                entries[index] = { party = playing[index] }
+            end
+            top = self:smallRows(entries, top + 24, true, used)
+        end
     else
         top = self:historyList(top, empty)
     end

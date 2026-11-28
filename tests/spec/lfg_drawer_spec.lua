@@ -276,7 +276,7 @@ test.test("lfg button: the drawer's newest group, none, and the party", function
     test.assertTrue(drawer.party.wordWrap)
 end)
 
-test.test("lfg button: a solo listing shows as Your listing, with Edit and End listing", function()
+test.test("lfg button: a solo listing shows as Open to the guild, with Edit and End listing", function()
     local button, state = newButton()
     button:OpenDrawer()
     local drawer = button.drawer
@@ -284,7 +284,7 @@ test.test("lfg button: a solo listing shows as Your listing, with Edit and End l
         note = "Bring a key", members = { { role = "dps" } }, solo = true, own = true }
 
     button:Update({ count = 0, fresh = {}, top = { kind = "party", party = party } })
-    test.assertEqual("YOUR LISTING", drawer.heading.text)
+    test.assertEqual("OPEN TO THE GUILD", drawer.heading.text)
     test.assertEqual("Stratholme", drawer.party.text)
     test.assertContains(drawer.partyDetails.text, "1/5")
     test.assertEqual("Bring a key", drawer.note.text)
@@ -494,7 +494,7 @@ test.test("Forever no glow in a party or in Do Not Disturb, and the drawer shows
     fixtures.fire(hammer, "GROUP_ROSTER_UPDATE")
     addon.lfgButton:OpenDrawer()
     test.assertEqual("YOUR PARTY", addon.lfgButton.drawer.heading.text)
-    test.assertEqual("Not listed", addon.lfgButton.drawer.party.text)
+    test.assertEqual("Playing", addon.lfgButton.drawer.party.text)
     test.assertEqual(nil, addon.lfgButton.glow.color)
 end)
 
@@ -506,7 +506,7 @@ test.test("Forever after Start a group with no party, the drawer shows my listin
 
     toolLists(tool)
     button:OpenDrawer()
-    test.assertEqual("YOUR LISTING", button.drawer.heading.text)
+    test.assertEqual("OPEN TO THE GUILD", button.drawer.heading.text)
     test.assertEqual("Stratholme", button.drawer.party.text)
     test.assertContains(button.drawer.partyDetails.text, "1/5")
     test.assertTrue(button.editListingButton.shown)

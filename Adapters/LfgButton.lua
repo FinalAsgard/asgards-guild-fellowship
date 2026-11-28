@@ -537,9 +537,9 @@ function Button:refreshDrawer()
     local slot = kind == addon.LfgDrawerModel.SLOT
     local gate = kind == addon.LfgDrawerModel.GATE or slot
     local asking = kind == addon.LfgDrawerModel.ASK or gate
-    local headings = { [addon.LfgDrawerModel.PARTY] = top.party ~= nil and top.party.solo and "Your listing"
-        or "Your party", [addon.LfgDrawerModel.ASK] = "List your party?",
-        [addon.LfgDrawerModel.GATE] = "List your party?", [addon.LfgDrawerModel.SLOT] = "Your party" }
+    local headings = { [addon.LfgDrawerModel.PARTY] = top.party ~= nil and top.party.solo and "Open to the guild"
+        or "Your party", [addon.LfgDrawerModel.ASK] = "Open to the guild?",
+        [addon.LfgDrawerModel.GATE] = "Open to the guild?", [addon.LfgDrawerModel.SLOT] = "Your party" }
     drawer.heading:SetText(Theme.Label(headings[kind] or "New for you"))
     -- Asking whether to list a party with outsiders, or to fill an empty
     -- slot, is a plain yes or no.
@@ -560,7 +560,7 @@ function Button:refreshDrawer()
         -- Posted as: the purpose and the open role, where they're known.
         local info = top.party or {}
         local role = info.slotRole and ("needs " .. (addon.Widgets.ROLE_LABELS[info.slotRole] or info.slotRole))
-        drawer.slotDetails:SetText(join({ info.label or "Not listed", role }))
+        drawer.slotDetails:SetText(join({ info.label or "Playing", role }))
     end
     local newest, party = kind == addon.LfgDrawerModel.NEWEST, kind == addon.LfgDrawerModel.PARTY
     setShown(drawer.icon, newest)
@@ -634,7 +634,7 @@ function Button:refreshDrawer()
         end
     elseif party then
         local info = top.party
-        drawer.party:SetText(info.label or "Not listed")
+        drawer.party:SetText(info.label or "Playing")
         drawer.partyDetails:SetText(join({ sizeText(info), needs(info) }))
         drawer.note:SetText(info.note or "")
         if info.kind == "dungeon" then

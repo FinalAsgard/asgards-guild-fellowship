@@ -260,6 +260,81 @@ test.test("lfg board: a listing not heard from for 5 minutes is dropped", functi
     test.assertEqual(1, #board:Listings(1000 + 5 * 60))
 end)
 
+-- Playing parties ------------------------------------------------------------------
+
+local PARTY = { { name = "Tool", classToken = "WARRIOR", level = 60 }, { name = "Hammer", level = 58 } }
+
+test.test("lfg protocol: an unlisted party is understood, and ignored when malformed", function()
+    local addon = load()
+    local protocol = addon.LfgProtocol
+    local message = protocol.Party(PARTY, "Stratholme")
+
+    test.assertEqual("lfg-party", message.t)
+    test.assertEqual(2, message.s)
+    test.assertEqual("Hammer", message.mb[2].n)
+    test.assertEqual("Stratholme", message.w)
+    test.assertTrue(protocol.IsValid(message))
+    test.assertTrue(protocol.TYPES["lfg-party"])
+    test.assertTrue(protocol.IsValid(protocol.Party(PARTY, nil)), "where it is can be unknown")
+
+    -- A party is two or more, with as many members as it says, and a short place.
+    test.assertFalse(protocol.IsValid(protocol.Party({ PARTY[1] }, "Stratholme")))
+    message = protocol.Party(PARTY, "Stratholme")
+    message.s = 3
+    test.assertFalse(protocol.IsValid(message))
+    test.assertFalse(protocol.IsValid(protocol.Party(PARTY, string.rep("x", 61))))
+    message = protocol.Party(PARTY, "Stratholme")
+    message.mb[2].n = ""
+    test.assertFalse(protocol.IsValid(message))
+    test.assertEqual("bad fields", protocol.Problem(message))
+end)
+
+test.test("lfg board: a Playing party shows until it's listed, ends or goes quiet", function()
+    local addon = load()
+    local protocol = addon.LfgProtocol
+    local board = addon.LfgBoard.Create()
+
+    board:OnParty(protocol.Party(PARTY, "Stratholme"), "tool-key", "Tool-Realm", 1000)
+    board:OnParty(protocol.Party({ { name = "Anvil" }, { name = "Zap" } }, nil), "anvil-key", "Anvil", 1000)
+    local parties = board:Parties(1000)
+    test.assertEqual(2, #parties)
+    test.assertEqual("Anvil", parties[1].leader)
+    test.assertEqual("Tool", parties[2].leader)
+    test.assertEqual("Stratholme", parties[2].place)
+    test.assertEqual(2, parties[2].size)
+    test.assertEqual(58, parties[2].members[2].level)
+    test.assertEqual(0, #board:Listings(1000), "a party isn't a listing")
+
+    -- Listed: it's Open, no longer Playing. Stop looking: Playing again.
+    board:OnListing(listingMessage(addon), "tool-key", "Tool-Realm", 1010)
+    test.assertEqual(1, #board:Parties(1010))
+    test.assertEqual(1, #board:Listings(1010))
+    board:OnParty(protocol.Party(PARTY, "Stratholme"), "tool-key", "Tool-Realm", 1020)
+    test.assertEqual(0, #board:Listings(1020))
+    test.assertEqual(2, #board:Parties(1020))
+
+    -- An end takes it off; so does going quiet.
+    board:OnEnd("anvil-key", false)
+    test.assertEqual(1, #board:Parties(1020))
+    test.assertEqual(0, #board:Parties(1020 + addon.LfgBoard.STALE_SECONDS))
+end)
+
+test.test("fellowship store: Show my party on the guild's board is on until turned off", function()
+    local addon = test.newAddon("Core/FellowshipStore.lua")
+    local database = { schemaVersion = 2, guilds = {} }
+    local store = addon.FellowshipStore.Create(database)
+
+    test.assertTrue(store:LfgShareParty())
+    test.assertTrue(store:SetLfgShareParty(false))
+    test.assertFalse(store:LfgShareParty())
+    test.assertTrue(store:SetLfgShareParty(true))
+    test.assertTrue(store:LfgShareParty())
+    test.assertFalse(store:SetLfgShareParty("yes"))
+    database.lfgShareParty = "junk"
+    test.assertTrue(store:LfgShareParty(), "an unusable value reads as on")
+    test.assertFalse(store:SetLfgShareParty(false), "and is left alone")
+end)
+
 -- DungeonCatalog search ------------------------------------------------------------
 
 local SAMPLE = {
@@ -1023,7 +1098,7 @@ test.test("lfg page: Find guildmates shows to the lister, greyed out until the p
     test.assertEqual("solo", page:Mode())
     test.assertTrue(page.soloFindButton.shown)
     test.assertFalse(page.soloFindButton.active)
-    test.assertEqual("List your party to find guildmates", page.soloFindButton.reason)
+    test.assertEqual("Open your party to the guild to find guildmates", page.soloFindButton.reason)
     click(page.soloFindButton)
     test.assertFalse(page.filling == true)
     -- A member of someone else's party doesn't see it.

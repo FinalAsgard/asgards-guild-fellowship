@@ -326,7 +326,7 @@ test.test("Forever with Auto-list off, forming a party lists nothing and asks no
     -- The drawer just shows the party, unlisted.
     addon.lfgButton:OpenDrawer()
     test.assertEqual("YOUR PARTY", addon.lfgButton.drawer.heading.text)
-    test.assertEqual("Not listed", addon.lfgButton.drawer.party.text)
+    test.assertEqual("Playing", addon.lfgButton.drawer.party.text)
 end)
 
 test.test("Forever with Auto-list on, forming a party lists it at once for what it looks like it's for", function()
@@ -359,7 +359,7 @@ test.test("Forever with Auto-list on and nothing to guess, forming a party asks;
 
     local button = addon.lfgButton
     test.assertTrue(button:DrawerOpen())
-    test.assertEqual("LIST YOUR PARTY?", button.drawer.heading.text)
+    test.assertEqual("OPEN TO THE GUILD?", button.drawer.heading.text)
     test.assertTrue(button.listButton.shown)
     click(button.listButton)
 
@@ -2187,4 +2187,108 @@ test.test("Forever the release build has no lfgtest command", function()
     fixtures.slash(world, "help")
 
     test.assertFalse(string.find(table.concat(world.messages, "\n"), "lfgtest", 1, true) ~= nil)
+end)
+
+-- Playing parties --------------------------------------------------------------------
+
+test.test("Forever an unlisted party with a guildmate shows as Playing on the guild's boards until it's opened", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = login(channel, "Tool Box")
+    local zap, zapAddon = login(channel, "Zap Arcane")
+
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+
+    local parties = zapAddon.lfgBoard:Parties(zap.time)
+    test.assertEqual(1, #parties)
+    test.assertEqual("Tool Box", parties[1].leader)
+    test.assertEqual(2, parties[1].size)
+    test.assertEqual(nil, zapAddon.lfgBoard:Listings(zap.time)[1], "nothing to join")
+    -- On Zap's board: under Playing in Other Parties, with no Ask to join.
+    test.assertTrue(zapAddon.agfWindow:Open("lfg"))
+    local page = zapAddon.lfgPage
+    page:ShowTab("other")
+    test.assertEqual("Other Parties · 1", page.tabs.tabs[3].label.text)
+    test.assertTrue(page.playingLabel.shown)
+    local card = page.smallCards[1]
+    test.assertTrue(card.shown)
+    test.assertContains(card.details.text, "Playing · 2 players")
+    test.assertEqual(parties[1], card.party)
+    test.assertEqual(nil, rawget(card, "listing"))
+
+    -- Opened to the guild, it's a listing instead.
+    test.assertTrue(toolAddon.agfWindow:Open("lfg"))
+    local toolPage = toolAddon.lfgPage
+    test.assertEqual("Your party is Playing", toolPage.solo.text.text)
+    test.assertEqual("Open to guild", toolPage.startButton.label.text)
+    test.assertEqual("Guildmates see your party on the board and can ask to join.", toolPage.startButton.hint)
+    toolPage:StartEditing()
+    toolPage.draft.dungeon = toolAddon.DungeonCatalog.For("forever", nil):Get("strat")
+    test.assertTrue(toolPage:Save())
+    fixtures.deliver(channel)
+    test.assertEqual(0, #zapAddon.lfgBoard:Parties(zap.time))
+    test.assertEqual(1, #zapAddon.lfgBoard:Listings(zap.time))
+
+    -- Stop looking: Playing again.
+    test.assertEqual("Stop looking", toolPage.notLookingButton.label.text)
+    test.assertEqual("Your party stays together but shows as Playing.", toolPage.notLookingButton.hint)
+    toolPage.notLookingButton.scripts.OnClick(toolPage.notLookingButton, "LeftButton")
+    fixtures.deliver(channel)
+    test.assertEqual(0, #zapAddon.lfgBoard:Listings(zap.time))
+    test.assertEqual(1, #zapAddon.lfgBoard:Parties(zap.time))
+
+    -- It's re-announced while it lasts, so it doesn't go stale.
+    tool.time = tool.time + 4 * 60
+    zap.time = tool.time
+    fixtures.runTimers(tool, 4 * 60)
+    fixtures.deliver(channel)
+    zap.time = zap.time + 2 * 60
+    test.assertEqual(1, #zapAddon.lfgBoard:Parties(zap.time))
+
+    -- Leaving the party takes it off.
+    leaveParty(tool)
+    fixtures.deliver(channel)
+    test.assertEqual(0, #zapAddon.lfgBoard:Parties(zap.time))
+end)
+
+test.test("Forever Show my party on the guild's board off keeps an unlisted party off, and back on shows it", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = login(channel, "Tool Box")
+    local zap, zapAddon = login(channel, "Zap Arcane")
+    test.assertTrue(toolAddon.settings:Get("lfgShareParty"))
+
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+    test.assertEqual(1, #zapAddon.lfgBoard:Parties(zap.time))
+
+    test.assertTrue(toolAddon.settings:Set("lfgShareParty", false))
+    fixtures.deliver(channel)
+    test.assertEqual(0, #zapAddon.lfgBoard:Parties(zap.time), "turning it off takes the party off other boards")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+    test.assertEqual(0, #zapAddon.lfgBoard:Parties(zap.time))
+
+    test.assertTrue(toolAddon.settings:Set("lfgShareParty", true))
+    fixtures.deliver(channel)
+    test.assertEqual(1, #zapAddon.lfgBoard:Parties(zap.time))
+end)
+
+test.test("Forever only a party with a guildmate in it, led by the player, shows as Playing", function()
+    local channel = fixtures.newChannel()
+    local tool = login(channel, "Tool Box")
+    local hammer = login(channel, "Hammer Smith")
+    local zap, zapAddon = login(channel, "Zap Arcane")
+
+    -- With a stranger only: nothing.
+    partyUp(tool, { "Tool Box", "Stranger Danger" }, "Tool Box")
+    fixtures.deliver(channel)
+    test.assertEqual(0, #zapAddon.lfgBoard:Parties(zap.time))
+
+    -- Hammer is in Tool's party but doesn't lead it: only Tool announces.
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    partyUp(hammer, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    fixtures.deliver(channel)
+    local parties = zapAddon.lfgBoard:Parties(zap.time)
+    test.assertEqual(1, #parties)
+    test.assertEqual("Tool Box", parties[1].leader)
 end)
