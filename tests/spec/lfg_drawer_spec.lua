@@ -276,7 +276,7 @@ test.test("lfg button: the drawer's newest group, none, and the party", function
     test.assertTrue(drawer.party.wordWrap)
 end)
 
-test.test("lfg button: a solo listing shows as Open to the guild, with Edit and End listing", function()
+test.test("lfg button: a solo listing shows as Open to the guild, with Edit and Stop looking", function()
     local button, state = newButton()
     button:OpenDrawer()
     local drawer = button.drawer
@@ -290,6 +290,8 @@ test.test("lfg button: a solo listing shows as Open to the guild, with Edit and 
     test.assertEqual("Bring a key", drawer.note.text)
     test.assertTrue(button.editListingButton.shown)
     test.assertTrue(button.endListingButton.shown)
+    test.assertEqual("Stop looking", button.endListingButton.label.text)
+    test.assertEqual("Your party stays together but shows as Playing.", button.endListingButton.hint)
     test.assertFalse(button.startButton.shown)
 
     button.editListingButton.scripts.OnClick(button.editListingButton)
@@ -498,7 +500,7 @@ test.test("Forever no glow in a party or in Do Not Disturb, and the drawer shows
     test.assertEqual(nil, addon.lfgButton.glow.color)
 end)
 
-test.test("Forever after Start a group with no party, the drawer shows my listing; End listing ends it", function()
+test.test("Forever after Start a group with no party, the drawer shows my listing; Stop looking ends it", function()
     local channel = fixtures.newChannel()
     local tool = login(channel, "Tool Box")
     local hammer, addon = login(channel, "Hammer Smith")
@@ -529,7 +531,7 @@ test.test("Forever after Start a group with no party, the drawer shows my listin
     test.assertEqual("edit", tool.addon.lfgPage:Mode())
     tool.addon.lfgPage:Save()
 
-    -- End listing takes it off the board.
+    -- Stop looking takes it off the board.
     fixtures.deliver(channel)
     test.assertEqual(1, addon.lfgButton.count.count)
     button:OpenDrawer()

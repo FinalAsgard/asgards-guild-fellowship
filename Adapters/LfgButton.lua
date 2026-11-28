@@ -294,7 +294,8 @@ function Button:buildDrawer()
     self.askGuildButton:SetPoint("BOTTOMLEFT", drawer, "BOTTOMLEFT", pad, pad + LfgButton.TILE_SIZE + Theme.SPACING.s)
     self.askGuildButton:SetPoint("RIGHT", drawer, "RIGHT", -pad, 0)
     self.askGuildButton:Hide()
-    -- Edit and End listing, side by side, on the player's own listing.
+    -- Edit and Stop looking (the board's word for it, with its tooltip),
+    -- side by side, on the player's own listing.
     local half = (LfgButton.DRAWER_WIDTH - 2 * pad - Theme.SPACING.xs) / 2
     self.editListingButton = ui:Button(drawer, "Edit", "secondary", function()
         owner:CloseDrawer()
@@ -303,12 +304,13 @@ function Button:buildDrawer()
         end
     end)
     self.editListingButton:SetWidth(half)
-    self.endListingButton = ui:Button(drawer, "End listing", "secondary", function()
+    self.endListingButton = ui:Button(drawer, "Stop looking", "secondary", function()
         owner:CloseDrawer()
         if owner.options.onEndListing ~= nil then
             owner.options.onEndListing()
         end
     end)
+    ui:Hint(self.endListingButton, "Your party stays together but shows as Playing.")
     self.endListingButton:SetWidth(half)
     self.endListingButton:SetPoint("LEFT", self.editListingButton, "RIGHT", Theme.SPACING.xs, 0)
     self.editListingButton:Hide()
