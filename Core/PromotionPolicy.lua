@@ -24,7 +24,9 @@ local function days(inputs, time)
 end
 
 -- A time check against `record` (a join or rank-since date, or an earliest
--- join): before tracking passes any N; an approximate date says so.
+-- join): before tracking passes any N; an approximate date says so. The
+-- fourth value is the days still to go, nil when met or unknown (an
+-- approximate date counts from that date).
 local function daysCheck(inputs, record, n, unknown)
     if record == nil then
         return false, unknown, "unknown"
@@ -41,7 +43,8 @@ local function daysCheck(inputs, record, n, unknown)
     else
         text = count .. " of " .. n .. " days"
     end
-    return count >= n, text .. (approximate and " (approx.)" or ""), (approximate and "≈" or "") .. count .. " d"
+    return count >= n, text .. (approximate and " (approx.)" or ""), (approximate and "≈" or "") .. count .. " d",
+        count < n and (n - count) or nil
 end
 
 -- The characters of `key`'s player now in the guild (just `key` when it
@@ -66,7 +69,8 @@ end
 
 -- How each kind of item is judged for `key` (whose record is `character`):
 -- true when met, and for an automated kind the detail ("5 of 7 days") and
--- the detail in short, for a grid cell ("5 d", "≈44 d", "level 76").
+-- the detail in short, for a grid cell ("5 d", "≈44 d", "level 76"); a
+-- time kind also gives the days still to go (see daysCheck).
 -- Manual kinds are met by an officer's tick; any failed automated kind can
 -- be overridden by one (see Evaluate).
 PromotionPolicy.STATUS = {
@@ -167,13 +171,17 @@ end
 -- One character's promotion status, or nil when it isn't in the guild,
 -- doesn't hold its player's profile (see ProfileOf), its rank is the top
 -- one (nothing above it), or its rank has no requirements:
---   { key, rank, rankName, nextRank, nextRankName, items, met, total, ready }
+--   { key, rank, rankName, nextRank, nextRankName, items, met, total, ready,
+--     timeMet, remaining }
 -- where each item is { id, label, kind, automated, met, detail, short,
--- overridden, record }: `record` is the officer's tick (or override) when
--- there is one, `detail` an automated item's status in words, `short` the
--- same for a grid cell, and
+-- overridden, record, remaining }: `record` is the officer's tick (or
+-- override) when there is one, `detail` an automated item's status in
+-- words, `short` the same for a grid cell, `remaining` a time item's days
+-- still to go (nil when met or unknown), and
 -- `overridden` true when an officer's override is what meets a failed
--- automated item.
+-- automated item. The status's `remaining` is the most days any time item
+-- still has to go: the days until its time is met, nil when none is open
+-- with a known date.
 -- `key`'s record and its rank's items, or nil when it has no checklist.
 local function checklistOf(inputs, key, itemsOf)
     local partition = inputs.partition
@@ -191,13 +199,13 @@ local function checklistOf(inputs, key, itemsOf)
 end
 
 -- One item's status for `key`: met, detail, the officer's record, whether
--- the kind is automated, whether an override is what meets it, and the
--- detail in short.
+-- the kind is automated, whether an override is what meets it, the detail
+-- in short, and a time item's days still to go.
 local function judgeItem(inputs, key, item, character)
     local judge = PromotionPolicy.STATUS[item.kind]
-    local met, detail, short = false, nil, nil
+    local met, detail, short, remaining = false, nil, nil, nil
     if judge ~= nil then
-        met, detail, short = judge(inputs, key, item, character)
+        met, detail, short, remaining = judge(inputs, key, item, character)
     end
     met = met == true
     local record = inputs.checks:Record(key, item.id)
@@ -206,7 +214,10 @@ local function judgeItem(inputs, key, item, character)
     if automated and not met and record ~= nil and record.ticked then
         met, overridden = true, true
     end
-    return met, detail, record, automated, overridden, short or detail
+    if met then
+        remaining = nil
+    end
+    return met, detail, record, automated, overridden, short or detail, remaining
 end
 
 -- The time kinds: when a rank has any, a character whose every one is met
@@ -267,9 +278,13 @@ function PromotionPolicy.Evaluate(inputs, key, itemsOf)
     local index
     for index = 1, #items do
         local item = items[index]
-        local met, detail, record, automated, overridden, short = judgeItem(inputs, key, item, character)
+        local met, detail, record, automated, overridden, short, remaining = judgeItem(inputs, key, item, character)
         table.insert(result.items, { id = item.id, label = item.label, kind = item.kind, automated = automated,
-            met = met, detail = detail, short = short, overridden = overridden, record = record })
+            met = met, detail = detail, short = short, overridden = overridden, record = record,
+            remaining = remaining })
+        if remaining ~= nil and (result.remaining == nil or remaining > result.remaining) then
+            result.remaining = remaining
+        end
         if met then
             result.met = result.met + 1
         end

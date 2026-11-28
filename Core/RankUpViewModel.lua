@@ -29,6 +29,10 @@ local _, addon = ...
 -- players missing one requirement, and the footer counts them out of
 -- everyone up for that rank.
 --
+-- The All players list (see All) has every player, each with its status in
+-- words: Ready, Due, Match, Snoozed until <date>, Not yet: N days, or No
+-- requirements, the soonest first.
+--
 -- Pure: PromotionPolicy's inputs are handed in, plus how names show.
 local RankUpViewModel = {
     READY = "Ready",
@@ -44,6 +48,14 @@ local RankUpViewModel = {
     OVERRIDDEN = "overridden",
     TICKED = "ticked",
     UNTICKED = "unticked",
+    -- All players' statuses, besides READY, DUE and MATCH.
+    SNOOZED = "Snoozed",
+    NOT_YET = "Not yet",
+    NONE = "No requirements",
+    -- All players' status filter.
+    FILTER_ALL = "all",
+    FILTER_SNOOZED = "snoozed",
+    FILTER_NOT_YET = "notyet",
 }
 addon.RankUpViewModel = RankUpViewModel
 
@@ -397,5 +409,145 @@ function RankUpViewModel.Due(inputs)
     end
     table.insert(parts, RankUpViewModel.FOOTER)
     view.footer = table.concat(parts, DOT)
+    return view
+end
+
+local function plural(count, word)
+    return count .. " " .. word .. (count == 1 and "" or "s")
+end
+
+-- inputs: as for Due (search, but no rank), plus
+--   filter    FILTER_ALL (or nil), FILTER_SNOOZED or FILTER_NOT_YET
+--   dateText  function(time) -> how a date shows ("Dec 4"); without it, a
+--             snooze says how long it has left ("for 3 more days")
+-- Returns {
+--   rows    every player in the guild (narrowed by search and filter): {
+--           playerId, key (the profile character), name, status (READY,
+--           DUE, MATCH, SNOOZED, NOT_YET or NONE), rank, rankText ("→
+--           Member", nil for NONE), statusText ("Snoozed until Dec 4 by
+--           Toolbox", "Not yet: 5 days"), days (Not yet's days to go),
+--           untilTime and snoozedBy (a snooze's end, and who snoozed, by
+--           name) }, soonest first: Ready, Match, Due, then Snoozed by its
+--           end, Not yet by its days (unknown last), then No requirements,
+--           each by name
+--   count   every player, whatever the search and filter
+--   snoozed, notYet   how many of each, likewise
+-- }
+-- A Ready player is Ready even while snoozed, as on Due; a player with
+-- alts behind but nothing due is Match.
+function RankUpViewModel.All(inputs)
+    local partition = inputs.partition
+    local needle = string.match(lower(inputs.search), "^%s*(.-)%s*$")
+    local filter = inputs.filter or RankUpViewModel.FILTER_ALL
+    local itemsByRank = {}
+    local function itemsOf(rank)
+        if itemsByRank[rank] == nil then
+            itemsByRank[rank] = inputs.requirements:Items(rank)
+        end
+        return itemsByRank[rank]
+    end
+    local matches = addon.PromotionPolicy.MatchSet(inputs)
+    local view = { rows = {}, count = 0, snoozed = 0, notYet = 0 }
+    partition:EachPlayer(function(playerId, player)
+        local key = addon.PromotionPolicy.HighestCharacter(partition, playerId)
+        if key == nil then
+            return
+        end
+        view.count = view.count + 1
+        local status = addon.PromotionPolicy.Evaluate(inputs, key, itemsOf)
+        local keys = inGuild(partition, playerId)
+        local target
+        local index
+        for index = 1, #keys do
+            local rank = matches[keys[index]]
+            if rank ~= nil and (target == nil or rank < target) then
+                target = rank
+            end
+        end
+        local snooze = inputs.checks:IsSnoozed(key, inputs.now) and inputs.checks:SnoozeOf(key) or nil
+        local row = { playerId = playerId, key = key }
+        if status ~= nil and status.ready then
+            row.status, row.statusText = RankUpViewModel.READY, RankUpViewModel.READY
+        elseif snooze ~= nil then
+            row.status = RankUpViewModel.SNOOZED
+            row.untilTime = snooze.untilTime
+            row.snoozedBy = snooze.by and nameOf(inputs, snooze.by) or nil
+            local ends
+            if inputs.dateText ~= nil then
+                ends = " until " .. inputs.dateText(snooze.untilTime)
+            else
+                ends = " for " .. plural(math.ceil((snooze.untilTime - inputs.now) / addon.PromotionPolicy.DAY),
+                    "more day")
+            end
+            row.statusText = RankUpViewModel.SNOOZED .. ends
+                .. (row.snoozedBy and (" by " .. row.snoozedBy) or "")
+            view.snoozed = view.snoozed + 1
+        elseif status ~= nil and status.timeMet then
+            row.status, row.statusText = RankUpViewModel.DUE, RankUpViewModel.DUE
+        elseif target ~= nil then
+            row.status, row.statusText = RankUpViewModel.MATCH, RankUpViewModel.MATCH
+        elseif status ~= nil then
+            row.status = RankUpViewModel.NOT_YET
+            row.days = status.remaining
+            row.statusText = RankUpViewModel.NOT_YET .. (row.days and (": " .. plural(row.days, "day")) or "")
+            view.notYet = view.notYet + 1
+        else
+            row.status, row.statusText = RankUpViewModel.NONE, RankUpViewModel.NONE
+        end
+        if row.status == RankUpViewModel.MATCH then
+            row.rank = target
+        elseif status ~= nil then
+            row.rank = status.nextRank
+        else
+            row.rank = target
+        end
+        if row.rank ~= nil then
+            row.rankText = RankUpViewModel.ARROW .. rankNameOf(inputs, row.rank)
+        end
+        if (filter == RankUpViewModel.FILTER_SNOOZED and row.status ~= RankUpViewModel.SNOOZED)
+            or (filter == RankUpViewModel.FILTER_NOT_YET and row.status ~= RankUpViewModel.NOT_YET)
+        then
+            return
+        end
+        local characterNames = {}
+        for index = 1, #keys do
+            characterNames[index] = nameOf(inputs, keys[index])
+        end
+        local alias = player and player.alias or nil
+        if type(alias) ~= "string" or alias == "" then
+            alias = nil
+        end
+        if needle ~= "" and not found(needle, alias, characterNames) then
+            return
+        end
+        row.name = alias or (player and player.main and nameOf(inputs, player.main)) or characterNames[1]
+        table.insert(view.rows, row)
+    end)
+    local order = {
+        [RankUpViewModel.READY] = 1,
+        [RankUpViewModel.MATCH] = 2,
+        [RankUpViewModel.DUE] = 3,
+        [RankUpViewModel.SNOOZED] = 4,
+        [RankUpViewModel.NOT_YET] = 5,
+        [RankUpViewModel.NONE] = 6,
+    }
+    local function soon(row)
+        if row.status == RankUpViewModel.SNOOZED then
+            return row.untilTime
+        end
+        return row.days or math.huge
+    end
+    table.sort(view.rows, function(a, b)
+        if a.status ~= b.status then
+            return order[a.status] < order[b.status]
+        end
+        if soon(a) ~= soon(b) then
+            return soon(a) < soon(b)
+        end
+        if lower(a.name) ~= lower(b.name) then
+            return lower(a.name) < lower(b.name)
+        end
+        return tostring(a.playerId) < tostring(b.playerId)
+    end)
     return view
 end

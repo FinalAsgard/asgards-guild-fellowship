@@ -2089,6 +2089,38 @@ test.test("rank management: the Missing filter keeps the players missing a requi
     test.assertContains(page.footer.text, "Ready")
 end)
 
+test.test("rank management: All players lists the guild's players, Not yet counting down", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    -- Members (rank 3) need level 50, with no time requirement: Zap Arcane
+    -- (level 30) isn't due.
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    local officer = normalizer:Key("Tool Box")
+    local requirements = addon.RankRequirements.Create(partition:GetRankRequirements(), {
+        isOfficer = function(key)
+            return key == officer
+        end,
+    })
+    requirements:SetAutomated(3, "level", true, 50, "Member", officer, 1)
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    local page = addon.rankPage
+    local tab = page.tabs.tabs[2]
+    test.assertContains(tab.label.text, "All players (")
+    tab.scripts.OnClick(tab, "LeftButton")
+
+    local texts = {}
+    local _, frame
+    for _, frame in ipairs(page.list:Shown()) do
+        if frame.shown and rawget(frame, "entry") ~= nil then
+            table.insert(texts, frame.entry.name .. ": " .. frame.entry.statusText)
+        end
+    end
+    test.assertContains(table.concat(texts, ", "), "Zap Arcane: Not yet")
+    test.assertContains(page.footer.text, " players · ")
+end)
+
 -- Friends -----------------------------------------------------------------------
 
 test.test("friends: the page is built on show, and a pinned Friend is starred", function()

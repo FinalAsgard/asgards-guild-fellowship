@@ -1499,6 +1499,9 @@ if clientProfile.supported then
                             inputs.rank = rank
                             return addon.RankUpViewModel.MissingChoices(inputs)
                         end,
+                        players = function(search, filter)
+                            return promotions.players(search, filter)
+                        end,
                         onSnooze = function(key)
                             return promotions.snooze(key)
                         end,
@@ -3461,6 +3464,24 @@ if clientProfile.supported then
         inputs.rank = rank
         inputs.missing = missing
         return addon.RankUpViewModel.Due(inputs)
+    end
+    -- The Rank management page's All players list (RankUpViewModel.All) for
+    -- what's typed in its search and the status filter, or nil for a member
+    -- or without a guild.
+    promotions.players = function(search, filter)
+        local inputs = promotionInputs()
+        if inputs == nil or not selfIsOfficer() then
+            return nil
+        end
+        local _, _, normalizer = rosterController:QuietContext()
+        inputs.normalizer = normalizer
+        inputs.members = rosterController:LiveMembers(normalizer)
+        inputs.search = search
+        inputs.filter = filter
+        inputs.dateText = function(time)
+            return client:FormatDate(time)
+        end
+        return addon.RankUpViewModel.All(inputs)
     end
     -- The characters ready for promotion, as a set, for the roster's marker:
     -- officers only.

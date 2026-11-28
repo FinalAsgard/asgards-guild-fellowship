@@ -9,7 +9,17 @@ local function setup()
     local ui = addon.Widgets.Create(environment)
     local content = environment.CreateFrame("Frame")
     local world = { addon = addon, searches = {}, snoozed = {}, ranks = {}, ticks = {}, missings = {},
-        missingRanks = {} }
+        missingRanks = {}, filters = {} }
+    -- All players, soonest first.
+    world.players = {
+        { playerId = 1, key = "toolbox", name = "TheTool", status = "Ready", statusText = "Ready",
+            rankText = "→ Member" },
+        { playerId = 3, key = "nap", name = "Nap", status = "Snoozed", rankText = "→ Member",
+            statusText = "Snoozed until 2026-12-04 by Toolbox" },
+        { playerId = 4, key = "fresh", name = "Fresh", status = "Not yet", rankText = "→ Member",
+            statusText = "Not yet: 5 days" },
+        { playerId = 5, key = "boss", name = "Boss", status = "No requirements", statusText = "No requirements" },
+    }
     world.rows = {
         { playerId = 1, key = "toolbox", name = "TheTool", status = "Ready", rankText = "→ Member",
             promoteText = "Toolbox, Hammer" },
@@ -48,6 +58,19 @@ local function setup()
         end,
         targets = function()
             return { { text = "Any rank" }, { rank = 3, text = "→ Member" }, { rank = 2, text = "→ Veteran" } }
+        end,
+        players = function(search, filter)
+            table.insert(world.filters, filter)
+            local rows = {}
+            local _, row
+            for _, row in ipairs(world.players) do
+                local kept = filter == "all" or (filter == "snoozed" and row.status == "Snoozed")
+                    or (filter == "notyet" and row.status == "Not yet")
+                if kept and string.find(string.lower(row.name), string.lower(search), 1, true) then
+                    table.insert(rows, row)
+                end
+            end
+            return { rows = rows, count = #world.players, snoozed = 1, notYet = 1 }
         end,
         missing = function(rank)
             table.insert(world.missingRanks, rank or "any")
@@ -469,4 +492,79 @@ test.test("rank management page: nobody missing the filtered requirement says so
 
     test.assertTrue(world.page.empty.shown)
     test.assertEqual("Nobody due is missing that.", world.page.empty.text)
+end)
+
+-- All players -----------------------------------------------------------------------
+
+local function allTab(world)
+    local tab = world.page.tabs.tabs[2]
+    click(tab)
+end
+
+local function shownInOrder(world)
+    local rows = {}
+    local _, frame
+    for _, frame in ipairs(world.page.list:Shown()) do
+        if frame.shown then
+            table.insert(rows, frame)
+        end
+    end
+    return rows
+end
+
+test.test("rank management page: the All players tab is labelled with the player count", function()
+    local world = setup()
+    test.assertEqual("All players (4)", world.page.tabs.tabs[2].label.text)
+    test.assertTrue(world.page.picker.shown)
+    test.assertFalse(world.page.filterBar.shown)
+end)
+
+test.test("rank management page: All players lists every player with its status in words", function()
+    local world = setup()
+    allTab(world)
+    local rows = shownInOrder(world)
+
+    test.assertEqual("all", world.page.tabs:Selected())
+    test.assertEqual(4, #rows)
+    test.assertEqual("TheTool  |cff9d9d9d→ Member|r", rows[1].name.text)
+    test.assertEqual("Ready", rows[1].status.text)
+    test.assertEqual("Snoozed", rows[2].status.text)
+    test.assertEqual("Snoozed until 2026-12-04 by Toolbox", rows[2].sub.text)
+    test.assertEqual("Not yet: 5 days", rows[3].sub.text)
+    test.assertEqual("Boss", rows[4].name.text)
+    test.assertEqual("No requirements", rows[4].sub.text)
+    test.assertEqual("4 players · 1 snoozed · 1 not yet", world.page.footer.text)
+    -- Due's controls give way to the status filter.
+    test.assertFalse(world.page.picker.shown)
+    test.assertFalse(world.page.missingPicker.shown)
+    test.assertTrue(world.page.filterBar.shown)
+end)
+
+test.test("rank management page: All players' filter offers All, Snoozed and Not yet", function()
+    local world = setup()
+    allTab(world)
+    local buttons = world.page.filterBar.buttons
+
+    test.assertEqual("All", buttons[1].label.text)
+    test.assertEqual("Snoozed", buttons[2].label.text)
+    test.assertEqual("Not yet", buttons[3].label.text)
+    click(buttons[2])
+    test.assertEqual("snoozed", world.filters[#world.filters])
+    local rows = shownInOrder(world)
+    test.assertEqual(1, #rows)
+    test.assertEqual("Nap  |cff9d9d9d→ Member|r", rows[1].name.text)
+
+    click(buttons[3])
+    test.assertEqual("Fresh  |cff9d9d9d→ Member|r", shownInOrder(world)[1].name.text)
+end)
+
+test.test("rank management page: back on Due, the list is Due's again", function()
+    local world = setup()
+    allTab(world)
+    click(world.page.tabs.tabs[1])
+
+    test.assertEqual(2, #shown(world))
+    test.assertTrue(world.page.picker.shown)
+    test.assertFalse(world.page.filterBar.shown)
+    test.assertEqual("1 Ready · 1 Due · Promotion happens on the guild roster.", world.page.footer.text)
 end)

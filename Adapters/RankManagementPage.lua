@@ -22,6 +22,10 @@ local _, addon = ...
 -- list keeps the Due players missing it, a chip with an X names it, its
 -- column header is highlighted in the grid, and the footer counts them.
 --
+-- The All players tab (labelled with the player count) lists every player
+-- with its status in words (RankUpViewModel.All), the soonest first, and
+-- a status filter: All, Snoozed or Not yet.
+--
 -- It's built when the page is shown (Refresh), and again when the owner
 -- says something changed (Update), keeping the list where it's scrolled.
 local Theme = addon.Theme
@@ -29,7 +33,17 @@ local Theme = addon.Theme
 local RankManagementPage = {
     TABS = {
         { id = "due", label = "Due" },
+        { id = "all", label = "All players" },
     },
+    ALL_LABEL = "All players (%d)",
+    -- All players' status filter.
+    FILTERS = {
+        { id = "all", label = "All" },
+        { id = "snoozed", label = "Snoozed" },
+        { id = "notyet", label = "Not yet" },
+    },
+    FILTER_WIDTH = 240,
+    EMPTY_ALL = "No players in the guild yet.",
     SEARCH_WIDTH = 260,
     SEARCH_PLACEHOLDER = "Search by alias or character name",
     ROW_HEIGHT = 54,
@@ -85,6 +99,8 @@ end
 --   targets function() -> RankUpViewModel.Targets' choices, for Promote to
 --   missing function(rank) -> RankUpViewModel.MissingChoices' choices for
 --           the picked rank (nil for Any rank), for Missing
+--   players function(search, filter) -> RankUpViewModel.All's view, for All
+--           players, or nil outside a guild
 --   onTick  function(key, item, ticked, note) -> true, or false and why
 --           not: ticks or unticks officer check `item` for the player whose
 --           profile character is `key`, with `note` (a check's note, or an
@@ -94,14 +110,17 @@ end
 -- promoted to that was picked, or nil for Any rank, and `missing` the
 -- Missing choice picked, or nil.
 function RankManagementPage.Create(content, ui, options)
-    local page = setmetatable({ content = content, ui = ui, options = options, query = "" }, Page)
+    local page = setmetatable({ content = content, ui = ui, options = options, query = "", tab = "due",
+        filter = "all" }, Page)
     page:build()
     return page
 end
 
 function Page:build()
     local ui, content, owner = self.ui, self.content, self
-    self.tabs = ui:Tabs(content, RankManagementPage.TABS, function() end)
+    self.tabs = ui:Tabs(content, RankManagementPage.TABS, function(id)
+        owner:showTab(id)
+    end)
     self.tabs:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
     self.tabs:SetPoint("RIGHT", content, "RIGHT", 0, 0)
     self.search = ui:SearchBox(content, RankManagementPage.SEARCH_WIDTH, RankManagementPage.SEARCH_PLACEHOLDER,
@@ -125,6 +144,14 @@ function Page:build()
     end)
     self.chip:SetPoint("LEFT", self.missingPicker, "RIGHT", Theme.SPACING.m, 0)
     self.chip:Hide()
+    -- All players' status filter, where Promote to is on Due.
+    self.filterBar = ui:Segmented(content, RankManagementPage.FILTERS, RankManagementPage.FILTER_WIDTH,
+        function(id)
+            owner.filter = id
+            owner:rebuild(false)
+        end)
+    self.filterBar:SetPoint("LEFT", self.search, "RIGHT", Theme.SPACING.m, 0)
+    self.filterBar:Hide()
     self.menu = ui:ContextMenu(content)
     self.prompt = ui:TextPrompt(content)
     -- The grid's column labels, over the list while a rank is picked.
@@ -152,6 +179,22 @@ function Page:build()
     self.empty = ui:Text(content, RankManagementPage.EMPTY, "regular", "body", "muted")
     self:placeList(false)
     self:labelPicker()
+end
+
+-- Shows tab `id`: Due's picker and Missing, or All players' filter.
+function Page:showTab(id)
+    self.tab = id
+    local all = id == "all"
+    setShown(self.picker, not all)
+    setShown(self.missingPicker, not all)
+    setShown(self.chip, not all and self.missing ~= nil)
+    setShown(self.filterBar, all)
+    self:rebuild(false)
+end
+
+-- The All players tab's label, with the player count.
+function Page:labelAll(count)
+    self.tabs:SetLabel("all", string.format(RankManagementPage.ALL_LABEL, count or 0))
 end
 
 -- The list under the search, or under the grid's header.
@@ -433,17 +476,25 @@ function Page:fillRow(frame, entry)
     end
     frame.name:SetWordWrap(false)
     self:fillCells(frame, entry)
-    frame.name:SetText(entry.name .. "  |cff9d9d9d" .. entry.rankText .. "|r")
-    frame.status:SetText(entry.status)
-    local due = entry.status == addon.RankUpViewModel.DUE
+    local RankUpViewModel = addon.RankUpViewModel
+    frame.name:SetText(entry.name .. (entry.rankText and ("  |cff9d9d9d" .. entry.rankText .. "|r") or ""))
+    frame.status:SetText(entry.status == RankUpViewModel.NONE and "" or entry.status)
+    local due = entry.status == RankUpViewModel.DUE
     local color = "text"
-    if entry.status == addon.RankUpViewModel.READY then
+    if entry.status == RankUpViewModel.READY then
         color = "green"
     elseif due then
         color = "gold"
+    elseif entry.status == RankUpViewModel.SNOOZED or entry.status == RankUpViewModel.NOT_YET then
+        color = "muted"
     end
     frame.status:SetTextColor(Theme.Color(color))
-    if due then
+    if entry.statusText ~= nil then
+        -- An All players row: its status in words, past what the column holds.
+        local said = entry.status == RankUpViewModel.SNOOZED or entry.status == RankUpViewModel.NOT_YET
+            or entry.status == RankUpViewModel.NONE
+        frame.sub:SetText(said and entry.statusText or "")
+    elseif due then
         frame.sub:SetText("Waiting on: " .. (entry.waitingText or ""))
     else
         frame.sub:SetText("Promote: " .. (entry.promoteText or ""))
@@ -454,6 +505,10 @@ end
 -- The list again from the rules engine; `keepPlace` leaves it scrolled
 -- where it is, else it starts at the top.
 function Page:rebuild(keepPlace)
+    if self.tab == "all" then
+        self:rebuildAll(keepPlace)
+        return
+    end
     self.view = self.options.model(self.query, self.rank, self.missing) or { rows = {}, count = 0, footer = "" }
     local grid = self.view.columns ~= nil
     self:placeList(grid)
@@ -475,10 +530,34 @@ function Page:rebuild(keepPlace)
     setShown(self.empty, self.view.rows[1] == nil)
 end
 
--- Builds the page again, from the top.
+-- All players again, filtered and searched.
+function Page:rebuildAll(keepPlace)
+    local players = self.options.players
+    self.view = players ~= nil and players(self.query, self.filter) or nil
+    self.view = self.view or { rows = {}, count = 0, snoozed = 0, notYet = 0 }
+    self:placeList(false)
+    self:labelColumns({})
+    if not keepPlace then
+        self.list:ScrollTo(0)
+    end
+    self.list:SetRows(self.view.rows)
+    self:labelAll(self.view.count)
+    self.footer:SetText(self.view.count .. (self.view.count == 1 and " player" or " players") .. " · "
+        .. (self.view.snoozed or 0) .. " snoozed · " .. (self.view.notYet or 0) .. " not yet")
+    local empty = RankManagementPage.EMPTY_ALL
+    if self.view.count > 0 then
+        empty = RankManagementPage.NO_MATCHES
+    end
+    self.empty:SetText(empty)
+    setShown(self.empty, self.view.rows[1] == nil)
+end
+
+-- Builds the page again, from the top, on Due.
 function Page:Refresh()
     self.tabs:Select("due")
-    self:rebuild(false)
+    local players = self.options.players ~= nil and self.options.players("", "all") or nil
+    self:labelAll(players and players.count or 0)
+    self:showTab("due")
 end
 
 -- Something changed (a tick, a scan): the list again, in its place.

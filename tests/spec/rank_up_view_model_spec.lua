@@ -511,3 +511,79 @@ test.test("rank up view model: Missing for one player says is, and a met require
     test.assertEqual(0, view.missing.count)
     test.assertEqual(1, view.missing.of)
 end)
+
+-- All players -----------------------------------------------------------------------
+
+local function all(world, filter, search)
+    world.inputs.filter = filter
+    world.inputs.search = search
+    return world.addon.RankUpViewModel.All(world.inputs)
+end
+
+local function statuses(view)
+    local list = {}
+    local index
+    for index = 1, #view.rows do
+        list[index] = view.rows[index].name .. ": " .. view.rows[index].statusText
+    end
+    return table.concat(list, ", ")
+end
+
+test.test("rank up view model: All players lists every player with its status in words, soonest first", function()
+    -- Veteran is rank 2, with no requirements; Boss is too, with an
+    -- Initiate alt to bring up.
+    local world = newGuild({ ready = { 4, 30 }, waiting = { 4, 30 }, snoozy = { 4, 30 }, early = { 4, 2 },
+        newest = { 4, 0 }, vet = { 2, 30 }, boss = { 2, 30 }, grunt = { 4, 30 } })
+    world.inputs.partition:JoinPlayerOf("grunt", "boss", "manual")
+    world.inputs.checks:Set("ready", world.rules, true, nil, OFFICER, NOW)
+    world.inputs.checks:Snooze("snoozy", 4, NOW + 3 * DAY, OFFICER, NOW)
+    local view = all(world)
+
+    test.assertEqual("ready: Ready, boss: Match, waiting: Due, snoozy: Snoozed for 3 more days by officer,"
+        .. " early: Not yet: 5 days, newest: Not yet: 7 days, vet: No requirements", statuses(view))
+    test.assertEqual(7, view.count)
+    test.assertEqual(1, view.snoozed)
+    test.assertEqual(2, view.notYet)
+    test.assertEqual("→ Member", view.rows[1].rankText)
+    test.assertEqual("→ Veteran", view.rows[2].rankText)
+    test.assertEqual(nil, view.rows[7].rankText)
+    test.assertEqual(5, view.rows[5].days)
+end)
+
+test.test("rank up view model: Not yet counts down to the last time requirement still open", function()
+    -- Members need 7 days in the guild and, here, 20 days at the rank.
+    local world = newGuild({ lead = { 3, 10 } })
+    world.inputs.requirements:SetAutomated(3, "rank-days", true, 20, RANKS[4], OFFICER, NOW)
+    world.inputs.dates:Offer("lead", "rankSince", { time = NOW - 6 * DAY, rank = 3, source = "log" })
+
+    test.assertEqual("lead: Not yet: 14 days", statuses(all(world)))
+
+    world.inputs.dates:Offer("lead", "rankSince", { time = NOW - 19 * DAY, rank = 3, source = "log" })
+    test.assertEqual("lead: Not yet: 1 day", statuses(all(world)))
+end)
+
+test.test("rank up view model: a snoozed row says when the snooze ends and who snoozed", function()
+    local world = newGuild({ snoozy = { 4, 30 } })
+    world.inputs.checks:Snooze("snoozy", 4, NOW + 7 * DAY, OFFICER, NOW)
+    world.inputs.dateText = function(time)
+        return "day " .. math.floor((time - NOW) / DAY)
+    end
+    local row = all(world).rows[1]
+
+    test.assertEqual("Snoozed until day 7 by officer", row.statusText)
+    test.assertEqual(NOW + 7 * DAY, row.untilTime)
+    test.assertEqual("officer", row.snoozedBy)
+end)
+
+test.test("rank up view model: All players' filter keeps Snoozed or Not yet, and the counts stay", function()
+    local world = newGuild({ waiting = { 4, 30 }, snoozy = { 4, 30 }, early = { 4, 2 }, vet = { 2, 30 } })
+    world.inputs.checks:Snooze("snoozy", 4, NOW + 3 * DAY, OFFICER, NOW)
+
+    test.assertEqual("snoozy Snoozed", names(all(world, "snoozed")))
+    test.assertEqual("early Not yet", names(all(world, "notyet")))
+    local view = all(world, "all", "wait")
+    test.assertEqual("waiting Due", names(view))
+    test.assertEqual(4, view.count)
+    test.assertEqual(1, view.snoozed)
+    test.assertEqual(1, view.notYet)
+end)
