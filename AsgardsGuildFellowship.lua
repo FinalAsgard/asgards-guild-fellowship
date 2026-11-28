@@ -158,15 +158,22 @@ function friendsUi.followGuildRoster(name)
     friendsUi.roster:Refresh(character.player)
     return true
 end
--- Rank management and the window's badges follow a change while the window
--- is open.
+-- Rank management, the Friends page's player panel and the window's badges
+-- follow a change while the window is open. Rank management open for a
+-- user who's no longer an officer gives way to a page they may see.
 function friendsUi.followRank()
     if agfWindow == nil or not agfWindow:IsOpen() then
         return
     end
     agfWindow:RefreshBadges()
+    if agfWindow:Page() == "rank" and not agfWindow:ModuleShown("rank") then
+        agfWindow:ShowPage("rank")
+    end
     if friendsUi.rankPage ~= nil and agfWindow:Page() == "rank" then
         friendsUi.rankPage:Update()
+    elseif friendsUi.page ~= nil and agfWindow:Page() == "friends" then
+        -- The panel's Rank tab follows, and goes for a demoted officer.
+        friendsUi.page:Update()
     end
 end
 -- The Greetings page in the new window, once it's drawn.
@@ -1668,23 +1675,31 @@ if clientProfile.supported then
     -- Ask to join requests to the player's listing.
     lfgJoin.requests = addon.LfgRequests.Create()
     local lfgWaiting, lfgFlushing, lfgHeartbeat
+    -- An End that waited when something else was announced: it goes out
+    -- first, so a client that ignores what follows (a Playing party) still
+    -- drops the listing.
+    local lfgEndFirst
     local function refreshLfg()
         lfgRefresh()
     end
     local function flushLfg()
         lfgFlushing = false
-        if lfgWaiting == nil then
+        if lfgWaiting == nil and lfgEndFirst == nil then
             return
         end
         if comm:IsBusy() then
             lfgFlushing = client:After(2, flushLfg)
             if not lfgFlushing then
-                lfgWaiting = nil
+                lfgWaiting, lfgEndFirst = nil, nil
             end
             return
         end
-        local message = lfgWaiting
-        lfgWaiting = nil
+        local message = lfgEndFirst or lfgWaiting
+        if lfgEndFirst ~= nil then
+            lfgEndFirst = nil
+        else
+            lfgWaiting = nil
+        end
         local stats = lfgJoin.stats
         -- Under the board's own prefix: under the sync prefix, a guild
         -- sync's backlog held it back.
@@ -1695,8 +1710,15 @@ if clientProfile.supported then
         else
             stats.refused = stats.refused + 1
         end
+        if lfgWaiting ~= nil and not lfgFlushing then
+            flushLfg()
+        end
     end
     local function sendLfg(message)
+        local ended = addon.LfgProtocol.TYPE_END
+        if lfgWaiting ~= nil and lfgWaiting.t == ended and message.t ~= ended then
+            lfgEndFirst = lfgWaiting
+        end
         lfgWaiting = message
         if not lfgFlushing then
             flushLfg()

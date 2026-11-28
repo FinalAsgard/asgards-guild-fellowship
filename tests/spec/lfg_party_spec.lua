@@ -2251,6 +2251,47 @@ test.test("Forever an unlisted party with a guildmate shows as Playing on the gu
     test.assertEqual(0, #zapAddon.lfgBoard:Parties(zap.time))
 end)
 
+-- The LFG messages waiting on `channel`, by type, in order.
+local function queuedTypes(channel)
+    local types = {}
+    local index
+    for index = 1, #channel.queue do
+        local queued = channel.queue[index]
+        local serializer = queued.from.environment.LibStub.libs["AceSerializer-3.0"]
+        local ok, message = serializer:Deserialize(queued.text)
+        if string.sub(queued.prefix, 1, 6) == "AGFLfg" and ok and type(message) == "table" then
+            table.insert(types, tostring(message.t))
+        end
+    end
+    return table.concat(types, ",")
+end
+
+test.test("Forever Stop looking in combat sends the listing's end before the Playing party", function()
+    local channel = fixtures.newChannel()
+    local tool, toolAddon = login(channel, "Tool Box")
+    local zap, zapAddon = login(channel, "Zap Arcane")
+    partyUp(tool, { "Tool Box", "Hammer Smith" }, "Tool Box")
+    test.assertTrue(toolAddon.agfWindow:Open("lfg"))
+    local toolPage = toolAddon.lfgPage
+    toolPage:StartEditing()
+    toolPage.draft.dungeon = toolAddon.DungeonCatalog.For("forever", nil):Get("strat")
+    test.assertTrue(toolPage:Save())
+    fixtures.deliver(channel)
+    test.assertEqual(1, #zapAddon.lfgBoard:Listings(zap.time))
+
+    tool.inCombat = true
+    toolPage.notLookingButton.scripts.OnClick(toolPage.notLookingButton, "LeftButton")
+    test.assertEqual("", queuedTypes(channel))
+    tool.inCombat = false
+    fixtures.runTimers(tool, 2)
+    fixtures.runTimers(tool, 2)
+    -- An older client ignores the Playing party, but drops the listing.
+    test.assertEqual("lfg-end,lfg-party", queuedTypes(channel))
+    fixtures.deliver(channel)
+    test.assertEqual(0, #zapAddon.lfgBoard:Listings(zap.time))
+    test.assertEqual(1, #zapAddon.lfgBoard:Parties(zap.time))
+end)
+
 test.test("Forever Show my party on the guild's board off keeps an unlisted party off, and back on shows it", function()
     local channel = fixtures.newChannel()
     local tool, toolAddon = login(channel, "Tool Box")

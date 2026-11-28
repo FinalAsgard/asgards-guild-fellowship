@@ -2268,6 +2268,35 @@ test.test("rank management: the Friends page's player panel has the Rank tab too
     test.assertContains(detail.lines[1].text, "Ready")
 end)
 
+test.test("rank management: an officer demoted while it's open leaves it, and Friends drops the Rank tab", function()
+    local profile = fixtures.PROFILES[1]
+    local world, addon = login(profile, fixtures.newChannel(), "Tool Box")
+    fakeFrames.install(world.environment)
+    memberRules(addon)
+    local _, partition, normalizer = addon.rosterController:QuietContext()
+    test.assertTrue(addon.agfWindow:Open())
+    addon.agfWindow:ShowPage("rank")
+    test.assertEqual("rank", addon.agfWindow:Page())
+
+    -- Demoted: the next roster scan moves the window off Rank management.
+    world.officerRanks = { [0] = true }
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 5)
+    test.assertFalse(addon.agfWindow:ModuleShown("rank"))
+    test.assertFalse(addon.agfWindow:Page() == "rank")
+
+    -- Back to officer, on Friends with Hammer's Rank tab: demoted, it goes.
+    world.officerRanks = { [0] = true, [1] = true }
+    addon.agfWindow:ShowPage("friends", partition:GetCharacter(normalizer:Key("Hammer Smith")).player)
+    local detail = addon.friendsPage.detail
+    test.assertTrue(detail.tabs.tabs[5].shown)
+    world.officerRanks = { [0] = true }
+    fixtures.fire(world, "GUILD_ROSTER_UPDATE")
+    fixtures.runTimers(world, 5)
+    test.assertEqual("Hammer Smith", detail.name.text)
+    test.assertFalse(detail.tabs.tabs[5].shown)
+end)
+
 test.test("rank management: a member sees their own Rank tab, read-only, and nobody else's", function()
     local profile = fixtures.PROFILES[1]
     local world, addon = login(profile, fixtures.newChannel(), "Hammer Smith")

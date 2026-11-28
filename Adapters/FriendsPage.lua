@@ -401,6 +401,15 @@ function Page:showDetail()
     self.detail:ShowPlayer(view or fallbackView(friend, self:isFriend(friend.playerId)))
 end
 
+-- The roster or a checklist changed: the selected player's panel shows
+-- what's new (an officer's Rank tab goes once they're not). The cards and
+-- an open picker stay as they are.
+function Page:Update()
+    if self.view ~= nil and not self.pickerOpen then
+        self:showDetail()
+    end
+end
+
 -- Whether `playerId` is one of the pinned Friends.
 function Page:isFriend(playerId)
     local index
