@@ -1034,3 +1034,68 @@ test.test("roster page: ShowDetailTab opens the Rank tab, and a player without o
     world.page:ShowDetailTab("rank")
     test.assertEqual("characters", world.page.detail.tabs:Selected())
 end)
+
+test.test("roster page: ShowDetailTab from the Departed tab goes back to Members first", function()
+    local world = setup()
+    world.officer = true
+    world.checklist = dueChecklist(true)
+    world.page:Refresh()
+    click(world.page.tabs.tabs[2])
+    test.assertFalse(world.page.membersBody.shown)
+
+    world.page:ShowDetailTab("rank")
+    test.assertEqual("members", world.page.tabs:Selected())
+    test.assertTrue(world.page.membersBody.shown)
+    test.assertEqual("rank", world.page.detail.tabs:Selected())
+end)
+
+test.test("roster page: opening a player the search hides clears the search, so their card shows", function()
+    local world = setup(3, 1)
+    local box = world.page.search.box
+    box:SetText("player002")
+    box.scripts.OnTextChanged(box, true)
+
+    world.page:Refresh(3)
+    test.assertEqual("", world.filters.search)
+    test.assertEqual("", world.page.search:GetValue())
+    test.assertEqual(3, #shownCards(world))
+    test.assertEqual(3, world.page:Selected())
+end)
+
+test.test("roster page: opening a player the search shows keeps the search", function()
+    local world = setup(3, 1)
+    local box = world.page.search.box
+    box:SetText("player002")
+    box.scripts.OnTextChanged(box, true)
+
+    world.page:Refresh(2)
+    test.assertEqual("player002", world.filters.search)
+    test.assertEqual(1, #shownCards(world))
+end)
+
+test.test("roster page: an update keeps Departed's count current from the Members tab", function()
+    local world = setup(3, 1)
+    world.officer = true
+    world.gone = departedRows()
+    world.page:Refresh()
+    test.assertEqual("Departed · 2", world.page.tabs.tabs[2].label.text)
+
+    table.remove(world.gone, 1)
+    world.page:Update()
+    test.assertEqual("members", world.page.tabs:Selected())
+    test.assertEqual("Departed · 1", world.page.tabs.tabs[2].label.text)
+end)
+
+test.test("roster page: an officer demoted during an update loses the tabs and Review", function()
+    local world = setup(3, 1)
+    world.officer = true
+    world.page:Refresh()
+    click(world.page.tabs.tabs[3])
+    test.assertTrue(world.page.reviewBody.shown)
+
+    world.officer = false
+    world.page:Update()
+    test.assertFalse(world.page.tabs.shown)
+    test.assertFalse(world.page.reviewBody.shown)
+    test.assertTrue(world.page.membersBody.shown)
+end)

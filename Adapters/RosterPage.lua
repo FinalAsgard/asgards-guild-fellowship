@@ -76,6 +76,8 @@ local RosterPage = {
     DECIDE_WIDTH = 76,
     -- The review's before side; the after side starts here.
     REVIEW_SIDE_WIDTH = 320,
+    -- How far the review sits above the list it covers.
+    OVERLAY_LEVELS = 10,
 }
 addon.RosterPage = RosterPage
 
@@ -340,10 +342,13 @@ function Page:buildReview(body)
     self.reviewEmpty = ui:Text(body, RosterPage.REVIEW_EMPTY, "regular", "body", "muted")
     self.reviewEmpty:SetPoint("TOPLEFT", self.reviewList, "TOPLEFT", 0, 0)
 
-    -- One bundle's before and after, over the list.
+    -- One bundle's before and after, over the list, and taking the clicks
+    -- so none reach a covered Approve or Deny.
     local view = ui:Panel(body)
     view:SetPoint("TOPLEFT", body, "TOPLEFT", 0, 0)
     view:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", 0, 0)
+    view:SetFrameLevel((body:GetFrameLevel() or 0) + RosterPage.OVERLAY_LEVELS)
+    view:EnableMouse(true)
     local pad = Theme.SPACING.l
     view.title = ui:Text(view, "", "semibold", "title", "text")
     view.title:SetPoint("TOPLEFT", view, "TOPLEFT", pad, -pad)
@@ -622,6 +627,7 @@ end
 -- member, whose Members body fills the page.
 function Page:layoutTabs()
     local officer = self:call("isOfficer") == true
+    self.laidOutOfficer = officer
     local top = officer and -(RosterPage.TABS_HEIGHT + Theme.SPACING.m) or 0
     local _, body
     for _, body in ipairs({ self.membersBody, self.departedBody, self.reviewBody }) do
@@ -854,15 +860,27 @@ end
 -- `focus` (a player id), selects that player instead. The selected card is
 -- kept in view.
 function Page:rebuild(focus, keepOrder)
-    self.view = self.options.model(focus or self.selected, {
-        search = self.query,
-        sort = self.sort,
-        rank = self.rank,
-        -- An update keeps the cards of players who went offline (keepOrder).
-        onlineOnly = self.onlineOnly and not keepOrder,
-    })
-    if self.view == nil then
-        self.view = { rows = {}, cards = {}, ranks = {}, header = "", sync = "" }
+    local function build()
+        self.view = self.options.model(focus or self.selected, {
+            search = self.query,
+            sort = self.sort,
+            rank = self.rank,
+            -- An update keeps the cards of players who went offline (keepOrder).
+            onlineOnly = self.onlineOnly and not keepOrder,
+        })
+        if self.view == nil then
+            self.view = { rows = {}, cards = {}, ranks = {}, header = "", sync = "" }
+        end
+    end
+    build()
+    -- A player opened from elsewhere whom the search or a filter hides:
+    -- they're cleared, so the player's card shows with the panel.
+    local filtered = (self.query or "") ~= "" or self.rank ~= nil or self.onlineOnly
+    if focus ~= nil and filtered and rowOf(self.view, focus) == nil then
+        self.query, self.rank, self.rankName, self.onlineOnly = "", nil, nil, false
+        self.search:SetValue("")
+        self.onlineSwitch:SetOn(false)
+        build()
     end
     if keepOrder then
         self:keepOrder()
@@ -956,13 +974,21 @@ end
 -- The roster changed on its own (someone came online, a sync): the cards
 -- and the panel show what's new, in the order and place they're in.
 function Page:Update()
+    local officer = self:call("isOfficer") == true
+    -- Made or no longer an officer: the tabs show or go, as on a refresh.
+    if officer ~= self.laidOutOfficer then
+        self:layoutTabs()
+    end
     self:rebuild(nil, true)
     self:showDetail()
     if self.tab == "departed" then
         self:refreshDeparted()
+    elseif officer then
+        -- Departed's count stays current without filling its hidden list.
+        self.tabs:SetLabel("departed", "Departed" .. DOT .. #(self:call("departed") or {}))
     end
     -- The Review tab's count stays current wherever the officer is.
-    if self:call("isOfficer") == true then
+    if officer then
         self:refreshReview()
     end
 end
@@ -986,9 +1012,17 @@ function Page:applyFilters()
     end
 end
 
+-- The panel with no player, kept hidden while the picker is open.
+function Page:showEmptyDetail()
+    self.detail:ShowEmpty(RosterPage.EMPTY)
+    if self.linking ~= nil then
+        self.detail:Hide()
+    end
+end
+
 function Page:showDetail()
     if self.selected == nil then
-        self.detail:ShowEmpty(RosterPage.EMPTY)
+        self:showEmptyDetail()
         return
     end
     -- Another player's Grouped tab starts at its first page.
@@ -997,7 +1031,7 @@ function Page:showDetail()
     end
     local view = self.options.detail ~= nil and self.options.detail(self.selected, self.groupedShown) or nil
     if view == nil then
-        self.detail:ShowEmpty(RosterPage.EMPTY)
+        self:showEmptyDetail()
         return
     end
     -- The ⋯ button and the Bio tab's Edit, for a player the user may change.
@@ -1171,6 +1205,10 @@ end
 function Page:ShowDetailTab(id)
     local view = self.detail.view
     if view ~= nil and (id ~= "rank" or view.rank ~= nil) then
+        -- The panel sits on the Members tab.
+        if self.tab ~= "members" then
+            self:ShowTab("members")
+        end
         self.detail:ShowTab(id)
     end
 end
