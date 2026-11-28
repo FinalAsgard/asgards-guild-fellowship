@@ -493,6 +493,8 @@ end
 function Page:ClosePicker()
     self.replacing = nil
     self:showPicker(false)
+    -- What changed while the picker covered the panel (see Update) shows.
+    self:showDetail()
 end
 
 -- Whether Choose a friend is showing.

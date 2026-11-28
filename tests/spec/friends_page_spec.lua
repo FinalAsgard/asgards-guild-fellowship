@@ -289,6 +289,18 @@ test.test("friends page: Cancel backs out of Choose a friend without changing an
     test.assertEqual(0, #world.calls)
 end)
 
+test.test("friends page: an update waits while the picker's open, and Cancel shows it", function()
+    local world = setup({ "Anvil" })
+    click(world.page.cards[2])
+    local built = #world.shown
+    world.page:Update()
+    test.assertEqual(built, #world.shown, "the covered panel isn't built")
+
+    click(world.page.picker.cancel)
+    test.assertEqual(built + 1, #world.shown)
+    test.assertTrue(world.page.detail.shown)
+end)
+
 test.test("friends page: hovering a Friend shows the X, which removes them", function()
     local world = setup({ "Anvil", "Bolt" })
     local card = world.page.cards[1]
